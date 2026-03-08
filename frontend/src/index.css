@@ -1,0 +1,118 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 220 43% 97%;
+    --foreground: 217 54% 11%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 217 54% 11%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 217 54% 11%;
+
+    --primary: 213 52% 24%;
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 215 40% 96%;
+    --secondary-foreground: 214 32% 28%;
+
+    --muted: 214 35% 95%;
+    --muted-foreground: 215 18% 47%;
+
+    --accent: 214 72% 96%;
+    --accent-foreground: 213 31% 39%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 214 32% 91%;
+    --input: 214 33% 89%;
+    --ring: 213 52% 24%;
+
+    --radius: 1rem;
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 210 40% 98%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 212.7 26.8% 83.9%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background-image:
+      radial-gradient(circle at top left, rgba(238, 244, 255, 0.96), transparent 34%),
+      radial-gradient(circle at top right, rgba(226, 236, 248, 0.72), transparent 28%),
+      linear-gradient(180deg, rgba(250, 252, 255, 1) 0%, rgba(245, 247, 251, 1) 100%);
+  }
+}
+
+@layer components {
+  .theme-card {
+    @apply rounded-[1.25rem] border border-border/70 bg-card/95 text-card-foreground shadow-[0_18px_44px_-30px_rgba(15,23,42,0.22)];
+  }
+
+  .theme-card-main {
+    @apply rounded-[1.5rem] border border-white/80 bg-white text-card-foreground shadow-[0_26px_80px_-42px_rgba(30,58,95,0.36)];
+  }
+
+  .theme-card-header {
+    @apply border-b border-border/60 pb-4;
+    background:
+      linear-gradient(180deg, rgba(238, 244, 255, 0.78) 0%, rgba(255, 255, 255, 0) 100%);
+  }
+
+  .theme-card-header-plain {
+    @apply pb-3;
+  }
+
+  .theme-meta {
+    @apply inline-flex items-center rounded-full border border-[#d7e2f0] bg-[#eef4ff] px-2.5 py-1 text-xs font-medium text-[#486284];
+  }
+
+  .theme-meta-strong {
+    @apply inline-flex items-center rounded-full border border-primary/10 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary;
+  }
+
+  .theme-status-surface {
+    @apply rounded-2xl border border-white/70 bg-white/80 shadow-[0_12px_36px_-28px_rgba(15,23,42,0.18)];
+  }
+
+  .theme-canvas {
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.76), rgba(255, 255, 255, 0.48)),
+      rgba(245, 247, 251, 0.6);
+  }
+}

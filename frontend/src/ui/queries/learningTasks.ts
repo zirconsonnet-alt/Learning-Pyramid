@@ -1,0 +1,45 @@
+import { useQuery } from "@tanstack/react-query"
+
+import { ApiError } from "@/ui/api/http"
+import { getLearningTask } from "@/ui/api/learningTasks"
+import { getLearningTaskNode, getLearningTaskNodeBinding, listLearningTaskNodes } from "@/ui/api/learningTaskNodes"
+
+export function useLearningTask(projectId: string, learningTaskId: string) {
+  return useQuery({
+    queryKey: ["learningTask", projectId, learningTaskId],
+    queryFn: () => getLearningTask(projectId, learningTaskId),
+    enabled: !!projectId && !!learningTaskId,
+  })
+}
+
+export function useLearningTaskNode(projectId: string, nodeId: string) {
+  return useQuery({
+    queryKey: ["learningTaskNode", projectId, nodeId],
+    queryFn: () => getLearningTaskNode(projectId, nodeId),
+    enabled: !!projectId && !!nodeId,
+  })
+}
+
+export function useLearningTaskNodes(projectId: string) {
+  return useQuery({
+    queryKey: ["learningTaskNodes", projectId],
+    queryFn: () => listLearningTaskNodes(projectId),
+    enabled: !!projectId,
+  })
+}
+
+export function useLearningTaskNodeBinding(projectId: string, nodeId: string) {
+  return useQuery({
+    queryKey: ["learningTaskNodeBinding", projectId, nodeId],
+    queryFn: async () => {
+      try {
+        return await getLearningTaskNodeBinding(projectId, nodeId)
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 404) return null
+        throw err
+      }
+    },
+    enabled: !!projectId && !!nodeId,
+    retry: false,
+  })
+}

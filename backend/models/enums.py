@@ -1,0 +1,111 @@
+from enum import Enum
+
+
+class ProjectState(str, Enum):
+    ACTIVE = "ACTIVE"
+    DELETED = "DELETED"
+
+
+# 0a 列举的其它枚举，模型层先给出（后续章节会用到）
+class ReviewTaskState(str, Enum):
+    PENDING = "PENDING"
+    DONE = "DONE"
+
+
+class ConvergenceState(str, Enum):
+    IN_PROGRESS = "IN_PROGRESS"
+    TERMINATED = "TERMINATED"
+
+
+class ReviewChainState(str, Enum):
+    IN_PROGRESS = "IN_PROGRESS"
+    TERMINATED = "TERMINATED"
+
+
+class AggregationCycleState(str, Enum):
+    CLEARING = "CLEARING"
+    ROLL_UP = "ROLL_UP"
+    DONE = "DONE"
+
+
+class LayerMode(str, Enum):
+    AUTO_TICK_ON_ENTRY = "AUTO_TICK_ON_ENTRY"
+    MANUAL_TICK_ON_ENTRY = "MANUAL_TICK_ON_ENTRY"
+
+
+class SessionMode(str, Enum):
+    READ_ONLY = "READ_ONLY"
+    READ_WRITE = "READ_WRITE"
+
+
+class ValidationCode(str, Enum):
+    OK = "OK"
+    NOT_FOUND = "NOT_FOUND"
+    UNREACHABLE = "UNREACHABLE"
+    INVALID_INPUT = "INVALID_INPUT"
+
+class InstancePresence(str, Enum):
+    PRESENT = "PRESENT"
+    MISSING = "MISSING"
+
+
+class FsSyncPolicy(str, Enum):
+    DISABLED = "DISABLED"
+    STARTUP_SYNC = "STARTUP_SYNC"
+    MANUAL_SYNC = "MANUAL_SYNC"
+
+
+class AsrProvider(str, Enum):
+    WHISPER = "WHISPER"
+
+
+class RecallPointReviewResult(str, Enum):
+    CAN_RECALL = "CAN_RECALL"
+    CANNOT_RECALL = "CANNOT_RECALL"
+
+
+class ContentBlockKind(str, Enum):
+    TEXT = "TEXT"
+    IMAGE = "IMAGE"
+
+
+class ReviewChainTemplateItemKind(str, Enum):
+    CONVERGENCE = "CONVERGENCE"
+    REVIEW_TASK = "REVIEW_TASK"
+
+
+class MediaAssetKind(str, Enum):
+    IMAGE = "IMAGE"
+
+
+class AggregationEventReason(str, Enum):
+    MANUAL_DRAIN = "MANUAL_DRAIN"
+    THRESHOLD_DRAIN = "THRESHOLD_DRAIN"
+
+
+class AuditEventKind(str, Enum):
+    PROJECT_CREATED = "PROJECT_CREATED"
+    PROJECT_DELETED = "PROJECT_DELETED"
+    ADD_INSTANCE = "ADD_INSTANCE"
+    ADD_LEARNING_OBJECT_LEAF = "ADD_LEARNING_OBJECT_LEAF"
+    ADD_LEARNING_OBJECT_CONTAINER = "ADD_LEARNING_OBJECT_CONTAINER"
+    SYNC_LEARNING_OBJECTS_FROM_FS = "SYNC_LEARNING_OBJECTS_FROM_FS"
+    SUBMIT_LEARNING_TASK = "SUBMIT_LEARNING_TASK"
+    EDIT_RECALL_POINT = "EDIT_RECALL_POINT"
+    APPEND_RECALL_POINT_INSIGHT = "APPEND_RECALL_POINT_INSIGHT"
+    EDIT_LEARNING_TASK = "EDIT_LEARNING_TASK"
+    EDIT_PROJECT_CONFIG = "EDIT_PROJECT_CONFIG"
+    BULK_REMAP_RECALL_POINTS_INSTANCE = "BULK_REMAP_RECALL_POINTS_INSTANCE"
+    EXECUTOR_COMMIT_REVIEW_TASK = "EXECUTOR_COMMIT_REVIEW_TASK"
+    MANUAL_ROLL_UP = "MANUAL_ROLL_UP"
+    REQUEST_ASR = "REQUEST_ASR"
+
+
+class AuditResultCode(str, Enum):
+    OK = "OK"
+    PRECONDITION_FAILURE = "PRECONDITION_FAILURE"
+    NOT_FOUND = "NOT_FOUND"
+    COMMIT_VALIDATION_FAILURE = "COMMIT_VALIDATION_FAILURE"
+    CONCURRENCY_CONFLICT = "CONCURRENCY_CONFLICT"
+    SESSION_CLOSED = "SESSION_CLOSED"
+    INTERNAL_ERROR = "INTERNAL_ERROR"

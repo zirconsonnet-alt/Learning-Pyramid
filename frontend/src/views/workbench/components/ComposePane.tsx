@@ -1,0 +1,253 @@
+import { useRef } from "react"
+
+import type { Instance } from "@/ui/api/instances"
+import { ApiError } from "@/ui/api/http"
+import { Button } from "@/ui/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
+import { Input } from "@/ui/components/ui/input"
+import { Label } from "@/ui/components/ui/label"
+import { richText } from "@/ui/api/richContent"
+import { useSubmitLearningTask } from "@/ui/queries/workbench"
+import { useWorkbenchStore } from "@/ui/store/workbenchStore"
+import type { DraftRecallPoint } from "@/ui/store/workbenchStore"
+
+function formatApiError(err: unknown) {
+  if (err instanceof ApiError) return `${err.code}: ${err.message}`
+  if (err instanceof Error) return err.message
+  return "未知错误"
+}
+
+function newLocalId() {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}_${Math.random().toString(16).slice(2)}`
+}
+
+function parseAnchorMs(position: string): number | null {
+  const m = position.match(/^t=(\d+)$/)
+  if (!m) return null
+  const n = Number(m[1])
+  return Number.isFinite(n) ? n : null
+}
+
+function msToClock(ms: number) {
+  const totalSec = Math.floor(ms / 1000)
+  const h = Math.floor(totalSec / 3600)
+  const m = Math.floor((totalSec % 3600) / 60)
+  const s = totalSec % 60
+  const msPart = ms % 1000
+  const hh = h > 0 ? `${h}:` : ""
+  const mm = h > 0 ? String(m).padStart(2, "0") : String(m)
+  const ss = String(s).padStart(2, "0")
+  return `${hh}${mm}:${ss}.${String(msPart).padStart(3, "0")}`
+}
+
+function isDraftComplete(draft: DraftRecallPoint) {
+  return draft.questionText.trim().length > 0 && draft.answerText.trim().length > 0
+}
+
+export function ComposePane({
+  projectId,
+  selectedInstanceId,
+  instance,
+  currentMs,
+  queueHasGate,
+}: {
+  projectId: string
+  selectedInstanceId: string | null
+  instance: Instance | null
+  currentMs: number
+  queueHasGate: boolean
+}) {
+  const ps = useWorkbenchStore((s) => s.byProjectId[projectId])
+  const addDraft = useWorkbenchStore((s) => s.addDraft)
+  const updateDraft = useWorkbenchStore((s) => s.updateDraft)
+  const removeDraft = useWorkbenchStore((s) => s.removeDraft)
+  const clearDraftsForInstance = useWorkbenchStore((s) => s.clearDraftsForInstance)
+  const setTaskTitle = useWorkbenchStore((s) => s.setTaskTitle)
+  const cardRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const questionRefs = useRef<Record<string, HTMLInputElement | null>>({})
+  const answerRefs = useRef<Record<string, HTMLInputElement | null>>({})
+
+  const submit = useSubmitLearningTask(projectId)
+
+  const drafts = (ps?.drafts ?? []).filter((d) => (selectedInstanceId ? d.instanceId === selectedInstanceId : true))
+  const taskTitle = ps?.taskTitle ?? ""
+
+  function onAdd() {
+    if (!selectedInstanceId) return
+    const position = `t=${currentMs}`
+    const now = Date.now()
+    const draft: DraftRecallPoint = {
+      localId: newLocalId(),
+      instanceId: selectedInstanceId,
+      position,
+      questionText: "",
+      answerText: "",
+      createdAt: now,
+      updatedAt: now,
+    }
+    addDraft(projectId, draft)
+  }
+
+  async function onSubmit() {
+    if (queueHasGate) return
+    const title = taskTitle.trim()
+    if (!title) return
+    if (drafts.some((d) => !d.questionText.trim() || !d.answerText.trim())) return
+    const items = drafts.map((d) => ({
+      question: richText(d.questionText.trim()),
+      answer: richText(d.answerText.trim()),
+      anchor: { instanceId: d.instanceId, position: d.position },
+    }))
+    if (items.length === 0) return
+    await submit.mutateAsync({ title, items })
+    if (selectedInstanceId) clearDraftsForInstance(projectId, selectedInstanceId)
+  }
+
+  function focusDraft(draft: DraftRecallPoint) {
+    cardRefs.current[draft.localId]?.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    })
+
+    const questionFilled = draft.questionText.trim().length > 0
+    const answerFilled = draft.answerText.trim().length > 0
+    const target =
+      !questionFilled
+        ? questionRefs.current[draft.localId]
+        : !answerFilled
+          ? answerRefs.current[draft.localId]
+          : questionRefs.current[draft.localId]
+
+    window.setTimeout(() => target?.focus(), 160)
+  }
+
+  return (
+    <Card className="theme-card-main">
+      <CardHeader className="theme-card-header flex-row items-center justify-between gap-3 space-y-0">
+        <div className="flex items-center gap-2">
+          <CardTitle>复述点录入</CardTitle>
+          {instance ? (
+            <div className="theme-meta">{instance.materialDisplayName}</div>
+          ) : null}
+        </div>
+        <Button onClick={onAdd} disabled={!selectedInstanceId}>
+          添加复述点
+        </Button>
+      </CardHeader>
+      <CardContent className="space-y-4 pt-5">
+        {queueHasGate ? (
+          <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4 text-sm">
+            门禁：队列非空时禁止提交学习。请先完成“复习”。
+          </div>
+        ) : null}
+
+        {drafts.length > 0 ? (
+          <div className="theme-canvas rounded-[1.2rem] border border-border/60 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="text-sm font-semibold text-foreground">填写进度</div>
+              <div className="theme-meta shrink-0">{drafts.length} 个复述点</div>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {drafts.map((draft, index) => {
+                const completed = isDraftComplete(draft)
+                return (
+                  <button
+                    key={`draft-progress-${draft.localId}`}
+                    type="button"
+                    onClick={() => focusDraft(draft)}
+                    className={
+                      completed
+                        ? "flex size-10 items-center justify-center rounded-xl border border-primary/20 bg-primary text-sm font-semibold text-primary-foreground shadow-[0_12px_24px_-20px_rgba(30,58,95,0.55)] transition-transform hover:-translate-y-0.5"
+                        : "flex size-10 items-center justify-center rounded-xl border border-border/80 bg-white text-sm font-semibold text-[#60748f] transition-colors hover:border-primary/25 hover:text-primary"
+                    }
+                    title={completed ? `第 ${index + 1} 个复述点，已填写` : `第 ${index + 1} 个复述点，尚未填写完成`}
+                    aria-label={completed ? `第 ${index + 1} 个复述点，已填写` : `第 ${index + 1} 个复述点，尚未填写完成`}
+                  >
+                    {index + 1}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        ) : null}
+
+        {drafts.length === 0 ? <p className="text-sm text-muted-foreground">暂无复述点草稿。</p> : null}
+
+        <div className="space-y-3">
+          {drafts.map((d) => {
+            const ms = parseAnchorMs(d.position)
+            return (
+              <div
+                key={d.localId}
+                ref={(node) => {
+                  cardRefs.current[d.localId] = node
+                }}
+                className="theme-status-surface rounded-[1.2rem] border border-border/70 p-4"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="theme-meta">
+                    锚点：{ms === null ? d.position : msToClock(ms)}（{d.position}）
+                  </div>
+                  <Button variant="ghost" size="sm" onClick={() => removeDraft(projectId, d.localId)}>
+                    删除
+                  </Button>
+                </div>
+                <div className="mt-2 grid gap-2 md:grid-cols-2">
+                  <div>
+                    <Label>问题</Label>
+                    <Input
+                      ref={(node) => {
+                        questionRefs.current[d.localId] = node
+                      }}
+                      value={d.questionText}
+                      onChange={(e) => updateDraft(projectId, d.localId, { questionText: e.target.value })}
+                      placeholder="请输入问题/提示语"
+                    />
+                  </div>
+                  <div>
+                    <Label>答案</Label>
+                    <Input
+                      ref={(node) => {
+                        answerRefs.current[d.localId] = node
+                      }}
+                      value={d.answerText}
+                      onChange={(e) => updateDraft(projectId, d.localId, { answerText: e.target.value })}
+                      placeholder="请输入答案/复述内容"
+                    />
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        <div className="theme-canvas grid gap-3 rounded-[1.2rem] border border-border/60 p-4">
+          <div>
+            <Label htmlFor="taskTitle">学习任务标题</Label>
+            <Input
+              id="taskTitle"
+              value={taskTitle}
+              onChange={(e) => setTaskTitle(projectId, e.target.value)}
+              placeholder={instance ? `${instance.materialDisplayName} - 学习任务` : "例如：第一节 - 学习任务"}
+            />
+          </div>
+          <div>
+            <Button
+              onClick={() => void onSubmit()}
+              disabled={
+                queueHasGate ||
+                submit.isPending ||
+                !taskTitle.trim() ||
+                drafts.length === 0 ||
+                drafts.some((d) => !d.questionText.trim() || !d.answerText.trim())
+              }
+            >
+              {submit.isPending ? "提交中..." : "提交学习"}
+            </Button>
+            {submit.error ? <p className="mt-2 text-sm text-destructive">{formatApiError(submit.error)}</p> : null}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
