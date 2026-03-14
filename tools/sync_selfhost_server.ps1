@@ -8,7 +8,8 @@ param(
     [string]$SshKeyPath = "",
     [switch]$SkipBuild,
     [switch]$SkipReleaseSync,
-    [switch]$AllowDirtyWorktree
+    [switch]$AllowDirtyWorktree,
+    [switch]$DisableSshKey
 )
 
 $ErrorActionPreference = "Stop"
@@ -142,20 +143,30 @@ Require-Command ssh
 $repoRoot = Get-RepoRoot
 Assert-CleanGitWorktree -RepoRoot $repoRoot -AllowDirty:$AllowDirtyWorktree
 
-$resolvedSshKeyPath = Resolve-SshKeyPath -ConfiguredPath $SshKeyPath
 $sshCommonArgs = @(
     "-o", "ServerAliveInterval=15",
     "-o", "ServerAliveCountMax=8",
     "-o", "TCPKeepAlive=yes",
-    "-o", "ConnectTimeout=15",
-    "-o", "PreferredAuthentications=publickey,password,keyboard-interactive"
+    "-o", "ConnectTimeout=15"
 )
-if ($resolvedSshKeyPath) {
-    $sshCommonArgs += @("-i", $resolvedSshKeyPath, "-o", "IdentitiesOnly=yes")
-    Write-Host "Using SSH key: $resolvedSshKeyPath"
+$resolvedSshKeyPath = $null
+if ($DisableSshKey) {
+    $sshCommonArgs += @(
+        "-o", "PubkeyAuthentication=no",
+        "-o", "PreferredAuthentications=password,keyboard-interactive"
+    )
+    Write-Host "SSH auth mode: interactive password / keyboard-interactive"
 }
 else {
-    Write-Warning "No SSH key found. Falling back to interactive SSH authentication."
+    $resolvedSshKeyPath = Resolve-SshKeyPath -ConfiguredPath $SshKeyPath
+    $sshCommonArgs += @("-o", "PreferredAuthentications=publickey,password,keyboard-interactive")
+    if ($resolvedSshKeyPath) {
+        $sshCommonArgs += @("-i", $resolvedSshKeyPath, "-o", "IdentitiesOnly=yes")
+        Write-Host "Using SSH key: $resolvedSshKeyPath"
+    }
+    else {
+        Write-Warning "No SSH key found. Falling back to interactive SSH authentication."
+    }
 }
 
 $scpArgs = @($sshCommonArgs + @("-P", "$SshPort"))
