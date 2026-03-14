@@ -5,6 +5,8 @@ import { ApiError } from "@/ui/api/http"
 import { type RecallPoint } from "@/ui/api/review"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
+import { useSystemCapabilities } from "@/ui/queries/system"
+import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 
 type NodeExportCardProps = {
   projectId: string
@@ -47,10 +49,12 @@ function downloadJson(filename: string, payload: unknown) {
 
 export function NodeExportCard(props: NodeExportCardProps) {
   const { projectId, nodeTitle, recallPoints, exportRecallPoints, exportAsr } = props
+  const capabilitiesQ = useSystemCapabilities()
   const [statusText, setStatusText] = useState<string | null>(null)
   const [errorText, setErrorText] = useState<string | null>(null)
   const [isExportingRecall, setIsExportingRecall] = useState(false)
   const [isExportingAsr, setIsExportingAsr] = useState(false)
+  const asrEnabled = capabilitiesQ.data?.asrEnabled ?? true
 
   async function onExportRecallPoints() {
     setErrorText(null)
@@ -64,9 +68,13 @@ export function NodeExportCard(props: NodeExportCardProps) {
         nodeTitle,
         recallPoints: items,
       })
-      setStatusText(`已导出 ${items.length} 条复述点。`)
+      const message = items.length > 0 ? `已导出 ${items.length} 条复述点。` : "当前节点还没有复述点，已导出空结果。"
+      setStatusText(message)
+      showSuccessFeedback("复述点 JSON 已导出", message)
     } catch (err) {
-      setErrorText(formatApiError(err))
+      const message = formatApiError(err)
+      setErrorText(message)
+      showErrorFeedback("导出复述点失败", message)
     } finally {
       setIsExportingRecall(false)
     }
@@ -77,6 +85,7 @@ export function NodeExportCard(props: NodeExportCardProps) {
     setStatusText(null)
     setIsExportingAsr(true)
     try {
+      showInfoFeedback("开始生成 ASR", `正在为“${nodeTitle}”下的 ${recallPoints.length} 条复述点准备转写结果。`)
       const missingAnchorIds = recallPoints
         .filter((item) => parseAnchorCenterMs(item.anchor.position) === null)
         .map((item) => item.recallPointId)
@@ -105,9 +114,13 @@ export function NodeExportCard(props: NodeExportCardProps) {
         nodeTitle,
         asrArtifacts: items,
       })
-      setStatusText(`已导出 ${items.length} 条 ASR 转写结果。`)
+      const message = `已导出 ${items.length} 条 ASR 转写结果。`
+      setStatusText(message)
+      showSuccessFeedback("ASR JSON 已导出", message)
     } catch (err) {
-      setErrorText(formatApiError(err))
+      const message = formatApiError(err)
+      setErrorText(message)
+      showErrorFeedback("导出 ASR 失败", message)
     } finally {
       setIsExportingAsr(false)
     }
@@ -116,39 +129,55 @@ export function NodeExportCard(props: NodeExportCardProps) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>导出与 ASR</CardTitle>
-        <CardDescription>导出当前节点覆盖的复述点数据，并按复述点锚点批量生成或复用 ASR 转写结果。</CardDescription>
+        <CardTitle>{asrEnabled ? "导出与 ASR" : "导出"}</CardTitle>
+        <CardDescription>
+          {asrEnabled
+            ? "导出当前节点覆盖的复述点数据，并按复述点锚点批量生成或复用 ASR 转写结果。"
+            : "导出当前节点覆盖的复述点数据。当前部署已禁用 ASR。"}
+        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid gap-3 md:grid-cols-2">
+        <div className={`grid gap-3 ${asrEnabled ? "md:grid-cols-2" : ""}`}>
           <div className="rounded-md border bg-muted/30 p-3">
             <div className="text-xs text-muted-foreground">覆盖复述点</div>
             <div className="mt-1 font-medium text-foreground">{recallPoints.length}</div>
           </div>
-          <div className="rounded-md border bg-muted/30 p-3">
-            <div className="text-xs text-muted-foreground">ASR 窗口</div>
-            <div className="mt-1 font-medium text-foreground">center ± 30s</div>
-          </div>
+          {asrEnabled ? (
+            <div className="rounded-md border bg-muted/30 p-3">
+              <div className="text-xs text-muted-foreground">ASR 窗口</div>
+              <div className="mt-1 font-medium text-foreground">center ± 30s</div>
+            </div>
+          ) : null}
         </div>
+
+        {recallPoints.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-border/80 bg-muted/15 px-4 py-4 text-sm text-muted-foreground">
+            当前节点还没有可导出的复述点。先完成节点绑定、生成复述点后，再导出 JSON 或发起 ASR。
+          </div>
+        ) : null}
 
         <div className="flex flex-wrap gap-3">
-          <Button onClick={() => void onExportRecallPoints()} disabled={isExportingRecall}>
+          <Button onClick={() => void onExportRecallPoints()} disabled={isExportingRecall || recallPoints.length === 0}>
             {isExportingRecall ? "导出中..." : "导出复述点 JSON"}
           </Button>
-          <Button
-            variant="outline"
-            onClick={() => void onExportAsr()}
-            disabled={isExportingAsr || recallPoints.length === 0}
-          >
-            {isExportingAsr ? "处理中..." : "生成并导出 ASR JSON"}
-          </Button>
+          {asrEnabled ? (
+            <Button
+              variant="outline"
+              onClick={() => void onExportAsr()}
+              disabled={isExportingAsr || recallPoints.length === 0}
+            >
+              {isExportingAsr ? "处理中..." : "生成并导出 ASR JSON"}
+            </Button>
+          ) : null}
         </div>
 
-        <p className="text-xs text-muted-foreground">
-          ASR 导出会对当前节点下每个复述点调用一次 `request_asr`；已存在的缓存结果会被直接复用。
-        </p>
-        {statusText ? <p className="text-sm text-muted-foreground">{statusText}</p> : null}
-        {errorText ? <p className="text-sm text-destructive">{errorText}</p> : null}
+        {asrEnabled ? (
+          <p className="text-xs text-muted-foreground">
+            ASR 导出会对当前节点下每个复述点调用一次 `request_asr`；已存在的缓存结果会被直接复用。
+          </p>
+        ) : null}
+        {statusText ? <div className="rounded-md border bg-muted/20 px-3 py-2 text-sm text-muted-foreground">{statusText}</div> : null}
+        {errorText ? <div className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">{errorText}</div> : null}
       </CardContent>
     </Card>
   )

@@ -3,7 +3,7 @@ import katex from "katex"
 import "katex/dist/katex.min.css"
 import { useSearchParams } from "react-router-dom"
 
-import methodGuideMarkdown from "../../../../docs/PLM-基于重点压缩的学习系统.md?raw"
+import methodGuideMarkdown from "../../../../docs/plm-method-guide.md?raw"
 import userManualMarkdown from "../../../../docs/learningpyramid-user-manual.md?raw"
 
 import { cn } from "@/ui/utils"

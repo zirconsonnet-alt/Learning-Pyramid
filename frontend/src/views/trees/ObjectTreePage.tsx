@@ -1,11 +1,12 @@
 import { useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { ChevronRight } from "lucide-react"
+import { ChevronRight, FolderTree } from "lucide-react"
 import { useNavigate, useParams } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
 import { listInstances, type Instance } from "@/ui/api/instances"
 import { listLearningObjectNodes, listRecallPointsByLearningObjectNode, type LearningObjectNode } from "@/ui/api/learningObjects"
+import { ContentEmptyState, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { cn } from "@/ui/utils"
 import {
@@ -182,10 +183,8 @@ export function ObjectTreePage() {
 
   const effectiveSelectedNodeId = selectedNodeId && nodeById[selectedNodeId] ? selectedNodeId : defaultSelectedId
   const selectedNode = effectiveSelectedNodeId ? nodeById[effectiveSelectedNodeId] : null
-  const selectedInstance = useMemo(() => {
-    if (!selectedNode?.instanceId) return null
-    return (instancesQ.data ?? []).find((instance) => instance.instanceId === selectedNode.instanceId) ?? null
-  }, [instancesQ.data, selectedNode?.instanceId])
+  const selectedInstance =
+    !selectedNode?.instanceId ? null : (instancesQ.data ?? []).find((instance) => instance.instanceId === selectedNode.instanceId) ?? null
 
   const selectedRecallPointsQ = useQuery({
     queryKey: ["recallPointsByObjectNode", pid, effectiveSelectedNodeId],
@@ -243,9 +242,15 @@ export function ObjectTreePage() {
           </div>
 
           <div className="theme-canvas min-h-[32rem] overflow-auto p-4 md:p-5">
-            {isLoading ? <p className="text-sm text-muted-foreground">加载中...</p> : null}
-            {nodesQ.error ? <p className="text-sm text-destructive">{formatApiError(nodesQ.error)}</p> : null}
-            {!isLoading && !nodesQ.error && !hasData ? <p className="text-sm text-muted-foreground">暂无学习对象节点。</p> : null}
+            {isLoading ? <LoadingNotice title="正在加载学习对象树" message="正在整理目录结构、材料节点和层级布局。" /> : null}
+            {nodesQ.error ? <ErrorNotice title="学习对象树加载失败" message={formatApiError(nodesQ.error)} /> : null}
+            {!isLoading && !nodesQ.error && !hasData ? (
+              <ContentEmptyState
+                icon={FolderTree}
+                title="当前项目还没有学习对象树"
+                message="先在项目设置里同步素材目录，或通过桌面连接器接入材料；完成后这里会自动生成对象节点。"
+              />
+            ) : null}
             {!isLoading && !nodesQ.error && hasData ? (
               <LearningObjectTreeCanvas
                 rootIds={rootIds}
@@ -366,9 +371,8 @@ export function ObjectTreePage() {
                   </div>
                 ) : null}
 
-                {nodesQ.error ? <p className="text-sm text-destructive">{formatApiError(nodesQ.error)}</p> : null}
-                {instancesQ.error ? <p className="text-sm text-destructive">{formatApiError(instancesQ.error)}</p> : null}
-                {selectedRecallPointsQ.error ? <p className="text-sm text-destructive">{formatApiError(selectedRecallPointsQ.error)}</p> : null}
+                {instancesQ.error ? <ErrorNotice title="实例详情加载失败" message={formatApiError(instancesQ.error)} /> : null}
+                {selectedRecallPointsQ.error ? <ErrorNotice title="复述点统计加载失败" message={formatApiError(selectedRecallPointsQ.error)} /> : null}
 
                 <div className="pt-1">
                   <Button variant="outline" onClick={() => nav(`/p/${pid}/learning-object-nodes/${selectedNode.nodeId}`)}>
@@ -377,7 +381,10 @@ export function ObjectTreePage() {
                 </div>
               </div>
             ) : (
-              <p className="text-sm text-muted-foreground">选择一个节点以查看详情。</p>
+              <ContentEmptyState
+                title="先选择一个对象节点"
+                message="从左侧结构图里点击任意目录或材料节点，这里就会显示它的路径、状态和复述点摘要。"
+              />
             )}
           </section>
         </aside>

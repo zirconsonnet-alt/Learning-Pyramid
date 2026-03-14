@@ -11,8 +11,90 @@ class CreateProjectRequest(BaseModel):
     projectRoot: Optional[str] = None
 
 
+class SetProjectMaterialSourceBindingRequest(BaseModel):
+    sourceKind: str = Field(min_length=1)
+    desktopAgentId: Optional[str] = None
+    sourceRootLabel: Optional[str] = None
+
+
+class PairDesktopAgentRequest(BaseModel):
+    pairingCode: str = Field(min_length=1)
+    deviceName: str = Field(min_length=1)
+    platform: str = Field(min_length=1)
+    appVersion: str = Field(min_length=1)
+
+
+class RefreshDesktopAgentTokenRequest(BaseModel):
+    refreshToken: str = Field(min_length=1)
+
+
+class AuthCredentialsRequest(BaseModel):
+    email: str = Field(min_length=3)
+    password: str = Field(min_length=8)
+
+
+class ProvisionDesktopAgentRequest(BaseModel):
+    deviceName: str = Field(min_length=1)
+    platform: str = Field(min_length=1)
+    appVersion: str = Field(min_length=1)
+
+
+class CompleteDesktopAgentAccountSetupRequest(BaseModel):
+    agentId: str = Field(min_length=1)
+    projectId: str = Field(min_length=1)
+    sourceRootLabel: Optional[str] = None
+
+
 class AddInstanceRequest(BaseModel):
     materialId: str = Field(min_length=1)
+
+
+class ClientMediaManifestEntryRequest(BaseModel):
+    relativePath: str = Field(min_length=1)
+    displayName: Optional[str] = None
+    mediaKind: Optional[str] = None
+    sizeBytes: Optional[int] = Field(default=None, ge=0)
+    modifiedAt: Optional[str] = None
+
+
+class SyncClientMediaManifestRequest(BaseModel):
+    rootTitle: Optional[str] = None
+    entries: List[ClientMediaManifestEntryRequest] = Field(default_factory=list)
+
+
+class DesktopAgentManifestSyncRequest(BaseModel):
+    projectId: str = Field(min_length=1)
+    agentId: str = Field(min_length=1)
+    rootTitle: Optional[str] = None
+    entries: List[ClientMediaManifestEntryRequest] = Field(default_factory=list)
+
+
+class DesktopAgentDiagnosticEventRequest(BaseModel):
+    level: str = Field(min_length=1)
+    category: str = Field(min_length=1)
+    eventType: str = Field(min_length=1)
+    message: str = Field(min_length=1)
+    details: dict = Field(default_factory=dict)
+    projectId: Optional[str] = None
+    instanceId: Optional[str] = None
+    relativePath: Optional[str] = None
+    createdAt: Optional[str] = None
+
+
+class DesktopAgentHlsJobStateRequest(BaseModel):
+    state: str = Field(min_length=1)
+    message: Optional[str] = None
+
+
+class CreateDesktopAgentSetupSessionRequest(BaseModel):
+    preferredProjectId: Optional[str] = None
+
+
+class CompleteDesktopAgentSetupRequest(BaseModel):
+    setupCode: str = Field(min_length=1)
+    agentId: str = Field(min_length=1)
+    projectId: str = Field(min_length=1)
+    sourceRootLabel: Optional[str] = None
 
 
 class AddLearningObjectLeafRequest(BaseModel):

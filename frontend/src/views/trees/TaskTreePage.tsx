@@ -1,11 +1,12 @@
 import { useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { ChevronRight } from "lucide-react"
+import { ChevronRight, Waypoints } from "lucide-react"
 import { useNavigate, useParams } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
 import { listAggregationEvents, type AggregationEvent } from "@/ui/api/layers"
 import { listLearningTaskNodes, type LearningTaskNode } from "@/ui/api/learningTaskNodes"
+import { ContentEmptyState, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { useLearningTask, useLearningTaskNodeBinding } from "@/ui/queries/learningTasks"
 import { formatLearningTaskNodeDisplayTitle, isDefaultAggregationTitle } from "@/views/learningTasks/displayTitle"
@@ -315,10 +316,16 @@ export function TaskTreePage() {
           </div>
 
           <div className="theme-canvas min-h-[32rem] overflow-auto p-4 md:p-5">
-            {isLoading ? <p className="text-sm text-muted-foreground">加载中...</p> : null}
-            {q.error ? <p className="text-sm text-destructive">{formatApiError(q.error)}</p> : null}
-            {eventsQ.error ? <p className="text-sm text-destructive">{formatApiError(eventsQ.error)}</p> : null}
-            {!isLoading && !q.error && !eventsQ.error && !hasData ? <p className="text-sm text-muted-foreground">暂无学习任务节点。</p> : null}
+            {isLoading ? <LoadingNotice title="正在加载学习任务树" message="正在整理任务节点、聚合关系和层级布局。" /> : null}
+            {q.error ? <ErrorNotice title="学习任务树加载失败" message={formatApiError(q.error)} /> : null}
+            {eventsQ.error ? <ErrorNotice title="聚合事件加载失败" message={formatApiError(eventsQ.error)} /> : null}
+            {!isLoading && !q.error && !eventsQ.error && !hasData ? (
+              <ContentEmptyState
+                icon={Waypoints}
+                title="当前项目还没有学习任务树"
+                message="先在工作台里提交一批复述点并创建学习任务，之后这里会自动按层生成对应的任务结构。"
+              />
+            ) : null}
             {!isLoading && !q.error && !eventsQ.error && hasData ? (
               <LearningTaskTreeCanvas
                 rootIds={rootIds}
@@ -430,10 +437,10 @@ export function TaskTreePage() {
                   </div>
                 ) : null}
 
-                {selectedBindingQ.error ? <p className="text-sm text-destructive">{formatApiError(selectedBindingQ.error)}</p> : null}
-                {selectedTaskQ.error ? <p className="text-sm text-destructive">{formatApiError(selectedTaskQ.error)}</p> : null}
-                {selectedChainQ.error ? <p className="text-sm text-destructive">{formatApiError(selectedChainQ.error)}</p> : null}
-                {selectedConvergenceQ.error ? <p className="text-sm text-destructive">{formatApiError(selectedConvergenceQ.error)}</p> : null}
+                {selectedBindingQ.error ? <ErrorNotice title="节点绑定加载失败" message={formatApiError(selectedBindingQ.error)} /> : null}
+                {selectedTaskQ.error ? <ErrorNotice title="学习任务详情加载失败" message={formatApiError(selectedTaskQ.error)} /> : null}
+                {selectedChainQ.error ? <ErrorNotice title="复习链摘要加载失败" message={formatApiError(selectedChainQ.error)} /> : null}
+                {selectedConvergenceQ.error ? <ErrorNotice title="收敛状态加载失败" message={formatApiError(selectedConvergenceQ.error)} /> : null}
 
                 <div className="pt-1">
                   <Button variant="outline" onClick={() => nav(`/p/${pid}/learning-task-nodes/${selectedNode.nodeId}`)}>
@@ -442,7 +449,10 @@ export function TaskTreePage() {
                 </div>
               </div>
             ) : (
-              <p className="text-sm text-muted-foreground">选择一个节点以查看详情。</p>
+              <ContentEmptyState
+                title="先选择一个任务节点"
+                message="从左侧结构图里点击任意任务、章节或聚合节点，这里就会显示它的层级、复习状态和上下游关系。"
+              />
             )}
           </section>
         </aside>

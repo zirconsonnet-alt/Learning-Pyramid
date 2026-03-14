@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useQueries } from "@tanstack/react-query"
+import { Clock3, FolderTree, ListChecks, RadioTower, Settings2, Sparkles, Waypoints } from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
@@ -7,8 +8,10 @@ import { listRecallPointsByInstance } from "@/ui/api/instances"
 import type { Layer } from "@/ui/api/layers"
 import type { Instance } from "@/ui/api/instances"
 import type { LearningTaskNode } from "@/ui/api/learningTaskNodes"
+import { ContentEmptyState, ContentNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
+import { useProject } from "@/ui/queries/projects"
 import { useLearningTaskNodes } from "@/ui/queries/learningTasks"
 import {
   useAggregationQueue,
@@ -18,6 +21,7 @@ import {
   useQueue,
 } from "@/ui/queries/workbench"
 import { useAppStore } from "@/ui/store/appStore"
+import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { useWorkbenchStore } from "@/ui/store/workbenchStore"
 import { cn } from "@/ui/utils"
 import { ComposePane } from "@/views/workbench/components/ComposePane"
@@ -37,6 +41,45 @@ function parseAnchorMs(position: string): number | null {
   if (!m) return null
   const n = Number(m[1])
   return Number.isFinite(n) ? n : null
+}
+
+function SummaryTile(props: {
+  label: string
+  value: string
+  detail: string
+  tone?: "default" | "warning"
+}) {
+  const { label, value, detail, tone = "default" } = props
+  return (
+    <div
+      className={cn(
+        "theme-status-surface px-4 py-4",
+        tone === "warning" && "border-amber-200/80 bg-amber-50/75",
+      )}
+    >
+      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#73839a]">{label}</div>
+      <div className="mt-2 text-2xl font-semibold tracking-tight text-foreground">{value}</div>
+      <div className="mt-1 text-sm text-muted-foreground">{detail}</div>
+    </div>
+  )
+}
+
+function StatusStrip(props: { label: string; value: string; hint?: string; warning?: boolean }) {
+  const { label, value, hint, warning = false } = props
+  return (
+    <div
+      className={cn(
+        "theme-status-surface flex items-start justify-between gap-4 px-4 py-3",
+        warning && "border-amber-200/70 bg-amber-50/80",
+      )}
+    >
+      <div className="min-w-0">
+        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#73839a]">{label}</div>
+        {hint ? <div className="mt-1 text-sm text-muted-foreground">{hint}</div> : null}
+      </div>
+      <div className={cn("theme-meta shrink-0", warning && "border-amber-300 bg-amber-100 text-amber-800")}>{value}</div>
+    </div>
+  )
 }
 
 function LearningTaskNodeLink(props: { projectId: string; node: LearningTaskNode; sourceLayerIndex?: number }) {
@@ -105,7 +148,11 @@ function LayerReviewChainCard(props: {
             )
           })
         ) : (
-          <span className="text-xs text-muted-foreground">当前无学习任务</span>
+          <ContentEmptyState
+            title={`L${layer.layerIndex} 当前还没有待上推任务`}
+            message="继续录入并提交学习任务，或先完成下游复习后再回来；一旦该层出现候选节点，这里会自动列出可上推项。"
+            className="w-full bg-white/60 px-3 py-3"
+          />
         )}
       </div>
       {aggQ.error ? <div className="mt-2 text-xs text-destructive">{formatApiError(aggQ.error)}</div> : null}
@@ -139,6 +186,7 @@ export function WorkbenchPage() {
   }, [pid, selectedProjectId])
 
   const instancesQ = useInstances(pid)
+  const projectQ = useProject(pid, { enabled: !!pid })
   const learningTaskNodesQ = useLearningTaskNodes(pid)
   const queueQ = useQueue(pid)
   const layersQ = useLayers(pid)
@@ -173,6 +221,17 @@ export function WorkbenchPage() {
     for (const node of learningTaskNodesQ.data ?? []) map[node.nodeId] = node
     return map
   }, [learningTaskNodesQ.data])
+  const presentInstanceCount = useMemo(
+    () => (instancesQ.data ?? []).filter((item) => item.presence !== "MISSING").length,
+    [instancesQ.data],
+  )
+  const queueSize = queueQ.data?.ids.length ?? 0
+  const currentMode = queueHasGate ? "复习执行中" : "复述与生成"
+  const workbenchNarrative = queueHasGate
+    ? "当前队列存在待复习任务，工作台已切换到复习优先模式。"
+    : "当前没有复习门禁，可以继续围绕选中的视频录入复述点并提交学习。"
+  const selectedInstanceLabel = instance?.materialDisplayName ?? "尚未选择视频"
+  const projectTitle = projectQ.projectTitle
 
   useEffect(() => {
     if (!pid) return
@@ -183,8 +242,20 @@ export function WorkbenchPage() {
   }, [instancesQ.data, pid, selectedInstanceId, setSelectedInstanceId])
 
   async function onManualRollUp(layerIndex: number) {
-    if (queueHasGate) return
-    await rollUpM.mutateAsync({ layerIndex })
+    if (queueHasGate) {
+      showInfoFeedback("当前无法上推", "还有待完成的复习门禁，请先完成复习再继续层级推进。")
+      return
+    }
+    try {
+      const result = await rollUpM.mutateAsync({ layerIndex })
+      if (result.parentNodeId) {
+        showSuccessFeedback("层级上推已完成", `L${layerIndex} 已生成新的聚合节点。`)
+      } else {
+        showInfoFeedback("层级状态已刷新", `L${layerIndex} 目前没有新的聚合结果。`)
+      }
+    } catch (err) {
+      showErrorFeedback("层级上推失败", formatApiError(err))
+    }
   }
 
   function onOpenAnchor(a: { instanceId: string; position: string }) {
@@ -199,9 +270,12 @@ export function WorkbenchPage() {
 
   if (!pid) {
     return (
-      <div className="space-y-2">
-        <p className="text-sm text-muted-foreground">缺少 projectId。</p>
-        <Button onClick={() => navigate("/projects")}>返回项目列表</Button>
+      <div className="space-y-4">
+        <ContentNotice
+          title="当前工作台缺少项目上下文"
+          message="这个页面需要附带有效的项目 ID 才能继续加载。你可以先回到项目列表，再重新进入目标项目的工作台。"
+          action={<Button onClick={() => navigate("/projects")}>返回项目列表</Button>}
+        />
       </div>
     )
   }
@@ -224,13 +298,65 @@ export function WorkbenchPage() {
         </Card>
       ) : null}
 
+      <section className="theme-card-main overflow-hidden">
+        <div className="grid gap-7 p-7 lg:grid-cols-[minmax(0,1.2fr)_minmax(300px,0.8fr)] lg:p-8">
+          <div className="space-y-5">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="theme-meta-strong">Workbench</span>
+              <span className="theme-meta">{queueHasGate ? "Review Gate Active" : "Compose Flow Active"}</span>
+              <span className="theme-meta">{projectTitle}</span>
+            </div>
+            <div className="space-y-3">
+              <h1 className="text-3xl font-semibold tracking-tight text-foreground lg:text-[2.45rem]">围绕当前项目完成播放、复述、复习和层推进。</h1>
+              <p className="max-w-3xl text-base leading-7 text-[#60728a]">{workbenchNarrative}</p>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <Button asChild size="lg">
+                <Link to={`/p/${pid}/task-tree`}>
+                  <Waypoints className="h-4 w-4" />
+                  查看学习任务树
+                </Link>
+              </Button>
+              <Button variant="outline" size="lg" asChild>
+                <Link to={`/p/${pid}/settings`}>
+                  <Settings2 className="h-4 w-4" />
+                  项目设置
+                </Link>
+              </Button>
+              <Button variant="outline" size="lg" asChild>
+                <Link to={`/p/${pid}/timeline`}>
+                  <Clock3 className="h-4 w-4" />
+                  时间线
+                </Link>
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+            <SummaryTile label="当前模式" value={currentMode} detail={queueHasGate ? "优先完成复习任务" : "允许继续提交学习"} />
+            <SummaryTile label="视频实例" value={String(presentInstanceCount)} detail={`失效 ${missingInstances.length} 个`} tone={missingInstances.length > 0 ? "warning" : "default"} />
+            <SummaryTile label="队列长度" value={String(queueSize)} detail={queueHasGate ? "存在门禁，提交学习已暂停" : "当前没有待复习门禁"} tone={queueHasGate ? "warning" : "default"} />
+            <SummaryTile label="层级推进" value={String((layersQ.data ?? []).length)} detail="查看各层候选任务与手动上推状态" />
+          </div>
+        </div>
+      </section>
+
       <div className="grid gap-5 xl:grid-cols-[300px_minmax(0,1.2fr)_320px]">
         <div className="space-y-4">
-          <Card className="theme-card">
-            <CardHeader className="theme-card-header">
-              <CardTitle>学习对象</CardTitle>
+          <Card className="theme-card-main">
+            <CardHeader className="theme-card-header space-y-2">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#edf4ff] text-primary">
+                  <FolderTree className="h-5 w-5" />
+                </div>
+                <div>
+                  <CardTitle>内容目录</CardTitle>
+                  <CardDescription>从学习对象树选择一个视频实例，作为当前播放与录入上下文。</CardDescription>
+                </div>
+              </div>
             </CardHeader>
             <CardContent className="space-y-3">
+              <StatusStrip label="当前选中" value={selectedInstanceLabel} hint="切换实例会同步刷新视频和复述点上下文。" />
               <div className="theme-canvas rounded-[1.1rem] border border-border/60 p-3">
                 <LearningObjectTree
                   projectId={pid}
@@ -247,6 +373,18 @@ export function WorkbenchPage() {
         </div>
 
         <div className="space-y-4">
+          <Card className="theme-card">
+            <CardContent className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
+              <div className="min-w-0">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#72849b]">当前工作上下文</div>
+                <div className="mt-1 text-lg font-semibold text-foreground">{selectedInstanceLabel}</div>
+                <div className="mt-1 text-sm text-muted-foreground">
+                  {queueHasGate ? "系统正在等待你完成复习评估。" : "你可以继续围绕当前视频录入复述点并提交学习。"}
+                </div>
+              </div>
+              <div className="theme-meta-strong">{queueHasGate ? "Review Mode" : "Compose Mode"}</div>
+            </CardContent>
+          </Card>
           <VideoPane
             key={instance?.instanceId ?? "none"}
             projectId={pid}
@@ -275,31 +413,49 @@ export function WorkbenchPage() {
         </div>
 
         <div className="space-y-4">
-          <Card className="theme-card">
-            <CardHeader className="theme-card-header">
-              <CardTitle>系统状态</CardTitle>
+          <Card className="theme-card-main">
+            <CardHeader className="theme-card-header space-y-2">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#edf4ff] text-primary">
+                  <RadioTower className="h-5 w-5" />
+                </div>
+                <div>
+                  <CardTitle>工作状态</CardTitle>
+                  <CardDescription>观察当前队列、失效实例和门禁状态，确保工作流不会被隐藏问题打断。</CardDescription>
+                </div>
+              </div>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
-              <div className="theme-status-surface flex items-center justify-between px-4 py-3">
-                <span className="text-muted-foreground">队列长度</span>
-                <span className="theme-meta">{queueQ.data ? queueQ.data.ids.length : "-"}</span>
-              </div>
-              <div className="theme-status-surface flex items-center justify-between px-4 py-3">
-                <span className="text-muted-foreground">当前状态</span>
-                <span className={cn("theme-meta", queueHasGate && "border-destructive/20 bg-destructive/10 text-destructive")}>
-                  {queueHasGate ? "待复习" : "空闲"}
-                </span>
-              </div>
+              <StatusStrip label="队列长度" value={queueQ.data ? `${queueQ.data.ids.length}` : "-"} hint={queueHasGate ? "存在待复习项目，提交学习将暂时关闭。" : "当前没有待处理的复习门禁。"} warning={queueHasGate} />
+              <StatusStrip label="失效实例" value={`${actionableMissingCount}`} hint="这些实例仍被历史锚点引用，建议尽快在项目设置中完成修复。" warning={actionableMissingCount > 0} />
+              <StatusStrip label="当前操作" value={queueHasGate ? "复习" : "录入"} hint={queueHasGate ? "先完成复习再继续新增学习任务。" : "现在可以继续添加复述点并提交学习。"} />
             </CardContent>
           </Card>
 
-          <Card className="theme-card">
-            <CardHeader className="theme-card-header">
-              <CardTitle>层与学习任务</CardTitle>
+          <Card className="theme-card-main">
+            <CardHeader className="theme-card-header space-y-2">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#edf4ff] text-primary">
+                  <ListChecks className="h-5 w-5" />
+                </div>
+                <div>
+                  <CardTitle>层推进与学习任务</CardTitle>
+                  <CardDescription>查看每一层待推进的学习任务节点，并在空闲时执行上推。</CardDescription>
+                </div>
+              </div>
             </CardHeader>
             <CardContent className="space-y-4 text-sm">
               {layersQ.isLoading ? <p className="text-sm text-muted-foreground">加载中...</p> : null}
               {layersQ.error ? <p className="text-sm text-destructive">{formatApiError(layersQ.error)}</p> : null}
+              {!layersQ.isLoading && !layersQ.error && (layersQ.data?.length ?? 0) === 0 ? (
+                <div className="theme-status-surface flex items-start gap-3 px-4 py-4">
+                  <Sparkles className="mt-0.5 h-4 w-4 text-primary" />
+                  <div className="space-y-1">
+                    <div className="text-sm font-medium text-foreground">当前还没有层配置</div>
+                    <div className="text-sm text-muted-foreground">请先在项目设置里确认层数与模板，之后这里会出现各层候选任务。</div>
+                  </div>
+                </div>
+              ) : null}
               <div className="space-y-2">
                 {(layersQ.data ?? []).map((l) => (
                   <LayerReviewChainCard
@@ -317,7 +473,6 @@ export function WorkbenchPage() {
               {rollUpM.error ? <p className="text-sm text-destructive">{formatApiError(rollUpM.error)}</p> : null}
             </CardContent>
           </Card>
-
         </div>
       </div>
     </div>

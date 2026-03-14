@@ -2,12 +2,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { createProject, deleteProject, listProjects } from "@/ui/api/projects"
 
-export function useProjects() {
-  return useQuery({ queryKey: ["projects"], queryFn: listProjects })
+export function useProjects(enabled = true) {
+  return useQuery({ queryKey: ["projects"], queryFn: listProjects, enabled })
 }
 
-export function useProject(projectId?: string) {
-  const query = useProjects()
+export function useProject(projectId?: string, options?: { enabled?: boolean }) {
+  const query = useProjects(options?.enabled ?? true)
   const project = projectId ? query.data?.find((item) => item.projectId === projectId) ?? null : null
 
   return {

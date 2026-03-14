@@ -1,6 +1,7 @@
 import { Link, useNavigate, useParams } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
+import { ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import { useLearningTask } from "@/ui/queries/learningTasks"
@@ -21,9 +22,12 @@ export function LearningTaskPage() {
 
   if (!pid || !taskId) {
     return (
-      <div className="space-y-2">
-        <p className="text-sm text-muted-foreground">缺少 projectId 或 learningTaskId。</p>
-        <Button onClick={() => navigate("/projects")}>返回项目列表</Button>
+      <div className="space-y-4">
+        <ContentNotice
+          title="当前页面缺少学习任务上下文"
+          message="学习任务详情页需要同时提供项目 ID 和学习任务 ID。你可以先回到项目列表，再从任务树或工作台重新进入。"
+          action={<Button onClick={() => navigate("/projects")}>返回项目列表</Button>}
+        />
       </div>
     )
   }
@@ -46,8 +50,19 @@ export function LearningTaskPage() {
           <CardDescription>工作台按这个任务组织复习链和后续调度。</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {taskQ.isLoading ? <p className="text-sm text-muted-foreground">加载中...</p> : null}
-          {taskQ.error ? <p className="text-sm text-destructive">{formatApiError(taskQ.error)}</p> : null}
+          {taskQ.isLoading ? <LoadingNotice title="正在加载学习任务" message="正在读取任务标题、复述点数量和关联复习链。" /> : null}
+          {taskQ.error ? <ErrorNotice title="学习任务加载失败" message={formatApiError(taskQ.error)} /> : null}
+          {!taskQ.isLoading && !taskQ.error && !taskQ.data ? (
+            <ContentNotice
+              title="未找到这个学习任务"
+              message="这个学习任务可能已经被移除，或者当前链接里的任务 ID 已经过期。你可以返回任务树重新选择。"
+              action={
+                <Button variant="outline" asChild>
+                  <Link to={`/p/${pid}/task-tree`}>返回学习任务树</Link>
+                </Button>
+              }
+            />
+          ) : null}
 
           {taskQ.data ? (
             <>

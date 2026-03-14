@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
+import { Link } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
+import { ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { listLearningObjectNodes, type LearningObjectNode } from "@/ui/api/learningObjects"
+import { Button } from "@/ui/components/ui/button"
 import { cn } from "@/ui/utils"
 
 function formatApiError(err: unknown) {
@@ -132,16 +135,12 @@ export function LearningObjectTree({
     return { nodeById: map, rootIds: roots, containerIds: containers }
   }, [q.data])
 
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
-
-  useEffect(() => {
-    if (containerIds.length === 0) return
-    setExpanded((prev) => (prev.size === 0 ? new Set(containerIds) : prev))
-  }, [containerIds])
+  const [expanded, setExpanded] = useState<Set<string> | null>(null)
+  const effectiveExpanded = expanded ?? new Set(containerIds)
 
   function toggle(nodeId: string) {
     setExpanded((prev) => {
-      const next = new Set(prev)
+      const next = new Set(prev ?? containerIds)
       if (next.has(nodeId)) next.delete(nodeId)
       else next.add(nodeId)
       return next
@@ -149,15 +148,27 @@ export function LearningObjectTree({
   }
 
   if (q.isLoading) {
-    return <p className="text-sm text-muted-foreground">加载学习对象树中...</p>
+    return <LoadingNotice title="正在加载内容目录" message="正在读取这个项目的学习对象树和材料层级。" />
   }
 
   if (q.error) {
-    return <p className="text-sm text-destructive">{formatApiError(q.error)}</p>
+    return <ErrorNotice title="内容目录加载失败" message={formatApiError(q.error)} />
   }
 
   if (rootIds.length === 0) {
-    return <p className="text-sm text-muted-foreground">当前扫描目录下暂无学习对象。</p>
+    return (
+      <div className="space-y-3 rounded-[1rem] border border-dashed border-border/70 bg-background/70 p-4">
+        <div className="space-y-1">
+          <p className="text-sm font-medium text-foreground">当前还没有学习对象</p>
+          <p className="text-sm text-muted-foreground">
+            请先到项目设置里绑定目录并执行同步。完成后，这里会显示可学习的视频和目录树。
+          </p>
+        </div>
+        <Button asChild size="sm" className="rounded-full">
+          <Link to={`/p/${projectId}/settings`}>前往项目设置</Link>
+        </Button>
+      </div>
+    )
   }
 
   return (
@@ -167,7 +178,7 @@ export function LearningObjectTree({
           key={rootId}
           nodeId={rootId}
           depth={0}
-          expanded={expanded}
+          expanded={effectiveExpanded}
           toggle={toggle}
           nodeById={nodeById}
           selectedInstanceId={selectedInstanceId}

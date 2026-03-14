@@ -1,0 +1,63 @@
+name: Backend CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  sqlite-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+      - name: Run SQLite/backend tests
+        run: >
+          python -m pytest
+          tests/test_sqlite_store.py
+          tests/test_sql_backend.py
+          tests/test_api_envelope.py
+          tests/test_auth_api.py
+          tests/test_http_runtime_config.py
+          tests/test_postgres_export_script.py
+          -q
+
+  postgres-tests:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: learningpyramid_test
+          POSTGRES_USER: learningpyramid
+          POSTGRES_PASSWORD: learningpyramid
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U learningpyramid -d learningpyramid_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      PLM_TEST_POSTGRES_DSN: postgresql://learningpyramid:learningpyramid@127.0.0.1:5432/learningpyramid_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+      - name: Run PostgreSQL/backend tests
+        run: >
+          python -m pytest
+          tests/test_sql_backend.py
+          tests/test_api_envelope.py
+          tests/test_auth_api.py
+          tests/test_http_runtime_config.py
+          tests/test_postgres_export_script.py
+          tests/test_postgres_runtime.py
+          tests/test_postgres_hosted_api.py
+          -q

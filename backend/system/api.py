@@ -3,13 +3,15 @@ import hashlib
 import os
 import urllib.error
 import urllib.request
-from dataclasses import replace
+from datetime import datetime, timezone
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path, PurePosixPath
 from typing import Any, Optional, Sequence, Tuple
 from urllib.parse import urlparse, urlunparse
 
 from backend.models.aggregation_event import AggregationEvent
+from backend.models.aggregation_queue import AggregationQueue
 from backend.models.asr_artifact import AsrArtifact, AsrSegment
 from backend.models.audit_log_event import AuditLogEvent
 from backend.models.convergence import Convergence
@@ -23,6 +25,7 @@ from backend.models.enums import (
     FsSyncPolicy,
     InstancePresence,
     LayerMode,
+    MaterialSourceKind,
     ProjectState,
     RecallPointReviewResult,
     ReviewChainTemplateItemKind,
@@ -36,20 +39,24 @@ from backend.models.layer import Layer
 from backend.models.learning_object_node import LearningObjectContainer, LearningObjectLeaf
 from backend.models.learning_task import LearningTask
 from backend.models.learning_task_node import LearningTaskContainer, LearningTaskLeaf, LearningTaskNode
+from backend.models.project import Project
 from backend.models.project_config import (
     LayerConfig,
     LocalServiceConfig,
     ProjectConfig,
     ProjectExternalServicesConfig,
     ReviewChainTemplate,
+    default_project_config,
     default_layer_config,
 )
+from backend.models.project_material_source_binding import ProjectMaterialSourceBinding
 from backend.models.project_storage_config import ProjectStorageConfig
 from backend.models.recall_point import Anchor, RecallPoint
 from backend.models.recall_point_review_record import RecallPointReviewRecord
 from backend.models.rich_content import RichContent, validate_rich_content_write_time
 from backend.models.review_chain import ReviewChain, ReviewChainItem, ReviewChainItemKind
 from backend.models.review_task import ReviewTask
+from backend.models.review_task_queue import ReviewTaskQueue
 from backend.models.types import (
     AsrArtifactId,
     ConvergenceId,
@@ -74,8 +81,13 @@ from backend.models.entry_registration import EntryRegistration
 from backend.protocols.interfaces import LearningItem
 from backend.protocols.learning_task_submit import learning_task_submit
 from backend.protocols.review_submit_binary import review_submit_binary
+from backend.repositories.persistence_interfaces import SystemStateRecord
 from backend.system.local_whisper import can_auto_use_local_whisper, ensure_local_whisper_runtime, is_builtin_whisper_base_url
 from backend.system.material_paths import resolve_material_file_path
+from backend.system.persistence_json import SCHEMA_VERSION, encode_project_payload_record, encode_project_shell_payload
+from backend.system.persistence_store import SqlStore
+from backend.system.project_paths import allocate_project_root
+from backend.system.runtime_features import current_runtime_features
 from backend.system.inmemory_system import (
     DEFAULT_AGGREGATION_K_NODE,
     DEFAULT_AGGREGATION_K_POINT,
@@ -93,6 +105,15 @@ class TickAttemptResult(str, Enum):
 MAX_ASR_WINDOW_MS: int = 5 * 60 * 1000
 
 
+@dataclass(frozen=True, slots=True)
+class ManifestMediaEntry:
+    relative_path: PurePosixPath
+    display_name: str | None = None
+    media_kind: str | None = None
+    size_bytes: int | None = None
+    modified_at: str | None = None
+
+
 class SystemAPI:
     """
     4.5 对外入口白名单（最小可运行内存实现）
@@ -102,6 +123,167 @@ class SystemAPI:
         self.sys = sys
         self.idgen = sys.g.idgen
         self._startup_fs_sync_done: set[str] = set()
+
+    def _sql_store(self) -> SqlStore | None:
+        store = getattr(self.sys, "_persist_store", None)
+        return store if isinstance(store, SqlStore) else None
+
+    def _reload_sql_state(self) -> None:
+        self.sys.g.projects.clear()
+        self.sys._load_persisted()
+        self.sys._ensure_system_project_id_seq()
+
+    @staticmethod
+    def _sql_updated_at_text() -> str:
+        return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+    def _create_project_sql_direct(self, sql_store: SqlStore, title: str, project_root: str | None) -> ProjectId:
+        pid = self.idgen.new_project_id()
+        resolved_project_root = project_root
+        if resolved_project_root is None:
+            auto_project_root, _ = allocate_project_root(title)
+            resolved_project_root = auto_project_root.as_posix()
+
+        project = Project(
+            project_id=pid,
+            title=title,
+            state=ProjectState.ACTIVE,
+            created_at=now_utc_ms(),
+            deleted_at=None,
+        )
+        project.validate_write_time()
+
+        review_task_queue = ReviewTaskQueue(
+            project_id=pid,
+            queue_id="GLOBAL_QUEUE",
+            review_task_ids=tuple(),
+            head_index=0,
+        )
+        review_task_queue.validate_local_invariants()
+
+        storage_config = ProjectStorageConfig.create(
+            pid,
+            resolved_project_root,
+            learning_object_root="learning_objects",
+            fs_sync_policy=FsSyncPolicy.STARTUP_SYNC,
+            updated_at=now_utc_ms(),
+        )
+        material_source_binding = ProjectMaterialSourceBinding.create(
+            pid,
+            source_kind=MaterialSourceKind.SERVER_FS,
+            updated_at=now_utc_ms(),
+        )
+        project_config = default_project_config(project_id=pid, updated_at=now_utc_ms())
+
+        layer0 = Layer(
+            project_id=pid,
+            layer_id=self.idgen.new_layer_id(pid),
+            layer_index=0,
+            layer_mode=LayerMode.AUTO_TICK_ON_ENTRY,
+            orchestrator_managed_review_chain_ids=tuple(),
+            aggregation_k_node=DEFAULT_AGGREGATION_K_NODE,
+            aggregation_k_point=DEFAULT_AGGREGATION_K_POINT,
+            aggregation_cycle_state=AggregationCycleState.DONE,
+        )
+        layer0.validate_local_invariants()
+        aggregation_queue = AggregationQueue(
+            project_id=pid,
+            layer_index=0,
+            node_ids=tuple(),
+            head_index=0,
+        )
+        aggregation_queue.validate_local_invariants()
+
+        audit_event = AuditLogEvent(
+            project_id=pid,
+            event_id=self.idgen.new_audit_event_id(pid),
+            occurred_at=now_utc_ms(),
+            kind=AuditEventKind.PROJECT_CREATED,
+            api_name="create_project",
+            result=AuditResultCode.OK,
+            payload=json.dumps({"projectId": str(pid)}, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
+        )
+        audit_event.validate_write_time()
+
+        updated_at = self._sql_updated_at_text()
+        with sql_store.begin_unit_of_work(project_id=str(pid)) as uow:
+            uow.system_state.upsert(
+                uow.session,
+                SystemStateRecord(
+                    schema_version=SCHEMA_VERSION,
+                    idgen_counters=dict(self.idgen._counters),
+                    updated_at=updated_at,
+                ),
+            )
+            uow.project_lifecycle.create_bootstrap(
+                uow.session,
+                project=project,
+                project_snapshot=encode_project_shell_payload(
+                    project=project,
+                    project_storage_config=storage_config,
+                    project_material_source_binding=material_source_binding,
+                    project_config=project_config,
+                ),
+                project_storage_config=storage_config,
+                project_config=project_config,
+                review_task_queue=review_task_queue,
+                layers=(layer0,),
+                aggregation_queues=(aggregation_queue,),
+                audit_events=(audit_event,),
+                updated_at=updated_at,
+            )
+
+        self._reload_sql_state()
+        return pid
+
+    def _delete_project_sql_direct(self, sql_store: SqlStore, project_id: ProjectId) -> None:
+        project_store = self.sys.g.projects.get(str(project_id))
+        if project_store is None or project_store.project is None:
+            raise NotFound(project_id)
+        if project_store.project.state != ProjectState.ACTIVE:
+            raise PreconditionFailure("Project must be ACTIVE to delete")
+
+        deleted_at = now_utc_ms()
+        deleted_project = Project(
+            project_id=project_store.project.project_id,
+            title=project_store.project.title,
+            state=ProjectState.DELETED,
+            created_at=project_store.project.created_at,
+            deleted_at=deleted_at,
+        )
+        deleted_project.validate_write_time()
+
+        audit_event = AuditLogEvent(
+            project_id=project_id,
+            event_id=self.idgen.new_audit_event_id(project_id),
+            occurred_at=deleted_at,
+            kind=AuditEventKind.PROJECT_DELETED,
+            api_name="delete_project",
+            result=AuditResultCode.OK,
+            payload=json.dumps({"projectId": str(project_id)}, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
+        )
+        audit_event.validate_write_time()
+
+        updated_at = self._sql_updated_at_text()
+        with sql_store.begin_unit_of_work(project_id=str(project_id)) as uow:
+            uow.system_state.upsert(
+                uow.session,
+                SystemStateRecord(
+                    schema_version=SCHEMA_VERSION,
+                    idgen_counters=dict(self.idgen._counters),
+                    updated_at=updated_at,
+                ),
+            )
+            uow.project_lifecycle.replace_with_deleted_tombstone(
+                uow.session,
+                project=deleted_project,
+                project_snapshot={"project": encode_project_payload_record(deleted_project)},
+                audit_events=(audit_event,),
+                updated_at=updated_at,
+            )
+
+        self._startup_fs_sync_done.discard(id_canonical_text(project_id))
+        self._reload_sql_state()
 
     def _append_audit_event(
         self,
@@ -185,6 +367,9 @@ class SystemAPI:
         """
         pid_k = id_canonical_text(project_id)
         if pid_k in self._startup_fs_sync_done:
+            return
+        if not current_runtime_features().server_media_stream_enabled:
+            self._startup_fs_sync_done.add(pid_k)
             return
 
         s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
@@ -481,6 +666,262 @@ class SystemAPI:
         layer = self.sys.layer_repo.get_by_index(s, layer_index)
         return layer.aggregation_cycle_state
 
+    def sync_learning_objects_from_manifest(
+        self,
+        project_id: ProjectId,
+        *,
+        root_title: str | None,
+        manifest_entries: Sequence[ManifestMediaEntry | dict[str, object] | str | PurePosixPath],
+    ) -> dict[str, object]:
+        normalized_entries: list[ManifestMediaEntry] = []
+        seen_paths: set[str] = set()
+        media_kind_counts: dict[str, int] = {}
+
+        def _normalize_manifest_entry(raw: ManifestMediaEntry | dict[str, object] | str | PurePosixPath) -> ManifestMediaEntry:
+            if isinstance(raw, ManifestMediaEntry):
+                relative_raw = raw.relative_path
+                display_name = raw.display_name
+                media_kind = raw.media_kind
+                size_bytes = raw.size_bytes
+                modified_at = raw.modified_at
+            elif isinstance(raw, (str, PurePosixPath)):
+                relative_raw = raw
+                display_name = None
+                media_kind = None
+                size_bytes = None
+                modified_at = None
+            else:
+                relative_raw = raw.get("relativePath", "")
+                display_name = None if raw.get("displayName") is None else str(raw.get("displayName")).strip() or None
+                media_kind = None if raw.get("mediaKind") is None else str(raw.get("mediaKind")).strip() or None
+                size_bytes_raw = raw.get("sizeBytes")
+                if size_bytes_raw is None:
+                    size_bytes = None
+                else:
+                    try:
+                        size_bytes = int(size_bytes_raw)
+                    except Exception as exc:
+                        raise PreconditionFailure("sync_learning_objects_from_manifest: size_bytes must be an integer") from exc
+                modified_at = None if raw.get("modifiedAt") is None else str(raw.get("modifiedAt")).strip() or None
+            rel = normalize_material_id_to_purepath(relative_raw)
+            text = rel.as_posix().strip()
+            if not text:
+                raise PreconditionFailure("sync_learning_objects_from_manifest: relative_path must be non-empty")
+            if rel.is_absolute():
+                raise PreconditionFailure("sync_learning_objects_from_manifest: relative_path must be relative")
+            if ".." in rel.parts:
+                raise PreconditionFailure("sync_learning_objects_from_manifest: relative_path must not contain '..'")
+            if size_bytes is not None and int(size_bytes) < 0:
+                raise PreconditionFailure("sync_learning_objects_from_manifest: size_bytes must be >= 0")
+            return ManifestMediaEntry(
+                relative_path=PurePosixPath(text),
+                display_name=display_name,
+                media_kind=media_kind,
+                size_bytes=size_bytes,
+                modified_at=modified_at,
+            )
+
+        for raw in manifest_entries:
+            entry = _normalize_manifest_entry(raw)
+            text = entry.relative_path.as_posix()
+            if text in seen_paths:
+                continue
+            seen_paths.add(text)
+            normalized_entries.append(entry)
+            if entry.media_kind is not None:
+                key = str(entry.media_kind).strip().lower() or "unknown"
+                media_kind_counts[key] = media_kind_counts.get(key, 0) + 1
+
+        normalized_entries.sort(key=lambda item: item.relative_path.as_posix())
+        file_rel = [item.relative_path for item in normalized_entries]
+        metadata_by_file = {item.relative_path: item for item in normalized_entries}
+        dir_rel_set: set[PurePosixPath] = {PurePosixPath(".")}
+        for rel in file_rel:
+            parent = rel.parent
+            while True:
+                dir_rel_set.add(parent)
+                if parent == PurePosixPath("."):
+                    break
+                parent = parent.parent
+        dir_rel = sorted(dir_rel_set, key=lambda p: p.as_posix())
+
+        root_label = (str(root_title or "").strip() or "Local Media").strip()
+
+        s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
+        try:
+            cur_instances = self.sys.instance_repo.all(s)
+            cur_instances_by_key = {id_canonical_text(i.instance_id): i for i in cur_instances}
+
+            existing_instance_id_by_material: dict[str, InstanceId] = {}
+            for inst in sorted(cur_instances, key=lambda x: id_canonical_text(x.instance_id)):
+                existing_instance_id_by_material.setdefault(inst.material_id.as_posix(), inst.instance_id)
+
+            used_instance_keys: set[str] = set()
+            instance_id_by_file: dict[PurePosixPath, InstanceId] = {}
+            for rel in file_rel:
+                existing_iid = existing_instance_id_by_material.get(rel.as_posix())
+                if existing_iid is not None and id_canonical_text(existing_iid) not in used_instance_keys:
+                    iid = existing_iid
+                else:
+                    iid = id_from_rel_path(rel)
+                instance_id_by_file[rel] = iid
+                used_instance_keys.add(id_canonical_text(iid))
+
+            leaf_id_by_file: dict[PurePosixPath, LearningObjectNodeId] = {rel: node_id_from_rel_path(rel, "LEAF") for rel in file_rel}
+            dir_id_by_dir: dict[PurePosixPath, LearningObjectNodeId] = {rel: node_id_from_rel_path(rel, "DIR") for rel in dir_rel}
+
+            now = now_utc_ms()
+            scanned_instance_keys = {id_canonical_text(x) for x in instance_id_by_file.values()}
+            instances_to_add: list[Instance] = []
+            instances_to_update: list[Instance] = []
+            created_instances = 0
+            updated_instances = 0
+            for rel in file_rel:
+                iid = instance_id_by_file[rel]
+                inst_key = id_canonical_text(iid)
+                existing = cur_instances_by_key.get(inst_key)
+                last_seen_at = (
+                    existing.last_seen_at
+                    if existing is not None
+                    and existing.material_id == rel
+                    and existing.presence == InstancePresence.PRESENT
+                    else now
+                )
+                desired = Instance.create(
+                    project_id,
+                    iid,
+                    rel,
+                    presence=InstancePresence.PRESENT,
+                    last_seen_at=last_seen_at,
+                )
+                if existing is None:
+                    instances_to_add.append(desired)
+                    created_instances += 1
+                elif existing != desired:
+                    instances_to_update.append(desired)
+                    updated_instances += 1
+
+            marked_missing_instances = 0
+            for inst in cur_instances:
+                if id_canonical_text(inst.instance_id) in scanned_instance_keys:
+                    continue
+                if inst.presence == InstancePresence.MISSING:
+                    continue
+                marked_missing_instances += 1
+                desired = Instance.create(
+                    project_id,
+                    inst.instance_id,
+                    inst.material_id,
+                    presence=InstancePresence.MISSING,
+                    last_seen_at=inst.last_seen_at,
+                )
+                if inst != desired:
+                    instances_to_update.append(desired)
+                    updated_instances += 1
+
+            nodes_out: list[LearningObjectLeaf | LearningObjectContainer] = []
+            for rel in file_rel:
+                parent_rel = rel.parent
+                parent_id = dir_id_by_dir.get(parent_rel)
+                if parent_id is None:
+                    raise PreconditionFailure("sync_learning_objects_from_manifest: missing parent dir node")
+                manifest_entry = metadata_by_file[rel]
+                nodes_out.append(
+                    LearningObjectLeaf(
+                        source="FILESYSTEM",
+                        project_id=project_id,
+                        node_id=leaf_id_by_file[rel],
+                        relative_path=rel,
+                        parent_id=parent_id,
+                        instance_id=instance_id_by_file[rel],
+                        title=str(manifest_entry.display_name or rel.name).strip() or rel.name,
+                    )
+                )
+
+            children_by_dir: dict[PurePosixPath, list[tuple[str, LearningObjectNodeId]]] = {d: [] for d in dir_rel}
+            for d in dir_rel:
+                if d.as_posix() == ".":
+                    continue
+                children_by_dir[d.parent].append((d.as_posix(), dir_id_by_dir[d]))
+            for rel in file_rel:
+                children_by_dir[rel.parent].append((rel.as_posix(), leaf_id_by_file[rel]))
+
+            for rel in dir_rel:
+                children = children_by_dir.get(rel, [])
+                children.sort(key=lambda x: x[0])
+                child_ids = tuple(x[1] for x in children)
+                if rel.as_posix() == ".":
+                    parent_id = None
+                    title = root_label
+                else:
+                    parent_id = dir_id_by_dir.get(rel.parent)
+                    title = rel.name
+                    if parent_id is None:
+                        raise PreconditionFailure("sync_learning_objects_from_manifest: missing parent dir id")
+                nodes_out.append(
+                    LearningObjectContainer(
+                        source="FILESYSTEM",
+                        project_id=project_id,
+                        node_id=dir_id_by_dir[rel],
+                        relative_path=rel,
+                        parent_id=parent_id,
+                        children=child_ids,
+                        title=title,
+                    )
+                )
+
+            for inst in instances_to_add:
+                self.sys.instance_repo.add(s, inst)
+            for inst in instances_to_update:
+                self.sys.instance_repo.update(s, inst)
+
+            replaced_nodes_count = 0
+            cur_nodes = self.sys.learning_object_repo.all(s)
+            cur_nodes_by_id = {id_canonical_text(n.node_id): n for n in cur_nodes}
+            next_nodes_by_id = {id_canonical_text(n.node_id): n for n in nodes_out}
+            if cur_nodes_by_id != next_nodes_by_id:
+                self.sys.learning_object_repo.replace_all_from_fs(s, nodes_out)
+                replaced_nodes_count = len(nodes_out)
+
+            unchanged = created_instances == 0 and updated_instances == 0 and replaced_nodes_count == 0
+            report: dict[str, object] = {
+                "unchanged": bool(unchanged),
+                "created_instances_count": int(created_instances),
+                "marked_missing_count": int(marked_missing_instances),
+                "replaced_learning_object_nodes_count": int(replaced_nodes_count),
+                "warnings": tuple(),
+            }
+
+            if unchanged:
+                self.sys.rollback(s)
+                return report
+
+            self._append_audit_event(
+                s,
+                kind=AuditEventKind.SYNC_LEARNING_OBJECTS_FROM_FS,
+                api_name="sync_learning_objects_from_manifest",
+                payload={
+                    "source": "CLIENT_MANIFEST",
+                    "filesCount": len(file_rel),
+                    "dirsCount": len(dir_rel),
+                    "rootTitle": root_label,
+                    "displayNameCount": sum(1 for item in normalized_entries if item.display_name),
+                    "modifiedAtCount": sum(1 for item in normalized_entries if item.modified_at),
+                    "sizeBytesCount": sum(1 for item in normalized_entries if item.size_bytes is not None),
+                    "mediaKindCounts": dict(sorted(media_kind_counts.items())),
+                    "createdInstancesCount": int(created_instances),
+                    "markedMissingCount": int(marked_missing_instances),
+                    "replacedLearningObjectNodesCount": int(replaced_nodes_count),
+                    "unchanged": bool(unchanged),
+                },
+            )
+            self.sys.commit(s)
+            return report
+        except Exception:
+            if s.state == SessionState.OPEN:
+                self.sys.rollback(s)
+            raise
+
     def _set_aggregation_cycle_state(self, s: MutationSession, layer_index: int, state: AggregationCycleState) -> None:
         s.assert_open()
         if s.mode != SessionMode.READ_WRITE:
@@ -611,24 +1052,36 @@ class SystemAPI:
 
     # 4.5.2
     def create_project(self, title: str, project_root: str | None = None) -> ProjectId:
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            return self._create_project_sql_direct(sql_store, title, project_root)
         return self.sys.create_project(title, project_root)
 
     def list_projects(self) -> Tuple:
-        # returns tuple[Project,...]
-        projects = [
-            ps.project
-            for ps in self.sys.g.projects.values()
-            if ps.project is not None and ps.project.state == ProjectState.ACTIVE
-        ]
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            return sql_store.list_projects_metadata(active_only=True)
+
+        projects = [ps.project for ps in self.sys.g.projects.values() if ps.project is not None and ps.project.state == ProjectState.ACTIVE]
         projects.sort(key=lambda p: id_canonical_text(p.project_id))
         return tuple(projects)
 
     def delete_project(self, project_id: ProjectId) -> None:
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            self._delete_project_sql_direct(sql_store, project_id)
+            return
         self._ensure_startup_fs_sync_done(project_id)
         self.sys.delete_project(project_id)
 
     # 4.5.2 (read)
     def get_project_config(self, project_id: ProjectId) -> ProjectConfig:
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            item = sql_store.get_project_config(str(project_id))
+            if item is not None:
+                return item
+            raise NotFound("ProjectConfig missing")
         s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
         try:
             return self.sys.project_config_repo.get(s)
@@ -636,13 +1089,29 @@ class SystemAPI:
             self.sys.rollback(s)
 
     def get_project_storage_config(self, project_id: ProjectId) -> ProjectStorageConfig:
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            item = sql_store.get_project_storage_config(str(project_id))
+            if item is not None:
+                return item
+            raise NotFound("ProjectStorageConfig missing")
         s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
         try:
             return self.sys.project_storage_config_repo.get(s)
         finally:
             self.sys.rollback(s)
 
+    def get_project_material_source_binding(self, project_id: ProjectId) -> ProjectMaterialSourceBinding:
+        s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
+        try:
+            return self.sys.project_material_source_binding_repo.get(s)
+        finally:
+            self.sys.rollback(s)
+
     def list_audit_log_events(self, project_id: ProjectId) -> Tuple[AuditLogEvent, ...]:
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            return sql_store.list_audit_log_events(str(project_id))
         s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
         try:
             return self.sys.audit_log_repo.all(s)
@@ -651,6 +1120,9 @@ class SystemAPI:
 
     def list_instances(self, project_id: ProjectId) -> Tuple:
         self._ensure_startup_fs_sync_done(project_id)
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            return sql_store.list_instances(str(project_id))
         s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
         try:
             return self.sys.instance_repo.all(s)
@@ -659,6 +1131,12 @@ class SystemAPI:
 
     def get_instance(self, project_id: ProjectId, instance_id: InstanceId) -> Instance:
         self._ensure_startup_fs_sync_done(project_id)
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            item = sql_store.get_instance(str(project_id), str(instance_id))
+            if item is not None:
+                return item
+            raise NotFound(instance_id)
         s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
         try:
             return self.sys.instance_repo.get(s, instance_id)
@@ -891,6 +1369,9 @@ class SystemAPI:
 
     # 4.5 3a
     def list_missing_instances(self, project_id: ProjectId) -> Tuple[InstanceId, ...]:
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            return sql_store.list_missing_instance_ids(str(project_id))
         s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
         try:
             items = [i.instance_id for i in self.sys.instance_repo.all(s) if i.presence == InstancePresence.MISSING]
@@ -903,6 +1384,10 @@ class SystemAPI:
     def list_recall_points_by_instance(
         self, project_id: ProjectId, instance_id: InstanceId
     ) -> Tuple[RecallPointId, ...]:
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            _ = self.get_instance(project_id, instance_id)
+            return sql_store.list_recall_point_ids_by_instance(str(project_id), str(instance_id))
         s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
         try:
             # Ensure instance_id is resolvable.
@@ -1982,6 +2467,41 @@ class SystemAPI:
                 self.sys.rollback(s)
             raise
 
+    def set_project_material_source_binding(
+        self,
+        project_id: ProjectId,
+        *,
+        source_kind: MaterialSourceKind,
+        desktop_agent_id: str | None = None,
+        source_root_label: str | None = None,
+    ) -> None:
+        self._ensure_startup_fs_sync_done(project_id)
+        s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
+        try:
+            binding = ProjectMaterialSourceBinding.create(
+                project_id,
+                source_kind=source_kind,
+                desktop_agent_id=desktop_agent_id,
+                source_root_label=source_root_label,
+                updated_at=now_utc_ms(),
+            )
+            self.sys.project_material_source_binding_repo.set(s, binding)
+            self._append_audit_event(
+                s,
+                kind=AuditEventKind.SET_PROJECT_MATERIAL_SOURCE_BINDING,
+                api_name="set_project_material_source_binding",
+                payload={
+                    "sourceKind": binding.source_kind.value,
+                    "desktopAgentId": None if binding.desktop_agent_id is None else str(binding.desktop_agent_id),
+                    "sourceRootLabel": binding.source_root_label,
+                },
+            )
+            self.sys.commit(s)
+        except Exception:
+            if s.state == SessionState.OPEN:
+                self.sys.rollback(s)
+            raise
+
     # 4.5.6
     def executor_commit_review_task(
         self,
@@ -2421,6 +2941,12 @@ class SystemAPI:
     # Read APIs (adapter-facing)
     # -------------------------
     def get_asr_artifact(self, project_id: ProjectId, asr_artifact_id: AsrArtifactId) -> AsrArtifact:
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            item = sql_store.get_asr_artifact(str(project_id), str(asr_artifact_id))
+            if item is not None:
+                return item
+            raise NotFound(asr_artifact_id)
         s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
         try:
             return self.sys.asr_artifact_repo.get(s, asr_artifact_id)
@@ -2438,6 +2964,10 @@ class SystemAPI:
         return self.list_recall_points_by_learning_task_node(project_id, node_id)
 
     def export_asr_by_learning_object_node(self, project_id: ProjectId, node_id: LearningObjectNodeId) -> Tuple[AsrArtifact, ...]:
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            _ = self.get_learning_object_node(project_id, node_id)
+            return sql_store.export_asr_by_learning_object_node(str(project_id), str(node_id))
         s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
         try:
             inst_ids = self.sys.learning_object_repo.covered_instance_id_sequence(s, node_id)
@@ -2467,6 +2997,10 @@ class SystemAPI:
             self.sys.rollback(s)
 
     def export_asr_by_learning_task_node(self, project_id: ProjectId, node_id: LearningTaskNodeId) -> Tuple[AsrArtifact, ...]:
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            _ = self.get_learning_task_node(project_id, node_id)
+            return sql_store.export_asr_by_learning_task_node(str(project_id), str(node_id))
         s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
         try:
             recall_point_ids = tuple(self.sys.learning_task_node_repo.covered_rp_ids(s, node_id))
@@ -2492,6 +3026,12 @@ class SystemAPI:
 
     def get_learning_object_node(self, project_id: ProjectId, node_id: LearningObjectNodeId) -> object:
         self._ensure_startup_fs_sync_done(project_id)
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            item = sql_store.get_learning_object_node(str(project_id), str(node_id))
+            if item is not None:
+                return item
+            raise NotFound(node_id)
         s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
         try:
             return self.sys.learning_object_repo.get(s, node_id)
@@ -2500,6 +3040,9 @@ class SystemAPI:
 
     def list_learning_object_nodes(self, project_id: ProjectId) -> Tuple[object, ...]:
         self._ensure_startup_fs_sync_done(project_id)
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            return sql_store.list_learning_object_nodes(str(project_id))
         s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
         try:
             return self.sys.learning_object_repo.all(s)
@@ -2508,6 +3051,9 @@ class SystemAPI:
 
     def list_learning_object_roots(self, project_id: ProjectId) -> Tuple[LearningObjectNodeId, ...]:
         self._ensure_startup_fs_sync_done(project_id)
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            return sql_store.list_learning_object_root_ids(str(project_id))
         s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
         try:
             roots: list[LearningObjectNodeId] = []
@@ -2520,6 +3066,12 @@ class SystemAPI:
             self.sys.rollback(s)
 
     def get_learning_task_node(self, project_id: ProjectId, node_id: LearningTaskNodeId) -> LearningTaskNode:
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            item = sql_store.get_learning_task_node(str(project_id), str(node_id))
+            if item is not None:
+                return item
+            raise NotFound(node_id)
         s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
         try:
             return self.sys.learning_task_node_repo.get(s, node_id)
@@ -2527,6 +3079,12 @@ class SystemAPI:
             self.sys.rollback(s)
 
     def get_learning_task(self, project_id: ProjectId, learning_task_id: LearningTaskId) -> LearningTask:
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            item = sql_store.get_learning_task(str(project_id), str(learning_task_id))
+            if item is not None:
+                return item
+            raise NotFound(learning_task_id)
         s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
         try:
             return self.sys.learning_task_repo.get(s, learning_task_id)
@@ -2536,6 +3094,12 @@ class SystemAPI:
     def get_learning_task_entry_registration(
         self, project_id: ProjectId, learning_task_id: LearningTaskId
     ) -> EntryRegistration:
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            item = sql_store.get_learning_task_entry_registration(str(project_id), str(learning_task_id))
+            if item is not None:
+                return item
+            raise NotFound(learning_task_id)
         s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
         try:
             entry_node_id = self.sys.learning_task_node_repo.find_leaf_by_learning_task_id(s, learning_task_id)
@@ -2546,6 +3110,12 @@ class SystemAPI:
     def get_learning_task_node_entry_registration(
         self, project_id: ProjectId, node_id: LearningTaskNodeId
     ) -> EntryRegistration:
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            item = sql_store.get_learning_task_node_entry_registration(str(project_id), str(node_id))
+            if item is not None:
+                return item
+            raise NotFound(node_id)
         s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
         try:
             return self.sys.entry_repo.get(s, node_id)
@@ -2553,6 +3123,12 @@ class SystemAPI:
             self.sys.rollback(s)
 
     def get_review_chain_entry_registration(self, project_id: ProjectId, review_chain_id: ReviewChainId) -> EntryRegistration:
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            item = sql_store.get_review_chain_entry_registration(str(project_id), str(review_chain_id))
+            if item is not None:
+                return item
+            raise NotFound(review_chain_id)
         s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
         try:
             for reg in self.sys.entry_repo.all(s):
@@ -2563,6 +3139,9 @@ class SystemAPI:
             self.sys.rollback(s)
 
     def list_learning_task_nodes(self, project_id: ProjectId) -> Tuple[LearningTaskNode, ...]:
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            return sql_store.list_learning_task_nodes(str(project_id))
         s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
         try:
             return self.sys.learning_task_node_repo.all(s)
@@ -2570,6 +3149,10 @@ class SystemAPI:
             self.sys.rollback(s)
 
     def list_recall_points_by_learning_task_node(self, project_id: ProjectId, node_id: LearningTaskNodeId) -> Tuple[RecallPoint, ...]:
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            _ = self.get_learning_task_node(project_id, node_id)
+            return sql_store.list_recall_points_by_learning_task_node(str(project_id), str(node_id))
         s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
         try:
             rp_ids = self.sys.learning_task_node_repo.covered_rp_ids(s, node_id)
@@ -2581,6 +3164,10 @@ class SystemAPI:
         self, project_id: ProjectId, node_id: LearningObjectNodeId
     ) -> Tuple[RecallPoint, ...]:
         self._ensure_startup_fs_sync_done(project_id)
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            _ = self.get_learning_object_node(project_id, node_id)
+            return sql_store.list_recall_points_by_learning_object_node(str(project_id), str(node_id))
         s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
         try:
             inst_ids = self.sys.learning_object_repo.covered_instance_id_sequence(s, node_id)
@@ -2595,6 +3182,12 @@ class SystemAPI:
             self.sys.rollback(s)
 
     def get_queue(self, project_id: ProjectId) -> Tuple[Optional[ReviewTaskId], Tuple[ReviewTaskId, ...]]:
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            item = sql_store.get_review_task_queue(str(project_id))
+            if item is not None:
+                return item
+            raise NotFound("GLOBAL_QUEUE missing (project bootstrap not done)")
         s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
         try:
             head = self.sys.queue_repo.peek_head(s)
@@ -2604,6 +3197,12 @@ class SystemAPI:
             self.sys.rollback(s)
 
     def get_review_task(self, project_id: ProjectId, review_task_id: ReviewTaskId) -> ReviewTask:
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            item = sql_store.get_review_task(str(project_id), str(review_task_id))
+            if item is not None:
+                return item
+            raise NotFound(review_task_id)
         s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
         try:
             return self.sys.review_task_repo.get(s, review_task_id)
@@ -2611,6 +3210,12 @@ class SystemAPI:
             self.sys.rollback(s)
 
     def get_convergence(self, project_id: ProjectId, convergence_id: ConvergenceId) -> Convergence:
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            item = sql_store.get_convergence(str(project_id), str(convergence_id))
+            if item is not None:
+                return item
+            raise NotFound(convergence_id)
         s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
         try:
             return self.sys.convergence_repo.get(s, convergence_id)
@@ -2618,6 +3223,12 @@ class SystemAPI:
             self.sys.rollback(s)
 
     def get_review_chain(self, project_id: ProjectId, review_chain_id: ReviewChainId) -> ReviewChain:
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            item = sql_store.get_review_chain(str(project_id), str(review_chain_id))
+            if item is not None:
+                return item
+            raise NotFound(review_chain_id)
         s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
         try:
             return self.sys.review_chain_repo.get(s, review_chain_id)
@@ -2625,6 +3236,12 @@ class SystemAPI:
             self.sys.rollback(s)
 
     def get_range_snapshot(self, project_id: ProjectId, range_id: RangeId) -> object:
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            item = sql_store.get_range_snapshot(str(project_id), str(range_id))
+            if item is not None:
+                return item
+            raise NotFound(range_id)
         s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
         try:
             return self.sys.range_repo.get(s, range_id)
@@ -2632,6 +3249,12 @@ class SystemAPI:
             self.sys.rollback(s)
 
     def get_recall_point(self, project_id: ProjectId, recall_point_id: RecallPointId) -> RecallPoint:
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            item = sql_store.get_recall_point(str(project_id), str(recall_point_id))
+            if item is not None:
+                return item
+            raise NotFound(recall_point_id)
         s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
         try:
             return self.sys.recall_point_repo.get(s, recall_point_id)
@@ -2639,6 +3262,9 @@ class SystemAPI:
             self.sys.rollback(s)
 
     def list_layers(self, project_id: ProjectId) -> Tuple[Layer, ...]:
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            return sql_store.list_layers(str(project_id))
         s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
         try:
             return self.sys.layer_repo.all(s)
@@ -2646,6 +3272,12 @@ class SystemAPI:
             self.sys.rollback(s)
 
     def get_aggregation_queue_current(self, project_id: ProjectId, layer_index: int) -> Tuple[LearningTaskNodeId, ...]:
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            item = sql_store.get_aggregation_queue_current(str(project_id), layer_index)
+            if item is not None:
+                return item
+            raise NotFound(f"AggregationQueue missing for layer_index={layer_index}")
         s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
         try:
             return self.sys.aggq_repo.current_ids(s, layer_index)
@@ -2653,6 +3285,9 @@ class SystemAPI:
             self.sys.rollback(s)
 
     def list_aggregation_events(self, project_id: ProjectId) -> Tuple[AggregationEvent, ...]:
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            return sql_store.list_aggregation_events(str(project_id))
         s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
         try:
             return self.sys.event_repo.all(s)
@@ -2683,6 +3318,15 @@ class SystemAPI:
             self.sys.rollback(s)
 
     def validate_recall_point_ids_resolvable(self, project_id: ProjectId, range_id: RangeId) -> ValidationResult:
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            try:
+                snap = self.get_range_snapshot(project_id, range_id)
+                for rp_id in snap.recall_point_ids:
+                    self.get_recall_point(project_id, rp_id)
+                return ValidationResult.ok()
+            except NotFound as e:
+                return ValidationResult.not_found(str(e))
         s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
         try:
             snap = self.sys.range_repo.get(s, range_id)
@@ -2706,12 +3350,15 @@ API_WHITELIST: dict[str, SchedulingEffect] = {
     "list_projects": SchedulingEffect.NONE,
     "get_project_config": SchedulingEffect.NONE,
     "get_project_storage_config": SchedulingEffect.NONE,
+    "get_project_material_source_binding": SchedulingEffect.NONE,
     "list_audit_log_events": SchedulingEffect.NONE,
     "delete_project": SchedulingEffect.NONE,
     "add_instance": SchedulingEffect.NONE,
     "add_learning_object_leaf": SchedulingEffect.NONE,
     "add_learning_object_container": SchedulingEffect.NONE,
     "sync_learning_objects_from_fs": SchedulingEffect.NONE,
+    "sync_learning_objects_from_manifest": SchedulingEffect.NONE,
+    "set_project_material_source_binding": SchedulingEffect.NONE,
     "list_missing_instances": SchedulingEffect.NONE,
     "list_recall_points_by_instance": SchedulingEffect.NONE,
     "bulk_remap_recall_points_instance": SchedulingEffect.NONE,

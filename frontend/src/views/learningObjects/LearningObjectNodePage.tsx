@@ -11,6 +11,7 @@ import {
   listLearningObjectNodes,
   listRecallPointsByLearningObjectNode,
 } from "@/ui/api/learningObjects"
+import { ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import { RecallPointListCard } from "@/views/recallPoints/components/RecallPointListCard"
@@ -80,9 +81,12 @@ export function LearningObjectNodePage() {
 
   if (!pid || !nid) {
     return (
-      <div className="space-y-2">
-        <p className="text-sm text-muted-foreground">缺少 projectId 或 nodeId。</p>
-        <Button onClick={() => navigate("/projects")}>返回项目列表</Button>
+      <div className="space-y-4">
+        <ContentNotice
+          title="当前页面缺少对象节点上下文"
+          message="对象节点详情页需要同时提供项目 ID 和节点 ID。你可以先回到项目列表，再从学习对象树重新进入。"
+          action={<Button onClick={() => navigate("/projects")}>返回项目列表</Button>}
+        />
       </div>
     )
   }
@@ -107,10 +111,21 @@ export function LearningObjectNodePage() {
           <CardTitle>节点概览</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          {nodeQ.isLoading ? <p className="text-sm text-muted-foreground">加载中...</p> : null}
-          {nodeQ.error ? <p className="text-sm text-destructive">{formatApiError(nodeQ.error)}</p> : null}
-          {nodesQ.error ? <p className="text-sm text-destructive">{formatApiError(nodesQ.error)}</p> : null}
-          {instancesQ.error ? <p className="text-sm text-destructive">{formatApiError(instancesQ.error)}</p> : null}
+          {nodeQ.isLoading ? <LoadingNotice title="正在加载对象节点" message="正在读取这个节点的结构信息、绑定实例和覆盖范围。" /> : null}
+          {nodeQ.error ? <ErrorNotice title="对象节点加载失败" message={formatApiError(nodeQ.error)} /> : null}
+          {nodesQ.error ? <ErrorNotice title="对象树结构加载失败" message={formatApiError(nodesQ.error)} /> : null}
+          {instancesQ.error ? <ErrorNotice title="实例信息加载失败" message={formatApiError(instancesQ.error)} /> : null}
+          {!nodeQ.isLoading && !nodeQ.error && !nodeQ.data ? (
+            <ContentNotice
+              title="未找到这个对象节点"
+              message="这个对象节点可能已经被重建或移除。你可以返回学习对象树重新选择。"
+              action={
+                <Button variant="outline" asChild>
+                  <Link to={`/p/${pid}/object-tree`}>返回学习对象树</Link>
+                </Button>
+              }
+            />
+          ) : null}
 
           {nodeQ.data ? (
             <>
@@ -169,13 +184,15 @@ export function LearningObjectNodePage() {
         description="该学习对象节点覆盖到的复述点会直接显示在这里。"
       />
 
-      <NodeExportCard
-        projectId={pid}
-        nodeTitle={title}
-        recallPoints={recallPointsQ.data ?? []}
-        exportRecallPoints={() => exportRecallPointsByLearningObjectNode(pid, nid)}
-        exportAsr={() => exportAsrByLearningObjectNode(pid, nid)}
-      />
+      {nodeQ.data ? (
+        <NodeExportCard
+          projectId={pid}
+          nodeTitle={title}
+          recallPoints={recallPointsQ.data ?? []}
+          exportRecallPoints={() => exportRecallPointsByLearningObjectNode(pid, nid)}
+          exportAsr={() => exportAsrByLearningObjectNode(pid, nid)}
+        />
+      ) : null}
     </div>
   )
 }

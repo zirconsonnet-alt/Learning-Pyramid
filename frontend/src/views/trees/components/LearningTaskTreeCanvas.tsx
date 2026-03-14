@@ -1,6 +1,7 @@
 import { BookOpen, Layers3, ListTodo, type LucideIcon } from "lucide-react"
 import { useMemo } from "react"
 
+import { ContentEmptyState } from "@/ui/components/contentEmptyState"
 import { cn } from "@/ui/utils"
 import type { MindMapNode } from "@/views/trees/components/MindMapTree"
 
@@ -270,7 +271,13 @@ export function LearningTaskTreeCanvas({
   }, [focusNodeId, nodeById, parentById])
 
   if (Object.keys(rectById).length === 0) {
-    return <p className="text-sm text-muted-foreground">暂无根节点。</p>
+    return (
+      <ContentEmptyState
+        icon={Layers3}
+        title="当前任务树还没有根节点"
+        message="提交学习任务并形成聚合关系后，这里会自动生成可浏览的任务树结构。"
+      />
+    )
   }
 
   return (

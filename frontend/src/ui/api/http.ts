@@ -24,9 +24,45 @@ export class ApiError extends Error {
   }
 }
 
-function getBaseUrl() {
+export type ApiRequestMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
+
+export type ApiRequestExecutionOptions = {
+  signal?: AbortSignal
+  timeoutMs?: number
+}
+
+const API_GET_TIMEOUT_MS = 12_000
+const API_MUTATION_TIMEOUT_MS = 25_000
+
+export function getBaseUrl() {
   const v = import.meta.env.VITE_API_BASE_URL as string | undefined
   return v && v.trim() ? v.trim().replace(/\/$/, "") : "/api"
+}
+
+function resolveTimeoutMs(method: ApiRequestMethod, timeoutMs?: number) {
+  if (typeof timeoutMs === "number" && timeoutMs >= 0) return timeoutMs
+  return method === "GET" ? API_GET_TIMEOUT_MS : API_MUTATION_TIMEOUT_MS
+}
+
+function buildRequestTimeoutMessage(timeoutMs: number) {
+  const seconds = Math.max(1, Math.round(timeoutMs / 1000))
+  return `请求在 ${seconds} 秒内没有完成。请检查 VPN、Wi-Fi 或移动网络后重试。`
+}
+
+function buildNetworkFailureMessage() {
+  return "网络连接已中断，暂时无法连接服务器。请检查 VPN、Wi-Fi 或移动网络后重试。"
+}
+
+function buildGenericFailureMessage() {
+  return "请求失败，请稍后重试。"
+}
+
+function toFailureCause(error: unknown) {
+  return error instanceof Error ? { name: error.name, message: error.message } : { message: String(error) }
+}
+
+function isCallerAborted(signal: AbortSignal | undefined) {
+  return Boolean(signal?.aborted)
 }
 
 export async function apiRequest<T>({
@@ -34,20 +70,79 @@ export async function apiRequest<T>({
   method,
   body,
   responseSchema,
+  signal,
+  timeoutMs,
 }: {
   path: string
-  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
+  method?: ApiRequestMethod
   body?: unknown
   responseSchema: z.ZodType<T>
+  signal?: AbortSignal
+  timeoutMs?: number
 }): Promise<T> {
+  const requestMethod = method ?? "GET"
   const url = `${getBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`
-  const res = await fetch(url, {
-    method: method ?? "GET",
-    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  })
+  const controller = new AbortController()
+  const listeners: Array<() => void> = []
+  const effectiveTimeoutMs = resolveTimeoutMs(requestMethod, timeoutMs)
+  let timedOut = false
+  let timeoutId: ReturnType<typeof globalThis.setTimeout> | null = null
 
-  const text = await res.text()
+  if (signal) {
+    if (signal.aborted) {
+      controller.abort()
+    } else {
+      const onAbort = () => controller.abort()
+      signal.addEventListener("abort", onAbort, { once: true })
+      listeners.push(() => signal.removeEventListener("abort", onAbort))
+    }
+  }
+
+  if (effectiveTimeoutMs > 0) {
+    timeoutId = globalThis.setTimeout(() => {
+      timedOut = true
+      controller.abort()
+    }, effectiveTimeoutMs)
+  }
+
+  let res: Response
+  let text: string
+  try {
+    res = await fetch(url, {
+      method: requestMethod,
+      credentials: "include",
+      headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: controller.signal,
+    })
+    text = await res.text()
+  } catch (error) {
+    if (timeoutId !== null) globalThis.clearTimeout(timeoutId)
+    listeners.forEach((cleanup) => cleanup())
+    if (isCallerAborted(signal)) throw error
+    if (timedOut) {
+      throw new ApiError(buildRequestTimeoutMessage(effectiveTimeoutMs), {
+        code: "REQUEST_TIMEOUT",
+        status: 0,
+        details: { url, timeoutMs: effectiveTimeoutMs },
+      })
+    }
+    if (error instanceof TypeError) {
+      throw new ApiError(buildNetworkFailureMessage(), {
+        code: "NETWORK_ERROR",
+        status: 0,
+        details: { url, cause: toFailureCause(error) },
+      })
+    }
+    throw new ApiError(buildGenericFailureMessage(), {
+      code: "REQUEST_FAILED",
+      status: 0,
+      details: { url, cause: toFailureCause(error) },
+    })
+  }
+
+  if (timeoutId !== null) globalThis.clearTimeout(timeoutId)
+  listeners.forEach((cleanup) => cleanup())
   const raw = text.trim()
   if (!raw) {
     throw new ApiError(`Empty response body (status=${res.status})`, { code: "EMPTY_RESPONSE", status: res.status })

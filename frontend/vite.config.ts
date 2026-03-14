@@ -13,6 +13,33 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          const normalizedId = id.replace(/\\/g, "/")
+          if (!normalizedId.includes("/node_modules/")) return undefined
+          if (normalizedId.includes("/node_modules/hls.js/")) return "hls"
+          if (normalizedId.includes("/node_modules/katex/")) return "katex"
+          if (
+            /\/node_modules\/(react|react-dom|scheduler|react-router|react-router-dom|@tanstack|zod|zustand)\//.test(
+              normalizedId,
+            )
+          ) {
+            return "framework"
+          }
+          if (
+            /\/node_modules\/(@radix-ui|lucide-react|class-variance-authority|clsx|tailwind-merge|tailwindcss-animate)\//.test(
+              normalizedId,
+            )
+          ) {
+            return "ui-kit"
+          }
+          return "vendor"
+        },
+      },
+    },
+  },
   server: {
     fs: {
       allow: [path.resolve(__dirname, "..")],

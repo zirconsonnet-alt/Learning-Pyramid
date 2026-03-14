@@ -34,6 +34,7 @@ export function requestAsr(
     method: "POST",
     body: p,
     responseSchema: RequestAsrResponseSchema,
+    timeoutMs: 90_000,
   })
 }
 

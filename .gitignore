@@ -5,11 +5,13 @@ __pycache__/
 
 .plm_store.json
 .plm_store.json.bak-*
+.plm_store.json.imported.bak
 ._plm_store_test.json
 data/
 
 build/
 release/
+config/caddy/
 
 frontend/node_modules/
 frontend/dist/

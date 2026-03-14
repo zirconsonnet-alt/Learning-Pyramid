@@ -6,6 +6,7 @@ import { ApiError } from "@/ui/api/http"
 import { listInstances, listRecallPointsByInstance } from "@/ui/api/instances"
 import { listLearningObjectNodes } from "@/ui/api/learningObjects"
 import { getRecallPoint, type RecallPoint } from "@/ui/api/review"
+import { ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import { RecallPointListCard } from "@/views/recallPoints/components/RecallPointListCard"
@@ -73,9 +74,12 @@ export function InstancePage() {
 
   if (!pid || !iid) {
     return (
-      <div className="space-y-2">
-        <p className="text-sm text-muted-foreground">缺少 projectId 或 instanceId。</p>
-        <Button onClick={() => navigate("/projects")}>返回项目列表</Button>
+      <div className="space-y-4">
+        <ContentNotice
+          title="当前页面缺少实例上下文"
+          message="实例详情页需要同时提供项目 ID 和实例 ID。你可以先回到项目列表，再从对象树或实例入口重新进入。"
+          action={<Button onClick={() => navigate("/projects")}>返回项目列表</Button>}
+        />
       </div>
     )
   }
@@ -98,10 +102,10 @@ export function InstancePage() {
           <CardDescription>实例是学习对象树叶子节点绑定到的具体材料。</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {instancesQ.isLoading ? <p className="text-sm text-muted-foreground">加载中...</p> : null}
-          {instancesQ.error ? <p className="text-sm text-destructive">{formatApiError(instancesQ.error)}</p> : null}
-          {objectNodesQ.error ? <p className="text-sm text-destructive">{formatApiError(objectNodesQ.error)}</p> : null}
-          {recallPointIdsQ.error ? <p className="text-sm text-destructive">{formatApiError(recallPointIdsQ.error)}</p> : null}
+          {instancesQ.isLoading ? <LoadingNotice title="正在加载实例详情" message="正在读取材料实例、对象树绑定和复述点引用情况。" /> : null}
+          {instancesQ.error ? <ErrorNotice title="实例详情加载失败" message={formatApiError(instancesQ.error)} /> : null}
+          {objectNodesQ.error ? <ErrorNotice title="对象树绑定加载失败" message={formatApiError(objectNodesQ.error)} /> : null}
+          {recallPointIdsQ.error ? <ErrorNotice title="复述点引用加载失败" message={formatApiError(recallPointIdsQ.error)} /> : null}
 
           {instance ? (
             <>
@@ -145,7 +149,17 @@ export function InstancePage() {
               </div>
             </>
           ) : (
-            !instancesQ.isLoading && <p className="text-sm text-muted-foreground">未找到该实例。</p>
+            !instancesQ.isLoading && !instancesQ.error && (
+              <ContentNotice
+                title="未找到这个实例"
+                message="这个实例可能已经被移除，或者当前链接里的实例 ID 已经过期。你可以返回对象树重新选择。"
+                action={
+                  <Button variant="outline" asChild>
+                    <Link to={`/p/${pid}/object-tree`}>返回学习对象树</Link>
+                  </Button>
+                }
+              />
+            )
           )}
         </CardContent>
       </Card>

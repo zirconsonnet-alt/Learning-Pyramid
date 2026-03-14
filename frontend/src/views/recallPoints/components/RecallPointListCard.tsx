@@ -1,8 +1,10 @@
+import { Sparkles } from "lucide-react"
 import { Link } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
 import { type RecallPoint } from "@/ui/api/review"
 import { richContentToPlainText } from "@/ui/api/richContent"
+import { ContentEmptyState, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
 
 function formatApiError(err: unknown) {
@@ -33,9 +35,15 @@ export function RecallPointListCard({
         {description ? <CardDescription>{description}</CardDescription> : null}
       </CardHeader>
       <CardContent>
-        {isLoading ? <p className="text-sm text-muted-foreground">加载中...</p> : null}
-        {error ? <p className="text-sm text-destructive">{formatApiError(error)}</p> : null}
-        {!isLoading && !error && items.length === 0 ? <p className="text-sm text-muted-foreground">暂无复述点。</p> : null}
+        {isLoading ? <LoadingNotice title="正在加载复述点列表" message="正在整理这个节点下的复述点和锚点信息。" /> : null}
+        {error ? <ErrorNotice title="复述点列表加载失败" message={formatApiError(error)} /> : null}
+        {!isLoading && !error && items.length === 0 ? (
+          <ContentEmptyState
+            icon={Sparkles}
+            title="这个节点还没有复述点"
+            message="先在工作台里围绕相关视频录入复述点，或等待上游节点同步完成；这里随后会自动列出对应结果。"
+          />
+        ) : null}
         <div className="divide-y rounded-md border">
           {items.map((rp) => (
             <Link

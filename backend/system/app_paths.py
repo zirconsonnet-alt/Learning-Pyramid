@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import shutil
 from pathlib import Path
 
 from backend.system.version import APP_ID, LEGACY_APP_IDS
@@ -41,6 +40,14 @@ def default_store_path() -> Path:
     return default_data_dir() / "plm_store.json"
 
 
+def default_store_db_path() -> Path:
+    return default_data_dir() / "plm_store.sqlite3"
+
+
+def default_auth_db_path() -> Path:
+    return default_data_dir() / "plm_auth.sqlite3"
+
+
 def runtime_dir() -> Path:
     return default_data_dir() / "runtime"
 
@@ -49,13 +56,20 @@ def logs_dir() -> Path:
     return default_data_dir() / "logs"
 
 
-def resolve_store_path(*, legacy_root: Path | None = None) -> Path:
-    raw = os.getenv("PLM_STORE_PATH", "").strip()
+def desktop_media_cache_dir() -> Path:
+    raw = os.getenv("PLM_AGENT_CACHE_DIR", "").strip()
     if raw:
         return Path(raw).expanduser()
+    return runtime_dir() / "desktop-media-cache"
+
+
+def resolve_legacy_store_path(*, legacy_root: Path | None = None) -> Path | None:
+    explicit = os.getenv("PLM_LEGACY_STORE_PATH", "").strip() or os.getenv("PLM_STORE_PATH", "").strip()
+    if explicit:
+        path = Path(explicit).expanduser()
+        return path if path.exists() else None
 
     target = default_store_path()
-    legacy = None if legacy_root is None else legacy_root / ".plm_store.json"
     if target.exists():
         return target
 
@@ -63,13 +77,30 @@ def resolve_store_path(*, legacy_root: Path | None = None) -> Path:
         for legacy_dir in legacy_data_dirs():
             legacy_store = legacy_dir / "plm_store.json"
             if legacy_store.exists():
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(legacy_store, target)
-                return target
+                return legacy_store
 
-    if legacy is None or not legacy.exists():
-        return target
+    legacy = None if legacy_root is None else legacy_root / ".plm_store.json"
+    if legacy is not None and legacy.exists():
+        return legacy
+    return None
 
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(legacy, target)
-    return target
+
+def resolve_store_path(*, legacy_root: Path | None = None) -> Path:
+    legacy_path = resolve_legacy_store_path(legacy_root=legacy_root)
+    if legacy_path is not None:
+        return legacy_path
+    return default_store_path()
+
+
+def resolve_auth_db_path() -> Path:
+    raw = os.getenv("PLM_AUTH_DB_PATH", "").strip()
+    if raw:
+        return Path(raw).expanduser()
+    return default_auth_db_path()
+
+
+def resolve_store_db_path() -> Path:
+    raw = os.getenv("PLM_STORE_DB_PATH", "").strip()
+    if raw:
+        return Path(raw).expanduser()
+    return default_store_db_path()

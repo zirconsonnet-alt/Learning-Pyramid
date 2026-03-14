@@ -1,0 +1,19 @@
+services:
+  app:
+    environment:
+      PLM_FORWARDED_ALLOW_IPS: "*"
+
+  caddy:
+    image: caddy:2.10-alpine
+    depends_on:
+      - app
+    environment:
+      PLM_PUBLIC_HOST: ${PLM_PUBLIC_HOST:?set PLM_PUBLIC_HOST in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile.selfhost:/etc/caddy/Caddyfile:ro
+      - ./data/caddy:/data
+      - ./config/caddy:/config
+    restart: unless-stopped

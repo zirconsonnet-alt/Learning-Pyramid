@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { CheckCircle2, ClipboardCheck, PlayCircle } from "lucide-react"
 
 import { ApiError } from "@/ui/api/http"
 import type { Instance } from "@/ui/api/instances"
@@ -6,6 +7,7 @@ import { richContentToPlainText } from "@/ui/api/richContent"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import { useCommitReviewTask, useReviewBundle } from "@/ui/queries/workbench"
+import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -62,13 +64,28 @@ export function ReviewPane({
     const ids = rangeQ.data.recallPointIds
     const canRecall = ids.map((id) => (answers[id] ?? null))
     if (canRecall.some((v) => v === null)) return
-    await commit.mutateAsync({ reviewTaskId: headId, canRecall: canRecall as number[] })
+    const yesCount = canRecall.filter((value) => value === 1).length
+    const noCount = canRecall.filter((value) => value === 0).length
+    try {
+      await commit.mutateAsync({ reviewTaskId: headId, canRecall: canRecall as number[] })
+      showSuccessFeedback("复习结果已提交", `本轮已提交 ${ids.length} 题，其中会回忆 ${yesCount} 题，不会回忆 ${noCount} 题。`)
+    } catch (err) {
+      showErrorFeedback("提交复习结果失败", formatApiError(err))
+    }
   }
 
   return (
     <Card className="theme-card-main">
-      <CardHeader className="theme-card-header flex-row items-center justify-between gap-3 space-y-0">
-        <CardTitle>复习</CardTitle>
+      <CardHeader className="theme-card-header flex-row items-start justify-between gap-3 space-y-0">
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#edf4ff] text-primary">
+            <ClipboardCheck className="h-5 w-5" />
+          </div>
+          <div className="space-y-1">
+            <CardTitle>复习任务</CardTitle>
+            <p className="text-sm text-muted-foreground">按当前范围逐题判断是否会回忆，再提交本轮复习结果。</p>
+          </div>
+        </div>
         {rangeQ.data ? <div className="theme-meta">{rangeQ.data.recallPointIds.length} 题</div> : null}
       </CardHeader>
       <CardContent className="space-y-4 pt-5">
@@ -94,6 +111,7 @@ export function ReviewPane({
                   {onOpenAnchor ? (
                     <div className="mt-2">
                       <Button variant="outline" size="sm" onClick={() => onOpenAnchor(rp.anchor)}>
+                        <PlayCircle className="h-4 w-4" />
                         在视频中打开
                       </Button>
                     </div>
@@ -143,6 +161,12 @@ export function ReviewPane({
             >
               {commit.isPending ? "提交中..." : "提交复习"}
             </Button>
+            {!commit.isPending && rangeQ.data.recallPointIds.length > 0 && rangeQ.data.recallPointIds.every((id) => answers[id] !== undefined) ? (
+              <div className="mt-2 flex items-center gap-2 text-sm text-emerald-700">
+                <CheckCircle2 className="h-4 w-4" />
+                当前题目都已完成选择，可以提交本轮复习。
+              </div>
+            ) : null}
             {commit.error ? <p className="mt-2 text-sm text-destructive">{formatApiError(commit.error)}</p> : null}
           </div>
         ) : null}

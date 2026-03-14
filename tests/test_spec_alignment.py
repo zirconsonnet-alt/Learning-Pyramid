@@ -1,4 +1,3 @@
-import json
 import os
 import unittest
 from pathlib import Path
@@ -25,15 +24,57 @@ from backend.models.types import (
 from backend.system.api import SystemAPI
 from backend.system.inmemory_system import InMemorySystem
 from backend.system.local_whisper import BUILTIN_WHISPER_BASE_URL
+from backend.system.persistence_store import JsonSnapshotStore, SnapshotStore, SQLiteSnapshotStore
+from backend.system.postgres_store import PostgresStore
+from tests.postgres_test_support import reset_postgres_database
+
+try:
+    import psycopg  # noqa: F401
+except ImportError:  # pragma: no cover - exercised in environments without psycopg installed
+    psycopg = None
 
 
-class SpecAlignmentTests(unittest.TestCase):
+class _SpecAlignmentBackendMixin:
+    BACKEND = "json"
+    POSTGRES_DSN: str | None = None
+
+    def _make_store(self, root: Path) -> SnapshotStore:
+        if self.BACKEND == "json":
+            return JsonSnapshotStore(root / "store.json")
+        if self.BACKEND == "sqlite":
+            return SQLiteSnapshotStore(root / "store.sqlite3")
+        if self.BACKEND == "postgres":
+            assert self.POSTGRES_DSN is not None
+            return PostgresStore(self.POSTGRES_DSN)
+        raise AssertionError(f"Unsupported backend: {self.BACKEND}")
+
+    def _reset_backend(self, root: Path) -> None:
+        if self.BACKEND == "postgres":
+            assert self.POSTGRES_DSN is not None
+            reset_postgres_database(self.POSTGRES_DSN)
+
+    def _create_api(self, root: Path) -> SystemAPI:
+        return SystemAPI(InMemorySystem(persist_store=self._make_store(root)))
+
     def _new_api(self) -> tuple[SystemAPI, Path]:
         tmp = TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         root = Path(tmp.name)
-        api = SystemAPI(InMemorySystem(persist_path=root / "store.json"))
+        self._reset_backend(root)
+        api = self._create_api(root)
         return api, root
+
+    def _reload_api(self, root: Path) -> SystemAPI:
+        return self._create_api(root)
+
+    def _load_raw_snapshot(self, root: Path) -> dict[str, object]:
+        snapshot = self._make_store(root).load_snapshot()
+        self.assertIsNotNone(snapshot)
+        assert snapshot is not None
+        return snapshot
+
+    def _save_raw_snapshot(self, root: Path, snapshot: dict[str, object]) -> None:
+        self._make_store(root).save_snapshot(snapshot)
 
     def _make_project_dirs(self, root: Path, name: str) -> tuple[Path, Path]:
         project_root = root / name
@@ -169,29 +210,26 @@ class SpecAlignmentTests(unittest.TestCase):
         self.assertEqual(cfg.fs_sync_policy, FsSyncPolicy.STARTUP_SYNC)
 
     def test_persisted_dot_learning_object_root_is_rewritten_on_load(self) -> None:
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            persist_path = root / "store.json"
-            project_root, learning_root = self._make_project_dirs(root, "videos")
-            (learning_root / "lesson.mp4").write_text("video", encoding="utf-8")
+        api, root = self._new_api()
+        project_root, learning_root = self._make_project_dirs(root, "videos")
+        (learning_root / "lesson.mp4").write_text("video", encoding="utf-8")
 
-            api = SystemAPI(InMemorySystem(persist_path=persist_path))
-            project_id = api.create_project("ml", project_root.as_posix())
+        project_id = api.create_project("ml", project_root.as_posix())
 
-            raw = json.loads(persist_path.read_text(encoding="utf-8"))
-            raw["projects"][str(project_id)]["projectStorageConfig"]["projectRoot"] = learning_root.as_posix()
-            raw["projects"][str(project_id)]["projectStorageConfig"]["learningObjectRoot"] = "."
-            persist_path.write_text(json.dumps(raw, ensure_ascii=False, separators=(",", ":"), sort_keys=True), encoding="utf-8")
+        raw = self._load_raw_snapshot(root)
+        raw["projects"][str(project_id)]["projectStorageConfig"]["projectRoot"] = learning_root.as_posix()
+        raw["projects"][str(project_id)]["projectStorageConfig"]["learningObjectRoot"] = "."
+        self._save_raw_snapshot(root, raw)
 
-            reloaded = SystemAPI(InMemorySystem(persist_path=persist_path))
-            cfg = reloaded.get_project_storage_config(project_id)
-            self.assertEqual(cfg.project_root.as_posix(), project_root.as_posix())
-            self.assertEqual(cfg.learning_object_root.as_posix(), "learning_objects")
+        reloaded = self._reload_api(root)
+        cfg = reloaded.get_project_storage_config(project_id)
+        self.assertEqual(cfg.project_root.as_posix(), project_root.as_posix())
+        self.assertEqual(cfg.learning_object_root.as_posix(), "learning_objects")
 
-            rewritten = json.loads(persist_path.read_text(encoding="utf-8"))
-            stored_cfg = rewritten["projects"][str(project_id)]["projectStorageConfig"]
-            self.assertEqual(stored_cfg["projectRoot"], project_root.as_posix())
-            self.assertEqual(stored_cfg["learningObjectRoot"], "learning_objects")
+        rewritten = self._load_raw_snapshot(root)
+        stored_cfg = rewritten["projects"][str(project_id)]["projectStorageConfig"]
+        self.assertEqual(stored_cfg["projectRoot"], project_root.as_posix())
+        self.assertEqual(stored_cfg["learningObjectRoot"], "learning_objects")
 
     def test_add_instance_is_disabled(self) -> None:
         api, root = self._new_api()
@@ -228,53 +266,47 @@ class SpecAlignmentTests(unittest.TestCase):
         self.assertEqual(items[0].material_id.as_posix(), "lesson.mp4")
 
     def test_list_missing_instances_does_not_trigger_startup_sync_after_restart(self) -> None:
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            persist_path = root / "store.json"
-            project_root, learning_root = self._make_project_dirs(root, "videos")
-            lesson_path = learning_root / "lesson.mp4"
-            lesson_path.write_text("video-bytes", encoding="utf-8")
+        api, root = self._new_api()
+        project_root, learning_root = self._make_project_dirs(root, "videos")
+        lesson_path = learning_root / "lesson.mp4"
+        lesson_path.write_text("video-bytes", encoding="utf-8")
 
-            api = SystemAPI(InMemorySystem(persist_path=persist_path))
-            project_id = api.create_project("ml", project_root.as_posix())
+        project_id = api.create_project("ml", project_root.as_posix())
 
-            api.sync_learning_objects_from_fs(project_id)
-            items = api.list_instances(project_id)
-            self.assertEqual(len(items), 1)
-            self.assertEqual(items[0].presence, InstancePresence.PRESENT)
+        api.sync_learning_objects_from_fs(project_id)
+        items = api.list_instances(project_id)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].presence, InstancePresence.PRESENT)
 
-            lesson_path.unlink()
+        lesson_path.unlink()
 
-            restarted_api = SystemAPI(InMemorySystem(persist_path=persist_path))
-            audit_before = len(restarted_api.list_audit_log_events(project_id))
-            missing_ids = restarted_api.list_missing_instances(project_id)
-            self.assertEqual(missing_ids, ())
-            self.assertEqual(len(restarted_api.list_audit_log_events(project_id)), audit_before)
+        restarted_api = self._reload_api(root)
+        audit_before = len(restarted_api.list_audit_log_events(project_id))
+        missing_ids = restarted_api.list_missing_instances(project_id)
+        self.assertEqual(missing_ids, ())
+        self.assertEqual(len(restarted_api.list_audit_log_events(project_id)), audit_before)
 
     def test_begin_session_read_write_triggers_startup_sync_before_open(self) -> None:
-        with TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            persist_path = root / "store.json"
-            project_root, learning_root = self._make_project_dirs(root, "videos")
-            lesson_path = learning_root / "lesson.mp4"
-            lesson_path.write_text("video-bytes", encoding="utf-8")
+        api, root = self._new_api()
+        project_root, learning_root = self._make_project_dirs(root, "videos")
+        lesson_path = learning_root / "lesson.mp4"
+        lesson_path.write_text("video-bytes", encoding="utf-8")
 
-            api = SystemAPI(InMemorySystem(persist_path=persist_path))
-            project_id = api.create_project("ml", project_root.as_posix())
-            api.sync_learning_objects_from_fs(project_id)
-            original_instance_id = str(api.list_instances(project_id)[0].instance_id)
+        project_id = api.create_project("ml", project_root.as_posix())
+        api.sync_learning_objects_from_fs(project_id)
+        original_instance_id = str(api.list_instances(project_id)[0].instance_id)
 
-            lesson_path.unlink()
+        lesson_path.unlink()
 
-            restarted_api = SystemAPI(InMemorySystem(persist_path=persist_path))
-            session = restarted_api.begin_session(project_id, SessionMode.READ_WRITE)
-            try:
-                self.assertEqual(session.state, "OPEN")
-            finally:
-                restarted_api.sys.rollback(session)
+        restarted_api = self._reload_api(root)
+        session = restarted_api.begin_session(project_id, SessionMode.READ_WRITE)
+        try:
+            self.assertEqual(session.state, "OPEN")
+        finally:
+            restarted_api.sys.rollback(session)
 
-            missing_ids = restarted_api.list_missing_instances(project_id)
-            self.assertEqual([str(x) for x in missing_ids], [original_instance_id])
+        missing_ids = restarted_api.list_missing_instances(project_id)
+        self.assertEqual([str(x) for x in missing_ids], [original_instance_id])
 
     def test_begin_session_read_write_rejects_missing_startup_sync_root(self) -> None:
         api, root = self._new_api()
@@ -680,6 +712,53 @@ class SpecAlignmentTests(unittest.TestCase):
         reg_from_chain = api.get_review_chain_entry_registration(project_id, reg_from_task.review_chain_id)
         self.assertEqual(reg_from_chain.entry_node, entry_node_id)
         self.assertEqual(reg_from_chain.target_layer_index, 0)
+
+    def test_first_failed_review_does_not_immediately_enqueue_followup_round(self) -> None:
+        api, root = self._new_api()
+        project_root, learning_root = self._make_project_dirs(root, "videos")
+        (learning_root / "lesson.mp4").write_text("video", encoding="utf-8")
+
+        project_id = api.create_project("ml", project_root.as_posix())
+        api.sync_learning_objects_from_fs(project_id)
+        instance = api.list_instances(project_id)[0]
+
+        api.submit_learning_task(
+            project_id,
+            items=[(rich_text("Q1"), rich_text("A1"), Anchor(instance.instance_id, position="t=0"))],
+            title="Lesson 1",
+        )
+        first_head, first_queue = api.get_queue(project_id)
+        self.assertIsNotNone(first_head)
+        self.assertEqual(len(first_queue), 1)
+
+        assert first_head is not None
+        api.executor_commit_review_task(project_id, first_head, [0])
+
+        next_head, next_queue = api.get_queue(project_id)
+        self.assertIsNone(next_head)
+        self.assertEqual(next_queue, tuple())
+
+
+class TestSpecAlignmentJson(_SpecAlignmentBackendMixin, unittest.TestCase):
+    BACKEND = "json"
+
+
+class TestSpecAlignmentSQLite(_SpecAlignmentBackendMixin, unittest.TestCase):
+    BACKEND = "sqlite"
+
+
+class TestSpecAlignmentPostgres(_SpecAlignmentBackendMixin, unittest.TestCase):
+    BACKEND = "postgres"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        dsn = os.getenv("PLM_TEST_POSTGRES_DSN", "").strip()
+        if not dsn:
+            raise unittest.SkipTest("set PLM_TEST_POSTGRES_DSN to run PostgreSQL spec alignment tests")
+        if psycopg is None:
+            raise unittest.SkipTest("psycopg is required to run PostgreSQL spec alignment tests")
+        cls.POSTGRES_DSN = dsn
 
 
 if __name__ == "__main__":

@@ -21,6 +21,7 @@ type ProjectWorkbenchState = {
 type WorkbenchState = {
   byProjectId: Record<string, ProjectWorkbenchState>
   ensure: (projectId: string) => void
+  clearAll: () => void
   resetProject: (projectId: string) => void
   setRoots: (projectId: string, roots: string[]) => void
   setSelectedInstanceId: (projectId: string, instanceId: string | null) => void
@@ -43,6 +44,7 @@ export const useWorkbenchStore = create<WorkbenchState>()(
   persist(
     (set) => ({
       byProjectId: {},
+      clearAll: () => set({ byProjectId: {} }),
       ensure: (projectId) =>
         set((s) =>
           s.byProjectId[projectId] ? s : { byProjectId: { ...s.byProjectId, [projectId]: emptyProjectState() } },

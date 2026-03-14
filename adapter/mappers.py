@@ -8,6 +8,7 @@ from typing import Any, Dict
 
 from backend.models.asr_artifact import AsrArtifact, AsrSegment
 from backend.models.convergence import Convergence
+from backend.models.desktop_agent import DesktopAgent
 from backend.models.entry_registration import EntryRegistration
 from backend.models.instance import Instance
 from backend.models.layer import Layer
@@ -16,6 +17,7 @@ from backend.models.learning_task import LearningTask
 from backend.models.learning_task_node import LearningTaskContainer, LearningTaskLeaf, LearningTaskNode
 from backend.models.project import Project
 from backend.models.project_config import LayerConfig, ProjectConfig, ReviewChainTemplateItem
+from backend.models.project_material_source_binding import ProjectMaterialSourceBinding
 from backend.models.project_storage_config import ProjectStorageConfig
 from backend.models.range_snapshot import RangeSnapshot
 from backend.models.recall_point import RecallPoint
@@ -66,6 +68,29 @@ def project_storage_config_to_dto(c: ProjectStorageConfig) -> Dict[str, Any]:
         "learningObjectRoot": _jsonable(c.learning_object_root),
         "fsSyncPolicy": _jsonable(c.fs_sync_policy),
         "updatedAt": _jsonable(c.updated_at),
+    }
+
+
+def project_material_source_binding_to_dto(binding: ProjectMaterialSourceBinding) -> Dict[str, Any]:
+    return {
+        "projectId": str(binding.project_id),
+        "sourceKind": _jsonable(binding.source_kind),
+        "desktopAgentId": None if binding.desktop_agent_id is None else str(binding.desktop_agent_id),
+        "sourceRootLabel": binding.source_root_label,
+        "updatedAt": _jsonable(binding.updated_at),
+    }
+
+
+def desktop_agent_to_dto(agent: DesktopAgent) -> Dict[str, Any]:
+    return {
+        "agentId": str(agent.agent_id),
+        "userId": str(agent.user_id),
+        "deviceName": agent.device_name,
+        "platform": agent.platform,
+        "appVersion": agent.app_version,
+        "status": _jsonable(agent.status),
+        "lastSeenAt": agent.last_seen_at,
+        "pairedAt": agent.paired_at,
     }
 
 

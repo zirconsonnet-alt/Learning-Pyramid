@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from "react-router-dom"
 import { ApiError } from "@/ui/api/http"
 import type { Convergence, ReviewTask } from "@/ui/api/review"
 import { getConvergence, getReviewTask } from "@/ui/api/review"
+import { ContentEmptyState, ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import { useProject } from "@/ui/queries/projects"
@@ -50,9 +51,12 @@ export function ReviewChainPage() {
 
   if (!pid || !chainId) {
     return (
-      <div className="space-y-2">
-        <p className="text-sm text-muted-foreground">缺少 projectId 或 reviewChainId。</p>
-        <Button onClick={() => navigate("/projects")}>返回项目列表</Button>
+      <div className="space-y-4">
+        <ContentNotice
+          title="当前页面缺少复习链上下文"
+          message="复习链详情页需要同时提供项目 ID 和复习链 ID。你可以先回到项目列表，再从任务树或工作台重新进入。"
+          action={<Button onClick={() => navigate("/projects")}>返回项目列表</Button>}
+        />
       </div>
     )
   }
@@ -78,8 +82,19 @@ export function ReviewChainPage() {
           <CardDescription>查看当前 head、队列长度和每个队列项的详情。</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3 text-sm">
-          {chainQ.isLoading ? <p className="text-sm text-muted-foreground">加载中...</p> : null}
-          {chainQ.error ? <p className="text-sm text-destructive">{formatApiError(chainQ.error)}</p> : null}
+          {chainQ.isLoading ? <LoadingNotice title="正在加载复习链" message="正在读取队列 head、执行状态以及各个队列项详情。" /> : null}
+          {chainQ.error ? <ErrorNotice title="复习链加载失败" message={formatApiError(chainQ.error)} /> : null}
+          {!chainQ.isLoading && !chainQ.error && !chainQ.data ? (
+            <ContentNotice
+              title="未找到这条复习链"
+              message="这条复习链可能已经被清理，或者当前链接里的复习链 ID 已经过期。你可以返回工作台继续处理当前项目。"
+              action={
+                <Button variant="outline" asChild>
+                  <Link to={`/p/${pid}/workbench`}>返回工作台</Link>
+                </Button>
+              }
+            />
+          ) : null}
 
           {chainQ.data ? (
             <>
@@ -152,7 +167,12 @@ export function ReviewChainPage() {
                   )
                 })}
 
-                {queue.length === 0 ? <p className="text-sm text-muted-foreground">当前复习链为空。</p> : null}
+                {queue.length === 0 ? (
+                  <ContentEmptyState
+                    title="当前复习链还没有队列项"
+                    message="当系统为这个项目生成复习任务或收敛任务后，这里会按执行顺序列出对应队列。"
+                  />
+                ) : null}
               </div>
 
               <div className="pt-1">

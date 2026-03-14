@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Dict, Optional, Sequence, Set, Tuple, TypeVar
@@ -21,6 +20,7 @@ from backend.models.enums import (
     AsrProvider,
     ConvergenceState,
     FsSyncPolicy,
+    MaterialSourceKind,
     LayerMode,
     ProjectState,
     ReviewChainState,
@@ -54,6 +54,7 @@ from backend.models.project_config import (
     default_project_config,
     default_push_config,
 )
+from backend.models.project_material_source_binding import ProjectMaterialSourceBinding
 from backend.models.project_storage_config import ProjectStorageConfig
 from backend.models.range_snapshot import RangeSnapshot
 from backend.models.recall_point import RecallPoint
@@ -62,7 +63,8 @@ from backend.models.rich_content import RichContent, validate_rich_content_write
 from backend.models.review_chain import ReviewChain
 from backend.models.review_task import ReviewTask
 from backend.models.review_task_queue import ReviewTaskQueue
-from backend.system.persistence_json import decode_snapshot, encode_snapshot
+from backend.system.persistence_json import SCHEMA_VERSION, decode_snapshot, encode_project_payload, encode_snapshot
+from backend.system.persistence_store import JsonSnapshotStore, SnapshotStore
 from backend.system.project_paths import allocate_project_root
 from backend.models.types import (
     AsrArtifactId,
@@ -90,6 +92,7 @@ from backend.models.types import (
 class ProjectStore:
     project: Optional[Project] = None
     project_storage_config: Optional[ProjectStorageConfig] = None
+    project_material_source_binding: Optional[ProjectMaterialSourceBinding] = None
     project_config: Optional[ProjectConfig] = None
     material_allowlist: Optional[MaterialAllowlist] = None
     media_assets: Dict[str, MediaAsset] = field(default_factory=dict)
@@ -122,6 +125,7 @@ class ProjectStaged:
     project: Optional[Project] = None  # staged replacement/creation
     delete_project: bool = False  # system-level delete marker (4.1.7)
     project_storage_config: Optional[ProjectStorageConfig] = None
+    project_material_source_binding: Optional[ProjectMaterialSourceBinding] = None
     project_config: Optional[ProjectConfig] = None
     material_allowlist: Optional[MaterialAllowlist] = None
     media_assets: Dict[str, MediaAsset] = field(default_factory=dict)
@@ -396,6 +400,28 @@ class ProjectConfigRepository:
             raise PreconditionFailure("ProjectConfigRepository.set must use matching session.project_id")
         config.validate_write_time()
         session._staged.project_config = config
+
+
+class ProjectMaterialSourceBindingRepository:
+    def __init__(self, g: GlobalStore) -> None:
+        self.g = g
+
+    def get(self, session: MutationSession) -> ProjectMaterialSourceBinding:
+        session.assert_open()
+        if session._staged.project_material_source_binding is not None:
+            return session._staged.project_material_source_binding
+        if session._baseline.project_material_source_binding is not None:
+            return session._baseline.project_material_source_binding
+        raise NotFound("ProjectMaterialSourceBinding missing")
+
+    def set(self, session: MutationSession, binding: ProjectMaterialSourceBinding) -> None:
+        session.assert_open()
+        if session.mode != SessionMode.READ_WRITE:
+            raise PreconditionFailure("READ_ONLY session cannot write")
+        if binding.project_id != session.project_id:
+            raise PreconditionFailure("ProjectMaterialSourceBindingRepository.set must use matching session.project_id")
+        binding.validate_write_time()
+        session._staged.project_material_source_binding = binding
 
 
 class MaterialAllowlistRepository:
@@ -2008,11 +2034,19 @@ def _validate_commit_entry_registry_and_management(ps: ProjectStore, st: Project
 # Transaction Manager / System
 # -------------------------
 class InMemorySystem:
-    def __init__(self, persist_path: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        persist_path: str | Path | None = None,
+        *,
+        persist_store: SnapshotStore | None = None,
+    ) -> None:
         self.g = GlobalStore()
-        self._persist_path: Optional[Path] = Path(persist_path) if persist_path else None
+        self._persist_store: SnapshotStore | None = persist_store
+        if self._persist_store is None and persist_path is not None:
+            self._persist_store = JsonSnapshotStore(persist_path)
+        self._persist_path: Optional[Path] = self._persist_store.location if self._persist_store is not None else None
         needs_persist_after_load = False
-        if self._persist_path is not None:
+        if self._persist_store is not None:
             needs_persist_after_load = self._load_persisted()
         self._ensure_system_project_id_seq()
         if needs_persist_after_load:
@@ -2020,6 +2054,7 @@ class InMemorySystem:
 
         self.project_repo = ProjectRepository(self.g)
         self.project_storage_config_repo = ProjectStorageConfigRepository(self.g)
+        self.project_material_source_binding_repo = ProjectMaterialSourceBindingRepository(self.g)
         self.project_config_repo = ProjectConfigRepository(self.g)
         self.material_allowlist_repo = MaterialAllowlistRepository(self.g)
         self.media_asset_repo = MediaAssetRepository(self.g)
@@ -2086,19 +2121,43 @@ class InMemorySystem:
         self.g.idgen.ensure_project_id_seq_at_least(max_n)
 
     def _load_persisted(self) -> bool:
-        p = self._persist_path
-        if p is None or not p.exists():
+        if self._persist_store is None:
             return False
-        raw = p.read_text(encoding="utf-8").strip()
-        if not raw:
+        data = self._persist_store.load_snapshot()
+        if data is None:
             return False
-        data = json.loads(raw)
         projects_data, idgen_counters = decode_snapshot(data)
         self.g.idgen._counters = dict(idgen_counters)
         needs_persist = False
 
         for pid, d in projects_data.items():
             ps = ProjectStore(project=d["project"])
+            if ps.project is not None and ps.project.state == ProjectState.DELETED:
+                ps.project_storage_config = d.get("project_storage_config")
+                ps.project_material_source_binding = d.get("project_material_source_binding")
+                ps.project_config = d.get("project_config")
+                ps.material_allowlist = d.get("material_allowlist")
+                ps.audit_log_events = d.get("audit_log_events", {})
+                ps.instances = d["instances"]
+                ps.learning_object_nodes = d["learning_object_nodes"]
+                ps.recall_points = d["recall_points"]
+                ps.recall_point_review_records = d.get("recall_point_review_records", {})
+                ps.media_assets = d.get("media_assets", {})
+                ps.learning_tasks = d["learning_tasks"]
+                ps.learning_task_nodes = d["learning_task_nodes"]
+                ps.range_snapshots = d["range_snapshots"]
+                ps.asr_artifacts = d.get("asr_artifacts", {})
+                ps.review_tasks = d["review_tasks"]
+                ps.convergences = d["convergences"]
+                ps.review_chains = d["review_chains"]
+                ps.review_task_queue = d["review_task_queue"]
+                ps.layers = d["layers"]
+                ps.layers_by_index = d["layers_by_index"]
+                ps.entry_regs = d["entry_regs"]
+                ps.aggregation_queues = d["aggregation_queues"]
+                ps.aggregation_events = d["aggregation_events"]
+                self.g.projects[str(ProjectId(pid))] = ps
+                continue
             # Backward compatibility: older snapshots used ProjectScanConfig (scan_root) and some snapshots
             # did not persist ProjectStorageConfig at all.
             raw_cfg = d.get("project_storage_config") or d.get("project_scan_config")
@@ -2153,6 +2212,15 @@ class InMemorySystem:
 
             # ProjectConfig may be missing in older snapshots; migrate after layer hydration to avoid
             # creating a config view that disagrees with existing Layer control fields.
+            raw_binding = d.get("project_material_source_binding")
+            if raw_binding is None and ps.project is not None:
+                ps.project_material_source_binding = ProjectMaterialSourceBinding.create(
+                    ps.project.project_id,
+                    source_kind=MaterialSourceKind.SERVER_FS,
+                )
+                needs_persist = True
+            else:
+                ps.project_material_source_binding = raw_binding
             ps.project_config = d.get("project_config")
             ps.material_allowlist = d.get("material_allowlist")
             ps.audit_log_events = d.get("audit_log_events", {})
@@ -2239,12 +2307,21 @@ class InMemorySystem:
                 if ps.project_storage_config.project_id != ps.project.project_id:
                     raise PreconditionFailure("ProjectStorageConfig.project_id mismatch")
                 ps.project_storage_config.validate_write_time()
+                if ps.project_material_source_binding is None:
+                    raise PreconditionFailure("ProjectMaterialSourceBinding migration produced None")
+                if ps.project_material_source_binding.project_id != ps.project.project_id:
+                    raise PreconditionFailure("ProjectMaterialSourceBinding.project_id mismatch")
+                ps.project_material_source_binding.validate_write_time()
             except Exception:
                 ps.project_storage_config = _migrated_project_storage_config_default()
+                ps.project_material_source_binding = ProjectMaterialSourceBinding.create(
+                    ps.project.project_id,  # type: ignore[union-attr]
+                    source_kind=MaterialSourceKind.SERVER_FS,
+                )
                 needs_persist = True
 
-            # Compatibility: per-layer control fields were historically persisted as layer_index-keyed maps.
-            # The domain model now stores them on Layer, so we hydrate each Layer from these maps.
+            # The persisted snapshot format stores per-layer control fields as layer_index-keyed maps,
+            # while the domain model stores them on Layer. Hydrate the model from that persisted shape.
             k_node_by_idx: Dict[int, int] = dict(d.get("aggregation_k_node", {}))
             k_point_by_idx: Dict[int, int] = dict(d.get("aggregation_k_point", {}))
             cycle_by_idx: Dict[int, AggregationCycleState] = dict(d.get("aggregation_cycle_state", {}))
@@ -2351,27 +2428,21 @@ class InMemorySystem:
         return needs_persist
 
     def _persist_to_disk(self, projects_override: Optional[Dict[str, ProjectStore]] = None) -> None:
-        p = self._persist_path
-        if p is None:
+        if self._persist_store is None:
             return
-        p.parent.mkdir(parents=True, exist_ok=True)
         projects = projects_override if projects_override is not None else self.g.projects
         snapshot = encode_snapshot(projects=projects, idgen_counters=self.g.idgen._counters)
-        text = json.dumps(snapshot, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+        self._persist_store.save_snapshot(snapshot)
 
-        fd, tmp_name = tempfile.mkstemp(prefix=p.name + ".", suffix=".tmp", dir=str(p.parent))
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
-                f.write(text)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp_name, p)
-        finally:
-            try:
-                if os.path.exists(tmp_name):
-                    os.remove(tmp_name)
-            except Exception:
-                pass
+    def _persist_project_to_disk(self, project_id: ProjectId, project_store: ProjectStore) -> None:
+        if self._persist_store is None:
+            return
+        self._persist_store.save_project_snapshot(
+            project_id=str(project_id),
+            project_snapshot=encode_project_payload(project_store),
+            idgen_counters=self.g.idgen._counters,
+            schema_version=SCHEMA_VERSION,
+        )
 
     def begin_session(self, project_id: ProjectId, mode: SessionMode) -> MutationSession:
         _ensure_project_active(self.g, project_id)
@@ -2411,9 +2482,7 @@ class InMemorySystem:
                 # Keep only staged audit events (baseline events are cleared as part of delete).
                 next_ps.audit_log_events = dict(st.audit_log_events)
 
-                projects_snapshot = dict(self.g.projects)
-                projects_snapshot[str(session.project_id)] = next_ps
-                self._persist_to_disk(projects_override=projects_snapshot)
+                self._persist_project_to_disk(session.project_id, next_ps)
                 self.g.projects[str(session.project_id)] = next_ps
                 session.state = SessionState.COMMITTED
                 return
@@ -2441,6 +2510,11 @@ class InMemorySystem:
             next_ps = ProjectStore(project=proj)
             next_ps.project_storage_config = (
                 st.project_storage_config if st.project_storage_config is not None else ps.project_storage_config
+            )
+            next_ps.project_material_source_binding = (
+                st.project_material_source_binding
+                if st.project_material_source_binding is not None
+                else ps.project_material_source_binding
             )
             next_ps.project_config = st.project_config if st.project_config is not None else ps.project_config
             next_ps.material_allowlist = st.material_allowlist if st.material_allowlist is not None else ps.material_allowlist
@@ -2480,9 +2554,7 @@ class InMemorySystem:
             next_ps.aggregation_events = dict(ps.aggregation_events)
             next_ps.aggregation_events.update(st.aggregation_events)
 
-            projects_snapshot = dict(self.g.projects)
-            projects_snapshot[str(session.project_id)] = next_ps
-            self._persist_to_disk(projects_override=projects_snapshot)
+            self._persist_project_to_disk(session.project_id, next_ps)
             self.g.projects[str(session.project_id)] = next_ps
 
             session.state = SessionState.COMMITTED
@@ -2539,6 +2611,13 @@ class InMemorySystem:
             )
             self.project_storage_config_repo.set(s, cfg)
 
+            binding = ProjectMaterialSourceBinding.create(
+                pid,
+                source_kind=MaterialSourceKind.SERVER_FS,
+                updated_at=now_utc_ms(),
+            )
+            self.project_material_source_binding_repo.set(s, binding)
+
             # Minimal project bootstrap (0b.1.5a): ProjectConfig singleton (defaults are fixed by spec).
             pcfg = default_project_config(project_id=pid, updated_at=now_utc_ms())
             self.project_config_repo.set(s, pcfg)
@@ -2552,7 +2631,7 @@ class InMemorySystem:
                 orchestrator_managed_review_chain_ids=tuple(),
                 aggregation_k_node=DEFAULT_AGGREGATION_K_NODE,
                 aggregation_k_point=DEFAULT_AGGREGATION_K_POINT,
-                aggregation_cycle_state=AggregationCycleState.CLEARING,
+                aggregation_cycle_state=AggregationCycleState.DONE,
             )
             layer0.validate_local_invariants()
             self.layer_repo.add(s, layer0)

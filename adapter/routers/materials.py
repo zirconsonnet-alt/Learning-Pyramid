@@ -9,6 +9,7 @@ from adapter.schemas import (
     AddLearningObjectContainerRequest,
     AddLearningObjectLeafRequest,
     BulkRemapRecallPointsInstanceRequest,
+    SyncClientMediaManifestRequest,
 )
 from backend.models.types import InstanceId, LearningObjectNodeId
 from backend.models.types import RecallPointId
@@ -32,6 +33,27 @@ def add_instance(projectId: str, req: AddInstanceRequest, api: SystemAPI = Depen
 @router.post("/projects/{projectId}/sync-learning-objects-from-fs")
 def sync_learning_objects_from_fs(projectId: str, api: SystemAPI = Depends(get_api)) -> dict:
     report = api.sync_learning_objects_from_fs(projectId)  # type: ignore[arg-type]
+    return {"ok": True, "data": report}
+
+
+@router.post("/projects/{projectId}/media-manifest/sync")
+def sync_learning_objects_from_manifest(
+    projectId: str, req: SyncClientMediaManifestRequest, api: SystemAPI = Depends(get_api)
+) -> dict:
+    report = api.sync_learning_objects_from_manifest(  # type: ignore[arg-type]
+        projectId,
+        root_title=req.rootTitle,
+        manifest_entries=tuple(
+            {
+                "relativePath": entry.relativePath,
+                "displayName": entry.displayName,
+                "mediaKind": entry.mediaKind,
+                "sizeBytes": entry.sizeBytes,
+                "modifiedAt": entry.modifiedAt,
+            }
+            for entry in req.entries
+        ),
+    )
     return {"ok": True, "data": report}
 
 

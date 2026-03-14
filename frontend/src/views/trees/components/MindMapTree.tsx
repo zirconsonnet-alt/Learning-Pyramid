@@ -1,3 +1,4 @@
+import { ContentEmptyState } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 
 export type MindMapNode = {
@@ -123,7 +124,12 @@ export function LayerBandTree({
   })
 
   if (allNodeIds.length === 0) {
-    return <p className="text-sm text-muted-foreground">暂无根节点。</p>
+    return (
+      <ContentEmptyState
+        title="当前结构图还没有根节点"
+        message="相关节点数据生成后，这里会自动展开对应的层级结构。"
+      />
+    )
   }
 
   return (
@@ -195,7 +201,12 @@ export function MindMapTree({
   onNodeClick: (n: MindMapNode) => void
 }) {
   if (rootIds.length === 0 && footerNodeIds.length === 0) {
-    return <p className="text-sm text-muted-foreground">暂无根节点。</p>
+    return (
+      <ContentEmptyState
+        title="当前结构图还没有根节点"
+        message="相关节点数据生成后，这里会自动展开对应的层级结构。"
+      />
+    )
   }
 
   return (

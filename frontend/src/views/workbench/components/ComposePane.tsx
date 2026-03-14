@@ -1,13 +1,16 @@
 import { useRef } from "react"
+import { BookPlus, CircleCheckBig, FileText } from "lucide-react"
 
 import type { Instance } from "@/ui/api/instances"
 import { ApiError } from "@/ui/api/http"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
+import { ContentEmptyState } from "@/ui/components/contentEmptyState"
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
 import { richText } from "@/ui/api/richContent"
 import { useSubmitLearningTask } from "@/ui/queries/workbench"
+import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { useWorkbenchStore } from "@/ui/store/workbenchStore"
 import type { DraftRecallPoint } from "@/ui/store/workbenchStore"
 
@@ -99,8 +102,13 @@ export function ComposePane({
       anchor: { instanceId: d.instanceId, position: d.position },
     }))
     if (items.length === 0) return
-    await submit.mutateAsync({ title, items })
-    if (selectedInstanceId) clearDraftsForInstance(projectId, selectedInstanceId)
+    try {
+      await submit.mutateAsync({ title, items })
+      if (selectedInstanceId) clearDraftsForInstance(projectId, selectedInstanceId)
+      showSuccessFeedback("学习任务已提交", `“${title}” 已提交，共包含 ${items.length} 个复述点。`)
+    } catch (err) {
+      showErrorFeedback("提交学习任务失败", formatApiError(err))
+    }
   }
 
   function focusDraft(draft: DraftRecallPoint) {
@@ -123,13 +131,19 @@ export function ComposePane({
 
   return (
     <Card className="theme-card-main">
-      <CardHeader className="theme-card-header flex-row items-center justify-between gap-3 space-y-0">
-        <div className="flex items-center gap-2">
-          <CardTitle>复述点录入</CardTitle>
-          {instance ? (
-            <div className="theme-meta">{instance.materialDisplayName}</div>
-          ) : null}
+      <CardHeader className="theme-card-header flex-row items-start justify-between gap-3 space-y-0">
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#edf4ff] text-primary">
+            <BookPlus className="h-5 w-5" />
+          </div>
+          <div className="space-y-1">
+            <CardTitle>复述点录入</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              围绕当前视频持续记录锚点、问题和答案，再统一提交为学习任务。
+            </p>
+          </div>
         </div>
+        {instance ? <div className="theme-meta">{instance.materialDisplayName}</div> : null}
         <Button onClick={onAdd} disabled={!selectedInstanceId}>
           添加复述点
         </Button>
@@ -171,7 +185,17 @@ export function ComposePane({
           </div>
         ) : null}
 
-        {drafts.length === 0 ? <p className="text-sm text-muted-foreground">暂无复述点草稿。</p> : null}
+        {drafts.length === 0 ? (
+          <ContentEmptyState
+            icon={BookPlus}
+            title={selectedInstanceId ? "还没有开始录入复述点" : "先选择一个视频再开始录入"}
+            message={
+              selectedInstanceId
+                ? "点击上方“添加复述点”，系统会用当前播放时间创建第一条锚点草稿，随后你就可以继续填写问题和答案。"
+                : "请先从左侧内容目录里选择一个视频实例，之后这里会开始记录当前视频的复述点草稿。"
+            }
+          />
+        ) : null}
 
         <div className="space-y-3">
           {drafts.map((d) => {
@@ -222,6 +246,15 @@ export function ComposePane({
         </div>
 
         <div className="theme-canvas grid gap-3 rounded-[1.2rem] border border-border/60 p-4">
+          <div className="flex items-start gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-white/85 text-primary">
+              <FileText className="h-4 w-4" />
+            </div>
+            <div className="space-y-1">
+              <div className="text-sm font-medium text-foreground">生成一个新的学习任务</div>
+              <div className="text-sm text-muted-foreground">任务标题会作为这批复述点后续在任务树和复习链路中的入口名称。</div>
+            </div>
+          </div>
           <div>
             <Label htmlFor="taskTitle">学习任务标题</Label>
             <Input
@@ -244,6 +277,12 @@ export function ComposePane({
             >
               {submit.isPending ? "提交中..." : "提交学习"}
             </Button>
+            {!submit.isPending && drafts.length > 0 && !drafts.some((d) => !d.questionText.trim() || !d.answerText.trim()) ? (
+              <div className="mt-2 flex items-center gap-2 text-sm text-emerald-700">
+                <CircleCheckBig className="h-4 w-4" />
+                所有复述点已填写完成，可以提交。
+              </div>
+            ) : null}
             {submit.error ? <p className="mt-2 text-sm text-destructive">{formatApiError(submit.error)}</p> : null}
           </div>
         </div>

@@ -21,6 +21,7 @@ from backend.models.enums import (
     FsSyncPolicy,
     InstancePresence,
     LayerMode,
+    MaterialSourceKind,
     MediaAssetKind,
     ProjectState,
     RecallPointReviewResult,
@@ -43,9 +44,11 @@ from backend.models.project_config import (
     ProjectExternalServicesConfig,
     RecallPointPushConfig,
     ReviewChainTemplateItem,
+    default_layer_config,
     default_external_services_config,
     default_push_config,
 )
+from backend.models.project_material_source_binding import ProjectMaterialSourceBinding
 from backend.models.project_storage_config import ProjectStorageConfig
 from backend.models.range_snapshot import RangeSnapshot
 from backend.models.recall_point import Anchor, RecallPoint
@@ -65,6 +68,7 @@ from backend.models.types import (
     LearningTaskId,
     LearningTaskNodeId,
     MediaAssetId,
+    DesktopAgentId,
     ProjectId,
     RangeId,
     RecallPointId,
@@ -119,6 +123,33 @@ def _decode_project(d: dict[str, Any]) -> Project:
     )
 
 
+def encode_timestamp_ms(ts: datetime) -> int:
+    return _ts_to_ms(ts)
+
+
+def encode_project_payload_record(project: Project) -> dict[str, Any]:
+    return _encode_project(project)
+
+
+def encode_project_shell_payload(
+    *,
+    project: Project,
+    project_storage_config: ProjectStorageConfig | None = None,
+    project_material_source_binding: ProjectMaterialSourceBinding | None = None,
+    project_config: ProjectConfig | None = None,
+) -> dict[str, Any]:
+    return {
+        "project": _encode_project(project),
+        "projectStorageConfig": None
+        if project_storage_config is None
+        else _encode_project_storage_config(project_storage_config),
+        "projectMaterialSourceBinding": None
+        if project_material_source_binding is None
+        else _encode_project_material_source_binding(project_material_source_binding),
+        "projectConfig": None if project_config is None else _encode_project_config(project_config),
+    }
+
+
 def _encode_review_chain_template_item(it: ReviewChainTemplateItem) -> dict[str, Any]:
     out: dict[str, Any] = {"kind": it.kind.value}
     if it.count is not None:
@@ -142,11 +173,16 @@ def _encode_layer_config(c: LayerConfig) -> dict[str, Any]:
 
 
 def _decode_layer_config(d: dict[str, Any]) -> LayerConfig:
-    tmpl = tuple(_decode_review_chain_template_item(dict(it)) for it in list(d.get("reviewChainTemplate", [])))
+    base = default_layer_config()
+    raw_template = d.get("reviewChainTemplate")
+    if raw_template is None:
+        tmpl = base.review_chain_template
+    else:
+        tmpl = tuple(_decode_review_chain_template_item(dict(it)) for it in list(raw_template))
     return LayerConfig(
         review_chain_template=tmpl,
-        aggregation_k_node=int(d.get("aggregationKNode", 0)),
-        aggregation_k_point=int(d.get("aggregationKPoint", 0)),
+        aggregation_k_node=int(d.get("aggregationKNode", base.aggregation_k_node)),
+        aggregation_k_point=int(d.get("aggregationKPoint", base.aggregation_k_point)),
     )
 
 
@@ -223,6 +259,14 @@ def _decode_project_config(d: dict[str, Any]) -> ProjectConfig:
     )
 
 
+def encode_project_config_payload(config: ProjectConfig) -> dict[str, Any]:
+    return _encode_project_config(config)
+
+
+def decode_project_config_payload(payload: dict[str, Any]) -> ProjectConfig:
+    return _decode_project_config(dict(payload))
+
+
 def _encode_instance(i: Instance) -> dict[str, Any]:
     return {
         "projectId": str(i.project_id),
@@ -269,6 +313,35 @@ def _decode_project_storage_config(d: dict[str, Any]) -> ProjectStorageConfig:
         PurePosixPath(d["scanRoot"]),
         updated_at=updated_at,
     )
+
+
+def _encode_project_material_source_binding(binding: ProjectMaterialSourceBinding) -> dict[str, Any]:
+    return {
+        "projectId": str(binding.project_id),
+        "sourceKind": binding.source_kind.value,
+        "desktopAgentId": None if binding.desktop_agent_id is None else str(binding.desktop_agent_id),
+        "sourceRootLabel": binding.source_root_label,
+        "updatedAtMs": _ts_to_ms(binding.updated_at),
+    }
+
+
+def _decode_project_material_source_binding(d: dict[str, Any]) -> ProjectMaterialSourceBinding:
+    desktop_agent_id = d.get("desktopAgentId")
+    return ProjectMaterialSourceBinding.create(
+        ProjectId(d["projectId"]),
+        source_kind=MaterialSourceKind(str(d.get("sourceKind") or "SERVER_FS")),
+        desktop_agent_id=None if desktop_agent_id is None else DesktopAgentId(str(desktop_agent_id)),
+        source_root_label=None if d.get("sourceRootLabel") is None else str(d.get("sourceRootLabel")),
+        updated_at=_ms_to_ts(int(d["updatedAtMs"])),
+    )
+
+
+def encode_project_storage_config_payload(config: ProjectStorageConfig) -> dict[str, Any]:
+    return _encode_project_storage_config(config)
+
+
+def decode_project_storage_config_payload(payload: dict[str, Any]) -> ProjectStorageConfig:
+    return _decode_project_storage_config(dict(payload))
 
 
 def _encode_material_allowlist(a: MaterialAllowlist) -> dict[str, Any]:
@@ -789,68 +862,148 @@ def _decode_event(d: dict[str, Any]) -> AggregationEvent:
     )
 
 
+def encode_project_payload(project_store: Any) -> dict[str, Any]:
+    if getattr(project_store, "project", None) is None:
+        raise ValueError("ProjectStore.project must be present")
+    proj: Project = project_store.project  # type: ignore[assignment]
+
+    # Compatibility: per-layer control fields are persisted as layer_index-keyed maps.
+    # The domain model stores them on Layer, so derive the maps from Layer objects here.
+    layers = tuple(getattr(project_store, "layers", {}).values())
+    aggregation_k_node: dict[str, int] = {}
+    aggregation_k_point: dict[str, int] = {}
+    aggregation_cycle_state: dict[str, str] = {}
+    pending_roll_up_parent_node_id: dict[str, Optional[str]] = {}
+    normal_tick_quota_remaining: dict[str, int] = {}
+    for layer in layers:
+        idx = str(int(layer.layer_index))
+        aggregation_k_node[idx] = int(layer.aggregation_k_node)
+        aggregation_k_point[idx] = int(layer.aggregation_k_point)
+        aggregation_cycle_state[idx] = layer.aggregation_cycle_state.value
+        pending_roll_up_parent_node_id[idx] = (
+            None if layer.pending_roll_up_parent_node_id is None else str(layer.pending_roll_up_parent_node_id)
+        )
+        normal_tick_quota_remaining[idx] = int(layer.normal_tick_quota_remaining)
+
+    return {
+        "project": _encode_project(proj),
+        "projectStorageConfig": None
+        if getattr(project_store, "project_storage_config", None) is None
+        else _encode_project_storage_config(project_store.project_storage_config),
+        "projectMaterialSourceBinding": None
+        if getattr(project_store, "project_material_source_binding", None) is None
+        else _encode_project_material_source_binding(project_store.project_material_source_binding),
+        "projectConfig": None
+        if getattr(project_store, "project_config", None) is None
+        else _encode_project_config(project_store.project_config),
+        "materialAllowlist": None
+        if getattr(project_store, "material_allowlist", None) is None
+        else _encode_material_allowlist(project_store.material_allowlist),
+        "auditLogEvents": {
+            k: _encode_audit_log_event(v) for k, v in getattr(project_store, "audit_log_events", {}).items()
+        },
+        "instances": {k: _encode_instance(v) for k, v in getattr(project_store, "instances", {}).items()},
+        "learningObjectNodes": {
+            k: _encode_learning_object_node(v) for k, v in getattr(project_store, "learning_object_nodes", {}).items()
+        },
+        "recallPoints": {k: _encode_recall_point(v) for k, v in getattr(project_store, "recall_points", {}).items()},
+        "recallPointReviewRecords": {
+            k: _encode_recall_point_review_record(v)
+            for k, v in getattr(project_store, "recall_point_review_records", {}).items()
+        },
+        "mediaAssets": {k: _encode_media_asset(v) for k, v in getattr(project_store, "media_assets", {}).items()},
+        "learningTasks": {k: _encode_learning_task(v) for k, v in getattr(project_store, "learning_tasks", {}).items()},
+        "learningTaskNodes": {
+            k: _encode_learning_task_node(v) for k, v in getattr(project_store, "learning_task_nodes", {}).items()
+        },
+        "rangeSnapshots": {k: _encode_range_snapshot(v) for k, v in getattr(project_store, "range_snapshots", {}).items()},
+        "asrArtifacts": {k: _encode_asr_artifact(v) for k, v in getattr(project_store, "asr_artifacts", {}).items()},
+        "reviewTasks": {k: _encode_review_task(v) for k, v in getattr(project_store, "review_tasks", {}).items()},
+        "convergences": {k: _encode_convergence(v) for k, v in getattr(project_store, "convergences", {}).items()},
+        "reviewChains": {k: _encode_review_chain(v) for k, v in getattr(project_store, "review_chains", {}).items()},
+        "reviewTaskQueue": None
+        if getattr(project_store, "review_task_queue", None) is None
+        else _encode_review_task_queue(project_store.review_task_queue),
+        "layers": {k: _encode_layer(v) for k, v in getattr(project_store, "layers", {}).items()},
+        "layersByIndex": {str(k): v for k, v in getattr(project_store, "layers_by_index", {}).items()},
+        "entryRegs": {k: _encode_entry_reg(v) for k, v in getattr(project_store, "entry_regs", {}).items()},
+        "aggregationQueues": {
+            str(k): _encode_aggq(v) for k, v in getattr(project_store, "aggregation_queues", {}).items()
+        },
+        "aggregationKNode": dict(aggregation_k_node),
+        "aggregationKPoint": dict(aggregation_k_point),
+        "aggregationCycleState": dict(aggregation_cycle_state),
+        "pendingRollUpParentNodeId": dict(pending_roll_up_parent_node_id),
+        "normalTickQuotaRemaining": dict(normal_tick_quota_remaining),
+        "aggregationEvents": {k: _encode_event(v) for k, v in getattr(project_store, "aggregation_events", {}).items()},
+    }
+
+
+def decode_project_payload(project_id: str, raw: dict[str, Any]) -> dict[str, Any]:
+    d = dict(raw)
+    project = _decode_project(dict(d["project"]))
+    raw_storage_cfg = d.get("projectStorageConfig")
+    if raw_storage_cfg is None:
+        raw_storage_cfg = d.get("projectScanConfig")
+    raw_material_source_binding = d.get("projectMaterialSourceBinding")
+    return {
+        "project": project,
+        "project_storage_config": None if raw_storage_cfg is None else _decode_project_storage_config(dict(raw_storage_cfg)),
+        "project_material_source_binding": None
+        if raw_material_source_binding is None
+        else _decode_project_material_source_binding(dict(raw_material_source_binding)),
+        "project_config": None if d.get("projectConfig") is None else _decode_project_config(dict(d["projectConfig"])),
+        "material_allowlist": None
+        if d.get("materialAllowlist") is None
+        else _decode_material_allowlist(dict(d["materialAllowlist"])),
+        "audit_log_events": {k: _decode_audit_log_event(v) for k, v in dict(d.get("auditLogEvents", {})).items()},
+        "instances": {k: _decode_instance(v) for k, v in dict(d.get("instances", {})).items()},
+        "learning_object_nodes": {
+            k: _decode_learning_object_node(v) for k, v in dict(d.get("learningObjectNodes", {})).items()
+        },
+        "recall_points": {k: _decode_recall_point(v) for k, v in dict(d.get("recallPoints", {})).items()},
+        "recall_point_review_records": {
+            k: _decode_recall_point_review_record(v)
+            for k, v in dict(d.get("recallPointReviewRecords", {})).items()
+        },
+        "media_assets": {k: _decode_media_asset(v) for k, v in dict(d.get("mediaAssets", {})).items()},
+        "learning_tasks": {k: _decode_learning_task(v) for k, v in dict(d.get("learningTasks", {})).items()},
+        "learning_task_nodes": {
+            k: _decode_learning_task_node(v) for k, v in dict(d.get("learningTaskNodes", {})).items()
+        },
+        "range_snapshots": {k: _decode_range_snapshot(v) for k, v in dict(d.get("rangeSnapshots", {})).items()},
+        "asr_artifacts": {k: _decode_asr_artifact(v) for k, v in dict(d.get("asrArtifacts", {})).items()},
+        "review_tasks": {k: _decode_review_task(v) for k, v in dict(d.get("reviewTasks", {})).items()},
+        "convergences": {k: _decode_convergence(v) for k, v in dict(d.get("convergences", {})).items()},
+        "review_chains": {k: _decode_review_chain(v) for k, v in dict(d.get("reviewChains", {})).items()},
+        "review_task_queue": None
+        if d.get("reviewTaskQueue") is None
+        else _decode_review_task_queue(dict(d["reviewTaskQueue"])),
+        "layers": {k: _decode_layer(v) for k, v in dict(d.get("layers", {})).items()},
+        "layers_by_index": {int(k): str(v) for k, v in dict(d.get("layersByIndex", {})).items()},
+        "entry_regs": {k: _decode_entry_reg(v) for k, v in dict(d.get("entryRegs", {})).items()},
+        "aggregation_queues": {int(k): _decode_aggq(v) for k, v in dict(d.get("aggregationQueues", {})).items()},
+        "aggregation_k_node": {int(k): int(v) for k, v in dict(d.get("aggregationKNode", {})).items()},
+        "aggregation_k_point": {int(k): int(v) for k, v in dict(d.get("aggregationKPoint", {})).items()},
+        "aggregation_cycle_state": {
+            int(k): AggregationCycleState(v) for k, v in dict(d.get("aggregationCycleState", {})).items()
+        },
+        "pending_roll_up_parent_node_id": {
+            int(k): (None if v is None else str(v)) for k, v in dict(d.get("pendingRollUpParentNodeId", {})).items()
+        },
+        "normal_tick_quota_remaining": {
+            int(k): int(v) for k, v in dict(d.get("normalTickQuotaRemaining", {})).items()
+        },
+        "aggregation_events": {k: _decode_event(v) for k, v in dict(d.get("aggregationEvents", {})).items()},
+    }
+
+
 def encode_snapshot(*, projects: Dict[str, Any], idgen_counters: Dict[str, int]) -> dict[str, Any]:
     out: dict[str, Any] = {"schemaVersion": SCHEMA_VERSION, "idgenCounters": dict(idgen_counters), "projects": {}}
     for pid, ps in projects.items():
         if getattr(ps, "project", None) is None:
             continue
-        proj: Project = ps.project  # type: ignore[assignment]
-
-        # Compatibility: per-layer control fields are persisted as layer_index-keyed maps.
-        # The domain model stores them on Layer, so derive the maps from Layer objects here.
-        layers = tuple(getattr(ps, "layers", {}).values())
-        aggregation_k_node: dict[str, int] = {}
-        aggregation_k_point: dict[str, int] = {}
-        aggregation_cycle_state: dict[str, str] = {}
-        pending_roll_up_parent_node_id: dict[str, Optional[str]] = {}
-        normal_tick_quota_remaining: dict[str, int] = {}
-        for layer in layers:
-            idx = str(int(layer.layer_index))
-            aggregation_k_node[idx] = int(layer.aggregation_k_node)
-            aggregation_k_point[idx] = int(layer.aggregation_k_point)
-            aggregation_cycle_state[idx] = layer.aggregation_cycle_state.value
-            pending_roll_up_parent_node_id[idx] = (
-                None if layer.pending_roll_up_parent_node_id is None else str(layer.pending_roll_up_parent_node_id)
-            )
-            normal_tick_quota_remaining[idx] = int(layer.normal_tick_quota_remaining)
-
-        out["projects"][pid] = {
-            "project": _encode_project(proj),
-            "projectStorageConfig": None
-            if getattr(ps, "project_storage_config", None) is None
-            else _encode_project_storage_config(ps.project_storage_config),
-            "projectConfig": None if getattr(ps, "project_config", None) is None else _encode_project_config(ps.project_config),
-            "materialAllowlist": None
-            if getattr(ps, "material_allowlist", None) is None
-            else _encode_material_allowlist(ps.material_allowlist),
-            "auditLogEvents": {k: _encode_audit_log_event(v) for k, v in getattr(ps, "audit_log_events", {}).items()},
-            "instances": {k: _encode_instance(v) for k, v in getattr(ps, "instances", {}).items()},
-            "learningObjectNodes": {k: _encode_learning_object_node(v) for k, v in getattr(ps, "learning_object_nodes", {}).items()},
-            "recallPoints": {k: _encode_recall_point(v) for k, v in getattr(ps, "recall_points", {}).items()},
-            "recallPointReviewRecords": {
-                k: _encode_recall_point_review_record(v)
-                for k, v in getattr(ps, "recall_point_review_records", {}).items()
-            },
-            "mediaAssets": {k: _encode_media_asset(v) for k, v in getattr(ps, "media_assets", {}).items()},
-            "learningTasks": {k: _encode_learning_task(v) for k, v in getattr(ps, "learning_tasks", {}).items()},
-            "learningTaskNodes": {k: _encode_learning_task_node(v) for k, v in getattr(ps, "learning_task_nodes", {}).items()},
-            "rangeSnapshots": {k: _encode_range_snapshot(v) for k, v in getattr(ps, "range_snapshots", {}).items()},
-            "asrArtifacts": {k: _encode_asr_artifact(v) for k, v in getattr(ps, "asr_artifacts", {}).items()},
-            "reviewTasks": {k: _encode_review_task(v) for k, v in getattr(ps, "review_tasks", {}).items()},
-            "convergences": {k: _encode_convergence(v) for k, v in getattr(ps, "convergences", {}).items()},
-            "reviewChains": {k: _encode_review_chain(v) for k, v in getattr(ps, "review_chains", {}).items()},
-            "reviewTaskQueue": None if getattr(ps, "review_task_queue", None) is None else _encode_review_task_queue(ps.review_task_queue),
-            "layers": {k: _encode_layer(v) for k, v in getattr(ps, "layers", {}).items()},
-            "layersByIndex": {str(k): v for k, v in getattr(ps, "layers_by_index", {}).items()},
-            "entryRegs": {k: _encode_entry_reg(v) for k, v in getattr(ps, "entry_regs", {}).items()},
-            "aggregationQueues": {str(k): _encode_aggq(v) for k, v in getattr(ps, "aggregation_queues", {}).items()},
-            "aggregationKNode": dict(aggregation_k_node),
-            "aggregationKPoint": dict(aggregation_k_point),
-            "aggregationCycleState": dict(aggregation_cycle_state),
-            "pendingRollUpParentNodeId": dict(pending_roll_up_parent_node_id),
-            "normalTickQuotaRemaining": dict(normal_tick_quota_remaining),
-            "aggregationEvents": {k: _encode_event(v) for k, v in getattr(ps, "aggregation_events", {}).items()},
-        }
+        out["projects"][pid] = encode_project_payload(ps)
     return out
 
 
@@ -862,53 +1015,6 @@ def decode_snapshot(data: dict[str, Any]) -> Tuple[Dict[str, dict[str, Any]], Di
     projects_out: Dict[str, dict[str, Any]] = {}
     projects = dict(data.get("projects", {}))
     for pid, raw in projects.items():
-        d = dict(raw)
-        project = _decode_project(dict(d["project"]))
-        raw_storage_cfg = d.get("projectStorageConfig")
-        if raw_storage_cfg is None:
-            raw_storage_cfg = d.get("projectScanConfig")
-        projects_out[str(pid)] = {
-            "project": project,
-            "project_storage_config": None if raw_storage_cfg is None else _decode_project_storage_config(dict(raw_storage_cfg)),
-            "project_config": None if d.get("projectConfig") is None else _decode_project_config(dict(d["projectConfig"])),
-            "material_allowlist": None
-            if d.get("materialAllowlist") is None
-            else _decode_material_allowlist(dict(d["materialAllowlist"])),
-            "audit_log_events": {k: _decode_audit_log_event(v) for k, v in dict(d.get("auditLogEvents", {})).items()},
-            "instances": {k: _decode_instance(v) for k, v in dict(d.get("instances", {})).items()},
-            "learning_object_nodes": {k: _decode_learning_object_node(v) for k, v in dict(d.get("learningObjectNodes", {})).items()},
-            "recall_points": {k: _decode_recall_point(v) for k, v in dict(d.get("recallPoints", {})).items()},
-            "recall_point_review_records": {
-                k: _decode_recall_point_review_record(v)
-                for k, v in dict(d.get("recallPointReviewRecords", {})).items()
-            },
-            "media_assets": {k: _decode_media_asset(v) for k, v in dict(d.get("mediaAssets", {})).items()},
-            "learning_tasks": {k: _decode_learning_task(v) for k, v in dict(d.get("learningTasks", {})).items()},
-            "learning_task_nodes": {k: _decode_learning_task_node(v) for k, v in dict(d.get("learningTaskNodes", {})).items()},
-            "range_snapshots": {k: _decode_range_snapshot(v) for k, v in dict(d.get("rangeSnapshots", {})).items()},
-            "asr_artifacts": {k: _decode_asr_artifact(v) for k, v in dict(d.get("asrArtifacts", {})).items()},
-            "review_tasks": {k: _decode_review_task(v) for k, v in dict(d.get("reviewTasks", {})).items()},
-            "convergences": {k: _decode_convergence(v) for k, v in dict(d.get("convergences", {})).items()},
-            "review_chains": {k: _decode_review_chain(v) for k, v in dict(d.get("reviewChains", {})).items()},
-            "review_task_queue": None
-            if d.get("reviewTaskQueue") is None
-            else _decode_review_task_queue(dict(d["reviewTaskQueue"])),
-            "layers": {k: _decode_layer(v) for k, v in dict(d.get("layers", {})).items()},
-            "layers_by_index": {int(k): str(v) for k, v in dict(d.get("layersByIndex", {})).items()},
-            "entry_regs": {k: _decode_entry_reg(v) for k, v in dict(d.get("entryRegs", {})).items()},
-            "aggregation_queues": {int(k): _decode_aggq(v) for k, v in dict(d.get("aggregationQueues", {})).items()},
-            "aggregation_k_node": {int(k): int(v) for k, v in dict(d.get("aggregationKNode", {})).items()},
-            "aggregation_k_point": {int(k): int(v) for k, v in dict(d.get("aggregationKPoint", {})).items()},
-            "aggregation_cycle_state": {
-                int(k): AggregationCycleState(v) for k, v in dict(d.get("aggregationCycleState", {})).items()
-            },
-            "pending_roll_up_parent_node_id": {
-                int(k): (None if v is None else str(v)) for k, v in dict(d.get("pendingRollUpParentNodeId", {})).items()
-            },
-            "normal_tick_quota_remaining": {
-                int(k): int(v) for k, v in dict(d.get("normalTickQuotaRemaining", {})).items()
-            },
-            "aggregation_events": {k: _decode_event(v) for k, v in dict(d.get("aggregationEvents", {})).items()},
-        }
+        projects_out[str(pid)] = decode_project_payload(str(pid), dict(raw))
 
     return projects_out, idgen_counters

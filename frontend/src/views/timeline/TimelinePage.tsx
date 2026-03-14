@@ -1,8 +1,10 @@
+import { Clock3 } from "lucide-react"
 import { useMemo } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
 import type { AuditLogEvent } from "@/ui/api/auditLog"
+import { ContentEmptyState, ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import { useAuditLogEvents } from "@/ui/queries/auditLog"
@@ -158,9 +160,12 @@ export function TimelinePage() {
 
   if (!pid) {
     return (
-      <div className="space-y-2">
-        <p className="text-sm text-muted-foreground">缺少 projectId。</p>
-        <Button onClick={() => nav("/projects")}>返回项目列表</Button>
+      <div className="space-y-4">
+        <ContentNotice
+          title="当前页面缺少项目上下文"
+          message="时间线页面需要附带有效的项目 ID 才能读取对应事件。你可以先回到项目列表，再从目标项目重新进入。"
+          action={<Button onClick={() => nav("/projects")}>返回项目列表</Button>}
+        />
       </div>
     )
   }
@@ -185,10 +190,14 @@ export function TimelinePage() {
           <CardDescription>按时间倒序展示该项目的关键学习里程碑。</CardDescription>
         </CardHeader>
         <CardContent>
-          {q.isLoading ? <p className="text-sm text-muted-foreground">加载中...</p> : null}
-          {q.error ? <p className="text-sm text-destructive">{formatApiError(q.error)}</p> : null}
+          {q.isLoading ? <LoadingNotice title="正在加载项目时间线" message="正在整理这个项目最近的学习、复习和配置事件。" /> : null}
+          {q.error ? <ErrorNotice title="项目时间线加载失败" message={formatApiError(q.error)} /> : null}
           {!q.isLoading && !q.error && events.length === 0 ? (
-            <p className="text-sm text-muted-foreground">暂无事件记录。</p>
+            <ContentEmptyState
+              icon={Clock3}
+              title="这条时间线还没有新的项目里程碑"
+              message="当你创建学习任务、提交复习、执行上推或调整项目配置后，这里会按时间顺序自动记录关键事件。"
+            />
           ) : null}
 
           {!q.isLoading && !q.error && events.length > 0 ? (

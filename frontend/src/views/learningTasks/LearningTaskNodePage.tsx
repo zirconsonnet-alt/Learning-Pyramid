@@ -7,6 +7,7 @@ import {
   exportRecallPointsByLearningTaskNode,
   listRecallPointsByLearningTaskNode,
 } from "@/ui/api/learningTaskNodes"
+import { ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import { useLearningTaskNode, useLearningTaskNodeBinding } from "@/ui/queries/learningTasks"
@@ -36,9 +37,12 @@ export function LearningTaskNodePage() {
 
   if (!pid || !nid) {
     return (
-      <div className="space-y-2">
-        <p className="text-sm text-muted-foreground">缺少 projectId 或 nodeId。</p>
-        <Button onClick={() => navigate("/projects")}>返回项目列表</Button>
+      <div className="space-y-4">
+        <ContentNotice
+          title="当前页面缺少任务节点上下文"
+          message="任务节点详情页需要同时提供项目 ID 和节点 ID。你可以先回到项目列表，再从学习任务树重新进入。"
+          action={<Button onClick={() => navigate("/projects")}>返回项目列表</Button>}
+        />
       </div>
     )
   }
@@ -68,9 +72,20 @@ export function LearningTaskNodePage() {
           <CardTitle>节点概览</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          {nodeQ.isLoading ? <p className="text-sm text-muted-foreground">加载中...</p> : null}
-          {nodeQ.error ? <p className="text-sm text-destructive">{formatApiError(nodeQ.error)}</p> : null}
-          {bindingQ.error ? <p className="text-sm text-destructive">{formatApiError(bindingQ.error)}</p> : null}
+          {nodeQ.isLoading ? <LoadingNotice title="正在加载任务节点" message="正在读取这个节点的层级、子节点和关联任务信息。" /> : null}
+          {nodeQ.error ? <ErrorNotice title="任务节点加载失败" message={formatApiError(nodeQ.error)} /> : null}
+          {bindingQ.error ? <ErrorNotice title="节点绑定加载失败" message={formatApiError(bindingQ.error)} /> : null}
+          {!nodeQ.isLoading && !nodeQ.error && !nodeQ.data ? (
+            <ContentNotice
+              title="未找到这个任务节点"
+              message="这个任务节点可能已经被重建或移除。你可以返回学习任务树重新选择。"
+              action={
+                <Button variant="outline" asChild>
+                  <Link to={`/p/${pid}/task-tree`}>返回学习任务树</Link>
+                </Button>
+              }
+            />
+          ) : null}
 
           {nodeQ.data ? (
             <>
@@ -123,13 +138,15 @@ export function LearningTaskNodePage() {
         description="该学习任务节点覆盖到的复述点会直接显示在这里。"
       />
 
-      <NodeExportCard
-        projectId={pid}
-        nodeTitle={title}
-        recallPoints={recallPointsQ.data ?? []}
-        exportRecallPoints={() => exportRecallPointsByLearningTaskNode(pid, nid)}
-        exportAsr={() => exportAsrByLearningTaskNode(pid, nid)}
-      />
+      {nodeQ.data ? (
+        <NodeExportCard
+          projectId={pid}
+          nodeTitle={title}
+          recallPoints={recallPointsQ.data ?? []}
+          exportRecallPoints={() => exportRecallPointsByLearningTaskNode(pid, nid)}
+          exportAsr={() => exportAsrByLearningTaskNode(pid, nid)}
+        />
+      ) : null}
     </div>
   )
 }

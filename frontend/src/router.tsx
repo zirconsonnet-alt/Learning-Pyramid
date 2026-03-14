@@ -1,41 +1,63 @@
+import { Suspense, lazy } from "react"
+import type { ReactNode } from "react"
 import { createBrowserRouter, Navigate } from "react-router-dom"
 
 import { AppShell } from "@/shell/AppShell"
-import { GuidePage } from "@/views/guide/GuidePage"
-import { InstancePage } from "@/views/instances/InstancePage"
-import { LearningObjectNodePage } from "@/views/learningObjects/LearningObjectNodePage"
-import { LearningTaskNodePage } from "@/views/learningTasks/LearningTaskNodePage"
-import { ProjectsPage } from "@/views/projects/ProjectsPage"
-import { RecallPointPage } from "@/views/recallPoints/RecallPointPage"
-import { LearningTaskPage } from "@/views/learningTasks/LearningTaskPage"
-import { ReviewChainPage } from "@/views/reviewChains/ReviewChainPage"
-import { ProjectSettingsPage } from "@/views/settings/ProjectSettingsPage"
 import { RouteErrorPage } from "@/views/system/RouteErrorPage"
-import { TimelinePage } from "@/views/timeline/TimelinePage"
-import { ObjectTreePage } from "@/views/trees/ObjectTreePage"
-import { TaskTreePage } from "@/views/trees/TaskTreePage"
-import { WorkbenchPage } from "@/views/workbench/WorkbenchPage"
+import { RoutePendingPage } from "@/views/system/RoutePendingPage"
+
+const AuthPage = lazy(async () => ({ default: (await import("@/views/auth/AuthPage")).AuthPage }))
+const GuidePage = lazy(async () => ({ default: (await import("@/views/guide/GuidePage")).GuidePage }))
+const InstancePage = lazy(async () => ({ default: (await import("@/views/instances/InstancePage")).InstancePage }))
+const LearningObjectNodePage = lazy(async () => ({
+  default: (await import("@/views/learningObjects/LearningObjectNodePage")).LearningObjectNodePage,
+}))
+const LearningTaskNodePage = lazy(async () => ({
+  default: (await import("@/views/learningTasks/LearningTaskNodePage")).LearningTaskNodePage,
+}))
+const LearningTaskPage = lazy(async () => ({ default: (await import("@/views/learningTasks/LearningTaskPage")).LearningTaskPage }))
+const ProjectsPage = lazy(async () => ({ default: (await import("@/views/projects/ProjectsPage")).ProjectsPage }))
+const RecallPointPage = lazy(async () => ({ default: (await import("@/views/recallPoints/RecallPointPage")).RecallPointPage }))
+const ReviewChainPage = lazy(async () => ({ default: (await import("@/views/reviewChains/ReviewChainPage")).ReviewChainPage }))
+const ProjectSettingsPage = lazy(async () => ({ default: (await import("@/views/settings/ProjectSettingsPage")).ProjectSettingsPage }))
+const DesktopAgentPage = lazy(async () => ({ default: (await import("@/views/system/DesktopAgentPage")).DesktopAgentPage }))
+const RelayMonitorPage = lazy(async () => ({ default: (await import("@/views/system/RelayMonitorPage")).RelayMonitorPage }))
+const TimelinePage = lazy(async () => ({ default: (await import("@/views/timeline/TimelinePage")).TimelinePage }))
+const ObjectTreePage = lazy(async () => ({ default: (await import("@/views/trees/ObjectTreePage")).ObjectTreePage }))
+const TaskTreePage = lazy(async () => ({ default: (await import("@/views/trees/TaskTreePage")).TaskTreePage }))
+const WorkbenchPage = lazy(async () => ({ default: (await import("@/views/workbench/WorkbenchPage")).WorkbenchPage }))
+
+function lazyElement(element: ReactNode) {
+  return <Suspense fallback={<RoutePendingPage />}>{element}</Suspense>
+}
 
 export const router = createBrowserRouter([
+  {
+    path: "/login",
+    element: lazyElement(<AuthPage />),
+    errorElement: <RouteErrorPage />,
+  },
   {
     element: <AppShell />,
     errorElement: <RouteErrorPage />,
     children: [
       { path: "/", element: <Navigate to="/projects" replace /> },
       { path: "/docs", element: <Navigate to="/guide" replace /> },
-      { path: "/guide", element: <GuidePage /> },
-      { path: "/projects", element: <ProjectsPage /> },
-      { path: "/p/:projectId/workbench", element: <WorkbenchPage /> },
-      { path: "/p/:projectId/settings", element: <ProjectSettingsPage /> },
-      { path: "/p/:projectId/timeline", element: <TimelinePage /> },
-      { path: "/p/:projectId/task-tree", element: <TaskTreePage /> },
-      { path: "/p/:projectId/learning-tasks/:learningTaskId", element: <LearningTaskPage /> },
-      { path: "/p/:projectId/learning-task-nodes/:nodeId", element: <LearningTaskNodePage /> },
-      { path: "/p/:projectId/learning-object-nodes/:nodeId", element: <LearningObjectNodePage /> },
-      { path: "/p/:projectId/instances/:instanceId", element: <InstancePage /> },
-      { path: "/p/:projectId/object-tree", element: <ObjectTreePage /> },
-      { path: "/p/:projectId/review-chains/:reviewChainId", element: <ReviewChainPage /> },
-      { path: "/p/:projectId/recall-points/:recallPointId", element: <RecallPointPage /> },
+      { path: "/guide", element: lazyElement(<GuidePage />) },
+      { path: "/projects", element: lazyElement(<ProjectsPage />) },
+      { path: "/system/desktop-agent", element: lazyElement(<DesktopAgentPage />) },
+      { path: "/system/relay-monitor", element: lazyElement(<RelayMonitorPage />) },
+      { path: "/p/:projectId/workbench", element: lazyElement(<WorkbenchPage />) },
+      { path: "/p/:projectId/settings", element: lazyElement(<ProjectSettingsPage />) },
+      { path: "/p/:projectId/timeline", element: lazyElement(<TimelinePage />) },
+      { path: "/p/:projectId/task-tree", element: lazyElement(<TaskTreePage />) },
+      { path: "/p/:projectId/learning-tasks/:learningTaskId", element: lazyElement(<LearningTaskPage />) },
+      { path: "/p/:projectId/learning-task-nodes/:nodeId", element: lazyElement(<LearningTaskNodePage />) },
+      { path: "/p/:projectId/learning-object-nodes/:nodeId", element: lazyElement(<LearningObjectNodePage />) },
+      { path: "/p/:projectId/instances/:instanceId", element: lazyElement(<InstancePage />) },
+      { path: "/p/:projectId/object-tree", element: lazyElement(<ObjectTreePage />) },
+      { path: "/p/:projectId/review-chains/:reviewChainId", element: lazyElement(<ReviewChainPage />) },
+      { path: "/p/:projectId/recall-points/:recallPointId", element: lazyElement(<RecallPointPage />) },
     ],
   },
 ])

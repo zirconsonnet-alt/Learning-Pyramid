@@ -1,0 +1,16 @@
+.git
+.history
+.pytest_cache
+__pycache__
+*.py[cod]
+
+.plm_store.json
+.plm_store.json.bak-*
+.plm_store.json.imported.bak
+._plm_store_test.json
+data
+build
+release
+
+frontend/node_modules
+frontend/*.tsbuildinfo

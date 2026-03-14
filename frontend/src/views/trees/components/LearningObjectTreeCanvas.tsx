@@ -1,6 +1,7 @@
 import { File, FolderOpen, HardDrive, type LucideIcon } from "lucide-react"
 import { useMemo } from "react"
 
+import { ContentEmptyState } from "@/ui/components/contentEmptyState"
 import { cn } from "@/ui/utils"
 
 export type ObjectTreeVisualType = "root" | "group" | "material"
@@ -268,7 +269,13 @@ export function LearningObjectTreeCanvas({
   }, [focusNodeId, nodeById, parentById])
 
   if (Object.keys(rectById).length === 0) {
-    return <p className="text-sm text-muted-foreground">暂无根节点。</p>
+    return (
+      <ContentEmptyState
+        icon={HardDrive}
+        title="当前对象树还没有根节点"
+        message="素材目录同步完成后，这里会出现学习对象的根目录与分组结构。"
+      />
+    )
   }
 
   return (

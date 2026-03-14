@@ -94,9 +94,9 @@
 
 本规格出现的常用语义类型（非穷尽，但应覆盖全文使用）：
 
-* ID 类（`xxxId` 或同类标识符）：`ProjectId`、`InstanceId`、`LearningObjectNodeId`、`RecallPointId`、`LearningTaskId`、`LearningTaskNodeId`、`RangeId`（实现可复用旧 `FocusSetId` 的底层类型）、`ReviewTaskId`、`ConvergenceId`、`ConvergenceRuleId`、`ReviewChainId`、`ReviewTaskQueueId`、`LayerId`、`DimensionId`、`JudgementOptionId`、`AggregationEventId`（4.4.5）、`MediaAssetId`、`AsrArtifactId`。
+* ID 类（`xxxId` 或同类标识符）：`ProjectId`、`InstanceId`、`LearningObjectNodeId`、`RecallPointId`、`LearningTaskId`、`LearningTaskNodeId`、`RangeId`（实现可复用旧 `FocusSetId` 的底层类型）、`ReviewTaskId`、`ConvergenceId`、`ConvergenceRuleId`、`ReviewChainId`、`ReviewTaskQueueId`、`LayerId`、`DimensionId`、`JudgementOptionId`、`AggregationEventId`（4.4.5）、`MediaAssetId`、`AsrArtifactId`、`DesktopAgentId`。
 * 枚举类（`Enum`）：`ProjectState`、`LayerMode`、`ContentBlockKind`、`ReviewChainTemplateItemKind`。
-  * 增补：`InstancePresence`、`FsSyncPolicy`。
+  * 增补：`InstancePresence`、`FsSyncPolicy`、`MaterialSourceKind`。
 * 标量/值域类（`Scalar`）：`PurePath`、`Timestamp`、`LabelVector = {0,1}^{|D|}`（判别映射的值域；等价表示为长度为 `|D|` 的 0/1 向量）、`RichContent`、`ContentBlock`、`ReviewChainTemplate`、`ReviewChainTemplateItem`、`LayerConfig`。
 * 校验结果类（`Result`）：`ValidationResult`、`ValidationCode`（0b.7.2/0b.7.3）。
 
@@ -112,12 +112,13 @@
 * `ValidationCode = {OK, NOT_FOUND, UNREACHABLE, INVALID_INPUT}`（0b.7.2/0b.7.3）
 * `ContentBlockKind = {TEXT, IMAGE}`（0a.12）
 * `ReviewChainTemplateItemKind = {CONVERGENCE, REVIEW_TASK}`（1.0.5 / 4.3.2）
-* `AuditEventKind = {PROJECT_CREATED, PROJECT_DELETED, ADD_INSTANCE, ADD_LEARNING_OBJECT_LEAF, ADD_LEARNING_OBJECT_CONTAINER, SUBMIT_LEARNING_TASK, EDIT_RECALL_POINT, EDIT_LEARNING_TASK, EDIT_PROJECT_CONFIG, EXECUTOR_COMMIT_REVIEW_TASK, MANUAL_ROLL_UP, REQUEST_ASR}`（4.6；最小集合；实现可在保持兼容前提下增补，但不得改变既有值语义）
+* `AuditEventKind = {PROJECT_CREATED, PROJECT_DELETED, ADD_INSTANCE, ADD_LEARNING_OBJECT_LEAF, ADD_LEARNING_OBJECT_CONTAINER, SYNC_LEARNING_OBJECTS_FROM_FS, SYNC_LEARNING_OBJECTS_FROM_MANIFEST, SET_PROJECT_MATERIAL_SOURCE_BINDING, BULK_REMAP_RECALL_POINTS_INSTANCE, SUBMIT_LEARNING_TASK, EDIT_RECALL_POINT, EDIT_LEARNING_TASK, EDIT_PROJECT_CONFIG, EXECUTOR_COMMIT_REVIEW_TASK, MANUAL_ROLL_UP, REQUEST_ASR}`（4.6；最小集合；实现可在保持兼容前提下增补，但不得改变既有值语义）
 * `AuditResultCode = {OK}`（1.8 / 4.6；本规格仅强制记录成功提交的审计事件）
 * `SessionMode = {READ_ONLY, READ_WRITE}`（0b.1.6）
 
 * `InstancePresence = {PRESENT, MISSING}`（1.1.1）
 * `FsSyncPolicy = {DISABLED, STARTUP_SYNC, MANUAL_SYNC}`（1.0.4 / 0b.1.5b / 4.5）
+* `MaterialSourceKind = {SERVER_FS, DESKTOP_AGENT_MANIFEST}`（1.0.4a / 0b.1.5b / 4.5）
 
 ---
 
@@ -208,6 +209,7 @@
 * 项目 bootstrap 的最小产物（强约束）：
   * 在 `project_id` 作用域内持久化且仅持久化一条 `ReviewTaskQueue` 记录，满足 `queue_id == GLOBAL_QUEUE`。
   * 在 `project_id` 作用域内持久化且仅持久化一条 `ProjectStorageConfig` 记录，且 `project_root` 非空、`learning_object_root` 非空（见 1.0.4）。
+  * 在 `project_id` 作用域内持久化且仅持久化一条 `ProjectMaterialSourceBinding` 记录；其默认值必须写死为 `source_kind == SERVER_FS`、`desktop_agent_id == None`（见 1.0.4a）。
   * 在 `project_id` 作用域内持久化且仅持久化一条 `ProjectConfig` 记录（见 1.0.5）；其默认值必须写死为：  
     - `layer_index = 0` 的 `review_chain_template == [CONVERGENCE]`（等价于 4.3.2 的默认行为）；  
     - `layer_index = 0` 的 `aggregation_threshold == (K_node=10, K_point=200)`（用于初始化 Layer 的控制字段；聚合时读取 Layer 当前值，见 4.4.2）。  
@@ -217,93 +219,107 @@
     - `layer_mode = AUTO_TICK_ON_ENTRY`  
     - `orchestrator_managed_review_chain_ids = ()`（空 Tuple）  
     - `K_node = 10, K_point = 200`（与 1.0.5 的默认阈值一致）  
-    - `aggregation_cycle_state = CLEARING`（若实现持久化该字段；若未持久化则可视为派生初态，但对外可观察行为必须一致）  
+    - `aggregation_cycle_state = DONE`（若实现持久化该字段；若未持久化则可视为派生初态，但对外可观察行为必须一致）  
   * 在 `project_id` 下初始化且仅初始化 `layer_index = 0` 的 `AggregationQueue`（4.4.1），其初态必须为：  
     - `node_ids = ()`  
     - `head_index = 0`
 * 若项目 bootstrap 失败，则 `Project` 不得进入 `ACTIVE` 的已提交状态（项目创建整体回滚）。
 
-0b.1.5b 项目材料目录同步（Project Filesystem Sync）（强约束）
+0b.1.5b 项目材料源同步（Project Material Source Sync）（强约束）
 
 目的  
-当项目启用“材料目录同步”能力时，系统将 `ProjectStorageConfig.learning_object_root` 下的目录树视为 LearningObjectNode 树与 Instance 集合的权威结构源。系统必须在启动或手动触发时检查目录结构与既有 LearningObjectNode 树是否一致；若不一致则按本节协议重建 LearningObjectNode 树并新增/标记 Instance。  
+当项目启用“材料源同步”能力时，系统必须将该项目当前 `ProjectMaterialSourceBinding` 指向的权威材料源视为 `LearningObjectNode` 树与 `Instance` 集合的唯一结构事实源。同步协议负责把材料源快照归一化为相对路径集合，并据此原子重建学习对象树、创建新增 `Instance`、以及将未再出现的 `Instance` 标记为 `MISSING`。  
 
-触发策略（写死）  
-- 若 `ProjectStorageConfig.fs_sync_policy == DISABLED`：系统不得执行任何自动同步；LearningObjectNode/Instance 仅通过显式写入口变更。  
-- 若 `ProjectStorageConfig.fs_sync_policy == STARTUP_SYNC`：系统在对外开放该项目任何 READ_WRITE 写入口之前，必须对该项目执行一次同步（可与系统 bootstrap 同阶段）。  
-- 若 `ProjectStorageConfig.fs_sync_policy == MANUAL_SYNC`：系统启动时不得自动同步，但必须提供 4.5 的 `sync_learning_objects_from_fs(...)` 对外入口供用户显式触发。  
-
-启动失败与根目录门禁（强约束；写死）  
-- 对 `STARTUP_SYNC` 项目，系统在尝试同步前必须先判定 `abs_root := resolve(project_root / learning_object_root)` 的根目录状态。  
-- 若 `abs_root` 不存在：必须拒绝该项目进入“可提供 READ_WRITE 写入口”的就绪态，并返回 `NotFound`（或实现定义的等价明确错误）；不得将其视为空目录，不得隐式创建目录，不得跳过同步。  
-- 若 `abs_root` 存在但不是目录：必须拒绝同步并返回 `PreconditionFailure`（或实现定义的等价明确错误），且不得产生任何 staged 写入。  
-- 若访问 `abs_root` 发生权限/I/O 错误：必须拒绝同步并返回明确错误，且不得产生任何 staged 写入。  
-- 上述口径同样适用于对外入口 `sync_learning_objects_from_fs(project_id)`；实现不得对 STARTUP/MANUAL 两条路径采用不同根目录判定语义。  
+术语（强约束）  
+- `source_kind == SERVER_FS`：权威材料源为服务端本地目录 `resolve(project_root / learning_object_root)`。  
+- `source_kind == DESKTOP_AGENT_MANIFEST`：权威材料源为某个已绑定桌面连接器所声明的本地目录；服务端不持久化该目录的绝对路径，只接收其相对路径清单（manifest）。  
+- 下文凡称“项目启用 0b.1.5b 同步协议”，均指以下任一条件成立：  
+  - `source_kind == SERVER_FS` 且 `ProjectStorageConfig.fs_sync_policy != DISABLED`；  
+  - `source_kind == DESKTOP_AGENT_MANIFEST`。  
 
 一致性与原子性（强约束）  
 - 同步必须通过一次系统内部 `MutationSession(project_id, READ_WRITE)` + 单次 `commit()` 原子完成；任一步失败则整体回滚，对外不可见（0b.1.2）。  
-- 同步不得触发任何调度推进副作用：不得调用 Task Register / Orchestrator Tick / ReviewChain Step / Convergence Step，且不得创建/入队任何 ReviewTask（4.5 的 SCHEDULING_EFFECT = NONE）。  
+- 同步不得触发任何调度推进副作用：不得调用 Task Register / Orchestrator Tick / ReviewChain Step / Convergence Step，且不得创建/入队任何 `ReviewTask`（4.5 的 `SCHEDULING_EFFECT = NONE`）。  
 - 同步属于“显式协议写入”，并非 0b.7.1 的提交期强制校验扩展；系统级 `commit()` 的强制集合闭包保持不变（0b.7.1）。  
 
-扫描范围与路径规范化（强约束）  
+触发策略（写死）  
+- 当 `source_kind == SERVER_FS` 时：  
+  - 若 `ProjectStorageConfig.fs_sync_policy == DISABLED`：系统不得执行任何自动同步；`LearningObjectNode/Instance` 仅通过显式写入口变更。  
+  - 若 `ProjectStorageConfig.fs_sync_policy == STARTUP_SYNC`：系统在对外开放该项目任何 `READ_WRITE` 写入口之前，必须对该项目执行一次同步（可与系统 bootstrap 同阶段）。  
+  - 若 `ProjectStorageConfig.fs_sync_policy == MANUAL_SYNC`：系统启动时不得自动同步，但必须提供 4.5 的 `sync_learning_objects_from_fs(...)` 对外入口供用户显式触发。  
+- 当 `source_kind == DESKTOP_AGENT_MANIFEST` 时：  
+  - 系统必须禁止把服务端 `project_root / learning_object_root` 当作材料源做隐式扫描。  
+  - 同步只能由显式 `sync_learning_objects_from_manifest(...)` 入口，或语义等价的认证桌面连接器推送触发。  
+  - 系统启动时不得因为桌面连接器离线、尚未推送 manifest、或当前无活跃连接而拒绝项目进入可读写就绪态。若此前已有已提交的同步结果，则必须继续把该结果视为当前已提交事实；若此前从未成功同步，则项目仅表现为“尚无任何材料实例/节点”。  
+
+`SERVER_FS` 输入语义（强约束）  
 - 扫描根目录 `abs_root := resolve(project_root / learning_object_root)`；其中 `project_root` 来自 `ProjectStorageConfig.project_root`（1.0.4）。  
 - `learning_object_root` 必须位于 `project_root` 下，且不得包含 `..` 语义（1.0.4）。  
-- 扫描得到的所有条目路径一律以 POSIX 语义规范化为相对 `learning_object_root` 的 `PurePath`（记为 `rel_path`），并以 `rel_path.as_posix()` 作为排序输入（0a.9a 的 Unicode code point 字典序）。
-
-扫描过滤与特殊条目处理（强约束；写死）
-- 必须忽略（不纳入同构判定、不生成节点、不生成 Instance）所有以 `.` 开头的文件或目录条目（例如 `.DS_Store`、`.git/` 等）。
-- 空目录处理（强约束）：必须将空目录纳入扫描并生成对应的 `LearningObjectContainer`（其 `children` 允许为空）。
-- 符号链接/快捷方式（强约束）：扫描若遇到符号链接条目（无论指向文件或目录），必须拒绝同步并返回错误，且不得产生任何 staged 写入（0b.5）。建议错误名：`UnsupportedFilesystemEntryError`（实现可复用 `DirectoryStructureCorruptedError`，但必须在错误摘要中指明“符号链接不受支持”与具体路径）。
-- 非普通文件/目录（设备文件、管道等）：必须拒绝同步并返回错误，且不得产生任何 staged 写入（0b.5），并在错误摘要中列出条目路径与类型。
-
-  
-
-目录结构同构与同质约束门禁（强约束；写死）  
-- 目录树与 LearningObjectNode 树必须严格同构：每个目录对应一个 `LearningObjectContainer(relative_path=dir_rel_path)`；每个文件对应一个 `LearningObjectLeaf(relative_path=file_rel_path)`；层级关系与直接孩子集合必须严格对应“文件系统直接子条目”。  
+- 对 `STARTUP_SYNC` 项目，系统在尝试同步前必须先判定 `abs_root` 的根目录状态：  
+  - 若 `abs_root` 不存在：必须拒绝该项目进入“可提供 READ_WRITE 写入口”的就绪态，并返回 `NotFound`（或实现定义的等价明确错误）；不得将其视为空目录，不得隐式创建目录，不得跳过同步。  
+  - 若 `abs_root` 存在但不是目录：必须拒绝同步并返回 `PreconditionFailure`（或实现定义的等价明确错误），且不得产生任何 staged 写入。  
+  - 若访问 `abs_root` 发生权限/I/O 错误：必须拒绝同步并返回明确错误，且不得产生任何 staged 写入。  
+- 上述口径同样适用于对外入口 `sync_learning_objects_from_fs(project_id)`；实现不得对 `STARTUP/MANUAL` 两条路径采用不同根目录判定语义。  
+- 必须忽略（不纳入同构判定、不生成节点、不生成 `Instance`）所有以 `.` 开头的文件或目录条目（例如 `.DS_Store`、`.git/` 等）。  
+- 空目录处理（强约束）：必须将空目录纳入扫描并生成对应的 `LearningObjectContainer`（其 `children` 允许为空）。  
+- 符号链接/快捷方式（强约束）：扫描若遇到符号链接条目（无论指向文件或目录），必须拒绝同步并返回错误，且不得产生任何 staged 写入（0b.5）。建议错误名：`UnsupportedFilesystemEntryError`（实现可复用 `DirectoryStructureCorruptedError`，但必须在错误摘要中指明“符号链接不受支持”与具体路径）。  
+- 非普通文件/目录（设备文件、管道等）：必须拒绝同步并返回错误，且不得产生任何 staged 写入（0b.5），并在错误摘要中列出条目路径与类型。  
+- 目录树与 `LearningObjectNode` 树必须严格同构：每个目录对应一个 `LearningObjectContainer(relative_path=dir_rel_path)`；每个文件对应一个 `LearningObjectLeaf(relative_path=file_rel_path)`；层级关系与直接孩子集合必须严格对应“文件系统直接子条目”。  
 - 同质约束门禁（写前条件失败；0b.5）：对任一目录 `d`，其直接孩子集合不得同时包含“目录”与“文件”；否则必须拒绝同步并返回“目录结构损坏”（建议错误名：`DirectoryStructureCorruptedError`，见 0b.6 增补），且失败不得产生任何 staged 写入。  
+
+`DESKTOP_AGENT_MANIFEST` 输入语义（强约束）  
+- manifest 的最小权威输入为一组文件相对路径 `relative_paths`；每条路径均相对桌面连接器当前选择的本地目录根。  
+- manifest 中的 `root_title` 或根目录显示名仅允许作为显示/审计辅助信息；不得参与 `InstanceId`/`LearningObjectNodeId` 计算，不得影响排序或同构判定。  
+- 对每条 manifest 路径，系统必须先做以下规范化后再进入同步逻辑：  
+  - 将 `\` 统一替换为 `/`；  
+  - 以 `PurePosixPath` 解析；  
+  - 必须是非空相对路径；不得为绝对路径；不得包含 `.` 或 `..` 语义；  
+  - 任一组件若以 `.` 开头，必须按“被忽略条目”处理，即不纳入同步结果。  
+- manifest 可为空；空 manifest 表示当前权威材料源快照为空。  
+- manifest 的目录集合定义为：所有文件路径的父目录闭包再加根目录 `.`；最小版中，未被任何文件覆盖到的空目录不属于权威结构源。  
+- 若规范化后出现重复文件路径，或同一路径同时被解释为“文件路径”与“某文件路径的父目录”，必须拒绝同步并返回“目录结构损坏”，且不得产生任何 staged 写入。  
+- `LearningObjectNode` 树必须与“manifest 文件路径 + 父目录闭包”严格同构。  
+
+路径文本与跨平台一致性（强约束；写死）  
+- 对任意材料源输入得到的 `rel_path`，其权威路径文本均定义为 `rel_path.as_posix()`；系统不得对路径做 Unicode `NFC/NFD` 归一化或 locale 相关变换（按 Unicode code point 原样处理）。  
+- 大小写语义（强约束）：路径比较按 code point 区分大小写；若底层材料源或输入清单导致出现“仅大小写不同但不可共存/不可区分”的冲突，同步阶段必须拒绝并返回冲突列表（不产生任何写入）。  
 
 ID 生成（强约束；用于稳定引用）  
 - 定义（强约束；写死以避免实现分叉）  
-  - 令 `path_text(rel_path) := rel_path.as_posix()`（见下文“路径文本与跨平台一致性”）。  
+  - 令 `path_text(rel_path) := rel_path.as_posix()`。  
   - 令 `fs_hash32(rel_path) := sha256(path_text(rel_path).encode('utf-8')).hexdigest()[:32]`。  
     - 约束：`hexdigest()` 必须为小写十六进制；截断长度必须固定为 32。  
   - `id_from_rel_path(rel_path) := InstanceId('instfs_' + fs_hash32(rel_path))`。  
   - `node_id_from_rel_path(rel_path, kind)`：  
-    - 若 `kind == LEAF`：`LearningObjectNodeId('lonfs_leaf_' + fs_hash32(rel_path))`  
-    - 若 `kind == DIR`：`LearningObjectNodeId('lonfs_dir_' + fs_hash32(rel_path))`  
-- InstanceId（由文件系统生成）：对任一文件 `rel_path`，其 `instance_id` 必须等于 `id_from_rel_path(rel_path)`。  
-- LearningObjectNodeId（由文件系统生成）：对任一目录/文件 `rel_path`，其 `node_id` 必须等于 `node_id_from_rel_path(rel_path, kind)`。  
-- 强约束：在 `fs_sync_policy != DISABLED` 的项目内，系统不得允许用户通过 `add_learning_object_leaf/container` 任意指定 `node_id`；相关入口必须拒绝或仅作为调试入口存在且默认关闭（4.5）。  
-
-
-
-路径文本与跨平台一致性（强约束；写死）
-- `rel_path.as_posix()` 作为权威路径文本输入；系统不得对路径做 Unicode NFC/NFD 归一化或 locale 相关变换（按 Unicode code point 原样处理）。
-- 大小写语义（强约束）：路径比较按 code point 区分大小写；若底层文件系统导致出现“仅大小写不同但不可共存/不可区分”的冲突，扫描阶段必须拒绝同步并返回冲突列表（不产生任何写入）。
+    - 若 `kind == LEAF`：`LearningObjectNodeId('lonfs_leaf_' + fs_hash32(rel_path))`；  
+    - 若 `kind == DIR`：`LearningObjectNodeId('lonfs_dir_' + fs_hash32(rel_path))`。  
+- 对任一同步得到的文件 `rel_path`，其 `instance_id` 必须等于 `id_from_rel_path(rel_path)`。  
+- 对任一同步得到的目录/文件 `rel_path`，其 `node_id` 必须等于 `node_id_from_rel_path(rel_path, kind)`。  
+- 强约束：在启用 0b.1.5b 同步协议的项目内，系统不得允许用户通过 `add_learning_object_leaf/container` 任意指定 `node_id`；相关入口必须拒绝或仅作为调试入口存在且默认关闭（4.5）。  
 
 同步写入产物（同一 commit 生效）  
-(1) Instance 同步（文件 -> Instance）  
-- 对每个扫描到的文件条目 `rel_path`：  
-  - 若 `Instance(instance_id=id_from_rel_path(rel_path))` 不存在则创建；其 `material_id` 必须等于 `rel_path`（PurePath）。  
+(1) `Instance` 同步（文件 -> Instance）  
+- 对每个同步得到的文件条目 `rel_path`：  
+  - 若 `Instance(instance_id=id_from_rel_path(rel_path))` 不存在则创建；其 `material_id` 必须等于 `rel_path`（`PurePath`）。  
   - 将其 `presence := PRESENT`，并写入 `last_seen_at := now_utc_ms()`。  
-- 对任何“未扫描到但已存在于 InstanceRepository”的 Instance：不得删除；必须将其 `presence := MISSING`（并可选择不更新 last_seen_at）。  
+- 对任何“本次未出现在权威材料源快照里，但已存在于 InstanceRepository”的 `Instance`：不得删除；必须将其 `presence := MISSING`（并可选择不更新 `last_seen_at`）。  
+- 实现可保留“当前桌面连接器离线 / 中继暂不可用 / 当前无法打开字节流”等运行时状态，但这些状态不得反写为 `presence == MISSING`；`MISSING` 仅表示“最近一次成功同步的权威材料源快照中已不存在该路径”。  
 
 实现形态约束（强约束；写死以避免分叉）  
-- 系统必须以幂等方式写入 Instance 同步产物；推荐以以下等价接口承载（实现可不同名，但语义必须等价且可测试）：  
+- 系统必须以幂等方式写入 `Instance` 同步产物；推荐以以下等价接口承载（实现可不同名，但语义必须等价且可测试）：  
   - `InstanceRepository.upsert_from_fs(session: MutationSession, instance_id: InstanceId, material_id: PurePath, presence: InstancePresence, last_seen_at: Optional[Timestamp]) -> None`  
-    - 对扫描到的文件：必须写入（或覆盖保持一致）`material_id == rel_path`、`presence := PRESENT`、`last_seen_at := now_utc_ms()`。  
-    - 对已存在但未扫描到：必须写入 `presence := MISSING`；`last_seen_at` 不得更新（保持既有值或为 None）。  
-- 任一 I/O 错误/结构损坏导致同步失败时：上述任何 staged 写入必须为无（0b.5）。  
+    - 对同步得到的文件：必须写入（或覆盖保持一致）`material_id == rel_path`、`presence := PRESENT`、`last_seen_at := now_utc_ms()`。  
+    - 对已存在但未再出现：必须写入 `presence := MISSING`；`last_seen_at` 不得更新（保持既有值或为 `None`）。  
+- 任一 I/O 错误、manifest 非法输入或结构损坏导致同步失败时：上述任何 staged 写入必须为无（0b.5）。  
 
-(2) LearningObjectNode 同步（目录树 -> LearningObjectNode 树）  
-- 系统必须以“全量替换”方式写入 LearningObjectNode 集合：以扫描结果重建该项目在 `LearningObjectNodeRepository` 下的全部节点（见 1.2.2 `replace_all_from_fs`），确保最终态满足 1.2.3 的树一致性校验。  
+(2) `LearningObjectNode` 同步（目录树 -> LearningObjectNode 树）  
+- 系统必须以“全量替换”方式写入 `LearningObjectNode` 集合：以同步结果重建该项目在 `LearningObjectNodeRepository` 下的全部节点（见 1.2.2 `replace_all_from_fs`），确保最终态满足 1.2.3 的树一致性校验。  
 - `LearningObjectLeaf.instance_id` 必须等于其对应文件条目的 `instance_id`。  
-- Container.children 顺序写死为：按 `child.relative_path.as_posix()` 的 Unicode code point 字典序升序排列（跨平台一致；见 0a.9a）。  
+- `Container.children` 顺序写死为：按 `child.relative_path.as_posix()` 的 Unicode code point 字典序升序排列（跨平台一致；见 0a.9a）。  
 
 失败语义（强约束）  
 - 目录结构损坏：必须拒绝同步且不产生任何写入（0b.5）。  
-- 其他 I/O 错误：必须拒绝同步且不产生任何写入；系统可返回错误摘要，但不得留下部分更新。  
-
+- 其他 I/O 错误、认证失败或材料源不可达：必须拒绝同步且不产生任何写入；系统可返回错误摘要，但不得留下部分更新。  
 
 0b.1.6 会话创建入口（强约束；用于消除 API 形态分叉）
 
@@ -433,7 +449,7 @@ READ_ONLY（只读会话；强约束）
 
 * `DirectoryStructureCorruptedError`（目录结构损坏；强约束）
 
-  * 发生点：执行 0b.1.5b 材料目录同步协议时，发现任一目录的直接孩子集合违反同质约束（同时包含目录与文件），或发现目录树无法与 LearningObjectNode 树严格同构。
+  * 发生点：执行 0b.1.5b 材料源同步协议时，发现任一目录的直接孩子集合违反同质约束（同时包含目录与文件）、manifest 输入导致同一路径同时被解释为目录与文件，或发现目录树无法与 `LearningObjectNode` 树严格同构。
   * staged 写入：必须为无（拒绝时不产生任何写入；0b.5）。
   * 调用方行为（强约束）：调用方必须将其视为“用户需修复目录结构”的失败，并向用户提供损坏路径与混杂条目列表；修复后可重试同步。
 
@@ -477,7 +493,7 @@ READ_ONLY（只读会话；强约束）
 - `validate_material_reachable(session: MutationSession, instance_id: InstanceId) -> ValidationResult`
   - 失败码集合：
     - `NOT_FOUND`：`InstanceRepository.get(session, instance_id)` 不可解析。
-    - `UNREACHABLE`：材料不可达（具体探测由实现决定，但不得改写既有已提交事实）。
+    - `UNREACHABLE`：材料当前不可达（具体探测由实现决定，但不得改写既有已提交事实）；对 `DESKTOP_AGENT_MANIFEST` 材料源，这包括桌面连接器离线、会话未建立、字节流中继不可用等运行时失败。
 - `validate_recall_point_ids_resolvable(session: MutationSession, range_id: RangeId) -> ValidationResult`
   - 失败码集合：
     - `NOT_FOUND`：`RangeSnapshotRepository.get(session, range_id)` 不可解析，或其 `recall_point_ids` 中存在不可在 `RecallPointRepository.get(session, ...)` 解析的 ID。
@@ -511,6 +527,7 @@ READ_ONLY（只读会话；强约束）
   - [1.0.2 仓库接口](#toc-1-0-2)
   - [1.0.3 一致性与校验](#toc-1-0-3)
   - [1.0.4 ProjectStorageConfig（项目存储配置）](#toc-1-0-4)
+  - [1.0.4a ProjectMaterialSourceBinding（项目材料源绑定）](#toc-1-0-4a)
   - [1.0.5 ProjectConfig（项目配置）](#toc-1-0-5)
 - [1.1 Instance（实例）](#toc-1-1)
   - [1.1.1 数据模型](#toc-1-1-1)
@@ -593,20 +610,20 @@ READ_ONLY（只读会话；强约束）
 #### 1.0.4 ProjectStorageConfig（项目存储配置）
 
 用途  
-在 `project_id` 作用域内持久化“项目文件夹根路径（project_root）”，用于约束：本项目的数据库文件、富媒体文件与项目配置均存放在同一项目文件夹内。该配置仅记录路径事实，不做可达性探测。
+在 `project_id` 作用域内持久化“服务器侧项目工作目录（project_root）”，用于约束：本项目的数据库文件、富媒体资产、项目配置，以及当 `source_kind == SERVER_FS` 时的服务端材料目录，均位于同一服务器工作目录树内。该配置仅记录路径事实，不做可达性探测。
 
 存储字段  
 - `project_id: ProjectId`
 - `project_root: PurePath`
-  - 语义：项目文件夹根路径（POSIX 语义 PurePath）。  
+  - 语义：服务器侧项目工作目录根路径（POSIX 语义 `PurePath`）。  
   - 写入规范化（强约束）：对输入字符串先执行 `\ -> /` 分隔符归一，再以 `PurePosixPath` 解析并存储；不得做可达性探测、外部访问或隐式修复。
 
 - `learning_object_root: PurePath`
-  - 语义：学习对象（材料）目录的扫描根路径；**相对 `project_root` 的相对路径**（POSIX 语义 PurePath）。
+  - 语义：当 `source_kind == SERVER_FS` 时，学习对象（材料）目录的扫描根路径；**相对 `project_root` 的相对路径**（POSIX 语义 `PurePath`）。
   - 写入规范化（强约束）：同 `project_root`，先 `\ -> /`，再以 `PurePosixPath` 解析并存储。
   - 强约束：规范化后不得包含 `..` 路径穿越语义；解析 `project_root / learning_object_root` 必须仍位于 `project_root` 目录树内。
 - `fs_sync_policy: FsSyncPolicy`
-  - 语义：材料目录同步策略（见 0b.1.5b）。
+  - 语义：`SERVER_FS` 材料源的同步策略（见 0b.1.5b）。
   - 默认值（强约束）：`STARTUP_SYNC`。
 
 - `updated_at: Timestamp`
@@ -621,10 +638,9 @@ READ_ONLY（只读会话；强约束）
   - 写前条件（强约束；0b.5）：  
     - `config.project_id == session.project_id`（不得跨项目写入）。  
     - `project_root` 非空（去除首尾空白后必须非空）。
-
-- `learning_object_root` 非空（去除首尾空白后必须非空）。
-- `learning_object_root` 必须为相对路径；规范化后不得包含 `..`；解析后必须位于 `project_root` 下。
-- `fs_sync_policy` 必须为 `FsSyncPolicy` 枚举值之一。
+    - `learning_object_root` 非空（去除首尾空白后必须非空）。
+    - `learning_object_root` 必须为相对路径；规范化后不得包含 `..`；解析后必须位于 `project_root` 下。
+    - `fs_sync_policy` 必须为 `FsSyncPolicy` 枚举值之一。
   
 
 读接口  
@@ -633,6 +649,44 @@ READ_ONLY（只读会话；强约束）
 
 一致性与校验  
 - 索引不变式：同一 `project_id` 作用域内必须且只能存在一条 `ProjectStorageConfig` 记录（由项目 bootstrap 最小产物保证，0b.1.5a）。  
+
+<a id="toc-1-0-4a"></a>
+
+#### 1.0.4a ProjectMaterialSourceBinding（项目材料源绑定）
+
+用途  
+在 `project_id` 作用域内持久化“当前哪一种权威材料源负责生成 `Instance/LearningObjectNode`”这一控制事实。该对象决定 0b.1.5b 应采用 `SERVER_FS` 还是 `DESKTOP_AGENT_MANIFEST` 路径。
+
+存储字段  
+- `project_id: ProjectId`
+- `source_kind: MaterialSourceKind`
+  - 语义：当前权威材料源类型；取值必须为 `SERVER_FS` 或 `DESKTOP_AGENT_MANIFEST`。
+- `desktop_agent_id: Optional[DesktopAgentId]`
+  - 语义：当 `source_kind == DESKTOP_AGENT_MANIFEST` 时，表示被绑定的桌面连接器标识；当 `source_kind == SERVER_FS` 时必须为 `None`。
+- `source_root_label: Optional[str]`
+  - 语义：材料源根目录的展示标签；可用于 UI 展示或审计摘要。
+  - 强约束：该字段不得参与路径规范化、排序、ID 生成或同构判定。
+- `updated_at: Timestamp`
+  - 语义：最后更新时间戳；必须由系统时钟生成（0a.10）。
+
+仓库接口  
+- 关联仓库：`ProjectMaterialSourceBindingRepository`
+
+写接口  
+- `set(session: MutationSession, binding: ProjectMaterialSourceBinding) -> None`
+  - 语义：upsert；若已存在则覆盖更新（覆盖 `source_kind/desktop_agent_id/source_root_label/updated_at`）。
+  - 写前条件（强约束；0b.5）：
+    - `binding.project_id == session.project_id`（不得跨项目写入）。
+    - `binding.source_kind == SERVER_FS -> binding.desktop_agent_id == None`。
+    - `binding.source_kind == DESKTOP_AGENT_MANIFEST -> binding.desktop_agent_id` 必须非空。
+
+读接口  
+- `get(session: MutationSession) -> ProjectMaterialSourceBinding`
+  - 不存在则抛 `NotFound`（但对 `state == ACTIVE` 的项目按 0b.1.5a 应不发生）。
+
+一致性与校验  
+- 索引不变式：同一 `project_id` 作用域内必须且只能存在一条 `ProjectMaterialSourceBinding` 记录（由项目 bootstrap 最小产物保证，0b.1.5a）。
+- 切换 `source_kind` 不得隐式重建 `Instance/LearningObjectNode`；既有已提交树与实例集合必须保持不变，直到下一次显式成功同步完成。
 
 <a id="toc-1-0-5"></a>
 
@@ -759,15 +813,15 @@ Non-retroactive guarantee（强约束；可测试口径）
   - 语义：实例唯一标识
 - `material_id: PurePath`
   - 语义：材料定位/标识
-  - 约束（强约束）：当项目 `ProjectStorageConfig.fs_sync_policy != DISABLED` 时，`material_id` 必须等于该材料相对 `learning_object_root` 的相对路径（PurePath；POSIX 语义），由 0b.1.5b 同步协议产生。
+  - 约束（强约束）：当项目启用 0b.1.5b 的同步协议时，`material_id` 必须等于该材料相对当前权威材料源根路径的相对路径（`PurePath`；POSIX 语义），由 0b.1.5b 同步协议产生。
   - 写入：若 `material_id` 输入为 `str`，实现必须以**稳定且跨平台一致**的规则转换为 `PurePath`（强约束：必须使用 POSIX 语义的 `PurePosixPath` 作为唯一规范化实现）：
     - 先执行字符串归一化：将 `\` 统一替换为 `/`（仅做分隔符归一，不做可达性探测与外部访问）。
     - 再以 `PurePosixPath(normalized)` 构造并存储为 `PurePath`。
     - 禁止在写入期做可达性探测、外部访问或隐式修复。
 
 - `presence: InstancePresence`
-  - 语义：该材料在当前 `learning_object_root` 扫描视图下的存在性标记（PRESENT | MISSING）。
-  - 写入来源（强约束）：当项目 `fs_sync_policy != DISABLED` 时，该字段仅允许由 0b.1.5b 的同步协议写入；对外入口不得直接改写。
+  - 语义：该材料在“最近一次成功提交的权威材料源快照”中的存在性标记（`PRESENT | MISSING`）。
+  - 写入来源（强约束）：当项目启用 0b.1.5b 的同步协议时，该字段仅允许由 0b.1.5b 的同步协议写入；对外入口不得直接改写。
   - 默认值（强约束）：`PRESENT`（新建 Instance 时）。
 - `last_seen_at: Optional[Timestamp]`
   - 语义：最近一次在同步扫描中被观测到的时间戳；当 `presence == MISSING` 时允许为 `None` 或保留旧值。
@@ -807,10 +861,11 @@ Non-retroactive guarantee（强约束；可测试口径）
 - 提交与回滚：
   - 提交失败必须整体回滚且对外不可见；提交失败后会话进入失败关闭态，不得复用。  
   - 本仓库不新增跨对象结构强制校验（仅维护索引不变式）。  
-- 引用可解析性与存在性：  
+  - 引用可解析性与存在性：  
   - `material_id` 的可达性不得进入 0b.7.1 的系统级提交期强制集合。  
-  - 当项目启用 0b.1.5b 的同步协议（`fs_sync_policy != DISABLED`）时：  
-    - Instance 的“可达/存在”由 `presence`（PRESENT/MISSING）作为业务事实表达；同步协议负责在启动/手动同步时更新该字段。  
+  - 当项目启用 0b.1.5b 的同步协议时：  
+    - `presence`（`PRESENT/MISSING`）只表达“最近一次成功同步的权威材料源快照中该路径是否存在”；同步协议负责更新该字段。  
+    - 桌面连接器离线、会话未建立、字节流中继失败、或当前运行时暂不可播放，均不得写成 `MISSING`；这些只属于 `validate_material_reachable(...) == UNREACHABLE` 的运行时可达性语义。  
     - 丢失材料不得导致 Instance 被删除（否则会破坏 RecallPoint 强引用）；只能标记为 `MISSING`，并由用户手动迁移相关 RecallPoint 的 `anchor.instance_id`。  
   - `validate_material_reachable(session, instance_id)` 仍为系统必备显式校验接口：其实现应至少满足：当 `presence == MISSING` 时返回 `UNREACHABLE`；其余探测细节由实现决定，但不得改写既有已提交事实。  
   - 系统不得在读路径触发隐式校验或隐式修复。
@@ -837,12 +892,12 @@ Non-retroactive guarantee（强约束；可测试口径）
   - `project_id: ProjectId`
   - `node_id: LearningObjectNodeId`
   - `relative_path: PurePath`
-    - 语义：相对 `ProjectStorageConfig.learning_object_root` 的相对路径（POSIX 语义）。
-    - 当 `fs_sync_policy != DISABLED` 时，该字段为权威结构源，用于目录树同构（0b.1.5b）。  
+    - 语义：相对当前权威材料源根路径的相对路径（POSIX 语义）。
+    - 当项目启用 0b.1.5b 的同步协议时，该字段为权威结构源，用于目录树同构（0b.1.5b）。  
   - `source: Enum{FILESYSTEM, MANUAL}`
     - 语义：该节点的写入来源。  
-    - 强约束：当项目 `fs_sync_policy != DISABLED` 时，该字段必须为 `FILESYSTEM`。  
-    - 强约束：当通过 4.5 的 `add_learning_object_leaf/container` 手工写入口创建/修改节点（且仅允许在 `fs_sync_policy == DISABLED`）时，创建的新节点必须写入 `MANUAL`。
+    - 强约束：当项目启用 0b.1.5b 的同步协议时，该字段必须为 `FILESYSTEM`；此处 `FILESYSTEM` 表示“由权威材料源同步协议生成”，既可来自 `SERVER_FS`，也可来自 `DESKTOP_AGENT_MANIFEST`。  
+    - 强约束：当通过 4.5 的 `add_learning_object_leaf/container` 手工写入口创建/修改节点（且仅允许在项目未启用 0b.1.5b 同步协议时）时，创建的新节点必须写入 `MANUAL`。
 
   - `parent_id: Optional[LearningObjectNodeId]`
     - 根节点为 `None`,若非 None，则 parent 必须解析为 Container  
@@ -856,12 +911,12 @@ Non-retroactive guarantee（强约束；可测试口径）
 
 - 结构字段  
   - `source: Enum{FILESYSTEM, MANUAL}`
-    - 语义：同上（Leaf）。强约束同上：`fs_sync_policy != DISABLED -> source == FILESYSTEM`；手工入口创建的新节点必须写入 `MANUAL`。  
+    - 语义：同上（Leaf）。强约束同上：项目启用 0b.1.5b 同步协议时 `source == FILESYSTEM`；手工入口创建的新节点必须写入 `MANUAL`。  
 
   - `project_id: ProjectId`
   - `node_id: LearningObjectNodeId`  
   - `relative_path: PurePath`
-    - 语义：相对 `ProjectStorageConfig.learning_object_root` 的相对路径（POSIX 语义）。
+    - 语义：相对当前权威材料源根路径的相对路径（POSIX 语义）。
   - `parent_id: Optional[LearningObjectNodeId]`（根节点为 `None`）  
   - `children: Sequence[LearningObjectNodeId]`（有序；顺序即遍历顺序）
 - 描述字段  
@@ -869,7 +924,7 @@ Non-retroactive guarantee（强约束；可测试口径）
 
 语义  
 - 叶子节点必须且只能绑定一个 `instance_id`。
-- 当项目 `fs_sync_policy != DISABLED` 时：LearningObjectNode 树必须与 `learning_object_root` 下的目录树严格同构（0b.1.5b）；任一目录/文件均对应唯一节点，且层级关系与直接孩子集合必须一致。  
+- 当项目启用 0b.1.5b 的同步协议时：`LearningObjectNode` 树必须与当前权威材料源定义的目录树严格同构（0b.1.5b）；任一目录/文件均对应唯一节点，且层级关系与直接孩子集合必须一致。  
 - 容器节点不绑定 `instance_id`。  
 - `children` 定义该容器的直接子节点 `node_id` 有序序列；任何遍历/聚合均以该顺序为准。  
 - `children` 的顺序是权威事实源（authoritative order）；对已提交状态，该顺序必须保持稳定。  
@@ -916,8 +971,8 @@ Non-retroactive guarantee（强约束；可测试口径）
 - `add(session: MutationSession, node: LearningObjectLeaf | LearningObjectContainer) -> None`：新增；`node_id` 已存在则抛`PreconditionFailure`。
 
 - `replace_all_from_fs(session: MutationSession, nodes: Sequence[LearningObjectLeaf | LearningObjectContainer]) -> None`
-  - 语义：以文件系统同步结果为权威输入，对本项目作用域内 LearningObjectNode 集合执行**全量替换**（清空旧集合并写入新集合）。
-  - 触发源（强约束）：仅允许由 0b.1.5b 的同步协议与 4.5 的 `sync_learning_objects_from_fs` 对外入口调用；不得在其他入口隐式调用。
+  - 语义：以权威材料源同步结果为权威输入，对本项目作用域内 `LearningObjectNode` 集合执行**全量替换**（清空旧集合并写入新集合）。
+  - 触发源（强约束）：仅允许由 0b.1.5b 的同步协议，以及 4.5 的 `sync_learning_objects_from_fs` / `sync_learning_objects_from_manifest` 对外入口调用；不得在其他入口隐式调用。
   - 原子性（强约束）：实现必须保证替换在同一 mutation session 中 staged 完整可提交；不得对外暴露部分替换中间态。
 
 
@@ -963,7 +1018,7 @@ Queries 失败语义（强约束；用于实现一致性）
 
 一致性与校验  
 - Failure：
-  - （同步门禁）当 `fs_sync_policy != DISABLED` 时，若文件系统目录直接孩子混杂目录/文件，系统必须在同步协议阶段拒绝执行并返回“目录结构损坏”，且不得产生任何 staged 写入（0b.1.5b）。
+  - （同步门禁）当项目启用 0b.1.5b 的同步协议时，若权威材料源输入导致同一路径同时被解释为目录与文件，或在 `SERVER_FS` 模式下出现“某目录直接孩子混杂目录/文件”，系统必须在同步协议阶段拒绝执行并返回“目录结构损坏”，且不得产生任何 staged 写入（0b.1.5b）。
   - 若检测到结构不一致（断引用、单父冲突、父子不一致、同质性违反等），则 `commit()` 必须失败并整体回滚，对外不可见。  
 - Query 前置条件
   - 只对“已提交且通过 commit 校验”的状态定义。
@@ -2746,6 +2801,7 @@ Failure 语义
     - `ProjectStorageConfig(project_root = 规范化后的路径, learning_object_root = PurePosixPath("learning_objects"), fs_sync_policy = STARTUP_SYNC)`（见 1.0.4 / 0b.1.5b）  
       - 强约束（写死默认目录名）：`learning_object_root = PurePosixPath("learning_objects")`。  
       - 若实现允许用户配置该相对路径，则必须通过新增白名单入口扩展；在最小版中不得提供该对外配置入口（避免实现分叉）。  
+    - `ProjectMaterialSourceBinding(source_kind = SERVER_FS, desktop_agent_id = None)`（见 1.0.4a / 0b.1.5b）  
     - `ProjectConfig`（见 1.0.5；必须写入 `layer_index = 0` 的默认配置，并同时写入 `external_services/push_config` 的写死默认值）  
     - 必须初始化 `layer_index = 0` 的 `Layer`（字段默认值见 0b.1.5a）  
     - 必须初始化 `layer_index = 0` 的 `AggregationQueue`（字段默认值见 0b.1.5a）  
@@ -2755,6 +2811,15 @@ Failure 语义
 - `get_project_config(project_id: ProjectId) -> ProjectConfig`
   - 语义：读取并返回该项目的 `ProjectConfig`（1.0.5）；不得产生任何写入。
   - `SCHEDULING_EFFECT = NONE`
+- `get_project_material_source_binding(project_id: ProjectId) -> ProjectMaterialSourceBinding`
+  - 语义：读取并返回该项目当前的权威材料源绑定（1.0.4a）；不得产生任何写入。
+  - `SCHEDULING_EFFECT = NONE`
+- `set_project_material_source_binding(project_id: ProjectId, source_kind: MaterialSourceKind, desktop_agent_id: Optional[DesktopAgentId], source_root_label: Optional[str]) -> None`
+  - 语义：在一次系统事务内覆盖该项目的 `ProjectMaterialSourceBinding`（1.0.4a）。
+  - 约束：
+    - 切换绑定本身不得隐式触发 `sync_learning_objects_from_fs(...)`、`sync_learning_objects_from_manifest(...)` 或任何调度推进。
+    - 已提交的 `Instance/LearningObjectNode` 集合必须保持不变，直到后续显式同步成功。
+  - `SCHEDULING_EFFECT = NONE`
 - `delete_project(project_id: ProjectId) -> None`
   - 语义：按 4.1.7 删除该项目作用域内全部持久化对象。
   - `SCHEDULING_EFFECT = NONE`
@@ -2763,20 +2828,20 @@ Failure 语义
 - `add_instance(project_id: ProjectId, material_id: str) -> InstanceId`
   - 语义：在 `project_id` 作用域内创建一个新的 `Instance` 并返回其 `instance_id`。
   - 约束：`material_id` 的规范化与存储语义必须满足 1.1.1（使用 POSIX 语义 `PurePosixPath` 规范化；不得做可达性探测、外部访问或隐式修复）。
-  - 额外约束（强约束）：当项目 `ProjectStorageConfig.fs_sync_policy != DISABLED` 时，本入口必须抛 `PreconditionFailure`（Instance 集合由文件系统同步协议唯一维护，0b.1.5b）。
+  - 额外约束（强约束）：当项目启用 0b.1.5b 的同步协议时，本入口必须抛 `PreconditionFailure`（`Instance` 集合由材料源同步协议唯一维护，0b.1.5b）。
   - `SCHEDULING_EFFECT = NONE`
 - `add_learning_object_leaf(project_id: ProjectId, parent_id: Optional[LearningObjectNodeId], instance_id: InstanceId, title: str) -> LearningObjectNodeId`
   - 语义：在 `project_id` 作用域内创建一个新的 `LearningObjectLeaf` 并返回其 `node_id`。
   - 约束：不得触发任何调度推进；树一致性由 1.2.3 的提交期强制校验保证。
-  - 额外约束（强约束）：当项目 `ProjectStorageConfig.fs_sync_policy != DISABLED` 时，本入口必须抛 `PreconditionFailure`（LearningObject 树由文件系统同步协议唯一维护，0b.1.5b）。
+  - 额外约束（强约束）：当项目启用 0b.1.5b 的同步协议时，本入口必须抛 `PreconditionFailure`（`LearningObject` 树由材料源同步协议唯一维护，0b.1.5b）。
   - `SCHEDULING_EFFECT = NONE`
 - `add_learning_object_container(project_id: ProjectId, parent_id: Optional[LearningObjectNodeId], children: Sequence[LearningObjectNodeId], title: str) -> LearningObjectNodeId`
   - 语义：在 `project_id` 作用域内创建一个新的 `LearningObjectContainer` 并返回其 `node_id`。
   - 约束：不得触发任何调度推进；`children` 顺序为权威顺序；树一致性由 1.2.3 的提交期强制校验保证。
-  - 额外约束（强约束）：当项目 `ProjectStorageConfig.fs_sync_policy != DISABLED` 时，本入口必须抛 `PreconditionFailure`（LearningObject 树由文件系统同步协议唯一维护，0b.1.5b）。
+  - 额外约束（强约束）：当项目启用 0b.1.5b 的同步协议时，本入口必须抛 `PreconditionFailure`（`LearningObject` 树由材料源同步协议唯一维护，0b.1.5b）。
   - `SCHEDULING_EFFECT = NONE`
 
-4) 材料目录同步与缺失迁移辅助（不产生调度副作用）
+4) 材料源同步与缺失迁移辅助（不产生调度副作用）
 - `SyncReport`（值对象；最小返回契约，强约束）
   - `unchanged: bool`
     - 语义：当且仅当本次同步未对任何持久化对象产生变更时为 `true`。
@@ -2786,13 +2851,21 @@ Failure 语义
   - `warnings: Tuple[str, ...]`
     - 语义：非致命提示；允许为空。实现不得在此字段中伪装错误成功。
 - `sync_learning_objects_from_fs(project_id: ProjectId) -> SyncReport`
-  - 语义：按 0b.1.5b 对 `learning_object_root` 执行一次同步：检查目录同质性与同构；若一致则幂等返回；若不一致则重建 LearningObjectNode 树、为新增文件创建 Instance、并将缺失文件对应 Instance 标记为 MISSING。
+  - 语义：当且仅当 `source_kind == SERVER_FS` 时，按 0b.1.5b 对 `learning_object_root` 执行一次同步：检查目录同质性与同构；若一致则幂等返回；若不一致则重建 `LearningObjectNode` 树、为新增文件创建 `Instance`、并将缺失文件对应 `Instance` 标记为 `MISSING`。
   - 返回约束（强约束）：
     - 若本次同步未产生任何持久化变更，则必须返回 `SyncReport(unchanged=true, created_instances_count=0, marked_missing_count=0, replaced_learning_object_nodes_count=0, warnings=...)`。
     - 若本次同步成功且产生了变更，则必须返回 `unchanged=false`，且三个 count 字段必须准确反映本次提交实际生效的变更数量。
   - `SCHEDULING_EFFECT = NONE`
   - 门禁（强约束）：本入口不得调用 4.3.x 任一协议；不得创建/入队 ReviewTask。是否允许在队列非空时执行由实现决定，但若允许必须不改变任何调度相关对象。
   - Failure：目录结构损坏必须抛 `DirectoryStructureCorruptedError` 且不产生任何写入（0b.5）。
+- `sync_learning_objects_from_manifest(project_id: ProjectId, root_title: Optional[str], relative_paths: Sequence[PurePath | str]) -> SyncReport`
+  - 语义：当且仅当 `source_kind == DESKTOP_AGENT_MANIFEST` 时，按 0b.1.5b 对桌面连接器提交的 manifest 执行一次同步：检查路径合法性与目录树同构；若一致则幂等返回；若不一致则重建 `LearningObjectNode` 树、为新增文件创建 `Instance`、并将缺失文件对应 `Instance` 标记为 `MISSING`。
+  - 返回约束（强约束）：
+    - 若本次同步未产生任何持久化变更，则必须返回 `SyncReport(unchanged=true, created_instances_count=0, marked_missing_count=0, replaced_learning_object_nodes_count=0, warnings=...)`。
+    - 若本次同步成功且产生了变更，则必须返回 `unchanged=false`，且三个 count 字段必须准确反映本次提交实际生效的变更数量。
+  - `SCHEDULING_EFFECT = NONE`
+  - 门禁（强约束）：本入口不得调用 4.3.x 任一协议；不得创建/入队 `ReviewTask`。是否允许在队列非空时执行由实现决定，但若允许必须不改变任何调度相关对象。
+  - Failure：manifest 非法输入或目录结构损坏必须抛明确错误且不产生任何写入（0b.5）。
 
 - `list_missing_instances(project_id: ProjectId) -> Sequence[InstanceId]`
   - 语义：返回本项目内所有 `presence == MISSING` 的 InstanceId（按 `id_canonical_text(instance_id)` 升序）。
@@ -2914,6 +2987,10 @@ Failure 语义
 - `add_instance(...)` -> `ADD_INSTANCE`
 - `add_learning_object_leaf(...)` -> `ADD_LEARNING_OBJECT_LEAF`
 - `add_learning_object_container(...)` -> `ADD_LEARNING_OBJECT_CONTAINER`
+- `set_project_material_source_binding(...)` -> `SET_PROJECT_MATERIAL_SOURCE_BINDING`
+- `sync_learning_objects_from_fs(...)` -> `SYNC_LEARNING_OBJECTS_FROM_FS`
+- `sync_learning_objects_from_manifest(...)` -> `SYNC_LEARNING_OBJECTS_FROM_MANIFEST`
+- `bulk_remap_recall_points_instance(...)` -> `BULK_REMAP_RECALL_POINTS_INSTANCE`
 - `submit_learning_task(...)` -> `SUBMIT_LEARNING_TASK`
 - `edit_recall_point(...)` -> `EDIT_RECALL_POINT`
 - `edit_learning_task(...)` -> `EDIT_LEARNING_TASK`
@@ -2925,7 +3002,7 @@ Failure 语义
 Payload 最小摘要建议（非强制；推荐）
 - 学习提交：`items_count`、`entry_node_id`（若可得）
 - 复习提交落库：`review_task_id`、`can_recall_len`、`result_range_id`（可空）
-- 导入/建树：相关 ID 与计数摘要
+- 导入/建树：相关 ID、`source_kind` 与计数摘要
 
 
 ---
