@@ -11,19 +11,9 @@ if not exist "%SYNC_SCRIPT%" (
   exit /b 1
 )
 
-set "SERVER_HOST="
+set "SERVER_HOST=plm.xuebao.chat"
 set "SERVER_USER=root"
 set "SSH_PORT=22"
-
-if "%SERVER_HOST%"=="" (
-  set /p SERVER_HOST=Server host or public IP:
-)
-
-if "%SERVER_HOST%"=="" (
-  echo Server host is required.
-  pause
-  exit /b 1
-)
 
 echo.
 echo Deploy target:

@@ -11,20 +11,10 @@ if not exist "%INSTALL_SCRIPT%" (
   exit /b 1
 )
 
-set "SERVER_HOST="
+set "SERVER_HOST=plm.xuebao.chat"
 set "SERVER_USER=root"
 set "SSH_PORT=22"
 set "SSH_KEY_PATH=%USERPROFILE%\.ssh\learningpyramid_selfhost_ed25519"
-
-if "%SERVER_HOST%"=="" (
-  set /p SERVER_HOST=Server host or public IP:
-)
-
-if "%SERVER_HOST%"=="" (
-  echo Server host is required.
-  pause
-  exit /b 1
-)
 
 echo.
 echo SSH key install target:
