@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader } from "@/ui/components/ui/card"
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
 
-import { renderStateBadge, selectClassName } from "./helpers"
+import { describeStateLabel, renderStateBadge, selectClassName } from "./helpers"
 import { CompactMetric, ControlDeck, MetaChip, SectionHeader } from "./shared"
 
 export function RelayMonitorFiltersCard({
@@ -98,7 +98,7 @@ export function RelayMonitorFiltersCard({
           icon={Search}
           eyebrow="诊断筛选"
           title="诊断控制台"
-          description="先看当前态势，再用快速预设缩小范围，最后补充精确搜索条件。"
+          description="先确认当前态势，再用快速预设和精确条件收窄范围。"
           actions={
             <>
               <Button variant="outline" onClick={onReset} disabled={!hasDiagnosticFilters}>
@@ -107,7 +107,7 @@ export function RelayMonitorFiltersCard({
               </Button>
               <Button variant="outline" onClick={onExport}>
                 <Download className="size-4" />
-                导出 JSONL
+                导出诊断记录
               </Button>
             </>
           }
@@ -116,6 +116,7 @@ export function RelayMonitorFiltersCard({
       <CardContent className="space-y-5">
         <div className="grid gap-3 xl:grid-cols-[1.05fr_0.95fr]">
           <ControlDeck
+            eyebrow="当前重点"
             title="当前巡检焦点"
             badge={renderStateBadge(runtimeHealthState)}
             tone={postureTone}
@@ -165,7 +166,7 @@ export function RelayMonitorFiltersCard({
           </ControlDeck>
 
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-2">
-            <CompactMetric label="当前态势" value={runtimeHealthState} detail="来自 runtime、站内告警和离线绑定项目的综合判断。" tone={postureTone} />
+            <CompactMetric label="当前态势" value={describeStateLabel(runtimeHealthState)} detail="来自运行状态、站内告警和离线绑定项目的综合判断。" tone={postureTone} />
             <CompactMetric
               label="匹配事件"
               value={monitor?.diagnosticSummary.eventCount ?? 0}
@@ -221,9 +222,9 @@ export function RelayMonitorFiltersCard({
               onChange={(e) => onLevelChange(e.target.value)}
             >
               <option value="">全部级别</option>
-              <option value="ERROR">ERROR</option>
-              <option value="WARNING">WARNING</option>
-              <option value="INFO">INFO</option>
+              <option value="ERROR">错误</option>
+              <option value="WARNING">告警</option>
+              <option value="INFO">信息</option>
             </select>
           </div>
           <div className="space-y-2">
@@ -232,7 +233,7 @@ export function RelayMonitorFiltersCard({
               id="diagnostic-category"
               value={diagnosticCategory}
               onChange={(e) => onCategoryChange(e.target.value)}
-              placeholder="例如 hls / probe"
+              placeholder="例如 HLS / 探测"
             />
           </div>
           <div className="space-y-2">
@@ -241,7 +242,7 @@ export function RelayMonitorFiltersCard({
               id="diagnostic-event-type"
               value={diagnosticEventType}
               onChange={(e) => onEventTypeChange(e.target.value)}
-              placeholder="例如 hls_failed"
+              placeholder="例如 HLS 转码失败"
             />
           </div>
           <div className="space-y-2">

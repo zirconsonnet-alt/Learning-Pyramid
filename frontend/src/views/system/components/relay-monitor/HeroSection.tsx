@@ -69,7 +69,7 @@ export function RelayMonitorHeroSection({
         : `最近成功投递 ${formatDateTime(alertWebhook.lastSuccessAt)}。`
       : webhookNarrative
   const backlogSignalValue = `${globalRelay?.queuedCommandCount ?? 0} 条排队`
-  const backlogSignalDetail = `Pending probe ${globalRelay?.pendingProbeCount ?? 0}；活跃 Stream ${activeStreamCount}；活跃 HLS ${activeHlsJobCount}。`
+  const backlogSignalDetail = `待处理探测 ${globalRelay?.pendingProbeCount ?? 0}；活跃流 ${activeStreamCount}；活跃 HLS ${activeHlsJobCount}。`
   const impactSignalValue = boundOfflineProjectCount > 0 ? `${boundOfflineProjectCount} 个受影响` : "暂无影响项目"
   const impactSignalDetail =
     boundOfflineProjectCount > 0
@@ -83,16 +83,14 @@ export function RelayMonitorHeroSection({
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-2">
               <MetaChip icon={Waypoints} strong>
-                Relay Monitor
+                中继监控
               </MetaChip>
-              <MetaChip icon={runtimeReady ? ShieldCheck : AlertTriangle}>Runtime {runtimeReady ? "正常" : "降级"}</MetaChip>
+              <MetaChip icon={runtimeReady ? ShieldCheck : AlertTriangle}>{`运行时${runtimeReady ? "正常" : "降级"}`}</MetaChip>
               <MetaChip icon={RadioTower}>{`设备 ${monitor?.agentCount ?? 0} · 项目 ${monitor?.projectCount ?? 0}`}</MetaChip>
             </div>
             <div className="space-y-2">
-              <h1 className="text-2xl font-semibold tracking-tight text-slate-950 sm:text-[2rem]">先看有没有异常，再看异常影响哪里，最后再追数据细节。</h1>
-              <p className="max-w-3xl text-sm leading-6 text-slate-600">
-                这里会先给出当前健康状态、优先处理动作和核心运行信号，方便你快速决定下一步该查哪里。
-              </p>
+              <h1 className="text-2xl font-semibold tracking-tight text-slate-950 sm:text-[2rem]">中继健康状态、异常影响和关键趋势一屏可见。</h1>
+              <p className="max-w-3xl text-sm leading-6 text-slate-600">先确认当前状态，再决定要处理告警、设备绑定还是传输趋势。</p>
             </div>
           </div>
 
@@ -108,7 +106,7 @@ export function RelayMonitorHeroSection({
               icon={Activity}
               label="实时交付"
               value={activeStreamCount + activeHlsJobCount}
-              detail={`活跃 Stream ${activeStreamCount}，活跃 HLS Job ${activeHlsJobCount}。`}
+              detail={`活跃流 ${activeStreamCount}，活跃 HLS 任务 ${activeHlsJobCount}。`}
               tone={activeStreamCount + activeHlsJobCount > 0 ? "teal" : "slate"}
             />
             <MetricTile
@@ -159,7 +157,7 @@ export function RelayMonitorHeroSection({
 
           <WatchlistPanel
             title="待处理队列"
-            description="这里会列出当前最值得优先处理的动作，方便直接进入排查。"
+            description="当前最值得优先处理的动作会集中列在这里。"
             tone={alertSignalTone}
             bodyClassName="space-y-3"
           >
@@ -174,15 +172,15 @@ export function RelayMonitorHeroSection({
           <SystemBoard
             eyebrow="运行快照"
             title="值班快照"
-            description="这里会汇总当前监测范围、排队、缓存和最近回收情况，方便快速复查。"
+            description="当前监测范围、排队、缓存和最近回收情况都汇总在这里。"
             tone={backlogSignalTone}
             bodyClassName="grid gap-3 sm:grid-cols-2"
           >
               <StatusField label="监测范围" value={`设备 ${monitor?.agentCount ?? 0} · 项目 ${monitor?.projectCount ?? 0}`} emphasize />
               <StatusField label="最近成功告警" value={formatDateTime(alertWebhook?.lastSuccessAt)} />
               <StatusField label="命令排队" value={`${globalRelay?.queuedCommandCount ?? 0} 条`} />
-              <StatusField label="Probe 待处理" value={`${globalRelay?.pendingProbeCount ?? 0} 条`} />
-              <StatusField label="Cache 占用" value={formatBytes(globalRelay?.hlsCacheBytes)} />
+              <StatusField label="探测待处理" value={`${globalRelay?.pendingProbeCount ?? 0} 条`} />
+              <StatusField label="缓存占用" value={formatBytes(globalRelay?.hlsCacheBytes)} />
               <StatusField label="最近回收" value={formatDateTime(globalRelay?.lastReapedAt)} />
           </SystemBoard>
 
@@ -193,9 +191,9 @@ export function RelayMonitorHeroSection({
             tone="slate"
           >
             <div className="flex flex-wrap gap-2">
-              <MetaChip icon={Clock3}>{`Bucket ${formatBucketSeconds(monitor?.trends.sampleBucketSeconds)}`}</MetaChip>
-              <MetaChip icon={ShieldCheck}>{`Retention ${monitor?.trends.retentionDays ?? 0} 天`}</MetaChip>
-              <MetaChip icon={Activity}>{`Latest ${formatDateTime(monitor?.trends.latestCapturedAt)}`}</MetaChip>
+              <MetaChip icon={Clock3}>{`周期 ${formatBucketSeconds(monitor?.trends.sampleBucketSeconds)}`}</MetaChip>
+              <MetaChip icon={ShieldCheck}>{`保留 ${monitor?.trends.retentionDays ?? 0} 天`}</MetaChip>
+              <MetaChip icon={Activity}>{`最近样本 ${formatDateTime(monitor?.trends.latestCapturedAt)}`}</MetaChip>
             </div>
           </SystemBoard>
         </StatusSidebar>

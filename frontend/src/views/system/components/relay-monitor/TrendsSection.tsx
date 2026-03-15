@@ -68,7 +68,7 @@ export function RelayTrendsSection({ monitor }: { monitor: RelayMonitor | undefi
   if ((windows?.lastDay.failedHlsJobs ?? 0) > 0) {
     capacitySignals.push({
       title: "24h HLS 失败",
-      detail: `最近 24 小时有 ${windows?.lastDay.failedHlsJobs ?? 0} 个失败 HLS job，需要结合转码审计继续排查。`,
+      detail: `最近 24 小时有 ${windows?.lastDay.failedHlsJobs ?? 0} 个失败 HLS 转码任务，需要结合转码审计继续排查。`,
       tone: "amber",
     })
   }
@@ -101,7 +101,7 @@ export function RelayTrendsSection({ monitor }: { monitor: RelayMonitor | undefi
           icon={Waves}
           eyebrow="容量概览"
           title="趋势与容量"
-          description="先看容量风险信号，再看各时间窗口的曲线变化，最后确认采样保留是否足够支撑排查。"
+          description="容量风险、时间窗口曲线和采样保留都会集中显示在这里。"
         />
       </CardHeader>
       <CardContent className="space-y-5">
@@ -150,7 +150,7 @@ export function RelayTrendsSection({ monitor }: { monitor: RelayMonitor | undefi
             <CompactMetric
               label="近 7 天活跃峰值"
               value={`${windows?.last7Days.peakActiveStreams ?? 0} / ${windows?.last7Days.peakActiveHlsJobs ?? 0}`}
-              detail="峰值 Stream / HLS Job"
+              detail="峰值流 / HLS 任务"
             />
             <CompactMetric
               label="近 30 天缓存"
@@ -164,9 +164,9 @@ export function RelayTrendsSection({ monitor }: { monitor: RelayMonitor | undefi
         <div className="grid gap-4 xl:grid-cols-2">
           <CockpitPanel
             title="近 6 小时实时流量"
-            description="适合判断上行和浏览器下行是否同步，以及短时间内是否出现吞吐骤降。"
+            description="用来观察上行和浏览器下行是否同步，以及短时间内是否出现吞吐骤降。"
             tone="teal"
-            chips={[`Bucket ${formatBucketSeconds(monitor?.trends.sampleBucketSeconds)}`, `点数 ${trend6h.length}`]}
+            chips={[`周期 ${formatBucketSeconds(monitor?.trends.sampleBucketSeconds)}`, `点数 ${trend6h.length}`]}
           >
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-2">
@@ -182,17 +182,17 @@ export function RelayTrendsSection({ monitor }: { monitor: RelayMonitor | undefi
 
           <CockpitPanel
             title="近 24 小时活动强度"
-            description="观察活跃 stream、活跃 HLS 和缓存体积是否一起抬升，方便判断是流量高峰还是积压。"
+            description="观察活跃流、活跃 HLS 任务和缓存体积是否一起抬升。"
             tone="amber"
-            chips={[`峰值 Stream ${windows?.lastDay.peakActiveStreams ?? 0}`, `峰值 HLS ${windows?.lastDay.peakActiveHlsJobs ?? 0}`]}
+            chips={[`峰值流 ${windows?.lastDay.peakActiveStreams ?? 0}`, `峰值 HLS ${windows?.lastDay.peakActiveHlsJobs ?? 0}`]}
           >
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="space-y-2">
-                <div className="text-xs text-slate-600">活跃 Stream</div>
+                <div className="text-xs text-slate-600">活跃流</div>
                 <TrendSparkline values={trend24h.map((item) => item.activeStreamCount)} stroke="#0f766e" />
               </div>
               <div className="space-y-2">
-                <div className="text-xs text-slate-600">活跃 HLS Job</div>
+                <div className="text-xs text-slate-600">活跃 HLS 任务</div>
                 <TrendSparkline values={trend24h.map((item) => item.activeHlsJobCount)} stroke="#ea580c" />
               </div>
               <div className="space-y-2">
@@ -204,9 +204,9 @@ export function RelayTrendsSection({ monitor }: { monitor: RelayMonitor | undefi
 
           <CockpitPanel
             title="近 7 天吞吐与失败"
-            description="按更长窗口看周内波动，适合判断失败是否只是瞬时尖刺，还是持续的容量/稳定性问题。"
+            description="按更长窗口查看周内波动，判断失败是瞬时尖刺还是持续问题。"
             tone="sky"
-            chips={[`完成 Stream ${windows?.last7Days.completedStreams ?? 0}`, `失败 Stream ${windows?.last7Days.failedStreams ?? 0}`]}
+            chips={[`完成流 ${windows?.last7Days.completedStreams ?? 0}`, `失败流 ${windows?.last7Days.failedStreams ?? 0}`]}
           >
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="space-y-2">
@@ -218,7 +218,7 @@ export function RelayTrendsSection({ monitor }: { monitor: RelayMonitor | undefi
                 <TrendSparkline values={trend7d.map((item) => item.viewerBytes)} stroke="#2563eb" />
               </div>
               <div className="space-y-2">
-                <div className="text-xs text-slate-600">失败 Stream</div>
+                <div className="text-xs text-slate-600">失败流</div>
                 <TrendSparkline values={trend7d.map((item) => item.failedStreams)} stroke="#be123c" />
               </div>
             </div>
@@ -226,7 +226,7 @@ export function RelayTrendsSection({ monitor }: { monitor: RelayMonitor | undefi
 
           <CockpitPanel
             title="近 30 天缓存与 HLS"
-            description="按天聚合的长期容量视角，适合看缓存高水位、HLS 产物量以及长期的失败分布。"
+            description="按天聚合查看缓存高水位、HLS 产物量和长期失败分布。"
             tone="slate"
             chips={[`峰值缓存 ${formatBytes(windows?.last30Days.peakCacheBytes)}`, `点数 ${trend30d.length}`]}
           >

@@ -126,6 +126,7 @@ export function SystemBoard({
 }
 
 export function ControlDeck({
+  eyebrow = "当前重点",
   title,
   description,
   badge,
@@ -134,6 +135,7 @@ export function ControlDeck({
   className,
   bodyClassName,
 }: {
+  eyebrow?: string
   title: string
   description?: ReactNode
   badge?: ReactNode
@@ -144,7 +146,7 @@ export function ControlDeck({
 }) {
   return (
     <SystemBoard
-      eyebrow="Current Focus"
+      eyebrow={eyebrow}
       title={title}
       description={description}
       tone={tone}

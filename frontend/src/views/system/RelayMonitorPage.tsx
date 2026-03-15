@@ -148,7 +148,7 @@ export function RelayMonitorPage() {
         ? `最近 1 小时有 ${alertCount} 条高优先级告警，最新一条是“${topAlert.title}”。`
         : boundOfflineProjectCount > 0
           ? `${boundOfflineProjectCount} 个项目仍绑定到离线设备，建议优先检查桌面连接器在线状态。`
-          : "当前没有新的高优先级告警，桌面连接器、HLS 转码和 relay 运行面整体稳定。"
+          : "当前没有新的高优先级告警，桌面连接器、中继传输和 HLS 转码整体稳定。"
 
   const filterChips: string[] = []
   if (diagnosticSinceHours !== "24") filterChips.push(`时间窗口 ${diagnosticSinceHours}h`)
@@ -165,20 +165,20 @@ export function RelayMonitorPage() {
       : `已配置 ${globalRelay.alertWebhook.channelCount} 个外部通道，最近一次成功投递已记录。`
     : "当前没有配置外部告警通道，问题只会停留在站内监控面板。"
   const filterNarrative = hasDiagnosticFilters
-    ? `当前诊断视图正在使用 ${filterChips.length} 个筛选条件，适合做定向排查。`
-    : "当前诊断视图保持默认范围，适合做账号级巡检。"
+    ? `当前诊断视图正在使用 ${filterChips.length} 个筛选条件，结果已聚焦到当前排查范围。`
+    : "当前诊断视图保持默认范围，可直接用于账号级巡检。"
   const bindingNarrative =
     boundOfflineProjectCount > 0
       ? `${boundOfflineProjectCount} 个项目仍绑定到离线设备，建议优先处理这些项目的播放可用性。`
       : "当前所有桌面连接器绑定项目都处于在线或未绑定状态。"
   const hlsNarrative =
     (monitor?.hlsSummary.activityWindows.lastDay.failedCount ?? 0) > 0
-      ? `近 24 小时内有 ${monitor?.hlsSummary.activityWindows.lastDay.failedCount ?? 0} 个 HLS job 失败，需要结合失败原因继续跟踪。`
+      ? `近 24 小时内有 ${monitor?.hlsSummary.activityWindows.lastDay.failedCount ?? 0} 个 HLS 转码任务失败，需要结合失败原因继续跟踪。`
       : "近 24 小时没有新的 HLS 失败，转码链路整体平稳。"
   const issueNarrative =
     (monitor?.streamSummary.failedSessionCount ?? 0) > 0 || (monitor?.streamSummary.cancelledSessionCount ?? 0) > 0
       ? `最近存在 ${monitor?.streamSummary.failedSessionCount ?? 0} 个失败会话和 ${monitor?.streamSummary.cancelledSessionCount ?? 0} 个取消会话。`
-      : "最近没有新的失败或取消 relay 会话。"
+      : "最近没有新的失败或取消中继会话。"
   const priorityActions: string[] = []
   if (boundOfflineProjectCount > 0) {
     priorityActions.push(`先检查 ${boundOfflineProjectCount} 个离线绑定项目对应的桌面连接器在线状态和项目绑定关系。`)
@@ -187,7 +187,7 @@ export function RelayMonitorPage() {
     priorityActions.push(`查看最近 1 小时的高优先级告警，优先处理最新一条“${topAlert.title}”。`)
   }
   if ((monitor?.streamSummary.failedSessionCount ?? 0) > 0 || (monitor?.hlsSummary.activityWindows.lastDay.failedCount ?? 0) > 0) {
-    priorityActions.push("继续核查最近失败的 relay 会话和 HLS job，确认是桌面连接器断线、浏览器中断还是转码失败。")
+    priorityActions.push("继续核查最近失败的中继会话和 HLS 转码任务，确认是桌面连接器断线、浏览器中断还是转码失败。")
   }
   if (globalRelay?.alertWebhook?.configured && globalRelay.alertWebhook.lastError) {
     priorityActions.push("修复外部告警通道最近一次投递错误，避免异常只停留在站内监控面板。")

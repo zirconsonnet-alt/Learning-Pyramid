@@ -5,8 +5,13 @@ import { Card, CardContent, CardHeader } from "@/ui/components/ui/card"
 
 import {
   describeAgentReference,
+  describeCacheReference,
   describeInstanceReference,
+  describeJobReference,
+  describeOperationalMessage,
   describeProjectReference,
+  describeStateLabel,
+  describeStreamMode,
   formatBytes,
   formatCountSummary,
   formatDateTime,
@@ -49,14 +54,14 @@ export function RelayHlsIssuesSection({
           <SectionHeader
             icon={Film}
             eyebrow="转码概览"
-            title="HLS Job 审计"
-            description="这里会汇总最近的转码活动，先看失败与影响，再看单个任务的状态、产物和时间线。"
+            title="HLS 转码审计"
+            description="最近的转码活动、失败情况和任务时间线都集中显示在这里。"
           />
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <CompactMetric label="Job 总数" value={monitor?.hlsSummary.jobCount ?? 0} />
-            <CompactMetric label="活跃 HLS Job" value={monitor?.hlsSummary.activeHlsJobCount ?? 0} tone={(monitor?.hlsSummary.activeHlsJobCount ?? 0) > 0 ? "sky" : "slate"} />
+            <CompactMetric label="任务总数" value={monitor?.hlsSummary.jobCount ?? 0} />
+            <CompactMetric label="活跃 HLS 任务" value={monitor?.hlsSummary.activeHlsJobCount ?? 0} tone={(monitor?.hlsSummary.activeHlsJobCount ?? 0) > 0 ? "sky" : "slate"} />
             <CompactMetric
               label="近 1 小时"
               value={`${monitor?.hlsSummary.activityWindows.lastHour.jobCount ?? 0} 个`}
@@ -73,7 +78,7 @@ export function RelayHlsIssuesSection({
           <div className="grid gap-3 xl:grid-cols-[0.92fr_1.08fr]">
             <SystemBoard
               title="当前关注项"
-              description="这里会汇总需要继续跟踪的失败或异常转码任务。"
+              description="需要继续跟踪的失败或异常转码任务会显示在这里。"
               tone={recentFailedJob ? jobTone(recentFailedJob.state) : "emerald"}
               bodyClassName="space-y-3"
             >
@@ -84,14 +89,14 @@ export function RelayHlsIssuesSection({
                 />
                 <CompactMetric
                   label="主要失败原因"
-                  value={Object.keys(monitor?.hlsSummary.issueReasonCounts ?? {})[0] ?? "暂无"}
-                  detail={formatCountSummary(monitor?.hlsSummary.issueReasonCounts, "当前没有记录到失败原因")}
+                  value={describeOperationalMessage(Object.keys(monitor?.hlsSummary.issueReasonCounts ?? {})[0] ?? "", "暂无")}
+                  detail={formatCountSummary(monitor?.hlsSummary.issueReasonCounts, "当前没有记录到失败原因", describeOperationalMessage)}
                   tone={Object.keys(monitor?.hlsSummary.issueReasonCounts ?? {}).length ? "amber" : "slate"}
                 />
                 <CompactMetric
-                  label="当前焦点 Job"
-                  value={recentFailedJob?.state ?? "清空"}
-                  detail={recentFailedJob ? recentFailedJob.relativePath : "当前没有失败中的 HLS job。"}
+                  label="当前焦点任务"
+                  value={recentFailedJob ? describeStateLabel(recentFailedJob.state) : "清空"}
+                  detail={recentFailedJob ? recentFailedJob.relativePath : "当前没有失败中的 HLS 转码任务。"}
                   tone={recentFailedJob ? "rose" : "emerald"}
                 />
             </SystemBoard>
@@ -107,12 +112,12 @@ export function RelayHlsIssuesSection({
               <SystemBoard
                 eyebrow="转码快照"
                 title="转码分布与时间窗"
-                description="把状态分布、问题原因和 1h/24h 窗口汇总到同一块，值班时能更快判断异常是在扩散还是刚刚恢复。"
+                description="状态分布、问题原因和 1 小时 / 24 小时窗口都汇总在这里。"
                 tone={(monitor?.hlsSummary.activityWindows.lastDay.failedCount ?? 0) > 0 ? "amber" : "slate"}
                 bodyClassName="space-y-2 text-xs leading-6 text-slate-600"
               >
-                <div>状态分布：{formatCountSummary(monitor?.hlsSummary.jobsByState)}</div>
-                <div>问题原因：{formatCountSummary(monitor?.hlsSummary.issueReasonCounts)}</div>
+                <div>状态分布：{formatCountSummary(monitor?.hlsSummary.jobsByState, "暂无", describeStateLabel)}</div>
+                <div>问题原因：{formatCountSummary(monitor?.hlsSummary.issueReasonCounts, "暂无", describeOperationalMessage)}</div>
                 <div>
                   近 1 小时：完成 {monitor?.hlsSummary.activityWindows.lastHour.completedCount ?? 0} / 失败{" "}
                   {monitor?.hlsSummary.activityWindows.lastHour.failedCount ?? 0} / 取消{" "}
@@ -135,9 +140,9 @@ export function RelayHlsIssuesSection({
                   title={<div className="truncate">{job.relativePath}</div>}
                   meta={
                     <>
-                      <MetaChip>{`任务 ${job.jobId}`}</MetaChip>
+                      <MetaChip>{describeJobReference(job.jobId)}</MetaChip>
                       <MetaChip>{describeInstanceReference(job.instanceId)}</MetaChip>
-                      <MetaChip>{`缓存 ${job.cacheKey}`}</MetaChip>
+                      <MetaChip>{describeCacheReference(job.cacheKey)}</MetaChip>
                     </>
                   }
                   headerRight={renderStateBadge(job.state)}
@@ -159,14 +164,14 @@ export function RelayHlsIssuesSection({
 
                   {job.message ? (
                     <EntryNote tone={jobTone(job.state)} className={job.state.trim().toUpperCase() === "FAILED" ? "text-rose-700" : undefined}>
-                      {job.message}
+                      {describeOperationalMessage(job.message)}
                     </EntryNote>
                   ) : null}
                 </BoardEntryCard>
               ))}
             </div>
           ) : (
-            <EmptyState message="当前没有可见的 HLS job。" />
+            <EmptyState message="当前没有可见的 HLS 转码任务。" />
           )}
         </CardContent>
       </Card>
@@ -177,12 +182,12 @@ export function RelayHlsIssuesSection({
             icon={AlertTriangle}
             eyebrow="会话概览"
             title="最近中继问题"
-            description="把失败或取消的 relay session 整理成故障面板，优先看失败原因、受影响项目和流量终止位置。"
+            description="失败或取消的中继会话会集中显示，便于确认失败原因和受影响项目。"
           />
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <CompactMetric label="总 Session" value={monitor?.streamSummary.sessionCount ?? 0} />
+            <CompactMetric label="会话总数" value={monitor?.streamSummary.sessionCount ?? 0} />
             <CompactMetric
               label="失败 / 取消"
               value={`${monitor?.streamSummary.failedSessionCount ?? 0} / ${monitor?.streamSummary.cancelledSessionCount ?? 0}`}
@@ -195,30 +200,30 @@ export function RelayHlsIssuesSection({
           <div className="grid gap-3 xl:grid-cols-[0.92fr_1.08fr]">
             <SystemBoard
               title="当前关注项"
-              description="这里会汇总最近失败或取消的会话，方便先判断故障来源。"
+              description="最近失败或取消的会话会集中显示在这里。"
               tone={recentFailedIssue ? issueTone(recentFailedIssue.status) : "emerald"}
               bodyClassName="space-y-3"
             >
                 <CompactMetric
                   label="问题原因分布"
-                  value={Object.keys(monitor?.streamSummary.issueReasonCounts ?? {})[0] ?? "暂无"}
-                  detail={formatCountSummary(monitor?.streamSummary.issueReasonCounts, "当前没有问题原因记录")}
+                  value={describeOperationalMessage(Object.keys(monitor?.streamSummary.issueReasonCounts ?? {})[0] ?? "", "暂无")}
+                  detail={formatCountSummary(monitor?.streamSummary.issueReasonCounts, "当前没有问题原因记录", describeOperationalMessage)}
                   tone={Object.keys(monitor?.streamSummary.issueReasonCounts ?? {}).length ? "amber" : "slate"}
                 />
                 <CompactMetric
-                  label="当前焦点 Session"
-                  value={recentFailedIssue?.status ?? "清空"}
+                  label="当前焦点会话"
+                  value={recentFailedIssue ? describeStateLabel(recentFailedIssue.status) : "清空"}
                   detail={
                     recentFailedIssue
                       ? `${describeProjectReference(recentFailedIssue.projectTitle, recentFailedIssue.projectId)} / ${describeInstanceReference(recentFailedIssue.instanceId)}`
-                      : "最近没有失败或取消的 relay session。"
+                      : "最近没有失败或取消的中继会话。"
                   }
                   tone={recentFailedIssue ? (recentFailedIssue.status === "FAILED" ? "rose" : "amber") : "emerald"}
                 />
                 <CompactMetric
                   label="最新失败原因"
-                  value={recentFailedIssue?.failureReason ?? "暂无"}
-                  detail={recentFailedIssue ? formatDateTime(recentFailedIssue.finishedAt ?? recentFailedIssue.updatedAt) : "没有需要继续跟踪的 session 失败。"}
+                  value={describeOperationalMessage(recentFailedIssue?.failureReason, "暂无")}
+                  detail={recentFailedIssue ? formatDateTime(recentFailedIssue.finishedAt ?? recentFailedIssue.updatedAt) : "当前没有需要继续跟踪的会话失败。"}
                   tone={recentFailedIssue?.failureReason ? "rose" : "slate"}
                 />
             </SystemBoard>
@@ -227,11 +232,11 @@ export function RelayHlsIssuesSection({
               <SystemBoard
                 eyebrow="问题分布"
                 title="问题原因分布"
-                description="快速判断当前 session 故障更多是来自 agent、viewer 还是后台回收链路。"
+                description="当前会话故障原因会集中汇总在这里。"
                 tone={recentFailedIssue ? issueTone(recentFailedIssue.status) : "slate"}
                 bodyClassName="text-xs leading-6 text-slate-600"
               >
-                <div>{formatCountSummary(monitor?.streamSummary.issueReasonCounts)}</div>
+                <div>{formatCountSummary(monitor?.streamSummary.issueReasonCounts, "暂无", describeOperationalMessage)}</div>
               </SystemBoard>
 
               <NarrativePanel
@@ -255,9 +260,9 @@ export function RelayHlsIssuesSection({
                   }
                   meta={
                     <>
-                      <MetaChip>{`会话 ${issue.streamId}`}</MetaChip>
+                      <MetaChip>{describeProjectReference(issue.projectTitle, issue.projectId)}</MetaChip>
                       <MetaChip>{describeAgentReference(issue.agentId)}</MetaChip>
-                      <MetaChip>{issue.mode}</MetaChip>
+                      <MetaChip>{describeStreamMode(issue.mode)}</MetaChip>
                     </>
                   }
                   headerRight={renderStateBadge(issue.status)}
@@ -271,16 +276,21 @@ export function RelayHlsIssuesSection({
                     <div>{`浏览器下行 ${formatBytes(issue.bytesToViewer)}`}</div>
                   </div>
 
+                  <div className="grid gap-2 text-xs text-slate-600 sm:grid-cols-2">
+                    <div>{describeStreamMode(issue.mode)}</div>
+                    <div>{describeInstanceReference(issue.instanceId)}</div>
+                  </div>
+
                   {issue.failureReason ? (
                     <EntryNote tone={issueTone(issue.status)} className={issue.status === "FAILED" ? "text-rose-700 text-sm leading-6" : "text-sm leading-6"}>
-                      {issue.failureReason}
+                      {describeOperationalMessage(issue.failureReason)}
                     </EntryNote>
                   ) : null}
                 </BoardEntryCard>
               ))}
             </div>
           ) : (
-            <EmptyState message="最近没有失败或取消的 relay session。" />
+            <EmptyState message="最近没有失败或取消的中继会话。" />
           )}
         </CardContent>
       </Card>

@@ -3,7 +3,20 @@ import { Activity, AlertTriangle, CheckCircle2, Siren } from "lucide-react"
 import type { RelayMonitor } from "@/ui/api/system"
 import { Card, CardContent, CardHeader } from "@/ui/components/ui/card"
 
-import { describeAgentReference, describeInstanceReference, formatCountSummary, formatDateTime, renderStateBadge } from "./helpers"
+import {
+  describeAgentReference,
+  describeDiagnosticCategory,
+  describeEventReference,
+  describeEventType,
+  describeInstanceReference,
+  describeOperationalMessage,
+  describeProjectReference,
+  describeStateLabel,
+  formatCountSummary,
+  formatDateTime,
+  formatDiagnosticDetails,
+  renderStateBadge,
+} from "./helpers"
 import { BoardEntryCard, CompactMetric, ControlDeck, EmptyState, EntryNote, MetaChip, NarrativePanel, SectionHeader, SystemBoard } from "./shared"
 
 function alertTone(severity: "error" | "warning") {
@@ -33,18 +46,18 @@ export function RelayAlertsDiagnosticsSection({ monitor }: { monitor: RelayMonit
             icon={Siren}
             eyebrow="告警概览"
             title="当前告警"
-            description="这里会汇总最近 1 小时的高优先级问题，方便优先判断影响面和重复出现次数。"
+            description="最近 1 小时的重要异常会集中显示，便于先确认影响面和重复次数。"
           />
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <CompactMetric label="高优先级告警" value={alertCount} tone={alertCount > 0 ? "amber" : "emerald"} />
-            <CompactMetric label="ERROR 事件" value={errorCount} tone={errorCount > 0 ? "rose" : "slate"} />
-            <CompactMetric label="WARNING 事件" value={warningCount} tone={warningCount > 0 ? "amber" : "slate"} />
+            <CompactMetric label="错误事件" value={errorCount} tone={errorCount > 0 ? "rose" : "slate"} />
+            <CompactMetric label="告警事件" value={warningCount} tone={warningCount > 0 ? "amber" : "slate"} />
             <CompactMetric
-              label="当前焦点"
-              value={topAlert ? topAlert.code : "清空"}
-              detail={topAlert ? `最近出现 ${topAlert.count} 次` : "最近 1 小时没有新的高优先级告警。"}
+              label="当前重点"
+              value={topAlert ? describeEventType(topAlert.code) : "已清空"}
+              detail={topAlert ? `${topAlert.title}；最近出现 ${topAlert.count} 次` : "最近 1 小时没有新的高优先级告警。"}
               tone={topAlert ? (topAlert.severity === "error" ? "rose" : "amber") : "emerald"}
             />
           </div>
@@ -63,12 +76,12 @@ export function RelayAlertsDiagnosticsSection({ monitor }: { monitor: RelayMonit
           <SystemBoard
             eyebrow="告警分布"
             title="类别与事件类型分布"
-            description="把当前告警背后的类别和事件类型拆开看，方便判断是单点故障还是同类问题在扩散。"
+            description="当前告警按类别和事件类型汇总，便于判断是单点故障还是同类问题在扩散。"
             tone={topAlert ? alertTone(topAlert.severity) : "slate"}
             bodyClassName="space-y-2 text-xs leading-6 text-slate-600"
           >
-            <div>类别分布：{formatCountSummary(monitor?.diagnosticSummary.eventsByCategory)}</div>
-            <div>事件类型：{formatCountSummary(monitor?.diagnosticSummary.eventsByType)}</div>
+            <div>类别分布：{formatCountSummary(monitor?.diagnosticSummary.eventsByCategory, "暂无", describeDiagnosticCategory)}</div>
+            <div>事件类型：{formatCountSummary(monitor?.diagnosticSummary.eventsByType, "暂无", describeEventType)}</div>
           </SystemBoard>
 
           {monitor?.alerts.length ? (
@@ -79,9 +92,9 @@ export function RelayAlertsDiagnosticsSection({ monitor }: { monitor: RelayMonit
                   title={alert.title}
                   meta={
                     <>
-                      <MetaChip>{alert.code}</MetaChip>
+                      <MetaChip>{describeEventType(alert.code)}</MetaChip>
                       {alert.agentId ? <MetaChip>{describeAgentReference(alert.agentId)}</MetaChip> : null}
-                      {alert.projectId ? <MetaChip>{`项目 ${alert.projectId}`}</MetaChip> : null}
+                      {alert.projectId ? <MetaChip>{describeProjectReference(undefined, alert.projectId)}</MetaChip> : null}
                     </>
                   }
                   headerRight={
@@ -93,14 +106,14 @@ export function RelayAlertsDiagnosticsSection({ monitor }: { monitor: RelayMonit
                   tone={alertTone(alert.severity)}
                 >
                   <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="text-sm leading-6 text-slate-700">{alert.message}</div>
+                    <div className="text-sm leading-6 text-slate-700">{describeOperationalMessage(alert.message)}</div>
                     <div className="shrink-0">{renderStateBadge(alert.severity.toUpperCase())}</div>
                   </div>
                 </BoardEntryCard>
               ))}
             </div>
           ) : (
-            <EmptyState message="最近 1 小时没有新的 error / warning 诊断告警。" />
+            <EmptyState message="最近 1 小时没有新的错误或告警诊断事件。" />
           )}
         </CardContent>
       </Card>
@@ -111,40 +124,41 @@ export function RelayAlertsDiagnosticsSection({ monitor }: { monitor: RelayMonit
             icon={Activity}
             eyebrow="事件流"
             title="最近诊断"
-            description="把结构化诊断事件按事件流展示，适合快速判断是 HLS、probe、manifest-sync 还是 session 层问题。"
+            description="按时间查看最近诊断事件，便于判断问题出在 HLS、探测、清单同步还是会话层。"
           />
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <CompactMetric label="当前载入" value={monitor?.recentDiagnostics.length ?? 0} />
-            <CompactMetric label="级别分布" value={formatCountSummary(monitor?.diagnosticSummary.eventsByLevel)} />
+            <CompactMetric label="级别分布" value={formatCountSummary(monitor?.diagnosticSummary.eventsByLevel, "暂无", describeStateLabel)} />
             <CompactMetric label="类别数" value={Object.keys(monitor?.diagnosticSummary.eventsByCategory ?? {}).length} />
             <CompactMetric
               label="最新事件"
-              value={topEvent?.eventType ?? "暂无"}
+              value={topEvent ? describeEventType(topEvent.eventType) : "暂无"}
               detail={topEvent ? formatDateTime(topEvent.createdAt) : "当前没有最近诊断事件。"}
             />
           </div>
 
           <ControlDeck
-            title={topEvent ? topEvent.eventType : "当前事件"}
+            eyebrow="当前重点"
+            title={topEvent ? describeEventType(topEvent.eventType) : "当前事件"}
             description={
               topEvent
-                ? `最近一条事件来自 ${describeAgentReference(topEvent.agentId)}，类别 ${topEvent.category}，类型 ${topEvent.eventType}。`
+                ? `最近一条事件来自 ${describeAgentReference(topEvent.agentId)}，类别 ${describeDiagnosticCategory(topEvent.category)}，类型 ${describeEventType(topEvent.eventType)}。`
                 : "当前筛选范围下没有可展示的结构化诊断事件。"
             }
-            badge={topEvent ? <MetaChip>{topEvent.level}</MetaChip> : null}
+            badge={topEvent ? renderStateBadge(topEvent.level) : null}
             tone={topEvent ? eventTone(topEvent.level) : "slate"}
             bodyClassName="flex flex-wrap gap-2"
           >
             {topEvent ? (
               <>
-                <MetaChip>{topEvent.category}</MetaChip>
+                <MetaChip>{describeDiagnosticCategory(topEvent.category)}</MetaChip>
                 <MetaChip>{describeAgentReference(topEvent.agentId)}</MetaChip>
-                {topEvent.projectId ? <MetaChip>{`项目 ${topEvent.projectId}`}</MetaChip> : null}
+                {topEvent.projectId ? <MetaChip>{describeProjectReference(undefined, topEvent.projectId)}</MetaChip> : null}
               </>
             ) : (
-              <div className="text-xs leading-5 text-slate-600">调整左侧诊断控制台后，这里会聚焦到当前窗口中的最新一条事件。</div>
+              <div className="text-xs leading-5 text-slate-600">调整左侧诊断控制台后，会自动聚焦到当前窗口中的最新事件。</div>
             )}
           </ControlDeck>
 
@@ -153,13 +167,13 @@ export function RelayAlertsDiagnosticsSection({ monitor }: { monitor: RelayMonit
               {monitor.recentDiagnostics.map((event) => (
                 <BoardEntryCard
                   key={event.eventId}
-                  title={event.message}
+                  title={describeOperationalMessage(event.message)}
                   meta={
                     <>
-                      <MetaChip>{event.category}</MetaChip>
-                      <MetaChip>{event.eventType}</MetaChip>
+                      <MetaChip>{describeDiagnosticCategory(event.category)}</MetaChip>
+                      <MetaChip>{describeEventType(event.eventType)}</MetaChip>
                       <MetaChip>{describeAgentReference(event.agentId)}</MetaChip>
-                      {event.projectId ? <MetaChip>{`项目 ${event.projectId}`}</MetaChip> : null}
+                      {event.projectId ? <MetaChip>{describeProjectReference(undefined, event.projectId)}</MetaChip> : null}
                     </>
                   }
                   headerRight={renderStateBadge(event.level)}
@@ -170,14 +184,12 @@ export function RelayAlertsDiagnosticsSection({ monitor }: { monitor: RelayMonit
                     <div>{`时间 ${formatDateTime(event.createdAt)}`}</div>
                     <div>{describeInstanceReference(event.instanceId)}</div>
                     <div>{event.relativePath ? `文件 ${event.relativePath}` : "文件路径未关联"}</div>
-                    <div>{`事件编号 ${event.eventId}`}</div>
+                    <div>{describeEventReference(event.eventId)}</div>
                   </div>
 
                   {Object.keys(event.details ?? {}).length > 0 ? (
                     <EntryNote tone={eventTone(event.level)}>
-                      {Object.entries(event.details)
-                        .map(([key, value]) => `${key}=${String(value)}`)
-                        .join(" / ")}
+                      {formatDiagnosticDetails(event.details)}
                     </EntryNote>
                   ) : null}
                 </BoardEntryCard>

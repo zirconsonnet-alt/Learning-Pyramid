@@ -45,7 +45,7 @@ export function RelayBindingsSection({
             icon={FolderTree}
             eyebrow="项目影响"
             title="项目绑定设备"
-            description="先看哪些项目受设备状态影响，再看它们当前到底绑到了哪台桌面连接器。"
+            description="查看哪些项目受设备状态影响，以及它们当前绑定到哪台桌面连接器。"
           />
         </CardHeader>
         <CardContent className="space-y-4">
@@ -67,7 +67,7 @@ export function RelayBindingsSection({
           <div className="grid gap-3 xl:grid-cols-[0.95fr_1.05fr]">
             <SystemBoard
               title="影响看板"
-              description="这里会汇总需要优先处理的离线绑定和待接入项目。"
+              description="这里集中显示离线绑定和待接入项目。"
               tone={offlineBindings.length > 0 ? "amber" : unboundProjects.length > 0 ? "slate" : "emerald"}
               bodyClassName="grid gap-3 sm:grid-cols-3 xl:grid-cols-1"
             >
@@ -133,12 +133,12 @@ export function RelayBindingsSection({
                     <div>{describeAgentReference(binding.desktopAgentId)}</div>
                     <div>{`最近心跳 ${formatDateTime(binding.lastSeenAt)}`}</div>
                     <div>{`配对时间 ${formatDateTime(binding.pairedAt)}`}</div>
-                    <div>{binding.connected ? "当前设备已连接 relay" : "当前设备未连接 relay"}</div>
+                    <div>{binding.connected ? "当前设备已连接中继服务" : "当前设备未连接中继服务"}</div>
                   </div>
 
                   {binding.supersededByAgentId ? (
                     <EntryNote tone="amber" className="text-amber-900">
-                      当前项目仍绑定旧连接器，较新的同机连接器是 {binding.supersededByAgentId}。
+                      当前项目仍绑定旧连接器，较新的同机连接器是 {describeAgentReference(binding.supersededByAgentId)}。
                     </EntryNote>
                   ) : null}
                 </BoardEntryCard>
@@ -162,14 +162,14 @@ export function RelayBindingsSection({
         <CardContent className="space-y-4">
           <div className="flex flex-wrap gap-2">
             <MetaChip icon={RadioTower}>{`在线 ${connectedAgentCount} / 总计 ${monitor?.agentCount ?? 0}`}</MetaChip>
-            <MetaChip icon={AlertTriangle}>{`活跃 Stream ${activeStreamCount}`}</MetaChip>
-            <MetaChip icon={Film}>{`活跃 HLS ${activeHlsJobCount}`}</MetaChip>
+            <MetaChip icon={AlertTriangle}>{`活跃流 ${activeStreamCount}`}</MetaChip>
+            <MetaChip icon={Film}>{`活跃 HLS 任务 ${activeHlsJobCount}`}</MetaChip>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            <CompactMetric label="在线连接 relay" value={connectedAgentCount} tone={connectedAgentCount > 0 ? "emerald" : "slate"} />
-            <CompactMetric label="活跃 Stream" value={activeStreamCount} tone={activeStreamCount > 0 ? "sky" : "slate"} />
-            <CompactMetric label="活跃 HLS" value={activeHlsJobCount} tone={activeHlsJobCount > 0 ? "amber" : "slate"} />
+            <CompactMetric label="在线连接中继" value={connectedAgentCount} tone={connectedAgentCount > 0 ? "emerald" : "slate"} />
+            <CompactMetric label="活跃流" value={activeStreamCount} tone={activeStreamCount > 0 ? "sky" : "slate"} />
+            <CompactMetric label="活跃 HLS 任务" value={activeHlsJobCount} tone={activeHlsJobCount > 0 ? "amber" : "slate"} />
           </div>
 
           {monitor?.agents.length ? (
@@ -182,7 +182,7 @@ export function RelayBindingsSection({
                     <>
                       <MetaChip>{agent.platform}</MetaChip>
                       <MetaChip>{agent.appVersion}</MetaChip>
-                      <MetaChip>{agent.agentId}</MetaChip>
+                      <MetaChip>{describeAgentReference(agent.agentId)}</MetaChip>
                     </>
                   }
                   headerRight={
@@ -196,8 +196,8 @@ export function RelayBindingsSection({
                 >
                   <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                     <CompactMetric label="队列命令" value={agent.queuedCommandCount} />
-                    <CompactMetric label="活跃 Stream / Probe" value={`${agent.activeStreamCount} / ${agent.pendingProbeCount}`} />
-                    <CompactMetric label="HLS Job" value={`${agent.activeHlsJobCount} 活跃 / ${agent.hlsJobCount} 累计`} />
+                    <CompactMetric label="活跃流 / 探测" value={`${agent.activeStreamCount} / ${agent.pendingProbeCount}`} />
+                    <CompactMetric label="HLS 任务" value={`${agent.activeHlsJobCount} 活跃 / ${agent.hlsJobCount} 累计`} />
                   </div>
 
                   <div className="grid gap-2 text-xs text-slate-600 sm:grid-cols-2">
