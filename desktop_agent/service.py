@@ -19,7 +19,7 @@ class DesktopAgentService:
         config_store: ConfigStore | None = None,
         *,
         client_factory: Callable[[AgentConfig], RelayClient] = RelayClient,
-        reconnect_delay_seconds: float = 3.0,
+        reconnect_delay_seconds: float = 10.0,  # 增加默认重连延迟到10秒
         refresh_interval_seconds: float = 6 * 60 * 60,
         sleep_fn: Callable[[float], None] = time.sleep,
     ) -> None:

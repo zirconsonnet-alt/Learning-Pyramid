@@ -92,6 +92,26 @@ def _http_error_means_hls_job_gone(exc: Exception) -> bool:
     return "/hls-jobs/" in request_url
 
 
+def _is_network_available() -> bool:
+    """检测网络连接状态"""
+    try:
+        # 尝试连接到一个可靠的公共服务
+        requests.head("https://www.google.com", timeout=2)
+        return True
+    except Exception:
+        return False
+
+
+def _wait_for_network_recovery(max_wait_seconds: int = 60) -> bool:
+    """等待网络恢复，带超时"""
+    start_time = time.monotonic()
+    while time.monotonic() - start_time < max_wait_seconds:
+        if _is_network_available():
+            return True
+        time.sleep(1)
+    return False
+
+
 def _is_websocket_auth_error(exc: Exception) -> bool:
     status_code = getattr(exc, "status_code", None)
     if status_code == 401:
@@ -266,11 +286,20 @@ class RelayClient:
             },
             timeout=30,
         )
-        _raise_for_agent_response(response)
-
     def _send_ws_json(self, ws: websocket.WebSocket, payload: dict[str, Any]) -> None:
         with self._ws_send_lock:
             ws.send(json.dumps(payload))
+
+    def _sync_task_status(self, ws: websocket.WebSocket) -> None:
+        """重连后向服务器报告当前活跃任务状态"""
+        active_counts = self._active_task_counts()
+        if active_counts["stream"] > 0 or active_counts["hls"] > 0:
+            self._send_ws_json(ws, {
+                "type": "status.sync",
+                "activeStreams": active_counts["stream"],
+                "activeHlsJobs": active_counts["hls"],
+                "timestamp": time.time()
+            })
 
     def _record_background_error(self, exc: BaseException) -> None:
         self._task_errors.put(exc)
@@ -507,7 +536,30 @@ class RelayClient:
                         except Exception as exc:
                             if self._http_error_means_cancelled(exc, cancel_event) or _http_error_means_stream_session_gone(exc):
                                 raise DesktopAgentTaskCancelled("desktop agent stream cancelled") from exc
-                            raise
+                            # 对于临时网络错误，重试几次
+                            if isinstance(exc, (requests.ConnectionError, requests.Timeout)):
+                                for retry in range(3):
+                                    if cancel_event.is_set():
+                                        raise DesktopAgentTaskCancelled("desktop agent stream cancelled")
+                                    try:
+                                        time.sleep(1)  # 等待1秒后重试
+                                        self._upload_stream_chunk(
+                                            stream_id=stream_id,
+                                            chunk=current,
+                                            content_type=content_type,
+                                            file_size=file_size,
+                                            range_start=start,
+                                            range_end=end,
+                                            is_final=remaining == 0,
+                                        )
+                                        break  # 重试成功
+                                    except Exception:
+                                        if retry == 2:  # 最后一次重试失败
+                                            raise
+                                else:
+                                    continue  # 重试成功，继续上传
+                            else:
+                                raise
             except DesktopAgentTaskCancelled:
                 raise
             except Exception as exc:
@@ -600,7 +652,26 @@ class RelayClient:
                     except Exception as exc:
                         if self._http_error_means_cancelled(exc, cancel_event) or _http_error_means_hls_job_gone(exc):
                             raise DesktopAgentTaskCancelled("desktop agent HLS job cancelled") from exc
-                        raise
+                        # 对于临时网络错误，重试几次
+                        if isinstance(exc, (requests.ConnectionError, requests.Timeout)):
+                            for retry in range(3):
+                                if cancel_event.is_set():
+                                    raise DesktopAgentTaskCancelled("desktop agent HLS job cancelled")
+                                try:
+                                    time.sleep(1)  # 等待1秒后重试
+                                    self._upload_hls_artifact(
+                                        job_id=job_id,
+                                        artifact_path=relative_artifact_path,
+                                        content=artifact.read_bytes(),
+                                    )
+                                    break  # 重试成功
+                                except Exception:
+                                    if retry == 2:  # 最后一次重试失败
+                                        raise
+                            else:
+                                continue  # 重试成功，继续上传
+                        else:
+                            raise
                 try:
                     self._report_hls_job_state_http(job_id=job_id, state="COMPLETED")
                 except Exception as exc:
@@ -642,8 +713,18 @@ class RelayClient:
                         raise
                 return
             finally:
+                # 确保临时目录被清理
                 if output_dir is not None:
-                    shutil.rmtree(output_dir, ignore_errors=True)
+                    try:
+                        shutil.rmtree(output_dir, ignore_errors=True)
+                    except Exception as cleanup_exc:
+                        self.report_diagnostic_event(
+                            level="warning",
+                            category="cleanup",
+                            event_type="temp_dir_cleanup_failed",
+                            message=f"Failed to cleanup temp dir: {output_dir}",
+                            details={"jobId": job_id, "cleanup_error": str(cleanup_exc)},
+                        )
 
         self._spawn_task("hls", job_id, _run)
 
@@ -688,6 +769,11 @@ class RelayClient:
             )
             if on_connected is not None:
                 on_connected()
+            # 重连后同步任务状态
+            self._sync_task_status(ws)
+            last_heartbeat_at = 0.0
+            last_health_check = 0.0
+            health_check_interval = 30  # 每30秒检查一次连接健康
             last_heartbeat_at = 0.0
             while True:
                 self._raise_background_error_if_any()
@@ -717,6 +803,16 @@ class RelayClient:
                         {"type": "heartbeat", "at": time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime())},
                     )
                     last_heartbeat_at = now
+                
+                # 定期健康检查
+                if now - last_health_check >= health_check_interval:
+                    try:
+                        # 发送ping消息测试连接
+                        self._send_ws_json(ws, {"type": "ping", "timestamp": now})
+                        last_health_check = now
+                    except Exception:
+                        # 连接可能已断开，抛出异常触发重连
+                        raise RuntimeError("connection health check failed")
                 try:
                     raw = ws.recv()
                 except websocket.WebSocketTimeoutException:
@@ -761,7 +857,23 @@ class RelayClient:
                     continue
         except DesktopAgentAuthExpired:
             raise
-        except Exception:
+        except (websocket.WebSocketConnectionClosedException, ConnectionError, OSError) as exc:
+            self.report_diagnostic_event(
+                level="warning",
+                category="network",
+                event_type="connection_lost",
+                message=f"Network connection lost: {type(exc).__name__}",
+                details={
+                    "error_type": type(exc).__name__,
+                    "active_tasks": self._active_task_counts(),
+                },
+                project_id=self.config.project_id,
+            )
+            cancel_stream_tasks = False
+            cancel_hls_tasks = False
+            raise
+        except Exception as exc:
+            # 对于其他异常，检查是否有活跃任务，如果有则不取消
             if self._active_task_counts().get("stream", 0) > 0:
                 cancel_stream_tasks = False
             if self._active_task_counts().get("hls", 0) > 0:
@@ -781,14 +893,23 @@ class RelayClient:
                     pass
 
     def run_forever(self) -> None:
-        heartbeat_sec = 15
-        reconnect_delay_sec = 3
+        heartbeat_sec = 30
+        reconnect_delay_sec = 1  # 初始延迟改为1秒
+        max_reconnect_delay_sec = 60  # 最大延迟改为1分钟
+        current_reconnect_delay = reconnect_delay_sec
         while True:
             try:
                 self.run_session(heartbeat_sec=heartbeat_sec)
+                current_reconnect_delay = reconnect_delay_sec
             except KeyboardInterrupt:
                 raise
             except DesktopAgentAuthExpired:
                 raise
             except Exception:
-                time.sleep(reconnect_delay_sec)
+                # 检测网络状态，如果网络可用则快速重连
+                if _is_network_available():
+                    time.sleep(1)  # 网络可用时快速重试
+                else:
+                    # 网络不可用时使用指数退避
+                    time.sleep(current_reconnect_delay)
+                    current_reconnect_delay = min(current_reconnect_delay * 1.5, max_reconnect_delay_sec)
