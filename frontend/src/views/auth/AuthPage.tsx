@@ -17,7 +17,7 @@ type AuthMode = "login" | "register"
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
   if (err instanceof Error) return err.message
-  return "Unknown error"
+  return "未知错误"
 }
 
 function resolveReturnTo(state: unknown): string {
@@ -41,7 +41,7 @@ export function AuthPage() {
   const returnTo = useMemo(() => resolveReturnTo(location.state), [location.state])
   const effectiveMode: AuthMode = allowSignup ? mode : "login"
   const passwordValid = effectiveMode === "register" ? password.length >= 8 : password.length > 0
-  const deploymentMode = capabilitiesQ.data?.appMode === "hosted" ? "Hosted Workspace" : "Local Workspace"
+  const deploymentMode = capabilitiesQ.data?.appMode === "hosted" ? "云端工作区" : "本地工作区"
   const authNarrative =
     capabilitiesQ.data?.appMode === "hosted"
       ? "通过受保护的入口进入项目、桌面连接器和 Relay Monitor，管理远程素材与回放链路。"

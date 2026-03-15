@@ -275,7 +275,7 @@ export function LearningTaskTreeCanvas({
       <ContentEmptyState
         icon={Layers3}
         title="当前任务树还没有根节点"
-        message="提交学习任务并形成聚合关系后，这里会自动生成可浏览的任务树结构。"
+        message="提交学习任务并形成聚合关系后，任务树结构会显示在这里。"
       />
     )
   }

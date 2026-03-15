@@ -127,7 +127,7 @@ export function LayerBandTree({
     return (
       <ContentEmptyState
         title="当前结构图还没有根节点"
-        message="相关节点数据生成后，这里会自动展开对应的层级结构。"
+        message="相关节点准备好后，对应的层级结构会显示在这里。"
       />
     )
   }
@@ -204,7 +204,7 @@ export function MindMapTree({
     return (
       <ContentEmptyState
         title="当前结构图还没有根节点"
-        message="相关节点数据生成后，这里会自动展开对应的层级结构。"
+        message="相关节点准备好后，对应的层级结构会显示在这里。"
       />
     )
   }

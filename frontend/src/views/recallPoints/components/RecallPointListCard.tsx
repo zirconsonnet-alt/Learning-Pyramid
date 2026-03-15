@@ -6,6 +6,7 @@ import { type RecallPoint } from "@/ui/api/review"
 import { richContentToPlainText } from "@/ui/api/richContent"
 import { ContentEmptyState, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
+import { formatInstanceReference, formatRecallPointReference } from "@/ui/displayIdentifiers"
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -18,6 +19,7 @@ export function RecallPointListCard({
   error,
   isLoading,
   items,
+  instanceTitleById,
   projectId,
   title = "复述点",
 }: {
@@ -25,6 +27,7 @@ export function RecallPointListCard({
   error?: unknown
   isLoading?: boolean
   items: RecallPoint[]
+  instanceTitleById?: Record<string, string>
   projectId: string
   title?: string
 }) {
@@ -41,7 +44,7 @@ export function RecallPointListCard({
           <ContentEmptyState
             icon={Sparkles}
             title="这个节点还没有复述点"
-            message="先在工作台里围绕相关视频录入复述点，或等待上游节点同步完成；这里随后会自动列出对应结果。"
+            message="先在工作台录入复述点，或等待上游节点同步完成；完成后结果会显示在这里。"
           />
         ) : null}
         <div className="divide-y rounded-md border">
@@ -54,10 +57,13 @@ export function RecallPointListCard({
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="truncate font-medium">{richContentToPlainText(rp.question)}</div>
-                  <div className="mt-1 truncate font-mono text-xs text-muted-foreground">{rp.recallPointId}</div>
+                  <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                    <span>{formatRecallPointReference(rp.recallPointId)}</span>
+                    <span>{formatInstanceReference(rp.anchor.instanceId, instanceTitleById?.[rp.anchor.instanceId])}</span>
+                  </div>
                 </div>
                 <div className="shrink-0 text-right text-xs text-muted-foreground">
-                  <div>{rp.anchor.instanceId}</div>
+                  <div>视频锚点</div>
                   <div>{rp.anchor.position}</div>
                 </div>
               </div>

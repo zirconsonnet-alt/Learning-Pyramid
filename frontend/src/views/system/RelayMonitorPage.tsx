@@ -147,7 +147,7 @@ export function RelayMonitorPage() {
       : topAlert
         ? `最近 1 小时有 ${alertCount} 条高优先级告警，最新一条是“${topAlert.title}”。`
         : boundOfflineProjectCount > 0
-          ? `${boundOfflineProjectCount} 个项目仍绑定到离线设备，建议优先检查桌面连接器在线状态。`
+          ? `${boundOfflineProjectCount} 个项目仍绑定到离线设备，请先检查桌面连接器在线状态。`
           : "当前没有新的高优先级告警，桌面连接器、中继传输和 HLS 转码整体稳定。"
 
   const filterChips: string[] = []
@@ -166,10 +166,10 @@ export function RelayMonitorPage() {
     : "当前没有配置外部告警通道，问题只会停留在站内监控面板。"
   const filterNarrative = hasDiagnosticFilters
     ? `当前诊断视图正在使用 ${filterChips.length} 个筛选条件，结果已聚焦到当前排查范围。`
-    : "当前诊断视图保持默认范围，可直接用于账号级巡检。"
+    : "当前诊断视图保持默认范围，适合直接开始账号级巡检。"
   const bindingNarrative =
     boundOfflineProjectCount > 0
-      ? `${boundOfflineProjectCount} 个项目仍绑定到离线设备，建议优先处理这些项目的播放可用性。`
+      ? `${boundOfflineProjectCount} 个项目仍绑定到离线设备，请先处理这些项目的播放可用性。`
       : "当前所有桌面连接器绑定项目都处于在线或未绑定状态。"
   const hlsNarrative =
     (monitor?.hlsSummary.activityWindows.lastDay.failedCount ?? 0) > 0

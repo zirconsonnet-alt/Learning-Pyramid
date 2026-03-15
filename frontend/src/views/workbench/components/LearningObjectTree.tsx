@@ -161,7 +161,7 @@ export function LearningObjectTree({
         <div className="space-y-1">
           <p className="text-sm font-medium text-foreground">当前还没有学习对象</p>
           <p className="text-sm text-muted-foreground">
-            请先到项目设置里绑定目录并执行同步。完成后，这里会显示可学习的视频和目录树。
+            请先到项目设置里绑定目录并执行同步，完成后就能在这里看到视频和目录树。
           </p>
         </div>
         <Button asChild size="sm" className="rounded-full">

@@ -26,7 +26,7 @@ import { cn } from "@/ui/utils"
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
   if (err instanceof Error) return err.message
-  return "Unknown error"
+  return "未知错误"
 }
 
 function formatTs(iso: string) {
@@ -121,8 +121,8 @@ export function ProjectsPage() {
           <div className="grid gap-8 p-7 lg:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)] lg:p-8">
             <div className="space-y-5">
               <div className="flex flex-wrap items-center gap-3">
-                <span className="theme-meta-strong">Project Hub</span>
-                <span className="theme-meta">{hostedMode ? "Hosted Workflow" : "Local Workflow"}</span>
+                <span className="theme-meta-strong">项目中心</span>
+                <span className="theme-meta">{hostedMode ? "云端工作流" : "本地工作流"}</span>
                 <span className="theme-meta">{sourceModeLabel}</span>
               </div>
               <div className="space-y-3">
@@ -186,7 +186,7 @@ export function ProjectsPage() {
         <section className="space-y-4">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#6d7e95]">Projects</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#6d7e95]">项目列表</p>
               <h2 className="mt-1 text-2xl font-semibold tracking-tight text-foreground">所有项目</h2>
               <p className="mt-2 text-sm text-muted-foreground">选择一个项目继续进入工作台，或先进入项目设置完成素材接入。</p>
             </div>
@@ -240,7 +240,6 @@ export function ProjectsPage() {
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
                         {selectedProjectId === p.projectId ? <span className="theme-meta-strong">当前工作项目</span> : null}
-                        <span className="theme-meta">{p.projectId}</span>
                       </div>
                     </div>
                   </CardHeader>
@@ -277,7 +276,7 @@ export function ProjectsPage() {
                     </div>
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                       <Clock3 className="h-3.5 w-3.5" />
-                      最适合先进入工作台确认当前媒体、队列和结构节点，再继续深入编辑。
+                      先进入工作台继续学习，或到项目设置完成素材接入。
                     </div>
                   </CardContent>
                 </Card>
@@ -337,7 +336,6 @@ export function ProjectsPage() {
                   <div className="text-sm font-semibold text-foreground">{deleteTarget.title}</div>
                   <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                     <span className="theme-meta">{formatProjectState(deleteTarget.state)}</span>
-                    <span>{deleteTarget.projectId}</span>
                     <span>创建于 {formatTs(deleteTarget.createdAt)}</span>
                   </div>
                 </div>

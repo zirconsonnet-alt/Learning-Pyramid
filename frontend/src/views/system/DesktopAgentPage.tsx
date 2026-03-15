@@ -20,6 +20,7 @@ import { ApiError } from "@/ui/api/http"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import { Label } from "@/ui/components/ui/label"
+import { formatDesktopAgentReference } from "@/ui/displayIdentifiers"
 import { useCurrentUser } from "@/ui/queries/auth"
 import { useDesktopAgents } from "@/ui/queries/workbench"
 import {
@@ -91,6 +92,10 @@ function describeSourceKind(kind: string | null | undefined) {
   if (normalized === "DESKTOP_AGENT_MANIFEST") return "桌面连接器"
   if (normalized === "SERVER_FS") return "服务器文件系统"
   return kind?.trim() || "未设置"
+}
+
+function formatDesktopBinding(agentId: string | null | undefined, deviceName?: string | null) {
+  return formatDesktopAgentReference(agentId, deviceName, "桌面设备待确认")
 }
 
 type Tone = "slate" | "sky" | "amber" | "emerald" | "rose"
@@ -301,9 +306,9 @@ export function DesktopAgentPage() {
   const setupCodeTone: Tone = !setupSession ? "slate" : setupCodeExpired ? "amber" : "emerald"
   const selectedBinding =
     selectedProject?.sourceKind === "DESKTOP_AGENT_MANIFEST" && selectedAgent
-      ? `${selectedAgent.deviceName} · ${selectedAgent.status === "ONLINE" ? "在线" : "离线"}`
+      ? `${formatDesktopBinding(selectedProject.desktopAgentId, selectedAgent.deviceName)} · ${selectedAgent.status === "ONLINE" ? "在线" : "离线"}`
       : selectedProject?.sourceKind === "DESKTOP_AGENT_MANIFEST"
-        ? `已绑定桌面连接器 ${selectedProject.desktopAgentId ?? "未知"}`
+        ? `${formatDesktopBinding(selectedProject.desktopAgentId)} · 等待上线确认`
         : "当前未绑定桌面连接器"
   const selectedClientStatus =
     selectedProject?.sourceKind !== "DESKTOP_AGENT_MANIFEST"
@@ -350,7 +355,7 @@ export function DesktopAgentPage() {
       index: "2",
       icon: Link2,
       title: "生成接入码",
-      description: setupSession ? "接入码已生成，可直接在 Windows 客户端粘贴。" : "接入码会自动带入服务器地址、项目和逻辑根选项。",
+      description: setupSession ? "接入码已生成，可直接在 Windows 客户端粘贴。" : "接入码会包含服务器地址、项目和逻辑根信息。",
       status: !preferredAsset ? "等待上一步" : !setupSession ? "待生成" : setupCodeExpired ? "需要刷新" : selectedProject?.sourceKind === "DESKTOP_AGENT_MANIFEST" ? "已完成" : "当前步骤",
       summary: setupSession
         ? `${formatTimeRemaining(setupSession.expiresAt)} · 截止 ${formatDateTime(setupSession.expiresAt)}`
@@ -364,7 +369,7 @@ export function DesktopAgentPage() {
       description:
         selectedProject?.sourceKind === "DESKTOP_AGENT_MANIFEST"
           ? `当前项目已绑定 ${selectedAgent?.deviceName ?? "设备"}，等待客户端在线即可。`
-          : "客户端完成接入后会自动带出项目配置，再在本地选一次目录。",
+          : "客户端完成接入后，再在本地确认一次目录即可。",
       status:
         selectedProject?.sourceKind === "DESKTOP_AGENT_MANIFEST"
           ? selectedAgent?.status === "ONLINE"
@@ -421,7 +426,7 @@ export function DesktopAgentPage() {
   if (selectedProject?.sourceKind === "DESKTOP_AGENT_MANIFEST" && selectedAgent?.status !== "ONLINE") {
     heroWatchlist.push({
       title: "目标设备未上线",
-      detail: `${selectedAgent?.deviceName ?? "当前绑定设备"} 还没有在线，建议优先检查客户端启动状态和网络连通性。`,
+      detail: `${selectedAgent?.deviceName ?? "当前绑定设备"} 还没有在线，请先检查客户端启动状态和网络连通性。`,
       tone: "amber",
     })
   }
@@ -526,7 +531,7 @@ export function DesktopAgentPage() {
                 icon={Link2}
                 label="接入码"
                 value={setupCodeStatus}
-                detail={setupSession ? `${formatTimeRemaining(setupSession.expiresAt)} · 作用域 ${setupScopeLabel}` : "生成后会自动带上项目与逻辑根选项。"}
+                detail={setupSession ? `${formatTimeRemaining(setupSession.expiresAt)} · 作用域 ${setupScopeLabel}` : "生成后会附带项目和逻辑根信息。"}
                 tone={setupSession ? (setupCodeExpired ? "amber" : "sky") : "slate"}
               />
               <OpsSignalTile
@@ -550,7 +555,7 @@ export function DesktopAgentPage() {
 
             <WatchlistPanel
               title="当前待处理"
-              description="这里会汇总安装包、接入码和设备在线状态里最需要先处理的事项。"
+              description="查看安装包、接入码和设备状态里的待处理事项。"
               tone={heroWatchlistTone}
               bodyClassName="space-y-3"
             >
@@ -622,7 +627,7 @@ export function DesktopAgentPage() {
                         detail={
                           releasePolicy?.requireSigned
                             ? `服务器策略要求仅展示已签名安装包；当前可见 ${releasePolicy.visibleAssetCount} / 总计 ${releasePolicy.totalAssetCount}。`
-                            : "当前服务器没有强制签名要求，但仍建议优先使用已签名安装包。"
+                            : "当前服务器不强制签名校验；如果有已签名版本，可以优先选择。"
                         }
                         tone={releasePolicy?.requireSigned ? "sky" : preferredAssetSignature?.tone ?? "slate"}
                       />
@@ -630,7 +635,7 @@ export function DesktopAgentPage() {
                         icon={Activity}
                         label="安装能力"
                         value={releaseInstallMode}
-                        detail={preferredAsset?.silentInstall.supported ? "当前推荐安装包支持静默安装策略，适合后续自动化部署或升级。" : "当前推荐安装包不提供静默安装能力。"}
+                        detail={preferredAsset?.silentInstall.supported ? "当前推荐安装包支持静默安装，便于后续升级和部署。" : "当前推荐安装包不提供静默安装能力。"}
                         tone={preferredAsset?.silentInstall.supported ? "emerald" : "slate"}
                       />
                       <OpsSignalTile
@@ -647,10 +652,10 @@ export function DesktopAgentPage() {
                 )}
 
                 {latestRelease && latestRelease.assets.length > 1 ? (
-                  <SystemBoard
-                    title="其他安装包"
-                    description="这里提供 ZIP 和便携版，适合调试、临时分发或不安装直接运行。"
-                    tone="slate"
+                <SystemBoard
+                  title="其他安装包"
+                    description="ZIP 和便携版适合调试、临时分发或不安装直接运行。"
+                  tone="slate"
                     headerRight={showOtherAssets ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
                     bodyClassName="space-y-3"
                   >
@@ -740,7 +745,7 @@ export function DesktopAgentPage() {
                     detail={
                       selectedProject?.sourceKind === "DESKTOP_AGENT_MANIFEST"
                         ? "当前项目已经绑定过桌面客户端；如果设备离线，需要优先确认客户端状态。"
-                        : "当前项目还没有桌面端绑定，适合首次接入。"
+                        : "当前项目还没有桌面端绑定，可以开始首次接入。"
                     }
                     tone={selectedProject?.sourceKind === "DESKTOP_AGENT_MANIFEST" ? (selectedAgent?.status === "ONLINE" ? "emerald" : "amber") : "slate"}
                   />
@@ -749,13 +754,13 @@ export function DesktopAgentPage() {
                 <SystemBoard
                   eyebrow="当前接入码"
                   title={setupCodeStatus}
-                  description="这里会显示当前接入码、有效期和使用状态。"
+                  description="查看当前接入码、有效期和使用状态。"
                   tone={setupCodeTone}
                   headerRight={<TonePill tone={setupCodeTone}>{setupCodeStatus}</TonePill>}
                   bodyClassName="space-y-4"
                 >
                   <EntryNote tone={setupCodeTone} className="break-all font-mono text-foreground">
-                    {setupSession?.setupCode ?? "生成后会在这里显示接入码。"}
+                    {setupSession?.setupCode ?? "生成后会显示在这里。"}
                   </EntryNote>
 
                   <div className="grid gap-3 sm:grid-cols-2">
@@ -773,7 +778,7 @@ export function DesktopAgentPage() {
 
                 <WatchlistPanel
                   title="当前待办"
-                  description="接入码过期、首次生成和继续接入等动作会集中显示在这里。"
+                  description="查看接入码刷新、首次生成和继续接入等待办。"
                   tone={setupWatchlistTone}
                   bodyClassName="space-y-3"
                 >
@@ -790,7 +795,7 @@ export function DesktopAgentPage() {
                     ) : (
                       <WatchlistItem
                         title="等待生成第一条接入码"
-                        detail="先选定默认项目或保留为空，再生成接入码，桌面端就能自动获得服务器地址与范围信息。"
+                        detail="先选定默认项目或保留为空，再生成接入码，桌面端就能直接获得服务器地址和范围信息。"
                         tone="slate"
                       />
                     )}
@@ -811,7 +816,7 @@ export function DesktopAgentPage() {
                 <SystemBoard
                   eyebrow="接入概览"
                   title="当前接入情况"
-                  description="这里汇总项目接入数量、离线绑定和待接入情况。"
+                  description="查看项目接入数量、离线绑定和待接入情况。"
                   tone={intakeOverviewTone}
                   bodyClassName="grid gap-3 sm:grid-cols-3 xl:grid-cols-1"
                 >
@@ -842,7 +847,7 @@ export function DesktopAgentPage() {
                   title="优先处理"
                   description={
                     offlineBoundProjects.length
-                      ? `当前有 ${offlineBoundProjects.length} 个项目绑定到了离线设备，建议优先恢复这些项目。`
+                      ? `当前有 ${offlineBoundProjects.length} 个项目绑定到了离线设备，请先恢复这些项目。`
                       : unboundProjects.length
                         ? `当前有 ${unboundProjects.length} 个项目仍未完成桌面端接入，可以继续补首批设备。`
                         : "当前没有离线绑定或待接入项目，项目接入状态稳定。"
@@ -856,8 +861,8 @@ export function DesktopAgentPage() {
                         title={project.title}
                         detail={
                           project.sourceKind === "DESKTOP_AGENT_MANIFEST"
-                            ? `当前绑定的桌面连接器 ${project.desktopAgentId ?? "未知"} 尚未在线。`
-                            : "当前还没有桌面端绑定，适合做首次接入。"
+                            ? `${formatDesktopBinding(project.desktopAgentId)} 当前还未在线。`
+                            : "当前还没有桌面端绑定，可以开始首次接入。"
                         }
                         tone={project.sourceKind === "DESKTOP_AGENT_MANIFEST" ? "amber" : "slate"}
                       />
@@ -894,8 +899,8 @@ export function DesktopAgentPage() {
                             <div className="font-medium text-slate-950">
                               {project.sourceKind === "DESKTOP_AGENT_MANIFEST"
                                 ? boundAgent
-                                  ? `${boundAgent.deviceName} · ${boundAgent.appVersion}`
-                                  : `已绑定连接器 ${project.desktopAgentId ?? "未知"}`
+                                  ? `${formatDesktopBinding(project.desktopAgentId, boundAgent.deviceName)} · ${boundAgent.appVersion}`
+                                  : `${formatDesktopBinding(project.desktopAgentId)} · 等待上线确认`
                                 : "等待首次接入"}
                             </div>
                             <div className="mt-1">{describeSourceKind(project.sourceKind)}</div>
@@ -918,7 +923,7 @@ export function DesktopAgentPage() {
                           {project.sourceKind === "DESKTOP_AGENT_MANIFEST"
                             ? boundAgent?.status === "ONLINE"
                               ? "当前项目已经绑定到在线桌面端，可以继续确认逻辑根和本地目录映射。"
-                              : "当前项目已经绑定桌面端，但目标设备还未在线，适合优先做恢复判断。"
+                              : "当前项目已经绑定桌面端，但目标设备还未在线，先恢复设备连接。"
                             : "当前项目还没有桌面端绑定，生成接入码后就能开始首次本地目录映射。"}
                         </EntryNote>
 
@@ -956,7 +961,7 @@ export function DesktopAgentPage() {
           <Card className="theme-card overflow-hidden">
             <CardHeader className="theme-card-header gap-3">
               <CardTitle>当前项目详情</CardTitle>
-              <CardDescription>这里会显示当前项目的逻辑根、绑定设备和本地目录映射提示。</CardDescription>
+              <CardDescription>查看当前项目的逻辑根、绑定设备和本地目录映射提示。</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4 text-sm">
               {selectedProject ? (
@@ -967,7 +972,7 @@ export function DesktopAgentPage() {
                       selectedProject.sourceKind === "DESKTOP_AGENT_MANIFEST"
                         ? selectedAgent?.status === "ONLINE"
                           ? "当前项目已经绑定到在线桌面端，可以继续确认逻辑根和本地目录映射。"
-                          : "当前项目已经绑定桌面端，但目标设备还未在线，适合先做恢复判断。"
+                          : "当前项目已经绑定桌面端，但目标设备还未在线，先恢复设备连接。"
                         : "当前项目还没有桌面端绑定，后续会通过接入码完成首次本地目录映射。"
                     }
                     badge={
@@ -1010,7 +1015,7 @@ export function DesktopAgentPage() {
 
                   <WatchlistPanel
                     title="当前提示"
-                    description="这里会根据当前项目的绑定状态给出下一步建议。"
+                    description="根据当前项目状态给出下一步建议。"
                     tone={bindingEnvelopeTone}
                     bodyClassName="space-y-3"
                   >
@@ -1035,7 +1040,7 @@ export function DesktopAgentPage() {
                   </Button>
                 </>
               ) : (
-                <EmptyState message="先从左侧选一个项目，这里就会显示对应的逻辑根详情。" />
+                <EmptyState message="先从左侧选一个项目，即可查看对应的逻辑根详情。" />
               )}
             </CardContent>
           </Card>
@@ -1049,14 +1054,14 @@ export function DesktopAgentPage() {
               <SystemBoard
                 eyebrow="接入建议"
                 title="安装与接入策略"
-                description="这里会说明推荐安装方式，以及遇到异常时优先检查什么。"
+                description="查看推荐安装方式，以及遇到异常时先检查什么。"
                 tone={policyBoardTone}
                 bodyClassName="space-y-3"
               >
                 <NarrativePanel
                   icon={ShieldCheck}
                   title="推荐使用安装器完成首次接入"
-                  description="安装器版本更适合自启、更新和桌面环境下的稳定常驻，适合作为首选接入路径。"
+                  description="安装器版本更适合自启、更新和桌面环境下的稳定常驻。"
                   tone="emerald"
                 />
                 <NarrativePanel

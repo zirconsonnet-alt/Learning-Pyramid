@@ -25,7 +25,7 @@ export function LearningTaskPage() {
       <div className="space-y-4">
         <ContentNotice
           title="当前页面缺少学习任务上下文"
-          message="学习任务详情页需要同时提供项目 ID 和学习任务 ID。你可以先回到项目列表，再从任务树或工作台重新进入。"
+          message="当前链接缺少学习任务信息。请先返回项目列表，再从任务树或工作台重新进入。"
           action={<Button onClick={() => navigate("/projects")}>返回项目列表</Button>}
         />
       </div>
@@ -55,7 +55,7 @@ export function LearningTaskPage() {
           {!taskQ.isLoading && !taskQ.error && !taskQ.data ? (
             <ContentNotice
               title="未找到这个学习任务"
-              message="这个学习任务可能已经被移除，或者当前链接里的任务 ID 已经过期。你可以返回任务树重新选择。"
+              message="这个学习任务可能已经被移除，或当前入口已失效。请返回任务树重新选择。"
               action={
                 <Button variant="outline" asChild>
                   <Link to={`/p/${pid}/task-tree`}>返回学习任务树</Link>

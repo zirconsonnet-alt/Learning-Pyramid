@@ -323,7 +323,7 @@ export function TaskTreePage() {
               <ContentEmptyState
                 icon={Waypoints}
                 title="当前项目还没有学习任务树"
-                message="先在工作台里提交一批复述点并创建学习任务，之后这里会自动按层生成对应的任务结构。"
+                message="先在工作台提交一批复述点并创建学习任务，任务结构就会显示在这里。"
               />
             ) : null}
             {!isLoading && !q.error && !eventsQ.error && hasData ? (

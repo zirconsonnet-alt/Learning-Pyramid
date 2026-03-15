@@ -150,7 +150,7 @@ function LayerReviewChainCard(props: {
         ) : (
           <ContentEmptyState
             title={`L${layer.layerIndex} 当前还没有待上推任务`}
-            message="继续录入并提交学习任务，或先完成下游复习后再回来；一旦该层出现候选节点，这里会自动列出可上推项。"
+            message="继续录入并提交学习任务，或先完成下游复习；出现可上推任务后会显示在这里。"
             className="w-full bg-white/60 px-3 py-3"
           />
         )}
@@ -273,7 +273,7 @@ export function WorkbenchPage() {
       <div className="space-y-4">
         <ContentNotice
           title="当前工作台缺少项目上下文"
-          message="这个页面需要附带有效的项目 ID 才能继续加载。你可以先回到项目列表，再重新进入目标项目的工作台。"
+          message="当前链接缺少项目信息。请先返回项目列表，再重新进入工作台。"
           action={<Button onClick={() => navigate("/projects")}>返回项目列表</Button>}
         />
       </div>
@@ -302,8 +302,8 @@ export function WorkbenchPage() {
         <div className="grid gap-7 p-7 lg:grid-cols-[minmax(0,1.2fr)_minmax(300px,0.8fr)] lg:p-8">
           <div className="space-y-5">
             <div className="flex flex-wrap items-center gap-3">
-              <span className="theme-meta-strong">Workbench</span>
-              <span className="theme-meta">{queueHasGate ? "Review Gate Active" : "Compose Flow Active"}</span>
+              <span className="theme-meta-strong">工作台</span>
+              <span className="theme-meta">{queueHasGate ? "复习门禁中" : "录入进行中"}</span>
               <span className="theme-meta">{projectTitle}</span>
             </div>
             <div className="space-y-3">
@@ -382,7 +382,7 @@ export function WorkbenchPage() {
                   {queueHasGate ? "系统正在等待你完成复习评估。" : "你可以继续围绕当前视频录入复述点并提交学习。"}
                 </div>
               </div>
-              <div className="theme-meta-strong">{queueHasGate ? "Review Mode" : "Compose Mode"}</div>
+              <div className="theme-meta-strong">{queueHasGate ? "复习模式" : "录入模式"}</div>
             </CardContent>
           </Card>
           <VideoPane
@@ -452,7 +452,7 @@ export function WorkbenchPage() {
                   <Sparkles className="mt-0.5 h-4 w-4 text-primary" />
                   <div className="space-y-1">
                     <div className="text-sm font-medium text-foreground">当前还没有层配置</div>
-                    <div className="text-sm text-muted-foreground">请先在项目设置里确认层数与模板，之后这里会出现各层候选任务。</div>
+                    <div className="text-sm text-muted-foreground">请先在项目设置里确认层配置；保存后会显示各层候选任务。</div>
                   </div>
                 </div>
               ) : null}

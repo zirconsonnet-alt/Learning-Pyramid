@@ -7,6 +7,12 @@ import { getConvergence, getReviewTask } from "@/ui/api/review"
 import { ContentEmptyState, ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
+import {
+  formatConvergenceReference,
+  formatRangeReference,
+  formatReviewChainReference,
+  formatReviewTaskReference,
+} from "@/ui/displayIdentifiers"
 import { useProject } from "@/ui/queries/projects"
 import { useReviewChain } from "@/ui/queries/reviewChains"
 import { cn } from "@/ui/utils"
@@ -22,6 +28,32 @@ function formatTs(iso: string | null) {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
   return d.toLocaleString()
+}
+
+function describeReviewChainState(state: string) {
+  if (state === "IN_PROGRESS") return "进行中"
+  if (state === "TERMINATED") return "已完成"
+  return state
+}
+
+function describeQueueItemKind(kind: "CONVERGENCE" | "REVIEW_TASK") {
+  return kind === "REVIEW_TASK" ? "复习任务" : "收敛步骤"
+}
+
+function describeReviewTaskState(state: string) {
+  if (state === "PENDING") return "待执行"
+  if (state === "DONE") return "已完成"
+  return state
+}
+
+function describeConvergenceState(state: string) {
+  if (state === "IN_PROGRESS") return "进行中"
+  if (state === "TERMINATED") return "已完成"
+  return state
+}
+
+function formatQueueItemReference(kind: "CONVERGENCE" | "REVIEW_TASK", id: string) {
+  return kind === "REVIEW_TASK" ? formatReviewTaskReference(id) : formatConvergenceReference(id)
 }
 
 export function ReviewChainPage() {
@@ -54,7 +86,7 @@ export function ReviewChainPage() {
       <div className="space-y-4">
         <ContentNotice
           title="当前页面缺少复习链上下文"
-          message="复习链详情页需要同时提供项目 ID 和复习链 ID。你可以先回到项目列表，再从任务树或工作台重新进入。"
+          message="当前链接缺少复习链信息。请先返回项目列表，再从任务树或工作台重新进入。"
           action={<Button onClick={() => navigate("/projects")}>返回项目列表</Button>}
         />
       </div>
@@ -72,7 +104,7 @@ export function ReviewChainPage() {
           项目：<span className="font-medium text-foreground">{projectTitle}</span>
         </p>
         <p className="text-sm text-muted-foreground">
-          链：<span className="font-mono text-foreground">{chainId}</span>
+          当前引用：<span className="font-medium text-foreground">{formatReviewChainReference(chainId)}</span>
         </p>
       </div>
 
@@ -87,7 +119,7 @@ export function ReviewChainPage() {
           {!chainQ.isLoading && !chainQ.error && !chainQ.data ? (
             <ContentNotice
               title="未找到这条复习链"
-              message="这条复习链可能已经被清理，或者当前链接里的复习链 ID 已经过期。你可以返回工作台继续处理当前项目。"
+              message="这条复习链可能已经被清理，或当前入口已失效。请返回工作台继续处理当前项目。"
               action={
                 <Button variant="outline" asChild>
                   <Link to={`/p/${pid}/workbench`}>返回工作台</Link>
@@ -101,7 +133,7 @@ export function ReviewChainPage() {
               <div className="grid gap-3 md:grid-cols-3">
                 <div className="rounded-md border bg-muted/30 p-3">
                   <div className="text-xs text-muted-foreground">状态</div>
-                  <div className="mt-1 font-medium text-foreground">{chainQ.data.state}</div>
+                  <div className="mt-1 font-medium text-foreground">{describeReviewChainState(chainQ.data.state)}</div>
                 </div>
                 <div className="rounded-md border bg-muted/30 p-3">
                   <div className="text-xs text-muted-foreground">队列长度</div>
@@ -110,7 +142,7 @@ export function ReviewChainPage() {
                 <div className="rounded-md border bg-muted/30 p-3">
                   <div className="text-xs text-muted-foreground">当前 head</div>
                   <div className="mt-1 font-medium text-foreground">
-                    {headItem ? `${headItem.kind} · ${headItem.id}` : "已完成"}
+                    {headItem ? `${describeQueueItemKind(headItem.kind)} · ${formatQueueItemReference(headItem.kind, headItem.id)}` : "已完成"}
                   </div>
                 </div>
               </div>
@@ -136,8 +168,8 @@ export function ReviewChainPage() {
                         <div>
                           <div className="text-xs text-muted-foreground">队列位次 #{index + 1}</div>
                           <div className="mt-1 flex items-center gap-2">
-                            <span className="rounded-full border px-2 py-0.5 text-xs">{item.kind}</span>
-                            <span className="font-mono text-xs text-muted-foreground">{item.id}</span>
+                            <span className="rounded-full border px-2 py-0.5 text-xs">{describeQueueItemKind(item.kind)}</span>
+                            <span className="text-xs text-muted-foreground">{formatQueueItemReference(item.kind, item.id)}</span>
                           </div>
                         </div>
                         <div className="text-xs text-muted-foreground">
@@ -150,17 +182,17 @@ export function ReviewChainPage() {
 
                       {item.kind === "REVIEW_TASK" && reviewTask ? (
                         <div className="mt-2 grid gap-2 text-xs text-muted-foreground md:grid-cols-3">
-                          <div>状态：<span className="text-foreground">{reviewTask.state}</span></div>
+                          <div>状态：<span className="text-foreground">{describeReviewTaskState(reviewTask.state)}</span></div>
                           <div>创建时间：<span className="text-foreground">{formatTs(reviewTask.createdAt)}</span></div>
-                          <div>输入范围：<span className="font-mono text-foreground">{reviewTask.inputRangeId}</span></div>
+                          <div>输入范围：<span className="text-foreground">{formatRangeReference(reviewTask.inputRangeId)}</span></div>
                         </div>
                       ) : null}
 
                       {item.kind === "CONVERGENCE" && convergence ? (
                         <div className="mt-2 grid gap-2 text-xs text-muted-foreground md:grid-cols-3">
-                          <div>状态：<span className="text-foreground">{convergence.state}</span></div>
+                          <div>状态：<span className="text-foreground">{describeConvergenceState(convergence.state)}</span></div>
                           <div>轮次：<span className="text-foreground">{convergence.roundCount}</span></div>
-                          <div>种子范围：<span className="font-mono text-foreground">{convergence.seedRangeId}</span></div>
+                          <div>种子范围：<span className="text-foreground">{formatRangeReference(convergence.seedRangeId)}</span></div>
                         </div>
                       ) : null}
                     </div>
@@ -170,7 +202,7 @@ export function ReviewChainPage() {
                 {queue.length === 0 ? (
                   <ContentEmptyState
                     title="当前复习链还没有队列项"
-                    message="当系统为这个项目生成复习任务或收敛任务后，这里会按执行顺序列出对应队列。"
+                    message="这个项目生成复习任务或收敛步骤后，队列会显示在这里。"
                   />
                 ) : null}
               </div>

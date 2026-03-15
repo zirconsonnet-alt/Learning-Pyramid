@@ -248,7 +248,7 @@ export function ObjectTreePage() {
               <ContentEmptyState
                 icon={FolderTree}
                 title="当前项目还没有学习对象树"
-                message="先在项目设置里同步素材目录，或通过桌面连接器接入材料；完成后这里会自动生成对象节点。"
+                message="先在项目设置里同步素材目录，或通过桌面连接器接入材料；完成后对象节点会显示在这里。"
               />
             ) : null}
             {!isLoading && !nodesQ.error && hasData ? (

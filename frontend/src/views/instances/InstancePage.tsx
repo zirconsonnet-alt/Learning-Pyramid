@@ -9,6 +9,7 @@ import { getRecallPoint, type RecallPoint } from "@/ui/api/review"
 import { ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
+import { formatInstanceReference, formatMaterialReference } from "@/ui/displayIdentifiers"
 import { RecallPointListCard } from "@/views/recallPoints/components/RecallPointListCard"
 
 function formatApiError(err: unknown) {
@@ -69,6 +70,13 @@ export function InstancePage() {
     () => recallPointQs.map((query) => query.data).filter((item): item is RecallPoint => !!item),
     [recallPointQs],
   )
+  const instanceTitleById = useMemo(
+    () =>
+      Object.fromEntries(
+        (instancesQ.data ?? []).map((item) => [item.instanceId, item.materialDisplayName]),
+      ) as Record<string, string>,
+    [instancesQ.data],
+  )
   const recallPointsLoading = recallPointIdsQ.isLoading || recallPointQs.some((query) => query.isLoading)
   const recallPointsError = recallPointIdsQ.error ?? recallPointQs.find((query) => query.error)?.error ?? null
 
@@ -77,7 +85,7 @@ export function InstancePage() {
       <div className="space-y-4">
         <ContentNotice
           title="当前页面缺少实例上下文"
-          message="实例详情页需要同时提供项目 ID 和实例 ID。你可以先回到项目列表，再从对象树或实例入口重新进入。"
+          message="当前链接缺少实例信息。请先返回项目列表，再从对象树或实例入口重新进入。"
           action={<Button onClick={() => navigate("/projects")}>返回项目列表</Button>}
         />
       </div>
@@ -88,7 +96,7 @@ export function InstancePage() {
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-lg font-semibold">{instance?.materialDisplayName ?? iid}</h1>
+          <h1 className="text-lg font-semibold">{instance?.materialDisplayName ?? formatInstanceReference(iid)}</h1>
           <p className="text-sm text-muted-foreground">查看实例材料信息、对象树绑定与复述点引用。</p>
         </div>
         <Button variant="outline" asChild>
@@ -126,8 +134,8 @@ export function InstancePage() {
 
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="rounded-md border p-4">
-                  <div className="text-xs text-muted-foreground">materialId</div>
-                  <div className="mt-1 break-all text-sm font-medium text-foreground">{instance.materialId}</div>
+                  <div className="text-xs text-muted-foreground">材料引用</div>
+                  <div className="mt-1 break-all text-sm font-medium text-foreground">{formatMaterialReference(instance.materialId)}</div>
                 </div>
                 <div className="rounded-md border p-4">
                   <div className="text-xs text-muted-foreground">最近看到时间</div>
@@ -152,7 +160,7 @@ export function InstancePage() {
             !instancesQ.isLoading && !instancesQ.error && (
               <ContentNotice
                 title="未找到这个实例"
-                message="这个实例可能已经被移除，或者当前链接里的实例 ID 已经过期。你可以返回对象树重新选择。"
+                message="这个实例可能已经被移除，或当前入口已失效。请返回对象树重新选择。"
                 action={
                   <Button variant="outline" asChild>
                     <Link to={`/p/${pid}/object-tree`}>返回学习对象树</Link>
@@ -167,10 +175,11 @@ export function InstancePage() {
       <RecallPointListCard
         projectId={pid}
         items={recallPoints}
+        instanceTitleById={instanceTitleById}
         isLoading={recallPointsLoading}
         error={recallPointsError}
         title="相关复述点"
-        description="所有锚定到这个实例的复述点都会直接显示在这里。"
+        description="所有锚定到这个实例的复述点都会显示在这里。"
       />
     </div>
   )

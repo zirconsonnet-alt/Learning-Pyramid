@@ -9,6 +9,7 @@ import { editRecallPoint, getRecallPoint, type RecallPoint } from "@/ui/api/revi
 import { ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
+import { formatInstanceReference, formatRecallPointReference } from "@/ui/displayIdentifiers"
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
 import { useProject } from "@/ui/queries/projects"
@@ -41,7 +42,7 @@ export function RecallPointPage() {
       <div className="space-y-4">
         <ContentNotice
           title="当前页面缺少复述点上下文"
-          message="这个详情页需要同时提供项目 ID 和复述点 ID。你可以先回到上一个页面，或重新从复述点列表进入。"
+          message="当前链接缺少复述点信息。请返回上一页，或重新从复述点列表进入。"
           action={<Button onClick={() => nav(-1)}>返回</Button>}
         />
       </div>
@@ -57,7 +58,7 @@ export function RecallPointPage() {
             项目：<span className="font-medium text-foreground">{projectTitle}</span>
           </p>
           <p className="text-sm text-muted-foreground">
-            recallPointId：<span className="font-mono text-foreground">{rpid || "-"}</span>
+            当前引用：<span className="font-medium text-foreground">{formatRecallPointReference(rpid, "复述点待确认")}</span>
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -84,7 +85,7 @@ export function RecallPointPage() {
         <Card>
           <CardHeader>
             <CardTitle>编辑</CardTitle>
-            <CardDescription>更新 question / answer / anchor.position（不会触发调度副作用）。</CardDescription>
+            <CardDescription>更新问题、答案和锚点位置。</CardDescription>
           </CardHeader>
           <RecallPointEditor key={rp.recallPointId} projectId={pid} recallPointId={rpid} qKey={qKey} recallPoint={rp} />
         </Card>
@@ -94,7 +95,7 @@ export function RecallPointPage() {
         <Card>
           <CardHeader>
             <CardTitle>历史理解</CardTitle>
-            <CardDescription>insights（只读；在复习提交时追加）。</CardDescription>
+            <CardDescription>历史理解记录（只读；在复习提交后追加）。</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
             {rp.insights.length === 0 ? (
@@ -105,7 +106,7 @@ export function RecallPointPage() {
                 <div className="space-y-1">
                   <p className="font-medium text-foreground">这条复述点还没有历史理解记录</p>
                   <p className="leading-6 text-muted-foreground">
-                    当这条复述点在后续复习里被提交新的理解、误区或补充说明后，这里会自动累积对应的 insights。
+                    后续复习产生新的理解、误区或补充后，记录会继续追加在这里。
                   </p>
                 </div>
               </div>
@@ -166,15 +167,15 @@ function RecallPointEditor({
   return (
     <CardContent className="space-y-3">
       <div className="grid gap-2">
-        <Label htmlFor="anchorInstance">anchor.instanceId</Label>
-        <Input id="anchorInstance" value={recallPoint?.anchor.instanceId ?? ""} disabled />
+        <Label htmlFor="anchorInstance">关联材料实例</Label>
+        <Input id="anchorInstance" value={formatInstanceReference(recallPoint?.anchor.instanceId ?? "", undefined, "未关联材料实例")} disabled />
       </div>
       <div className="grid gap-2">
-        <Label htmlFor="anchorPos">anchor.position</Label>
+        <Label htmlFor="anchorPos">锚点位置</Label>
         <Input id="anchorPos" value={positionText} onChange={(e) => setPositionText(e.target.value)} disabled={!recallPoint || editM.isPending} />
       </div>
       <div className="grid gap-2">
-        <Label htmlFor="qText">question（TEXT）</Label>
+        <Label htmlFor="qText">问题文本</Label>
         <textarea
           id="qText"
           className="min-h-[80px] w-full rounded-md border bg-background px-3 py-2 text-sm"
@@ -184,7 +185,7 @@ function RecallPointEditor({
         />
       </div>
       <div className="grid gap-2">
-        <Label htmlFor="aText">answer（TEXT）</Label>
+        <Label htmlFor="aText">答案文本</Label>
         <textarea
           id="aText"
           className="min-h-[80px] w-full rounded-md border bg-background px-3 py-2 text-sm"

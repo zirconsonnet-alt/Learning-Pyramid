@@ -273,7 +273,7 @@ export function LearningObjectTreeCanvas({
       <ContentEmptyState
         icon={HardDrive}
         title="当前对象树还没有根节点"
-        message="素材目录同步完成后，这里会出现学习对象的根目录与分组结构。"
+        message="素材目录同步完成后，学习对象的根目录与分组结构会显示在这里。"
       />
     )
   }

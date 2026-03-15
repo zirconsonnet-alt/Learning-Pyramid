@@ -6,6 +6,7 @@ import type { Instance } from "@/ui/api/instances"
 import { richContentToPlainText } from "@/ui/api/richContent"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
+import { formatInstanceReference } from "@/ui/displayIdentifiers"
 import { useCommitReviewTask, useReviewBundle } from "@/ui/queries/workbench"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 
@@ -105,7 +106,7 @@ export function ReviewPane({
                 <div key={rpId} className="theme-status-surface rounded-[1.2rem] border border-border/70 p-4">
                   <div className="text-sm font-medium">Q：{richContentToPlainText(rp.question)}</div>
                   <div className="mt-1 text-xs text-muted-foreground">
-                    锚点：{inst ? inst.materialDisplayName : rp.anchor.instanceId} /{" "}
+                    锚点：{formatInstanceReference(rp.anchor.instanceId, inst?.materialDisplayName)} /{" "}
                     {ms === null ? rp.anchor.position : msToClock(ms)}
                   </div>
                   {onOpenAnchor ? (

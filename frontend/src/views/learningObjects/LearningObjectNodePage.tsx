@@ -14,6 +14,7 @@ import {
 import { ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
+import { formatInstanceReference } from "@/ui/displayIdentifiers"
 import { RecallPointListCard } from "@/views/recallPoints/components/RecallPointListCard"
 import { NodeExportCard } from "@/views/shared/NodeExportCard"
 
@@ -78,13 +79,20 @@ export function LearningObjectNodePage() {
     if (!node || node.kind !== "leaf") return null
     return (instancesQ.data ?? []).find((instance) => instance.instanceId === node.instanceId) ?? null
   }, [instancesQ.data, nodeQ.data])
+  const instanceTitleById = useMemo(
+    () =>
+      Object.fromEntries(
+        (instancesQ.data ?? []).map((instance) => [instance.instanceId, instance.materialDisplayName]),
+      ) as Record<string, string>,
+    [instancesQ.data],
+  )
 
   if (!pid || !nid) {
     return (
       <div className="space-y-4">
         <ContentNotice
           title="当前页面缺少对象节点上下文"
-          message="对象节点详情页需要同时提供项目 ID 和节点 ID。你可以先回到项目列表，再从学习对象树重新进入。"
+          message="当前链接缺少对象节点评息。请先返回项目列表，再从学习对象树重新进入。"
           action={<Button onClick={() => navigate("/projects")}>返回项目列表</Button>}
         />
       </div>
@@ -157,8 +165,8 @@ export function LearningObjectNodePage() {
                     <div className="mt-1 font-medium text-foreground">{boundInstance.presence === "MISSING" ? "缺失" : "正常"}</div>
                   </div>
                   <div className="rounded-md border bg-muted/30 p-3">
-                    <div className="text-xs text-muted-foreground">instanceId</div>
-                    <div className="mt-1 break-all font-medium text-foreground">{boundInstance.instanceId}</div>
+                    <div className="text-xs text-muted-foreground">实例引用</div>
+                    <div className="mt-1 break-all font-medium text-foreground">{formatInstanceReference(boundInstance.instanceId)}</div>
                   </div>
                 </div>
               ) : null}
@@ -178,10 +186,11 @@ export function LearningObjectNodePage() {
       <RecallPointListCard
         projectId={pid}
         items={recallPointsQ.data ?? []}
+        instanceTitleById={instanceTitleById}
         isLoading={recallPointsQ.isLoading}
         error={recallPointsQ.error}
         title="复述点列表"
-        description="该学习对象节点覆盖到的复述点会直接显示在这里。"
+        description="这个对象节点关联的复述点会显示在这里。"
       />
 
       {nodeQ.data ? (

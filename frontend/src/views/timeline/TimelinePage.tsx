@@ -7,6 +7,16 @@ import type { AuditLogEvent } from "@/ui/api/auditLog"
 import { ContentEmptyState, ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
+import {
+  formatArtifactReference,
+  formatInstanceReference,
+  formatLearningTaskReference,
+  formatObjectNodeReference,
+  formatParentNodeReference,
+  formatRangeReference,
+  formatRecallPointReference,
+  formatReviewTaskReference,
+} from "@/ui/displayIdentifiers"
 import { useAuditLogEvents } from "@/ui/queries/auditLog"
 import { useProject } from "@/ui/queries/projects"
 
@@ -55,6 +65,18 @@ function formatMs(v: unknown): string | null {
   return `${(v / 1000).toFixed(1)} 秒`
 }
 
+function formatTimelineValue(key: string, value: string) {
+  if (key === "instanceId" || key === "fromInstanceId" || key === "toInstanceId") return formatInstanceReference(value)
+  if (key === "recallPointId") return formatRecallPointReference(value)
+  if (key === "nodeId") return formatObjectNodeReference(value)
+  if (key === "parentId") return formatParentNodeReference(value)
+  if (key === "learningTaskId") return formatLearningTaskReference(value)
+  if (key === "reviewTaskId") return formatReviewTaskReference(value)
+  if (key === "resultRangeId" || key === "seedRangeId" || key === "inputRangeId") return formatRangeReference(value)
+  if (key === "asrArtifactId") return formatArtifactReference(value)
+  return value
+}
+
 function describeEvent(
   ev: AuditLogEvent,
   projectTitle: string,
@@ -64,7 +86,7 @@ function describeEvent(
 
   const add = (label: string, key: string) => {
     const v = p ? asText(p[key]) : null
-    if (v !== null) details.push({ label, value: v })
+    if (v !== null) details.push({ label, value: formatTimelineValue(key, v) })
   }
   const addValue = (label: string, value: string | null) => {
     if (value !== null) details.push({ label, value })
@@ -163,7 +185,7 @@ export function TimelinePage() {
       <div className="space-y-4">
         <ContentNotice
           title="当前页面缺少项目上下文"
-          message="时间线页面需要附带有效的项目 ID 才能读取对应事件。你可以先回到项目列表，再从目标项目重新进入。"
+          message="当前链接缺少项目信息。请先返回项目列表，再重新进入时间线。"
           action={<Button onClick={() => nav("/projects")}>返回项目列表</Button>}
         />
       </div>
@@ -196,7 +218,7 @@ export function TimelinePage() {
             <ContentEmptyState
               icon={Clock3}
               title="这条时间线还没有新的项目里程碑"
-              message="当你创建学习任务、提交复习、执行上推或调整项目配置后，这里会按时间顺序自动记录关键事件。"
+              message="创建学习任务、提交复习、执行上推或调整项目配置后，关键变动会记录在这里。"
             />
           ) : null}
 

@@ -158,7 +158,7 @@ export function RelayAlertsDiagnosticsSection({ monitor }: { monitor: RelayMonit
                 {topEvent.projectId ? <MetaChip>{describeProjectReference(undefined, topEvent.projectId)}</MetaChip> : null}
               </>
             ) : (
-              <div className="text-xs leading-5 text-slate-600">调整左侧诊断控制台后，会自动聚焦到当前窗口中的最新事件。</div>
+              <div className="text-xs leading-5 text-slate-600">当前筛选范围内还没有事件。可以扩大时间窗口或清空筛选后再查看。</div>
             )}
           </ControlDeck>
 

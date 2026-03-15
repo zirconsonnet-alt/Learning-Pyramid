@@ -40,7 +40,7 @@ export function LearningTaskNodePage() {
       <div className="space-y-4">
         <ContentNotice
           title="当前页面缺少任务节点上下文"
-          message="任务节点详情页需要同时提供项目 ID 和节点 ID。你可以先回到项目列表，再从学习任务树重新进入。"
+          message="当前链接缺少任务节点信息。请先返回项目列表，再从学习任务树重新进入。"
           action={<Button onClick={() => navigate("/projects")}>返回项目列表</Button>}
         />
       </div>
@@ -135,7 +135,7 @@ export function LearningTaskNodePage() {
         isLoading={recallPointsQ.isLoading}
         error={recallPointsQ.error}
         title="复述点列表"
-        description="该学习任务节点覆盖到的复述点会直接显示在这里。"
+        description="这个任务节点关联的复述点会显示在这里。"
       />
 
       {nodeQ.data ? (

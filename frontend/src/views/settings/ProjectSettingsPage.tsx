@@ -8,6 +8,7 @@ import type { ReviewChainTemplateItem } from "@/ui/api/projectConfig"
 import { ContentNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
+import { formatMaterialReference, formatRecallPointReference } from "@/ui/displayIdentifiers"
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
 import { scanProjectDirectoryManifest, useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
@@ -66,19 +67,6 @@ function formatLastSeenAt(value: string | null | undefined) {
   return Number.isNaN(dt.getTime()) ? value : dt.toLocaleString()
 }
 
-function formatBytes(value: number | null | undefined) {
-  const size = Math.max(0, Number(value ?? 0))
-  if (size < 1024) return `${size} B`
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
-  if (size < 1024 * 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`
-  return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`
-}
-
-function formatPercent(value: number | null | undefined) {
-  if (value == null) return "暂无"
-  return `${(Number(value) * 100).toFixed(1)}%`
-}
-
 function suggestTargetInstance(missingInstance: Instance, presentInstances: Instance[]) {
   return (
     presentInstances.find((item) => item.materialDisplayName === missingInstance.materialDisplayName)?.instanceId ??
@@ -93,6 +81,17 @@ function describeDirectoryPermission(permission: "unsupported" | "missing" | "pr
   if (permission === "prompt") return "待授权"
   if (permission === "denied") return "已拒绝"
   return "已授权"
+}
+
+function describeDesktopAgentStatus(status: string | null | undefined) {
+  return status === "ONLINE" ? "在线" : "离线"
+}
+
+function describeRuntimeReadiness(ready: boolean | undefined, isLoading: boolean) {
+  if (isLoading) return "更新中"
+  if (ready === true) return "状态正常"
+  if (ready === false) return "需要关注"
+  return "暂无摘要"
 }
 
 function isDirectoryPickerAbort(err: unknown) {
@@ -267,7 +266,7 @@ export function ProjectSettingsPage() {
       <div className="space-y-4">
         <ContentNotice
           title="当前页面缺少项目上下文"
-          message="项目设置需要附带有效的项目 ID 才能继续加载素材接入、层配置和桌面连接器摘要。"
+          message="当前链接缺少项目信息。请先返回项目列表，再重新进入项目设置。"
           action={<Button onClick={() => navigate("/projects")}>返回项目列表</Button>}
         />
       </div>
@@ -289,7 +288,7 @@ export function ProjectSettingsPage() {
             <Card className="theme-card">
               <CardHeader>
                 <CardTitle>桌面连接器</CardTitle>
-                <CardDescription>桌面连接器下载和接入流程已经迁移到独立页面，这里只保留当前项目的接入摘要。</CardDescription>
+                <CardDescription>桌面连接器下载和接入已经移到独立页面；这里保留当前项目的状态和常用入口。</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4 text-sm">
                 <div className="rounded-xl border bg-muted/30 p-4">
@@ -299,18 +298,18 @@ export function ProjectSettingsPage() {
                   </div>
                   <div className="mt-3 text-xs text-muted-foreground">
                     {boundDesktopAgent
-                      ? `已绑定设备：${boundDesktopAgent.deviceName}（${boundDesktopAgent.status === "ONLINE" ? "在线" : "离线"}）`
+                      ? `已绑定设备：${boundDesktopAgent.deviceName}（${describeDesktopAgentStatus(boundDesktopAgent.status)}）`
                       : "当前项目还没有绑定桌面连接器。"}
                   </div>
                   <div className="mt-2 text-xs text-muted-foreground">
-                    sourceRootLabel：{materialSourceBindingQ.data?.sourceRootLabel ?? "未设置"}
+                    逻辑根标签：{materialSourceBindingQ.data?.sourceRootLabel ?? "未设置"}
                   </div>
                 </div>
 
                 {desktopAgentStatusQ.data ? (
                   <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
                     {desktopAgentStatusQ.data.agent
-                      ? `设备状态：${desktopAgentStatusQ.data.agent.status}，最近心跳：${formatLastSeenAt(
+                      ? `设备当前${describeDesktopAgentStatus(desktopAgentStatusQ.data.agent.status)}，最近心跳：${formatLastSeenAt(
                           desktopAgentStatusQ.data.agent.lastSeenAt,
                         )}`
                       : "尚未绑定桌面设备。"}
@@ -326,16 +325,8 @@ export function ProjectSettingsPage() {
                 </div>
                 <div className="space-y-2 rounded-md border bg-muted/30 p-3">
                   <div className="flex items-center justify-between gap-3">
-                    <div className="text-xs font-medium text-foreground">Relay Runtime</div>
-                    <div className="text-xs text-muted-foreground">
-                      {runtimeQ.isLoading
-                        ? "刷新中..."
-                        : runtimeQ.data?.ready
-                          ? "运行正常"
-                          : runtimeQ.data
-                            ? "运行降级"
-                            : "未就绪"}
-                    </div>
+                    <div className="text-xs font-medium text-foreground">中继状态摘要</div>
+                    <div className="text-xs text-muted-foreground">{describeRuntimeReadiness(runtimeQ.data?.ready, runtimeQ.isLoading)}</div>
                   </div>
                   {relayRuntime ? (
                     <>
@@ -349,70 +340,23 @@ export function ProjectSettingsPage() {
                           <div className="mt-1 text-sm font-semibold text-foreground">{relayRuntime.activeStreamCount}</div>
                         </div>
                         <div className="rounded-md border bg-background/80 p-2">
-                          <div className="text-muted-foreground">Pending Probe</div>
+                          <div className="text-muted-foreground">待处理探测</div>
                           <div className="mt-1 text-sm font-semibold text-foreground">{relayRuntime.pendingProbeCount}</div>
                         </div>
                         <div className="rounded-md border bg-background/80 p-2">
-                          <div className="text-muted-foreground">活跃 HLS Job</div>
+                          <div className="text-muted-foreground">活跃 HLS 转码</div>
                           <div className="mt-1 text-sm font-semibold text-foreground">{relayRuntime.activeHlsJobCount}</div>
-                        </div>
-                        <div className="rounded-md border bg-background/80 p-2">
-                          <div className="text-muted-foreground">缓存条目</div>
-                          <div className="mt-1 text-sm font-semibold text-foreground">{relayRuntime.hlsCacheEntryCount}</div>
-                        </div>
-                        <div className="rounded-md border bg-background/80 p-2">
-                          <div className="text-muted-foreground">缓存体积</div>
-                          <div className="mt-1 text-sm font-semibold text-foreground">{formatBytes(relayRuntime.hlsCacheBytes)}</div>
                         </div>
                       </div>
                       <div className="space-y-1 text-xs text-muted-foreground">
                         <div>
-                          队列命令 {relayRuntime.queuedCommandCount}，总 stream session {relayRuntime.streamSessionCount}，总 HLS job{" "}
-                          {relayRuntime.hlsJobCount}。
+                          当前摘要只保留在线状态、活跃传输和待处理探测。更详细的告警、转码记录和设备清单，请前往 Relay Monitor 查看。
                         </div>
-                        <div>
-                          HLS cache 命中 {relayRuntime.hlsCacheHitCount} / miss {relayRuntime.hlsCacheMissCount} / 请求{" "}
-                          {relayRuntime.hlsCacheRequestCount}（{formatPercent(relayRuntime.hlsCacheHitRate)}）。
-                        </div>
-                        <div>
-                          持久化 HLS job 审计 {relayRuntime.persistedHlsJobAuditCount}，趋势样本 {relayRuntime.persistedMetricSampleCount}，
-                          诊断事件 {relayRuntime.persistedDiagnosticEventCount}，后台过期同步 {relayRuntime.persistedExpiredHlsJobCount}。
-                        </div>
-                        {relayRuntime.connectedAgentIds.length > 0 ? (
-                          <div className="break-all">在线 agent：{relayRuntime.connectedAgentIds.join(" / ")}</div>
-                        ) : null}
-                        {Object.keys(relayRuntime.hlsJobsByState ?? {}).length > 0 ? (
-                          <div>
-                            Job 状态：{Object.entries(relayRuntime.hlsJobsByState)
-                              .map(([state, count]) => `${state}=${count}`)
-                              .join(" / ")}
-                          </div>
-                        ) : null}
-                        {relayRuntime.hlsCachePrunedCount > 0 ||
-                        relayRuntime.reapedStreamCount > 0 ||
-                        relayRuntime.reapedProbeCount > 0 ||
-                        relayRuntime.reapedHlsJobCount > 0 ||
-                        relayRuntime.expiredStreamIds.length > 0 ||
-                        relayRuntime.expiredProbeIds.length > 0 ||
-                        relayRuntime.expiredHlsJobIds.length > 0 ? (
-                          <div>
-                            累计回收：stream {relayRuntime.reapedStreamCount} / probe {relayRuntime.reapedProbeCount} / hls{" "}
-                            {relayRuntime.reapedHlsJobCount}
-                          </div>
-                        ) : null}
-                        {relayRuntime.hlsCachePrunedCount > 0 ||
-                        relayRuntime.expiredStreamIds.length > 0 ||
-                        relayRuntime.expiredProbeIds.length > 0 ||
-                        relayRuntime.expiredHlsJobIds.length > 0 ? (
-                          <div>
-                            最近回收：stream {relayRuntime.expiredStreamIds.length} / probe {relayRuntime.expiredProbeIds.length} / hls{" "}
-                            {relayRuntime.expiredHlsJobIds.length} / cache {relayRuntime.hlsCachePrunedCount}
-                          </div>
-                        ) : null}
+                        {runtimeQ.data?.ready === false ? <div>当前中继链路存在异常，建议打开 Relay Monitor 查看详情。</div> : null}
                       </div>
                     </>
                   ) : (
-                    <div className="text-xs text-muted-foreground">当前还没有 relay runtime 数据。</div>
+                    <div className="text-xs text-muted-foreground">暂时还没有中继状态摘要。</div>
                   )}
                 </div>
                 {materialSourceBindingQ.error ? (
@@ -551,7 +495,7 @@ export function ProjectSettingsPage() {
               ) : null}
               {!storageConfigQ.isLoading && !storageConfigQ.error && !storageConfigQ.data ? (
                 <div className="rounded-md border bg-muted/30 p-2 text-xs text-muted-foreground">
-                  当前后端还未暴露项目路径接口。重启后端后，这里会显示项目根路径和目录同步配置。
+                  暂时还没有项目路径信息。
                 </div>
               ) : null}
             </CardContent>
@@ -631,7 +575,7 @@ export function ProjectSettingsPage() {
       <Card className="theme-card">
         <CardHeader>
           <CardTitle>缺失材料修复</CardTitle>
-          <CardDescription>启动同步会把旧实例标记为缺失，但不会自动改写复述点锚点。这里手动迁移。</CardDescription>
+          <CardDescription>旧实例会被标记为缺失，相关复述点仍需要在这里手动迁移。</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3 text-sm">
           {instancesQ.isLoading ? <p className="text-sm text-muted-foreground">加载实例中...</p> : null}
@@ -653,7 +597,7 @@ export function ProjectSettingsPage() {
                       <span className="font-semibold text-foreground">{instance.materialDisplayName}</span>
                       <span className="theme-meta">缺失</span>
                     </div>
-                    <div className="break-all text-xs text-muted-foreground">{instance.materialId}</div>
+                    <div className="break-all text-xs text-muted-foreground">{formatMaterialReference(instance.materialId)}</div>
                     <div className="text-xs text-muted-foreground">最近观测：{formatLastSeenAt(instance.lastSeenAt)}</div>
                   </div>
 
@@ -665,7 +609,7 @@ export function ProjectSettingsPage() {
                       </div>
                       {recallPointIds.length > 0 ? (
                         <div className="break-all text-xs text-muted-foreground">
-                          {recallPointIds.slice(0, 6).join(" / ")}
+                          {recallPointIds.slice(0, 6).map((id) => formatRecallPointReference(id)).join(" / ")}
                           {recallPointIds.length > 6 ? " / ..." : ""}
                         </div>
                       ) : (
@@ -690,7 +634,7 @@ export function ProjectSettingsPage() {
                         {presentInstances.length === 0 ? <option value="">当前没有可迁移到的新实例</option> : null}
                         {presentInstances.map((item) => (
                           <option key={item.instanceId} value={item.instanceId}>
-                            {item.materialDisplayName} ({item.materialId})
+                            {item.materialDisplayName}（{formatMaterialReference(item.materialId)}）
                           </option>
                         ))}
                       </select>
