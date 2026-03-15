@@ -137,7 +137,7 @@ Install-Selfhost-Server-SshKey.bat
 Sync-Selfhost-Server.bat
 ```
 
-`Sync-Selfhost-Server.bat` now prefers the default SSH key, refuses a dirty git worktree unless you explicitly allow it, validates the remote `.env`, and runs readiness plus a public smoke check after deploy.
+`Sync-Selfhost-Server.bat` now prefers the default SSH key, prompts before deploying a dirty git worktree, validates the remote `.env`, and runs readiness plus a public smoke check after deploy.
 
 ## Dev mode
 

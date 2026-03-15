@@ -187,7 +187,7 @@ Sync-Selfhost-Server.bat
 `Sync-Selfhost-Server.bat` and `tools/sync_selfhost_server.ps1` now:
 
 - prefer `~/.ssh/learningpyramid_selfhost_ed25519` when present
-- refuse to deploy a dirty git worktree unless you pass `-AllowDirtyWorktree`
+- prompt before deploying a dirty git worktree from `Sync-Selfhost-Server.bat`, while `tools/sync_selfhost_server.ps1` still supports `-AllowDirtyWorktree` for non-interactive runs
 - verify the remote `.env` still has non-placeholder PostgreSQL and media token secrets
 - run readiness plus a public `/api/system/capabilities` smoke check after deploy
 

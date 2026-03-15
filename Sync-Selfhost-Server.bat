@@ -23,7 +23,7 @@ echo   Port: %SSH_PORT%
 echo   Auth: interactive SSH auth ^(password / keyboard-interactive^)
 echo.
 
-powershell -ExecutionPolicy Bypass -File "%SYNC_SCRIPT%" -ServerHost "%SERVER_HOST%" -ServerUser "%SERVER_USER%" -SshPort %SSH_PORT% -DisableSshKey
+powershell -ExecutionPolicy Bypass -File "%SYNC_SCRIPT%" -ServerHost "%SERVER_HOST%" -ServerUser "%SERVER_USER%" -SshPort %SSH_PORT% -DisableSshKey -PromptOnDirtyWorktree %*
 set "EXIT_CODE=%ERRORLEVEL%"
 
 echo.

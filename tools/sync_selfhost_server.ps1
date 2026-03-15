@@ -9,6 +9,7 @@ param(
     [switch]$SkipBuild,
     [switch]$SkipReleaseSync,
     [switch]$AllowDirtyWorktree,
+    [switch]$PromptOnDirtyWorktree,
     [switch]$DisableSshKey
 )
 
@@ -46,7 +47,8 @@ function Resolve-SshKeyPath {
 function Assert-CleanGitWorktree {
     param(
         [string]$RepoRoot,
-        [switch]$AllowDirty
+        [switch]$AllowDirty,
+        [switch]$PromptOnDirty
     )
     if ($AllowDirty) {
         return
@@ -66,6 +68,15 @@ function Assert-CleanGitWorktree {
         return
     }
     $preview = ($statusLines | Select-Object -First 20) -join [Environment]::NewLine
+    if ($PromptOnDirty) {
+        Write-Warning "Git worktree is dirty. Deploying now will include local uncommitted changes."
+        Write-Host $preview
+        $confirmation = Read-Host "Continue deploy with dirty worktree? [y/N]"
+        if ($confirmation -match '^(?i:y|yes)$') {
+            return
+        }
+        throw "Deploy cancelled because git worktree is dirty.`n$preview"
+    }
     throw "Git worktree is dirty. Commit or stash changes before deploying, or rerun with -AllowDirtyWorktree.`n$preview"
 }
 
@@ -141,7 +152,7 @@ Require-Command scp
 Require-Command ssh
 
 $repoRoot = Get-RepoRoot
-Assert-CleanGitWorktree -RepoRoot $repoRoot -AllowDirty:$AllowDirtyWorktree
+Assert-CleanGitWorktree -RepoRoot $repoRoot -AllowDirty:$AllowDirtyWorktree -PromptOnDirty:$PromptOnDirtyWorktree
 
 $sshCommonArgs = @(
     "-o", "ServerAliveInterval=15",
