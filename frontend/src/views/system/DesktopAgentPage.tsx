@@ -86,6 +86,13 @@ function describeAsset(kind: "installer_exe" | "installer_zip" | "standalone_zip
   return "Standalone ZIP"
 }
 
+function describeSourceKind(kind: string | null | undefined) {
+  const normalized = kind?.trim().toUpperCase()
+  if (normalized === "DESKTOP_AGENT_MANIFEST") return "桌面连接器"
+  if (normalized === "SERVER_FS") return "服务器文件系统"
+  return kind?.trim() || "未设置"
+}
+
 type Tone = "slate" | "sky" | "amber" | "emerald" | "rose"
 type StepperState = "complete" | "current" | "pending" | "warning" | "blocked"
 
@@ -296,7 +303,7 @@ export function DesktopAgentPage() {
     selectedProject?.sourceKind === "DESKTOP_AGENT_MANIFEST" && selectedAgent
       ? `${selectedAgent.deviceName} · ${selectedAgent.status === "ONLINE" ? "在线" : "离线"}`
       : selectedProject?.sourceKind === "DESKTOP_AGENT_MANIFEST"
-        ? `已绑定 agent ${selectedProject.desktopAgentId ?? "未知"}`
+        ? `已绑定桌面连接器 ${selectedProject.desktopAgentId ?? "未知"}`
         : "当前未绑定桌面连接器"
   const selectedClientStatus =
     selectedProject?.sourceKind !== "DESKTOP_AGENT_MANIFEST"
@@ -451,7 +458,7 @@ export function DesktopAgentPage() {
         <div className="grid gap-6 p-6 sm:p-7 xl:grid-cols-[minmax(0,1fr)_320px]">
           <div className="space-y-5">
             <div className="flex flex-wrap items-center gap-2">
-              <MetaChip strong>显式 Stepper</MetaChip>
+              <MetaChip strong>接入流程</MetaChip>
               <MetaChip>{availableProjects.length} 个项目可接入</MetaChip>
               <MetaChip>{onlineAgentCount} 台连接器在线</MetaChip>
               <MetaChip>{`已推进 ${completedStepCount}/3`}</MetaChip>
@@ -460,14 +467,14 @@ export function DesktopAgentPage() {
             <div className="space-y-3">
               <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-[2.35rem]">跟着流程条走：先装客户端，再发接入码，最后确认设备上线。</h1>
               <p className="max-w-3xl text-sm leading-7 text-[#5f7188] sm:text-base">
-                这块现在不再是三张并列说明卡，而是把真实接入顺序做成 stepper。当前步骤、阻塞点、过期状态和下一动作会直接显式标出来，不需要自己读段落推断流程。
+                当前步骤、卡点和下一步都会直接显示在这里。按顺序完成安装、发码和上线确认，就能把项目接入到桌面连接器。
               </p>
             </div>
 
             <SystemBoard
-              eyebrow="Flow Tracker"
+              eyebrow="接入进度"
               title={`当前 Step ${currentStep.index} · ${currentStep.title}`}
-              description="按安装、发码、上线三段推进；当前步骤、推进进度和阻塞状态会直接显示在流程条上。"
+              description="接入流程分成安装、发码和上线三步；当前状态和下一步会直接显示在这里。"
               tone={currentStepMeta.tone}
               headerRight={
                 <div className="flex flex-wrap gap-2">
@@ -495,8 +502,8 @@ export function DesktopAgentPage() {
           </div>
 
           <StatusSidebar
-            eyebrow="Current Status"
-            title="接入控制台"
+            eyebrow="当前状态"
+            title="接入状态"
             badge={<TonePill tone={selectedAgent?.status === "ONLINE" ? "emerald" : setupSession && !setupCodeExpired ? "sky" : "amber"}>{selectedClientStatus}</TonePill>}
             bodyClassName="gap-3"
           >
@@ -542,8 +549,8 @@ export function DesktopAgentPage() {
             </div>
 
             <WatchlistPanel
-              title="接入 watchlist"
-              description="把当前最影响接入推进的阻塞、恢复项和离线绑定集中到 hero 右侧，值班时不用来回扫卡片。"
+              title="当前待处理"
+              description="这里会汇总安装包、接入码和设备在线状态里最需要先处理的事项。"
               tone={heroWatchlistTone}
               bodyClassName="space-y-3"
             >
@@ -560,14 +567,14 @@ export function DesktopAgentPage() {
           <div className="grid gap-4 lg:grid-cols-2">
             <Card className="theme-card overflow-hidden">
               <CardHeader className="theme-card-header gap-3">
-                <CardTitle>Release Board</CardTitle>
-                <CardDescription>把推荐安装包、签名策略和安装能力收成一个发布面板，避免只剩单一下载入口。</CardDescription>
+                <CardTitle>客户端下载</CardTitle>
+                <CardDescription>先下载推荐安装包；如果需要 ZIP 或便携版，可以在下方展开其他版本。</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4 text-sm">
                 {latestRelease ? (
                   <div className="space-y-4">
                     <SystemBoard
-                      eyebrow="Release Focus"
+                      eyebrow="推荐安装包"
                       title={preferredAsset ? describeAsset(preferredAsset.kind) : "等待安装包"}
                       description={`${latestRelease.version} · 发布时间 ${formatDateTime(latestRelease.publishedAt)}`}
                       tone={releaseFocusTone}
@@ -628,9 +635,9 @@ export function DesktopAgentPage() {
                       />
                       <OpsSignalTile
                         icon={RadioTower}
-                        label="发布视图"
+                        label="可下载版本"
                         value={`${latestRelease.assets.length} 个资产`}
-                        detail="推荐方案置顶，其余 ZIP / 便携版安装包作为次级入口收纳。"
+                        detail="当前提供推荐安装包和其他可选下载版本。"
                         tone={latestRelease.assets.length > 1 ? "slate" : "emerald"}
                       />
                     </div>
@@ -642,7 +649,7 @@ export function DesktopAgentPage() {
                 {latestRelease && latestRelease.assets.length > 1 ? (
                   <SystemBoard
                     title="其他安装包"
-                    description="便携版和 ZIP 版本收在这里，适合调试或特殊分发场景。"
+                    description="这里提供 ZIP 和便携版，适合调试、临时分发或不安装直接运行。"
                     tone="slate"
                     headerRight={showOtherAssets ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
                     bodyClassName="space-y-3"
@@ -673,8 +680,8 @@ export function DesktopAgentPage() {
 
             <Card className="theme-card overflow-hidden">
               <CardHeader className="theme-card-header gap-3">
-                <CardTitle>Setup Control Deck</CardTitle>
-                <CardDescription>把接入码、预选范围和下一动作收成一个 control deck，避免生成后还要在页面里来回找状态。</CardDescription>
+                <CardTitle>接入码</CardTitle>
+                <CardDescription>在这里选择默认项目和逻辑根，生成后可以直接复制到 Windows 客户端。</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4 text-sm">
                 <ControlDeck
@@ -701,7 +708,7 @@ export function DesktopAgentPage() {
                     <option value="">不预选项目</option>
                     {availableProjects.map((project) => (
                       <option key={project.projectId} value={project.projectId}>
-                        {project.title} [{project.projectId}]
+                        {project.title}
                       </option>
                     ))}
                   </select>
@@ -721,7 +728,7 @@ export function DesktopAgentPage() {
                 <div className="grid gap-3 sm:grid-cols-2">
                   <OpsSignalTile
                     icon={FolderTree}
-                    label="嵌入范围"
+                    label="预选范围"
                     value={selectedProject?.title ?? "不预选项目"}
                     detail={selectedRoot?.label ?? "默认根目录"}
                     tone={selectedProject ? "sky" : "slate"}
@@ -740,9 +747,9 @@ export function DesktopAgentPage() {
                 </div>
 
                 <SystemBoard
-                  eyebrow="Setup Code"
+                  eyebrow="当前接入码"
                   title={setupCodeStatus}
-                  description="把当前接入码、有效期和使用状态收在一起，避免生成后还要回页面里找状态。"
+                  description="这里会显示当前接入码、有效期和使用状态。"
                   tone={setupCodeTone}
                   headerRight={<TonePill tone={setupCodeTone}>{setupCodeStatus}</TonePill>}
                   bodyClassName="space-y-4"
@@ -765,8 +772,8 @@ export function DesktopAgentPage() {
                 </SystemBoard>
 
                 <WatchlistPanel
-                  title="Setup watchlist"
-                  description="只收当前 setup 流程的待处理项，避免接入码刷新、首次生成这些动作被其他状态淹没。"
+                  title="当前待办"
+                  description="接入码过期、首次生成和继续接入等动作会集中显示在这里。"
                   tone={setupWatchlistTone}
                   bodyClassName="space-y-3"
                 >
@@ -796,15 +803,15 @@ export function DesktopAgentPage() {
 
           <Card className="theme-card overflow-hidden">
             <CardHeader className="theme-card-header gap-3">
-              <CardTitle>Project Intake Board</CardTitle>
-              <CardDescription>先看当前账号下还有哪些项目待接入或待恢复，再进入单个项目的逻辑根与设备绑定细节。</CardDescription>
+              <CardTitle>项目接入</CardTitle>
+              <CardDescription>先看哪些项目还没接入或需要恢复，再进入单个项目确认逻辑根和目录映射。</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4 text-sm">
               <div className="grid gap-3 xl:grid-cols-[0.92fr_1.08fr]">
                 <SystemBoard
-                  eyebrow="Intake Overview"
-                  title="Intake watchlist"
-                  description="把仍未绑定、绑定离线或等待恢复的项目单独提出来，不和正常项目混在一起。"
+                  eyebrow="接入概览"
+                  title="当前接入情况"
+                  description="这里汇总项目接入数量、离线绑定和待接入情况。"
                   tone={intakeOverviewTone}
                   bodyClassName="grid gap-3 sm:grid-cols-3 xl:grid-cols-1"
                 >
@@ -832,13 +839,13 @@ export function DesktopAgentPage() {
                 </SystemBoard>
 
                 <WatchlistPanel
-                  title="当前 watchlist"
+                  title="优先处理"
                   description={
                     offlineBoundProjects.length
                       ? `当前有 ${offlineBoundProjects.length} 个项目绑定到了离线设备，建议优先恢复这些项目。`
                       : unboundProjects.length
                         ? `当前有 ${unboundProjects.length} 个项目仍未完成桌面端接入，可以继续补首批设备。`
-                        : "当前没有离线绑定或待接入项目，intake backlog 已清空。"
+                        : "当前没有离线绑定或待接入项目，项目接入状态稳定。"
                   }
                   tone={intakeWatchlistTone}
                   bodyClassName="space-y-2"
@@ -849,14 +856,14 @@ export function DesktopAgentPage() {
                         title={project.title}
                         detail={
                           project.sourceKind === "DESKTOP_AGENT_MANIFEST"
-                            ? `当前绑定设备 ${project.desktopAgentId ?? "未知"} 尚未在线。`
+                            ? `当前绑定的桌面连接器 ${project.desktopAgentId ?? "未知"} 尚未在线。`
                             : "当前还没有桌面端绑定，适合做首次接入。"
                         }
                         tone={project.sourceKind === "DESKTOP_AGENT_MANIFEST" ? "amber" : "slate"}
                       />
                     ))}
                     {!offlineBoundProjects.length && !unboundProjects.length ? (
-                      <WatchlistItem title="当前 intake 平稳" detail="所有可接入项目都已经处于在线绑定或无待处理状态。" tone="emerald" />
+                      <WatchlistItem title="当前接入平稳" detail="所有可接入项目都已经处于在线绑定或无待处理状态。" tone="emerald" />
                     ) : null}
                 </WatchlistPanel>
               </div>
@@ -875,7 +882,7 @@ export function DesktopAgentPage() {
                         title={project.title}
                         meta={
                           <>
-                            <MetaChip>{project.projectId}</MetaChip>
+                            <MetaChip>{describeSourceKind(project.sourceKind)}</MetaChip>
                             <TonePill tone={itemTone}>
                               {project.sourceKind === "DESKTOP_AGENT_MANIFEST" ? (boundAgent?.status === "ONLINE" ? "已绑定 · 在线" : "已绑定 · 离线") : "未绑定"}
                             </TonePill>
@@ -888,10 +895,10 @@ export function DesktopAgentPage() {
                               {project.sourceKind === "DESKTOP_AGENT_MANIFEST"
                                 ? boundAgent
                                   ? `${boundAgent.deviceName} · ${boundAgent.appVersion}`
-                                  : `agent ${project.desktopAgentId ?? "未知"}`
+                                  : `已绑定连接器 ${project.desktopAgentId ?? "未知"}`
                                 : "等待首次接入"}
                             </div>
-                            <div className="mt-1">{project.sourceKind}</div>
+                            <div className="mt-1">{describeSourceKind(project.sourceKind)}</div>
                             {!isSelected ? (
                               <Button size="sm" variant="outline" type="button" className="mt-3" onClick={() => selectProject(project.projectId)}>
                                 查看项目
@@ -923,7 +930,7 @@ export function DesktopAgentPage() {
                                 selected={isSelected && selectedRoot?.rootKey === root.rootKey}
                                 title={root.label}
                                 description={root.relativePath ? `相对根路径：${root.relativePath}` : "默认根目录"}
-                                detail={root.sourceRootLabel ? `标签：${root.sourceRootLabel}` : undefined}
+                                detail={root.sourceRootLabel ? `逻辑根标签：${root.sourceRootLabel}` : undefined}
                                 onClick={() => selectProject(project.projectId, root.rootKey)}
                               />
                             ))
@@ -948,8 +955,8 @@ export function DesktopAgentPage() {
         <div className="space-y-4">
           <Card className="theme-card overflow-hidden">
             <CardHeader className="theme-card-header gap-3">
-              <CardTitle>Binding Envelope</CardTitle>
-              <CardDescription>右侧聚焦当前项目、逻辑根和本地目录绑定语义，像一个 envelope 一样收住当前接入范围。</CardDescription>
+              <CardTitle>当前项目详情</CardTitle>
+              <CardDescription>这里会显示当前项目的逻辑根、绑定设备和本地目录映射提示。</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4 text-sm">
               {selectedProject ? (
@@ -965,8 +972,8 @@ export function DesktopAgentPage() {
                     }
                     badge={
                       <div className="flex flex-wrap gap-2">
-                        <TonePill tone={selectedProject.sourceKind === "DESKTOP_AGENT_MANIFEST" ? "sky" : "slate"}>{selectedProject.sourceKind}</TonePill>
-                        {selectedProject.sourceRootLabel ? <TonePill tone="sky">{selectedProject.sourceRootLabel}</TonePill> : null}
+                        <TonePill tone={selectedProject.sourceKind === "DESKTOP_AGENT_MANIFEST" ? "sky" : "slate"}>{describeSourceKind(selectedProject.sourceKind)}</TonePill>
+                        {selectedProject.sourceRootLabel ? <TonePill tone="sky">{`标签：${selectedProject.sourceRootLabel}`}</TonePill> : null}
                       </div>
                     }
                     tone={bindingFocusTone}
@@ -974,16 +981,16 @@ export function DesktopAgentPage() {
                   >
                     <StatusField label="逻辑根名称" value={selectedRoot?.label ?? "默认根目录"} emphasize />
                     <StatusField label="相对根路径" value={selectedRoot?.relativePath || "默认根目录"} />
-                    <StatusField label="sourceRootLabel" value={selectedRoot?.sourceRootLabel ?? selectedProject.sourceRootLabel ?? "未设置"} />
+                    <StatusField label="逻辑根标签" value={selectedRoot?.sourceRootLabel ?? selectedProject.sourceRootLabel ?? "未设置"} />
                     <StatusField label="绑定设备" value={selectedBinding} />
                     <StatusField label="最近心跳" value={formatDateTime(selectedAgent?.lastSeenAt)} />
                     <StatusField label="本地状态" value={selectedClientStatus} />
                   </ControlDeck>
 
                   <SystemBoard
-                    eyebrow="Path Semantics"
-                    title="本地目录绑定语义"
-                    description="服务器只看逻辑根标签和相对路径，Windows 绝对路径只会在桌面端本地完成映射。"
+                    eyebrow="目录映射"
+                    title="本地目录映射"
+                    description="服务端只记录逻辑根标签和相对路径，本机目录路径只保留在当前桌面端。"
                     tone="sky"
                     bodyClassName="space-y-3"
                   >
@@ -1002,8 +1009,8 @@ export function DesktopAgentPage() {
                   </SystemBoard>
 
                   <WatchlistPanel
-                    title="当前 envelope 判断"
-                    description="把当前选中项目的绑定状态、恢复优先级和下一步动作收在一起，不需要再去主列表里回看。"
+                    title="当前提示"
+                    description="这里会根据当前项目的绑定状态给出下一步建议。"
                     tone={bindingEnvelopeTone}
                     bodyClassName="space-y-3"
                   >
@@ -1035,14 +1042,14 @@ export function DesktopAgentPage() {
 
           <Card className="theme-card overflow-hidden">
             <CardHeader className="theme-card-header gap-3">
-              <CardTitle>Policy Notes</CardTitle>
-              <CardDescription>把最关键的安装与接入策略压成简短的 notes，不抢主操作的注意力。</CardDescription>
+              <CardTitle>使用提示</CardTitle>
+              <CardDescription>首次接入和异常恢复前，先看这里的安装与排查建议。</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4 text-sm">
               <SystemBoard
-                eyebrow="Install Policy"
+                eyebrow="接入建议"
                 title="安装与接入策略"
-                description="把推荐安装方式和异常排查优先级收成同一块策略板，不抢主操作，但也不会埋得太深。"
+                description="这里会说明推荐安装方式，以及遇到异常时优先检查什么。"
                 tone={policyBoardTone}
                 bodyClassName="space-y-3"
               >

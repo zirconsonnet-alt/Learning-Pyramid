@@ -17,6 +17,7 @@ class LauncherState:
     status_badge: str
     title: str
     message: str
+    status_summary: str
     server_url: str
     project_id: str
     root_label: str
@@ -39,6 +40,7 @@ def build_launcher_state(controller: "DesktopAgentUiController") -> LauncherStat
             status_badge="尚未接入",
             title="还没有保存的连接器",
             message="请先登录并完成一次接入。接入完成后，后续启动不需要重新登录。",
+            status_summary="尚未完成接入。",
             server_url=_default_server_url(),
             project_id="-",
             root_label="-",
@@ -57,17 +59,20 @@ def build_launcher_state(controller: "DesktopAgentUiController") -> LauncherStat
         status_badge = "运行中"
         title = "连接器正在后台运行"
         message = "当前连接器已在后台运行。重新启动会通知现有托盘进程刷新。"
+        status_summary = "当前连接器正在后台运行。"
     else:
         status_key = "stopped"
         status_badge = "可启动"
         title = "已保存连接器"
         message = "已保存的连接器可以直接启动，无需重新登录。"
+        status_summary = "已保存配置，可直接启动。"
 
     return LauncherState(
         status_key=status_key,
         status_badge=status_badge,
         title=title,
         message=message,
+        status_summary=status_summary,
         server_url=saved.server_url,
         project_id=saved.project_id,
         root_label=saved.source_root_label or "默认根目录",
@@ -77,5 +82,5 @@ def build_launcher_state(controller: "DesktopAgentUiController") -> LauncherStat
         update_status=update_status,
         update_history=update_history,
         start_enabled=True,
-        reconfigure_label="更换账号或重新接入",
+        reconfigure_label="更换账号 / 重新接入",
     )

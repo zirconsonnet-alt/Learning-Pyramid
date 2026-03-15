@@ -61,12 +61,13 @@ QLabel[role="hint"] {
 
 QPushButton {
     border-radius: 12px;
-    padding: 0 16px;
+    padding: 8px 16px;
     border: 1px solid #d6deea;
     background: #ffffff;
     color: #0f172a;
     font-weight: 600;
-    min-height: 40px;
+    min-height: 44px;
+    text-align: center;
 }
 
 QPushButton:hover {

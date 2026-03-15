@@ -16,14 +16,14 @@ export function RelayGovernanceSection({ globalRelay }: { globalRelay: RelayRunt
 
   return (
     <Card className="theme-card overflow-hidden">
-      <CardHeader className="theme-card-header gap-4">
-        <SectionHeader
-          icon={ShieldCheck}
-          eyebrow="Retention & Governance"
-          title="运行治理"
-          description="把 retention、janitor 和外部告警通道收成一个治理矩阵，方便快速判断采样是否够久、回收是否活跃、告警是否真的发出去了。"
-        />
-      </CardHeader>
+        <CardHeader className="theme-card-header gap-4">
+          <SectionHeader
+            icon={ShieldCheck}
+            eyebrow="治理概览"
+            title="运行治理"
+            description="这里会汇总样本保留、后台回收和外部告警通道状态，方便快速判断治理链路是否正常。"
+          />
+        </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <CompactMetric
@@ -79,7 +79,7 @@ export function RelayGovernanceSection({ globalRelay }: { globalRelay: RelayRunt
 
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             <SystemBoard
-              eyebrow="Retention Matrix"
+              eyebrow="样本保留"
               title="采样与诊断留存"
               description="看清当前各类持久化样本的数量和保留面，判断历史是否够支撑排障回溯。"
               tone={(globalRelay?.metricSampleRetentionDays ?? 0) > 0 ? "emerald" : "slate"}
@@ -92,7 +92,7 @@ export function RelayGovernanceSection({ globalRelay }: { globalRelay: RelayRunt
             </SystemBoard>
 
             <SystemBoard
-              eyebrow="Janitor Matrix"
+              eyebrow="回收与裁剪"
               title="回收与裁剪"
               description="集中看 stream、probe、HLS 和 cache 的回收动作，判断后台清理链路有没有在正常工作。"
               tone={janitorTone}
@@ -106,7 +106,7 @@ export function RelayGovernanceSection({ globalRelay }: { globalRelay: RelayRunt
             </SystemBoard>
 
             <SystemBoard
-              eyebrow="Webhook Matrix"
+              eyebrow="告警投递"
               title="投递与抑制"
               description="查看外部告警通道发了多少、失败多少、被抑制多少，避免只看到站内异常却没发出去。"
               tone={webhookTone}
@@ -122,7 +122,7 @@ export function RelayGovernanceSection({ globalRelay }: { globalRelay: RelayRunt
         </div>
 
         <SystemBoard
-          eyebrow="Governance Snapshot"
+          eyebrow="治理快照"
           title="治理快照"
           description="把回收时间、最近投递、cache 条目和原因分布收在一起，方便快速判断治理链路有没有积累异常。"
           tone="slate"

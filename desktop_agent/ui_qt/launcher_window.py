@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -48,8 +49,10 @@ class LauncherWindow(QMainWindow):
         hero_copy.setSpacing(6)
         self.title_label = QLabel()
         self.title_label.setProperty("role", "title")
+        self.title_label.setWordWrap(True)
         subtitle = QLabel("主界面只负责启动。登录、换账号和重新接入都放到第二层窗口。")
         subtitle.setProperty("role", "subtitle")
+        subtitle.setWordWrap(True)
         hero_copy.addWidget(self.title_label)
         hero_copy.addWidget(subtitle)
         hero_layout.addLayout(hero_copy, 1)
@@ -89,6 +92,7 @@ class LauncherWindow(QMainWindow):
         self.message_label = QLabel()
         self.message_label.setProperty("role", "subtitle")
         self.message_label.setWordWrap(True)
+        self.message_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         action_layout.addWidget(self.message_label)
 
         button_row = QHBoxLayout()
@@ -100,6 +104,14 @@ class LauncherWindow(QMainWindow):
         self.reconfigure_button.clicked.connect(self._open_onboarding)
         self.open_logs_button = QPushButton("打开日志")
         self.open_logs_button.clicked.connect(self._open_logs)
+        for button, min_width in (
+            (self.start_button, 156),
+            (self.reconfigure_button, 196),
+            (self.open_logs_button, 132),
+        ):
+            button.setMinimumHeight(44)
+            button.setMinimumWidth(min_width)
+            button.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
         button_row.addWidget(self.start_button)
         button_row.addWidget(self.reconfigure_button)
         button_row.addWidget(self.open_logs_button)
@@ -113,12 +125,15 @@ class LauncherWindow(QMainWindow):
         self.status_line = QLabel()
         self.status_line.setProperty("role", "hint")
         self.status_line.setWordWrap(True)
+        self.status_line.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.update_line = QLabel()
         self.update_line.setProperty("role", "hint")
         self.update_line.setWordWrap(True)
+        self.update_line.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.history_line = QLabel()
         self.history_line.setProperty("role", "hint")
         self.history_line.setWordWrap(True)
+        self.history_line.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         action_layout.addWidget(self.status_line)
         action_layout.addWidget(self.update_line)
         action_layout.addWidget(self.history_line)
@@ -164,7 +179,7 @@ class LauncherWindow(QMainWindow):
         self.autostart_checkbox.blockSignals(True)
         self.autostart_checkbox.setChecked(self.controller.autostart_enabled())
         self.autostart_checkbox.blockSignals(False)
-        self.status_line.setText(f"状态：{state.message}")
+        self.status_line.setText(f"状态：{state.status_summary}")
         self.update_line.setText(f"更新：{state.update_status}")
         self.history_line.setText(state.update_history)
         self._set_badge(state.status_key, state.status_badge)

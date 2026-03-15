@@ -91,7 +91,7 @@ export function RelayMonitorHeroSection({
             <div className="space-y-2">
               <h1 className="text-2xl font-semibold tracking-tight text-slate-950 sm:text-[2rem]">先看有没有异常，再看异常影响哪里，最后再追数据细节。</h1>
               <p className="max-w-3xl text-sm leading-6 text-slate-600">
-                页面首屏现在围绕决策路径重排：先给出健康结论，再给出关键运行指标，最后把治理和扩展信息下沉，避免所有卡片同权竞争注意力。
+                这里会先给出当前健康状态、优先处理动作和核心运行信号，方便你快速决定下一步该查哪里。
               </p>
             </div>
           </div>
@@ -139,8 +139,8 @@ export function RelayMonitorHeroSection({
         </div>
 
         <StatusSidebar
-          eyebrow="Current Health"
-          title="值班侧栏"
+          eyebrow="当前健康度"
+          title="当前健康状态"
           badge={
             <>
               {renderStateBadge(runtimeHealthState)}
@@ -159,7 +159,7 @@ export function RelayMonitorHeroSection({
 
           <WatchlistPanel
             title="待处理队列"
-            description="把本轮值班最该先动手的动作抬到右侧，避免健康卡只给状态、不告诉你先做什么。"
+            description="这里会列出当前最值得优先处理的动作，方便直接进入排查。"
             tone={alertSignalTone}
             bodyClassName="space-y-3"
           >
@@ -172,9 +172,9 @@ export function RelayMonitorHeroSection({
           </WatchlistPanel>
 
           <SystemBoard
-            eyebrow="Operator Snapshot"
+            eyebrow="运行快照"
             title="值班快照"
-            description="把当前监测范围、排队、缓存和最近回收这些运维快照固定在同一块，适合值班时快速复扫。"
+            description="这里会汇总当前监测范围、排队、缓存和最近回收情况，方便快速复查。"
             tone={backlogSignalTone}
             bodyClassName="grid gap-3 sm:grid-cols-2"
           >
@@ -187,8 +187,8 @@ export function RelayMonitorHeroSection({
           </SystemBoard>
 
           <SystemBoard
-            eyebrow="Sampling Window"
-            title="采样窗口"
+            eyebrow="采样设置"
+            title="采样范围"
             description={`采样周期 ${formatBucketSeconds(monitor?.trends.sampleBucketSeconds)}，保留 ${monitor?.trends.retentionDays ?? 0} 天，历史起点 ${formatDateTime(monitor?.trends.historyStartAt)}。`}
             tone="slate"
           >

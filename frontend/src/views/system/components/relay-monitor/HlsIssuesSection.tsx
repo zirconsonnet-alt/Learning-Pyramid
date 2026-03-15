@@ -3,7 +3,15 @@ import { AlertTriangle, BellRing, CheckCircle2, Film } from "lucide-react"
 import type { RelayMonitor } from "@/ui/api/system"
 import { Card, CardContent, CardHeader } from "@/ui/components/ui/card"
 
-import { formatBytes, formatCountSummary, formatDateTime, renderStateBadge } from "./helpers"
+import {
+  describeAgentReference,
+  describeInstanceReference,
+  describeProjectReference,
+  formatBytes,
+  formatCountSummary,
+  formatDateTime,
+  renderStateBadge,
+} from "./helpers"
 import { BoardEntryCard, CompactMetric, EmptyState, EntryNote, MetaChip, NarrativePanel, SectionHeader, SystemBoard } from "./shared"
 
 function jobTone(state: string) {
@@ -40,9 +48,9 @@ export function RelayHlsIssuesSection({
         <CardHeader className="theme-card-header gap-4">
           <SectionHeader
             icon={Film}
-            eyebrow="Transcode Triage"
+            eyebrow="转码概览"
             title="HLS Job 审计"
-            description="把最近转码活动做成 triage 面板，先看失败与影响，再看单个 job 的状态、产物和时间线。"
+            description="这里会汇总最近的转码活动，先看失败与影响，再看单个任务的状态、产物和时间线。"
           />
         </CardHeader>
         <CardContent className="space-y-4">
@@ -64,8 +72,8 @@ export function RelayHlsIssuesSection({
 
           <div className="grid gap-3 xl:grid-cols-[0.92fr_1.08fr]">
             <SystemBoard
-              title="转码 watchlist"
-              description="把需要继续跟踪的失败或异常 job 单独拉出来，方便先做值班判断。"
+              title="当前关注项"
+              description="这里会汇总需要继续跟踪的失败或异常转码任务。"
               tone={recentFailedJob ? jobTone(recentFailedJob.state) : "emerald"}
               bodyClassName="space-y-3"
             >
@@ -97,7 +105,7 @@ export function RelayHlsIssuesSection({
               />
 
               <SystemBoard
-                eyebrow="Transcode Snapshot"
+                eyebrow="转码快照"
                 title="转码分布与时间窗"
                 description="把状态分布、问题原因和 1h/24h 窗口汇总到同一块，值班时能更快判断异常是在扩散还是刚刚恢复。"
                 tone={(monitor?.hlsSummary.activityWindows.lastDay.failedCount ?? 0) > 0 ? "amber" : "slate"}
@@ -127,9 +135,9 @@ export function RelayHlsIssuesSection({
                   title={<div className="truncate">{job.relativePath}</div>}
                   meta={
                     <>
-                      <MetaChip>{job.jobId}</MetaChip>
-                      <MetaChip>{job.instanceId}</MetaChip>
-                      <MetaChip>{job.cacheKey}</MetaChip>
+                      <MetaChip>{`任务 ${job.jobId}`}</MetaChip>
+                      <MetaChip>{describeInstanceReference(job.instanceId)}</MetaChip>
+                      <MetaChip>{`缓存 ${job.cacheKey}`}</MetaChip>
                     </>
                   }
                   headerRight={renderStateBadge(job.state)}
@@ -167,7 +175,7 @@ export function RelayHlsIssuesSection({
         <CardHeader className="theme-card-header gap-4">
           <SectionHeader
             icon={AlertTriangle}
-            eyebrow="Session Failure Board"
+            eyebrow="会话概览"
             title="最近中继问题"
             description="把失败或取消的 relay session 整理成故障面板，优先看失败原因、受影响项目和流量终止位置。"
           />
@@ -186,8 +194,8 @@ export function RelayHlsIssuesSection({
 
           <div className="grid gap-3 xl:grid-cols-[0.92fr_1.08fr]">
             <SystemBoard
-              title="回放 watchlist"
-              description="把最近失败或取消的 session 抽成故障入口，优先判断是 agent、viewer 还是 janitor 类问题。"
+              title="当前关注项"
+              description="这里会汇总最近失败或取消的会话，方便先判断故障来源。"
               tone={recentFailedIssue ? issueTone(recentFailedIssue.status) : "emerald"}
               bodyClassName="space-y-3"
             >
@@ -200,7 +208,11 @@ export function RelayHlsIssuesSection({
                 <CompactMetric
                   label="当前焦点 Session"
                   value={recentFailedIssue?.status ?? "清空"}
-                  detail={recentFailedIssue ? `${recentFailedIssue.projectTitle ?? recentFailedIssue.projectId} / ${recentFailedIssue.instanceId}` : "最近没有失败或取消的 relay session。"}
+                  detail={
+                    recentFailedIssue
+                      ? `${describeProjectReference(recentFailedIssue.projectTitle, recentFailedIssue.projectId)} / ${describeInstanceReference(recentFailedIssue.instanceId)}`
+                      : "最近没有失败或取消的 relay session。"
+                  }
                   tone={recentFailedIssue ? (recentFailedIssue.status === "FAILED" ? "rose" : "amber") : "emerald"}
                 />
                 <CompactMetric
@@ -213,7 +225,7 @@ export function RelayHlsIssuesSection({
 
             <div className="space-y-3">
               <SystemBoard
-                eyebrow="Issue Mix"
+                eyebrow="问题分布"
                 title="问题原因分布"
                 description="快速判断当前 session 故障更多是来自 agent、viewer 还是后台回收链路。"
                 tone={recentFailedIssue ? issueTone(recentFailedIssue.status) : "slate"}
@@ -238,13 +250,13 @@ export function RelayHlsIssuesSection({
                   key={issue.streamId}
                   title={
                     <>
-                      {issue.projectTitle ?? issue.projectId} / {issue.instanceId}
+                      {describeProjectReference(issue.projectTitle, issue.projectId)} / {describeInstanceReference(issue.instanceId)}
                     </>
                   }
                   meta={
                     <>
-                      <MetaChip>{issue.streamId}</MetaChip>
-                      <MetaChip>{issue.agentId}</MetaChip>
+                      <MetaChip>{`会话 ${issue.streamId}`}</MetaChip>
+                      <MetaChip>{describeAgentReference(issue.agentId)}</MetaChip>
                       <MetaChip>{issue.mode}</MetaChip>
                     </>
                   }
@@ -255,8 +267,8 @@ export function RelayHlsIssuesSection({
                   <div className="grid gap-2 text-xs text-slate-600 sm:grid-cols-2 xl:grid-cols-4">
                     <div>{`开始 ${formatDateTime(issue.createdAt)}`}</div>
                     <div>{`结束 ${formatDateTime(issue.finishedAt ?? issue.updatedAt)}`}</div>
-                    <div>{`Agent 上行 ${formatBytes(issue.bytesFromAgent)}`}</div>
-                    <div>{`Viewer 下行 ${formatBytes(issue.bytesToViewer)}`}</div>
+                    <div>{`连接器上行 ${formatBytes(issue.bytesFromAgent)}`}</div>
+                    <div>{`浏览器下行 ${formatBytes(issue.bytesToViewer)}`}</div>
                   </div>
 
                   {issue.failureReason ? (

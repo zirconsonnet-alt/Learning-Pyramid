@@ -99,9 +99,9 @@ export function RelayTrendsSection({ monitor }: { monitor: RelayMonitor | undefi
       <CardHeader className="theme-card-header gap-4">
         <SectionHeader
           icon={Waves}
-          eyebrow="Capacity Cockpit"
+          eyebrow="容量概览"
           title="趋势与容量"
-          description="把周期采样做成容量驾驶舱：先看风险信号和窗口摘要，再看分时段曲线，最后再判断 retention 是否足够支撑排障。"
+          description="先看容量风险信号，再看各时间窗口的曲线变化，最后确认采样保留是否足够支撑排查。"
         />
       </CardHeader>
       <CardContent className="space-y-5">
@@ -109,7 +109,7 @@ export function RelayTrendsSection({ monitor }: { monitor: RelayMonitor | undefi
           <div className="theme-status-surface p-4 sm:p-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Capacity Watchlist</div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">容量信号</div>
                 <div className="mt-1 text-lg font-semibold text-slate-950">容量风险信号</div>
               </div>
               <MetaChip icon={Activity}>{`样本 ${monitor?.trends.sampleCount ?? 0}`}</MetaChip>

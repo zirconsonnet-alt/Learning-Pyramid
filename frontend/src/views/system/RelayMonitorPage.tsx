@@ -113,8 +113,8 @@ export function RelayMonitorPage() {
         <CardHeader className="theme-card-header gap-4">
           <SectionHeader
             icon={Waypoints}
-            eyebrow="Hosted Only"
-            title="Relay Monitor"
+            eyebrow="Hosted 模式"
+            title="中继监控"
             description="当前部署不是 hosted 模式，没有桌面中继运行时可监控。"
           />
         </CardHeader>
@@ -187,7 +187,7 @@ export function RelayMonitorPage() {
     priorityActions.push(`查看最近 1 小时的高优先级告警，优先处理最新一条“${topAlert.title}”。`)
   }
   if ((monitor?.streamSummary.failedSessionCount ?? 0) > 0 || (monitor?.hlsSummary.activityWindows.lastDay.failedCount ?? 0) > 0) {
-    priorityActions.push("继续核查最近失败的 relay 会话和 HLS job，确认是 agent 断线、viewer 中断还是转码失败。")
+    priorityActions.push("继续核查最近失败的 relay 会话和 HLS job，确认是桌面连接器断线、浏览器中断还是转码失败。")
   }
   if (globalRelay?.alertWebhook?.configured && globalRelay.alertWebhook.lastError) {
     priorityActions.push("修复外部告警通道最近一次投递错误，避免异常只停留在站内监控面板。")

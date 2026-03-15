@@ -96,9 +96,9 @@ export function RelayMonitorFiltersCard({
       <CardHeader className="theme-card-header gap-4">
         <SectionHeader
           icon={Search}
-          eyebrow="Ops Control Bar"
+          eyebrow="诊断筛选"
           title="诊断控制台"
-          description="把诊断检索做成值班控制台：先看当前态势，再用快速预设缩小排查范围，然后再补精确搜索。"
+          description="先看当前态势，再用快速预设缩小范围，最后补充精确搜索条件。"
           actions={
             <>
               <Button variant="outline" onClick={onReset} disabled={!hasDiagnosticFilters}>
@@ -250,7 +250,7 @@ export function RelayMonitorFiltersCard({
               id="diagnostic-query"
               value={diagnosticSearchText}
               onChange={(e) => onSearchTextChange(e.target.value)}
-              placeholder="message / path / agent / details"
+              placeholder="消息 / 路径 / 连接器 / 详情"
             />
           </div>
         </div>
