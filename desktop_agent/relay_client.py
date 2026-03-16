@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from queue import Empty, Queue
-from threading import Event, Lock, RLock, Thread
+from threading import Event, Lock, RLock, Thread, current_thread
 from typing import Any, Callable
 from urllib.parse import urlparse
 
@@ -92,24 +92,31 @@ def _http_error_means_hls_job_gone(exc: Exception) -> bool:
     return "/hls-jobs/" in request_url
 
 
-def _is_network_available() -> bool:
-    """检测网络连接状态"""
-    try:
-        # 尝试连接到一个可靠的公共服务
-        requests.head("https://www.google.com", timeout=2)
-        return True
-    except Exception:
-        return False
+def _is_network_available(base_url: str) -> bool:
+    return _is_network_available_for_server(base_url)
 
 
-def _wait_for_network_recovery(max_wait_seconds: int = 60) -> bool:
+def _wait_for_network_recovery(*, base_url: str, max_wait_seconds: int = 60) -> bool:
     """等待网络恢复，带超时"""
     start_time = time.monotonic()
     while time.monotonic() - start_time < max_wait_seconds:
-        if _is_network_available():
+        if _is_network_available(base_url):
             return True
         time.sleep(1)
     return False
+
+
+def _is_network_available_for_server(base_url: str) -> bool:
+    parsed = urlparse(str(base_url or "").strip())
+    host = parsed.hostname
+    if not host:
+        return False
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        with socket.create_connection((host, port), timeout=2):
+            return True
+    except OSError:
+        return False
 
 
 def _is_websocket_auth_error(exc: Exception) -> bool:
@@ -156,6 +163,11 @@ class RelayClient:
         self._hls_tasks: dict[str, _BackgroundTaskHandle] = {}
         self._task_errors: Queue[BaseException] = Queue()
         self._diagnostic_signatures: dict[str, str] = {}
+        self._manifest_sync_guard = Lock()
+        self._manifest_sync_requested = False
+        self._manifest_sync_reason = "startup"
+        self._manifest_sync_heartbeat_sec: int | None = None
+        self._manifest_sync_thread: Thread | None = None
 
     def set_agent_token(self, agent_token: str) -> None:
         self.config.agent_token = str(agent_token)
@@ -206,6 +218,106 @@ class RelayClient:
         self._last_manifest_signature = signature
         return response.json()["data"]
 
+    def _manifest_sync_failure_signature(
+        self,
+        *,
+        error: Exception,
+        reason: str,
+        heartbeat_sec: int | None,
+    ) -> str:
+        payload = {
+            "error": str(error),
+            "reason": str(reason),
+            "heartbeatSeconds": None if heartbeat_sec is None else int(heartbeat_sec),
+        }
+        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+
+    def _report_manifest_sync_failure(
+        self,
+        *,
+        error: Exception,
+        reason: str,
+        heartbeat_sec: int | None,
+    ) -> None:
+        signature = self._manifest_sync_failure_signature(
+            error=error,
+            reason=reason,
+            heartbeat_sec=heartbeat_sec,
+        )
+        if self._diagnostic_signatures.get("manifest_sync_failed") == signature:
+            return
+        self._diagnostic_signatures["manifest_sync_failed"] = signature
+        details = {"reason": str(reason)}
+        if heartbeat_sec is not None:
+            details["heartbeatSeconds"] = int(heartbeat_sec)
+        self.report_diagnostic_event_async(
+            level="warning",
+            category="manifest",
+            event_type="manifest_sync_failed",
+            message=str(error),
+            details=details,
+            project_id=self.config.project_id,
+            timeout_seconds=1.0,
+        )
+
+    def _drain_manifest_sync_requests(self) -> tuple[str, int | None] | None:
+        with self._manifest_sync_guard:
+            if not self._manifest_sync_requested:
+                self._manifest_sync_thread = None
+                return None
+            self._manifest_sync_requested = False
+            return self._manifest_sync_reason, self._manifest_sync_heartbeat_sec
+
+    def _run_manifest_sync_worker(self) -> None:
+        try:
+            while True:
+                request = self._drain_manifest_sync_requests()
+                if request is None:
+                    return
+                reason, heartbeat_sec = request
+                try:
+                    self.sync_manifest()
+                except DesktopAgentAuthExpired as exc:
+                    self._record_background_error(exc)
+                    return
+                except Exception as exc:
+                    self._report_manifest_sync_failure(
+                        error=exc,
+                        reason=reason,
+                        heartbeat_sec=heartbeat_sec,
+                    )
+                    continue
+                self._diagnostic_signatures.pop("manifest_sync_failed", None)
+        finally:
+            with self._manifest_sync_guard:
+                current = self._manifest_sync_thread
+                if current is not None and current is current_thread():
+                    self._manifest_sync_thread = None
+
+    def request_manifest_sync(
+        self,
+        *,
+        reason: str,
+        heartbeat_sec: int | None = None,
+    ) -> None:
+        should_start = False
+        with self._manifest_sync_guard:
+            self._manifest_sync_requested = True
+            self._manifest_sync_reason = str(reason)
+            self._manifest_sync_heartbeat_sec = None if heartbeat_sec is None else int(heartbeat_sec)
+            if self._manifest_sync_thread is None or not self._manifest_sync_thread.is_alive():
+                self._manifest_sync_thread = Thread(
+                    target=self._run_manifest_sync_worker,
+                    name="desktop-agent-manifest-sync",
+                    daemon=True,
+                )
+                should_start = True
+                thread = self._manifest_sync_thread
+            else:
+                thread = None
+        if should_start and thread is not None:
+            thread.start()
+
     def report_diagnostic_event(
         self,
         *,
@@ -218,6 +330,7 @@ class RelayClient:
         instance_id: str | None = None,
         relative_path: str | None = None,
         raise_on_auth_expired: bool = False,
+        timeout_seconds: float = 15.0,
     ) -> bool:
         try:
             response = self.http.post(
@@ -233,7 +346,7 @@ class RelayClient:
                     "relativePath": relative_path,
                     "createdAt": time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime()),
                 },
-                timeout=15,
+                timeout=max(0.5, float(timeout_seconds)),
             )
             _raise_for_agent_response(response)
             return True
@@ -243,6 +356,43 @@ class RelayClient:
             return False
         except Exception:
             return False
+
+    def report_diagnostic_event_async(
+        self,
+        *,
+        level: str,
+        category: str,
+        event_type: str,
+        message: str,
+        details: dict[str, Any] | None = None,
+        project_id: str | None = None,
+        instance_id: str | None = None,
+        relative_path: str | None = None,
+        raise_on_auth_expired: bool = False,
+        timeout_seconds: float = 1.0,
+    ) -> None:
+        def _runner() -> None:
+            try:
+                self.report_diagnostic_event(
+                    level=level,
+                    category=category,
+                    event_type=event_type,
+                    message=message,
+                    details=details,
+                    project_id=project_id,
+                    instance_id=instance_id,
+                    relative_path=relative_path,
+                    raise_on_auth_expired=raise_on_auth_expired,
+                    timeout_seconds=timeout_seconds,
+                )
+            except Exception:
+                return
+
+        Thread(
+            target=_runner,
+            name=f"desktop-agent-diagnostic-{event_type}",
+            daemon=True,
+        ).start()
 
     def _upload_stream_chunk(
         self,
@@ -286,6 +436,8 @@ class RelayClient:
             },
             timeout=30,
         )
+        _raise_for_agent_response(response)
+
     def _send_ws_json(self, ws: websocket.WebSocket, payload: dict[str, Any]) -> None:
         with self._ws_send_lock:
             ws.send(json.dumps(payload))
@@ -745,7 +897,6 @@ class RelayClient:
         cancel_hls_tasks = True
         try:
             self._report_local_environment_diagnostics()
-            self.sync_manifest()
             try:
                 ws = websocket.create_connection(
                     _ws_url(self.config.server_url, "/api/desktop-agents/ws"),
@@ -769,12 +920,11 @@ class RelayClient:
             )
             if on_connected is not None:
                 on_connected()
-            # 重连后同步任务状态
             self._sync_task_status(ws)
-            last_heartbeat_at = 0.0
-            last_health_check = 0.0
-            health_check_interval = 30  # 每30秒检查一次连接健康
-            last_heartbeat_at = 0.0
+            self.request_manifest_sync(reason="session_connected")
+            last_heartbeat_at = time.time()
+            last_server_activity_at = time.monotonic()
+            max_server_silence_seconds = max(float(heartbeat_sec) * 3.0, 45.0)
             while True:
                 self._raise_background_error_if_any()
                 if stop_event is not None and stop_event.is_set():
@@ -784,35 +934,15 @@ class RelayClient:
                     self._cancel_tasks("stream", "hls")
                     return
                 now = time.time()
+                if time.monotonic() - last_server_activity_at >= max_server_silence_seconds:
+                    raise ConnectionError("desktop agent heartbeat timed out")
                 if now - last_heartbeat_at >= heartbeat_sec:
-                    try:
-                        self.sync_manifest()
-                    except DesktopAgentAuthExpired:
-                        raise
-                    except Exception as exc:
-                        self.report_diagnostic_event(
-                            level="warning",
-                            category="manifest",
-                            event_type="manifest_sync_failed",
-                            message=str(exc),
-                            details={"heartbeatSeconds": heartbeat_sec},
-                            project_id=self.config.project_id,
-                        )
                     self._send_ws_json(
                         ws,
                         {"type": "heartbeat", "at": time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime())},
                     )
+                    self.request_manifest_sync(reason="heartbeat", heartbeat_sec=heartbeat_sec)
                     last_heartbeat_at = now
-                
-                # 定期健康检查
-                if now - last_health_check >= health_check_interval:
-                    try:
-                        # 发送ping消息测试连接
-                        self._send_ws_json(ws, {"type": "ping", "timestamp": now})
-                        last_health_check = now
-                    except Exception:
-                        # 连接可能已断开，抛出异常触发重连
-                        raise RuntimeError("connection health check failed")
                 try:
                     raw = ws.recv()
                 except websocket.WebSocketTimeoutException:
@@ -821,6 +951,7 @@ class RelayClient:
                     continue
                 if raw is None:
                     raise RuntimeError("websocket closed")
+                last_server_activity_at = time.monotonic()
                 try:
                     payload = json.loads(raw)
                 except json.JSONDecodeError:
@@ -858,7 +989,7 @@ class RelayClient:
         except DesktopAgentAuthExpired:
             raise
         except (websocket.WebSocketConnectionClosedException, ConnectionError, OSError) as exc:
-            self.report_diagnostic_event(
+            self.report_diagnostic_event_async(
                 level="warning",
                 category="network",
                 event_type="connection_lost",
@@ -868,6 +999,7 @@ class RelayClient:
                     "active_tasks": self._active_task_counts(),
                 },
                 project_id=self.config.project_id,
+                timeout_seconds=1.0,
             )
             cancel_stream_tasks = False
             cancel_hls_tasks = False
@@ -907,7 +1039,7 @@ class RelayClient:
                 raise
             except Exception:
                 # 检测网络状态，如果网络可用则快速重连
-                if _is_network_available():
+                if _is_network_available_for_server(self.config.server_url):
                     time.sleep(1)  # 网络可用时快速重试
                 else:
                     # 网络不可用时使用指数退避

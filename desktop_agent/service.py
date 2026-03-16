@@ -31,6 +31,36 @@ class DesktopAgentService:
         self._logger = get_desktop_agent_logger("service")
 
     @staticmethod
+    def _report_diagnostic(
+        client: object,
+        *,
+        timeout_seconds: float = 1.0,
+        **payload: object,
+    ) -> None:
+        async_reporter = getattr(client, "report_diagnostic_event_async", None)
+        if callable(async_reporter):
+            try:
+                async_reporter(timeout_seconds=timeout_seconds, **payload)
+                return
+            except TypeError:
+                async_reporter(**payload)
+                return
+            except Exception:
+                return
+        reporter = getattr(client, "report_diagnostic_event", None)
+        if not callable(reporter):
+            return
+        try:
+            reporter(timeout_seconds=timeout_seconds, **payload)
+        except TypeError:
+            try:
+                reporter(**payload)
+            except Exception:
+                return
+        except Exception:
+            return
+
+    @staticmethod
     def _emit_status(status_callback: ServiceStatusCallback | None, state: str, message: str | None = None) -> None:
         if status_callback is not None:
             status_callback(state, message)
@@ -65,13 +95,27 @@ class DesktopAgentService:
     ) -> None:
         self._logger.info("service_loop_started")
         self._emit_status(status_callback, "STARTING", None)
+        active_config: AgentConfig | None = None
+        active_client: RelayClient | None = None
         while True:
             if stop_event is not None and stop_event.is_set():
                 self._logger.info("service_loop_stopped_by_event")
                 self._emit_status(status_callback, "STOPPED", None)
                 return
-            config = self.config_store.load()
-            client = self.client_factory(config)
+            try:
+                if active_config is None or active_client is None:
+                    active_config = self.config_store.load()
+                    active_client = self.client_factory(active_config)
+            except FileNotFoundError:
+                self._logger.warning("service_config_missing")
+                self._emit_status(status_callback, "CONFIG_MISSING", "desktop agent config file is missing")
+                if self._wait_or_stop(stop_event, self.reconnect_delay_seconds):
+                    self._emit_status(status_callback, "STOPPED", None)
+                    return
+                continue
+
+            config = active_config
+            client = active_client
             self._emit_status(status_callback, "CONNECTING", None)
             try:
                 client.run_session(
@@ -84,66 +128,49 @@ class DesktopAgentService:
             except DesktopAgentAuthExpired as exc:
                 self._logger.warning("service_auth_expired error=%s", exc)
                 self._emit_status(status_callback, "AUTH_EXPIRED", str(exc))
-                reporter = getattr(client, "report_diagnostic_event", None)
-                if callable(reporter):
-                    try:
-                        reporter(
-                            level="warning",
-                            category="auth",
-                            event_type="auth_expired",
-                            message=str(exc),
-                            details={"agentId": config.agent_id},
-                            project_id=config.project_id,
-                        )
-                    except Exception:
-                        pass
+                self._report_diagnostic(
+                    client,
+                    level="warning",
+                    category="auth",
+                    event_type="auth_expired",
+                    message=str(exc),
+                    details={"agentId": config.agent_id},
+                    project_id=config.project_id,
+                )
                 try:
                     self._emit_status(status_callback, "REFRESHING", None)
-                    self.refresh_tokens(config)
+                    active_config = self.refresh_tokens(config)
+                    active_client = self.client_factory(active_config)
                 except KeyboardInterrupt:
                     raise
                 except Exception as refresh_exc:
                     self._logger.exception("service_refresh_failed")
                     self._emit_status(status_callback, "ERROR", str(refresh_exc))
-                    if callable(reporter):
-                        try:
-                            reporter(
-                                level="error",
-                                category="auth",
-                                event_type="refresh_failed",
-                                message=str(refresh_exc),
-                                details={"agentId": config.agent_id},
-                                project_id=config.project_id,
-                            )
-                        except Exception:
-                            pass
+                    self._report_diagnostic(
+                        client,
+                        level="error",
+                        category="auth",
+                        event_type="refresh_failed",
+                        message=str(refresh_exc),
+                        details={"agentId": config.agent_id},
+                        project_id=config.project_id,
+                    )
                     if self._wait_or_stop(stop_event, self.reconnect_delay_seconds):
                         self._emit_status(status_callback, "STOPPED", None)
                         return
                 continue
-            except FileNotFoundError:
-                self._logger.warning("service_config_missing")
-                self._emit_status(status_callback, "CONFIG_MISSING", "desktop agent config file is missing")
-                if self._wait_or_stop(stop_event, self.reconnect_delay_seconds):
-                    self._emit_status(status_callback, "STOPPED", None)
-                    return
-                continue
             except Exception as exc:
                 self._logger.exception("service_session_failed")
                 self._emit_status(status_callback, "ERROR", str(exc))
-                reporter = getattr(client, "report_diagnostic_event", None)
-                if callable(reporter):
-                    try:
-                        reporter(
-                            level="error",
-                            category="service",
-                            event_type="session_failed",
-                            message=str(exc),
-                            details={"agentId": config.agent_id},
-                            project_id=config.project_id,
-                        )
-                    except Exception:
-                        pass
+                self._report_diagnostic(
+                    client,
+                    level="error",
+                    category="service",
+                    event_type="session_failed",
+                    message=str(exc),
+                    details={"agentId": config.agent_id},
+                    project_id=config.project_id,
+                )
                 if self._wait_or_stop(stop_event, self.reconnect_delay_seconds):
                     self._emit_status(status_callback, "STOPPED", None)
                     return
@@ -155,25 +182,22 @@ class DesktopAgentService:
                 return
             try:
                 self._emit_status(status_callback, "REFRESHING", None)
-                self.refresh_tokens(config)
+                active_config = self.refresh_tokens(config)
+                active_client = self.client_factory(active_config)
             except KeyboardInterrupt:
                 raise
             except Exception as exc:
                 self._logger.exception("service_post_session_refresh_failed")
                 self._emit_status(status_callback, "ERROR", str(exc))
-                reporter = getattr(client, "report_diagnostic_event", None)
-                if callable(reporter):
-                    try:
-                        reporter(
-                            level="error",
-                            category="auth",
-                            event_type="post_session_refresh_failed",
-                            message=str(exc),
-                            details={"agentId": config.agent_id},
-                            project_id=config.project_id,
-                        )
-                    except Exception:
-                        pass
+                self._report_diagnostic(
+                    client,
+                    level="error",
+                    category="auth",
+                    event_type="post_session_refresh_failed",
+                    message=str(exc),
+                    details={"agentId": config.agent_id},
+                    project_id=config.project_id,
+                )
                 if self._wait_or_stop(stop_event, self.reconnect_delay_seconds):
                     self._emit_status(status_callback, "STOPPED", None)
                     return

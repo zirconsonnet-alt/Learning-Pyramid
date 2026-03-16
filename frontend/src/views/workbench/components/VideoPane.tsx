@@ -7,7 +7,7 @@ import type { Instance } from "@/ui/api/instances"
 import { ApiError } from "@/ui/api/http"
 import { resolveProjectFile, useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
 import { useSystemCapabilities } from "@/ui/queries/system"
-import { usePlaybackDescriptor } from "@/ui/queries/workbench"
+import { usePlaybackDescriptor, useProjectDesktopAgentStatus } from "@/ui/queries/workbench"
 import { clearPlaybackResumeMs, loadPlaybackResumeMs, savePlaybackResumeMs } from "@/ui/store/playbackResume"
 
 function isRelativeMaterialId(materialId: string) {
@@ -84,6 +84,7 @@ export function VideoPane({
   const [forceHostedHls, setForceHostedHls] = useState(false)
   const [disablePreferredHls, setDisablePreferredHls] = useState(false)
   const [hlsReloadNonce, setHlsReloadNonce] = useState(0)
+  const lastAgentConnectedRef = useRef(false)
   const instanceId = instance?.instanceId ?? null
   const capabilitiesQ = useSystemCapabilities()
   const directoryBinding = useProjectDirectoryBinding(projectId)
@@ -91,6 +92,7 @@ export function VideoPane({
   const serverMediaStreamEnabled = capabilitiesQ.data?.serverMediaStreamEnabled ?? false
   const browserLocalMediaEnabled = capabilitiesQ.data?.browserLocalMediaEnabled ?? false
   const mobilePrefersHostedHls = useMemo(() => browserPrefersResilientHls(), [])
+  const desktopAgentStatusQ = useProjectDesktopAgentStatus(isHostedMode ? projectId : "")
   const preferHostedHls = forceHostedHls || (mobilePrefersHostedHls && !disablePreferredHls)
   const playbackDescriptorQ = usePlaybackDescriptor(projectId, instanceId, isHostedMode, { preferHls: preferHostedHls })
   const playbackDescriptor = playbackDescriptorQ.data
@@ -253,6 +255,35 @@ export function VideoPane({
     playbackDescriptor?.ready,
     playbackDescriptorQ,
     projectId,
+  ])
+
+  useEffect(() => {
+    if (!isHostedMode || !instanceId) return
+    const connected = desktopAgentStatusQ.data?.agent?.connected ?? false
+    const wasConnected = lastAgentConnectedRef.current
+    lastAgentConnectedRef.current = connected
+    if (!connected || wasConnected) return
+    if (
+      !managedHlsError &&
+      !mediaElementError &&
+      !playbackDescriptorQ.error &&
+      !(playbackDescriptor?.mode === "relay_hls" && !playbackDescriptor.ready)
+    ) {
+      return
+    }
+    setManagedHlsError(null)
+    setMediaElementError(null)
+    setHlsReloadNonce((value) => value + 1)
+    void playbackDescriptorQ.refetch()
+  }, [
+    desktopAgentStatusQ.data?.agent?.connected,
+    instanceId,
+    isHostedMode,
+    managedHlsError,
+    mediaElementError,
+    playbackDescriptor?.mode,
+    playbackDescriptor?.ready,
+    playbackDescriptorQ,
   ])
 
   useEffect(() => {

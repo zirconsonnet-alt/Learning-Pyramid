@@ -214,6 +214,24 @@ def _build_recent_alerts(
     max_alerts: int,
 ) -> list[dict[str, Any]]:
     window_cutoff = now - timedelta(hours=max(1, int(window_hours)))
+    transient_recovery_alert_event_types = frozenset({"connection_lost", "session_failed", "ws_invalid_message"})
+    recovery_signal_event_types = frozenset({"stream_completed", "hls_job_completed"})
+    latest_recovery_at_by_scope: dict[tuple[str, str, str | None], datetime] = {}
+    for item in events:
+        event_type = str(item.event_type).strip()
+        if event_type not in recovery_signal_event_types:
+            continue
+        observed_at = _coerce_utc_datetime(item.created_at)
+        if observed_at < window_cutoff:
+            continue
+        scope = (
+            str(item.user_id),
+            str(item.agent_id),
+            None if item.project_id is None else str(item.project_id),
+        )
+        current = latest_recovery_at_by_scope.get(scope)
+        if current is None or observed_at > current:
+            latest_recovery_at_by_scope[scope] = observed_at
     aggregated: dict[tuple[str, str, str, str, str | None], dict[str, Any]] = {}
     for item in events:
         severity = str(item.level).strip().upper()
@@ -222,11 +240,27 @@ def _build_recent_alerts(
         observed_at = _coerce_utc_datetime(item.created_at)
         if observed_at < window_cutoff:
             continue
+        event_type = str(item.event_type).strip()
+        scope = (
+            str(item.user_id),
+            str(item.agent_id),
+            None if item.project_id is None else str(item.project_id),
+        )
+        latest_recovery_at = latest_recovery_at_by_scope.get(scope)
+        if (
+            event_type in transient_recovery_alert_event_types
+            and latest_recovery_at is not None
+            # Diagnostic timestamps are recorded at second precision in several paths,
+            # so a successful recovery can legitimately collapse into the same second
+            # as the transient disconnect/failure events it resolves.
+            and latest_recovery_at >= observed_at
+        ):
+            continue
         key = (
             severity,
             str(item.user_id),
             str(item.agent_id),
-            str(item.event_type),
+            event_type,
             None if item.project_id is None else str(item.project_id),
         )
         current = aggregated.setdefault(
@@ -237,8 +271,8 @@ def _build_recent_alerts(
                 "agentId": str(item.agent_id),
                 "projectId": None if item.project_id is None else str(item.project_id),
                 "category": str(item.category),
-                "code": str(item.event_type),
-                "title": f"{item.category}: {item.event_type}",
+                "code": event_type,
+                "title": f"{item.category}: {event_type}",
                 "message": str(item.message),
                 "observedAt": str(item.created_at),
                 "count": 0,

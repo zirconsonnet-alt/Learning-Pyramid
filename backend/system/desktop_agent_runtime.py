@@ -278,7 +278,15 @@ class DesktopAgentRuntime:
 
     def register_connection(self, agent_id: str, websocket: WebSocket) -> None:
         with self._guard:
-            self._connections[str(agent_id)] = _AgentConnection(websocket=websocket)
+            previous = self._connections.get(str(agent_id))
+            connection = _AgentConnection(websocket=websocket)
+            if previous is not None:
+                while True:
+                    try:
+                        connection.pending_commands.put(previous.pending_commands.get_nowait())
+                    except queue.Empty:
+                        break
+            self._connections[str(agent_id)] = connection
             for session in self._stream_sessions.values():
                 if session.agent_id != str(agent_id):
                     continue
@@ -342,10 +350,12 @@ class DesktopAgentRuntime:
             self._telemetry.hls_artifact_request_count += 1
             self._telemetry.hls_artifact_bytes_served += max(0, int(size_bytes))
 
-    def drain_commands(self, agent_id: str) -> list[dict[str, Any]]:
+    def drain_commands(self, agent_id: str, websocket: WebSocket | None = None) -> list[dict[str, Any]]:
         with self._guard:
             connection = self._connections.get(str(agent_id))
         if connection is None:
+            return []
+        if websocket is not None and connection.websocket is not websocket:
             return []
         items: list[dict[str, Any]] = []
         while True:

@@ -125,3 +125,47 @@ def test_desktop_agent_service_refreshes_tokens_after_planned_session_rotation(t
     assert persisted.refresh_token == "refresh-token-2"
     assert StubClient.refresh_calls == ["refresh-token-1"]
     assert StubClient.run_calls == [("agent-token-1", 180), ("agent-token-2", 180)]
+
+
+def test_desktop_agent_service_reuses_client_after_session_failure(tmp_path: Path) -> None:
+    store = _seed_config(tmp_path)
+
+    class StubClient:
+        instances: list["StubClient"] = []
+        run_calls: list[int] = []
+
+        def __init__(self, config: AgentConfig) -> None:
+            self.config = config
+            self.run_count = 0
+            StubClient.instances.append(self)
+
+        def run_session(
+            self,
+            *,
+            max_runtime_seconds: float | None = None,
+            stop_event=None,
+            on_connected=None,
+        ) -> None:
+            self.run_count += 1
+            StubClient.run_calls.append(self.run_count)
+            if self.run_count == 1:
+                raise RuntimeError("temporary network failure")
+            raise KeyboardInterrupt()
+
+        def report_diagnostic_event_async(self, **kwargs) -> None:
+            return None
+
+    service = DesktopAgentService(
+        config_store=store,
+        client_factory=StubClient,
+        reconnect_delay_seconds=0.01,
+        refresh_interval_seconds=120,
+        sleep_fn=lambda _: None,
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        service.run_forever()
+
+    assert len(StubClient.instances) == 1
+    assert StubClient.instances[0].run_count == 2
+    assert StubClient.run_calls == [1, 2]

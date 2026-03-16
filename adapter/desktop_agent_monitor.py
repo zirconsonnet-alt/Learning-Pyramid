@@ -770,15 +770,11 @@ def collect_user_desktop_agent_monitor(
         if item.status in {"FAILED", "CANCELLED"}
     ][: max(1, int(recent_issue_limit))]
 
-    persisted_hls_jobs: list[dict[str, Any]] = []
-    for project_id in project_ids:
-        persisted_hls_jobs.extend(
-            _hls_job_audit_to_dto(item)
-            for item in auth_store.list_desktop_agent_hls_job_audits_for_project(project_id)
-        )
-    persisted_hls_job_ids = {str(item.get("jobId", "")) for item in persisted_hls_jobs}
-    runtime_visible_jobs = [
-        {
+    runtime_hls_jobs_by_id: dict[str, dict[str, Any]] = {}
+    for job in runtime.list_hls_jobs():
+        if str(job.agent_id) not in agent_ids and str(job.project_id) not in project_id_set:
+            continue
+        runtime_hls_jobs_by_id[str(job.job_id)] = {
             "jobId": str(job.job_id),
             "cacheKey": str(job.cache_key),
             "agentId": str(job.agent_id),
@@ -798,9 +794,19 @@ def collect_user_desktop_agent_monitor(
             "artifactCount": int(job.artifact_count),
             "artifactBytes": int(job.artifact_bytes),
         }
-        for job in runtime.list_hls_jobs()
-        if (str(job.agent_id) in agent_ids or str(job.project_id) in project_id_set)
-        and str(job.job_id) not in persisted_hls_job_ids
+    persisted_hls_jobs: list[dict[str, Any]] = []
+    for project_id in project_ids:
+        for item in auth_store.list_desktop_agent_hls_job_audits_for_project(project_id):
+            dto = _hls_job_audit_to_dto(item)
+            runtime_current = runtime_hls_jobs_by_id.get(str(dto.get("jobId", "")))
+            if runtime_current is not None:
+                dto.update(runtime_current)
+            persisted_hls_jobs.append(dto)
+    persisted_hls_job_ids = {str(item.get("jobId", "")) for item in persisted_hls_jobs}
+    runtime_visible_jobs = [
+        dict(item)
+        for job_id, item in runtime_hls_jobs_by_id.items()
+        if job_id not in persisted_hls_job_ids
     ]
     all_hls_jobs = persisted_hls_jobs + runtime_visible_jobs
     all_hls_jobs.sort(

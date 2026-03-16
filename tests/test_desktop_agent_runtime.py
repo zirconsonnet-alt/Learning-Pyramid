@@ -67,6 +67,22 @@ def test_desktop_agent_runtime_snapshot_reports_current_counters() -> None:
     assert snapshot["config"]["hlsDisconnectGraceSeconds"] == 30.0
 
 
+def test_desktop_agent_runtime_reconnect_preserves_pending_commands_for_current_socket() -> None:
+    runtime = DesktopAgentRuntime()
+    old_socket = object()
+    new_socket = object()
+
+    runtime.register_connection("agent_123", old_socket)  # type: ignore[arg-type]
+    runtime.enqueue_command("agent_123", {"type": "probe.request", "requestId": "probe_123"})
+
+    runtime.register_connection("agent_123", new_socket)  # type: ignore[arg-type]
+
+    assert runtime.drain_commands("agent_123", old_socket) == []  # type: ignore[arg-type]
+    assert runtime.drain_commands("agent_123", new_socket) == [  # type: ignore[arg-type]
+        {"type": "probe.request", "requestId": "probe_123"}
+    ]
+
+
 def test_desktop_agent_runtime_snapshot_can_include_agent_activity_and_recent_jobs() -> None:
     runtime = DesktopAgentRuntime()
     runtime.register_connection("agent_123", object())  # type: ignore[arg-type]

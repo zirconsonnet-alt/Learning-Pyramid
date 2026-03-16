@@ -476,6 +476,53 @@ def test_relay_client_run_session_ignores_invalid_websocket_payload(monkeypatch,
     ]
 
 
+def test_relay_client_run_session_disconnect_does_not_block_on_diagnostic_upload(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    media_root = tmp_path / "media"
+    media_root.mkdir()
+    client = _create_client(media_root)
+    client._report_local_environment_diagnostics = lambda: None  # type: ignore[method-assign]
+
+    def _slow_report(**kwargs) -> bool:
+        time.sleep(0.5)
+        return True
+
+    client.report_diagnostic_event = _slow_report  # type: ignore[method-assign]
+
+    class _ClosingWebSocket(_FakeWebSocket):
+        def __init__(self) -> None:
+            super().__init__()
+            self._responses = [
+                json.dumps({"type": "connected"}),
+                websocket.WebSocketConnectionClosedException("Connection to remote host was lost."),
+            ]
+            self.closed = False
+
+        def settimeout(self, timeout: float) -> None:
+            self.timeout = timeout
+
+        def recv(self):
+            item = self._responses.pop(0)
+            if isinstance(item, BaseException):
+                raise item
+            return item
+
+        def close(self) -> None:
+            self.closed = True
+
+    fake_ws = _ClosingWebSocket()
+    monkeypatch.setattr("desktop_agent.relay_client.websocket.create_connection", lambda *args, **kwargs: fake_ws)
+
+    started_at = time.monotonic()
+    with pytest.raises(websocket.WebSocketConnectionClosedException, match="Connection to remote host was lost"):
+        client.run_session()
+    elapsed = time.monotonic() - started_at
+
+    assert elapsed < 0.3
+
+
 def test_relay_client_probe_failure_reports_diagnostic_event(monkeypatch, tmp_path: Path) -> None:
     media_root = tmp_path / "media"
     media_root.mkdir()
@@ -573,3 +620,18 @@ def test_raise_for_agent_response_preserves_auth_expired_behavior() -> None:
 
     with pytest.raises(DesktopAgentAuthExpired):
         _raise_for_agent_response(response)
+
+
+def test_report_hls_job_state_http_raises_for_backend_errors(tmp_path: Path) -> None:
+    media_root = tmp_path / "media"
+    media_root.mkdir()
+    client = _create_client(media_root)
+
+    response = requests.Response()
+    response.status_code = 401
+    response.reason = "Unauthorized"
+    response.url = "https://plm.xuebao.chat/api/desktop-agents/hls-jobs/job_123/state"
+    client.http.put = lambda *args, **kwargs: response  # type: ignore[method-assign]
+
+    with pytest.raises(DesktopAgentAuthExpired):
+        client._report_hls_job_state_http(job_id="job_123", state="RUNNING")

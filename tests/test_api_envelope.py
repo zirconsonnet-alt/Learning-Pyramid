@@ -411,6 +411,157 @@ def test_desktop_agent_alert_webhook_dispatches_only_on_maintenance_pass(monkeyp
     assert len(calls) == 1
 
 
+def test_desktop_agent_alert_webhook_suppresses_recovered_transient_disconnect_alerts(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("PLM_APP_MODE", "hosted")
+    monkeypatch.setenv("PLM_ENABLE_AUTH", "true")
+    monkeypatch.setenv("PLM_ENABLE_ASR", "false")
+    monkeypatch.setenv("PLM_ENABLE_SERVER_MEDIA_STREAM", "false")
+    monkeypatch.setenv("PLM_AGENT_ALERT_WEBHOOK_URL", "https://example.com/hooks/recovered-transient")
+    monkeypatch.setenv("PLM_AGENT_JANITOR_INTERVAL_SECONDS", "0")
+    monkeypatch.setenv("PLM_STORE_PATH", "")
+    monkeypatch.setenv("PLM_LEGACY_STORE_PATH", "")
+    monkeypatch.setenv("PLM_STORE_DB_PATH", str(tmp_path / "plm_store.sqlite3"))
+    monkeypatch.setenv("PLM_AUTH_DB_PATH", str(tmp_path / "plm_auth.sqlite3"))
+    _reset_caches()
+
+    calls: list[dict[str, object]] = []
+
+    class _WebhookResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+    def _fake_post(url: str, *, json: object, timeout: float):
+        calls.append({"url": url, "json": json, "timeout": timeout})
+        return _WebhookResponse()
+
+    reset_desktop_agent_alert_webhook_dispatcher(_fake_post)
+    client = TestClient(create_app())
+    register_resp = client.post(
+        "/api/auth/register",
+        json={"email": "recovered-hook@example.com", "password": "password123"},
+    )
+    assert register_resp.status_code == 200
+    create_project_resp = client.post("/api/projects", json={"title": "Recovered Transient Alerts"})
+    assert create_project_resp.status_code == 200
+    project_id = create_project_resp.json()["data"]["projectId"]
+
+    pairing_resp = client.post("/api/desktop-agents/pairing-codes")
+    assert pairing_resp.status_code == 200
+    pair_resp = client.post(
+        "/api/desktop-agents/pair",
+        json={
+            "pairingCode": pairing_resp.json()["data"]["pairingCode"],
+            "deviceName": "BYLOU-PC",
+            "platform": "windows",
+            "appVersion": "0.1.0",
+        },
+    )
+    assert pair_resp.status_code == 200
+
+    observed_at = datetime(2026, 3, 11, 12, 0, 0, tzinfo=timezone.utc)
+    auth_headers = {"Authorization": f"Bearer {pair_resp.json()['data']['agentToken']}"}
+    diagnostic_payloads = [
+        {
+            "level": "warning",
+            "category": "service",
+            "eventType": "connection_lost",
+            "message": "websocket disconnected",
+            "details": {"projectId": str(project_id)},
+            "projectId": str(project_id),
+            "createdAt": observed_at.isoformat(),
+        },
+        {
+            "level": "warning",
+            "category": "service",
+            "eventType": "ws_invalid_message",
+            "message": "received invalid websocket frame",
+            "details": {"projectId": str(project_id)},
+            "projectId": str(project_id),
+            "createdAt": observed_at.isoformat(),
+        },
+        {
+            "level": "error",
+            "category": "service",
+            "eventType": "session_failed",
+            "message": "desktop agent session aborted",
+            "details": {"projectId": str(project_id)},
+            "projectId": str(project_id),
+            "createdAt": observed_at.isoformat(),
+        },
+        {
+            "level": "info",
+            "category": "stream",
+            "eventType": "stream_completed",
+            "message": "progressive relay recovered and finished",
+            "details": {"streamId": "stream_recovered"},
+            "projectId": str(project_id),
+            "instanceId": "inst_recovered",
+            "relativePath": "lesson-11.mp4",
+            "createdAt": observed_at.isoformat(),
+        },
+    ]
+    for payload in diagnostic_payloads:
+        diagnostic_resp = client.post(
+            "/api/desktop-agents/diagnostic-events",
+            headers=auth_headers,
+            json=payload,
+        )
+        assert diagnostic_resp.status_code == 200
+
+    persisted_event_types = {
+        str(item.event_type)
+        for item in get_auth_store().list_all_desktop_agent_diagnostic_events(
+            since=(observed_at - timedelta(minutes=1)).isoformat()
+        )
+    }
+    assert {
+        "connection_lost",
+        "ws_invalid_message",
+        "session_failed",
+        "stream_completed",
+    } <= persisted_event_types
+
+    report = collect_desktop_agent_relay_status(
+        runtime=get_desktop_agent_runtime(),
+        auth_store=get_auth_store(),
+        dispatch_alert_webhooks=True,
+        now=observed_at + timedelta(minutes=1),
+    )
+    assert report["alertWebhook"]["configured"] is True
+    assert report["alertWebhook"]["sentCount"] == 0
+    assert report["alertWebhook"]["suppressedCount"] == 0
+    assert report["alertWebhook"]["failedCount"] == 0
+    assert report["alertWebhook"]["lastAlertCount"] == 0
+    assert report["alertWebhook"]["lastAttemptAt"] is None
+    assert report["alertWebhook"]["lastSuccessAt"] is None
+    assert report["alertWebhook"]["lastError"] is None
+    assert report["alertWebhook"]["channelCount"] == 1
+    assert report["alertWebhook"]["healthyChannelCount"] == 1
+    assert report["alertWebhook"]["retryingChannelCount"] == 0
+    assert report["alertWebhook"]["failingChannelCount"] == 0
+    assert report["alertWebhook"]["channels"] == [
+        {
+            "name": "primary",
+            "url": "https://example.com/hooks/recovered-transient",
+            "status": "IDLE",
+            "lastAttemptAt": None,
+            "lastSuccessAt": None,
+            "lastError": None,
+            "sentCount": 0,
+            "suppressedCount": 0,
+            "failedCount": 0,
+            "lastAlertCount": 0,
+            "nextRetryAt": None,
+            "retryPending": False,
+            "consecutiveFailureCount": 0,
+        }
+    ]
+    assert calls == []
+
+
 def test_desktop_agent_alert_webhook_retries_failed_channel_and_supports_multiple_targets(
     monkeypatch,
     tmp_path: Path,

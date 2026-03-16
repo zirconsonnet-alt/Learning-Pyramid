@@ -485,7 +485,7 @@ async def desktop_agent_ws(websocket: WebSocket) -> None:
 
     try:
         while True:
-            for command in runtime.drain_commands(agent.agent_id):
+            for command in runtime.drain_commands(agent.agent_id, websocket):
                 await websocket.send_json(command)
             try:
                 payload = await asyncio.wait_for(websocket.receive_json(), timeout=0.25)
