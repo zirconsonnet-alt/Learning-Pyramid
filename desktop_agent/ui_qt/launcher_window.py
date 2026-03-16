@@ -8,10 +8,12 @@ from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
     QHBoxLayout,
+    QLayout,
     QLabel,
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -29,16 +31,22 @@ class LauncherWindow(QMainWindow):
         super().__init__()
         self.controller = controller or DesktopAgentUiController()
         self.setWindowTitle("LearningPyramid Desktop Agent")
-        self.resize(840, 620)
-        self.setMinimumSize(760, 560)
+        self.resize(920, 760)
+        self.setMinimumSize(760, 620)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        self.setCentralWidget(scroll)
 
         central = QWidget()
         central.setObjectName("AppRoot")
-        self.setCentralWidget(central)
+        scroll.setWidget(central)
 
         root_layout = QVBoxLayout(central)
         root_layout.setContentsMargins(24, 24, 24, 24)
         root_layout.setSpacing(16)
+        root_layout.setSizeConstraint(QLayout.SetMinimumSize)
 
         hero = QFrame()
         hero.setProperty("card", True)
@@ -79,7 +87,7 @@ class LauncherWindow(QMainWindow):
         self.root_dir_value = self._summary_value(summary_grid, 2, "本地目录", span=3)
         self.version_value = self._summary_value(summary_grid, 3, "应用版本")
         summary_layout.addLayout(summary_grid)
-        root_layout.addWidget(summary, 1)
+        root_layout.addWidget(summary)
 
         action_card = QFrame()
         action_card.setProperty("card", True)
