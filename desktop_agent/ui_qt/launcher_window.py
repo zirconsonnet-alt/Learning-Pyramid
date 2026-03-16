@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 
 from PySide6.QtCore import QTimer, Qt
+from PySide6.QtGui import QResizeEvent, QShowEvent
 from PySide6.QtWidgets import (
     QCheckBox,
     QFrame,
@@ -30,6 +31,7 @@ class LauncherWindow(QMainWindow):
     def __init__(self, controller: DesktopAgentUiController | None = None) -> None:
         super().__init__()
         self.controller = controller or DesktopAgentUiController()
+        self._summary_value_labels: list[QLabel] = []
         self.setWindowTitle("LearningPyramid Desktop Agent")
         self.resize(920, 760)
         self.setMinimumSize(760, 620)
@@ -37,10 +39,13 @@ class LauncherWindow(QMainWindow):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll_area = scroll
         self.setCentralWidget(scroll)
 
         central = QWidget()
         central.setObjectName("AppRoot")
+        self.content_widget = central
         scroll.setWidget(central)
 
         root_layout = QVBoxLayout(central)
@@ -58,11 +63,11 @@ class LauncherWindow(QMainWindow):
         self.title_label = QLabel()
         self.title_label.setProperty("role", "title")
         self.title_label.setWordWrap(True)
-        subtitle = QLabel("主界面只负责启动。登录、换账号和重新接入都放到第二层窗口。")
-        subtitle.setProperty("role", "subtitle")
-        subtitle.setWordWrap(True)
+        self.hero_subtitle = QLabel("主界面只负责启动。登录、换账号和重新接入都放到第二层窗口。")
+        self.hero_subtitle.setProperty("role", "subtitle")
+        self.hero_subtitle.setWordWrap(True)
         hero_copy.addWidget(self.title_label)
-        hero_copy.addWidget(subtitle)
+        hero_copy.addWidget(self.hero_subtitle)
         hero_layout.addLayout(hero_copy, 1)
         self.badge_label = QLabel()
         self.badge_label.setAlignment(Qt.AlignCenter)
@@ -164,6 +169,7 @@ class LauncherWindow(QMainWindow):
         value = QLabel("-")
         value.setProperty("role", "value")
         value.setWordWrap(True)
+        self._summary_value_labels.append(value)
         grid.addWidget(label, row, column_offset)
         grid.addWidget(value, row, column_offset + 1, 1, span)
         grid.setColumnStretch(column_offset + 1, 1)
@@ -191,6 +197,45 @@ class LauncherWindow(QMainWindow):
         self.update_line.setText(f"更新：{state.update_status}")
         self.history_line.setText(state.update_history)
         self._set_badge(state.status_key, state.status_badge)
+        self._refresh_adaptive_layout()
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        QTimer.singleShot(0, self._refresh_adaptive_layout)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._refresh_adaptive_layout()
+
+    def _refresh_adaptive_layout(self) -> None:
+        self._fit_label_height(self.title_label)
+        self._fit_label_height(self.hero_subtitle)
+        self._fit_label_height(self.message_label)
+        self._fit_label_height(self.status_line)
+        self._fit_label_height(self.update_line)
+        self._fit_label_height(self.history_line)
+        for label in self._summary_value_labels:
+            self._fit_label_height(label)
+        for button in (self.start_button, self.reconfigure_button, self.open_logs_button):
+            self._fit_button_height(button)
+        self._fit_checkbox_height(self.autostart_checkbox)
+
+    def _fit_label_height(self, label: QLabel) -> None:
+        width = max(1, label.contentsRect().width() or label.width() or label.sizeHint().width())
+        preferred_height = label.heightForWidth(width) if label.wordWrap() and label.hasHeightForWidth() else label.sizeHint().height()
+        preferred_height = max(preferred_height, label.fontMetrics().lineSpacing() + 4)
+        if label.minimumHeight() != preferred_height:
+            label.setMinimumHeight(preferred_height)
+
+    def _fit_button_height(self, button: QPushButton) -> None:
+        preferred_height = max(44, button.fontMetrics().lineSpacing() + 30)
+        if button.minimumHeight() != preferred_height:
+            button.setMinimumHeight(preferred_height)
+
+    def _fit_checkbox_height(self, checkbox: QCheckBox) -> None:
+        preferred_height = max(28, checkbox.fontMetrics().lineSpacing() + 14)
+        if checkbox.minimumHeight() != preferred_height:
+            checkbox.setMinimumHeight(preferred_height)
 
     def _set_badge(self, status_key: str, text: str) -> None:
         color = BADGE_COLORS.get(status_key, "#475569")
