@@ -12,10 +12,15 @@ export const ProjectMaterialSourceBindingSchema = z.object({
 })
 export type ProjectMaterialSourceBinding = z.infer<typeof ProjectMaterialSourceBindingSchema>
 
+const ProjectDesktopAgentStatusAgentSchema = DesktopAgentSchema.extend({
+  connected: z.boolean(),
+  connectionState: z.enum(["CONNECTED", "RECONNECTING", "OFFLINE"]),
+})
+
 const ProjectDesktopAgentStatusSchema = z.object({
   projectId: z.string(),
   binding: ProjectMaterialSourceBindingSchema,
-  agent: DesktopAgentSchema.nullable(),
+  agent: ProjectDesktopAgentStatusAgentSchema.nullable(),
 })
 export type ProjectDesktopAgentStatus = z.infer<typeof ProjectDesktopAgentStatusSchema>
 
