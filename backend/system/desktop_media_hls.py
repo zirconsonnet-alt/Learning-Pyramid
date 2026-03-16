@@ -12,6 +12,11 @@ from backend.models.hls_cache_entry import HlsCacheEntry
 from backend.models.errors import PreconditionFailure
 from backend.system.app_paths import desktop_media_cache_dir
 
+DEFAULT_HLS_HEIGHT_MAX = 720
+DEFAULT_HLS_VIDEO_BITRATE = "1200k"
+DEFAULT_HLS_AUDIO_BITRATE = "96k"
+DEFAULT_HLS_SEGMENT_SECONDS = 3
+
 
 def _env_positive_int(name: str, default: int) -> int:
     raw = (os.getenv(name) or "").strip()
@@ -26,10 +31,12 @@ def _env_positive_int(name: str, default: int) -> int:
 
 def current_hls_profile() -> dict[str, int | str]:
     return {
-        "heightMax": _env_positive_int("PLM_AGENT_HLS_HEIGHT_MAX", 720),
-        "videoBitrate": str(os.getenv("PLM_AGENT_HLS_VIDEO_BITRATE") or "1800k").strip() or "1800k",
-        "audioBitrate": str(os.getenv("PLM_AGENT_HLS_AUDIO_BITRATE") or "128k").strip() or "128k",
-        "segmentSeconds": _env_positive_int("PLM_AGENT_HLS_SEGMENT_SECONDS", 6),
+        "heightMax": _env_positive_int("PLM_AGENT_HLS_HEIGHT_MAX", DEFAULT_HLS_HEIGHT_MAX),
+        "videoBitrate": str(os.getenv("PLM_AGENT_HLS_VIDEO_BITRATE") or DEFAULT_HLS_VIDEO_BITRATE).strip()
+        or DEFAULT_HLS_VIDEO_BITRATE,
+        "audioBitrate": str(os.getenv("PLM_AGENT_HLS_AUDIO_BITRATE") or DEFAULT_HLS_AUDIO_BITRATE).strip()
+        or DEFAULT_HLS_AUDIO_BITRATE,
+        "segmentSeconds": _env_positive_int("PLM_AGENT_HLS_SEGMENT_SECONDS", DEFAULT_HLS_SEGMENT_SECONDS),
     }
 
 

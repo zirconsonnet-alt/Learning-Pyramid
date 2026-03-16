@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -10,6 +11,8 @@ from threading import Event
 
 from desktop_agent.errors import DesktopAgentTaskCancelled
 from desktop_agent.path_safety import resolve_agent_media_path
+
+_BITRATE_PATTERN = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([kKmM]?)\s*$")
 
 
 def _ffmpeg_creationflags() -> int:
@@ -23,6 +26,16 @@ def _read_text_file(path: Path) -> str:
         return path.read_text(encoding="utf-8", errors="replace").strip()
     except Exception:
         return ""
+
+
+def _scale_bitrate(value: str, factor: float) -> str:
+    raw = str(value or "").strip()
+    match = _BITRATE_PATTERN.fullmatch(raw)
+    if not match:
+        return raw
+    amount = float(match.group(1)) * float(factor)
+    amount_text = str(int(amount)) if amount.is_integer() else f"{amount:.3f}".rstrip("0").rstrip(".")
+    return f"{amount_text}{match.group(2)}"
 
 
 def transcode_media_to_hls(
@@ -41,6 +54,9 @@ def transcode_media_to_hls(
     segment_pattern = temp_dir / "segment%03d.ts"
     master_path = temp_dir / "master.m3u8"
     ffmpeg_log_path = temp_dir / "ffmpeg.log"
+    video_rate = str(video_bitrate)
+    audio_rate = str(audio_bitrate)
+    video_buffer_size = _scale_bitrate(video_rate, 2.0) or video_rate
     process: subprocess.Popen[str] | None = None
     try:
         with ffmpeg_log_path.open("w", encoding="utf-8", errors="replace", newline="\n") as ffmpeg_log:
@@ -62,11 +78,15 @@ def transcode_media_to_hls(
                         "-preset",
                         "veryfast",
                         "-b:v",
-                        str(video_bitrate),
+                        video_rate,
+                        "-maxrate",
+                        video_rate,
+                        "-bufsize",
+                        video_buffer_size,
                         "-c:a",
                         "aac",
                         "-b:a",
-                        str(audio_bitrate),
+                        audio_rate,
                         "-f",
                         "hls",
                         "-hls_time",

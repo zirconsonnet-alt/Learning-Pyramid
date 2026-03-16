@@ -53,6 +53,10 @@ def test_transcode_media_to_hls_launches_ffmpeg_without_pipe_deadlock(monkeypatc
     assert "-nostdin" in command
     assert "-hide_banner" in command
     assert command[command.index("-loglevel") + 1] == "error"
+    assert command[command.index("-b:v") + 1] == "1800k"
+    assert command[command.index("-maxrate") + 1] == "1800k"
+    assert command[command.index("-bufsize") + 1] == "3600k"
+    assert command[command.index("-b:a") + 1] == "128k"
     assert kwargs["stdin"] is subprocess.DEVNULL
     assert kwargs["stderr"] == subprocess.STDOUT
     assert kwargs["stdout"] is not subprocess.PIPE

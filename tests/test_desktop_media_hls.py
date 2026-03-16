@@ -5,7 +5,7 @@ from pathlib import Path
 
 from backend.models.hls_cache_entry import HlsCacheEntry
 from backend.system.auth_store import AuthStore
-from backend.system.desktop_media_hls import prune_hls_cache
+from backend.system.desktop_media_hls import current_hls_profile, prune_hls_cache
 
 
 def _seed_hls_entry(
@@ -51,6 +51,20 @@ def _create_agent(auth_store: AuthStore) -> str:
         app_version="0.1.0",
     )
     return agent.agent_id
+
+
+def test_current_hls_profile_uses_safer_defaults(monkeypatch) -> None:
+    monkeypatch.delenv("PLM_AGENT_HLS_HEIGHT_MAX", raising=False)
+    monkeypatch.delenv("PLM_AGENT_HLS_VIDEO_BITRATE", raising=False)
+    monkeypatch.delenv("PLM_AGENT_HLS_AUDIO_BITRATE", raising=False)
+    monkeypatch.delenv("PLM_AGENT_HLS_SEGMENT_SECONDS", raising=False)
+
+    assert current_hls_profile() == {
+        "heightMax": 720,
+        "videoBitrate": "1200k",
+        "audioBitrate": "96k",
+        "segmentSeconds": 3,
+    }
 
 
 def test_prune_hls_cache_removes_expired_entries(monkeypatch, tmp_path: Path) -> None:
