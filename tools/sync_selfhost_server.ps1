@@ -44,6 +44,32 @@ function Resolve-SshKeyPath {
     return $null
 }
 
+function Test-SshKeyAvailableWithoutPrompt {
+    param([string]$KeyPath)
+    if (-not $KeyPath -or -not (Test-Path $KeyPath)) {
+        return $false
+    }
+
+    & ssh-keygen -y -P '""' -f $KeyPath *> $null
+    if ($LASTEXITCODE -eq 0) {
+        return $true
+    }
+
+    $pubPath = "${KeyPath}.pub"
+    $sshAdd = Get-Command ssh-add -ErrorAction SilentlyContinue
+    if ($sshAdd -and (Test-Path $pubPath)) {
+        $expectedPublicKey = (Get-Content -Raw $pubPath).Trim()
+        if ($expectedPublicKey) {
+            $agentKeys = @(& ssh-add -L 2>$null)
+            if ($LASTEXITCODE -eq 0 -and $agentKeys -contains $expectedPublicKey) {
+                return $true
+            }
+        }
+    }
+
+    return $false
+}
+
 function Assert-CleanGitWorktree {
     param(
         [string]$RepoRoot,
@@ -262,6 +288,7 @@ function Invoke-SshPreflightAuthCheck {
 Require-Command python
 Require-Command scp
 Require-Command ssh
+Require-Command ssh-keygen
 
 $repoRoot = Get-RepoRoot
 Assert-CleanGitWorktree -RepoRoot $repoRoot -AllowDirty:$AllowDirtyWorktree -PromptOnDirty:$PromptOnDirtyWorktree
@@ -275,6 +302,7 @@ $sshCommonArgs = @(
     "-o", "ConnectTimeout=15"
 )
 $resolvedSshKeyPath = $null
+$usePasswordAuthOnly = $DisableSshKey
 if ($DisableSshKey) {
     $sshCommonArgs += @(
         "-o", "PubkeyAuthentication=no",
@@ -284,14 +312,30 @@ if ($DisableSshKey) {
 }
 else {
     $resolvedSshKeyPath = Resolve-SshKeyPath -ConfiguredPath $SshKeyPath
-    $sshCommonArgs += @("-o", "PreferredAuthentications=publickey,password,keyboard-interactive")
     if ($resolvedSshKeyPath) {
-        $sshCommonArgs += @("-i", $resolvedSshKeyPath, "-o", "IdentitiesOnly=yes")
-        Write-Host "Using SSH key: $resolvedSshKeyPath"
+        if (Test-SshKeyAvailableWithoutPrompt -KeyPath $resolvedSshKeyPath) {
+            $sshCommonArgs += @("-o", "PreferredAuthentications=publickey,password,keyboard-interactive")
+            $sshCommonArgs += @("-i", $resolvedSshKeyPath, "-o", "IdentitiesOnly=yes")
+            Write-Host "Using SSH key: $resolvedSshKeyPath"
+        }
+        else {
+            $usePasswordAuthOnly = $true
+            Write-Warning "SSH key exists but is locked behind a local passphrase prompt. Falling back to interactive server password auth."
+            Write-Warning "To replace it with a no-passphrase project key, run: Install-Selfhost-Server-SshKey.bat -ReplaceExistingKey -NoKeyPassphrase"
+        }
     }
     else {
+        $usePasswordAuthOnly = $true
         Write-Warning "No SSH key found. Falling back to interactive SSH authentication."
     }
+}
+
+if ($usePasswordAuthOnly -and -not $DisableSshKey) {
+    $sshCommonArgs += @(
+        "-o", "PubkeyAuthentication=no",
+        "-o", "PreferredAuthentications=password,keyboard-interactive"
+    )
+    Write-Host "SSH auth mode: interactive password / keyboard-interactive"
 }
 
 $baseScpArgs = @($sshCommonArgs + @("-P", "$SshPort"))
@@ -341,15 +385,26 @@ $payloadArchiveTempRoot = $payloadInfo.TempRoot
 $payloadArchivePath = $payloadInfo.ArchivePath
 
 try {
-    try {
-        $sshReuseInfo = Start-SshConnectionReuse -BaseSshArgs $baseSshArgs -Destination $sshDestination
-        $sshReuseTempRoot = $sshReuseInfo.TempRoot
-        $sshReuseControlArgs = $sshReuseInfo.ControlArgs
-        $scpArgs = @($baseScpArgs + $sshReuseControlArgs)
-        $sshArgs = @($baseSshArgs + $sshReuseControlArgs)
+    $supportsSshConnectionReuse = $true
+    if (($null -ne (Get-Variable IsWindows -ErrorAction SilentlyContinue) -and $IsWindows) -or $env:OS -eq "Windows_NT") {
+        $supportsSshConnectionReuse = $false
     }
-    catch {
-        Write-Warning "Reusable SSH session setup failed. Falling back to a preflight auth check before upload."
+
+    if ($supportsSshConnectionReuse) {
+        try {
+            $sshReuseInfo = Start-SshConnectionReuse -BaseSshArgs $baseSshArgs -Destination $sshDestination
+            $sshReuseTempRoot = $sshReuseInfo.TempRoot
+            $sshReuseControlArgs = $sshReuseInfo.ControlArgs
+            $scpArgs = @($baseScpArgs + $sshReuseControlArgs)
+            $sshArgs = @($baseSshArgs + $sshReuseControlArgs)
+        }
+        catch {
+            Write-Warning "Reusable SSH session setup failed. Falling back to a preflight auth check before upload."
+            Invoke-SshPreflightAuthCheck -BaseSshArgs $baseSshArgs -Destination $sshDestination
+        }
+    }
+    else {
+        Write-Host "SSH connection reuse is unavailable on this machine. Running auth check before upload."
         Invoke-SshPreflightAuthCheck -BaseSshArgs $baseSshArgs -Destination $sshDestination
     }
 

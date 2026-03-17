@@ -51,7 +51,7 @@ function Resolve-OrCreate-SshKeyPath {
         Write-Host "Generating SSH key: $fullPath"
         if ($NoPassphrase) {
             Write-Host "Generating project SSH key without a passphrase."
-            & ssh-keygen -t ed25519 -C "learningpyramid-selfhost" -f $fullPath -N ""
+            & ssh-keygen -t ed25519 -C "learningpyramid-selfhost" -f $fullPath -N '""'
         }
         else {
             Write-Host "Generating project SSH key with an interactive passphrase prompt."
@@ -86,15 +86,21 @@ $sshArgs = @(
     "-o", "ConnectTimeout=15",
     "-p", "$SshPort"
 )
+$installAuthArgs = @(
+    $sshArgs + @(
+        "-o", "PubkeyAuthentication=no",
+        "-o", "PreferredAuthentications=password,keyboard-interactive"
+    )
+)
 
 Write-Host "Installing SSH public key on ${ServerUser}@${ServerHost}:${SshPort}"
-Get-Content -Raw $publicKeyPath | & ssh @sshArgs "${ServerUser}@${ServerHost}" "umask 077; mkdir -p ~/.ssh; touch ~/.ssh/authorized_keys; cat >> ~/.ssh/authorized_keys; sort -u ~/.ssh/authorized_keys -o ~/.ssh/authorized_keys"
+Get-Content -Raw $publicKeyPath | & ssh @installAuthArgs "${ServerUser}@${ServerHost}" "umask 077; mkdir -p ~/.ssh; touch ~/.ssh/authorized_keys; cat >> ~/.ssh/authorized_keys; sort -u ~/.ssh/authorized_keys -o ~/.ssh/authorized_keys"
 if ($LASTEXITCODE -ne 0) {
     throw "SSH public key install failed"
 }
 
 Write-Host "Testing SSH key login..."
-& ssh @sshArgs -i $resolvedKeyPath "${ServerUser}@${ServerHost}" "printf 'ssh-key-ok\n'"
+& ssh @sshArgs -i $resolvedKeyPath -o "IdentitiesOnly=yes" "${ServerUser}@${ServerHost}" "printf 'ssh-key-ok\n'"
 if ($LASTEXITCODE -ne 0) {
     throw "SSH key verification failed"
 }
