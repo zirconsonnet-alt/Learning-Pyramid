@@ -177,14 +177,15 @@ If you only need a one-off localhost smoke test over plain HTTP, you can tempora
 
 ## Server sync workflow
 
-The Windows helper scripts now assume a key-first deployment flow:
+The Windows helper scripts now default to a one-command sync flow:
 
 ```powershell
-Install-Selfhost-Server-SshKey.bat
 Sync-Selfhost-Server.bat
 ```
 
-If the project key at `~/.ssh/learningpyramid_selfhost_ed25519` has an unknown passphrase or you want to rotate it, run:
+`Sync-Selfhost-Server.bat` automatically makes sure the project key at `~/.ssh/learningpyramid_selfhost_ed25519` exists locally, is usable without a forgotten local passphrase prompt, and is installed on the server. When it has to create, rotate, or reinstall that key, it may ask for the server password once during the repair step.
+
+If you want to manage the project key explicitly or force a rotation, run:
 
 ```powershell
 Install-Selfhost-Server-SshKey.bat -ReplaceExistingKey -NoKeyPassphrase
@@ -195,6 +196,7 @@ That backs up the old key files locally, creates a fresh project key without a p
 `Sync-Selfhost-Server.bat` and `tools/sync_selfhost_server.ps1` now:
 
 - prefer `~/.ssh/learningpyramid_selfhost_ed25519` when present
+- auto-create, rotate, or reinstall that project key during sync when needed
 - open and reuse one SSH session before upload so password auth happens once up front instead of again after a long transfer
 - prompt before deploying a dirty git worktree from `Sync-Selfhost-Server.bat`, while `tools/sync_selfhost_server.ps1` still supports `-AllowDirtyWorktree` for non-interactive runs
 - verify the remote `.env` still has non-placeholder PostgreSQL and media token secrets

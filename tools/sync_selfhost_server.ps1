@@ -70,6 +70,106 @@ function Test-SshKeyAvailableWithoutPrompt {
     return $false
 }
 
+function Test-SshKeyAcceptedByServer {
+    param(
+        [string]$KeyPath,
+        [string]$ServerHost,
+        [string]$ServerUser,
+        [int]$SshPort
+    )
+    if (-not $KeyPath -or -not (Test-Path $KeyPath)) {
+        return $false
+    }
+
+    $testArgs = @(
+        "-o", "BatchMode=yes",
+        "-o", "PreferredAuthentications=publickey",
+        "-o", "PubkeyAuthentication=yes",
+        "-o", "PasswordAuthentication=no",
+        "-o", "KbdInteractiveAuthentication=no",
+        "-o", "IdentitiesOnly=yes",
+        "-o", "ConnectTimeout=10",
+        "-i", $KeyPath,
+        "-p", "$SshPort",
+        "${ServerUser}@${ServerHost}",
+        "printf 'ssh-key-ok\n'"
+    )
+    & ssh @testArgs *> $null
+    return ($LASTEXITCODE -eq 0)
+}
+
+function Invoke-InstallProjectSshKey {
+    param(
+        [string]$RepoRoot,
+        [string]$ServerHost,
+        [string]$ServerUser,
+        [int]$SshPort,
+        [string]$SshKeyPath,
+        [switch]$ReplaceExistingKey,
+        [switch]$NoKeyPassphrase
+    )
+    $installScript = Join-Path $RepoRoot "tools/install_selfhost_ssh_key.ps1"
+    if (-not (Test-Path $installScript)) {
+        throw "SSH key install script not found: $installScript"
+    }
+
+    $installArgs = @{
+        ServerHost = $ServerHost
+        ServerUser = $ServerUser
+        SshPort = $SshPort
+    }
+    if ($SshKeyPath) {
+        $installArgs.SshKeyPath = $SshKeyPath
+    }
+    if ($ReplaceExistingKey) {
+        $installArgs.ReplaceExistingKey = $true
+    }
+    if ($NoKeyPassphrase) {
+        $installArgs.NoKeyPassphrase = $true
+    }
+
+    & $installScript @installArgs
+}
+
+function Ensure-ProjectSshKeyReady {
+    param(
+        [string]$RepoRoot,
+        [string]$ServerHost,
+        [string]$ServerUser,
+        [int]$SshPort,
+        [string]$ConfiguredSshKeyPath
+    )
+    $resolvedSshKeyPath = Resolve-SshKeyPath -ConfiguredPath $ConfiguredSshKeyPath
+    if (-not $resolvedSshKeyPath) {
+        Write-Host "Project SSH key not found locally. Creating and installing one now..."
+        Invoke-InstallProjectSshKey -RepoRoot $RepoRoot -ServerHost $ServerHost -ServerUser $ServerUser -SshPort $SshPort -SshKeyPath $ConfiguredSshKeyPath -NoKeyPassphrase
+        $resolvedSshKeyPath = Resolve-SshKeyPath -ConfiguredPath $ConfiguredSshKeyPath
+        if (-not $resolvedSshKeyPath) {
+            throw "Project SSH key was not created successfully."
+        }
+        return $resolvedSshKeyPath
+    }
+
+    if (-not (Test-SshKeyAvailableWithoutPrompt -KeyPath $resolvedSshKeyPath)) {
+        Write-Warning "Project SSH key exists locally but is locked behind a forgotten or unavailable passphrase."
+        Write-Host "Rotating it to a no-passphrase deploy key and reinstalling it on the server..."
+        Invoke-InstallProjectSshKey -RepoRoot $RepoRoot -ServerHost $ServerHost -ServerUser $ServerUser -SshPort $SshPort -SshKeyPath $resolvedSshKeyPath -ReplaceExistingKey -NoKeyPassphrase
+        $resolvedSshKeyPath = Resolve-SshKeyPath -ConfiguredPath $ConfiguredSshKeyPath
+        if (-not $resolvedSshKeyPath) {
+            throw "Project SSH key rotation did not produce a usable key."
+        }
+        return $resolvedSshKeyPath
+    }
+
+    if (-not (Test-SshKeyAcceptedByServer -KeyPath $resolvedSshKeyPath -ServerHost $ServerHost -ServerUser $ServerUser -SshPort $SshPort)) {
+        Write-Host "Project SSH key is ready locally but not installed on the server. Installing it now..."
+        Invoke-InstallProjectSshKey -RepoRoot $RepoRoot -ServerHost $ServerHost -ServerUser $ServerUser -SshPort $SshPort -SshKeyPath $resolvedSshKeyPath
+        return $resolvedSshKeyPath
+    }
+
+    return $resolvedSshKeyPath
+}
+
 function Assert-CleanGitWorktree {
     param(
         [string]$RepoRoot,
@@ -302,7 +402,6 @@ $sshCommonArgs = @(
     "-o", "ConnectTimeout=15"
 )
 $resolvedSshKeyPath = $null
-$usePasswordAuthOnly = $DisableSshKey
 if ($DisableSshKey) {
     $sshCommonArgs += @(
         "-o", "PubkeyAuthentication=no",
@@ -311,31 +410,10 @@ if ($DisableSshKey) {
     Write-Host "SSH auth mode: interactive password / keyboard-interactive"
 }
 else {
-    $resolvedSshKeyPath = Resolve-SshKeyPath -ConfiguredPath $SshKeyPath
-    if ($resolvedSshKeyPath) {
-        if (Test-SshKeyAvailableWithoutPrompt -KeyPath $resolvedSshKeyPath) {
-            $sshCommonArgs += @("-o", "PreferredAuthentications=publickey,password,keyboard-interactive")
-            $sshCommonArgs += @("-i", $resolvedSshKeyPath, "-o", "IdentitiesOnly=yes")
-            Write-Host "Using SSH key: $resolvedSshKeyPath"
-        }
-        else {
-            $usePasswordAuthOnly = $true
-            Write-Warning "SSH key exists but is locked behind a local passphrase prompt. Falling back to interactive server password auth."
-            Write-Warning "To replace it with a no-passphrase project key, run: Install-Selfhost-Server-SshKey.bat -ReplaceExistingKey -NoKeyPassphrase"
-        }
-    }
-    else {
-        $usePasswordAuthOnly = $true
-        Write-Warning "No SSH key found. Falling back to interactive SSH authentication."
-    }
-}
-
-if ($usePasswordAuthOnly -and -not $DisableSshKey) {
-    $sshCommonArgs += @(
-        "-o", "PubkeyAuthentication=no",
-        "-o", "PreferredAuthentications=password,keyboard-interactive"
-    )
-    Write-Host "SSH auth mode: interactive password / keyboard-interactive"
+    $resolvedSshKeyPath = Ensure-ProjectSshKeyReady -RepoRoot $repoRoot -ServerHost $ServerHost -ServerUser $ServerUser -SshPort $SshPort -ConfiguredSshKeyPath $SshKeyPath
+    $sshCommonArgs += @("-o", "PreferredAuthentications=publickey,password,keyboard-interactive")
+    $sshCommonArgs += @("-i", $resolvedSshKeyPath, "-o", "IdentitiesOnly=yes")
+    Write-Host "Using SSH key: $resolvedSshKeyPath"
 }
 
 $baseScpArgs = @($sshCommonArgs + @("-P", "$SshPort"))

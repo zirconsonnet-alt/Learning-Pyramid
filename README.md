@@ -130,14 +130,15 @@ The hosted stack now expects `PLM_MEDIA_ACCESS_TOKEN_SECRET` to be set to a real
 `PLM_DESKTOP_AGENT_OFFLINE_GRACE_SECONDS` now defaults to `90`, so short browser/network/VPN interruptions do not immediately mark the desktop connector offline.
 `PLM_AGENT_STREAM_DISCONNECT_GRACE_SECONDS` now defaults to `10`, so active relay streams get a short reconnect window instead of failing the instant the connector websocket blips.
 
-For Windows server sync, the helper flow is:
+For Windows server sync, the normal helper flow is just:
 
 ```powershell
-Install-Selfhost-Server-SshKey.bat
 Sync-Selfhost-Server.bat
 ```
 
-If the default project key was created with a passphrase you no longer want to use, rotate it with:
+`Sync-Selfhost-Server.bat` now auto-prepares the project deploy key. If `~/.ssh/learningpyramid_selfhost_ed25519` is missing, locked behind a forgotten passphrase, or not yet installed on the server, the sync script repairs that first and may ask for the server password once so future syncs can stay key-based.
+
+If you want to manage or rotate the key explicitly, use:
 
 ```powershell
 Install-Selfhost-Server-SshKey.bat -ReplaceExistingKey -NoKeyPassphrase
