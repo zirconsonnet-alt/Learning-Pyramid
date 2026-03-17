@@ -112,38 +112,54 @@ function Get-DesktopAgentReleaseAssetPaths {
 }
 
 function New-DesktopAgentReleaseArchive {
-    param([System.IO.FileInfo[]]$Assets)
-    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("learningpyramid-release-sync-" + [guid]::NewGuid().ToString("N"))
+    param(
+        [System.IO.FileInfo[]]$Assets,
+        [string]$ScratchRoot
+    )
+    $tempRoot = Join-Path $ScratchRoot ("learningpyramid-release-sync-" + [guid]::NewGuid().ToString("N"))
     $stageDir = Join-Path $tempRoot "release"
-    New-Item -ItemType Directory -Path $stageDir -Force | Out-Null
-    foreach ($asset in $Assets) {
-        Copy-Item -Path $asset.FullName -Destination (Join-Path $stageDir $asset.Name) -Force
+    try {
+        New-Item -ItemType Directory -Path $stageDir -Force | Out-Null
+        foreach ($asset in $Assets) {
+            Copy-Item -Path $asset.FullName -Destination (Join-Path $stageDir $asset.Name) -Force
+        }
+        $archivePath = Join-Path $tempRoot "desktop-agent-release.zip"
+        Compress-Archive -Path (Join-Path $stageDir "*") -DestinationPath $archivePath -CompressionLevel Optimal -Force
+        return @{
+            TempRoot = $tempRoot
+            ArchivePath = $archivePath
+        }
     }
-    $archivePath = Join-Path $tempRoot "desktop-agent-release.zip"
-    Compress-Archive -Path (Join-Path $stageDir "*") -DestinationPath $archivePath -CompressionLevel Optimal -Force
-    return @{
-        TempRoot = $tempRoot
-        ArchivePath = $archivePath
+    catch {
+        Remove-PathIfPresent -Path $tempRoot
+        throw
     }
 }
 
 function New-DeployPayloadArchive {
     param(
         [string]$BundlePath,
-        [string]$ReleaseArchivePath
+        [string]$ReleaseArchivePath,
+        [string]$ScratchRoot
     )
-    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("learningpyramid-deploy-payload-" + [guid]::NewGuid().ToString("N"))
+    $tempRoot = Join-Path $ScratchRoot ("learningpyramid-deploy-payload-" + [guid]::NewGuid().ToString("N"))
     $stageDir = Join-Path $tempRoot "payload"
-    New-Item -ItemType Directory -Path $stageDir -Force | Out-Null
-    Copy-Item -Path $BundlePath -Destination (Join-Path $stageDir "latest.zip") -Force
-    if ($ReleaseArchivePath -and (Test-Path $ReleaseArchivePath)) {
-        Copy-Item -Path $ReleaseArchivePath -Destination (Join-Path $stageDir "desktop-agent-release.zip") -Force
+    try {
+        New-Item -ItemType Directory -Path $stageDir -Force | Out-Null
+        Copy-Item -Path $BundlePath -Destination (Join-Path $stageDir "latest.zip") -Force
+        if ($ReleaseArchivePath -and (Test-Path $ReleaseArchivePath)) {
+            Copy-Item -Path $ReleaseArchivePath -Destination (Join-Path $stageDir "desktop-agent-release.zip") -Force
+        }
+        $archivePath = Join-Path $tempRoot "learningpyramid-deploy-payload.zip"
+        Compress-Archive -Path (Join-Path $stageDir "*") -DestinationPath $archivePath -CompressionLevel Optimal -Force
+        return @{
+            TempRoot = $tempRoot
+            ArchivePath = $archivePath
+        }
     }
-    $archivePath = Join-Path $tempRoot "learningpyramid-deploy-payload.zip"
-    Compress-Archive -Path (Join-Path $stageDir "*") -DestinationPath $archivePath -CompressionLevel Optimal -Force
-    return @{
-        TempRoot = $tempRoot
-        ArchivePath = $archivePath
+    catch {
+        Remove-PathIfPresent -Path $tempRoot
+        throw
     }
 }
 
@@ -154,6 +170,32 @@ function Remove-PathIfPresent {
     }
     if (Test-Path $Path) {
         Remove-Item -Path $Path -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Get-DeployScratchRoot {
+    param([string]$RepoRoot)
+    $scratchRoot = Join-Path $RepoRoot "release\.deploy-work"
+    New-Item -ItemType Directory -Path $scratchRoot -Force | Out-Null
+    return $scratchRoot
+}
+
+function Remove-StaleDeployTempDirectories {
+    param([string[]]$Roots)
+    $patterns = @(
+        "learningpyramid-deploy-payload-*",
+        "learningpyramid-release-sync-*"
+    )
+    foreach ($root in $Roots) {
+        if (-not $root -or -not (Test-Path $root)) {
+            continue
+        }
+        foreach ($pattern in $patterns) {
+            Get-ChildItem -Path $root -Directory -Filter $pattern -ErrorAction SilentlyContinue |
+                ForEach-Object {
+                    Remove-PathIfPresent -Path $_.FullName
+                }
+        }
     }
 }
 
@@ -223,6 +265,8 @@ Require-Command ssh
 
 $repoRoot = Get-RepoRoot
 Assert-CleanGitWorktree -RepoRoot $repoRoot -AllowDirty:$AllowDirtyWorktree -PromptOnDirty:$PromptOnDirtyWorktree
+$deployScratchRoot = Get-DeployScratchRoot -RepoRoot $repoRoot
+Remove-StaleDeployTempDirectories -Roots @([System.IO.Path]::GetTempPath(), $deployScratchRoot)
 
 $sshCommonArgs = @(
     "-o", "ServerAliveInterval=15",
@@ -281,7 +325,7 @@ $sshDestination = "${ServerUser}@${ServerHost}"
 if (-not $SkipReleaseSync) {
     $releaseAssets = @(Get-DesktopAgentReleaseAssetPaths -RepoRoot $repoRoot)
     if ($releaseAssets.Count -gt 0) {
-        $archiveInfo = New-DesktopAgentReleaseArchive -Assets $releaseAssets
+        $archiveInfo = New-DesktopAgentReleaseArchive -Assets $releaseAssets -ScratchRoot $deployScratchRoot
         $releaseArchiveTempRoot = $archiveInfo.TempRoot
         $releaseArchivePath = $archiveInfo.ArchivePath
         $releaseArchiveHash = (Get-FileHash -Path $releaseArchivePath -Algorithm SHA256).Hash.ToUpperInvariant()
@@ -292,7 +336,7 @@ if (-not $SkipReleaseSync) {
     }
 }
 
-$payloadInfo = New-DeployPayloadArchive -BundlePath $bundlePath -ReleaseArchivePath $releaseArchivePath
+$payloadInfo = New-DeployPayloadArchive -BundlePath $bundlePath -ReleaseArchivePath $releaseArchivePath -ScratchRoot $deployScratchRoot
 $payloadArchiveTempRoot = $payloadInfo.TempRoot
 $payloadArchivePath = $payloadInfo.ArchivePath
 
