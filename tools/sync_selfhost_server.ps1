@@ -218,6 +218,43 @@ function Get-LatestBundlePath {
     return $bundle.FullName
 }
 
+function Invoke-WithRetry {
+    param(
+        [Parameter(Mandatory = $true)]
+        [scriptblock]$Action,
+        [Parameter(Mandatory = $true)]
+        [string]$Description,
+        [int]$MaxAttempts = 6,
+        [int]$DelaySeconds = 2
+    )
+
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        try {
+            return (& $Action)
+        }
+        catch {
+            if ($attempt -ge $MaxAttempts) {
+                throw
+            }
+            Write-Warning "${Description} failed on attempt ${attempt}/${MaxAttempts}. Retrying in ${DelaySeconds}s. $($_.Exception.Message)"
+            Start-Sleep -Seconds $DelaySeconds
+        }
+    }
+}
+
+function Get-DesktopAgentReleaseVersionFromName {
+    param([string]$Name)
+
+    $match = [regex]::Match(
+        $Name,
+        '^LearningPyramidDesktopAgent-(.+?)-(release\.json|Setup\.exe|windows-installer\.zip|windows-standalone\.zip)$'
+    )
+    if (-not $match.Success) {
+        return $null
+    }
+    return $match.Groups[1].Value
+}
+
 function Get-DesktopAgentReleaseAssetPaths {
     param([string]$RepoRoot)
     $releaseDir = Join-Path $RepoRoot "release"
@@ -234,7 +271,51 @@ function Get-DesktopAgentReleaseAssetPaths {
     foreach ($pattern in $patterns) {
         $items += Get-ChildItem -Path $releaseDir -Filter $pattern -File -ErrorAction SilentlyContinue
     }
-    return @($items | Sort-Object FullName -Unique)
+
+    $versionedItems = @(
+        foreach ($item in ($items | Sort-Object FullName -Unique)) {
+            $version = Get-DesktopAgentReleaseVersionFromName -Name $item.Name
+            if ($version) {
+                [pscustomobject]@{
+                    Item = $item
+                    Version = $version
+                }
+            }
+        }
+    )
+    if ($versionedItems.Count -eq 0) {
+        return @()
+    }
+
+    $latestManifestEntry = $versionedItems |
+        Where-Object { $_.Item.Name -like "LearningPyramidDesktopAgent-*-release.json" } |
+        Sort-Object { $_.Item.LastWriteTimeUtc } -Descending |
+        Select-Object -First 1
+    if ($latestManifestEntry) {
+        $selectedVersion = $latestManifestEntry.Version
+    }
+    else {
+        $selectedVersion = ($versionedItems | Sort-Object { $_.Item.LastWriteTimeUtc } -Descending | Select-Object -First 1).Version
+    }
+
+    $selectedEntries = @($versionedItems | Where-Object { $_.Version -eq $selectedVersion })
+    $selectedManifest = $selectedEntries |
+        Where-Object { $_.Item.Name -like "LearningPyramidDesktopAgent-*-release.json" } |
+        Select-Object -First 1
+    if ($selectedManifest) {
+        $manifest = Get-Content -Raw $selectedManifest.Item.FullName | ConvertFrom-Json
+        $selectedItems = @($selectedManifest.Item)
+        foreach ($property in $manifest.assets.PSObject.Properties) {
+            $assetPath = Join-Path $releaseDir $property.Name
+            if (-not (Test-Path $assetPath)) {
+                throw "Desktop agent release manifest references a missing asset: $assetPath"
+            }
+            $selectedItems += Get-Item -Path $assetPath
+        }
+        return @($selectedItems | Sort-Object FullName -Unique)
+    }
+
+    return @($selectedEntries.Item | Sort-Object FullName -Unique)
 }
 
 function New-DesktopAgentReleaseArchive {
@@ -247,10 +328,14 @@ function New-DesktopAgentReleaseArchive {
     try {
         New-Item -ItemType Directory -Path $stageDir -Force | Out-Null
         foreach ($asset in $Assets) {
-            Copy-Item -Path $asset.FullName -Destination (Join-Path $stageDir $asset.Name) -Force
+            Invoke-WithRetry -Description "Staging desktop agent release asset $($asset.Name)" -Action {
+                Copy-Item -Path $asset.FullName -Destination (Join-Path $stageDir $asset.Name) -Force
+            }
         }
         $archivePath = Join-Path $tempRoot "desktop-agent-release.zip"
-        Compress-Archive -Path (Join-Path $stageDir "*") -DestinationPath $archivePath -CompressionLevel Optimal -Force
+        Invoke-WithRetry -Description "Compressing desktop agent release archive" -Action {
+            Compress-Archive -Path (Join-Path $stageDir "*") -DestinationPath $archivePath -CompressionLevel Optimal -Force
+        }
         return @{
             TempRoot = $tempRoot
             ArchivePath = $archivePath
@@ -272,12 +357,18 @@ function New-DeployPayloadArchive {
     $stageDir = Join-Path $tempRoot "payload"
     try {
         New-Item -ItemType Directory -Path $stageDir -Force | Out-Null
-        Copy-Item -Path $BundlePath -Destination (Join-Path $stageDir "latest.zip") -Force
+        Invoke-WithRetry -Description "Staging self-host bundle" -Action {
+            Copy-Item -Path $BundlePath -Destination (Join-Path $stageDir "latest.zip") -Force
+        }
         if ($ReleaseArchivePath -and (Test-Path $ReleaseArchivePath)) {
-            Copy-Item -Path $ReleaseArchivePath -Destination (Join-Path $stageDir "desktop-agent-release.zip") -Force
+            Invoke-WithRetry -Description "Staging desktop agent release archive" -Action {
+                Copy-Item -Path $ReleaseArchivePath -Destination (Join-Path $stageDir "desktop-agent-release.zip") -Force
+            }
         }
         $archivePath = Join-Path $tempRoot "learningpyramid-deploy-payload.zip"
-        Compress-Archive -Path (Join-Path $stageDir "*") -DestinationPath $archivePath -CompressionLevel Optimal -Force
+        Invoke-WithRetry -Description "Compressing deploy payload" -Action {
+            Compress-Archive -Path (Join-Path $stageDir "*") -DestinationPath $archivePath -CompressionLevel Optimal -Force
+        }
         return @{
             TempRoot = $tempRoot
             ArchivePath = $archivePath
