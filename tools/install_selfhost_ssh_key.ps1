@@ -51,11 +51,11 @@ function Resolve-OrCreate-SshKeyPath {
         Write-Host "Generating SSH key: $fullPath"
         if ($NoPassphrase) {
             Write-Host "Generating project SSH key without a passphrase."
-            & ssh-keygen -t ed25519 -C "learningpyramid-selfhost" -f $fullPath -N '""'
+            & ssh-keygen -t ed25519 -C "learningpyramid-selfhost" -f $fullPath -N '""' | Out-Host
         }
         else {
             Write-Host "Generating project SSH key with an interactive passphrase prompt."
-            & ssh-keygen -t ed25519 -C "learningpyramid-selfhost" -f $fullPath
+            & ssh-keygen -t ed25519 -C "learningpyramid-selfhost" -f $fullPath | Out-Host
         }
         if ($LASTEXITCODE -ne 0) {
             throw "ssh-keygen failed"
@@ -67,7 +67,7 @@ function Resolve-OrCreate-SshKeyPath {
     else {
         Write-Host "Reusing existing SSH key: $fullPath"
     }
-    return (Resolve-Path $fullPath).Path
+    return @((Resolve-Path $fullPath).Path)
 }
 
 Require-Command ssh
