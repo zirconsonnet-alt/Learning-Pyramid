@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from backend.system.version import APP_VERSION
-from desktop_agent.autostart import AutostartManager
+from desktop_agent.autostart import AutostartManager, current_agent_command
 from desktop_agent.config_store import AgentConfig, AgentUpdateState, ConfigStore
 from desktop_agent.instance_lock import SingleInstanceLock
 from desktop_agent.tray import DesktopAgentTrayController
@@ -165,6 +165,22 @@ def test_tray_controller_toggles_autostart_to_tray_command(tmp_path: Path) -> No
     assert controller.autostart_enabled() is False
 
 
+def test_tray_controller_debounces_launch_ui_requests(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    spawned: list[list[str]] = []
+    monotonic_values = iter((100.0, 100.2, 101.5))
+    monkeypatch.setattr(tray_module.time, "monotonic", lambda: next(monotonic_values))
+    controller = DesktopAgentTrayController(
+        config_store=_seed_config(tmp_path),
+        autostart_manager=AutostartManager(tmp_path / "startup"),
+        process_spawner=lambda command: spawned.append(command),
+    )
+
+    assert controller.launch_ui() is True
+    assert controller.launch_ui() is False
+    assert controller.launch_ui() is True
+    assert spawned == [current_agent_command("ui"), current_agent_command("ui")]
+
+
 def test_tray_controller_claims_single_instance_lock(tmp_path: Path) -> None:
     lock_path = tmp_path / "config" / "tray.lock"
     first = DesktopAgentTrayController(
@@ -243,6 +259,28 @@ def test_tray_controller_checks_for_updates_and_opens_download(tmp_path: Path) -
     assert update_status.signature_status == "SIGNED"
     assert controller.open_update_download() is True
     assert opened == ["https://learn.example.com/api/system/desktop-agent-release/assets/agent-setup.exe"]
+
+
+def test_tray_controller_compacts_verbose_menu_labels(tmp_path: Path) -> None:
+    controller = DesktopAgentTrayController(
+        config_store=_seed_config(tmp_path),
+        autostart_manager=AutostartManager(tmp_path / "startup"),
+        process_spawner=lambda command: None,
+    )
+
+    controller._set_update_status(
+        "ERROR",
+        "HTTPSConnectionPool(host='plm.xuebao.chat', port=443): Max retries exceeded with url: "
+        "/api/system/desktop-agent-release/currentVersion?currentVersion=0.1.0-beta.2 "
+        "(Caused by NameResolutionError(\"Failed to resolve 'plm.xuebao.chat'\"))",
+    )
+
+    label = controller.current_update_menu_label()
+
+    assert label.startswith("更新: 检查更新失败: HTTPSConnectionPool(")
+    assert "..." in label
+    assert len(label) <= 64
+    assert label.endswith("m.xuebao.chat'\"))")
 
 
 def test_tray_controller_installs_update_silently(tmp_path: Path) -> None:
@@ -351,6 +389,95 @@ def test_tray_controller_opens_update_log_and_rolls_back(tmp_path: Path) -> None
             "-Relaunch",
         ]
     ]
+
+
+def test_launch_tray_marks_open_setup_as_default_menu_item(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _StubLogger:
+        def info(self, *args, **kwargs) -> None:
+            pass
+
+        def warning(self, *args, **kwargs) -> None:
+            pass
+
+        def exception(self, *args, **kwargs) -> None:
+            pass
+
+    class _StubController:
+        def __init__(self) -> None:
+            self._logger = _StubLogger()
+            self.launch_ui_calls = 0
+
+        def has_config(self) -> bool:
+            return True
+
+        def claim_single_instance(self) -> bool:
+            return True
+
+        def release_single_instance(self) -> None:
+            pass
+
+        def ensure_service_running(self) -> bool:
+            return True
+
+        def ensure_command_watcher_running(self) -> bool:
+            return True
+
+        def shutdown_requested(self) -> bool:
+            return False
+
+        def shutdown(self) -> None:
+            pass
+
+        def launch_ui(self) -> bool:
+            self.launch_ui_calls += 1
+            return True
+
+        def autostart_enabled(self) -> bool:
+            return False
+
+    class _StubIcon:
+        created_menu = None
+
+        def __init__(self, *args, **kwargs) -> None:
+            self.visible = False
+            _StubIcon.created_menu = kwargs.get("menu")
+
+        def run(self, setup=None) -> None:
+            del setup
+
+        def stop(self) -> None:
+            pass
+
+        def update_menu(self) -> None:
+            pass
+
+    class _StubPystray:
+        Icon = _StubIcon
+
+        class Menu:
+            SEPARATOR = object()
+
+            def __new__(cls, *items):
+                return list(items)
+
+        @staticmethod
+        def MenuItem(*args, **kwargs):
+            return {"args": args, "kwargs": kwargs}
+
+    controller = _StubController()
+    monkeypatch.setattr(tray_module, "configure_desktop_agent_logging", lambda: None)
+    monkeypatch.setattr(tray_module, "DesktopAgentTrayController", lambda: controller)
+    monkeypatch.setattr(tray_module, "_run_headless_fallback", lambda controller, *, reason, poll_interval_seconds=0.5: 0)
+    monkeypatch.setitem(sys.modules, "pystray", _StubPystray)
+
+    assert tray_module.launch_tray() == 0
+    assert isinstance(_StubIcon.created_menu, list)
+    open_setup_item = next(item for item in _StubIcon.created_menu if isinstance(item, dict) and item["args"][0] == "打开配置窗口")
+    assert open_setup_item["kwargs"].get("default") is True
+
+    callback = open_setup_item["args"][1]
+    callback(None, None)
+    assert controller.launch_ui_calls == 1
 
 
 def test_launch_tray_falls_back_to_headless_when_icon_run_returns_early(monkeypatch: pytest.MonkeyPatch) -> None:

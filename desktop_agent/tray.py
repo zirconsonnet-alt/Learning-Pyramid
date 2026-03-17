@@ -15,6 +15,10 @@ from desktop_agent.logging_utils import configure_desktop_agent_logging, get_des
 from desktop_agent.service import DesktopAgentService
 from desktop_agent.updater import DesktopAgentUpdater
 
+_TRAY_MENU_TEXT_LIMIT = 64
+_TRAY_MENU_TEXT_TAIL = 20
+_UI_LAUNCH_DEBOUNCE_SECONDS = 1.0
+
 
 def _spawn_process(command: list[str]) -> None:
     creationflags = 0
@@ -108,6 +112,28 @@ def _update_history_label(state: AgentUpdateState | None) -> str:
     return "最近升级：" + " / ".join(pieces)
 
 
+def _normalize_tray_text(value: str | None) -> str:
+    return " ".join(str(value or "").split())
+
+
+def _compact_tray_menu_text(
+    value: str | None,
+    *,
+    max_length: int = _TRAY_MENU_TEXT_LIMIT,
+    tail_length: int = _TRAY_MENU_TEXT_TAIL,
+) -> str:
+    normalized = _normalize_tray_text(value)
+    if len(normalized) <= max_length:
+        return normalized
+    if max_length <= 3:
+        return normalized[:max_length]
+    safe_tail_length = min(max(8, int(tail_length)), max_length - 4)
+    head_length = max_length - safe_tail_length - 3
+    if head_length < 8:
+        return normalized[: max_length - 3].rstrip() + "..."
+    return normalized[:head_length].rstrip() + "..." + normalized[-safe_tail_length:].lstrip()
+
+
 class DesktopAgentTrayController:
     def __init__(
         self,
@@ -136,6 +162,8 @@ class DesktopAgentTrayController:
         self._command_thread: threading.Thread | None = None
         self._command_stop_event: threading.Event | None = None
         self._shutdown_requested = threading.Event()
+        self._ui_launch_lock = threading.Lock()
+        self._last_ui_launch_monotonic = 0.0
         self._logger = get_desktop_agent_logger("tray")
         self.config_store.ensure_app_version()
 
@@ -151,6 +179,9 @@ class DesktopAgentTrayController:
     def current_status_label(self) -> str:
         current = self.current_status()
         return _status_label(current.state, current.message)
+
+    def current_status_menu_label(self) -> str:
+        return _compact_tray_menu_text(f"状态: {self.current_status_label()}")
 
     def _set_update_status(
         self,
@@ -196,11 +227,17 @@ class DesktopAgentTrayController:
         current = self.current_update_status()
         return _update_label(current.state, current.message)
 
+    def current_update_menu_label(self) -> str:
+        return _compact_tray_menu_text(f"更新: {self.current_update_label()}")
+
     def load_update_state(self) -> AgentUpdateState | None:
         return self.config_store.load_update_state()
 
     def current_update_history_label(self) -> str:
         return _update_history_label(self.load_update_state())
+
+    def current_update_history_menu_label(self) -> str:
+        return _compact_tray_menu_text(self.current_update_history_label())
 
     def has_config(self) -> bool:
         return self.config_store.exists()
@@ -225,9 +262,22 @@ class DesktopAgentTrayController:
         self.set_autostart(next_enabled)
         return next_enabled
 
-    def launch_ui(self) -> None:
+    def launch_ui(self, *, debounce_seconds: float = _UI_LAUNCH_DEBOUNCE_SECONDS) -> bool:
+        now = time.monotonic()
+        with self._ui_launch_lock:
+            elapsed = now - self._last_ui_launch_monotonic
+            if self._last_ui_launch_monotonic > 0 and elapsed < max(0.0, float(debounce_seconds)):
+                self._logger.info("launch_ui_skipped reason=debounced elapsed_seconds=%.3f", elapsed)
+                return False
+            self._last_ui_launch_monotonic = now
         self._logger.info("launch_ui_requested")
-        self.process_spawner(current_agent_command("ui"))
+        try:
+            self.process_spawner(current_agent_command("ui"))
+        except Exception:
+            with self._ui_launch_lock:
+                self._last_ui_launch_monotonic = 0.0
+            raise
+        return True
 
     def open_data_dir(self) -> None:
         target = str(self.config_store.base_dir)
@@ -548,11 +598,11 @@ def launch_tray() -> int:
         _build_tray_image(),
         "LearningPyramid Desktop Agent",
         menu=pystray.Menu(
-            pystray.MenuItem(lambda item: f"状态: {controller.current_status_label()}", lambda icon, item: None, enabled=False),
-            pystray.MenuItem(lambda item: f"更新: {controller.current_update_label()}", lambda icon, item: None, enabled=False),
-            pystray.MenuItem(lambda item: controller.current_update_history_label(), lambda icon, item: None, enabled=False),
+            pystray.MenuItem(lambda item: controller.current_status_menu_label(), lambda icon, item: None, enabled=False),
+            pystray.MenuItem(lambda item: controller.current_update_menu_label(), lambda icon, item: None, enabled=False),
+            pystray.MenuItem(lambda item: controller.current_update_history_menu_label(), lambda icon, item: None, enabled=False),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("打开配置窗口", _open_setup),
+            pystray.MenuItem("打开配置窗口", _open_setup, default=True),
             pystray.MenuItem("立即重连", _reconnect),
             pystray.MenuItem("开机自启", _toggle_autostart, checked=lambda item: controller.autostart_enabled()),
             pystray.MenuItem("打开数据目录", _open_data_dir),
