@@ -24,7 +24,7 @@ echo   Port: %SSH_PORT%
 echo   Key:  %SSH_KEY_PATH%
 echo.
 
-powershell -ExecutionPolicy Bypass -File "%INSTALL_SCRIPT%" -ServerHost "%SERVER_HOST%" -ServerUser "%SERVER_USER%" -SshPort %SSH_PORT% -SshKeyPath "%SSH_KEY_PATH%"
+powershell -ExecutionPolicy Bypass -File "%INSTALL_SCRIPT%" -ServerHost "%SERVER_HOST%" -ServerUser "%SERVER_USER%" -SshPort %SSH_PORT% -SshKeyPath "%SSH_KEY_PATH%" %*
 set "EXIT_CODE=%ERRORLEVEL%"
 
 echo.

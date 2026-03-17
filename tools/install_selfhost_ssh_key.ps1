@@ -4,7 +4,9 @@ param(
 
     [string]$ServerUser = "root",
     [int]$SshPort = 22,
-    [string]$SshKeyPath = ""
+    [string]$SshKeyPath = "",
+    [switch]$ReplaceExistingKey,
+    [switch]$NoKeyPassphrase
 )
 
 $ErrorActionPreference = "Stop"
@@ -17,7 +19,11 @@ function Require-Command {
 }
 
 function Resolve-OrCreate-SshKeyPath {
-    param([string]$ConfiguredPath)
+    param(
+        [string]$ConfiguredPath,
+        [switch]$ReplaceExisting,
+        [switch]$NoPassphrase
+    )
     if ($ConfiguredPath) {
         $fullPath = $ConfiguredPath
     }
@@ -28,12 +34,38 @@ function Resolve-OrCreate-SshKeyPath {
     if (-not (Test-Path $keyDir)) {
         New-Item -ItemType Directory -Path $keyDir -Force | Out-Null
     }
+    $keyExists = (Test-Path $fullPath) -or (Test-Path "${fullPath}.pub")
+    if ($ReplaceExisting -and $keyExists) {
+        $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+        foreach ($path in @($fullPath, "${fullPath}.pub")) {
+            if (-not (Test-Path $path)) {
+                continue
+            }
+            $backupPath = "${path}.bak-${timestamp}"
+            Move-Item -Path $path -Destination $backupPath -Force
+            Write-Host "Backed up existing key file: $backupPath"
+        }
+        $keyExists = $false
+    }
     if (-not (Test-Path $fullPath)) {
         Write-Host "Generating SSH key: $fullPath"
-        & ssh-keygen -t ed25519 -C "learningpyramid-selfhost" -f $fullPath -N ""
+        if ($NoPassphrase) {
+            Write-Host "Generating project SSH key without a passphrase."
+            & ssh-keygen -t ed25519 -C "learningpyramid-selfhost" -f $fullPath -N ""
+        }
+        else {
+            Write-Host "Generating project SSH key with an interactive passphrase prompt."
+            & ssh-keygen -t ed25519 -C "learningpyramid-selfhost" -f $fullPath
+        }
         if ($LASTEXITCODE -ne 0) {
             throw "ssh-keygen failed"
         }
+    }
+    elseif ($ReplaceExisting -and $keyExists) {
+        throw "Failed to rotate SSH key at $fullPath"
+    }
+    else {
+        Write-Host "Reusing existing SSH key: $fullPath"
     }
     return (Resolve-Path $fullPath).Path
 }
@@ -41,7 +73,7 @@ function Resolve-OrCreate-SshKeyPath {
 Require-Command ssh
 Require-Command ssh-keygen
 
-$resolvedKeyPath = Resolve-OrCreate-SshKeyPath -ConfiguredPath $SshKeyPath
+$resolvedKeyPath = Resolve-OrCreate-SshKeyPath -ConfiguredPath $SshKeyPath -ReplaceExisting:$ReplaceExistingKey -NoPassphrase:$NoKeyPassphrase
 $publicKeyPath = "${resolvedKeyPath}.pub"
 if (-not (Test-Path $publicKeyPath)) {
     throw "SSH public key not found: $publicKeyPath"

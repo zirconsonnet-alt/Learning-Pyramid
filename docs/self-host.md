@@ -184,6 +184,14 @@ Install-Selfhost-Server-SshKey.bat
 Sync-Selfhost-Server.bat
 ```
 
+If the project key at `~/.ssh/learningpyramid_selfhost_ed25519` has an unknown passphrase or you want to rotate it, run:
+
+```powershell
+Install-Selfhost-Server-SshKey.bat -ReplaceExistingKey -NoKeyPassphrase
+```
+
+That backs up the old key files locally, creates a fresh project key without a passphrase, and reinstalls the new public key on the server so future deploys do not stop for a local key passphrase prompt.
+
 `Sync-Selfhost-Server.bat` and `tools/sync_selfhost_server.ps1` now:
 
 - prefer `~/.ssh/learningpyramid_selfhost_ed25519` when present

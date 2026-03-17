@@ -137,6 +137,12 @@ Install-Selfhost-Server-SshKey.bat
 Sync-Selfhost-Server.bat
 ```
 
+If the default project key was created with a passphrase you no longer want to use, rotate it with:
+
+```powershell
+Install-Selfhost-Server-SshKey.bat -ReplaceExistingKey -NoKeyPassphrase
+```
+
 `Sync-Selfhost-Server.bat` now prefers the default SSH key, prompts before deploying a dirty git worktree, validates the remote `.env`, and runs readiness plus a public smoke check after deploy.
 
 ## Dev mode
