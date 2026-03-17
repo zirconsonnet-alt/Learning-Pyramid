@@ -147,6 +147,76 @@ function New-DeployPayloadArchive {
     }
 }
 
+function Remove-PathIfPresent {
+    param([string]$Path)
+    if (-not $Path) {
+        return
+    }
+    if (Test-Path $Path) {
+        Remove-Item -Path $Path -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Start-SshConnectionReuse {
+    param(
+        [string[]]$BaseSshArgs,
+        [string]$Destination
+    )
+    $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("learningpyramid-ssh-" + [System.IO.Path]::GetRandomFileName().Replace(".", ""))
+    New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+    $controlPath = Join-Path $tempRoot "mux"
+    $controlArgs = @(
+        "-o", "ControlMaster=auto",
+        "-o", "ControlPersist=30m",
+        "-o", "ControlPath=$controlPath"
+    )
+    $openArgs = @($BaseSshArgs + $controlArgs + @("-M", "-N", "-f", $Destination))
+
+    Write-Host "Opening reusable SSH session..."
+    Write-Host "Authenticate now; the same connection will be reused for upload and remote deploy."
+    & ssh @openArgs
+    if ($LASTEXITCODE -ne 0) {
+        Remove-PathIfPresent -Path $tempRoot
+        throw "Failed to establish reusable SSH session."
+    }
+
+    return @{
+        TempRoot = $tempRoot
+        ControlArgs = $controlArgs
+    }
+}
+
+function Stop-SshConnectionReuse {
+    param(
+        [string[]]$BaseSshArgs,
+        [string[]]$ControlArgs,
+        [string]$Destination,
+        [string]$TempRoot
+    )
+    try {
+        if ($ControlArgs -and $Destination) {
+            $closeArgs = @($BaseSshArgs + $ControlArgs + @("-O", "exit", $Destination))
+            & ssh @closeArgs *> $null
+        }
+    }
+    finally {
+        Remove-PathIfPresent -Path $TempRoot
+    }
+}
+
+function Invoke-SshPreflightAuthCheck {
+    param(
+        [string[]]$BaseSshArgs,
+        [string]$Destination
+    )
+    $checkArgs = @($BaseSshArgs + @($Destination, "printf 'ssh-auth-ok\n'"))
+    Write-Host "Checking SSH authentication before upload..."
+    & ssh @checkArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "SSH authentication check failed before upload."
+    }
+}
+
 Require-Command python
 Require-Command scp
 Require-Command ssh
@@ -180,8 +250,10 @@ else {
     }
 }
 
-$scpArgs = @($sshCommonArgs + @("-P", "$SshPort"))
-$sshArgs = @($sshCommonArgs + @("-p", "$SshPort"))
+$baseScpArgs = @($sshCommonArgs + @("-P", "$SshPort"))
+$baseSshArgs = @($sshCommonArgs + @("-p", "$SshPort"))
+$scpArgs = @($baseScpArgs)
+$sshArgs = @($baseSshArgs)
 
 if (-not $SkipBuild) {
     Write-Host "Building self-host bundle..."
@@ -202,6 +274,9 @@ $releaseArchiveTempRoot = $null
 $releaseArchivePath = $null
 $payloadArchiveTempRoot = $null
 $payloadArchivePath = $null
+$sshReuseTempRoot = $null
+$sshReuseControlArgs = @()
+$sshDestination = "${ServerUser}@${ServerHost}"
 
 if (-not $SkipReleaseSync) {
     $releaseAssets = @(Get-DesktopAgentReleaseAssetPaths -RepoRoot $repoRoot)
@@ -221,22 +296,26 @@ $payloadInfo = New-DeployPayloadArchive -BundlePath $bundlePath -ReleaseArchiveP
 $payloadArchiveTempRoot = $payloadInfo.TempRoot
 $payloadArchivePath = $payloadInfo.ArchivePath
 
-Write-Host "Uploading deploy payload: $payloadArchivePath"
-& scp @scpArgs $payloadArchivePath $remoteTarget
-if ($LASTEXITCODE -ne 0) {
-    throw "scp upload failed"
-}
+try {
+    try {
+        $sshReuseInfo = Start-SshConnectionReuse -BaseSshArgs $baseSshArgs -Destination $sshDestination
+        $sshReuseTempRoot = $sshReuseInfo.TempRoot
+        $sshReuseControlArgs = $sshReuseInfo.ControlArgs
+        $scpArgs = @($baseScpArgs + $sshReuseControlArgs)
+        $sshArgs = @($baseSshArgs + $sshReuseControlArgs)
+    }
+    catch {
+        Write-Warning "Reusable SSH session setup failed. Falling back to a preflight auth check before upload."
+        Invoke-SshPreflightAuthCheck -BaseSshArgs $baseSshArgs -Destination $sshDestination
+    }
 
-if ($releaseArchiveTempRoot) {
-    Remove-Item -Path $releaseArchiveTempRoot -Recurse -Force -ErrorAction SilentlyContinue
-    $releaseArchiveTempRoot = $null
-}
-if ($payloadArchiveTempRoot) {
-    Remove-Item -Path $payloadArchiveTempRoot -Recurse -Force -ErrorAction SilentlyContinue
-    $payloadArchiveTempRoot = $null
-}
+    Write-Host "Uploading deploy payload: $payloadArchivePath"
+    & scp @scpArgs $payloadArchivePath $remoteTarget
+    if ($LASTEXITCODE -ne 0) {
+        throw "scp upload failed"
+    }
 
-$remoteScript = @"
+    $remoteScript = @"
 set -euo pipefail
 
 REMOTE_ROOT='$RemoteRoot'
@@ -415,10 +494,16 @@ docker compose \
 exit 1
 "@
 
-Write-Host "Deploying on server..."
-$remoteScript | & ssh @sshArgs "${ServerUser}@${ServerHost}" bash -s
-if ($LASTEXITCODE -ne 0) {
-    throw "Remote deploy failed. See remote output above."
+    Write-Host "Deploying on server..."
+    $remoteScript | & ssh @sshArgs $sshDestination bash -s
+    if ($LASTEXITCODE -ne 0) {
+        throw "Remote deploy failed. See remote output above."
+    }
+}
+finally {
+    Stop-SshConnectionReuse -BaseSshArgs $baseSshArgs -ControlArgs $sshReuseControlArgs -Destination $sshDestination -TempRoot $sshReuseTempRoot
+    Remove-PathIfPresent -Path $releaseArchiveTempRoot
+    Remove-PathIfPresent -Path $payloadArchiveTempRoot
 }
 
 Write-Host ""

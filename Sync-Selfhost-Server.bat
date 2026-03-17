@@ -20,10 +20,10 @@ echo Deploy target:
 echo   Host: %SERVER_HOST%
 echo   User: %SERVER_USER%
 echo   Port: %SSH_PORT%
-echo   Auth: interactive SSH auth ^(password / keyboard-interactive^)
+echo   Auth: SSH key if installed, otherwise interactive SSH auth ^(password / keyboard-interactive^)
 echo.
 
-powershell -ExecutionPolicy Bypass -File "%SYNC_SCRIPT%" -ServerHost "%SERVER_HOST%" -ServerUser "%SERVER_USER%" -SshPort %SSH_PORT% -DisableSshKey -PromptOnDirtyWorktree %*
+powershell -ExecutionPolicy Bypass -File "%SYNC_SCRIPT%" -ServerHost "%SERVER_HOST%" -ServerUser "%SERVER_USER%" -SshPort %SSH_PORT% -PromptOnDirtyWorktree %*
 set "EXIT_CODE=%ERRORLEVEL%"
 
 echo.
