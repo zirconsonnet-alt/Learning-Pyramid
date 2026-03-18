@@ -148,16 +148,12 @@ export function TaskTreePage() {
   })
 
   const {
-    aggregationCount,
-    chapterCount,
     defaultSelectedId,
     descendantLeafCountById,
-    maxLayerIndex,
     nodeById,
     nodeLayerById,
     parentById,
     rootIds,
-    taskCount,
   } = useMemo(() => {
     const rawNodes = q.data ?? []
     const events = eventsQ.data ?? []
@@ -194,10 +190,6 @@ export function TaskTreePage() {
 
     for (const nodeId of Object.keys(rawNodeById)) countLeafDescendants(nodeId)
 
-    let tasks = 0
-    let chapters = 0
-    let aggregations = 0
-    let highestLayer = 0
     const map: Record<string, LearningTaskTreeNode> = {}
 
     for (const node of rawNodes) {
@@ -205,11 +197,6 @@ export function TaskTreePage() {
       const uiType = classifyTaskNode(node, eventByParentId[node.nodeId])
       const taskSpan = descendantCountById[node.nodeId] ?? 0
       const childCount = node.kind === "container" ? (node.children?.length ?? 0) : 0
-
-      if (uiType === "task") tasks += 1
-      if (uiType === "chapter") chapters += 1
-      if (uiType === "aggregation") aggregations += 1
-      highestLayer = Math.max(highestLayer, layerIndex)
 
       map[node.nodeId] = {
         nodeId: node.nodeId,
@@ -237,12 +224,8 @@ export function TaskTreePage() {
     const defaultNodeId = roots[0] ?? Object.keys(map).sort((a, b) => a.localeCompare(b))[0] ?? null
 
     return {
-      taskCount: tasks,
-      chapterCount: chapters,
-      aggregationCount: aggregations,
       defaultSelectedId: defaultNodeId,
       descendantLeafCountById: descendantCountById,
-      maxLayerIndex: highestLayer,
       nodeById: map,
       nodeLayerById: layerById,
       parentById: directParentById,
@@ -273,200 +256,181 @@ export function TaskTreePage() {
       : []
 
   const detailStatus = getReviewStatus(selectedBindingQ.data, selectedConvergenceQ.data)
-  const canvasFocusNodeId = hoveredNodeId ?? selectedNodeId
+  const canvasFocusNodeId = hoveredNodeId ?? effectiveSelectedNodeId
   const isLoading = q.isLoading || eventsQ.isLoading
   const hasData = (q.data ?? []).length > 0
 
   return (
     <div className="space-y-5">
-      <section className="theme-card-main overflow-hidden">
-        <div className="flex flex-col gap-5 p-6 md:p-7">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-            <div className="space-y-3">
-              <div className="flex flex-wrap gap-2">
-                <span className="theme-meta-strong">任务树工作台</span>
-                <span className="theme-meta">父节点居中布局</span>
-              </div>
-              <h1 className="text-[1.9rem] font-semibold tracking-tight text-foreground">学习任务树</h1>
-            </div>
-
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <OverviewMetric label="任务节点" value={String(taskCount)} caption="叶子任务" />
-            <OverviewMetric label="章节节点" value={String(chapterCount)} caption="人工命名分组" />
-            <OverviewMetric label="聚合节点" value={String(aggregationCount)} caption="自动聚合" />
-            <OverviewMetric
-              label="结构层级"
-              value={maxLayerIndex === 0 ? "L0" : `L0-L${maxLayerIndex}`}
-              caption={`${maxLayerIndex + 1} 层结构`}
-            />
-          </div>
-        </div>
-      </section>
-
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <section className="theme-card-main overflow-hidden">
-          <div className="flex flex-col gap-3 border-b border-border/60 px-6 py-5 md:flex-row md:items-center md:justify-between">
-            <h2 className="text-base font-semibold text-foreground">结构视图</h2>
-            <div className="flex flex-wrap gap-2 text-xs text-[#688099]">
-              <span className="theme-meta">组内紧，组间松</span>
-              <span className="theme-meta">层标签仅作辅助定位</span>
-            </div>
-          </div>
-
-          <div className="theme-canvas min-h-[32rem] overflow-auto p-4 md:p-5">
-            {isLoading ? <LoadingNotice title="正在加载学习任务树" message="正在整理任务节点、聚合关系和层级布局。" /> : null}
-            {q.error ? <ErrorNotice title="学习任务树加载失败" message={formatApiError(q.error)} /> : null}
-            {eventsQ.error ? <ErrorNotice title="聚合事件加载失败" message={formatApiError(eventsQ.error)} /> : null}
-            {!isLoading && !q.error && !eventsQ.error && !hasData ? (
-              <ContentEmptyState
-                icon={Waypoints}
-                title="当前项目还没有学习任务树"
-                message="先在工作台提交一批复述点并创建学习任务，任务结构就会显示在这里。"
-              />
-            ) : null}
-            {!isLoading && !q.error && !eventsQ.error && hasData ? (
-              <LearningTaskTreeCanvas
-                rootIds={rootIds}
-                nodeById={nodeById}
-                nodeLayerById={nodeLayerById}
-                selectedNodeId={effectiveSelectedNodeId}
-                focusNodeId={canvasFocusNodeId}
-                onNodeHover={setHoveredNodeId}
-                onNodeSelect={(node) => setSelectedNodeId(node.nodeId)}
-              />
-            ) : null}
-          </div>
-        </section>
-
-        <aside className="space-y-4">
-          <section className="theme-card p-5">
-            {selectedNode ? (
-              <div className="space-y-5">
-                <div className="space-y-3 border-b border-border/60 pb-4">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <TypeBadge uiType={selectedNode.uiType} />
-                    <span className="inline-flex items-center rounded-full border border-[#d8e3ee] bg-[#f6f9fc] px-2.5 py-1 text-xs font-semibold text-[#5f7790]">
-                      L{nodeLayerById[selectedNode.nodeId] ?? 0}
-                    </span>
-                  </div>
-                  <div>
-                    <h3 className="text-xl font-semibold tracking-tight text-foreground">{selectedNode.displayTitle ?? selectedNode.title}</h3>
-                    <p className="mt-2 text-sm text-[#647b93]">{selectedNode.metaText}</p>
-                  </div>
+      <section className="theme-card p-5 md:p-6">
+        {selectedNode ? (
+          <div className="space-y-5">
+            <div className="flex flex-col gap-4 border-b border-border/60 pb-4 xl:flex-row xl:items-start xl:justify-between">
+              <div className="space-y-3">
+                <div className="flex flex-wrap gap-2">
+                  <span className="theme-meta-strong">学习任务树</span>
+                  <span className="theme-meta">进入页面默认定位根节点</span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <TypeBadge uiType={selectedNode.uiType} />
+                  <span className="inline-flex items-center rounded-full border border-[#d8e3ee] bg-[#f6f9fc] px-2.5 py-1 text-xs font-semibold text-[#5f7790]">
+                    L{nodeLayerById[selectedNode.nodeId] ?? 0}
+                  </span>
                   <span className={cn("inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold", detailStatus.className)}>
                     {detailStatus.label}
                   </span>
                 </div>
-
-                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                  <DetailMetric label="覆盖任务数" value={`${descendantLeafCountById[selectedNode.nodeId] ?? 0}`} />
-                  <DetailMetric
-                    label={selectedNode.kind === "container" ? "直接子节点" : "目标层"}
-                    value={
-                      selectedNode.kind === "container"
-                        ? `${selectedChildren.length}`
-                        : selectedBindingQ.data?.targetLayerIndex === undefined || selectedBindingQ.data?.targetLayerIndex === null
-                          ? "-"
-                          : `L${selectedBindingQ.data.targetLayerIndex}`
-                    }
-                  />
-                  <DetailMetric label="绑定任务" value={selectedNode.kind === "leaf" && selectedNode.learningTaskId ? "已绑定" : "无"} />
-                  <DetailMetric
-                    label="复述点数"
-                    value={selectedTaskQ.data?.size === undefined || selectedTaskQ.data?.size === null ? "-" : `${selectedTaskQ.data.size}`}
-                  />
-                </div>
-
                 <div>
-                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#688099]">路径</div>
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    {pathNodeIds.map((nodeId, index) => {
-                      const node = nodeById[nodeId]
-                      if (!node) return null
-                      return (
-                        <div key={nodeId} className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            className={cn(
-                              "rounded-full border px-3 py-1.5 text-xs font-medium transition hover:border-primary/30 hover:bg-accent hover:text-foreground",
-                              nodeId === selectedNode.nodeId
-                                ? "border-[#9fbad6] bg-[#eef5fd] text-[#31567d]"
-                                : "border-[#d6e0ea] bg-white text-[#607892]",
-                            )}
-                            onClick={() => setSelectedNodeId(nodeId)}
-                          >
-                            {node.displayTitle ?? node.title}
-                          </button>
-                          {index < pathNodeIds.length - 1 ? <ChevronRight className="size-3.5 text-[#8097ae]" /> : null}
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-
-                {selectedParent ? (
-                  <div>
-                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#688099]">上级节点</div>
-                    <button
-                      type="button"
-                      className="mt-3 w-full rounded-2xl border border-[#d6e0ea] bg-white px-4 py-3 text-left text-sm font-medium text-[#31567d] transition hover:border-primary/20 hover:bg-accent"
-                      onClick={() => setSelectedNodeId(selectedParent.nodeId)}
-                    >
-                      {selectedParent.displayTitle ?? selectedParent.title}
-                    </button>
-                  </div>
-                ) : null}
-
-                {selectedChildren.length > 0 ? (
-                  <div>
-                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#688099]">下级节点</div>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {selectedChildren.map((child) => (
-                        <button
-                          key={child.nodeId}
-                          type="button"
-                          className="rounded-full border border-[#d6e0ea] bg-white px-3 py-1.5 text-xs font-medium text-[#5d7590] transition hover:border-primary/20 hover:bg-accent hover:text-foreground"
-                          onClick={() => setSelectedNodeId(child.nodeId)}
-                        >
-                          {child.displayTitle ?? child.title}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-
-                {selectedBindingQ.error ? <ErrorNotice title="节点绑定加载失败" message={formatApiError(selectedBindingQ.error)} /> : null}
-                {selectedTaskQ.error ? <ErrorNotice title="学习任务详情加载失败" message={formatApiError(selectedTaskQ.error)} /> : null}
-                {selectedChainQ.error ? <ErrorNotice title="复习链摘要加载失败" message={formatApiError(selectedChainQ.error)} /> : null}
-                {selectedConvergenceQ.error ? <ErrorNotice title="收敛状态加载失败" message={formatApiError(selectedConvergenceQ.error)} /> : null}
-
-                <div className="pt-1">
-                  <Button variant="outline" onClick={() => nav(`/p/${pid}/learning-task-nodes/${selectedNode.nodeId}`)}>
-                    查看节点详情
-                  </Button>
+                  <h1 className="text-[1.7rem] font-semibold tracking-tight text-foreground">
+                    {selectedNode.displayTitle ?? selectedNode.title}
+                  </h1>
+                  <p className="mt-2 text-sm text-[#647b93]">{selectedNode.metaText}</p>
                 </div>
               </div>
-            ) : (
-              <ContentEmptyState
-                title="先选择一个任务节点"
-                message="从左侧结构图里点击任意任务、章节或聚合节点，这里就会显示它的层级、复习状态和上下游关系。"
-              />
-            )}
-          </section>
-        </aside>
-      </div>
-    </div>
-  )
-}
 
-function OverviewMetric({ caption, label, value }: { caption: string; label: string; value: string }) {
-  return (
-    <div className="theme-status-surface px-4 py-3">
-      <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#69819a]">{label}</div>
-      <div className="mt-2 text-2xl font-semibold tracking-tight text-foreground">{value}</div>
-      <div className="mt-1 text-xs text-[#7a91a9]">{caption}</div>
+              <div className="flex flex-wrap gap-3">
+                <Button variant="outline" onClick={() => nav(`/p/${pid}/learning-task-nodes/${selectedNode.nodeId}`)}>
+                  查看节点详情
+                </Button>
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <DetailMetric label="覆盖任务数" value={`${descendantLeafCountById[selectedNode.nodeId] ?? 0}`} />
+              <DetailMetric
+                label={selectedNode.kind === "container" ? "直接子节点" : "目标层"}
+                value={
+                  selectedNode.kind === "container"
+                    ? `${selectedChildren.length}`
+                    : selectedBindingQ.data?.targetLayerIndex === undefined || selectedBindingQ.data?.targetLayerIndex === null
+                      ? "-"
+                      : `L${selectedBindingQ.data.targetLayerIndex}`
+                }
+              />
+              <DetailMetric label="绑定任务" value={selectedNode.kind === "leaf" && selectedNode.learningTaskId ? "已绑定" : "无"} />
+              <DetailMetric
+                label="复述点数"
+                value={selectedTaskQ.data?.size === undefined || selectedTaskQ.data?.size === null ? "-" : `${selectedTaskQ.data.size}`}
+              />
+            </div>
+
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,0.8fr)_minmax(0,1fr)]">
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#688099]">路径</div>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  {pathNodeIds.map((nodeId, index) => {
+                    const node = nodeById[nodeId]
+                    if (!node) return null
+                    return (
+                      <div key={nodeId} className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          className={cn(
+                            "rounded-full border px-3 py-1.5 text-xs font-medium transition hover:border-primary/30 hover:bg-accent hover:text-foreground",
+                            nodeId === selectedNode.nodeId
+                              ? "border-[#9fbad6] bg-[#eef5fd] text-[#31567d]"
+                              : "border-[#d6e0ea] bg-white text-[#607892]",
+                          )}
+                          onClick={() => setSelectedNodeId(nodeId)}
+                        >
+                          {node.displayTitle ?? node.title}
+                        </button>
+                        {index < pathNodeIds.length - 1 ? <ChevronRight className="size-3.5 text-[#8097ae]" /> : null}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {selectedParent ? (
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#688099]">上级节点</div>
+                  <button
+                    type="button"
+                    className="mt-3 w-full rounded-2xl border border-[#d6e0ea] bg-white px-4 py-3 text-left text-sm font-medium text-[#31567d] transition hover:border-primary/20 hover:bg-accent"
+                    onClick={() => setSelectedNodeId(selectedParent.nodeId)}
+                  >
+                    {selectedParent.displayTitle ?? selectedParent.title}
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#688099]">上级节点</div>
+                  <div className="mt-3 rounded-2xl border border-dashed border-[#d6e0ea] bg-white/60 px-4 py-3 text-sm text-[#7a91a9]">
+                    当前已在根节点
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#688099]">下级节点</div>
+                {selectedChildren.length > 0 ? (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {selectedChildren.map((child) => (
+                      <button
+                        key={child.nodeId}
+                        type="button"
+                        className="rounded-full border border-[#d6e0ea] bg-white px-3 py-1.5 text-xs font-medium text-[#5d7590] transition hover:border-primary/20 hover:bg-accent hover:text-foreground"
+                        onClick={() => setSelectedNodeId(child.nodeId)}
+                      >
+                        {child.displayTitle ?? child.title}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="mt-3 rounded-2xl border border-dashed border-[#d6e0ea] bg-white/60 px-4 py-3 text-sm text-[#7a91a9]">
+                    当前节点没有下级节点
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {selectedBindingQ.error ? <ErrorNotice title="节点绑定加载失败" message={formatApiError(selectedBindingQ.error)} /> : null}
+            {selectedTaskQ.error ? <ErrorNotice title="学习任务详情加载失败" message={formatApiError(selectedTaskQ.error)} /> : null}
+            {selectedChainQ.error ? <ErrorNotice title="复习链摘要加载失败" message={formatApiError(selectedChainQ.error)} /> : null}
+            {selectedConvergenceQ.error ? <ErrorNotice title="收敛状态加载失败" message={formatApiError(selectedConvergenceQ.error)} /> : null}
+          </div>
+        ) : (
+          <ContentEmptyState
+            title="先选择一个任务节点"
+            message="从结构图里点击任意任务、章节或聚合节点，这里就会显示它的层级、复习状态和上下游关系。"
+          />
+        )}
+      </section>
+
+      <section className="theme-card-main overflow-hidden">
+        <div className="flex flex-col gap-3 border-b border-border/60 px-6 py-5 md:flex-row md:items-center md:justify-between">
+          <h2 className="text-base font-semibold text-foreground">结构视图</h2>
+          <div className="flex flex-wrap gap-2 text-xs text-[#688099]">
+            <span className="theme-meta">组内紧，组间松</span>
+            <span className="theme-meta">层标签仅作辅助定位</span>
+          </div>
+        </div>
+
+        <div className="theme-canvas min-h-[36rem] overflow-auto p-4 md:p-5">
+          {isLoading ? <LoadingNotice title="正在加载学习任务树" message="正在整理任务节点、聚合关系和层级布局。" /> : null}
+          {q.error ? <ErrorNotice title="学习任务树加载失败" message={formatApiError(q.error)} /> : null}
+          {eventsQ.error ? <ErrorNotice title="聚合事件加载失败" message={formatApiError(eventsQ.error)} /> : null}
+          {!isLoading && !q.error && !eventsQ.error && !hasData ? (
+            <ContentEmptyState
+              icon={Waypoints}
+              title="当前项目还没有学习任务树"
+              message="先在工作台提交一批复述点并创建学习任务，任务结构就会显示在这里。"
+            />
+          ) : null}
+          {!isLoading && !q.error && !eventsQ.error && hasData ? (
+            <LearningTaskTreeCanvas
+              rootIds={rootIds}
+              nodeById={nodeById}
+              nodeLayerById={nodeLayerById}
+              selectedNodeId={effectiveSelectedNodeId}
+              focusNodeId={canvasFocusNodeId}
+              onNodeHover={setHoveredNodeId}
+              onNodeSelect={(node) => setSelectedNodeId(node.nodeId)}
+            />
+          ) : null}
+        </div>
+      </section>
     </div>
   )
 }

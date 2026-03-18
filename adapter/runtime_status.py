@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from adapter.desktop_agent_janitor import collect_desktop_agent_relay_status
-from adapter.deps import get_api, get_auth_store, get_desktop_agent_runtime
+from adapter.deps import get_api, get_auth_store
 from backend.system.runtime_features import current_runtime_features
 from backend.system.sql_backend import current_sql_runtime_config
 
@@ -41,10 +40,6 @@ def collect_runtime_status() -> tuple[bool, dict[str, Any]]:
         payload["store"] = {"ok": False, "error": str(exc)}
 
     auth_ready = True
-    relay_runtime_status: dict[str, Any] = {
-        "available": features.app_mode == "hosted",
-    }
-    auth_store = None
     try:
         auth_store = get_auth_store()
         payload["auth"] = auth_store.healthcheck()
@@ -52,21 +47,6 @@ def collect_runtime_status() -> tuple[bool, dict[str, Any]]:
     except Exception as exc:
         payload["auth"] = {"ok": False, "error": str(exc)}
         auth_ready = False
-        relay_runtime_status["hlsCacheError"] = str(exc)
-
-    try:
-        runtime = get_desktop_agent_runtime()
-        relay_runtime_status.update(
-            collect_desktop_agent_relay_status(
-                runtime=runtime,
-                auth_store=auth_store,
-            )
-        )
-        relay_runtime_status.pop("connectedAgentIds", None)
-    except Exception as exc:
-        relay_runtime_status["runtimeError"] = str(exc)
-
-    payload["desktopAgentRelay"] = relay_runtime_status
 
     ready = bool(store_ready and (auth_ready or not features.auth_enabled))
     payload["status"] = "ok" if ready else "degraded"

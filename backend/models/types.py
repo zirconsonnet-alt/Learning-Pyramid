@@ -26,7 +26,6 @@ ConvergenceId = NewType("ConvergenceId", str)
 ConvergenceRuleId = NewType("ConvergenceRuleId", str)
 MediaAssetId = NewType("MediaAssetId", str)
 AsrArtifactId = NewType("AsrArtifactId", str)
-DesktopAgentId = NewType("DesktopAgentId", str)
 
 # =========
 # Scalar types

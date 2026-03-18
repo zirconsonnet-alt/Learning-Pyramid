@@ -20,9 +20,6 @@ const ProjectsPage = lazy(async () => ({ default: (await import("@/views/project
 const RecallPointPage = lazy(async () => ({ default: (await import("@/views/recallPoints/RecallPointPage")).RecallPointPage }))
 const ReviewChainPage = lazy(async () => ({ default: (await import("@/views/reviewChains/ReviewChainPage")).ReviewChainPage }))
 const ProjectSettingsPage = lazy(async () => ({ default: (await import("@/views/settings/ProjectSettingsPage")).ProjectSettingsPage }))
-const DesktopAgentPage = lazy(async () => ({ default: (await import("@/views/system/DesktopAgentPage")).DesktopAgentPage }))
-const RelayMonitorPage = lazy(async () => ({ default: (await import("@/views/system/RelayMonitorPage")).RelayMonitorPage }))
-const TimelinePage = lazy(async () => ({ default: (await import("@/views/timeline/TimelinePage")).TimelinePage }))
 const ObjectTreePage = lazy(async () => ({ default: (await import("@/views/trees/ObjectTreePage")).ObjectTreePage }))
 const TaskTreePage = lazy(async () => ({ default: (await import("@/views/trees/TaskTreePage")).TaskTreePage }))
 const WorkbenchPage = lazy(async () => ({ default: (await import("@/views/workbench/WorkbenchPage")).WorkbenchPage }))
@@ -45,11 +42,8 @@ export const router = createBrowserRouter([
       { path: "/docs", element: <Navigate to="/guide" replace /> },
       { path: "/guide", element: lazyElement(<GuidePage />) },
       { path: "/projects", element: lazyElement(<ProjectsPage />) },
-      { path: "/system/desktop-agent", element: lazyElement(<DesktopAgentPage />) },
-      { path: "/system/relay-monitor", element: lazyElement(<RelayMonitorPage />) },
       { path: "/p/:projectId/workbench", element: lazyElement(<WorkbenchPage />) },
       { path: "/p/:projectId/settings", element: lazyElement(<ProjectSettingsPage />) },
-      { path: "/p/:projectId/timeline", element: lazyElement(<TimelinePage />) },
       { path: "/p/:projectId/task-tree", element: lazyElement(<TaskTreePage />) },
       { path: "/p/:projectId/learning-tasks/:learningTaskId", element: lazyElement(<LearningTaskPage />) },
       { path: "/p/:projectId/learning-task-nodes/:nodeId", element: lazyElement(<LearningTaskNodePage />) },

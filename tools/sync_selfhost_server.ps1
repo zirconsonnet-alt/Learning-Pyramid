@@ -7,7 +7,6 @@ param(
     [int]$SshPort = 22,
     [string]$SshKeyPath = "",
     [switch]$SkipBuild,
-    [switch]$SkipReleaseSync,
     [switch]$AllowDirtyWorktree,
     [switch]$PromptOnDirtyWorktree,
     [switch]$DisableSshKey
@@ -242,115 +241,9 @@ function Invoke-WithRetry {
     }
 }
 
-function Get-DesktopAgentReleaseVersionFromName {
-    param([string]$Name)
-
-    $match = [regex]::Match(
-        $Name,
-        '^LearningPyramidDesktopAgent-(.+?)-(release\.json|Setup\.exe|windows-installer\.zip|windows-standalone\.zip)$'
-    )
-    if (-not $match.Success) {
-        return $null
-    }
-    return $match.Groups[1].Value
-}
-
-function Get-DesktopAgentReleaseAssetPaths {
-    param([string]$RepoRoot)
-    $releaseDir = Join-Path $RepoRoot "release"
-    if (-not (Test-Path $releaseDir)) {
-        return @()
-    }
-    $patterns = @(
-        "LearningPyramidDesktopAgent-*-Setup.exe",
-        "LearningPyramidDesktopAgent-*-windows-installer.zip",
-        "LearningPyramidDesktopAgent-*-windows-standalone.zip",
-        "LearningPyramidDesktopAgent-*-release.json"
-    )
-    $items = @()
-    foreach ($pattern in $patterns) {
-        $items += Get-ChildItem -Path $releaseDir -Filter $pattern -File -ErrorAction SilentlyContinue
-    }
-
-    $versionedItems = @(
-        foreach ($item in ($items | Sort-Object FullName -Unique)) {
-            $version = Get-DesktopAgentReleaseVersionFromName -Name $item.Name
-            if ($version) {
-                [pscustomobject]@{
-                    Item = $item
-                    Version = $version
-                }
-            }
-        }
-    )
-    if ($versionedItems.Count -eq 0) {
-        return @()
-    }
-
-    $latestManifestEntry = $versionedItems |
-        Where-Object { $_.Item.Name -like "LearningPyramidDesktopAgent-*-release.json" } |
-        Sort-Object { $_.Item.LastWriteTimeUtc } -Descending |
-        Select-Object -First 1
-    if ($latestManifestEntry) {
-        $selectedVersion = $latestManifestEntry.Version
-    }
-    else {
-        $selectedVersion = ($versionedItems | Sort-Object { $_.Item.LastWriteTimeUtc } -Descending | Select-Object -First 1).Version
-    }
-
-    $selectedEntries = @($versionedItems | Where-Object { $_.Version -eq $selectedVersion })
-    $selectedManifest = $selectedEntries |
-        Where-Object { $_.Item.Name -like "LearningPyramidDesktopAgent-*-release.json" } |
-        Select-Object -First 1
-    if ($selectedManifest) {
-        $manifest = Get-Content -Raw $selectedManifest.Item.FullName | ConvertFrom-Json
-        $selectedItems = @($selectedManifest.Item)
-        foreach ($property in $manifest.assets.PSObject.Properties) {
-            $assetPath = Join-Path $releaseDir $property.Name
-            if (-not (Test-Path $assetPath)) {
-                throw "Desktop agent release manifest references a missing asset: $assetPath"
-            }
-            $selectedItems += Get-Item -Path $assetPath
-        }
-        return @($selectedItems | Sort-Object FullName -Unique)
-    }
-
-    return @($selectedEntries.Item | Sort-Object FullName -Unique)
-}
-
-function New-DesktopAgentReleaseArchive {
-    param(
-        [System.IO.FileInfo[]]$Assets,
-        [string]$ScratchRoot
-    )
-    $tempRoot = Join-Path $ScratchRoot ("learningpyramid-release-sync-" + [guid]::NewGuid().ToString("N"))
-    $stageDir = Join-Path $tempRoot "release"
-    try {
-        New-Item -ItemType Directory -Path $stageDir -Force | Out-Null
-        foreach ($asset in $Assets) {
-            Invoke-WithRetry -Description "Staging desktop agent release asset $($asset.Name)" -Action {
-                Copy-Item -Path $asset.FullName -Destination (Join-Path $stageDir $asset.Name) -Force
-            }
-        }
-        $archivePath = Join-Path $tempRoot "desktop-agent-release.zip"
-        Invoke-WithRetry -Description "Compressing desktop agent release archive" -Action {
-            Compress-Archive -Path (Join-Path $stageDir "*") -DestinationPath $archivePath -CompressionLevel Optimal -Force
-        }
-        return @{
-            TempRoot = $tempRoot
-            ArchivePath = $archivePath
-        }
-    }
-    catch {
-        Remove-PathIfPresent -Path $tempRoot
-        throw
-    }
-}
-
 function New-DeployPayloadArchive {
     param(
         [string]$BundlePath,
-        [string]$ReleaseArchivePath,
         [string]$ScratchRoot
     )
     $tempRoot = Join-Path $ScratchRoot ("learningpyramid-deploy-payload-" + [guid]::NewGuid().ToString("N"))
@@ -359,11 +252,6 @@ function New-DeployPayloadArchive {
         New-Item -ItemType Directory -Path $stageDir -Force | Out-Null
         Invoke-WithRetry -Description "Staging self-host bundle" -Action {
             Copy-Item -Path $BundlePath -Destination (Join-Path $stageDir "latest.zip") -Force
-        }
-        if ($ReleaseArchivePath -and (Test-Path $ReleaseArchivePath)) {
-            Invoke-WithRetry -Description "Staging desktop agent release archive" -Action {
-                Copy-Item -Path $ReleaseArchivePath -Destination (Join-Path $stageDir "desktop-agent-release.zip") -Force
-            }
         }
         $archivePath = Join-Path $tempRoot "learningpyramid-deploy-payload.zip"
         Invoke-WithRetry -Description "Compressing deploy payload" -Action {
@@ -400,8 +288,7 @@ function Get-DeployScratchRoot {
 function Remove-StaleDeployTempDirectories {
     param([string[]]$Roots)
     $patterns = @(
-        "learningpyramid-deploy-payload-*",
-        "learningpyramid-release-sync-*"
+        "learningpyramid-deploy-payload-*"
     )
     foreach ($root in $Roots) {
         if (-not $root -or -not (Test-Path $root)) {
@@ -522,34 +409,15 @@ if (-not $SkipBuild) {
 
 $bundlePath = Get-LatestBundlePath -RepoRoot $repoRoot
 $bundleHash = (Get-FileHash -Path $bundlePath -Algorithm SHA256).Hash.ToUpperInvariant()
-$remoteZipPath = "$RemoteRoot/upload/latest.zip"
 $remotePayloadPath = "$RemoteRoot/upload/deploy-payload.zip"
 $remoteTarget = "${ServerUser}@${ServerHost}:${remotePayloadPath}"
-$releaseSyncEnabled = $false
-$releaseArchiveHash = ""
-$releaseArchiveTempRoot = $null
-$releaseArchivePath = $null
 $payloadArchiveTempRoot = $null
 $payloadArchivePath = $null
 $sshReuseTempRoot = $null
 $sshReuseControlArgs = @()
 $sshDestination = "${ServerUser}@${ServerHost}"
 
-if (-not $SkipReleaseSync) {
-    $releaseAssets = @(Get-DesktopAgentReleaseAssetPaths -RepoRoot $repoRoot)
-    if ($releaseAssets.Count -gt 0) {
-        $archiveInfo = New-DesktopAgentReleaseArchive -Assets $releaseAssets -ScratchRoot $deployScratchRoot
-        $releaseArchiveTempRoot = $archiveInfo.TempRoot
-        $releaseArchivePath = $archiveInfo.ArchivePath
-        $releaseArchiveHash = (Get-FileHash -Path $releaseArchivePath -Algorithm SHA256).Hash.ToUpperInvariant()
-        $releaseSyncEnabled = $true
-    }
-    else {
-        Write-Host "No desktop agent release assets found under release/. Skipping release sync."
-    }
-}
-
-$payloadInfo = New-DeployPayloadArchive -BundlePath $bundlePath -ReleaseArchivePath $releaseArchivePath -ScratchRoot $deployScratchRoot
+$payloadInfo = New-DeployPayloadArchive -BundlePath $bundlePath -ScratchRoot $deployScratchRoot
 $payloadArchiveTempRoot = $payloadInfo.TempRoot
 $payloadArchivePath = $payloadInfo.ArchivePath
 
@@ -592,12 +460,8 @@ TMP_DIR="`$REMOTE_ROOT/release-tmp"
 PAYLOAD_PATH="`$REMOTE_ROOT/upload/deploy-payload.zip"
 ZIP_PATH="`$REMOTE_ROOT/upload/latest.zip"
 EXPECTED_HASH='$bundleHash'
-RELEASE_SYNC_ENABLED='$(if ($releaseSyncEnabled) { "1" } else { "0" })'
-RELEASE_ARCHIVE_PATH="`$REMOTE_ROOT/upload/desktop-agent-release.zip"
-EXPECTED_RELEASE_HASH='$releaseArchiveHash'
-RELEASE_DIR="`$APP_DIR/release"
 
-mkdir -p "`$REMOTE_ROOT/upload" "`$TMP_DIR" "`$APP_DIR" "`$RELEASE_DIR"
+mkdir -p "`$REMOTE_ROOT/upload" "`$TMP_DIR" "`$APP_DIR"
 
 if [ ! -f "`$APP_DIR/.env" ]; then
   echo "Remote .env not found at `$APP_DIR/.env. Copy .env.selfhost.example to .env on the server and edit secrets first." >&2
@@ -656,7 +520,7 @@ if [ ! -f "`$PAYLOAD_PATH" ]; then
   exit 1
 fi
 
-rm -f "`$ZIP_PATH" "`$RELEASE_ARCHIVE_PATH"
+rm -f "`$ZIP_PATH"
 unzip -o "`$PAYLOAD_PATH" -d "`$REMOTE_ROOT/upload" >/dev/null
 
 ACTUAL_HASH=`$(sha256sum "`$ZIP_PATH" | awk '{print toupper(`$1)}')
@@ -680,32 +544,6 @@ if [ -z "`$SRC_DIR" ]; then
 fi
 
 rsync -a --delete --exclude '.env' --exclude 'data/' --exclude 'release/' "`$SRC_DIR"/ "`$APP_DIR"/
-
-if [ "`$RELEASE_SYNC_ENABLED" = "1" ]; then
-  if [ ! -f "`$RELEASE_ARCHIVE_PATH" ]; then
-    echo "Desktop agent release archive not found: `$RELEASE_ARCHIVE_PATH" >&2
-    exit 1
-  fi
-  ACTUAL_RELEASE_HASH=`$(sha256sum "`$RELEASE_ARCHIVE_PATH" | awk '{print toupper(`$1)}')
-  if [ "`$ACTUAL_RELEASE_HASH" != "`$EXPECTED_RELEASE_HASH" ]; then
-    echo "Desktop agent release SHA256 mismatch: expected=`$EXPECTED_RELEASE_HASH actual=`$ACTUAL_RELEASE_HASH" >&2
-    exit 1
-  fi
-
-  RELEASE_TMP_DIR="`$TMP_DIR/release-assets"
-  rm -rf "`$RELEASE_TMP_DIR"
-  mkdir -p "`$RELEASE_TMP_DIR"
-  unzip -o "`$RELEASE_ARCHIVE_PATH" -d "`$RELEASE_TMP_DIR" >/dev/null
-
-  find "`$RELEASE_DIR" -maxdepth 1 -type f \( \
-    -name 'LearningPyramidDesktopAgent-*-Setup.exe' -o \
-    -name 'LearningPyramidDesktopAgent-*-windows-installer.zip' -o \
-    -name 'LearningPyramidDesktopAgent-*-windows-standalone.zip' -o \
-    -name 'LearningPyramidDesktopAgent-*-release.json' \
-  \) -delete
-
-  rsync -a "`$RELEASE_TMP_DIR"/ "`$RELEASE_DIR"/
-fi
 
 cd "`$APP_DIR"
 docker compose \
@@ -770,7 +608,6 @@ exit 1
 }
 finally {
     Stop-SshConnectionReuse -BaseSshArgs $baseSshArgs -ControlArgs $sshReuseControlArgs -Destination $sshDestination -TempRoot $sshReuseTempRoot
-    Remove-PathIfPresent -Path $releaseArchiveTempRoot
     Remove-PathIfPresent -Path $payloadArchiveTempRoot
 }
 

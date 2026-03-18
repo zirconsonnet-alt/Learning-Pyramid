@@ -74,16 +74,6 @@ python tools/build_windows_installer.py --bootstrap-packaging-venv
 
 If Inno Setup 6 is installed, the same script also emits a `LearningPyramid-...-Setup.exe`. Otherwise it still produces a script-based installer zip.
 
-## Build desktop agent standalone
-
-To generate a standalone Windows desktop agent executable:
-
-```powershell
-python tools/build_windows_desktop_agent.py --bootstrap-packaging-venv
-```
-
-The output zip contains `LearningPyramidDesktopAgent.exe` with `pair`, `sync`, and `run` commands.
-
 ## Stop
 
 ```powershell
@@ -127,8 +117,6 @@ docker compose \
 ```
 
 The hosted stack now expects `PLM_MEDIA_ACCESS_TOKEN_SECRET` to be set to a real secret in `.env`. The shipped self-host example also defaults to `PLM_ALLOW_SIGNUP=false` and `PLM_SECURE_COOKIES=true`; flip those only when you intentionally need a less strict local test setup.
-`PLM_DESKTOP_AGENT_OFFLINE_GRACE_SECONDS` now defaults to `90`, so short browser/network/VPN interruptions do not immediately mark the desktop connector offline.
-`PLM_AGENT_STREAM_DISCONNECT_GRACE_SECONDS` now defaults to `10`, so active relay streams get a short reconnect window instead of failing the instant the connector websocket blips.
 
 For Windows server sync, the normal helper flow is just:
 

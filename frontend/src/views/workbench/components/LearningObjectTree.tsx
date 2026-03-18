@@ -6,6 +6,9 @@ import { ApiError } from "@/ui/api/http"
 import { ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { listLearningObjectNodes, type LearningObjectNode } from "@/ui/api/learningObjects"
 import { Button } from "@/ui/components/ui/button"
+import { scanProjectDirectoryMedia, useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
+import { useImportLearningObjectsFromBrowser } from "@/ui/queries/workbench"
+import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { cn } from "@/ui/utils"
 
 function formatApiError(err: unknown) {
@@ -115,6 +118,8 @@ export function LearningObjectTree({
   selectedInstanceId: string | null
   onSelectInstance: (instanceId: string) => void
 }) {
+  const directoryBinding = useProjectDirectoryBinding(projectId)
+  const importLearningObjectsM = useImportLearningObjectsFromBrowser(projectId)
   const q = useQuery({
     queryKey: ["learningObjectNodes", projectId],
     queryFn: () => listLearningObjectNodes(projectId),
@@ -147,6 +152,23 @@ export function LearningObjectTree({
     })
   }
 
+  async function onImportHere() {
+    try {
+      const scan = await scanProjectDirectoryMedia(projectId)
+      const result = await importLearningObjectsM.mutateAsync(scan)
+      if (result.unchanged) {
+        showInfoFeedback("目录已是最新", "当前已授权目录里的媒体文件没有变化。")
+        return
+      }
+      showSuccessFeedback(
+        "内容目录已导入",
+        `已导入 ${scan.relativeFilePaths.length} 个媒体文件，新增 ${result.created_instances_count} 个实例。`,
+      )
+    } catch (err) {
+      showErrorFeedback("导入本地目录失败", formatApiError(err))
+    }
+  }
+
   if (q.isLoading) {
     return <LoadingNotice title="正在加载内容目录" message="正在读取这个项目的学习对象树和材料层级。" />
   }
@@ -156,17 +178,27 @@ export function LearningObjectTree({
   }
 
   if (rootIds.length === 0) {
+    const canImportHere = directoryBinding.permission === "granted" && !directoryBinding.loading
     return (
       <div className="space-y-3 rounded-[1rem] border border-dashed border-border/70 bg-background/70 p-4">
         <div className="space-y-1">
           <p className="text-sm font-medium text-foreground">当前还没有学习对象</p>
           <p className="text-sm text-muted-foreground">
-            请先到项目设置里绑定目录并执行同步，完成后就能在这里看到视频和目录树。
+            {canImportHere
+              ? "当前目录已经授权，可以直接在这里导入内容目录。"
+              : "请先到项目设置里绑定本地目录并导入内容目录，完成后就能在这里看到视频和目录树。"}
           </p>
         </div>
-        <Button asChild size="sm" className="rounded-full">
-          <Link to={`/p/${projectId}/settings`}>前往项目设置</Link>
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          {canImportHere ? (
+            <Button size="sm" className="rounded-full" onClick={() => void onImportHere()} disabled={importLearningObjectsM.isPending}>
+              {importLearningObjectsM.isPending ? "导入中..." : "立即导入"}
+            </Button>
+          ) : null}
+          <Button asChild size="sm" variant={canImportHere ? "outline" : "default"} className="rounded-full">
+            <Link to={`/p/${projectId}/settings`}>{canImportHere ? "前往项目设置" : "前往项目设置"}</Link>
+          </Button>
+        </div>
       </div>
     )
   }

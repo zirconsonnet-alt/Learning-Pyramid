@@ -1,5 +1,5 @@
 import { useRef } from "react"
-import { BookPlus, CircleCheckBig, FileText } from "lucide-react"
+import { BookPlus, CircleCheckBig } from "lucide-react"
 
 import type { Instance } from "@/ui/api/instances"
 import { ApiError } from "@/ui/api/http"
@@ -246,15 +246,6 @@ export function ComposePane({
         </div>
 
         <div className="theme-canvas grid gap-3 rounded-[1.2rem] border border-border/60 p-4">
-          <div className="flex items-start gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-white/85 text-primary">
-              <FileText className="h-4 w-4" />
-            </div>
-            <div className="space-y-1">
-              <div className="text-sm font-medium text-foreground">生成一个新的学习任务</div>
-              <div className="text-sm text-muted-foreground">任务标题会作为这批复述点后续在任务树和复习链路中的入口名称。</div>
-            </div>
-          </div>
           <div>
             <Label htmlFor="taskTitle">学习任务标题</Label>
             <Input

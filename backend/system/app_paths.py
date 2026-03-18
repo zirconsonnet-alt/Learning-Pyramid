@@ -56,13 +56,6 @@ def logs_dir() -> Path:
     return default_data_dir() / "logs"
 
 
-def desktop_media_cache_dir() -> Path:
-    raw = os.getenv("PLM_AGENT_CACHE_DIR", "").strip()
-    if raw:
-        return Path(raw).expanduser()
-    return runtime_dir() / "desktop-media-cache"
-
-
 def resolve_legacy_store_path(*, legacy_root: Path | None = None) -> Path | None:
     explicit = os.getenv("PLM_LEGACY_STORE_PATH", "").strip() or os.getenv("PLM_STORE_PATH", "").strip()
     if explicit:

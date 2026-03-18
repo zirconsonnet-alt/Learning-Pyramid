@@ -2,7 +2,6 @@ from .enums import (
     AggregationCycleState,
     AggregationEventReason,
     ConvergenceState,
-    DesktopAgentStatus,
     LayerMode,
     MaterialSourceKind,
     ProjectState,
@@ -31,11 +30,6 @@ from .recall_point import Anchor, RecallPoint
 from .constants import GLOBAL_QUEUE
 from .constants import MATERIAL_ALLOWLIST_V1
 from .convergence import Convergence
-from .desktop_agent import DesktopAgent
-from .desktop_media_probe_cache import DesktopMediaProbeCache
-from .desktop_agent_pairing_code import DesktopAgentPairingCode
-from .hls_cache_entry import HlsCacheEntry
-from .media_stream_session import MediaStreamSession
 from .material_allowlist import MaterialAllowlist
 from .project_scan_config import ProjectScanConfig
 from .review_chain import ReviewChain, ReviewChainItem, ReviewChainItemKind
@@ -55,7 +49,6 @@ from .types import (
     RangeId,
     RecallPointId,
     Timestamp,
-    DesktopAgentId,
     id_canonical_text,
     normalize_material_id_to_purepath,
     now_utc_ms,
@@ -71,7 +64,6 @@ __all__ = [
     "LearningTaskId",
     "LearningTaskNodeId",
     "RangeId",
-    "DesktopAgentId",
     "PurePath",
     "Timestamp",
     "id_canonical_text",
@@ -87,7 +79,6 @@ __all__ = [
     "AggregationCycleState",
     "LayerMode",
     "AggregationEventReason",
-    "DesktopAgentStatus",
     "MaterialSourceKind",
     # errors
     "PLMError",
@@ -119,11 +110,6 @@ __all__ = [
     "MaterialAllowlist",
     "ReviewTask",
     "Convergence",
-    "DesktopAgent",
-    "DesktopMediaProbeCache",
-    "DesktopAgentPairingCode",
-    "HlsCacheEntry",
-    "MediaStreamSession",
     "ReviewChain",
     "ReviewChainItem",
     "ReviewChainItemKind",

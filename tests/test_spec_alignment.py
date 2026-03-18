@@ -316,6 +316,38 @@ class _SpecAlignmentBackendMixin:
         with self.assertRaises(PreconditionFailure):
             api.begin_session(project_id, SessionMode.READ_WRITE)
 
+    def test_begin_session_read_write_skips_server_startup_sync_for_browser_local_projects(self) -> None:
+        api, root = self._new_api()
+        project_root, _learning_root = self._make_project_dirs(root, "videos")
+        project_id = api.create_project("ml", project_root.as_posix())
+
+        with patch.dict(
+            os.environ,
+            {
+                "PLM_ENABLE_SERVER_MEDIA_STREAM": "true",
+                "PLM_ENABLE_BROWSER_LOCAL_MEDIA": "true",
+            },
+            clear=False,
+        ):
+            report = api.import_learning_objects_from_browser_scan(
+                project_id,
+                root_title="Videos",
+                relative_file_paths=("lesson.mp4",),
+            )
+            self.assertFalse(report["unchanged"])
+
+            restarted_api = self._reload_api(root)
+            session = restarted_api.begin_session(project_id, SessionMode.READ_WRITE)
+            try:
+                self.assertEqual(session.state, "OPEN")
+            finally:
+                restarted_api.sys.rollback(session)
+
+            items = restarted_api.list_instances(project_id)
+            self.assertEqual(len(items), 1)
+            self.assertEqual(items[0].material_id.as_posix(), "lesson.mp4")
+            self.assertEqual(items[0].presence, InstancePresence.PRESENT)
+
     def test_sync_learning_objects_from_fs_noop_does_not_write_audit(self) -> None:
         api, root = self._new_api()
         project_root, learning_root = self._make_project_dirs(root, "videos")

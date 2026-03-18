@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react"
-import { ArrowRight, FolderKanban, RadioTower, ShieldCheck, Workflow } from "lucide-react"
+import { ArrowRight, FolderKanban, ShieldCheck, Workflow } from "lucide-react"
 import { Navigate, useLocation, useNavigate } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
@@ -44,17 +44,17 @@ export function AuthPage() {
   const deploymentMode = capabilitiesQ.data?.appMode === "hosted" ? "云端工作区" : "本地工作区"
   const authNarrative =
     capabilitiesQ.data?.appMode === "hosted"
-      ? "通过受保护的入口进入项目、桌面连接器和 Relay Monitor，管理远程素材与回放链路。"
+      ? "通过受保护的入口进入项目、设置和工作台，集中管理云端学习流程。"
       : "登录后进入本地工作空间，浏览器直接读取素材并管理学习对象、任务和回放。"
   const featureCards =
     capabilitiesQ.data?.appMode === "hosted"
       ? [
           { title: "受保护协作", description: "统一登录后再进入项目、设置和工作台。", icon: ShieldCheck },
-          { title: "桌面素材接入", description: "用 Desktop Agent 把本地媒体目录映射到当前项目。", icon: Workflow },
-          { title: "中继巡检", description: "用 Relay Monitor 持续观察 HLS、探测和桌面链路健康。", icon: RadioTower },
+          { title: "项目工作流", description: "在同一套云端工作区里继续处理对象树、任务和工作台。", icon: Workflow },
+          { title: "账号保护", description: "登录态统一管理项目访问与后续操作权限。", icon: FolderKanban },
         ]
       : [
-          { title: "项目工作流", description: "从一个入口进入任务、对象树、时间线和工作台。", icon: FolderKanban },
+          { title: "项目工作流", description: "从一个入口进入任务、对象树和工作台。", icon: FolderKanban },
           { title: "浏览器本地媒体", description: "直接读取本机素材并进入播放、复习与生成链路。", icon: Workflow },
           { title: "账号保护", description: "登录态统一管理项目访问与后续操作权限。", icon: ShieldCheck },
         ]

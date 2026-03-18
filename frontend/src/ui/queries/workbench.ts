@@ -1,20 +1,11 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query"
 
-import { createDesktopAgentPairingCode, listDesktopAgents } from "@/ui/api/desktopAgents"
 import { ApiError } from "@/ui/api/http"
-import { syncClientMediaManifest } from "@/ui/api/mediaManifest"
-import { getPlaybackDescriptor } from "@/ui/api/mediaPlayback"
-import type { PlaybackDescriptor } from "@/ui/api/mediaPlayback"
 import { getAggregationQueue, listAggregationEvents, listLayers, manualRollUp } from "@/ui/api/layers"
-import { getLearningObjectNode } from "@/ui/api/learningObjects"
+import { getLearningObjectNode, importLearningObjectsFromBrowser } from "@/ui/api/learningObjects"
 import { addInstance, bulkRemapRecallPointsInstance, listInstances, listMissingInstances, listRecallPointsByInstance } from "@/ui/api/instances"
 import { submitLearningTask } from "@/ui/api/learningTasks"
 import { getProjectConfig, setExternalServices, setLayerConfig } from "@/ui/api/projectConfig"
-import {
-  getProjectDesktopAgentStatus,
-  getProjectMaterialSourceBinding,
-  setProjectMaterialSourceBinding,
-} from "@/ui/api/projectMaterialSourceBinding"
 import type { ReviewChainTemplateItem } from "@/ui/api/projectConfig"
 import { getProjectStorageConfig } from "@/ui/api/projectStorageConfig"
 import { getQueue } from "@/ui/api/queue"
@@ -113,74 +104,6 @@ export function useProjectStorageConfig(projectId: string) {
     enabled: !!projectId,
     refetchInterval: 5000,
     retry: false,
-  })
-}
-
-export function useProjectMaterialSourceBinding(projectId: string) {
-  return useQuery({
-    queryKey: ["projectMaterialSourceBinding", projectId],
-    queryFn: () => getProjectMaterialSourceBinding(projectId),
-    enabled: !!projectId,
-    refetchInterval: 5000,
-  })
-}
-
-export function useProjectDesktopAgentStatus(projectId: string) {
-  return useQuery({
-    queryKey: ["projectDesktopAgentStatus", projectId],
-    queryFn: () => getProjectDesktopAgentStatus(projectId),
-    enabled: !!projectId,
-    refetchInterval: 3000,
-  })
-}
-
-export function useDesktopAgents(enabled = true) {
-  return useQuery({
-    queryKey: ["desktopAgents"],
-    queryFn: listDesktopAgents,
-    enabled,
-    refetchInterval: 3000,
-  })
-}
-
-export function useCreateDesktopAgentPairingCode() {
-  return useMutation({
-    mutationFn: () => createDesktopAgentPairingCode(),
-  })
-}
-
-export function useSetProjectMaterialSourceBinding(projectId: string) {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (payload: {
-      sourceKind: "SERVER_FS" | "DESKTOP_AGENT_MANIFEST"
-      desktopAgentId?: string | null
-      sourceRootLabel?: string | null
-    }) => setProjectMaterialSourceBinding(projectId, payload),
-    onSuccess: async () => {
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: ["projectMaterialSourceBinding", projectId] }),
-        qc.invalidateQueries({ queryKey: ["projectDesktopAgentStatus", projectId] }),
-      ])
-    },
-  })
-}
-
-export function usePlaybackDescriptor(
-  projectId: string,
-  instanceId: string | null,
-  enabled = true,
-  options?: { preferHls?: boolean },
-) {
-  return useQuery({
-    queryKey: ["playbackDescriptor", projectId, instanceId, Boolean(options?.preferHls)],
-    queryFn: ({ signal }) => getPlaybackDescriptor(projectId, instanceId ?? "", options, { signal }),
-    enabled: enabled && !!projectId && !!instanceId,
-    retry: false,
-    refetchInterval: (query) => {
-      const data = query.state.data as PlaybackDescriptor | undefined
-      return data?.mode === "relay_hls" && !data.ready && (!data.reason || data.reason === "transcode_pending") ? 2000 : false
-    },
   })
 }
 
@@ -302,18 +225,15 @@ export function useManualRollUp(projectId: string) {
   })
 }
 
-export function useSyncClientMediaManifest(projectId: string) {
+export function useImportLearningObjectsFromBrowser(projectId: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (payload: { rootTitle?: string; entries: import("@/ui/api/mediaManifest").ClientMediaManifestEntryInput[] }) =>
-      syncClientMediaManifest(projectId, payload),
+    mutationFn: (p: { rootTitle?: string; relativeFilePaths: string[] }) => importLearningObjectsFromBrowser(projectId, p),
     onSuccess: async () => {
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["instances", projectId] }),
         qc.invalidateQueries({ queryKey: ["missingInstances", projectId] }),
         qc.invalidateQueries({ queryKey: ["learningObjectNodes", projectId] }),
-        qc.invalidateQueries({ queryKey: ["learningObjectNode", projectId] }),
-        qc.invalidateQueries({ queryKey: ["learningObjectRoots", projectId] }),
       ])
     },
   })

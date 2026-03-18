@@ -68,7 +68,6 @@ from backend.models.types import (
     LearningTaskId,
     LearningTaskNodeId,
     MediaAssetId,
-    DesktopAgentId,
     ProjectId,
     RangeId,
     RecallPointId,
@@ -319,18 +318,15 @@ def _encode_project_material_source_binding(binding: ProjectMaterialSourceBindin
     return {
         "projectId": str(binding.project_id),
         "sourceKind": binding.source_kind.value,
-        "desktopAgentId": None if binding.desktop_agent_id is None else str(binding.desktop_agent_id),
         "sourceRootLabel": binding.source_root_label,
         "updatedAtMs": _ts_to_ms(binding.updated_at),
     }
 
 
 def _decode_project_material_source_binding(d: dict[str, Any]) -> ProjectMaterialSourceBinding:
-    desktop_agent_id = d.get("desktopAgentId")
     return ProjectMaterialSourceBinding.create(
         ProjectId(d["projectId"]),
-        source_kind=MaterialSourceKind(str(d.get("sourceKind") or "SERVER_FS")),
-        desktop_agent_id=None if desktop_agent_id is None else DesktopAgentId(str(desktop_agent_id)),
+        source_kind=MaterialSourceKind(str(d.get("sourceKind") or MaterialSourceKind.SERVER_FS.value)),
         source_root_label=None if d.get("sourceRootLabel") is None else str(d.get("sourceRootLabel")),
         updated_at=_ms_to_ts(int(d["updatedAtMs"])),
     )

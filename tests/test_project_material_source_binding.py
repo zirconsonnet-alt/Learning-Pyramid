@@ -6,51 +6,49 @@ from adapter.mappers import project_material_source_binding_to_dto
 from backend.models.enums import MaterialSourceKind, SessionMode
 from backend.models.errors import PreconditionFailure
 from backend.models.project_material_source_binding import ProjectMaterialSourceBinding
-from backend.models.types import DesktopAgentId, ProjectId
+from backend.models.types import ProjectId
 from backend.system.api import SystemAPI
 from backend.system.inmemory_system import InMemorySystem
 from backend.system.persistence_store import JsonSnapshotStore
 
 
 class ProjectMaterialSourceBindingTests(unittest.TestCase):
-    def test_create_defaults_to_server_fs_without_agent(self) -> None:
+    def test_create_defaults_to_server_fs(self) -> None:
         binding = ProjectMaterialSourceBinding.create(ProjectId("proj_1"))
 
         self.assertEqual(binding.source_kind, MaterialSourceKind.SERVER_FS)
-        self.assertIsNone(binding.desktop_agent_id)
         self.assertIsNone(binding.source_root_label)
 
-    def test_create_desktop_agent_manifest_requires_agent_id(self) -> None:
+    def test_create_rejects_non_enum_source_kind(self) -> None:
         with self.assertRaises(PreconditionFailure):
             ProjectMaterialSourceBinding.create(
                 ProjectId("proj_1"),
-                source_kind=MaterialSourceKind.DESKTOP_AGENT_MANIFEST,
+                source_kind="INVALID_KIND",  # type: ignore[arg-type]
             )
 
-    def test_create_server_fs_rejects_agent_id(self) -> None:
-        with self.assertRaises(PreconditionFailure):
-            ProjectMaterialSourceBinding.create(
-                ProjectId("proj_1"),
-                source_kind=MaterialSourceKind.SERVER_FS,
-                desktop_agent_id=DesktopAgentId("agent_1"),
-            )
-
-    def test_create_trims_root_label_and_keeps_agent_for_manifest(self) -> None:
+    def test_create_trims_root_label(self) -> None:
         binding = ProjectMaterialSourceBinding.create(
             ProjectId("proj_1"),
-            source_kind=MaterialSourceKind.DESKTOP_AGENT_MANIFEST,
-            desktop_agent_id=" agent_1 ",
+            source_kind=MaterialSourceKind.SERVER_FS,
             source_root_label="  Videos  ",
         )
 
-        self.assertEqual(binding.desktop_agent_id, DesktopAgentId("agent_1"))
         self.assertEqual(binding.source_root_label, "Videos")
+
+    def test_create_allows_browser_local_source_kind(self) -> None:
+        binding = ProjectMaterialSourceBinding.create(
+            ProjectId("proj_1"),
+            source_kind=MaterialSourceKind.BROWSER_LOCAL,
+            source_root_label="Authorized Videos",
+        )
+
+        self.assertEqual(binding.source_kind, MaterialSourceKind.BROWSER_LOCAL)
+        self.assertEqual(binding.source_root_label, "Authorized Videos")
 
     def test_mapper_serializes_binding(self) -> None:
         binding = ProjectMaterialSourceBinding.create(
             ProjectId("proj_1"),
-            source_kind=MaterialSourceKind.DESKTOP_AGENT_MANIFEST,
-            desktop_agent_id=DesktopAgentId("agent_1"),
+            source_kind=MaterialSourceKind.SERVER_FS,
             source_root_label="Videos",
         )
 
@@ -60,8 +58,7 @@ class ProjectMaterialSourceBindingTests(unittest.TestCase):
             dto,
             {
                 "projectId": "proj_1",
-                "sourceKind": "DESKTOP_AGENT_MANIFEST",
-                "desktopAgentId": "agent_1",
+                "sourceKind": "SERVER_FS",
                 "sourceRootLabel": "Videos",
                 "updatedAt": binding.updated_at.isoformat(timespec="milliseconds"),
             },
@@ -78,7 +75,6 @@ class ProjectMaterialSourceBindingTests(unittest.TestCase):
             api.sys.rollback(session)
 
         self.assertEqual(binding.source_kind, MaterialSourceKind.SERVER_FS)
-        self.assertIsNone(binding.desktop_agent_id)
 
     def test_json_snapshot_round_trip_preserves_binding(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -94,7 +90,6 @@ class ProjectMaterialSourceBindingTests(unittest.TestCase):
                 reloaded.sys.rollback(session)
 
         self.assertEqual(binding.source_kind, MaterialSourceKind.SERVER_FS)
-        self.assertIsNone(binding.desktop_agent_id)
 
 
 if __name__ == "__main__":

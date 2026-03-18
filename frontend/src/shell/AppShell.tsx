@@ -1,15 +1,15 @@
-import { useState } from "react"
-import { FolderKanban, Menu, RadioTower, Sparkles, Workflow, X } from "lucide-react"
-import { Link, Navigate, Outlet, useLocation, useNavigate, useParams } from "react-router-dom"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { Menu, Sparkles, Workflow } from "lucide-react"
+import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate, useParams } from "react-router-dom"
 
-import { MainNav } from "@/shell/MainNav"
+import { GLOBAL_NAV_ITEMS, MainNav, getProjectNavItems } from "@/shell/MainNav"
 import { ApiError } from "@/ui/api/http"
 import { ErrorNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/ui/components/ui/dialog"
 import { useCurrentUser, useLogout } from "@/ui/queries/auth"
 import { useProject } from "@/ui/queries/projects"
 import { useSystemCapabilities } from "@/ui/queries/system"
+import { cn } from "@/ui/utils"
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -20,92 +20,51 @@ function formatApiError(err: unknown) {
 function describeArea(pathname: string, projectTitle: string, hasProject: boolean) {
   if (pathname.startsWith("/projects")) {
     return {
-      eyebrow: "Project Hub",
       title: "项目中心",
-      description: "从一个统一入口管理项目、切换工作区，并进入当前协作流程。",
-      icon: FolderKanban,
+      context: "浏览与切换项目",
     }
   }
 
   if (pathname.startsWith("/guide")) {
     return {
-      eyebrow: "Guide",
       title: "产品指南",
-      description: "查看系统能力、操作约定和桌面连接器接入说明。",
-      icon: Sparkles,
-    }
-  }
-
-  if (pathname.startsWith("/system/desktop-agent")) {
-    return {
-      eyebrow: "Desktop Agent",
-      title: "桌面连接器",
-      description: "管理本地素材接入、桌面安装包和配对会话。",
-      icon: Workflow,
-    }
-  }
-
-  if (pathname.startsWith("/system/relay-monitor")) {
-    return {
-      eyebrow: "Relay Monitor",
-      title: "中继运营台",
-      description: "巡检 HLS、桌面连接器和中继链路的运行健康度。",
-      icon: RadioTower,
+      context: "了解系统能力与使用方式",
     }
   }
 
   if (hasProject) {
     if (pathname.includes("/workbench")) {
       return {
-        eyebrow: "Workbench",
-        title: projectTitle,
-        description: "围绕当前项目完成播放、抽取、复习和生成等核心工作流。",
-        icon: Workflow,
+        title: "项目工作台",
+        context: projectTitle,
       }
     }
 
     if (pathname.includes("/task-tree")) {
       return {
-        eyebrow: "Task Tree",
-        title: `${projectTitle} · 学习任务树`,
-        description: "维护任务结构、层级关系和执行路径。",
-        icon: Workflow,
+        title: "学习任务树",
+        context: projectTitle,
       }
     }
 
     if (pathname.includes("/object-tree")) {
       return {
-        eyebrow: "Object Tree",
-        title: `${projectTitle} · 学习对象树`,
-        description: "审视内容结构、绑定节点和知识对象脉络。",
-        icon: Workflow,
-      }
-    }
-
-    if (pathname.includes("/timeline")) {
-      return {
-        eyebrow: "Timeline",
-        title: `${projectTitle} · 时间线`,
-        description: "从时间维度查看处理进度、聚合事件和回放节点。",
-        icon: Workflow,
+        title: "学习对象树",
+        context: projectTitle,
       }
     }
 
     if (pathname.includes("/settings")) {
       return {
-        eyebrow: "Settings",
-        title: `${projectTitle} · 项目设置`,
-        description: "集中管理项目配置、素材源和系统集成参数。",
-        icon: Workflow,
+        title: "项目设置",
+        context: projectTitle,
       }
     }
   }
 
   return {
-    eyebrow: "LearningPyramid",
     title: "工作空间",
-    description: "统一进入项目、工作台和系统能力页面。",
-    icon: Sparkles,
+    context: "系统总览",
   }
 }
 
@@ -114,7 +73,7 @@ export function AppShell() {
   const location = useLocation()
   const { projectId } = useParams()
   const pid = projectId ?? ""
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [navMenuOpen, setNavMenuOpen] = useState(false)
   const capabilitiesQ = useSystemCapabilities()
   const authEnabled = capabilitiesQ.data?.authEnabled ?? false
   const currentUserQ = useCurrentUser(authEnabled)
@@ -122,11 +81,44 @@ export function AppShell() {
   const { projectTitle } = useProject(pid, { enabled: canAccessApp })
   const logout = useLogout()
   const area = describeArea(location.pathname, projectTitle || pid || "当前项目", Boolean(pid))
-  const AreaIcon = area.icon
-  const modeLabel = capabilitiesQ.data?.appMode === "hosted" ? "Hosted" : "Local"
+  const deploymentLabel = capabilitiesQ.data?.appMode === "hosted" ? "托管模式" : "本地模式"
+  const areaContext = area.context && area.context !== area.title ? area.context : null
   const capabilitiesUnavailableError = capabilitiesQ.error && !capabilitiesQ.data ? formatApiError(capabilitiesQ.error) : null
   const currentUserUnavailableError =
     authEnabled && currentUserQ.error && currentUserQ.data === undefined ? formatApiError(currentUserQ.error) : null
+  const menuRef = useRef<HTMLDivElement | null>(null)
+  const menuButtonRef = useRef<HTMLButtonElement | null>(null)
+  const projectNavItems = useMemo(() => getProjectNavItems(pid), [pid])
+
+  useEffect(() => {
+    setNavMenuOpen(false)
+  }, [location.hash, location.pathname, location.search])
+
+  useEffect(() => {
+    if (!navMenuOpen) return
+
+    function onPointerDown(event: MouseEvent | TouchEvent) {
+      const target = event.target
+      if (!(target instanceof Node)) return
+      if (menuRef.current?.contains(target) || menuButtonRef.current?.contains(target)) return
+      setNavMenuOpen(false)
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setNavMenuOpen(false)
+      }
+    }
+
+    document.addEventListener("mousedown", onPointerDown)
+    document.addEventListener("touchstart", onPointerDown)
+    document.addEventListener("keydown", onKeyDown)
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown)
+      document.removeEventListener("touchstart", onPointerDown)
+      document.removeEventListener("keydown", onKeyDown)
+    }
+  }, [navMenuOpen])
 
   async function onLogout() {
     await logout.mutateAsync()
@@ -207,152 +199,107 @@ export function AppShell() {
       <div className="pointer-events-none fixed inset-x-0 top-0 z-0 h-72 bg-[radial-gradient(circle_at_top_left,_rgba(193,214,242,0.62),_transparent_42%),radial-gradient(circle_at_top_right,_rgba(224,233,247,0.54),_transparent_34%)]" />
       <header className="sticky top-0 z-20 border-b border-white/70 bg-white/82 shadow-[0_16px_40px_-34px_rgba(15,23,42,0.46)] backdrop-blur-2xl supports-[backdrop-filter]:bg-white/72">
         <div className="container py-3 sm:py-4">
-          <div className="flex items-center gap-3 sm:hidden">
+          <div className="relative flex w-full items-center gap-3 sm:gap-4">
             <Link
               to="/projects"
-              className="inline-flex shrink-0 items-center justify-center rounded-2xl border border-white/80 bg-white/88 p-2 shadow-[0_18px_34px_-28px_rgba(15,23,42,0.3)] transition-colors hover:border-primary/15 hover:text-primary"
+              className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-[1.35rem] bg-[linear-gradient(160deg,#294f79,#1b3556)] text-primary-foreground shadow-[0_18px_38px_-28px_rgba(15,23,42,0.46)] transition-all hover:-translate-y-px hover:shadow-[0_22px_44px_-28px_rgba(15,23,42,0.52)]"
+              aria-label="返回项目中心"
             >
-              <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-[0_18px_36px_-24px_rgba(30,58,95,0.72)]">
-                <Workflow className="h-5 w-5" />
-              </span>
+              <Workflow className="h-5 w-5" />
             </Link>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6a7e98]">
-                <span className="truncate">{area.eyebrow}</span>
-                <span className="h-1 w-1 rounded-full bg-[#9aa9bd]" />
-                <span>{modeLabel}</span>
-              </div>
-              <div className="mt-1 flex min-w-0 items-center gap-2">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl bg-[#edf4ff] text-primary">
-                  <AreaIcon className="h-4 w-4" />
-                </div>
-                <div className="min-w-0">
-                  <div className="truncate text-base font-semibold tracking-tight text-foreground">{area.title}</div>
-                  {pid ? <div className="truncate text-xs text-[#6a7e98]">{projectTitle || pid}</div> : null}
-                </div>
-              </div>
-            </div>
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-11 w-11 shrink-0 rounded-2xl border-white/80 bg-white/88"
-              onClick={() => setMobileMenuOpen(true)}
-            >
-              <Menu className="h-5 w-5" />
-              <span className="sr-only">打开导航菜单</span>
-            </Button>
-          </div>
 
-          <div className="hidden flex-col gap-3 sm:flex sm:gap-4">
-            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-              <div className="flex min-w-0 items-start gap-3">
-                <Link
-                  to="/projects"
-                  className="inline-flex shrink-0 items-center gap-3 rounded-2xl border border-white/80 bg-white/82 px-2.5 py-2 shadow-[0_18px_34px_-28px_rgba(15,23,42,0.3)] transition-colors hover:border-primary/15 hover:text-primary sm:px-3.5"
-                >
-                  <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-[0_18px_36px_-24px_rgba(30,58,95,0.72)]">
-                    <Workflow className="h-5 w-5" />
-                  </span>
-                  <span className="hidden min-w-0 sm:block">
-                    <span className="block text-sm font-semibold tracking-tight">LearningPyramid</span>
-                    <span className="block text-xs text-muted-foreground">内容工作流与学习对象操作台</span>
-                  </span>
-                </Link>
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <div className="theme-meta-strong">{area.eyebrow}</div>
-                    {pid ? <div className="theme-meta min-w-0 max-w-[12rem] truncate sm:max-w-[20rem]">{projectTitle || pid}</div> : null}
-                    <div className="theme-meta hidden sm:inline-flex">{modeLabel}</div>
-                  </div>
-                  <div className="mt-2 flex items-start gap-3">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-[#edf4ff] text-primary shadow-[0_14px_30px_-24px_rgba(30,58,95,0.45)]">
-                      <AreaIcon className="h-4 w-4" />
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2 text-xs text-[#6a7e98]">
+                <span className="font-semibold tracking-[0.03em] text-[#465a74]">LearningPyramid</span>
+                <span className="inline-flex items-center rounded-full border border-[#d6e1ef] bg-white/76 px-2 py-0.5 text-[11px] font-medium text-[#607389]">
+                  {deploymentLabel}
+                </span>
+              </div>
+              <div className="mt-1.5 min-w-0">
+                <div className="truncate text-base font-semibold tracking-tight text-foreground sm:text-lg">{area.title}</div>
+                {areaContext ? <div className="mt-0.5 truncate text-sm text-[#6a7e98]">{areaContext}</div> : null}
+              </div>
+            </div>
+
+            <div className="flex shrink-0 items-center gap-2">
+              {GLOBAL_NAV_ITEMS.map((item) => {
+                const Icon = item.icon
+                return (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    className={({ isActive }) =>
+                      cn(
+                        "inline-flex h-10 items-center gap-2 rounded-2xl border border-white/80 bg-white/88 px-2.5 text-sm text-[#5b6b82] shadow-[0_18px_34px_-28px_rgba(15,23,42,0.24)] transition-colors hover:border-primary/15 hover:text-foreground min-[420px]:px-3.5",
+                        isActive && "border-primary/15 bg-[#eef4ff] text-foreground",
+                      )
+                    }
+                  >
+                    <Icon className="h-4 w-4 shrink-0 text-primary" />
+                    <span className="hidden min-[420px]:inline">{item.label}</span>
+                    <span className="sr-only min-[420px]:hidden">{item.label}</span>
+                  </NavLink>
+                )
+              })}
+
+              <Button
+                ref={menuButtonRef}
+                variant="outline"
+                size="icon"
+                className="h-11 w-11 shrink-0 rounded-2xl border-white/80 bg-white/88"
+                onClick={() => setNavMenuOpen((current) => !current)}
+                aria-expanded={navMenuOpen}
+                aria-haspopup="menu"
+              >
+                <Menu className="h-5 w-5" />
+                <span className="sr-only">打开项目菜单</span>
+              </Button>
+            </div>
+
+            {navMenuOpen ? (
+              <div
+                ref={menuRef}
+                className="absolute right-0 top-[calc(100%+0.65rem)] z-30 w-[min(22rem,calc(100vw-1rem))] overflow-hidden rounded-[1.6rem] border border-white/80 bg-[linear-gradient(180deg,rgba(250,252,255,0.98),rgba(244,247,252,0.96))] shadow-[0_24px_60px_-30px_rgba(15,23,42,0.36)] backdrop-blur-2xl"
+              >
+                <div className="max-h-[min(70vh,calc(100dvh-5.5rem))] overflow-y-auto overscroll-contain p-3 [-webkit-overflow-scrolling:touch]">
+                  {pid ? (
+                    <>
+                      <div className="px-2 pb-2 pt-1">
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#73839a]">当前项目</div>
+                        <div className="mt-1 truncate text-sm font-semibold text-foreground">{projectTitle || pid}</div>
+                      </div>
+                      <MainNav items={projectNavItems} onNavigate={() => setNavMenuOpen(false)} />
+                    </>
+                  ) : (
+                    <div className="rounded-2xl border border-dashed border-border/70 bg-white/72 px-4 py-3 text-sm text-muted-foreground">
+                      当前没有项目上下文。
                     </div>
-                    <div className="min-w-0">
-                      <h1 className="truncate text-base font-semibold tracking-tight text-foreground sm:text-lg">{area.title}</h1>
-                      <p className="mt-1 hidden max-w-3xl text-sm leading-6 text-[#5f7188] lg:block">{area.description}</p>
+                  )}
+
+                  {authEnabled && currentUserQ.data ? (
+                    <div className="mt-3 rounded-[1.25rem] border border-white/80 bg-white/82 p-3">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#6a7e98]">当前账号</div>
+                      <div className="mt-1 truncate text-sm font-medium text-foreground">{currentUserQ.data.email}</div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="mt-3 w-full rounded-xl"
+                        onClick={() => {
+                          setNavMenuOpen(false)
+                          void onLogout()
+                        }}
+                        disabled={logout.isPending}
+                      >
+                        {logout.isPending ? "退出中..." : "退出登录"}
+                      </Button>
                     </div>
-                  </div>
+                  ) : null}
                 </div>
               </div>
-              {authEnabled && currentUserQ.data ? (
-                <div className="theme-status-surface flex items-center justify-between gap-3 px-3 py-2.5 sm:px-4">
-                  <div className="min-w-0">
-                    <div className="hidden text-[11px] font-semibold uppercase tracking-[0.16em] text-[#6a7e98] sm:block">当前账号</div>
-                    <div className="max-w-[14rem] truncate text-sm font-medium text-foreground sm:max-w-[18rem]">{currentUserQ.data.email}</div>
-                  </div>
-                  <Button variant="outline" size="sm" onClick={() => void onLogout()} disabled={logout.isPending}>
-                    {logout.isPending ? "退出中..." : "退出登录"}
-                  </Button>
-                </div>
-              ) : null}
-            </div>
-            <MainNav />
+            ) : null}
           </div>
         </div>
       </header>
-
-      <Dialog open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
-        <DialogContent
-          hideClose
-          className="left-0 top-0 z-50 h-[100dvh] w-full max-w-none translate-x-0 translate-y-0 rounded-none border-0 bg-[linear-gradient(180deg,rgba(246,249,255,0.98),rgba(241,245,251,0.96))] p-0 shadow-none sm:hidden"
-        >
-          <div className="flex h-full flex-col overflow-hidden">
-            <div className="border-b border-white/80 bg-white/86 px-5 pb-5 pt-[max(1rem,env(safe-area-inset-top))] shadow-[0_16px_40px_-34px_rgba(15,23,42,0.32)] backdrop-blur-2xl">
-              <div className="flex items-start justify-between gap-3">
-                <DialogHeader className="min-w-0 flex-1 text-left">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#6a7e98]">Global Navigation</div>
-                  <DialogTitle className="mt-3 flex items-center gap-3 text-left text-lg">
-                    <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-[0_18px_36px_-24px_rgba(30,58,95,0.72)]">
-                      <AreaIcon className="h-4 w-4" />
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block truncate">{area.title}</span>
-                      <span className="block text-xs font-medium tracking-normal text-[#6a7e98]">{area.eyebrow}</span>
-                    </span>
-                  </DialogTitle>
-                  <DialogDescription className="mt-3 text-left leading-6 text-[#5f7188]">{area.description}</DialogDescription>
-                </DialogHeader>
-                <Button variant="outline" size="icon" className="mt-0.5 h-11 w-11 shrink-0 rounded-2xl bg-white/92" onClick={() => setMobileMenuOpen(false)}>
-                  <X className="h-5 w-5" />
-                  <span className="sr-only">关闭导航菜单</span>
-                </Button>
-              </div>
-
-              <div className="mt-5 flex flex-wrap items-center gap-2">
-                <div className="theme-meta">{modeLabel}</div>
-                {pid ? <div className="theme-meta max-w-full truncate">{projectTitle || pid}</div> : null}
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto px-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-5">
-              {authEnabled && currentUserQ.data ? (
-                <div className="theme-status-surface flex items-center justify-between gap-3 px-4 py-3">
-                  <div className="min-w-0">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#6a7e98]">当前账号</div>
-                    <div className="truncate text-sm font-medium text-foreground">{currentUserQ.data.email}</div>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setMobileMenuOpen(false)
-                      void onLogout()
-                    }}
-                    disabled={logout.isPending}
-                  >
-                    {logout.isPending ? "退出中..." : "退出登录"}
-                  </Button>
-                </div>
-              ) : null}
-
-              <div className="mt-5">
-                <MainNav variant="drawer" onNavigate={() => setMobileMenuOpen(false)} />
-              </div>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
 
       <main className="container relative z-10 py-6 lg:py-8">
         <Outlet />

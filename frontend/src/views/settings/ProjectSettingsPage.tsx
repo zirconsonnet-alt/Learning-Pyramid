@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react"
 import { useQueries } from "@tanstack/react-query"
-import { Link, useNavigate, useParams } from "react-router-dom"
+import { useNavigate, useParams } from "react-router-dom"
 
 import { listRecallPointsByInstance, type Instance } from "@/ui/api/instances"
 import { ApiError } from "@/ui/api/http"
@@ -11,20 +11,17 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/
 import { formatMaterialReference, formatRecallPointReference } from "@/ui/displayIdentifiers"
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
-import { scanProjectDirectoryManifest, useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
-import { useProject } from "@/ui/queries/projects"
-import { useSystemCapabilities, useSystemRuntime } from "@/ui/queries/system"
+import { scanProjectDirectoryMedia, useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
+import { useSystemCapabilities } from "@/ui/queries/system"
 import {
   useBulkRemapRecallPointsInstance,
+  useImportLearningObjectsFromBrowser,
   useInstances,
   useLayers,
   useProjectConfig,
-  useProjectDesktopAgentStatus,
-  useProjectMaterialSourceBinding,
   useProjectStorageConfig,
   useSetExternalServices,
   useSetLayerConfig,
-  useSyncClientMediaManifest,
 } from "@/ui/queries/workbench"
 import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 
@@ -83,15 +80,20 @@ function describeDirectoryPermission(permission: "unsupported" | "missing" | "pr
   return "已授权"
 }
 
-function describeDesktopAgentStatus(status: string | null | undefined) {
-  return status === "ONLINE" ? "在线" : "离线"
+function describeDirectoryPermissionTone(permission: "unsupported" | "missing" | "prompt" | "granted" | "denied") {
+  if (permission === "granted") return "border-emerald-200 bg-emerald-50 text-emerald-700"
+  if (permission === "prompt") return "border-amber-200 bg-amber-50 text-amber-700"
+  if (permission === "denied") return "border-rose-200 bg-rose-50 text-rose-700"
+  return "border-slate-200 bg-slate-50 text-slate-600"
 }
 
-function describeRuntimeReadiness(ready: boolean | undefined, isLoading: boolean) {
-  if (isLoading) return "更新中"
-  if (ready === true) return "状态正常"
-  if (ready === false) return "需要关注"
-  return "暂无摘要"
+function summarizeTemplateItems(items: ReviewChainTemplateItem[]) {
+  return items
+    .map((item) => {
+      if (item.kind === "CONVERGENCE") return "收敛"
+      return item.count && item.count > 1 ? `复习任务 × ${item.count}` : "复习任务"
+    })
+    .join(" · ")
 }
 
 function isDirectoryPickerAbort(err: unknown) {
@@ -102,23 +104,19 @@ export function ProjectSettingsPage() {
   const { projectId } = useParams()
   const navigate = useNavigate()
   const pid = projectId ?? ""
-  const { projectTitle } = useProject(pid)
   const capabilitiesQ = useSystemCapabilities()
   const directoryBinding = useProjectDirectoryBinding(pid)
   const directoryPermission = directoryBinding.permission
-  const isHostedMode = capabilitiesQ.data?.appMode === "hosted"
-  const runtimeQ = useSystemRuntime(isHostedMode)
+  const browserLocalMediaEnabled = capabilitiesQ.data?.browserLocalMediaEnabled ?? false
 
   const layersQ = useLayers(pid)
   const projectConfigQ = useProjectConfig(pid)
   const storageConfigQ = useProjectStorageConfig(pid)
-  const materialSourceBindingQ = useProjectMaterialSourceBinding(pid)
-  const desktopAgentStatusQ = useProjectDesktopAgentStatus(pid)
   const instancesQ = useInstances(pid)
+  const importLearningObjectsM = useImportLearningObjectsFromBrowser(pid)
   const setLayerConfigM = useSetLayerConfig(pid)
   const setExternalServicesM = useSetExternalServices(pid)
   const bulkRemapM = useBulkRemapRecallPointsInstance(pid)
-  const syncManifestM = useSyncClientMediaManifest(pid)
 
   const layerIndexes = useMemo(() => (layersQ.data ?? []).map((l) => l.layerIndex).sort((a, b) => a - b), [layersQ.data])
   const defaultLayerConfig = useMemo(
@@ -141,8 +139,7 @@ export function ProjectSettingsPage() {
   const effectiveAsrModel = projectConfigQ.data?.externalServices?.asr?.model ?? ""
 
   const [remapTargets, setRemapTargets] = useState<Record<string, string>>({})
-  const [syncStatusText, setSyncStatusText] = useState<string | null>(null)
-  const [directoryAction, setDirectoryAction] = useState<"authorize" | "request" | "clear" | null>(null)
+  const [directoryAction, setDirectoryAction] = useState<"authorize" | "request" | "clear" | "import" | null>(null)
 
   const missingInstances = useMemo(
     () => (instancesQ.data ?? []).filter((item) => item.presence === "MISSING"),
@@ -173,11 +170,7 @@ export function ProjectSettingsPage() {
   const canRequestDirectoryPermission =
     !!pid && !directoryBinding.loading && (directoryPermission === "prompt" || directoryPermission === "denied")
   const canClearDirectory = !!pid && !directoryBinding.loading && directoryPermission !== "missing"
-  const canSyncLocalMedia = !!pid && !syncManifestM.isPending && directoryPermission === "granted"
   const directoryBusy = directoryAction !== null
-
-  const boundDesktopAgent = desktopAgentStatusQ.data?.agent ?? null
-  const relayRuntime = runtimeQ.data?.desktopAgentRelay
 
   async function onRemapMissingInstance(fromInstanceId: string) {
     const sourceInstance = missingInstances.find((item) => item.instanceId === fromInstanceId)
@@ -195,27 +188,15 @@ export function ProjectSettingsPage() {
     }
   }
 
-  async function onSyncLocalMediaManifest() {
-    setSyncStatusText(null)
-    try {
-      const manifest = await scanProjectDirectoryManifest(pid)
-      const report = await syncManifestM.mutateAsync(manifest)
-      const summary = `同步完成：新增实例 ${report.created_instances_count}，标记缺失 ${report.marked_missing_count}，重建对象节点 ${report.replaced_learning_object_nodes_count}。`
-      setSyncStatusText(summary)
-      showSuccessFeedback("素材目录已同步", summary)
-    } catch (err) {
-      showErrorFeedback("素材目录同步失败", formatApiError(err))
-    }
-  }
-
   async function onAuthorizeDirectory() {
     if (!canChooseDirectory || directoryBusy) return
     setDirectoryAction("authorize")
     try {
       const permission = await directoryBinding.authorizeDirectory()
-      setSyncStatusText(null)
       if (permission === "granted") {
         showSuccessFeedback("本地目录已绑定", "浏览器已经记录并授权当前项目的本地素材目录。")
+        await importAuthorizedDirectory(true)
+        return
       } else {
         showInfoFeedback("目录已记录", "目录已经保存到当前项目，但浏览器还需要你继续授予读取权限。")
       }
@@ -224,7 +205,7 @@ export function ProjectSettingsPage() {
         showErrorFeedback("绑定本地目录失败", formatApiError(err))
       }
     } finally {
-      setDirectoryAction(null)
+      setDirectoryAction((current) => (current === "authorize" ? null : current))
     }
   }
 
@@ -234,7 +215,9 @@ export function ProjectSettingsPage() {
     try {
       const permission = await directoryBinding.requestPermission()
       if (permission === "granted") {
-        showSuccessFeedback("目录权限已恢复", "现在可以扫描并同步这个项目的本地素材目录。")
+        showSuccessFeedback("目录权限已恢复", "现在可以扫描并导入这个项目的本地素材目录。")
+        await importAuthorizedDirectory(true)
+        return
       } else if (permission === "denied") {
         showInfoFeedback("目录权限未授予", "浏览器仍未允许读取该目录，你可以重试或直接更换目录。")
       } else {
@@ -243,8 +226,36 @@ export function ProjectSettingsPage() {
     } catch (err) {
       showErrorFeedback("请求目录权限失败", formatApiError(err))
     } finally {
+      setDirectoryAction((current) => (current === "request" ? null : current))
+    }
+  }
+
+  async function importAuthorizedDirectory(silentSuccess = false) {
+    if (!pid) return
+    setDirectoryAction("import")
+    try {
+      const scan = await scanProjectDirectoryMedia(pid)
+      const result = await importLearningObjectsM.mutateAsync(scan)
+      if (result.unchanged) {
+        if (!silentSuccess) {
+          showInfoFeedback("目录已是最新", "当前已授权目录里的媒体文件没有变化。")
+        }
+        return
+      }
+      showSuccessFeedback(
+        "内容目录已导入",
+        `已导入 ${scan.relativeFilePaths.length} 个媒体文件，新增 ${result.created_instances_count} 个实例。`,
+      )
+    } catch (err) {
+      showErrorFeedback("导入本地目录失败", formatApiError(err))
+    } finally {
       setDirectoryAction(null)
     }
+  }
+
+  async function onImportAuthorizedDirectory(silentSuccess = false) {
+    if (!pid || directoryBusy) return
+    await importAuthorizedDirectory(silentSuccess)
   }
 
   async function onClearDirectoryBinding() {
@@ -252,7 +263,6 @@ export function ProjectSettingsPage() {
     setDirectoryAction("clear")
     try {
       await directoryBinding.clearDirectory()
-      setSyncStatusText(null)
       showSuccessFeedback("本地目录绑定已清除", "当前项目不再保留这个浏览器里的目录授权记录。")
     } catch (err) {
       showErrorFeedback("清除本地目录绑定失败", formatApiError(err))
@@ -274,124 +284,40 @@ export function ProjectSettingsPage() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="space-y-1">
-        <h1 className="text-lg font-semibold">项目设置</h1>
-        <p className="text-sm text-muted-foreground">
-          项目：<span className="font-medium text-foreground">{projectTitle}</span>
-        </p>
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-[380px_1fr]">
-        <div className="space-y-4">
-          {isHostedMode ? (
-            <Card className="theme-card">
-              <CardHeader>
-                <CardTitle>桌面连接器</CardTitle>
-                <CardDescription>桌面连接器下载和接入已经移到独立页面；这里保留当前项目的状态和常用入口。</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4 text-sm">
-                <div className="rounded-xl border bg-muted/30 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-muted-foreground">当前材料源</span>
-                    <span>{materialSourceBindingQ.data?.sourceKind === "DESKTOP_AGENT_MANIFEST" ? "桌面连接器" : "服务器文件系统"}</span>
+    <div className="space-y-5">
+      {browserLocalMediaEnabled ? (
+        <Card className="theme-card">
+          <CardHeader>
+            <CardTitle>素材接入</CardTitle>
+            <CardDescription>先确认当前目录状态，再在需要时同步目录内容。</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4 text-sm">
+            <div className="theme-status-surface rounded-[1.35rem] border border-border/70 p-4">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="theme-meta-strong">本地素材目录</span>
+                    <span
+                      className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${describeDirectoryPermissionTone(directoryPermission)}`}
+                    >
+                      {describeDirectoryPermission(directoryPermission)}
+                    </span>
                   </div>
-                  <div className="mt-3 text-xs text-muted-foreground">
-                    {boundDesktopAgent
-                      ? `已绑定设备：${boundDesktopAgent.deviceName}（${describeDesktopAgentStatus(boundDesktopAgent.status)}）`
-                      : "当前项目还没有绑定桌面连接器。"}
+                  <div className="text-sm text-foreground">
+                    {directoryBinding.handleName ? directoryBinding.handleName : "当前项目还没有绑定浏览器目录。"}
                   </div>
-                  <div className="mt-2 text-xs text-muted-foreground">
-                    逻辑根标签：{materialSourceBindingQ.data?.sourceRootLabel ?? "未设置"}
-                  </div>
-                </div>
-
-                {desktopAgentStatusQ.data ? (
-                  <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
-                    {desktopAgentStatusQ.data.agent
-                      ? `设备当前${describeDesktopAgentStatus(desktopAgentStatusQ.data.agent.status)}，最近心跳：${formatLastSeenAt(
-                          desktopAgentStatusQ.data.agent.lastSeenAt,
-                        )}`
-                      : "尚未绑定桌面设备。"}
-                  </div>
-                ) : null}
-                <div className="flex flex-wrap gap-2">
-                  <Button asChild>
-                    <Link to={`/system/desktop-agent?projectId=${encodeURIComponent(pid)}`}>打开 Desktop Agent 页面</Link>
-                  </Button>
-                  <Button asChild variant="outline">
-                    <Link to="/system/relay-monitor">打开 Relay Monitor</Link>
-                  </Button>
-                </div>
-                <div className="space-y-2 rounded-md border bg-muted/30 p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="text-xs font-medium text-foreground">中继状态摘要</div>
-                    <div className="text-xs text-muted-foreground">{describeRuntimeReadiness(runtimeQ.data?.ready, runtimeQ.isLoading)}</div>
-                  </div>
-                  {relayRuntime ? (
-                    <>
-                      <div className="grid grid-cols-2 gap-2 text-xs">
-                        <div className="rounded-md border bg-background/80 p-2">
-                          <div className="text-muted-foreground">在线设备</div>
-                          <div className="mt-1 text-sm font-semibold text-foreground">{relayRuntime.connectedAgentCount}</div>
-                        </div>
-                        <div className="rounded-md border bg-background/80 p-2">
-                          <div className="text-muted-foreground">活跃流</div>
-                          <div className="mt-1 text-sm font-semibold text-foreground">{relayRuntime.activeStreamCount}</div>
-                        </div>
-                        <div className="rounded-md border bg-background/80 p-2">
-                          <div className="text-muted-foreground">待处理探测</div>
-                          <div className="mt-1 text-sm font-semibold text-foreground">{relayRuntime.pendingProbeCount}</div>
-                        </div>
-                        <div className="rounded-md border bg-background/80 p-2">
-                          <div className="text-muted-foreground">活跃 HLS 转码</div>
-                          <div className="mt-1 text-sm font-semibold text-foreground">{relayRuntime.activeHlsJobCount}</div>
-                        </div>
-                      </div>
-                      <div className="space-y-1 text-xs text-muted-foreground">
-                        <div>
-                          当前摘要只保留在线状态、活跃传输和待处理探测。更详细的告警、转码记录和设备清单，请前往 Relay Monitor 查看。
-                        </div>
-                        {runtimeQ.data?.ready === false ? <div>当前中继链路存在异常，建议打开 Relay Monitor 查看详情。</div> : null}
-                      </div>
-                    </>
-                  ) : (
-                    <div className="text-xs text-muted-foreground">暂时还没有中继状态摘要。</div>
-                  )}
-                </div>
-                {materialSourceBindingQ.error ? (
-                  <p className="text-sm text-destructive">{formatApiError(materialSourceBindingQ.error)}</p>
-                ) : null}
-                {desktopAgentStatusQ.error ? (
-                  <p className="text-sm text-destructive">{formatApiError(desktopAgentStatusQ.error)}</p>
-                ) : null}
-                {runtimeQ.error ? <p className="text-sm text-destructive">{formatApiError(runtimeQ.error)}</p> : null}
-              </CardContent>
-            </Card>
-          ) : (
-            <Card className="theme-card">
-              <CardHeader>
-                <CardTitle>本地素材目录</CardTitle>
-                <CardDescription>网页模式下，播放器会通过浏览器授权直接读取你当前设备上的视频文件。</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm">
-                <div className="rounded-xl border bg-muted/30 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-muted-foreground">当前状态</span>
-                    <span>{describeDirectoryPermission(directoryPermission)}</span>
-                  </div>
-                  <div className="mt-3 text-xs text-muted-foreground">
+                  <div className="text-xs text-muted-foreground">
                     {directoryBinding.handleName
-                      ? `已记录目录：${directoryBinding.handleName}`
-                      : "还没有为当前项目绑定本地素材目录。"}
+                      ? "目录记录已和当前项目关联。"
+                      : "绑定后才可以把媒体文件导入成学习对象树。"}
                   </div>
                 </div>
 
-                {directoryPermission === "granted" ? (
-                  <div className="space-y-2">
-                    <div className="flex flex-wrap gap-2">
-                      <Button type="button" onClick={() => void onSyncLocalMediaManifest()} disabled={!canSyncLocalMedia}>
-                        {syncManifestM.isPending ? "同步中..." : "扫描并同步目录"}
+                <div className="flex flex-wrap gap-2 lg:justify-end">
+                  {directoryPermission === "granted" ? (
+                    <>
+                      <Button type="button" onClick={() => void onImportAuthorizedDirectory()} disabled={directoryBusy}>
+                        {directoryAction === "import" ? "同步中..." : "同步目录内容"}
                       </Button>
                       <Button
                         type="button"
@@ -401,36 +327,23 @@ export function ProjectSettingsPage() {
                       >
                         {directoryAction === "authorize" ? "打开目录选择器..." : "更换目录"}
                       </Button>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      className="px-0 text-muted-foreground"
-                      onClick={() => void onClearDirectoryBinding()}
-                      disabled={!canClearDirectory || directoryBusy}
-                    >
-                      {directoryAction === "clear" ? "清除中..." : "清除本地绑定"}
-                    </Button>
-                  </div>
-                ) : null}
+                    </>
+                  ) : null}
 
-                {(directoryPermission === "missing" || directoryPermission === "unsupported") ? (
-                  <div className="flex flex-wrap gap-2">
+                  {(directoryPermission === "missing" || directoryPermission === "unsupported") ? (
                     <Button type="button" onClick={() => void onAuthorizeDirectory()} disabled={!canChooseDirectory || directoryBusy}>
-                      {directoryAction === "authorize" ? "打开目录选择器..." : "选择并授权目录"}
+                      {directoryAction === "authorize" ? "打开目录选择器..." : "选择目录"}
                     </Button>
-                  </div>
-                ) : null}
+                  ) : null}
 
-                {(directoryPermission === "prompt" || directoryPermission === "denied") ? (
-                  <div className="space-y-2">
-                    <div className="flex flex-wrap gap-2">
+                  {(directoryPermission === "prompt" || directoryPermission === "denied") ? (
+                    <>
                       <Button
                         type="button"
                         onClick={() => void onRequestDirectoryPermission()}
                         disabled={!canRequestDirectoryPermission || directoryBusy}
                       >
-                        {directoryAction === "request" ? "请求中..." : "重新请求权限"}
+                        {directoryAction === "request" ? "请求中..." : "继续授权"}
                       </Button>
                       <Button
                         type="button"
@@ -440,63 +353,112 @@ export function ProjectSettingsPage() {
                       >
                         {directoryAction === "authorize" ? "打开目录选择器..." : "更换目录"}
                       </Button>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      className="px-0 text-muted-foreground"
-                      onClick={() => void onClearDirectoryBinding()}
-                      disabled={!canClearDirectory || directoryBusy}
-                    >
-                      {directoryAction === "clear" ? "清除中..." : "清除本地绑定"}
-                    </Button>
-                  </div>
-                ) : null}
+                    </>
+                  ) : null}
+                </div>
+              </div>
 
-                {!capabilitiesQ.data?.browserLocalMediaEnabled ? (
-                  <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
-                    当前部署未启用浏览器本地媒体访问，播放器仍会回退到服务端媒体流。
-                  </div>
-                ) : null}
-                {directoryBinding.error ? <p className="text-sm text-destructive">{directoryBinding.error}</p> : null}
-                {syncManifestM.error ? <p className="text-sm text-destructive">{formatApiError(syncManifestM.error)}</p> : null}
-                {syncStatusText ? <p className="text-sm text-muted-foreground">{syncStatusText}</p> : null}
-                {!directoryBinding.supported ? (
-                  <div className="rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
-                    当前浏览器不支持目录授权。首版建议使用桌面 Chrome 或 Edge。
-                  </div>
-                ) : null}
-              </CardContent>
-            </Card>
-          )}
+              {(directoryPermission === "granted" || directoryPermission === "prompt" || directoryPermission === "denied") && canClearDirectory ? (
+                <div className="mt-4 border-t border-border/60 pt-3">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="px-0 text-muted-foreground"
+                    onClick={() => void onClearDirectoryBinding()}
+                    disabled={!canClearDirectory || directoryBusy}
+                  >
+                    {directoryAction === "clear" ? "清除中..." : "清除本地绑定"}
+                  </Button>
+                </div>
+              ) : null}
+            </div>
 
+            <details className="rounded-[1.1rem] border border-border/70 bg-muted/20 px-4 py-3">
+              <summary className="cursor-pointer list-none text-sm font-medium text-foreground">了解目录导入机制</summary>
+              <div className="mt-3 space-y-2 text-xs leading-6 text-muted-foreground">
+                <p>浏览器目录授权和项目绑定是分开的。目录本身保存在当前浏览器里，项目只记录你绑定了哪一个目录句柄。</p>
+                <p>重新同步时只会更新媒体文件和学习对象树，不会推进复习调度，也不会自动改动复述链。</p>
+              </div>
+            </details>
+
+            {directoryBinding.error ? <p className="text-sm text-destructive">{directoryBinding.error}</p> : null}
+            {!directoryBinding.supported ? (
+              <p className="text-sm text-muted-foreground">当前浏览器不支持目录授权。首版建议使用桌面 Chrome 或 Edge。</p>
+            ) : null}
+            {importLearningObjectsM.error ? <p className="text-sm text-destructive">{formatApiError(importLearningObjectsM.error)}</p> : null}
+          </CardContent>
+        </Card>
+      ) : (
+        <Card className="theme-card">
+          <CardHeader>
+            <CardTitle>素材接入</CardTitle>
+            <CardDescription>当前部署没有开启浏览器本地目录模式。</CardDescription>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">
+            这个项目暂时不会显示目录选择器，你仍然可以在下面查看服务端路径和同步策略。
+          </CardContent>
+        </Card>
+      )}
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_360px]">
+        <LayerConfigEditor
+          key={layerConfigVersion}
+          canSave={!!pid}
+          initialConfig={effectiveLayerConfig}
+          layerIndexes={layerIndexes}
+          layersError={layersQ.error}
+          mutationError={setLayerConfigM.error}
+          projectConfigError={projectConfigQ.error}
+          selectedLayerIndex={effectiveConfigLayerIndex}
+          saving={setLayerConfigM.isPending}
+          onSave={async ({ kNode, kPoint, reviewChainTemplate }) => {
+            try {
+              await setLayerConfigM.mutateAsync({
+                layerIndex: effectiveConfigLayerIndex,
+                kNode,
+                kPoint,
+                reviewChainTemplate,
+              })
+              showSuccessFeedback(
+                "层配置已保存",
+                `第 ${effectiveConfigLayerIndex} 层现在使用 ${reviewChainTemplate.length} 个模板步骤，节点阈值 ${kNode}，复述点阈值 ${kPoint}。`,
+              )
+            } catch (err) {
+              showErrorFeedback("保存层配置失败", formatApiError(err))
+            }
+          }}
+          onSelectedLayerIndexChange={setConfigLayerIndex}
+        />
+
+        <div className="space-y-4">
           <Card className="theme-card">
             <CardHeader>
-              <CardTitle>项目路径</CardTitle>
-              <CardDescription>当前项目的目录绑定与同步策略。</CardDescription>
+              <CardTitle>服务端路径</CardTitle>
+              <CardDescription>只读查看当前项目的目录绑定。</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-3 text-sm">
+            <CardContent className="space-y-4 text-sm">
               {storageConfigQ.isLoading ? <p className="text-sm text-muted-foreground">加载中...</p> : null}
               {storageConfigQ.error ? <p className="text-sm text-destructive">{formatApiError(storageConfigQ.error)}</p> : null}
               {storageConfigQ.data ? (
-                <>
-                  <div className="space-y-1">
+                <div className="space-y-3">
+                  <div className="rounded-[1.1rem] border border-border/70 bg-background/85 px-4 py-3">
                     <div className="text-xs text-muted-foreground">项目根路径</div>
-                    <div className="break-all rounded-md border bg-muted/30 p-2 font-mono text-xs text-foreground">
-                      {storageConfigQ.data.projectRoot}
+                    <div className="mt-2 break-all font-mono text-xs text-foreground">{storageConfigQ.data.projectRoot}</div>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-[1.1rem] border border-border/70 bg-muted/20 px-4 py-3">
+                      <div className="text-xs text-muted-foreground">同步策略</div>
+                      <div className="mt-1 font-medium text-foreground">{describeFsSyncPolicy(storageConfigQ.data.fsSyncPolicy)}</div>
+                    </div>
+                    <div className="rounded-[1.1rem] border border-border/70 bg-muted/20 px-4 py-3">
+                      <div className="text-xs text-muted-foreground">学习对象目录</div>
+                      <div className="mt-1 break-all font-mono text-xs text-foreground">{storageConfigQ.data.learningObjectRoot}</div>
                     </div>
                   </div>
-
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">目录同步</span>
-                    <span>{describeFsSyncPolicy(storageConfigQ.data.fsSyncPolicy)}</span>
-                  </div>
-                </>
+                </div>
               ) : null}
               {!storageConfigQ.isLoading && !storageConfigQ.error && !storageConfigQ.data ? (
-                <div className="rounded-md border bg-muted/30 p-2 text-xs text-muted-foreground">
-                  暂时还没有项目路径信息。
-                </div>
+                <p className="text-sm text-muted-foreground">暂时还没有项目路径信息。</p>
               ) : null}
             </CardContent>
           </Card>
@@ -505,12 +467,8 @@ export function ProjectSettingsPage() {
             <Card className="theme-card">
               <CardHeader>
                 <CardTitle>语音转写</CardTitle>
+                <CardDescription>当前部署已禁用 ASR。</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-2 text-sm">
-                <div className="rounded-xl border bg-muted/30 p-4 text-muted-foreground">
-                  当前部署已禁用 ASR。
-                </div>
-              </CardContent>
             </Card>
           ) : (
             <AsrSettingsCard
@@ -541,35 +499,6 @@ export function ProjectSettingsPage() {
             />
           )}
         </div>
-
-        <LayerConfigEditor
-          key={layerConfigVersion}
-          canSave={!!pid}
-          initialConfig={effectiveLayerConfig}
-          layerIndexes={layerIndexes}
-          layersError={layersQ.error}
-          mutationError={setLayerConfigM.error}
-          projectConfigError={projectConfigQ.error}
-          selectedLayerIndex={effectiveConfigLayerIndex}
-          saving={setLayerConfigM.isPending}
-          onSave={async ({ kNode, kPoint, reviewChainTemplate }) => {
-            try {
-              await setLayerConfigM.mutateAsync({
-                layerIndex: effectiveConfigLayerIndex,
-                kNode,
-                kPoint,
-                reviewChainTemplate,
-              })
-              showSuccessFeedback(
-                "层配置已保存",
-                `第 ${effectiveConfigLayerIndex} 层现在使用 ${reviewChainTemplate.length} 个模板步骤，节点阈值 ${kNode}，复述点阈值 ${kPoint}。`,
-              )
-            } catch (err) {
-              showErrorFeedback("保存层配置失败", formatApiError(err))
-            }
-          }}
-          onSelectedLayerIndexChange={setConfigLayerIndex}
-        />
       </div>
 
       <Card className="theme-card">
@@ -577,7 +506,7 @@ export function ProjectSettingsPage() {
           <CardTitle>缺失材料修复</CardTitle>
           <CardDescription>旧实例会被标记为缺失，相关复述点仍需要在这里手动迁移。</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3 text-sm">
+        <CardContent className="space-y-4 text-sm">
           {instancesQ.isLoading ? <p className="text-sm text-muted-foreground">加载实例中...</p> : null}
           {instancesQ.error ? <p className="text-sm text-destructive">{formatApiError(instancesQ.error)}</p> : null}
           {!instancesQ.isLoading && !instancesQ.error && missingInstances.length === 0 ? (
@@ -682,29 +611,36 @@ function AsrSettingsCard({
     <Card className="theme-card">
       <CardHeader>
         <CardTitle>语音转写</CardTitle>
+        <CardDescription>按项目覆盖本机 Whisper 使用的模型。</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4 text-sm">
-        <div className="rounded-xl border bg-muted/30 p-4">
-          <div className="space-y-1">
-            <div className="font-semibold text-foreground">本机转写引擎</div>
+        <div className="flex items-center justify-between gap-3 rounded-[1.1rem] border border-border/70 bg-muted/20 px-4 py-3">
+          <div>
+            <div className="text-xs text-muted-foreground">转写引擎</div>
+            <div className="mt-1 font-medium text-foreground">内置 Whisper 运行时</div>
           </div>
-          <div className="mt-3 space-y-3">
-            <div>
-              <Label htmlFor="asrModel">模型（可选）</Label>
-              <Input
-                id="asrModel"
-                value={asrModel}
-                onChange={(e) => setAsrModel(e.target.value)}
-                placeholder="留空使用默认 small，例如：small / medium / large-v3"
-                disabled={isPending}
-              />
-            </div>
-          </div>
+          <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-700">
+            已启用
+          </span>
         </div>
 
-        <Button onClick={() => void onSave(asrModel)} disabled={isPending || disabled}>
-          {isPending ? "保存中..." : "保存转写设置"}
-        </Button>
+        <div className="space-y-2">
+          <Label htmlFor="asrModel">模型（可选）</Label>
+          <Input
+            id="asrModel"
+            value={asrModel}
+            onChange={(e) => setAsrModel(e.target.value)}
+            placeholder="留空使用默认 small，例如：small / medium / large-v3"
+            disabled={isPending}
+          />
+          <p className="text-xs text-muted-foreground">只在需要切换模型时填写，留空会继续使用默认值。</p>
+        </div>
+
+        <div className="flex justify-end">
+          <Button onClick={() => void onSave(asrModel)} disabled={isPending || disabled}>
+            {isPending ? "保存中..." : "保存转写设置"}
+          </Button>
+        </div>
 
         {isLoading ? <p className="text-sm text-muted-foreground">加载当前转写设置中...</p> : null}
         {queryError ? <p className="text-sm text-destructive">{formatApiError(queryError)}</p> : null}
@@ -741,6 +677,13 @@ function LayerConfigEditor({
   const [cfgKPoint, setCfgKPoint] = useState(() => String(initialConfig.aggregationKPoint))
   const [cfgTemplateItems, setCfgTemplateItems] = useState<TemplateEditorItem[]>(() => toTemplateEditorItems(initialConfig.reviewChainTemplate))
   const [cfgErr, setCfgErr] = useState<string | null>(null)
+  const templateSummary = summarizeTemplateItems(cfgTemplateItems.map((item) =>
+    item.kind === "CONVERGENCE"
+      ? { kind: "CONVERGENCE" as const }
+      : Number(item.count) > 1
+        ? { kind: "REVIEW_TASK" as const, count: Number(item.count) }
+        : { kind: "REVIEW_TASK" as const },
+  ))
 
   async function onSaveLayerConfig() {
     setCfgErr(null)
@@ -790,40 +733,66 @@ function LayerConfigEditor({
     <Card className="theme-card">
       <CardHeader>
         <CardTitle>层配置</CardTitle>
-        <CardDescription>配置每层的复习链模板与聚合阈值。</CardDescription>
+        <CardDescription>先看当前层摘要，再只调整本次要改的参数。</CardDescription>
       </CardHeader>
-      <CardContent className="space-y-3 text-sm">
-        <div className="grid gap-3">
-          <div>
-            <Label htmlFor="configLayer">目标层</Label>
-            <select
-              id="configLayer"
-              className="mt-2 h-9 w-full rounded-md border bg-background px-3 text-sm"
-              value={String(selectedLayerIndex)}
-              onChange={(e) => onSelectedLayerIndexChange(Number(e.target.value))}
-              disabled={layerIndexes.length === 0 || saving}
-            >
-              {layerIndexes.map((idx) => (
-                <option key={idx} value={idx}>
-                  第 {idx} 层
-                </option>
-              ))}
-            </select>
+      <CardContent className="space-y-4 text-sm">
+        <div className="theme-status-surface space-y-4 rounded-[1.35rem] border border-border/70 p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+            <div className="space-y-1">
+              <div className="theme-meta-strong">第 {selectedLayerIndex} 层</div>
+              <div className="text-sm text-muted-foreground">当前层的模板和聚合阈值会影响后续新登记的任务。</div>
+            </div>
+            <div className="w-full max-w-[220px] space-y-2">
+              <Label htmlFor="configLayer">切换层</Label>
+              <select
+                id="configLayer"
+                className="h-11 w-full rounded-xl border bg-background px-4 text-sm"
+                value={String(selectedLayerIndex)}
+                onChange={(e) => onSelectedLayerIndexChange(Number(e.target.value))}
+                disabled={layerIndexes.length === 0 || saving}
+              >
+                {layerIndexes.map((idx) => (
+                  <option key={idx} value={idx}>
+                    第 {idx} 层
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_160px_160px]">
+            <div className="rounded-[1.1rem] border border-border/70 bg-background/85 px-4 py-3">
+              <div className="text-xs text-muted-foreground">当前模板</div>
+              <div className="mt-1 text-sm font-medium text-foreground">{templateSummary}</div>
+            </div>
+            <div className="rounded-[1.1rem] border border-border/70 bg-background/85 px-4 py-3">
+              <div className="text-xs text-muted-foreground">节点阈值</div>
+              <div className="mt-1 text-lg font-semibold text-foreground">{initialConfig.aggregationKNode}</div>
+            </div>
+            <div className="rounded-[1.1rem] border border-border/70 bg-background/85 px-4 py-3">
+              <div className="text-xs text-muted-foreground">复述点阈值</div>
+              <div className="mt-1 text-lg font-semibold text-foreground">{initialConfig.aggregationKPoint}</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-4">
+          <div className="grid gap-4 rounded-[1.35rem] border border-border/70 bg-muted/20 p-4 md:grid-cols-2">
+            <div className="space-y-2">
               <Label htmlFor="kNode">节点阈值</Label>
               <Input id="kNode" value={cfgKNode} onChange={(e) => setCfgKNode(e.target.value)} disabled={saving} />
             </div>
-            <div>
+            <div className="space-y-2">
               <Label htmlFor="kPoint">复述点阈值</Label>
               <Input id="kPoint" value={cfgKPoint} onChange={(e) => setCfgKPoint(e.target.value)} disabled={saving} />
             </div>
           </div>
 
-          <div className="space-y-3">
-            <Label>复习链模板</Label>
+          <div className="space-y-3 rounded-[1.35rem] border border-border/70 bg-muted/20 p-4">
+            <div className="space-y-1">
+              <Label>复习链模板</Label>
+              <p className="text-xs text-muted-foreground">这里只编辑初始化顺序，机制说明收进下方折叠区。</p>
+            </div>
 
             <div className="flex flex-wrap gap-2">
               <Button
@@ -846,9 +815,9 @@ function LayerConfigEditor({
               </Button>
             </div>
 
-            <div className="space-y-2">
+            <div className="overflow-hidden rounded-[1.1rem] border border-border/70 bg-background/90">
               {cfgTemplateItems.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-border/70 bg-muted/20 px-4 py-6 text-sm text-muted-foreground">
+                <div className="px-4 py-6 text-sm text-muted-foreground">
                   还没有模板步骤，请先追加收敛或复习任务。
                 </div>
               ) : null}
@@ -856,57 +825,81 @@ function LayerConfigEditor({
               {cfgTemplateItems.map((item, index) => (
                 <div
                   key={item.id}
-                  className="flex flex-col gap-3 rounded-xl border border-border/70 bg-muted/20 p-4 md:flex-row md:items-end md:justify-between"
+                  className="border-t border-border/70 p-4 first:border-t-0"
                 >
-                  <div className="flex-1 space-y-2">
-                    <div className="text-sm font-medium text-foreground">第 {index + 1} 步</div>
-                    <div className="rounded-lg border bg-background px-3 py-2 text-sm text-foreground">
-                      {item.kind === "CONVERGENCE" ? "收敛" : "复习任务"}
-                    </div>
-                    {item.kind === "REVIEW_TASK" ? (
-                      <div className="max-w-[220px] space-y-1">
-                        <Label htmlFor={`template-count-${item.id}`}>连续复习次数</Label>
-                        <Input
-                          id={`template-count-${item.id}`}
-                          inputMode="numeric"
-                          value={item.count}
-                          onChange={(e) =>
-                            setCfgTemplateItems((prev) =>
-                              prev.map((current) =>
-                                current.id === item.id
-                                  ? {
-                                      ...current,
-                                      count: e.target.value,
-                                    }
-                                  : current,
-                              ),
-                            )
-                          }
-                          disabled={saving}
-                        />
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="flex items-start gap-3">
+                      <span className="inline-flex items-center rounded-full border border-[#d8e3ee] bg-[#f6f9fc] px-2.5 py-1 text-xs font-semibold text-[#5f7790]">
+                          第 {index + 1} 步
+                      </span>
+                      <div className="space-y-1">
+                        <div className="text-sm font-medium text-foreground">{item.kind === "CONVERGENCE" ? "收敛" : "复习任务"}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {item.kind === "CONVERGENCE"
+                            ? "完成一轮后决定是否继续生成复习任务。"
+                            : "在当前范围上直接生成待执行复习任务。"}
+                        </div>
                       </div>
-                    ) : (
-                      <div className="text-xs text-muted-foreground">收敛步骤不需要额外参数。</div>
-                    )}
-                  </div>
+                    </div>
 
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setCfgTemplateItems((prev) => prev.filter((current) => current.id !== item.id))}
-                    disabled={saving}
-                  >
-                    删除
-                  </Button>
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+                      {item.kind === "REVIEW_TASK" ? (
+                        <div className="w-full max-w-[220px] space-y-2">
+                          <Label htmlFor={`template-count-${item.id}`}>次数</Label>
+                          <Input
+                            id={`template-count-${item.id}`}
+                            inputMode="numeric"
+                            value={item.count}
+                            onChange={(e) =>
+                              setCfgTemplateItems((prev) =>
+                                prev.map((current) =>
+                                  current.id === item.id
+                                    ? {
+                                        ...current,
+                                        count: e.target.value,
+                                      }
+                                    : current,
+                                ),
+                              )
+                            }
+                            disabled={saving}
+                          />
+                        </div>
+                      ) : (
+                        <div className="text-xs text-muted-foreground">
+                          这个步骤没有额外参数。
+                        </div>
+                      )}
+
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setCfgTemplateItems((prev) => prev.filter((current) => current.id !== item.id))}
+                        disabled={saving}
+                      >
+                        删除
+                      </Button>
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>
+
+            <details className="rounded-[1.1rem] border border-border/70 bg-background/70 px-4 py-3">
+              <summary className="cursor-pointer list-none text-sm font-medium text-foreground">了解模板机制</summary>
+              <div className="mt-3 space-y-2 text-xs leading-6 text-muted-foreground">
+                <p>步骤顺序就是系统创建新复习链时的初始化顺序，越靠前越先执行。</p>
+                <p>模板里至少需要一个“收敛”步骤，否则系统无法继续推进后续轮次。</p>
+              </div>
+            </details>
           </div>
 
-          <Button onClick={() => void onSaveLayerConfig()} disabled={saving || !canSave}>
-            {saving ? "保存中..." : "保存配置"}
-          </Button>
+          <div className="flex justify-end">
+            <Button onClick={() => void onSaveLayerConfig()} disabled={saving || !canSave}>
+              {saving ? "保存中..." : "保存配置"}
+            </Button>
+          </div>
 
           {layersError ? <p className="text-sm text-destructive">{formatApiError(layersError)}</p> : null}
           {projectConfigError ? <p className="text-sm text-destructive">{formatApiError(projectConfigError)}</p> : null}

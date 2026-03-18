@@ -1,13 +1,16 @@
 import { useEffect, useState } from "react"
 
-import type { ClientMediaManifestEntryInput } from "@/ui/api/mediaManifest"
-
 type DirectoryBindingPermission = "unsupported" | "missing" | "prompt" | "granted" | "denied"
 
 type DirectoryRecord = {
   projectId: string
   handle: FileSystemDirectoryHandle
   savedAt: string
+}
+
+export type ProjectDirectoryScanResult = {
+  rootTitle: string
+  relativeFilePaths: string[]
 }
 
 export type ProjectDirectoryBindingState = {
@@ -21,21 +24,7 @@ export type ProjectDirectoryBindingState = {
 const DB_NAME = "plm-local-media"
 const STORE_NAME = "projectDirectories"
 const PROJECT_DIRECTORY_CHANGED_EVENT = "plm-project-directory-changed"
-const MEDIA_EXTENSIONS: Record<string, "video" | "audio"> = {
-  ".mp4": "video",
-  ".mov": "video",
-  ".mkv": "video",
-  ".webm": "video",
-  ".avi": "video",
-  ".m4v": "video",
-  ".mp3": "audio",
-  ".wav": "audio",
-  ".m4a": "audio",
-  ".aac": "audio",
-  ".flac": "audio",
-  ".ogg": "audio",
-  ".opus": "audio",
-}
+const IMPORTABLE_MEDIA_EXTENSIONS = new Set([".mp4", ".mov", ".mkv", ".webm", ".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus"])
 
 function directoryPickerSupported() {
   return typeof window !== "undefined" && "showDirectoryPicker" in window && typeof indexedDB !== "undefined"
@@ -181,48 +170,38 @@ export async function resolveProjectFile(projectId: string, materialId: string):
   return await fileHandle.getFile()
 }
 
-export async function scanProjectDirectoryManifest(
-  projectId: string,
-): Promise<{ rootTitle: string; entries: ClientMediaManifestEntryInput[] }> {
+export async function scanProjectDirectoryMedia(projectId: string): Promise<ProjectDirectoryScanResult> {
   const record = await loadDirectoryRecord(projectId)
   if (!record) {
-    throw new Error("尚未为当前项目绑定本地目录")
+    throw new Error("当前项目还没有绑定本地素材目录。")
   }
+
   const permission = await queryHandlePermission(record.handle)
   if (permission !== "granted") {
-    throw new Error("当前目录尚未授予读取权限")
+    throw new Error("当前浏览器还没有授予目录读取权限，请先在项目设置里完成授权。")
   }
 
-  const entries: ClientMediaManifestEntryInput[] = []
+  const collected = new Set<string>()
 
-  async function walk(current: FileSystemDirectoryHandle, parentParts: string[]) {
-    for await (const [name, handle] of current.entries()) {
-      if (name.startsWith(".")) continue
+  async function walk(dir: FileSystemDirectoryHandle, prefix: string[]) {
+    for await (const [name, handle] of dir.entries()) {
+      if (!name || name.startsWith(".")) continue
       if (handle.kind === "directory") {
-        await walk(handle as FileSystemDirectoryHandle, [...parentParts, name])
+        await walk(handle as FileSystemDirectoryHandle, [...prefix, name])
         continue
       }
-      const extIndex = name.lastIndexOf(".")
-      const ext = extIndex >= 0 ? name.slice(extIndex).toLowerCase() : ""
-      const mediaKind = MEDIA_EXTENSIONS[ext]
-      if (!mediaKind) continue
-      const file = await (handle as FileSystemFileHandle).getFile()
-      const relativePath = [...parentParts, name].join("/")
-      entries.push({
-        relativePath,
-        displayName: file.name,
-        mediaKind,
-        sizeBytes: file.size,
-        modifiedAt: new Date(file.lastModified).toISOString(),
-      })
+      const dotIndex = name.lastIndexOf(".")
+      const ext = dotIndex >= 0 ? name.slice(dotIndex).toLowerCase() : ""
+      if (!IMPORTABLE_MEDIA_EXTENSIONS.has(ext)) continue
+      collected.add([...prefix, name].join("/"))
     }
   }
 
   await walk(record.handle, [])
-  entries.sort((a, b) => a.relativePath.localeCompare(b.relativePath))
+
   return {
-    rootTitle: record.handle.name || "Local Media",
-    entries,
+    rootTitle: record.handle.name || "已授权目录",
+    relativeFilePaths: [...collected].sort((a, b) => a.localeCompare(b, "en")),
   }
 }
 

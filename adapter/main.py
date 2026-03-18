@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import time
@@ -13,12 +12,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from adapter.desktop_agent_janitor import collect_desktop_agent_relay_status
 from adapter.auth import auth_error_response, resolve_session_user
 from adapter.errors import register_exception_handlers
-from adapter.deps import get_auth_store, get_desktop_agent_runtime
+from adapter.deps import get_auth_store
 from adapter.runtime_status import collect_runtime_status
-from adapter.routers import asr, auth, desktop_agents, layers, learning_tasks, materials, media, projects, push, review, system, validation
+from adapter.routers import asr, auth, layers, learning_tasks, materials, media, projects, push, review, system, validation
 from backend.system.hosted_deployment_checks import hosted_runtime_warnings, validate_hosted_runtime_or_raise
 from backend.system.http_runtime_config import current_http_runtime_config
 from backend.system.runtime_features import current_runtime_features
@@ -37,52 +35,6 @@ def _configure_logging() -> None:
 
 
 logger = logging.getLogger("learningpyramid.http")
-
-
-def _env_non_negative_float(name: str, default: float) -> float:
-    raw = (os.getenv(name) or "").strip()
-    if not raw:
-        return float(default)
-    try:
-        value = float(raw)
-    except Exception:
-        return float(default)
-    return 0.0 if value <= 0 else float(value)
-
-
-def _desktop_agent_janitor_interval_seconds() -> float:
-    return _env_non_negative_float("PLM_AGENT_JANITOR_INTERVAL_SECONDS", 15.0)
-
-
-async def _desktop_agent_janitor_loop(stop_event: asyncio.Event, interval_seconds: float) -> None:
-    while not stop_event.is_set():
-        try:
-            report = await asyncio.to_thread(
-                collect_desktop_agent_relay_status,
-                runtime=get_desktop_agent_runtime(),
-                auth_store=get_auth_store(),
-                dispatch_alert_webhooks=True,
-            )
-            expired_streams = len(report.get("expiredStreamIds", ()))
-            expired_probes = len(report.get("expiredProbeIds", ()))
-            expired_hls_jobs = len(report.get("expiredHlsJobIds", ()))
-            pruned_cache = int(report.get("hlsCachePrunedCount", 0))
-            if expired_streams or expired_probes or expired_hls_jobs or pruned_cache:
-                logger.info(
-                    "desktop_agent_janitor_reaped streams=%s probes=%s hls_jobs=%s cache_entries=%s",
-                    expired_streams,
-                    expired_probes,
-                    expired_hls_jobs,
-                    pruned_cache,
-                )
-        except Exception:
-            logger.exception("desktop_agent_janitor_pass_failed")
-
-        try:
-            await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
-        except asyncio.TimeoutError:
-            continue
-
 
 def _frontend_dist_dir() -> Path:
     return resource_root() / "frontend" / "dist"
@@ -110,25 +62,8 @@ def _is_public_api_path(path: str) -> bool:
         "/api/docs",
         "/api/redoc",
         "/api/system/capabilities",
-        "/api/system/desktop-agent-release",
-        "/api/desktop-agents/pair",
-        "/api/desktop-agents/refresh-token",
-        "/api/desktop-agents/setup-bootstrap",
-        "/api/desktop-agents/setup-complete",
-        "/api/desktop-agents/manifest-sync",
-        "/api/desktop-agents/diagnostic-events",
     }
     if path in public_paths:
-        return True
-    if path.startswith("/api/desktop-agents/stream-sessions/"):
-        return True
-    if path.startswith("/api/desktop-agents/hls-jobs/"):
-        return True
-    if path.startswith("/api/media/streams/"):
-        return True
-    if path.startswith("/api/projects/") and "/media/instances/" in path and path.endswith("/relay-file"):
-        return True
-    if path.startswith("/api/system/desktop-agent-release/assets/"):
         return True
     return path.startswith("/api/auth/")
 
@@ -155,8 +90,6 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         ready, runtime = collect_runtime_status()
-        janitor_task: asyncio.Task[None] | None = None
-        janitor_stop: asyncio.Event | None = None
         try:
             sql_cfg = current_sql_runtime_config()
             sql_backend = sql_cfg.backend
@@ -173,18 +106,10 @@ def create_app() -> FastAPI:
             runtime.get("asrEnabled"),
             http_config.public_origin,
         )
-        janitor_interval_seconds = _desktop_agent_janitor_interval_seconds()
-        if features.app_mode == "hosted" and janitor_interval_seconds > 0:
-            janitor_stop = asyncio.Event()
-            janitor_task = asyncio.create_task(_desktop_agent_janitor_loop(janitor_stop, janitor_interval_seconds))
-            logger.info("desktop_agent_janitor_started interval_seconds=%s", janitor_interval_seconds)
         try:
             yield
         finally:
-            if janitor_stop is not None:
-                janitor_stop.set()
-            if janitor_task is not None:
-                await janitor_task
+            return
 
     app = FastAPI(
         title=f"{APP_NAME} API",
@@ -266,7 +191,6 @@ def create_app() -> FastAPI:
         return await call_next(request)
 
     app.include_router(auth.router, prefix="/api", tags=["auth"])
-    app.include_router(desktop_agents.router, prefix="/api", tags=["desktop-agents"])
     app.include_router(projects.router, prefix="/api", tags=["projects"])
     app.include_router(materials.router, prefix="/api", tags=["materials"])
     app.include_router(media.router, prefix="/api", tags=["media"])

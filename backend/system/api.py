@@ -4,7 +4,7 @@ import os
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from enum import Enum
 from pathlib import Path, PurePosixPath
 from typing import Any, Optional, Sequence, Tuple
@@ -103,16 +103,6 @@ class TickAttemptResult(str, Enum):
     GATE_BLOCKED = "GATE_BLOCKED"
 
 MAX_ASR_WINDOW_MS: int = 5 * 60 * 1000
-
-
-@dataclass(frozen=True, slots=True)
-class ManifestMediaEntry:
-    relative_path: PurePosixPath
-    display_name: str | None = None
-    media_kind: str | None = None
-    size_bytes: int | None = None
-    modified_at: str | None = None
-
 
 class SystemAPI:
     """
@@ -375,8 +365,13 @@ class SystemAPI:
         s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
         try:
             cfg = self.sys.project_storage_config_repo.get(s)
+            binding = self.sys.project_material_source_binding_repo.get(s)
         finally:
             self.sys.rollback(s)
+
+        if binding.source_kind == MaterialSourceKind.BROWSER_LOCAL:
+            self._startup_fs_sync_done.add(pid_k)
+            return
 
         if cfg.fs_sync_policy != FsSyncPolicy.STARTUP_SYNC:
             self._startup_fs_sync_done.add(pid_k)
@@ -662,79 +657,44 @@ class SystemAPI:
                 self.sys.rollback(s)
             raise
 
-    def _get_aggregation_cycle_state(self, s: MutationSession, layer_index: int) -> AggregationCycleState:
-        layer = self.sys.layer_repo.get_by_index(s, layer_index)
-        return layer.aggregation_cycle_state
-
-    def sync_learning_objects_from_manifest(
+    def import_learning_objects_from_browser_scan(
         self,
         project_id: ProjectId,
         *,
         root_title: str | None,
-        manifest_entries: Sequence[ManifestMediaEntry | dict[str, object] | str | PurePosixPath],
+        relative_file_paths: Sequence[str],
     ) -> dict[str, object]:
-        normalized_entries: list[ManifestMediaEntry] = []
-        seen_paths: set[str] = set()
-        media_kind_counts: dict[str, int] = {}
+        allowed_exts = {".mp4", ".mov", ".mkv", ".webm", ".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus"}
 
-        def _normalize_manifest_entry(raw: ManifestMediaEntry | dict[str, object] | str | PurePosixPath) -> ManifestMediaEntry:
-            if isinstance(raw, ManifestMediaEntry):
-                relative_raw = raw.relative_path
-                display_name = raw.display_name
-                media_kind = raw.media_kind
-                size_bytes = raw.size_bytes
-                modified_at = raw.modified_at
-            elif isinstance(raw, (str, PurePosixPath)):
-                relative_raw = raw
-                display_name = None
-                media_kind = None
-                size_bytes = None
-                modified_at = None
-            else:
-                relative_raw = raw.get("relativePath", "")
-                display_name = None if raw.get("displayName") is None else str(raw.get("displayName")).strip() or None
-                media_kind = None if raw.get("mediaKind") is None else str(raw.get("mediaKind")).strip() or None
-                size_bytes_raw = raw.get("sizeBytes")
-                if size_bytes_raw is None:
-                    size_bytes = None
-                else:
-                    try:
-                        size_bytes = int(size_bytes_raw)
-                    except Exception as exc:
-                        raise PreconditionFailure("sync_learning_objects_from_manifest: size_bytes must be an integer") from exc
-                modified_at = None if raw.get("modifiedAt") is None else str(raw.get("modifiedAt")).strip() or None
-            rel = normalize_material_id_to_purepath(relative_raw)
-            text = rel.as_posix().strip()
-            if not text:
-                raise PreconditionFailure("sync_learning_objects_from_manifest: relative_path must be non-empty")
+        def _normalize_rel_path(raw: str) -> PurePosixPath:
+            normalized_raw = str(raw or "").replace("\\", "/").strip()
+            if not normalized_raw:
+                raise PreconditionFailure("import_learning_objects_from_browser_scan: relative path must be non-empty")
+            if normalized_raw.startswith("/"):
+                raise PreconditionFailure("import_learning_objects_from_browser_scan: absolute path is not allowed")
+            if len(normalized_raw) >= 2 and normalized_raw[1] == ":" and normalized_raw[0].isalpha():
+                raise PreconditionFailure("import_learning_objects_from_browser_scan: drive path is not allowed")
+            rel = normalize_material_id_to_purepath(normalized_raw)
+            if rel.as_posix() in {"", "."}:
+                raise PreconditionFailure("import_learning_objects_from_browser_scan: relative path must not be empty")
             if rel.is_absolute():
-                raise PreconditionFailure("sync_learning_objects_from_manifest: relative_path must be relative")
-            if ".." in rel.parts:
-                raise PreconditionFailure("sync_learning_objects_from_manifest: relative_path must not contain '..'")
-            if size_bytes is not None and int(size_bytes) < 0:
-                raise PreconditionFailure("sync_learning_objects_from_manifest: size_bytes must be >= 0")
-            return ManifestMediaEntry(
-                relative_path=PurePosixPath(text),
-                display_name=display_name,
-                media_kind=media_kind,
-                size_bytes=size_bytes,
-                modified_at=modified_at,
-            )
+                raise PreconditionFailure("import_learning_objects_from_browser_scan: absolute path is not allowed")
+            if any(part in {"", ".", ".."} for part in rel.parts):
+                raise PreconditionFailure("import_learning_objects_from_browser_scan: invalid relative path")
+            if rel.suffix.lower() not in allowed_exts:
+                raise PreconditionFailure(
+                    f"import_learning_objects_from_browser_scan: unsupported media extension: {rel.suffix or '(none)'}"
+                )
+            return rel
 
-        for raw in manifest_entries:
-            entry = _normalize_manifest_entry(raw)
-            text = entry.relative_path.as_posix()
-            if text in seen_paths:
-                continue
-            seen_paths.add(text)
-            normalized_entries.append(entry)
-            if entry.media_kind is not None:
-                key = str(entry.media_kind).strip().lower() or "unknown"
-                media_kind_counts[key] = media_kind_counts.get(key, 0) + 1
+        def _files_node_id_from_dir(rel_path: PurePosixPath) -> LearningObjectNodeId:
+            seed = f"FILES:{rel_path.as_posix()}".encode("utf-8")
+            return LearningObjectNodeId(f"lonfs_files_{hashlib.sha256(seed).hexdigest()[:32]}")
 
-        normalized_entries.sort(key=lambda item: item.relative_path.as_posix())
-        file_rel = [item.relative_path for item in normalized_entries]
-        metadata_by_file = {item.relative_path: item for item in normalized_entries}
+        file_rel = sorted({_normalize_rel_path(item) for item in relative_file_paths}, key=lambda p: p.as_posix())
+        if not file_rel:
+            raise PreconditionFailure("当前已授权目录中没有找到可导入的媒体文件")
+
         dir_rel_set: set[PurePosixPath] = {PurePosixPath(".")}
         for rel in file_rel:
             parent = rel.parent
@@ -744,8 +704,6 @@ class SystemAPI:
                     break
                 parent = parent.parent
         dir_rel = sorted(dir_rel_set, key=lambda p: p.as_posix())
-
-        root_label = (str(root_title or "").strip() or "Local Media").strip()
 
         s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
         try:
@@ -769,9 +727,11 @@ class SystemAPI:
 
             leaf_id_by_file: dict[PurePosixPath, LearningObjectNodeId] = {rel: node_id_from_rel_path(rel, "LEAF") for rel in file_rel}
             dir_id_by_dir: dict[PurePosixPath, LearningObjectNodeId] = {rel: node_id_from_rel_path(rel, "DIR") for rel in dir_rel}
+            files_id_by_dir: dict[PurePosixPath, LearningObjectNodeId] = {rel: _files_node_id_from_dir(rel) for rel in dir_rel}
 
             now = now_utc_ms()
             scanned_instance_keys = {id_canonical_text(x) for x in instance_id_by_file.values()}
+
             instances_to_add: list[Instance] = []
             instances_to_update: list[Instance] = []
             created_instances = 0
@@ -819,45 +779,54 @@ class SystemAPI:
                     instances_to_update.append(desired)
                     updated_instances += 1
 
-            nodes_out: list[LearningObjectLeaf | LearningObjectContainer] = []
+            child_dirs_by_dir: dict[PurePosixPath, list[PurePosixPath]] = {rel: [] for rel in dir_rel}
+            file_children_by_dir: dict[PurePosixPath, list[PurePosixPath]] = {rel: [] for rel in dir_rel}
+            for rel in dir_rel:
+                if rel == PurePosixPath("."):
+                    continue
+                child_dirs_by_dir[rel.parent].append(rel)
             for rel in file_rel:
-                parent_rel = rel.parent
-                parent_id = dir_id_by_dir.get(parent_rel)
-                if parent_id is None:
-                    raise PreconditionFailure("sync_learning_objects_from_manifest: missing parent dir node")
-                manifest_entry = metadata_by_file[rel]
+                file_children_by_dir[rel.parent].append(rel)
+            for rel in dir_rel:
+                child_dirs_by_dir[rel].sort(key=lambda p: p.as_posix())
+                file_children_by_dir[rel].sort(key=lambda p: p.as_posix())
+
+            display_root_title = (root_title or "").strip() or "已授权目录"
+            current_binding = self.sys.project_material_source_binding_repo.get(s)
+            desired_binding = ProjectMaterialSourceBinding.create(
+                project_id,
+                source_kind=MaterialSourceKind.BROWSER_LOCAL,
+                source_root_label=display_root_title,
+                updated_at=now_utc_ms(),
+            )
+            binding_changed = current_binding != desired_binding
+            nodes_out: list[LearningObjectLeaf | LearningObjectContainer] = []
+
+            for rel in dir_rel:
+                leaf_children = tuple(leaf_id_by_file[path] for path in file_children_by_dir.get(rel, []))
+                files_rel = PurePosixPath("__files__") if rel == PurePosixPath(".") else rel / "__files__"
                 nodes_out.append(
-                    LearningObjectLeaf(
+                    LearningObjectContainer(
                         source="FILESYSTEM",
                         project_id=project_id,
-                        node_id=leaf_id_by_file[rel],
-                        relative_path=rel,
-                        parent_id=parent_id,
-                        instance_id=instance_id_by_file[rel],
-                        title=str(manifest_entry.display_name or rel.name).strip() or rel.name,
+                        node_id=files_id_by_dir[rel],
+                        relative_path=files_rel,
+                        parent_id=dir_id_by_dir[rel],
+                        children=leaf_children,
+                        title="Files",
                     )
                 )
 
-            children_by_dir: dict[PurePosixPath, list[tuple[str, LearningObjectNodeId]]] = {d: [] for d in dir_rel}
-            for d in dir_rel:
-                if d.as_posix() == ".":
-                    continue
-                children_by_dir[d.parent].append((d.as_posix(), dir_id_by_dir[d]))
-            for rel in file_rel:
-                children_by_dir[rel.parent].append((rel.as_posix(), leaf_id_by_file[rel]))
-
             for rel in dir_rel:
-                children = children_by_dir.get(rel, [])
-                children.sort(key=lambda x: x[0])
-                child_ids = tuple(x[1] for x in children)
-                if rel.as_posix() == ".":
+                sub_dir_ids = tuple(dir_id_by_dir[path] for path in child_dirs_by_dir.get(rel, []))
+                children = tuple(list(sub_dir_ids) + [files_id_by_dir[rel]])
+                if rel == PurePosixPath("."):
                     parent_id = None
-                    title = root_label
+                    title = display_root_title
                 else:
-                    parent_id = dir_id_by_dir.get(rel.parent)
+                    parent_id = dir_id_by_dir[rel.parent]
                     title = rel.name
-                    if parent_id is None:
-                        raise PreconditionFailure("sync_learning_objects_from_manifest: missing parent dir id")
+
                 nodes_out.append(
                     LearningObjectContainer(
                         source="FILESYSTEM",
@@ -865,8 +834,21 @@ class SystemAPI:
                         node_id=dir_id_by_dir[rel],
                         relative_path=rel,
                         parent_id=parent_id,
-                        children=child_ids,
+                        children=children,
                         title=title,
+                    )
+                )
+
+            for rel in file_rel:
+                nodes_out.append(
+                    LearningObjectLeaf(
+                        source="FILESYSTEM",
+                        project_id=project_id,
+                        node_id=leaf_id_by_file[rel],
+                        relative_path=rel,
+                        parent_id=files_id_by_dir[rel.parent],
+                        instance_id=instance_id_by_file[rel],
+                        title=rel.name,
                     )
                 )
 
@@ -874,6 +856,8 @@ class SystemAPI:
                 self.sys.instance_repo.add(s, inst)
             for inst in instances_to_update:
                 self.sys.instance_repo.update(s, inst)
+            if binding_changed:
+                self.sys.project_material_source_binding_repo.set(s, desired_binding)
 
             replaced_nodes_count = 0
             cur_nodes = self.sys.learning_object_repo.all(s)
@@ -883,7 +867,7 @@ class SystemAPI:
                 self.sys.learning_object_repo.replace_all_from_fs(s, nodes_out)
                 replaced_nodes_count = len(nodes_out)
 
-            unchanged = created_instances == 0 and updated_instances == 0 and replaced_nodes_count == 0
+            unchanged = created_instances == 0 and updated_instances == 0 and replaced_nodes_count == 0 and not binding_changed
             report: dict[str, object] = {
                 "unchanged": bool(unchanged),
                 "created_instances_count": int(created_instances),
@@ -893,34 +877,37 @@ class SystemAPI:
             }
 
             if unchanged:
+                self._startup_fs_sync_done.add(id_canonical_text(project_id))
                 self.sys.rollback(s)
                 return report
 
+            root_hash = hashlib.sha256(display_root_title.encode("utf-8")).hexdigest()[:16]
             self._append_audit_event(
                 s,
                 kind=AuditEventKind.SYNC_LEARNING_OBJECTS_FROM_FS,
-                api_name="sync_learning_objects_from_manifest",
+                api_name="import_learning_objects_from_browser_scan",
                 payload={
-                    "source": "CLIENT_MANIFEST",
+                    "browserRootHash": root_hash,
                     "filesCount": len(file_rel),
                     "dirsCount": len(dir_rel),
-                    "rootTitle": root_label,
-                    "displayNameCount": sum(1 for item in normalized_entries if item.display_name),
-                    "modifiedAtCount": sum(1 for item in normalized_entries if item.modified_at),
-                    "sizeBytesCount": sum(1 for item in normalized_entries if item.size_bytes is not None),
-                    "mediaKindCounts": dict(sorted(media_kind_counts.items())),
                     "createdInstancesCount": int(created_instances),
                     "markedMissingCount": int(marked_missing_instances),
                     "replacedLearningObjectNodesCount": int(replaced_nodes_count),
                     "unchanged": bool(unchanged),
                 },
             )
+
             self.sys.commit(s)
+            self._startup_fs_sync_done.add(id_canonical_text(project_id))
             return report
         except Exception:
             if s.state == SessionState.OPEN:
                 self.sys.rollback(s)
             raise
+
+    def _get_aggregation_cycle_state(self, s: MutationSession, layer_index: int) -> AggregationCycleState:
+        layer = self.sys.layer_repo.get_by_index(s, layer_index)
+        return layer.aggregation_cycle_state
 
     def _set_aggregation_cycle_state(self, s: MutationSession, layer_index: int, state: AggregationCycleState) -> None:
         s.assert_open()
@@ -2472,7 +2459,6 @@ class SystemAPI:
         project_id: ProjectId,
         *,
         source_kind: MaterialSourceKind,
-        desktop_agent_id: str | None = None,
         source_root_label: str | None = None,
     ) -> None:
         self._ensure_startup_fs_sync_done(project_id)
@@ -2481,7 +2467,6 @@ class SystemAPI:
             binding = ProjectMaterialSourceBinding.create(
                 project_id,
                 source_kind=source_kind,
-                desktop_agent_id=desktop_agent_id,
                 source_root_label=source_root_label,
                 updated_at=now_utc_ms(),
             )
@@ -2492,7 +2477,6 @@ class SystemAPI:
                 api_name="set_project_material_source_binding",
                 payload={
                     "sourceKind": binding.source_kind.value,
-                    "desktopAgentId": None if binding.desktop_agent_id is None else str(binding.desktop_agent_id),
                     "sourceRootLabel": binding.source_root_label,
                 },
             )
@@ -3357,7 +3341,6 @@ API_WHITELIST: dict[str, SchedulingEffect] = {
     "add_learning_object_leaf": SchedulingEffect.NONE,
     "add_learning_object_container": SchedulingEffect.NONE,
     "sync_learning_objects_from_fs": SchedulingEffect.NONE,
-    "sync_learning_objects_from_manifest": SchedulingEffect.NONE,
     "set_project_material_source_binding": SchedulingEffect.NONE,
     "list_missing_instances": SchedulingEffect.NONE,
     "list_recall_points_by_instance": SchedulingEffect.NONE,

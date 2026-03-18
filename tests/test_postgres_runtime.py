@@ -129,15 +129,6 @@ def test_postgres_runtime_records_schema_migrations_and_uses_hot_indexes() -> No
         ).fetchall()
         assert rows == [
             ("auth", 1, "initial_auth_schema"),
-            ("auth", 2, "desktop_agent_auth_tables"),
-            ("auth", 3, "media_stream_sessions"),
-            ("auth", 4, "desktop_media_probe_cache"),
-            ("auth", 5, "hls_cache_entries"),
-            ("auth", 6, "desktop_agent_hls_job_audits"),
-            ("auth", 7, "desktop_agent_metric_samples"),
-            ("auth", 8, "desktop_agent_diagnostic_events"),
-            ("auth", 9, "desktop_media_probe_cache_extended_metadata"),
-            ("auth", 10, "desktop_agent_hls_job_audits_cache_key_index"),
             ("store", 1, "initial_store_schema"),
             ("store", 2, "store_hot_indexes"),
         ]

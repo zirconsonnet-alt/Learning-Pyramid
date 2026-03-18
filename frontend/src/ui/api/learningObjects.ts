@@ -32,6 +32,13 @@ export type LearningObjectNode = z.infer<typeof LearningObjectNodeSchema>
 export const LearningObjectRootsSchema = z.object({ rootLearningObjectNodeIds: z.array(z.string()) })
 
 const AddLearningObjectResultSchema = z.object({ nodeId: z.string() })
+const ImportLearningObjectsFromBrowserResultSchema = z.object({
+  unchanged: z.boolean(),
+  created_instances_count: z.number().int(),
+  marked_missing_count: z.number().int(),
+  replaced_learning_object_nodes_count: z.number().int(),
+  warnings: z.array(z.unknown()),
+})
 
 export function addLearningObjectLeaf(
   projectId: string,
@@ -75,6 +82,21 @@ export function listLearningObjectNodes(projectId: string) {
   return apiRequest({
     path: `/projects/${projectId}/learning-object-nodes`,
     responseSchema: z.array(LearningObjectNodeSchema),
+  })
+}
+
+export function importLearningObjectsFromBrowser(
+  projectId: string,
+  params: { rootTitle?: string; relativeFilePaths: string[] },
+) {
+  return apiRequest({
+    path: `/projects/${projectId}/import-learning-objects-from-browser`,
+    method: "POST",
+    body: {
+      rootTitle: params.rootTitle,
+      relativeFilePaths: params.relativeFilePaths,
+    },
+    responseSchema: ImportLearningObjectsFromBrowserResultSchema,
   })
 }
 

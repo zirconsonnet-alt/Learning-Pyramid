@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from adapter.deps import get_api, get_auth_store, get_desktop_agent_runtime
+from adapter.deps import get_api, get_auth_store
 from adapter.main import create_app
 from backend.system.api import SystemAPI
 from backend.system.auth_store import SQLiteAuthStore
@@ -20,7 +20,6 @@ from tools.restore_runtime_bundle import restore_runtime_bundle
 def _reset_caches() -> None:
     get_api.cache_clear()
     get_auth_store.cache_clear()
-    get_desktop_agent_runtime.cache_clear()
 
 
 @pytest.fixture()
@@ -91,33 +90,6 @@ def test_postgres_hosted_app_project_lifecycle_and_runtime_health(hosted_postgre
     final_list = client.get("/api/projects")
     assert final_list.status_code == 200
     assert final_list.json() == {"ok": True, "data": []}
-
-
-def test_postgres_hosted_app_desktop_agent_pairing_flow(hosted_postgres_env: str) -> None:
-    client = TestClient(create_app())
-
-    register = client.post("/api/auth/register", json={"email": "owner@example.com", "password": "password123"})
-    assert register.status_code == 200
-
-    pairing = client.post("/api/desktop-agents/pairing-codes")
-    assert pairing.status_code == 200
-    pairing_code = pairing.json()["data"]["pairingCode"]
-
-    paired = client.post(
-        "/api/desktop-agents/pair",
-        json={
-            "pairingCode": pairing_code,
-            "deviceName": "BYLOU-PC",
-            "platform": "windows",
-            "appVersion": "0.1.0",
-        },
-    )
-    assert paired.status_code == 200
-    agent_id = paired.json()["data"]["agentId"]
-
-    agents = client.get("/api/desktop-agents")
-    assert agents.status_code == 200
-    assert [item["agentId"] for item in agents.json()["data"]] == [agent_id]
 
 
 def test_postgres_hosted_app_migration_backup_and_restore_round_trip(hosted_postgres_env: str, tmp_path: Path) -> None:

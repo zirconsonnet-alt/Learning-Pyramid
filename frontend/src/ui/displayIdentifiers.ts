@@ -38,16 +38,6 @@ export function formatMaterialReference(materialId: string | null | undefined, e
   return formatOpaqueReference(materialId, "材料", 6, empty)
 }
 
-export function formatDesktopAgentReference(
-  agentId: string | null | undefined,
-  deviceName?: string | null,
-  empty = "桌面设备待确认",
-) {
-  const normalizedName = deviceName?.trim()
-  if (normalizedName) return normalizedName
-  return formatOpaqueReference(agentId, "桌面设备", 6, empty)
-}
-
 export function formatObjectNodeReference(nodeId: string | null | undefined, empty = "对象节点未关联") {
   return formatOpaqueReference(nodeId, "对象节点", 6, empty)
 }

@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 from backend.models.enums import MaterialSourceKind
 from backend.models.errors import PreconditionFailure
-from backend.models.types import DesktopAgentId, ProjectId, Timestamp, now_utc_ms
+from backend.models.types import ProjectId, Timestamp, now_utc_ms
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,7 +16,6 @@ class ProjectMaterialSourceBinding:
 
     project_id: ProjectId
     source_kind: MaterialSourceKind
-    desktop_agent_id: DesktopAgentId | None
     source_root_label: str | None
     updated_at: Timestamp
 
@@ -25,19 +24,9 @@ class ProjectMaterialSourceBinding:
         project_id: ProjectId,
         *,
         source_kind: MaterialSourceKind = MaterialSourceKind.SERVER_FS,
-        desktop_agent_id: DesktopAgentId | str | None = None,
         source_root_label: str | None = None,
         updated_at: Timestamp | None = None,
     ) -> "ProjectMaterialSourceBinding":
-        normalized_agent_id: DesktopAgentId | None
-        if desktop_agent_id is None:
-            normalized_agent_id = None
-        else:
-            text = str(desktop_agent_id).strip()
-            if not text:
-                raise PreconditionFailure("ProjectMaterialSourceBinding.desktop_agent_id must be non-empty when provided")
-            normalized_agent_id = DesktopAgentId(text)
-
         normalized_root_label = None if source_root_label is None else str(source_root_label).strip()
         if normalized_root_label == "":
             normalized_root_label = None
@@ -45,7 +34,6 @@ class ProjectMaterialSourceBinding:
         binding = ProjectMaterialSourceBinding(
             project_id=project_id,
             source_kind=source_kind,
-            desktop_agent_id=normalized_agent_id,
             source_root_label=normalized_root_label,
             updated_at=updated_at or now_utc_ms(),
         )
@@ -57,16 +45,8 @@ class ProjectMaterialSourceBinding:
             raise PreconditionFailure("ProjectMaterialSourceBinding.project_id must be non-empty")
         if not isinstance(self.source_kind, MaterialSourceKind):
             raise PreconditionFailure("ProjectMaterialSourceBinding.source_kind must be MaterialSourceKind")
-        if self.source_kind == MaterialSourceKind.SERVER_FS:
-            if self.desktop_agent_id is not None:
-                raise PreconditionFailure("ProjectMaterialSourceBinding.desktop_agent_id must be omitted for SERVER_FS")
-        elif self.source_kind == MaterialSourceKind.DESKTOP_AGENT_MANIFEST:
-            if self.desktop_agent_id is None or not str(self.desktop_agent_id).strip():
-                raise PreconditionFailure(
-                    "ProjectMaterialSourceBinding.desktop_agent_id must be provided for DESKTOP_AGENT_MANIFEST"
-                )
-        else:
-            raise PreconditionFailure(f"Unknown MaterialSourceKind: {self.source_kind}")
+        if self.source_kind not in {MaterialSourceKind.SERVER_FS, MaterialSourceKind.BROWSER_LOCAL}:
+            raise PreconditionFailure("ProjectMaterialSourceBinding.source_kind is not supported")
 
         if self.source_root_label is not None and not str(self.source_root_label).strip():
             raise PreconditionFailure("ProjectMaterialSourceBinding.source_root_label must be non-empty when provided")

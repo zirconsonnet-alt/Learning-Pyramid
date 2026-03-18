@@ -9,7 +9,7 @@ from adapter.schemas import (
     AddLearningObjectContainerRequest,
     AddLearningObjectLeafRequest,
     BulkRemapRecallPointsInstanceRequest,
-    SyncClientMediaManifestRequest,
+    ImportBrowserDirectoryRequest,
 )
 from backend.models.types import InstanceId, LearningObjectNodeId
 from backend.models.types import RecallPointId
@@ -36,23 +36,16 @@ def sync_learning_objects_from_fs(projectId: str, api: SystemAPI = Depends(get_a
     return {"ok": True, "data": report}
 
 
-@router.post("/projects/{projectId}/media-manifest/sync")
-def sync_learning_objects_from_manifest(
-    projectId: str, req: SyncClientMediaManifestRequest, api: SystemAPI = Depends(get_api)
+@router.post("/projects/{projectId}/import-learning-objects-from-browser")
+def import_learning_objects_from_browser(
+    projectId: str,
+    req: ImportBrowserDirectoryRequest,
+    api: SystemAPI = Depends(get_api),
 ) -> dict:
-    report = api.sync_learning_objects_from_manifest(  # type: ignore[arg-type]
+    report = api.import_learning_objects_from_browser_scan(  # type: ignore[arg-type]
         projectId,
         root_title=req.rootTitle,
-        manifest_entries=tuple(
-            {
-                "relativePath": entry.relativePath,
-                "displayName": entry.displayName,
-                "mediaKind": entry.mediaKind,
-                "sizeBytes": entry.sizeBytes,
-                "modifiedAt": entry.modifiedAt,
-            }
-            for entry in req.entries
-        ),
+        relative_file_paths=req.relativeFilePaths,
     )
     return {"ok": True, "data": report}
 

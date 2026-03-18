@@ -52,9 +52,9 @@ Before first public deploy, update at least:
 - When `PLM_SQL_BACKEND=sqlite`, auth users, sessions, and project memberships are stored in `/data/plm_auth.sqlite3`.
 - When `PLM_SQL_BACKEND=sqlite`, core LearningPyramid business data is stored in `/data/plm_store.sqlite3` as normalized SQL tables plus one compatibility snapshot row per project.
 - When `PLM_SQL_BACKEND=postgres`, auth and project data live in the configured PostgreSQL database.
-- Desktop agent release assets are served from `PLM_DESKTOP_AGENT_RELEASE_DIR` and the default self-host compose mounts `./release` into the container at `/release`.
 - Legacy `plm_store.json` files are import-only. If one is detected on first start, it is migrated into the active SQL backend and archived.
-- User video files are not uploaded to the server. The browser must be granted access to a local folder.
+- Project structure and server-side sync still come from the server's own project directory.
+- Browser local folder authorization is only used when the web client needs to read media files directly from the same device.
 
 ## PostgreSQL runtime knobs
 
@@ -68,8 +68,6 @@ The hosted stack now supports these PostgreSQL runtime controls:
 - `PLM_POSTGRES_LOCK_TIMEOUT_MS`
 - `PLM_POSTGRES_IDLE_IN_TX_TIMEOUT_MS`
 - `PLM_LOG_LEVEL`
-- `PLM_DESKTOP_AGENT_OFFLINE_GRACE_SECONDS`
-- `PLM_AGENT_STREAM_DISCONNECT_GRACE_SECONDS`
 
 These values are already wired in `.env.selfhost.example` and `docker-compose.selfhost.yml`.
 
@@ -170,8 +168,6 @@ Recommended migration/rollback workflow:
 - Set `PLM_SECURE_COOKIES=true` when serving behind HTTPS.
 - If you expose the app on a public domain, put it behind a reverse proxy that terminates TLS.
 - The shipped `.env.selfhost.example` now uses `change-me` placeholders for secrets; replace them before booting the hosted app.
-- `PLM_DESKTOP_AGENT_OFFLINE_GRACE_SECONDS` controls how long a desktop connector can reconnect before the server marks it truly offline.
-- `PLM_AGENT_STREAM_DISCONNECT_GRACE_SECONDS` gives an active progressive relay a short grace window before the server treats a connector websocket drop as a real relay failure.
 
 If you only need a one-off localhost smoke test over plain HTTP, you can temporarily set `PLM_SECURE_COOKIES=false`.
 
