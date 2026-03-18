@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { ArrowRight, Clock3, FolderKanban, HardDrive, Plus, Settings2, Sparkles, Trash2, Workflow } from "lucide-react"
+import { ArrowRight, Plus, Settings2, Sparkles, Trash2 } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
@@ -17,7 +17,6 @@ import {
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
 import { useCreateProject, useDeleteProject, useProjects } from "@/ui/queries/projects"
-import { useSystemCapabilities } from "@/ui/queries/system"
 import { useAppStore } from "@/ui/store/appStore"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { useWorkbenchStore } from "@/ui/store/workbenchStore"
@@ -47,23 +46,16 @@ export function ProjectsPage() {
   const { data, isLoading, error } = useProjects()
   const create = useCreateProject()
   const del = useDeleteProject()
-  const capabilitiesQ = useSystemCapabilities()
 
   const selectedProjectId = useAppStore((s) => s.selectedProjectId)
   const setSelectedProjectId = useAppStore((s) => s.setSelectedProjectId)
 
   const projects = data ?? []
-  const selectedProject = projects.find((item) => item.projectId === selectedProjectId) ?? null
 
   const [title, setTitle] = useState("")
   const [createOpen, setCreateOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null)
   const [deleteConfirmation, setDeleteConfirmation] = useState("")
-  const hostedMode = capabilitiesQ.data?.appMode === "hosted"
-  const sourceModeLabel = capabilitiesQ.data?.browserLocalMediaEnabled ? "浏览器本地媒体" : hostedMode ? "桌面连接器与服务器素材" : "服务器扫描目录"
-  const createHint = capabilitiesQ.data?.browserLocalMediaEnabled
-    ? "创建后请在项目设置里绑定本地素材目录，并按需发起同步。"
-    : "创建后将使用服务器目录或桌面连接器作为后续素材接入来源。"
   const deleteExpectedText = deleteTarget?.title ?? ""
   const deleteMatches = deleteConfirmation.trim() === deleteExpectedText
 
@@ -117,78 +109,10 @@ export function ProjectsPage() {
   return (
     <>
       <div className="space-y-8">
-        <section className="theme-card-main overflow-hidden">
-          <div className="grid gap-8 p-7 lg:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)] lg:p-8">
-            <div className="space-y-5">
-              <div className="flex flex-wrap items-center gap-3">
-                <span className="theme-meta-strong">项目中心</span>
-                <span className="theme-meta">{hostedMode ? "云端工作流" : "本地工作流"}</span>
-                <span className="theme-meta">{sourceModeLabel}</span>
-              </div>
-              <div className="space-y-3">
-                <h1 className="text-3xl font-semibold tracking-tight text-foreground lg:text-[2.5rem]">项目是整个学习工作流的启动台。</h1>
-                <p className="max-w-3xl text-base leading-7 text-[#5f7188]">
-                  从这里创建项目、切换到工作台、进入任务树或项目设置，并确认当前素材接入模式和后续处理路径。
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-3">
-                <Button size="lg" onClick={() => setCreateOpen(true)}>
-                  <Plus className="h-4 w-4" />
-                  创建新项目
-                </Button>
-                {selectedProject ? (
-                  <Button variant="outline" size="lg" onClick={() => openProject(selectedProject.projectId, "workbench")}>
-                    回到当前项目
-                    <ArrowRight className="h-4 w-4" />
-                  </Button>
-                ) : null}
-              </div>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
-              <div className="theme-status-surface px-4 py-4">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#edf4ff] text-primary">
-                    <FolderKanban className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#70829a]">项目总数</div>
-                    <div className="text-xl font-semibold text-foreground">{projects.length}</div>
-                  </div>
-                </div>
-              </div>
-              <div className="theme-status-surface px-4 py-4">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#edf4ff] text-primary">
-                    <Workflow className="h-5 w-5" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#70829a]">当前项目</div>
-                    <div className="truncate text-sm font-semibold text-foreground">{selectedProject?.title ?? "尚未选择"}</div>
-                  </div>
-                </div>
-              </div>
-              <div className="theme-status-surface px-4 py-4">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#edf4ff] text-primary">
-                    <HardDrive className="h-5 w-5" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#70829a]">素材模式</div>
-                    <div className="text-sm font-semibold text-foreground">{sourceModeLabel}</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
         <section className="space-y-4">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#6d7e95]">项目列表</p>
-              <h2 className="mt-1 text-2xl font-semibold tracking-tight text-foreground">所有项目</h2>
-              <p className="mt-2 text-sm text-muted-foreground">选择一个项目继续进入工作台，或先进入项目设置完成素材接入。</p>
+              <h2 className="text-2xl font-semibold tracking-tight text-foreground">所有项目</h2>
             </div>
             <Button variant="outline" onClick={() => setCreateOpen(true)}>
               <Plus className="h-4 w-4" />
@@ -207,10 +131,7 @@ export function ProjectsPage() {
                 <div className="flex h-14 w-14 items-center justify-center rounded-3xl bg-[#edf4ff] text-primary">
                   <Sparkles className="h-6 w-6" />
                 </div>
-                <div className="space-y-2">
-                  <h3 className="text-xl font-semibold text-foreground">还没有项目</h3>
-                  <p className="max-w-xl text-sm leading-6 text-muted-foreground">{createHint}</p>
-                </div>
+                <h3 className="text-xl font-semibold text-foreground">还没有项目</h3>
                 <Button size="lg" onClick={() => setCreateOpen(true)}>
                   <Plus className="h-4 w-4" />
                   创建第一个项目
@@ -244,7 +165,6 @@ export function ProjectsPage() {
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    <p className="text-sm leading-6 text-[#60728a]">{createHint}</p>
                     <div className="flex flex-wrap gap-2">
                       <Button
                         onClick={() => {
@@ -274,10 +194,6 @@ export function ProjectsPage() {
                         删除
                       </Button>
                     </div>
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Clock3 className="h-3.5 w-3.5" />
-                      先进入工作台继续学习，或到项目设置完成素材接入。
-                    </div>
                   </CardContent>
                 </Card>
               ))}
@@ -290,12 +206,9 @@ export function ProjectsPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>创建新项目</DialogTitle>
-            <DialogDescription>{createHint}</DialogDescription>
+            <DialogDescription>输入项目标题后立即创建。</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="theme-status-surface px-4 py-4 text-sm text-muted-foreground">
-              新项目会先生成一个独立工作区，后续再在项目设置或桌面连接器流程里补齐素材接入。
-            </div>
             <div className="grid gap-2">
               <Label htmlFor="title">项目标题</Label>
               <Input
