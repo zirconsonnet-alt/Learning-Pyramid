@@ -1,18 +1,18 @@
 import { useRef } from "react"
 import { BookPlus, CircleCheckBig } from "lucide-react"
 
-import type { Instance } from "@/ui/api/instances"
 import { ApiError } from "@/ui/api/http"
+import type { Instance } from "@/ui/api/instances"
+import { richContentHasMeaning, richText } from "@/ui/api/richContent"
+import { RichContentEditor } from "@/ui/components/RichContentEditor"
+import { ContentEmptyState } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
-import { ContentEmptyState } from "@/ui/components/contentEmptyState"
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
-import { richText } from "@/ui/api/richContent"
 import { useSubmitLearningTask } from "@/ui/queries/workbench"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
-import { useWorkbenchStore } from "@/ui/store/workbenchStore"
-import type { DraftRecallPoint } from "@/ui/store/workbenchStore"
+import { useWorkbenchStore, type DraftRecallPoint } from "@/ui/store/workbenchStore"
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -44,7 +44,7 @@ function msToClock(ms: number) {
 }
 
 function isDraftComplete(draft: DraftRecallPoint) {
-  return draft.questionText.trim().length > 0 && draft.answerText.trim().length > 0
+  return richContentHasMeaning(draft.question) && richContentHasMeaning(draft.answer)
 }
 
 export function ComposePane({
@@ -62,32 +62,38 @@ export function ComposePane({
 }) {
   const ps = useWorkbenchStore((s) => s.byProjectId[projectId])
   const addDraft = useWorkbenchStore((s) => s.addDraft)
-  const updateDraft = useWorkbenchStore((s) => s.updateDraft)
+  const updateDraftText = useWorkbenchStore((s) => s.updateDraftText)
+  const appendDraftImage = useWorkbenchStore((s) => s.appendDraftImage)
+  const removeDraftImage = useWorkbenchStore((s) => s.removeDraftImage)
   const removeDraft = useWorkbenchStore((s) => s.removeDraft)
   const clearDraftsForInstance = useWorkbenchStore((s) => s.clearDraftsForInstance)
   const setTaskTitle = useWorkbenchStore((s) => s.setTaskTitle)
   const cardRefs = useRef<Record<string, HTMLDivElement | null>>({})
-  const questionRefs = useRef<Record<string, HTMLInputElement | null>>({})
-  const answerRefs = useRef<Record<string, HTMLInputElement | null>>({})
+  const questionRefs = useRef<Record<string, HTMLTextAreaElement | null>>({})
+  const answerRefs = useRef<Record<string, HTMLTextAreaElement | null>>({})
 
   const submit = useSubmitLearningTask(projectId)
 
   const drafts = (ps?.drafts ?? []).filter((d) => (selectedInstanceId ? d.instanceId === selectedInstanceId : true))
   const taskTitle = ps?.taskTitle ?? ""
 
-  function onAdd() {
-    if (!selectedInstanceId) return
-    const position = `t=${currentMs}`
+  function createDraft(instanceId: string, ms: number): DraftRecallPoint {
+    const position = `t=${ms}`
     const now = Date.now()
-    const draft: DraftRecallPoint = {
+    return {
       localId: newLocalId(),
-      instanceId: selectedInstanceId,
+      instanceId,
       position,
-      questionText: "",
-      answerText: "",
+      question: richText(""),
+      answer: richText(""),
       createdAt: now,
       updatedAt: now,
     }
+  }
+
+  function onAdd() {
+    if (!selectedInstanceId) return
+    const draft = createDraft(selectedInstanceId, currentMs)
     addDraft(projectId, draft)
   }
 
@@ -95,10 +101,10 @@ export function ComposePane({
     if (queueHasGate) return
     const title = taskTitle.trim()
     if (!title) return
-    if (drafts.some((d) => !d.questionText.trim() || !d.answerText.trim())) return
+    if (drafts.some((d) => !richContentHasMeaning(d.question) || !richContentHasMeaning(d.answer))) return
     const items = drafts.map((d) => ({
-      question: richText(d.questionText.trim()),
-      answer: richText(d.answerText.trim()),
+      question: d.question,
+      answer: d.answer,
       anchor: { instanceId: d.instanceId, position: d.position },
     }))
     if (items.length === 0) return
@@ -117,8 +123,8 @@ export function ComposePane({
       block: "center",
     })
 
-    const questionFilled = draft.questionText.trim().length > 0
-    const answerFilled = draft.answerText.trim().length > 0
+    const questionFilled = richContentHasMeaning(draft.question)
+    const answerFilled = richContentHasMeaning(draft.answer)
     const target =
       !questionFilled
         ? questionRefs.current[draft.localId]
@@ -216,28 +222,44 @@ export function ComposePane({
                     删除
                   </Button>
                 </div>
-                <div className="mt-2 grid gap-2 md:grid-cols-2">
-                  <div>
+                <div className="mt-2 grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
                     <Label>问题</Label>
-                    <Input
+                    <div
                       ref={(node) => {
-                        questionRefs.current[d.localId] = node
+                        const textarea = node?.querySelector("textarea") ?? null
+                        questionRefs.current[d.localId] = textarea
                       }}
-                      value={d.questionText}
-                      onChange={(e) => updateDraft(projectId, d.localId, { questionText: e.target.value })}
-                      placeholder="请输入问题/提示语"
-                    />
+                    >
+                      <RichContentEditor
+                        projectId={projectId}
+                        field="question"
+                        value={d.question}
+                        placeholder="请输入问题/提示语，或直接 Ctrl+V 粘贴图片"
+                        onTextChange={(text) => updateDraftText(projectId, d.localId, "question", text)}
+                        onAppendImage={(assetId) => appendDraftImage(projectId, d.localId, "question", assetId)}
+                        onRemoveImage={(imageIndex) => removeDraftImage(projectId, d.localId, "question", imageIndex)}
+                      />
+                    </div>
                   </div>
-                  <div>
+                  <div className="space-y-2">
                     <Label>答案</Label>
-                    <Input
+                    <div
                       ref={(node) => {
-                        answerRefs.current[d.localId] = node
+                        const textarea = node?.querySelector("textarea") ?? null
+                        answerRefs.current[d.localId] = textarea
                       }}
-                      value={d.answerText}
-                      onChange={(e) => updateDraft(projectId, d.localId, { answerText: e.target.value })}
-                      placeholder="请输入答案/复述内容"
-                    />
+                    >
+                      <RichContentEditor
+                        projectId={projectId}
+                        field="answer"
+                        value={d.answer}
+                        placeholder="请输入答案/复述内容，或直接 Ctrl+V 粘贴图片"
+                        onTextChange={(text) => updateDraftText(projectId, d.localId, "answer", text)}
+                        onAppendImage={(assetId) => appendDraftImage(projectId, d.localId, "answer", assetId)}
+                        onRemoveImage={(imageIndex) => removeDraftImage(projectId, d.localId, "answer", imageIndex)}
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -263,12 +285,14 @@ export function ComposePane({
                 submit.isPending ||
                 !taskTitle.trim() ||
                 drafts.length === 0 ||
-                drafts.some((d) => !d.questionText.trim() || !d.answerText.trim())
+                drafts.some((d) => !richContentHasMeaning(d.question) || !richContentHasMeaning(d.answer))
               }
             >
               {submit.isPending ? "提交中..." : "提交学习"}
             </Button>
-            {!submit.isPending && drafts.length > 0 && !drafts.some((d) => !d.questionText.trim() || !d.answerText.trim()) ? (
+            {!submit.isPending &&
+            drafts.length > 0 &&
+            !drafts.some((d) => !richContentHasMeaning(d.question) || !richContentHasMeaning(d.answer)) ? (
               <div className="mt-2 flex items-center gap-2 text-sm text-emerald-700">
                 <CircleCheckBig className="h-4 w-4" />
                 所有复述点已填写完成，可以提交。

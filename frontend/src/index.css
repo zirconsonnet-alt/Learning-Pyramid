@@ -77,6 +77,63 @@
       radial-gradient(circle at top right, rgba(226, 236, 248, 0.72), transparent 28%),
       linear-gradient(180deg, rgba(250, 252, 255, 1) 0%, rgba(245, 247, 251, 1) 100%);
   }
+
+  .plm-video-player::-webkit-media-controls-fullscreen-button {
+    display: none !important;
+    visibility: hidden !important;
+    width: 0 !important;
+  }
+
+  .plm-video-range {
+    height: 1.125rem;
+    appearance: none;
+    background: transparent;
+    accent-color: rgba(219, 234, 254, 0.92);
+    cursor: pointer;
+  }
+
+  .plm-video-range:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+
+  .plm-video-range::-webkit-slider-runnable-track {
+    height: 0.35rem;
+    border-radius: 999px;
+    background: linear-gradient(90deg, rgba(191, 219, 254, 0.95), rgba(125, 211, 252, 0.88));
+  }
+
+  .plm-video-range::-webkit-slider-thumb {
+    appearance: none;
+    width: 0.9rem;
+    height: 0.9rem;
+    margin-top: -0.28rem;
+    border: 2px solid rgba(255, 255, 255, 0.92);
+    border-radius: 999px;
+    background: #0f172a;
+    box-shadow: 0 6px 16px rgba(15, 23, 42, 0.45);
+  }
+
+  .plm-video-range::-moz-range-track {
+    height: 0.35rem;
+    border: 0;
+    border-radius: 999px;
+    background: linear-gradient(90deg, rgba(191, 219, 254, 0.95), rgba(125, 211, 252, 0.88));
+  }
+
+  .plm-video-range::-moz-range-thumb {
+    width: 0.9rem;
+    height: 0.9rem;
+    border: 2px solid rgba(255, 255, 255, 0.92);
+    border-radius: 999px;
+    background: #0f172a;
+    box-shadow: 0 6px 16px rgba(15, 23, 42, 0.45);
+  }
+
+  .plm-video-range-volume::-webkit-slider-runnable-track,
+  .plm-video-range-volume::-moz-range-track {
+    background: linear-gradient(90deg, rgba(229, 231, 235, 0.88), rgba(191, 219, 254, 0.85));
+  }
 }
 
 @layer components {

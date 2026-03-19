@@ -10,6 +10,7 @@ from backend.models.types import (
     LearningTaskId,
     LearningTaskNodeId,
     LayerId,
+    MediaAssetId,
     ProjectId,
     RangeId,
     RecallPointId,
@@ -86,3 +87,6 @@ class InMemoryIdGenerator:
 
     def new_asr_artifact_id(self, project_id: ProjectId) -> AsrArtifactId:
         return AsrArtifactId(self._next(project_id, "asr"))
+
+    def new_media_asset_id(self, project_id: ProjectId) -> MediaAssetId:
+        return MediaAssetId(self._next(project_id, "asset"))

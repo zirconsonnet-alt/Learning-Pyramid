@@ -3,7 +3,7 @@ import { CheckCircle2, ClipboardCheck, PlayCircle } from "lucide-react"
 
 import { ApiError } from "@/ui/api/http"
 import type { Instance } from "@/ui/api/instances"
-import { richContentToPlainText } from "@/ui/api/richContent"
+import { RichContentRenderer } from "@/ui/components/RichContentRenderer"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import { formatInstanceReference } from "@/ui/displayIdentifiers"
@@ -104,7 +104,10 @@ export function ReviewPane({
               const ms = parseAnchorMs(rp.anchor.position)
               return (
                 <div key={rpId} className="theme-status-surface rounded-[1.2rem] border border-border/70 p-4">
-                  <div className="text-sm font-medium">Q：{richContentToPlainText(rp.question)}</div>
+                  <div className="text-sm font-medium">
+                    <div className="mb-2 text-xs uppercase tracking-[0.16em] text-muted-foreground">Question</div>
+                    <RichContentRenderer projectId={projectId} value={rp.question} />
+                  </div>
                   <div className="mt-1 text-xs text-muted-foreground">
                     锚点：{formatInstanceReference(rp.anchor.instanceId, inst?.materialDisplayName)} /{" "}
                     {ms === null ? rp.anchor.position : msToClock(ms)}
@@ -128,7 +131,8 @@ export function ReviewPane({
                     </Button>
                     {show ? (
                       <div className="theme-canvas mt-2 rounded-2xl border border-border/60 p-3 text-sm">
-                        A：{richContentToPlainText(rp.answer)}
+                        <div className="mb-2 text-xs uppercase tracking-[0.16em] text-muted-foreground">Answer</div>
+                        <RichContentRenderer projectId={projectId} value={rp.answer} />
                       </div>
                     ) : null}
                   </div>

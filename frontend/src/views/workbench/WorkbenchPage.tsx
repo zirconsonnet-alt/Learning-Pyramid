@@ -6,6 +6,7 @@ import { ApiError } from "@/ui/api/http"
 import type { Layer } from "@/ui/api/layers"
 import type { Instance } from "@/ui/api/instances"
 import type { LearningTaskNode } from "@/ui/api/learningTaskNodes"
+import { richText } from "@/ui/api/richContent"
 import { ContentEmptyState, ContentNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
@@ -38,6 +39,10 @@ function parseAnchorMs(position: string): number | null {
   if (!m) return null
   const n = Number(m[1])
   return Number.isFinite(n) ? n : null
+}
+
+function newLocalId() {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}_${Math.random().toString(16).slice(2)}`
 }
 
 function StatusStrip(props: { label: string; value: string; hint?: string; warning?: boolean }) {
@@ -143,6 +148,7 @@ export function WorkbenchPage() {
 
   const ensure = useWorkbenchStore((s) => s.ensure)
   const ps = useWorkbenchStore((s) => (pid ? s.byProjectId[pid] : undefined))
+  const addDraft = useWorkbenchStore((s) => s.addDraft)
   const setSelectedInstanceId = useWorkbenchStore((s) => s.setSelectedInstanceId)
 
   const selectedProjectId = useAppStore((s) => s.selectedProjectId)
@@ -216,6 +222,29 @@ export function WorkbenchPage() {
     setSeekTo({ instanceId: a.instanceId, ms, nonce: Date.now() })
   }
 
+  function onQuickCaptureSave(request: { instanceId: string; ms: number; question: string; answer: string }) {
+    if (queueHasGate) {
+      const message = "请先完成复习，再继续录入新的复述点。"
+      showInfoFeedback("当前处于复习模式", message)
+      return { ok: false, message }
+    }
+
+    const now = Date.now()
+    setSelectedInstanceId(pid, request.instanceId)
+    setCurrentMs(request.ms)
+    addDraft(pid, {
+      localId: newLocalId(),
+      instanceId: request.instanceId,
+      position: `t=${request.ms}`,
+      question: richText(request.question),
+      answer: richText(request.answer),
+      createdAt: now,
+      updatedAt: now,
+    })
+    showSuccessFeedback("复述点草稿已添加", "这条记录已经保存到当前视频的录入列表里。")
+    return { ok: true }
+  }
+
   if (!pid) {
     return (
       <div className="space-y-4">
@@ -268,6 +297,7 @@ export function WorkbenchPage() {
             setCurrentMs={setCurrentMs}
             seekTo={seekTo}
             onSeekApplied={(nonce) => setSeekTo((s) => (s && s.nonce === nonce ? null : s))}
+            onQuickCaptureSave={onQuickCaptureSave}
           />
           {queueQ.data?.headId ? (
             <ReviewPane

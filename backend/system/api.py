@@ -1,6 +1,7 @@
 import json
 import hashlib
 import os
+import tempfile
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -25,6 +26,7 @@ from backend.models.enums import (
     FsSyncPolicy,
     InstancePresence,
     LayerMode,
+    MediaAssetKind,
     MaterialSourceKind,
     ProjectState,
     RecallPointReviewResult,
@@ -39,6 +41,7 @@ from backend.models.layer import Layer
 from backend.models.learning_object_node import LearningObjectContainer, LearningObjectLeaf
 from backend.models.learning_task import LearningTask
 from backend.models.learning_task_node import LearningTaskContainer, LearningTaskLeaf, LearningTaskNode
+from backend.models.media_asset import MediaAsset
 from backend.models.project import Project
 from backend.models.project_config import (
     LayerConfig,
@@ -65,6 +68,7 @@ from backend.models.types import (
     LearningObjectNodeId,
     LearningTaskId,
     LearningTaskNodeId,
+    MediaAssetId,
     ProjectId,
     RangeId,
     RecallPointId,
@@ -126,6 +130,25 @@ class SystemAPI:
     @staticmethod
     def _sql_updated_at_text() -> str:
         return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+    @staticmethod
+    def _image_extension_for_upload(mime_type: str, filename: str | None) -> str:
+        mime = str(mime_type or "").strip().lower()
+        mapping = {
+            "image/png": ".png",
+            "image/jpeg": ".jpg",
+            "image/jpg": ".jpg",
+            "image/webp": ".webp",
+            "image/gif": ".gif",
+            "image/bmp": ".bmp",
+        }
+        if mime in mapping:
+            return mapping[mime]
+        if filename:
+            ext = Path(str(filename)).suffix.lower().strip()
+            if ext in {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}:
+                return ".jpg" if ext == ".jpeg" else ext
+        raise PreconditionFailure(f"Unsupported image mime type: {mime_type}")
 
     def _create_project_sql_direct(self, sql_store: SqlStore, title: str, project_root: str | None) -> ProjectId:
         pid = self.idgen.new_project_id()
@@ -1087,6 +1110,24 @@ class SystemAPI:
             return self.sys.project_storage_config_repo.get(s)
         finally:
             self.sys.rollback(s)
+
+    def get_media_asset(self, project_id: ProjectId, asset_id: MediaAssetId) -> MediaAsset:
+        s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
+        try:
+            return self.sys.media_asset_repo.get(s, asset_id)
+        finally:
+            self.sys.rollback(s)
+
+    def resolve_media_asset_file_path(self, project_id: ProjectId, asset_id: MediaAssetId) -> Path:
+        asset = self.get_media_asset(project_id, asset_id)
+        storage_cfg = self.get_project_storage_config(project_id)
+        abs_project_root = Path(storage_cfg.project_root.as_posix()).resolve()
+        file_path = (abs_project_root / Path(asset.relative_path.as_posix())).resolve()
+        try:
+            file_path.relative_to(abs_project_root)
+        except Exception as exc:
+            raise PreconditionFailure("media asset path escapes project_root") from exc
+        return file_path
 
     def get_project_material_source_binding(self, project_id: ProjectId) -> ProjectMaterialSourceBinding:
         s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
@@ -2256,6 +2297,69 @@ class SystemAPI:
         except Exception:
             if s.state == SessionState.OPEN:
                 self.sys.rollback(s)
+            raise
+
+    def create_media_asset(
+        self,
+        project_id: ProjectId,
+        *,
+        content: bytes,
+        mime_type: str,
+        filename: str | None = None,
+    ) -> MediaAsset:
+        if not content:
+            raise PreconditionFailure("media asset content must be non-empty")
+
+        ext = self._image_extension_for_upload(mime_type, filename)
+        s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
+        temp_path: Path | None = None
+        file_path: Path | None = None
+        try:
+            storage_cfg = self.sys.project_storage_config_repo.get(s)
+            asset_id = self.idgen.new_media_asset_id(project_id)
+            relative_path = PurePosixPath(f"media/{asset_id}{ext}")
+            asset = MediaAsset(
+                project_id=project_id,
+                asset_id=asset_id,
+                kind=MediaAssetKind.IMAGE,
+                relative_path=relative_path,
+                created_at=now_utc_ms(),
+                mime_type=str(mime_type or "").strip().lower() or None,
+            )
+
+            abs_project_root = Path(storage_cfg.project_root.as_posix()).resolve()
+            file_path = (abs_project_root / Path(relative_path.as_posix())).resolve()
+            try:
+                file_path.relative_to(abs_project_root)
+            except Exception as exc:
+                raise PreconditionFailure("media asset path escapes project_root") from exc
+
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            fd, temp_name = tempfile.mkstemp(prefix=f"{asset_id}_", suffix=ext, dir=str(file_path.parent))
+            temp_path = Path(temp_name)
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(content)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(str(temp_path), str(file_path))
+            temp_path = None
+
+            self.sys.media_asset_repo.add(s, asset)
+            self.sys.commit(s)
+            return asset
+        except Exception:
+            if s.state == SessionState.OPEN:
+                self.sys.rollback(s)
+            if temp_path is not None:
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+            if file_path is not None and file_path.exists():
+                try:
+                    file_path.unlink()
+                except Exception:
+                    pass
             raise
 
     # 4.5.5

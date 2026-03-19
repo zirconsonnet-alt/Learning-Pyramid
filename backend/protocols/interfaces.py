@@ -10,6 +10,7 @@ from backend.models.types import (
     InstanceId,
     LearningTaskId,
     LearningTaskNodeId,
+    MediaAssetId,
     ProjectId,
     RangeId,
     RecallPointId,
@@ -24,6 +25,8 @@ class MutationSession(Protocol):
 
 class ProtocolIdGenerator(Protocol):
     def new_recall_point_id(self, project_id: ProjectId) -> RecallPointId: ...
+
+    def new_media_asset_id(self, project_id: ProjectId) -> MediaAssetId: ...
 
     def new_learning_task_id(self, project_id: ProjectId) -> LearningTaskId: ...
 

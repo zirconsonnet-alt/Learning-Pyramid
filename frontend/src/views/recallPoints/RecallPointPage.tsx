@@ -4,8 +4,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useParams } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
-import { richContentToPlainText, richText } from "@/ui/api/richContent"
+import {
+  appendImageBlock,
+  removeImageBlockAt,
+  richContentHasMeaning,
+  richText,
+  type RichContent,
+} from "@/ui/api/richContent"
 import { editRecallPoint, getRecallPoint, type RecallPoint } from "@/ui/api/review"
+import { RichContentEditor } from "@/ui/components/RichContentEditor"
+import { RichContentRenderer } from "@/ui/components/RichContentRenderer"
 import { ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
@@ -14,6 +22,7 @@ import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
 import { useProject } from "@/ui/queries/projects"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
+import { setRichContentText } from "@/ui/api/richContent"
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -114,7 +123,7 @@ export function RecallPointPage() {
             {rp.insights.map((it, idx) => (
               <div key={idx} className="rounded-md border bg-muted/20 px-3 py-2">
                 <div className="text-xs text-muted-foreground">#{idx + 1}</div>
-                <div className="mt-1 whitespace-pre-wrap">{richContentToPlainText(it)}</div>
+                <RichContentRenderer projectId={pid} value={it} className="mt-1" />
               </div>
             ))}
           </CardContent>
@@ -136,20 +145,18 @@ function RecallPointEditor({
   recallPoint: RecallPoint | null
 }) {
   const qc = useQueryClient()
-  const [questionText, setQuestionText] = useState(() => (recallPoint ? richContentToPlainText(recallPoint.question) : ""))
-  const [answerText, setAnswerText] = useState(() => (recallPoint ? richContentToPlainText(recallPoint.answer) : ""))
+  const [question, setQuestion] = useState<RichContent>(() => (recallPoint ? recallPoint.question : richText("")))
+  const [answer, setAnswer] = useState<RichContent>(() => (recallPoint ? recallPoint.answer : richText("")))
   const [positionText, setPositionText] = useState(() => recallPoint?.anchor.position ?? "")
 
   const editM = useMutation({
     mutationFn: async () => {
       if (!recallPoint) throw new Error("RecallPoint not loaded")
-      const qText = questionText.trim()
-      const aText = answerText.trim()
       const pos = positionText.trim()
-      if (!qText || !aText || !pos) return
+      if (!richContentHasMeaning(question) || !richContentHasMeaning(answer) || !pos) return
       await editRecallPoint(projectId, recallPointId, {
-        question: richText(qText),
-        answer: richText(aText),
+        question,
+        answer,
         anchor: { instanceId: recallPoint.anchor.instanceId, position: pos },
       })
     },
@@ -162,10 +169,16 @@ function RecallPointEditor({
     },
   })
 
-  const canSave = !!projectId && !!recallPointId && !!recallPoint && !!questionText.trim() && !!answerText.trim() && !!positionText.trim()
+  const canSave =
+    !!projectId &&
+    !!recallPointId &&
+    !!recallPoint &&
+    richContentHasMeaning(question) &&
+    richContentHasMeaning(answer) &&
+    !!positionText.trim()
 
   return (
-    <CardContent className="space-y-3">
+    <CardContent className="space-y-4">
       <div className="grid gap-2">
         <Label htmlFor="anchorInstance">关联材料实例</Label>
         <Input id="anchorInstance" value={formatInstanceReference(recallPoint?.anchor.instanceId ?? "", undefined, "未关联材料实例")} disabled />
@@ -174,24 +187,30 @@ function RecallPointEditor({
         <Label htmlFor="anchorPos">锚点位置</Label>
         <Input id="anchorPos" value={positionText} onChange={(e) => setPositionText(e.target.value)} disabled={!recallPoint || editM.isPending} />
       </div>
-      <div className="grid gap-2">
-        <Label htmlFor="qText">问题文本</Label>
-        <textarea
-          id="qText"
-          className="min-h-[80px] w-full rounded-md border bg-background px-3 py-2 text-sm"
-          value={questionText}
-          onChange={(e) => setQuestionText(e.target.value)}
+      <div className="grid gap-3">
+        <Label>问题内容</Label>
+        <RichContentEditor
+          projectId={projectId}
+          field="question"
+          value={question}
           disabled={!recallPoint || editM.isPending}
+          placeholder="请输入问题/提示语，或直接 Ctrl+V 粘贴图片"
+          onTextChange={(text) => setQuestion((prev) => setRichContentText(prev, text))}
+          onAppendImage={(assetId) => setQuestion((prev) => appendImageBlock(prev, assetId))}
+          onRemoveImage={(imageIndex) => setQuestion((prev) => removeImageBlockAt(prev, imageIndex))}
         />
       </div>
-      <div className="grid gap-2">
-        <Label htmlFor="aText">答案文本</Label>
-        <textarea
-          id="aText"
-          className="min-h-[80px] w-full rounded-md border bg-background px-3 py-2 text-sm"
-          value={answerText}
-          onChange={(e) => setAnswerText(e.target.value)}
+      <div className="grid gap-3">
+        <Label>答案内容</Label>
+        <RichContentEditor
+          projectId={projectId}
+          field="answer"
+          value={answer}
           disabled={!recallPoint || editM.isPending}
+          placeholder="请输入答案/复述内容，或直接 Ctrl+V 粘贴图片"
+          onTextChange={(text) => setAnswer((prev) => setRichContentText(prev, text))}
+          onAppendImage={(assetId) => setAnswer((prev) => appendImageBlock(prev, assetId))}
+          onRemoveImage={(imageIndex) => setAnswer((prev) => removeImageBlockAt(prev, imageIndex))}
         />
       </div>
       <Button onClick={() => editM.mutate()} disabled={!canSave || editM.isPending}>

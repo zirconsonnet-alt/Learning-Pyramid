@@ -69,6 +69,7 @@ export async function apiRequest<T>({
   path,
   method,
   body,
+  headers,
   responseSchema,
   signal,
   timeoutMs,
@@ -76,6 +77,7 @@ export async function apiRequest<T>({
   path: string
   method?: ApiRequestMethod
   body?: unknown
+  headers?: Record<string, string>
   responseSchema: z.ZodType<T>
   signal?: AbortSignal
   timeoutMs?: number
@@ -108,11 +110,15 @@ export async function apiRequest<T>({
   let res: Response
   let text: string
   try {
+    const isFormDataBody = typeof FormData !== "undefined" && body instanceof FormData
+    const isBlobBody = typeof Blob !== "undefined" && body instanceof Blob
+    const requestHeaders =
+      body === undefined ? headers : isFormDataBody || isBlobBody ? headers : { "Content-Type": "application/json", ...(headers ?? {}) }
     res = await fetch(url, {
       method: requestMethod,
       credentials: "include",
-      headers: body === undefined ? undefined : { "Content-Type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      headers: requestHeaders,
+      body: body === undefined ? undefined : isFormDataBody || isBlobBody ? body : JSON.stringify(body),
       signal: controller.signal,
     })
     text = await res.text()
