@@ -79,7 +79,7 @@ export function ReviewPane({
     <Card className="theme-card-main">
       <CardHeader className="theme-card-header flex-row items-start justify-between gap-3 space-y-0">
         <div className="flex items-start gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#edf4ff] text-primary">
+          <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#e2e8f0] bg-[#f5f7fa] text-primary">
             <ClipboardCheck className="h-5 w-5" />
           </div>
           <div className="space-y-1">

@@ -4,33 +4,33 @@
 
 @layer base {
   :root {
-    --background: 220 43% 97%;
-    --foreground: 217 54% 11%;
+    --background: 210 20% 98%;
+    --foreground: 218 35% 14%;
 
     --card: 0 0% 100%;
-    --card-foreground: 217 54% 11%;
+    --card-foreground: 218 35% 14%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 217 54% 11%;
+    --popover-foreground: 218 35% 14%;
 
-    --primary: 213 52% 24%;
+    --primary: 214 74% 39%;
     --primary-foreground: 210 40% 98%;
 
-    --secondary: 215 40% 96%;
-    --secondary-foreground: 214 32% 28%;
+    --secondary: 210 17% 95%;
+    --secondary-foreground: 217 20% 26%;
 
-    --muted: 214 35% 95%;
-    --muted-foreground: 215 18% 47%;
+    --muted: 210 15% 95%;
+    --muted-foreground: 216 14% 39%;
 
-    --accent: 214 72% 96%;
-    --accent-foreground: 213 31% 39%;
+    --accent: 210 24% 97%;
+    --accent-foreground: 218 24% 20%;
 
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 210 40% 98%;
 
-    --border: 214 32% 91%;
-    --input: 214 33% 89%;
-    --ring: 213 52% 24%;
+    --border: 214 20% 88%;
+    --input: 214 20% 86%;
+    --ring: 214 74% 39%;
 
     --radius: 1rem;
   }
@@ -73,9 +73,9 @@
     @apply bg-background text-foreground antialiased;
     font-family: "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
     background-image:
-      radial-gradient(circle at top left, rgba(238, 244, 255, 0.96), transparent 34%),
-      radial-gradient(circle at top right, rgba(226, 236, 248, 0.72), transparent 28%),
-      linear-gradient(180deg, rgba(250, 252, 255, 1) 0%, rgba(245, 247, 251, 1) 100%);
+      radial-gradient(circle at top left, rgba(211, 223, 239, 0.28), transparent 34%),
+      radial-gradient(circle at top right, rgba(229, 234, 241, 0.2), transparent 24%),
+      linear-gradient(180deg, rgba(252, 253, 255, 1) 0%, rgba(244, 246, 248, 1) 100%);
   }
 
   .plm-video-player::-webkit-media-controls-fullscreen-button {
@@ -158,17 +158,17 @@
 
 @layer components {
   .theme-card {
-    @apply rounded-[1.25rem] border border-border/70 bg-card/95 text-card-foreground shadow-[0_18px_44px_-30px_rgba(15,23,42,0.22)];
+    @apply rounded-[1.25rem] border border-[#dfe6ee] bg-white/95 text-card-foreground shadow-[0_20px_48px_-34px_rgba(15,23,42,0.16)];
   }
 
   .theme-card-main {
-    @apply rounded-[1.5rem] border border-white/80 bg-white text-card-foreground shadow-[0_26px_80px_-42px_rgba(30,58,95,0.36)];
+    @apply rounded-[1.5rem] border border-[#e1e8f0] bg-white text-card-foreground shadow-[0_24px_56px_-34px_rgba(15,23,42,0.18)];
   }
 
   .theme-card-header {
     @apply border-b border-border/60 pb-4;
     background:
-      linear-gradient(180deg, rgba(238, 244, 255, 0.78) 0%, rgba(255, 255, 255, 0) 100%);
+      linear-gradient(180deg, rgba(247, 249, 252, 0.92) 0%, rgba(255, 255, 255, 0) 100%);
   }
 
   .theme-card-header-plain {
@@ -176,20 +176,20 @@
   }
 
   .theme-meta {
-    @apply inline-flex items-center rounded-full border border-[#d7e2f0] bg-[#eef4ff] px-2.5 py-1 text-xs font-medium text-[#486284];
+    @apply inline-flex items-center rounded-full border border-[#cfdef1] bg-[#eef5ff] px-2.5 py-1 text-xs font-medium text-[#2b537f];
   }
 
   .theme-meta-strong {
-    @apply inline-flex items-center rounded-full border border-primary/10 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary;
+    @apply inline-flex items-center rounded-full border border-primary/10 bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground shadow-[0_12px_24px_-20px_rgba(37,99,235,0.7)];
   }
 
   .theme-status-surface {
-    @apply rounded-2xl border border-white/70 bg-white/80 shadow-[0_12px_36px_-28px_rgba(15,23,42,0.18)];
+    @apply rounded-2xl border border-[#e1e8ef] bg-white shadow-[0_14px_36px_-30px_rgba(15,23,42,0.14)];
   }
 
   .theme-canvas {
     background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.76), rgba(255, 255, 255, 0.48)),
-      rgba(245, 247, 251, 0.6);
+      linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(243, 246, 249, 0.94)),
+      rgba(241, 245, 249, 0.82);
   }
 }

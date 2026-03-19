@@ -63,7 +63,7 @@ function TreeNode({
     return (
       <div>
         <div
-          className="flex cursor-pointer items-center gap-2 rounded-xl px-3 py-2 text-sm text-[#486284] transition-colors hover:bg-accent/70 hover:text-foreground"
+          className="flex cursor-pointer items-center gap-2 rounded-xl px-3 py-2 text-sm text-[#40566f] transition-colors hover:bg-[#f3f6f9] hover:text-foreground"
           style={{ paddingLeft: depth * 14 }}
           onClick={() => toggle(nodeId)}
           role="button"
@@ -95,15 +95,17 @@ function TreeNode({
   return (
     <div
       className={cn(
-        "flex cursor-pointer items-center gap-2 rounded-xl px-3 py-2 text-sm transition-colors hover:bg-accent/70",
-        selectedInstanceId === data.instanceId ? "bg-accent text-foreground shadow-[0_10px_24px_-18px_rgba(30,58,95,0.42)]" : "text-[#344968]",
+        "flex cursor-pointer items-center gap-2 rounded-xl px-3 py-2 text-sm transition-colors hover:bg-[#f3f6f9]",
+        selectedInstanceId === data.instanceId
+          ? "bg-primary text-primary-foreground shadow-[0_16px_30px_-22px_rgba(37,99,235,0.42)]"
+          : "text-[#30465f]",
       )}
       style={{ paddingLeft: depth * 14 }}
       onClick={() => onSelectInstance(data.instanceId)}
       role="button"
       tabIndex={0}
     >
-      <span className="w-4 text-center text-muted-foreground">•</span>
+      <span className={cn("w-4 text-center", selectedInstanceId === data.instanceId ? "text-white/80" : "text-muted-foreground")}>•</span>
       <span className="truncate">{data.title}</span>
     </div>
   )
@@ -180,7 +182,7 @@ export function LearningObjectTree({
   if (rootIds.length === 0) {
     const canImportHere = directoryBinding.permission === "granted" && !directoryBinding.loading
     return (
-      <div className="space-y-3 rounded-[1rem] border border-dashed border-border/70 bg-background/70 p-4">
+      <div className="space-y-3 rounded-[1rem] border border-dashed border-border/70 bg-white p-4">
         <div className="space-y-1">
           <p className="text-sm font-medium text-foreground">当前还没有学习对象</p>
           <p className="text-sm text-muted-foreground">

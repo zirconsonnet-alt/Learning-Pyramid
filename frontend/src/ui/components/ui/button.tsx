@@ -10,12 +10,12 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          "bg-primary text-primary-foreground shadow-[0_14px_28px_-18px_rgba(30,58,95,0.72)] hover:-translate-y-px hover:bg-[hsl(213_52%_21%)] disabled:bg-slate-300 disabled:text-slate-500",
+          "bg-primary text-primary-foreground shadow-[0_16px_30px_-18px_rgba(37,99,235,0.5)] hover:-translate-y-px hover:bg-[hsl(214_74%_34%)] disabled:bg-slate-300 disabled:text-slate-500",
         secondary:
-          "bg-secondary text-secondary-foreground border border-border/60 hover:bg-secondary/80 disabled:bg-slate-200 disabled:text-slate-500",
+          "border border-[#dde5ee] bg-secondary text-secondary-foreground hover:bg-[#eef2f6] disabled:bg-slate-200 disabled:text-slate-500",
         outline:
-          "border border-input bg-white/90 text-[#486284] shadow-[0_10px_24px_-20px_rgba(15,23,42,0.25)] hover:border-primary/20 hover:bg-accent hover:text-foreground disabled:border-border/70 disabled:bg-white/60 disabled:text-muted-foreground",
-        ghost: "text-muted-foreground hover:bg-accent/70 hover:text-foreground",
+          "border border-input bg-white text-slate-700 shadow-[0_10px_24px_-20px_rgba(15,23,42,0.16)] hover:border-primary/25 hover:bg-[#f7fafc] hover:text-slate-950 disabled:border-border/70 disabled:bg-white disabled:text-muted-foreground",
+        ghost: "text-slate-500 hover:bg-[#f1f5f9] hover:text-slate-950",
         destructive: "bg-destructive text-destructive-foreground shadow-[0_14px_28px_-18px_rgba(220,38,38,0.45)] hover:bg-destructive/90",
       },
       size: {

@@ -37,19 +37,30 @@ export function MainNav(props: { items: NavItem[]; onNavigate?: () => void; clas
             key={item.to}
             to={item.to}
             onClick={onNavigate}
-            className={({ isActive }) =>
-              cn(
-                "group flex min-h-11 w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition-all duration-200",
-                isActive
-                  ? "bg-primary text-primary-foreground shadow-[0_18px_36px_-28px_rgba(30,58,95,0.4)]"
-                  : "text-[#41546e] hover:bg-[#f4f7fb] hover:text-foreground",
-              )
-            }
+            className="block"
           >
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[#edf4ff] text-primary transition-colors group-hover:bg-white">
-              <Icon className="h-4 w-4" />
-            </span>
-            <span className="min-w-0 truncate">{item.label}</span>
+            {({ isActive }) => (
+              <div
+                className={cn(
+                  "group flex min-h-11 w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition-all duration-200",
+                  isActive
+                    ? "bg-primary text-primary-foreground shadow-[0_18px_36px_-28px_rgba(37,99,235,0.48)]"
+                    : "text-[#42566f] hover:bg-[#f5f7fa] hover:text-foreground",
+                )}
+              >
+                <span
+                  className={cn(
+                    "flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border transition-colors",
+                    isActive
+                      ? "border-white/15 bg-white/12 text-white"
+                      : "border-[#e1e8f0] bg-[#f5f7fa] text-primary group-hover:bg-white",
+                  )}
+                >
+                  <Icon className="h-4 w-4" />
+                </span>
+                <span className="min-w-0 truncate">{item.label}</span>
+              </div>
+            )}
           </NavLink>
         )
       })}

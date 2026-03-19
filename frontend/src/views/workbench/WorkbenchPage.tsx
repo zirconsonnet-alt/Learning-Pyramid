@@ -50,7 +50,7 @@ function StatusStrip(props: { label: string; value: string; hint?: string; warni
       )}
     >
       <div className="min-w-0">
-        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#73839a]">{label}</div>
+        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#5f6f82]">{label}</div>
         {hint ? <div className="mt-1 text-sm text-muted-foreground">{hint}</div> : null}
       </div>
       <div className={cn("theme-meta shrink-0", warning && "border-amber-300 bg-amber-100 text-amber-800")}>{value}</div>
@@ -235,7 +235,7 @@ export function WorkbenchPage() {
           <Card className="theme-card-main">
             <CardHeader className="theme-card-header space-y-2">
               <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#edf4ff] text-primary">
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#e2e8f0] bg-[#f5f7fa] text-primary">
                   <FolderTree className="h-5 w-5" />
                 </div>
                 <div>
@@ -293,7 +293,7 @@ export function WorkbenchPage() {
           <Card className="theme-card-main">
             <CardHeader className="theme-card-header space-y-2">
               <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#edf4ff] text-primary">
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#e2e8f0] bg-[#f5f7fa] text-primary">
                   <RadioTower className="h-5 w-5" />
                 </div>
                 <div>
@@ -311,7 +311,7 @@ export function WorkbenchPage() {
           <Card className="theme-card-main">
             <CardHeader className="theme-card-header space-y-2">
               <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#edf4ff] text-primary">
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#e2e8f0] bg-[#f5f7fa] text-primary">
                   <ListChecks className="h-5 w-5" />
                 </div>
                 <div>

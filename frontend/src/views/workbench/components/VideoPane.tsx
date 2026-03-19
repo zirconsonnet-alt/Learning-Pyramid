@@ -1040,7 +1040,7 @@ export function VideoPane({
         ) : (
           <div className="theme-canvas rounded-[1.2rem] border border-border/60 p-6 text-sm text-muted-foreground">
             <div className="flex items-start gap-3">
-              <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white/80 text-[#5f7188]">
+              <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-[#e2e8f0] bg-white text-[#5f7188]">
                 <VideoOff className="h-5 w-5" />
               </div>
               <div className="space-y-1.5">

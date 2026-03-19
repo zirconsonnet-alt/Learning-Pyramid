@@ -196,8 +196,8 @@ export function AppShell() {
 
   return (
     <div className="min-h-dvh">
-      <div className="pointer-events-none fixed inset-x-0 top-0 z-0 h-72 bg-[radial-gradient(circle_at_top_left,_rgba(193,214,242,0.62),_transparent_42%),radial-gradient(circle_at_top_right,_rgba(224,233,247,0.54),_transparent_34%)]" />
-      <header className="sticky top-0 z-20 border-b border-white/70 bg-white/82 shadow-[0_16px_40px_-34px_rgba(15,23,42,0.46)] backdrop-blur-2xl supports-[backdrop-filter]:bg-white/72">
+      <div className="pointer-events-none fixed inset-x-0 top-0 z-0 h-72 bg-[radial-gradient(circle_at_top_left,_rgba(208,222,238,0.32),_transparent_40%),radial-gradient(circle_at_top_right,_rgba(229,234,241,0.22),_transparent_30%)]" />
+      <header className="sticky top-0 z-20 border-b border-[#e4e9ef] bg-white/92 shadow-[0_16px_40px_-34px_rgba(15,23,42,0.22)] backdrop-blur-2xl supports-[backdrop-filter]:bg-white/86">
         <div className="container py-3 sm:py-4">
           <div className="relative flex w-full items-center gap-3 sm:gap-4">
             <Link
@@ -211,7 +211,7 @@ export function AppShell() {
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2 text-xs text-[#6a7e98]">
                 <span className="font-semibold tracking-[0.03em] text-[#465a74]">LearningPyramid</span>
-                <span className="inline-flex items-center rounded-full border border-[#d6e1ef] bg-white/76 px-2 py-0.5 text-[11px] font-medium text-[#607389]">
+                <span className="inline-flex items-center rounded-full border border-[#e0e6ed] bg-[#f7f9fb] px-2 py-0.5 text-[11px] font-medium text-[#66798e]">
                   {deploymentLabel}
                 </span>
               </div>
@@ -230,8 +230,8 @@ export function AppShell() {
                     to={item.to}
                     className={({ isActive }) =>
                       cn(
-                        "inline-flex h-10 items-center gap-2 rounded-2xl border border-white/80 bg-white/88 px-2.5 text-sm text-[#5b6b82] shadow-[0_18px_34px_-28px_rgba(15,23,42,0.24)] transition-colors hover:border-primary/15 hover:text-foreground min-[420px]:px-3.5",
-                        isActive && "border-primary/15 bg-[#eef4ff] text-foreground",
+                        "inline-flex h-10 items-center gap-2 rounded-2xl border border-[#e3e8ef] bg-white px-2.5 text-sm text-[#5b6b82] shadow-[0_14px_28px_-24px_rgba(15,23,42,0.16)] transition-colors hover:border-primary/15 hover:text-foreground min-[420px]:px-3.5",
+                        isActive && "border-primary/15 bg-[#eef5ff] text-foreground",
                       )
                     }
                   >
@@ -246,7 +246,7 @@ export function AppShell() {
                 ref={menuButtonRef}
                 variant="outline"
                 size="icon"
-                className="h-11 w-11 shrink-0 rounded-2xl border-white/80 bg-white/88"
+                className="h-11 w-11 shrink-0 rounded-2xl border-[#e3e8ef] bg-white"
                 onClick={() => setNavMenuOpen((current) => !current)}
                 aria-expanded={navMenuOpen}
                 aria-haspopup="menu"
@@ -259,7 +259,7 @@ export function AppShell() {
             {navMenuOpen ? (
               <div
                 ref={menuRef}
-                className="absolute right-0 top-[calc(100%+0.65rem)] z-30 w-[min(22rem,calc(100vw-1rem))] overflow-hidden rounded-[1.6rem] border border-white/80 bg-[linear-gradient(180deg,rgba(250,252,255,0.98),rgba(244,247,252,0.96))] shadow-[0_24px_60px_-30px_rgba(15,23,42,0.36)] backdrop-blur-2xl"
+                className="absolute right-0 top-[calc(100%+0.65rem)] z-30 w-[min(22rem,calc(100vw-1rem))] overflow-hidden rounded-[1.6rem] border border-[#e3e8ef] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(246,248,251,0.96))] shadow-[0_24px_60px_-30px_rgba(15,23,42,0.24)] backdrop-blur-2xl"
               >
                 <div className="max-h-[min(70vh,calc(100dvh-5.5rem))] overflow-y-auto overscroll-contain p-3 [-webkit-overflow-scrolling:touch]">
                   {pid ? (
@@ -271,13 +271,13 @@ export function AppShell() {
                       <MainNav items={projectNavItems} onNavigate={() => setNavMenuOpen(false)} />
                     </>
                   ) : (
-                    <div className="rounded-2xl border border-dashed border-border/70 bg-white/72 px-4 py-3 text-sm text-muted-foreground">
+                    <div className="rounded-2xl border border-dashed border-border/70 bg-[#f8fafc] px-4 py-3 text-sm text-muted-foreground">
                       当前没有项目上下文。
                     </div>
                   )}
 
                   {authEnabled && currentUserQ.data ? (
-                    <div className="mt-3 rounded-[1.25rem] border border-white/80 bg-white/82 p-3">
+                    <div className="mt-3 rounded-[1.25rem] border border-[#e3e8ef] bg-white p-3">
                       <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#6a7e98]">当前账号</div>
                       <div className="mt-1 truncate text-sm font-medium text-foreground">{currentUserQ.data.email}</div>
                       <Button
