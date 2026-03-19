@@ -1,14 +1,13 @@
 import { useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { ChevronRight, FolderTree } from "lucide-react"
+import { FolderTree } from "lucide-react"
 import { useNavigate, useParams } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
 import { listInstances, type Instance } from "@/ui/api/instances"
-import { listLearningObjectNodes, listRecallPointsByLearningObjectNode, type LearningObjectNode } from "@/ui/api/learningObjects"
+import { listLearningObjectNodes, type LearningObjectNode } from "@/ui/api/learningObjects"
 import { ContentEmptyState, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
-import { cn } from "@/ui/utils"
 import {
   LearningObjectTreeCanvas,
   type LearningObjectTreeCanvasNode,
@@ -19,18 +18,6 @@ function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
   if (err instanceof Error) return err.message
   return "未知错误"
-}
-
-function getPathNodeIds(nodeId: string | null, parentById: Record<string, string | null>) {
-  if (!nodeId) return []
-
-  const path: string[] = []
-  let current: string | null | undefined = nodeId
-  while (current) {
-    path.unshift(current)
-    current = parentById[current]
-  }
-  return path
 }
 
 function formatObjectTitle(node: LearningObjectNode, depth: number) {
@@ -68,10 +55,8 @@ export function ObjectTreePage() {
 
   const {
     defaultSelectedId,
-    descendantMaterialCountById,
     depthById,
     nodeById,
-    parentById,
     rootIds,
   } = useMemo(() => {
     const rawNodes = nodesQ.data ?? []
@@ -79,7 +64,6 @@ export function ObjectTreePage() {
     for (const instance of instancesQ.data ?? []) instancesById[instance.instanceId] = instance
 
     const rawNodeById: Record<string, LearningObjectNode> = {}
-    const directParentById: Record<string, string | null> = {}
     const roots = rawNodes
       .filter((node) => node.parentId === null)
       .map((node) => node.nodeId)
@@ -87,7 +71,6 @@ export function ObjectTreePage() {
 
     for (const node of rawNodes) {
       rawNodeById[node.nodeId] = node
-      directParentById[node.nodeId] = node.parentId
     }
 
     const depthMap: Record<string, number> = {}
@@ -158,35 +141,14 @@ export function ObjectTreePage() {
 
     return {
       defaultSelectedId: defaultNodeId,
-      descendantMaterialCountById: descendantCountById,
       depthById: depthMap,
       nodeById: map,
-      parentById: directParentById,
       rootIds: roots,
     }
   }, [instancesQ.data, nodesQ.data])
 
   const effectiveSelectedNodeId = selectedNodeId && nodeById[selectedNodeId] ? selectedNodeId : defaultSelectedId
   const selectedNode = effectiveSelectedNodeId ? nodeById[effectiveSelectedNodeId] : null
-  const selectedInstance =
-    !selectedNode?.instanceId ? null : (instancesQ.data ?? []).find((instance) => instance.instanceId === selectedNode.instanceId) ?? null
-
-  const selectedRecallPointsQ = useQuery({
-    queryKey: ["recallPointsByObjectNode", pid, effectiveSelectedNodeId],
-    queryFn: () => listRecallPointsByLearningObjectNode(pid, effectiveSelectedNodeId ?? ""),
-    enabled: !!pid && !!effectiveSelectedNodeId,
-  })
-
-  const pathNodeIds = useMemo(
-    () => getPathNodeIds(effectiveSelectedNodeId, parentById),
-    [effectiveSelectedNodeId, parentById],
-  )
-
-  const selectedParent = selectedNode ? (parentById[selectedNode.nodeId] ? nodeById[parentById[selectedNode.nodeId] ?? ""] : null) : null
-  const selectedChildren =
-    selectedNode?.kind === "container"
-      ? (selectedNode.children ?? []).map((childId) => nodeById[childId]).filter((node): node is LearningObjectTreeCanvasNode => !!node)
-      : []
 
   const canvasFocusNodeId = hoveredNodeId ?? effectiveSelectedNodeId
   const isLoading = nodesQ.isLoading
@@ -196,37 +158,13 @@ export function ObjectTreePage() {
     <div className="space-y-5">
       <section className="theme-card p-5 md:p-6">
         {selectedNode ? (
-          <div className="space-y-5">
-            <div className="flex flex-col gap-4 border-b border-border/60 pb-4 xl:flex-row xl:items-start xl:justify-between">
-              <div className="space-y-3">
-                <div className="flex flex-wrap gap-2">
-                  <span className="theme-meta-strong">学习对象树</span>
-                  <span className="theme-meta">进入页面默认定位根节点</span>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <ObjectTypeBadge uiType={selectedNode.uiType} />
-                  <span className="inline-flex items-center rounded-full border border-[#d8e3ee] bg-[#f6f9fc] px-2.5 py-1 text-xs font-semibold text-[#5f7790]">
-                    D{depthById[selectedNode.nodeId] ?? 0}
-                  </span>
-                  {selectedInstance ? (
-                    <span
-                      className={cn(
-                        "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold",
-                        selectedInstance.presence === "MISSING"
-                          ? "border-amber-200 bg-amber-50 text-amber-700"
-                          : "border-emerald-200 bg-emerald-50 text-emerald-700",
-                      )}
-                    >
-                      {selectedInstance.presence === "MISSING" ? "材料缺失" : "材料可达"}
-                    </span>
-                  ) : null}
-                </div>
-                <div>
-                  <h1 className="text-[1.7rem] font-semibold tracking-tight text-foreground">
-                    {selectedNode.displayTitle ?? selectedNode.title}
-                  </h1>
-                  <p className="mt-2 text-sm text-[#647b93]">{selectedNode.metaText}</p>
-                </div>
+          <div className="space-y-4">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+              <div className="space-y-2">
+                <h1 className="text-[1.7rem] font-semibold tracking-tight text-foreground">
+                  {selectedNode.displayTitle ?? selectedNode.title}
+                </h1>
+                {selectedNode.kind === "leaf" ? <p className="text-sm text-[#647b93]">{selectedNode.metaText}</p> : null}
               </div>
 
               <div className="flex flex-wrap gap-3">
@@ -236,103 +174,12 @@ export function ObjectTreePage() {
               </div>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <DetailMetric label="覆盖材料数" value={`${descendantMaterialCountById[selectedNode.nodeId] ?? 0}`} />
-              <DetailMetric
-                label={selectedNode.kind === "container" ? "直接子节点" : "材料状态"}
-                value={
-                  selectedNode.kind === "container"
-                    ? `${selectedChildren.length}`
-                    : selectedInstance?.presence === "MISSING"
-                      ? "缺失"
-                      : "正常"
-                }
-              />
-              <DetailMetric label="路径深度" value={`D${depthById[selectedNode.nodeId] ?? 0}`} />
-              <DetailMetric
-                label="复述点数"
-                value={selectedRecallPointsQ.data ? `${selectedRecallPointsQ.data.length}` : selectedRecallPointsQ.isLoading ? "..." : "-"}
-              />
-            </div>
-
-            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,0.8fr)_minmax(0,1fr)]">
-              <div>
-                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#688099]">路径</div>
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  {pathNodeIds.map((nodeId, index) => {
-                    const node = nodeById[nodeId]
-                    if (!node) return null
-                    return (
-                      <div key={nodeId} className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          className={cn(
-                            "rounded-full border px-3 py-1.5 text-xs font-medium transition hover:border-primary/30 hover:bg-accent hover:text-foreground",
-                            nodeId === selectedNode.nodeId
-                              ? "border-[#9fbad6] bg-[#eef5fd] text-[#31567d]"
-                              : "border-[#d6e0ea] bg-white text-[#607892]",
-                          )}
-                          onClick={() => setSelectedNodeId(nodeId)}
-                        >
-                          {node.displayTitle ?? node.title}
-                        </button>
-                        {index < pathNodeIds.length - 1 ? <ChevronRight className="size-3.5 text-[#8097ae]" /> : null}
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-
-              {selectedParent ? (
-                <div>
-                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#688099]">上级节点</div>
-                  <button
-                    type="button"
-                    className="mt-3 w-full rounded-2xl border border-[#d6e0ea] bg-white px-4 py-3 text-left text-sm font-medium text-[#31567d] transition hover:border-primary/20 hover:bg-accent"
-                    onClick={() => setSelectedNodeId(selectedParent.nodeId)}
-                  >
-                    {selectedParent.displayTitle ?? selectedParent.title}
-                  </button>
-                </div>
-              ) : (
-                <div>
-                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#688099]">上级节点</div>
-                  <div className="mt-3 rounded-2xl border border-dashed border-[#d6e0ea] bg-white/60 px-4 py-3 text-sm text-[#7a91a9]">
-                    当前已在根节点
-                  </div>
-                </div>
-              )}
-
-              <div>
-                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#688099]">下级节点</div>
-                {selectedChildren.length > 0 ? (
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {selectedChildren.map((child) => (
-                      <button
-                        key={child.nodeId}
-                        type="button"
-                        className="rounded-full border border-[#d6e0ea] bg-white px-3 py-1.5 text-xs font-medium text-[#5d7590] transition hover:border-primary/20 hover:bg-accent hover:text-foreground"
-                        onClick={() => setSelectedNodeId(child.nodeId)}
-                      >
-                        {child.displayTitle ?? child.title}
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="mt-3 rounded-2xl border border-dashed border-[#d6e0ea] bg-white/60 px-4 py-3 text-sm text-[#7a91a9]">
-                    当前节点没有下级节点
-                  </div>
-                )}
-              </div>
-            </div>
-
             {instancesQ.error ? <ErrorNotice title="实例详情加载失败" message={formatApiError(instancesQ.error)} /> : null}
-            {selectedRecallPointsQ.error ? <ErrorNotice title="复述点统计加载失败" message={formatApiError(selectedRecallPointsQ.error)} /> : null}
           </div>
         ) : (
           <ContentEmptyState
             title="先选择一个对象节点"
-            message="从结构图里点击任意目录或材料节点，这里就会显示它的路径、状态和复述点摘要。"
+            message="从结构图里点击任意目录或材料节点，这里会显示当前节点的简要信息。"
           />
         )}
       </section>
@@ -371,33 +218,4 @@ export function ObjectTreePage() {
       </section>
     </div>
   )
-}
-
-function DetailMetric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-[1.2rem] border border-white/70 bg-white/82 px-4 py-3 shadow-[0_12px_32px_-28px_rgba(15,23,42,0.2)]">
-      <div className="text-xs text-[#7088a1]">{label}</div>
-      <div className="mt-1 text-lg font-semibold tracking-tight text-foreground">{value}</div>
-    </div>
-  )
-}
-
-function ObjectTypeBadge({ uiType }: { uiType?: ObjectTreeVisualType }) {
-  const labelByType: Record<ObjectTreeVisualType, { className: string; label: string }> = {
-    root: {
-      label: "根目录",
-      className: "border-[#b9cee3] bg-[#f3f8ff] text-[#2f547b]",
-    },
-    group: {
-      label: "分组节点",
-      className: "border-[#a8c0da] bg-[#eef5fd] text-[#31567d]",
-    },
-    material: {
-      label: "材料节点",
-      className: "border-[#d3dde8] bg-white text-[#5f7892]",
-    },
-  }
-
-  const config = labelByType[uiType ?? "material"]
-  return <span className={cn("inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold", config.className)}>{config.label}</span>
 }
