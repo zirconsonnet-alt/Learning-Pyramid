@@ -11,6 +11,13 @@ import { useImportLearningObjectsFromBrowser } from "@/ui/queries/workbench"
 import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { cn } from "@/ui/utils"
 
+function isSyntheticFilesContainer(node: LearningObjectNode | undefined) {
+  if (!node || node.kind !== "container") return false
+  const title = node.title.trim()
+  const relativePath = (node.relativePath ?? "").trim()
+  return title === "Files" && (relativePath === "__files__" || relativePath.endsWith("/__files__"))
+}
+
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
   if (err instanceof Error) return err.message
@@ -38,9 +45,7 @@ function TreeNode({
   if (!data) return null
 
   if (data.kind === "container") {
-    const firstChild = data.children[0] ? nodeById[data.children[0]] : undefined
-    const isSyntheticFilesContainer = data.title === "Files" && (data.children.length === 0 || firstChild?.kind !== "container")
-    if (isSyntheticFilesContainer) {
+    if (isSyntheticFilesContainer(data)) {
       return (
         <>
           {data.children.map((childId) => (

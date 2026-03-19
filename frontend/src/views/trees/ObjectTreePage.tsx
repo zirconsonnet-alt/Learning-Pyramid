@@ -13,6 +13,13 @@ import {
   type ObjectTreeVisualType,
 } from "@/views/trees/components/LearningObjectTreeCanvas"
 
+function isSyntheticFilesContainer(node: LearningObjectNode | undefined) {
+  if (!node || node.kind !== "container") return false
+  const title = node.title.trim()
+  const relativePath = (node.relativePath ?? "").trim()
+  return title === "Files" && (relativePath === "__files__" || relativePath.endsWith("/__files__"))
+}
+
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
   if (err instanceof Error) return err.message
@@ -56,17 +63,46 @@ export function ObjectTreePage() {
     nodeById,
     rootIds,
   } = useMemo(() => {
-    const rawNodes = nodesQ.data ?? []
+    const sourceNodes = nodesQ.data ?? []
     const instancesById: Record<string, Instance> = {}
     for (const instance of instancesQ.data ?? []) instancesById[instance.instanceId] = instance
 
+    const syntheticFilesNodes = sourceNodes.filter((node) => isSyntheticFilesContainer(node))
+    const syntheticFilesIds = new Set(syntheticFilesNodes.map((node) => node.nodeId))
+    const syntheticFilesById = Object.fromEntries(syntheticFilesNodes.map((node) => [node.nodeId, node])) as Record<
+      string,
+      LearningObjectNode
+    >
+    const normalizedNodes = sourceNodes
+      .filter((node) => !syntheticFilesIds.has(node.nodeId))
+      .map((node) => {
+        if (node.kind === "container") {
+          return {
+            ...node,
+            children: node.children.flatMap((childId) => {
+              if (!syntheticFilesIds.has(childId)) return [childId]
+              const syntheticNode = syntheticFilesById[childId]
+              return syntheticNode?.kind === "container" ? syntheticNode.children : []
+            }),
+          }
+        }
+        if (node.parentId && syntheticFilesIds.has(node.parentId)) {
+          const syntheticParent = syntheticFilesById[node.parentId]
+          return {
+            ...node,
+            parentId: syntheticParent?.parentId ?? null,
+          }
+        }
+        return node
+      })
+
     const rawNodeById: Record<string, LearningObjectNode> = {}
-    const roots = rawNodes
+    const roots = normalizedNodes
       .filter((node) => node.parentId === null)
       .map((node) => node.nodeId)
       .sort((a, b) => a.localeCompare(b))
 
-    for (const node of rawNodes) {
+    for (const node of normalizedNodes) {
       rawNodeById[node.nodeId] = node
     }
 
@@ -86,7 +122,7 @@ export function ObjectTreePage() {
       return depth
     }
 
-    for (const node of rawNodes) getDepth(node.nodeId)
+    for (const node of normalizedNodes) getDepth(node.nodeId)
 
     const descendantCountById: Record<string, number> = {}
     function countMaterialDescendants(nodeId: string): number {
@@ -109,7 +145,7 @@ export function ObjectTreePage() {
 
     const map: Record<string, LearningObjectTreeCanvasNode> = {}
 
-    for (const node of rawNodes) {
+    for (const node of normalizedNodes) {
       const depth = depthMap[node.nodeId] ?? 0
       const uiType = classifyObjectNode(node, depth)
       const displayTitle = formatObjectTitle(node, depth)

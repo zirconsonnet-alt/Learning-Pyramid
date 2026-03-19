@@ -710,10 +710,6 @@ class SystemAPI:
                 )
             return rel
 
-        def _files_node_id_from_dir(rel_path: PurePosixPath) -> LearningObjectNodeId:
-            seed = f"FILES:{rel_path.as_posix()}".encode("utf-8")
-            return LearningObjectNodeId(f"lonfs_files_{hashlib.sha256(seed).hexdigest()[:32]}")
-
         file_rel = sorted({_normalize_rel_path(item) for item in relative_file_paths}, key=lambda p: p.as_posix())
         if not file_rel:
             raise PreconditionFailure("当前已授权目录中没有找到可导入的媒体文件")
@@ -750,7 +746,6 @@ class SystemAPI:
 
             leaf_id_by_file: dict[PurePosixPath, LearningObjectNodeId] = {rel: node_id_from_rel_path(rel, "LEAF") for rel in file_rel}
             dir_id_by_dir: dict[PurePosixPath, LearningObjectNodeId] = {rel: node_id_from_rel_path(rel, "DIR") for rel in dir_rel}
-            files_id_by_dir: dict[PurePosixPath, LearningObjectNodeId] = {rel: _files_node_id_from_dir(rel) for rel in dir_rel}
 
             now = now_utc_ms()
             scanned_instance_keys = {id_canonical_text(x) for x in instance_id_by_file.values()}
@@ -826,23 +821,9 @@ class SystemAPI:
             nodes_out: list[LearningObjectLeaf | LearningObjectContainer] = []
 
             for rel in dir_rel:
-                leaf_children = tuple(leaf_id_by_file[path] for path in file_children_by_dir.get(rel, []))
-                files_rel = PurePosixPath("__files__") if rel == PurePosixPath(".") else rel / "__files__"
-                nodes_out.append(
-                    LearningObjectContainer(
-                        source="FILESYSTEM",
-                        project_id=project_id,
-                        node_id=files_id_by_dir[rel],
-                        relative_path=files_rel,
-                        parent_id=dir_id_by_dir[rel],
-                        children=leaf_children,
-                        title="Files",
-                    )
-                )
-
-            for rel in dir_rel:
                 sub_dir_ids = tuple(dir_id_by_dir[path] for path in child_dirs_by_dir.get(rel, []))
-                children = tuple(list(sub_dir_ids) + [files_id_by_dir[rel]])
+                leaf_ids = tuple(leaf_id_by_file[path] for path in file_children_by_dir.get(rel, []))
+                children = tuple(list(sub_dir_ids) + list(leaf_ids))
                 if rel == PurePosixPath("."):
                     parent_id = None
                     title = display_root_title
@@ -869,7 +850,7 @@ class SystemAPI:
                         project_id=project_id,
                         node_id=leaf_id_by_file[rel],
                         relative_path=rel,
-                        parent_id=files_id_by_dir[rel.parent],
+                        parent_id=dir_id_by_dir[rel.parent],
                         instance_id=instance_id_by_file[rel],
                         title=rel.name,
                     )

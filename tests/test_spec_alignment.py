@@ -348,6 +348,13 @@ class _SpecAlignmentBackendMixin:
             self.assertEqual(items[0].material_id.as_posix(), "lesson.mp4")
             self.assertEqual(items[0].presence, InstancePresence.PRESENT)
 
+            object_nodes = restarted_api.list_learning_object_nodes(project_id)
+            self.assertEqual([node.title for node in object_nodes if getattr(node, "parent_id", None) is None], ["Videos"])
+            self.assertFalse(any(node.title == "Files" for node in object_nodes))
+            leaf_nodes = [node for node in object_nodes if hasattr(node, "instance_id")]
+            self.assertEqual(len(leaf_nodes), 1)
+            self.assertEqual(leaf_nodes[0].parent_id, restarted_api.list_learning_object_roots(project_id)[0])
+
     def test_sync_learning_objects_from_fs_noop_does_not_write_audit(self) -> None:
         api, root = self._new_api()
         project_root, learning_root = self._make_project_dirs(root, "videos")
