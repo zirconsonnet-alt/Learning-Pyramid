@@ -65,15 +65,14 @@ export function RichContentEditor({
         disabled={disabled || isUploading}
         placeholder={placeholder}
       />
-      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        <span>{field === "question" ? "问题区" : "答案区"}支持直接 `Ctrl+V` 粘贴图片。</span>
-        {isUploading ? (
-          <span className="inline-flex items-center gap-1 text-primary">
+      {isUploading ? (
+        <div className="flex flex-wrap items-center gap-2 text-xs text-primary">
+          <span className="inline-flex items-center gap-1">
             <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
             正在上传图片...
           </span>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
       {imageAssetIds.length > 0 ? (
         <div className="flex flex-wrap gap-3">
           {imageAssetIds.map((assetId, imageIndex) => (

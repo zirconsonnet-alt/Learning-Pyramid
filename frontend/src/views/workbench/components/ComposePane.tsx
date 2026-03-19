@@ -235,7 +235,7 @@ export function ComposePane({
                         projectId={projectId}
                         field="question"
                         value={d.question}
-                        placeholder="请输入问题/提示语，或直接 Ctrl+V 粘贴图片"
+                        placeholder="请输入问题/提示语"
                         onTextChange={(text) => updateDraftText(projectId, d.localId, "question", text)}
                         onAppendImage={(assetId) => appendDraftImage(projectId, d.localId, "question", assetId)}
                         onRemoveImage={(imageIndex) => removeDraftImage(projectId, d.localId, "question", imageIndex)}
@@ -254,7 +254,7 @@ export function ComposePane({
                         projectId={projectId}
                         field="answer"
                         value={d.answer}
-                        placeholder="请输入答案/复述内容，或直接 Ctrl+V 粘贴图片"
+                        placeholder="请输入答案/复述内容"
                         onTextChange={(text) => updateDraftText(projectId, d.localId, "answer", text)}
                         onAppendImage={(assetId) => appendDraftImage(projectId, d.localId, "answer", assetId)}
                         onRemoveImage={(imageIndex) => removeDraftImage(projectId, d.localId, "answer", imageIndex)}

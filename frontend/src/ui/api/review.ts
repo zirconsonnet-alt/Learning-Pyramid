@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 import { apiRequest } from "@/ui/api/http"
-import { RichContentSchema } from "@/ui/api/richContent"
+import { normalizeRichContent, RichContentSchema } from "@/ui/api/richContent"
 
 export const ReviewTaskSchema = z.object({
   projectId: z.string(),
@@ -105,8 +105,8 @@ export function editRecallPoint(
     path: `/projects/${projectId}/recall-points/${recallPointId}`,
     method: "PUT",
     body: {
-      question: RichContentSchema.parse(params.question),
-      answer: RichContentSchema.parse(params.answer),
+      question: RichContentSchema.parse(normalizeRichContent(params.question)),
+      answer: RichContentSchema.parse(normalizeRichContent(params.answer)),
       anchor: params.anchor,
     },
     responseSchema: z.null(),

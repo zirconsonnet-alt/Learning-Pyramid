@@ -2,7 +2,7 @@ import { z } from "zod"
 
 import { apiRequest } from "@/ui/api/http"
 import type { RichContent } from "@/ui/api/richContent"
-import { RichContentSchema } from "@/ui/api/richContent"
+import { normalizeRichContent, RichContentSchema } from "@/ui/api/richContent"
 
 export const SubmitLearningTaskResultSchema = z.object({ entryNodeId: z.string() })
 export const LearningTaskSchema = z.object({
@@ -35,8 +35,8 @@ export function submitLearningTask(params: {
     body: {
       title: params.title,
       items: params.items.map((it) => ({
-        question: RichContentSchema.parse(it.question),
-        answer: RichContentSchema.parse(it.answer),
+        question: RichContentSchema.parse(normalizeRichContent(it.question)),
+        answer: RichContentSchema.parse(normalizeRichContent(it.answer)),
         anchor: it.anchor,
       })),
     },

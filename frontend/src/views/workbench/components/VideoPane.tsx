@@ -72,11 +72,10 @@ function formatPlaybackClock(ms: number) {
   const h = Math.floor(totalSec / 3600)
   const m = Math.floor((totalSec % 3600) / 60)
   const s = totalSec % 60
-  const msPart = ms % 1000
   const hh = h > 0 ? `${h}:` : ""
   const mm = h > 0 ? String(m).padStart(2, "0") : String(m)
   const ss = String(s).padStart(2, "0")
-  return `${hh}${mm}:${ss}.${String(msPart).padStart(3, "0")}`
+  return `${hh}${mm}:${ss}`
 }
 
 function newLocalId() {
@@ -136,7 +135,7 @@ export function VideoPane({
   const browserLocalMediaEnabled = capabilitiesQ.data?.browserLocalMediaEnabled ?? false
   const displayPlaybackMs = durationMs > 0 ? Math.min(playbackMs, durationMs) : playbackMs
   const progressMax = Math.max(durationMs, 1)
-  const durationLabel = durationMs > 0 ? formatPlaybackClock(durationMs) : "--:--.---"
+  const durationLabel = durationMs > 0 ? formatPlaybackClock(durationMs) : "--:--"
   const chromeVisible = isChromeAwake || !isPlaying || isCapturePanelOpen
   const playbackRateLabel = `${Number.isInteger(playbackRate) ? playbackRate.toFixed(0) : playbackRate.toFixed(2).replace(/0$/, "")}x`
 
@@ -791,7 +790,7 @@ export function VideoPane({
                   />
                 </div>
 
-                <div className="mt-1.5 rounded-[1rem] border border-white/14 bg-[linear-gradient(180deg,rgba(2,6,23,0.72),rgba(2,6,23,0.88))] px-2.5 py-1.5 shadow-[0_18px_44px_-28px_rgba(0,0,0,0.9)] backdrop-blur-xl">
+                <div className="mt-0.5 rounded-[1rem] border border-white/14 bg-[linear-gradient(180deg,rgba(2,6,23,0.72),rgba(2,6,23,0.88))] px-2.5 py-1.5 shadow-[0_18px_44px_-28px_rgba(0,0,0,0.9)] backdrop-blur-xl">
                   <div className="flex items-center gap-1 text-xs sm:gap-1.5 sm:text-sm">
                     <Button
                       type="button"
@@ -834,7 +833,7 @@ export function VideoPane({
                     <div className="ml-auto flex items-center gap-1 text-white/86">
                       <div className="group/volume relative hidden sm:block">
                         <div className="pointer-events-none absolute bottom-full left-1/2 mb-2 -translate-x-1/2 opacity-0 transition duration-150 group-hover/volume:opacity-100 group-focus-within/volume:opacity-100">
-                          <div className="pointer-events-auto flex h-28 w-10 items-center justify-center rounded-full bg-black/78 shadow-[0_14px_32px_-20px_rgba(0,0,0,0.9)] backdrop-blur-md">
+                          <div className="pointer-events-auto flex h-28 w-10 items-center justify-center rounded-full border border-white/12 bg-slate-950/96 shadow-[0_14px_32px_-20px_rgba(0,0,0,0.9)]">
                             <div className="w-20 -rotate-90">
                               <input
                                 type="range"
@@ -872,9 +871,9 @@ export function VideoPane({
                         {isMuted ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
                         <span className="sr-only">{isMuted ? "取消静音" : "静音"}</span>
                       </Button>
-                      <div className="group/rate relative">
-                        <div className="pointer-events-none absolute bottom-full left-1/2 mb-2 -translate-x-1/2 opacity-0 transition duration-150 group-hover/rate:opacity-100 group-focus-within/rate:opacity-100">
-                          <div className="pointer-events-auto flex flex-col gap-1 rounded-2xl bg-black/78 p-1.5 shadow-[0_14px_32px_-20px_rgba(0,0,0,0.9)] backdrop-blur-md">
+                    <div className="group/rate relative">
+                      <div className="pointer-events-none absolute bottom-full left-1/2 mb-2 -translate-x-1/2 opacity-0 transition duration-150 group-hover/rate:opacity-100 group-focus-within/rate:opacity-100">
+                          <div className="pointer-events-auto min-w-[4.75rem] rounded-xl border border-white/12 bg-slate-950 p-1 shadow-[0_14px_32px_-20px_rgba(0,0,0,0.9)]">
                             {[...PLAYBACK_RATE_OPTIONS].sort((left, right) => right - left).map((rate) => {
                               const active = Math.abs(rate - playbackRate) < 0.001
                               const rateLabel = `${Number.isInteger(rate) ? rate.toFixed(0) : String(rate)}x`
@@ -883,8 +882,8 @@ export function VideoPane({
                                   key={rate}
                                   type="button"
                                   className={cn(
-                                    "rounded-full px-2 py-1 text-[11px] transition hover:bg-white/10",
-                                    active ? "bg-white/14 text-white" : "text-white/78",
+                                    "flex h-7 w-full items-center justify-center rounded-lg px-2 text-[11px] font-medium tabular-nums outline-none transition-colors focus-visible:bg-white/12 focus-visible:text-white",
+                                    active ? "bg-white/14 text-white" : "text-white/78 hover:bg-white/10 hover:text-white",
                                   )}
                                   onClick={() => setVideoPlaybackRate(rate)}
                                 >

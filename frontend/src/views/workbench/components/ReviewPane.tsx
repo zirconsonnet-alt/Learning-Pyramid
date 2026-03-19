@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { CheckCircle2, ClipboardCheck, PlayCircle } from "lucide-react"
+import { Link } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
 import type { Instance } from "@/ui/api/instances"
@@ -28,11 +29,10 @@ function msToClock(ms: number) {
   const h = Math.floor(totalSec / 3600)
   const m = Math.floor((totalSec % 3600) / 60)
   const s = totalSec % 60
-  const msPart = ms % 1000
   const hh = h > 0 ? `${h}:` : ""
   const mm = h > 0 ? String(m).padStart(2, "0") : String(m)
   const ss = String(s).padStart(2, "0")
-  return `${hh}${mm}:${ss}.${String(msPart).padStart(3, "0")}`
+  return `${hh}${mm}:${ss}`
 }
 
 export function ReviewPane({
@@ -106,7 +106,13 @@ export function ReviewPane({
                 <div key={rpId} className="theme-status-surface rounded-[1.2rem] border border-border/70 p-4">
                   <div className="text-sm font-medium">
                     <div className="mb-2 text-xs uppercase tracking-[0.16em] text-muted-foreground">Question</div>
-                    <RichContentRenderer projectId={projectId} value={rp.question} />
+                    <Link
+                      to={`/p/${projectId}/recall-points/${rpId}`}
+                      className="block rounded-xl px-2 py-1 -mx-2 -my-1 transition hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                      title="打开复述点详情"
+                    >
+                      <RichContentRenderer projectId={projectId} value={rp.question} />
+                    </Link>
                   </div>
                   <div className="mt-1 text-xs text-muted-foreground">
                     锚点：{formatInstanceReference(rp.anchor.instanceId, inst?.materialDisplayName)} /{" "}
