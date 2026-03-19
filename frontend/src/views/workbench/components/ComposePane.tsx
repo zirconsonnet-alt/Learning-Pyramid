@@ -1,5 +1,5 @@
 import { useRef } from "react"
-import { BookPlus, CircleCheckBig } from "lucide-react"
+import { BookPlus } from "lucide-react"
 
 import { ApiError } from "@/ui/api/http"
 import type { Instance } from "@/ui/api/instances"
@@ -267,18 +267,20 @@ export function ComposePane({
           })}
         </div>
 
-        <div className="theme-canvas grid gap-3 rounded-[1.2rem] border border-[#e2e8ef] p-4">
-          <div>
-            <Label htmlFor="taskTitle">学习任务标题</Label>
+        <div className="border-t border-[#e2e8ef] pt-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center">
+            <Label htmlFor="taskTitle" className="shrink-0 text-sm font-medium text-[#475569] md:w-[6.5rem]">
+              任务标题
+            </Label>
             <Input
               id="taskTitle"
               value={taskTitle}
               onChange={(e) => setTaskTitle(projectId, e.target.value)}
+              className="h-11 flex-1 bg-white"
               placeholder={instance ? `${instance.materialDisplayName} - 学习任务` : "例如：第一节 - 学习任务"}
             />
-          </div>
-          <div>
             <Button
+              className="h-11 shrink-0 rounded-xl px-5 md:min-w-[7rem]"
               onClick={() => void onSubmit()}
               disabled={
                 queueHasGate ||
@@ -290,16 +292,14 @@ export function ComposePane({
             >
               {submit.isPending ? "提交中..." : "提交学习"}
             </Button>
-            {!submit.isPending &&
-            drafts.length > 0 &&
-            !drafts.some((d) => !richContentHasMeaning(d.question) || !richContentHasMeaning(d.answer)) ? (
-              <div className="mt-2 flex items-center gap-2 text-sm text-emerald-700">
-                <CircleCheckBig className="h-4 w-4" />
-                所有复述点已填写完成，可以提交。
-              </div>
-            ) : null}
-            {submit.error ? <p className="mt-2 text-sm text-destructive">{formatApiError(submit.error)}</p> : null}
           </div>
+          {submit.error ? <p className="mt-2 text-sm text-destructive">{formatApiError(submit.error)}</p> : null}
+          {!submit.isPending &&
+          !submit.error &&
+          drafts.length > 0 &&
+          !drafts.some((d) => !richContentHasMeaning(d.question) || !richContentHasMeaning(d.answer)) ? (
+            <p className="mt-2 text-xs text-[#64748b]">已准备好提交，共 {drafts.length} 个复述点。</p>
+          ) : null}
         </div>
       </CardContent>
     </Card>
