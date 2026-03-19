@@ -325,6 +325,7 @@ export function VideoPane({
       if (keepFullscreen) {
         await requestShellFullscreen()
       }
+      if (!keepFullscreen && !isElementInFullscreen(playerShellRef.current)) return
 
       setCaptureAnchorMs(captureMs)
       setQuestionText("")
@@ -344,7 +345,7 @@ export function VideoPane({
     ],
   )
 
-  const saveCaptureDraft = useCallback(async () => {
+  const saveCaptureDraft = useCallback(() => {
     if (!instanceId) {
       setCaptureError("当前还没有选中视频实例。")
       return
@@ -373,15 +374,6 @@ export function VideoPane({
       updatedAt: now,
     })
     closeCapturePanel()
-
-    const shell = playerShellRef.current
-    if (shell && isElementInFullscreen(shell)) {
-      try {
-        await document.exitFullscreen()
-      } catch {
-        // Ignore exit failures and keep the saved draft.
-      }
-    }
   }, [
     addDraft,
     answerText,
@@ -482,6 +474,11 @@ export function VideoPane({
       window.clearTimeout(timeoutId)
     }
   }, [isCapturePanelOpen])
+
+  useEffect(() => {
+    if (!isCapturePanelOpen || isShellFullscreen) return
+    closeCapturePanel()
+  }, [closeCapturePanel, isCapturePanelOpen, isShellFullscreen])
 
   useEffect(() => {
     clearChromeHideTimer()
@@ -907,18 +904,20 @@ export function VideoPane({
                           {playbackRateLabel}
                         </Button>
                       </div>
-                      <Button
-                        type="button"
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7 rounded-full text-white hover:bg-white/10"
-                        onClick={() => void openCapturePanel()}
-                        disabled={!instanceId || queueHasGate}
-                        title="记复述点"
-                      >
-                        <NotebookPen className="h-3.5 w-3.5" />
-                        <span className="sr-only">记复述点</span>
-                      </Button>
+                      {isShellFullscreen ? (
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7 rounded-full text-white hover:bg-white/10"
+                          onClick={() => void openCapturePanel()}
+                          disabled={!instanceId || queueHasGate}
+                          title="记复述点"
+                        >
+                          <NotebookPen className="h-3.5 w-3.5" />
+                          <span className="sr-only">记复述点</span>
+                        </Button>
+                      ) : null}
                       <Button
                         type="button"
                         size="icon"
@@ -1014,7 +1013,7 @@ export function VideoPane({
                   </div>
 
                   <div className={cn("mt-2 text-xs", captureError ? "text-rose-200" : "text-white/44")}>
-                    {captureError ?? "Ctrl+Enter 保存，保存后自动退出全屏"}
+                    {captureError ?? "Ctrl+Enter 保存，Esc 取消"}
                   </div>
 
                   <div className="mt-3 flex items-center justify-end gap-2">
