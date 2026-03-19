@@ -89,7 +89,7 @@ function LayerReviewChainCard(props: {
     <div className="theme-status-surface rounded-[1.2rem] border border-border/70 p-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="theme-meta-strong">L{layer.layerIndex}</div>
+          <div className="theme-meta border-[#dbe3ec] bg-[#f8fafc] text-[#334155]">L{layer.layerIndex}</div>
           <div className="theme-meta">
             {aggQ.isLoading ? "加载中..." : `${candidateCount} 节点`}
           </div>
