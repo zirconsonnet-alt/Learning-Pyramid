@@ -4,6 +4,7 @@ import { useMemo } from "react"
 import { ContentEmptyState } from "@/ui/components/contentEmptyState"
 import { cn } from "@/ui/utils"
 import type { MindMapNode } from "@/views/trees/components/MindMapTree"
+import { TreeCanvasViewport } from "@/views/trees/components/TreeCanvasViewport"
 
 type TaskTreeVisualType = "aggregation" | "chapter" | "task"
 
@@ -281,7 +282,7 @@ export function LearningTaskTreeCanvas({
   }
 
   return (
-    <div className="min-w-max">
+    <TreeCanvasViewport canvasWidth={canvasWidth} canvasHeight={canvasHeight}>
       <div className="relative" style={{ width: canvasWidth, height: canvasHeight }}>
         <div className="pointer-events-none absolute inset-0">
           {rows.map((row) => {
@@ -344,8 +345,9 @@ export function LearningTaskTreeCanvas({
             <button
               key={rect.nodeId}
               type="button"
+              data-tree-node="true"
               className={cn(
-                "absolute flex flex-col rounded-[24px] border px-4 py-3 text-left transition duration-200",
+                "absolute flex cursor-pointer flex-col rounded-[24px] border px-4 py-3 text-left transition duration-200",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#31567d]/30 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent",
                 visual.cardClass,
                 isSelected && "border-[#31567d] shadow-[0_32px_64px_-36px_rgba(34,66,102,0.52)]",
@@ -377,6 +379,6 @@ export function LearningTaskTreeCanvas({
           )
         })}
       </div>
-    </div>
+    </TreeCanvasViewport>
   )
 }
