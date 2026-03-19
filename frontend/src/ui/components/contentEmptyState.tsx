@@ -8,19 +8,19 @@ type ContentNoticeTone = "neutral" | "info" | "danger"
 function contentNoticeToneClasses(tone: ContentNoticeTone) {
   if (tone === "info") {
     return {
-      panel: "border-sky-200/80 bg-sky-50/70",
-      icon: "bg-sky-100 text-sky-700",
+      panel: "border-[#d9e4f3] bg-[#f6faff]",
+      icon: "bg-[#eaf2ff] text-[#2563eb]",
     }
   }
   if (tone === "danger") {
     return {
-      panel: "border-destructive/20 bg-destructive/5",
+      panel: "border-destructive/20 bg-[#fff7f7]",
       icon: "bg-destructive/10 text-destructive",
     }
   }
   return {
-    panel: "border-border/80 bg-muted/15",
-    icon: "bg-slate-100 text-slate-500",
+    panel: "border-[#dde5ee] bg-white",
+    icon: "bg-[#f3f6f9] text-slate-500",
   }
 }
 

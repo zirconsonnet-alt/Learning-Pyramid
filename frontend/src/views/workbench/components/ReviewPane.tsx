@@ -103,7 +103,7 @@ export function ReviewPane({
               const inst = instances.find((i) => i.instanceId === rp.anchor.instanceId) ?? null
               const ms = parseAnchorMs(rp.anchor.position)
               return (
-                <div key={rpId} className="theme-status-surface rounded-[1.2rem] border border-border/70 p-4">
+                <div key={rpId} className="theme-status-surface rounded-[1.2rem] border border-[#e2e8ef] p-4">
                   <div className="text-sm font-medium">
                     <div className="mb-2 text-xs uppercase tracking-[0.16em] text-muted-foreground">Question</div>
                     <Link
@@ -136,7 +136,7 @@ export function ReviewPane({
                       {show ? "隐藏答案" : "显示答案"}
                     </Button>
                     {show ? (
-                      <div className="theme-canvas mt-2 rounded-2xl border border-border/60 p-3 text-sm">
+                      <div className="theme-canvas mt-2 rounded-2xl border border-[#e2e8ef] p-3 text-sm">
                         <div className="mb-2 text-xs uppercase tracking-[0.16em] text-muted-foreground">Answer</div>
                         <RichContentRenderer projectId={projectId} value={rp.answer} />
                       </div>

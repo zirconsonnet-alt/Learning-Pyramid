@@ -127,7 +127,7 @@ function LayerReviewChainCard(props: {
           <ContentEmptyState
             title={`L${layer.layerIndex} 当前还没有待上推任务`}
             message="继续录入并提交学习任务，或先完成下游复习；出现可上推任务后会显示在这里。"
-            className="w-full bg-white/60 px-3 py-3"
+            className="w-full bg-[#f8fafc] px-3 py-3"
           />
         )}
       </div>
@@ -245,7 +245,7 @@ export function WorkbenchPage() {
               </div>
             </CardHeader>
             <CardContent>
-              <div className="theme-canvas rounded-[1.1rem] border border-border/60 p-3">
+              <div className="theme-canvas rounded-[1.1rem] border border-[#e2e8ef] p-3">
                 <LearningObjectTree
                   projectId={pid}
                   selectedInstanceId={selectedInstanceId}
@@ -325,7 +325,9 @@ export function WorkbenchPage() {
               {layersQ.error ? <p className="text-sm text-destructive">{formatApiError(layersQ.error)}</p> : null}
               {!layersQ.isLoading && !layersQ.error && (layersQ.data?.length ?? 0) === 0 ? (
                 <div className="theme-status-surface flex items-start gap-3 px-4 py-4">
-                  <Sparkles className="mt-0.5 h-4 w-4 text-primary" />
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[#eef5ff] text-primary">
+                    <Sparkles className="h-4 w-4" />
+                  </div>
                   <div className="space-y-1">
                     <div className="text-sm font-medium text-foreground">当前还没有层配置</div>
                     <div className="text-sm text-muted-foreground">请先在项目设置里确认层配置；保存后会显示各层候选任务。</div>

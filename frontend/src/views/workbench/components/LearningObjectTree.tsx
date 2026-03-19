@@ -63,7 +63,7 @@ function TreeNode({
     return (
       <div>
         <div
-          className="flex cursor-pointer items-center gap-2 rounded-xl px-3 py-2 text-sm text-[#40566f] transition-colors hover:bg-[#f3f6f9] hover:text-foreground"
+          className="flex cursor-pointer items-center gap-2 rounded-xl px-3 py-2 text-sm text-[#40566f] transition-colors hover:bg-white hover:text-foreground"
           style={{ paddingLeft: depth * 14 }}
           onClick={() => toggle(nodeId)}
           role="button"
@@ -95,7 +95,7 @@ function TreeNode({
   return (
     <div
       className={cn(
-        "flex cursor-pointer items-center gap-2 rounded-xl px-3 py-2 text-sm transition-colors hover:bg-[#f3f6f9]",
+        "flex cursor-pointer items-center gap-2 rounded-xl px-3 py-2 text-sm transition-colors hover:bg-white",
         selectedInstanceId === data.instanceId
           ? "bg-primary text-primary-foreground shadow-[0_16px_30px_-22px_rgba(37,99,235,0.42)]"
           : "text-[#30465f]",

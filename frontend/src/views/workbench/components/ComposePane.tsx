@@ -162,7 +162,7 @@ export function ComposePane({
         ) : null}
 
         {drafts.length > 0 ? (
-          <div className="theme-canvas rounded-[1.2rem] border border-border/60 p-4">
+          <div className="theme-canvas rounded-[1.2rem] border border-[#e2e8ef] p-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="text-sm font-semibold text-foreground">填写进度</div>
               <div className="theme-meta shrink-0">{drafts.length} 个复述点</div>
@@ -178,7 +178,7 @@ export function ComposePane({
                     className={
                       completed
                         ? "flex size-10 items-center justify-center rounded-xl border border-primary/20 bg-primary text-sm font-semibold text-primary-foreground shadow-[0_12px_24px_-20px_rgba(30,58,95,0.55)] transition-transform hover:-translate-y-0.5"
-                        : "flex size-10 items-center justify-center rounded-xl border border-border/80 bg-white text-sm font-semibold text-[#60748f] transition-colors hover:border-primary/25 hover:text-primary"
+                        : "flex size-10 items-center justify-center rounded-xl border border-[#d9e2eb] bg-[#f8fafc] text-sm font-semibold text-[#475569] transition-colors hover:border-primary/25 hover:bg-white hover:text-primary"
                     }
                     title={completed ? `第 ${index + 1} 个复述点，已填写` : `第 ${index + 1} 个复述点，尚未填写完成`}
                     aria-label={completed ? `第 ${index + 1} 个复述点，已填写` : `第 ${index + 1} 个复述点，尚未填写完成`}
@@ -267,7 +267,7 @@ export function ComposePane({
           })}
         </div>
 
-        <div className="theme-canvas grid gap-3 rounded-[1.2rem] border border-border/60 p-4">
+        <div className="theme-canvas grid gap-3 rounded-[1.2rem] border border-[#e2e8ef] p-4">
           <div>
             <Label htmlFor="taskTitle">学习任务标题</Label>
             <Input
