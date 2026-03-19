@@ -833,8 +833,9 @@ export function VideoPane({
                     <div className="ml-auto flex items-center gap-1 text-white/86">
                       <div className="group/volume relative hidden sm:block">
                         <div className="pointer-events-none absolute bottom-full left-1/2 mb-2 -translate-x-1/2 opacity-0 transition duration-150 group-hover/volume:opacity-100 group-focus-within/volume:opacity-100">
-                          <div className="pointer-events-auto flex h-28 w-10 items-center justify-center rounded-full border border-white/12 bg-slate-950/96 shadow-[0_14px_32px_-20px_rgba(0,0,0,0.9)]">
-                            <div className="w-20 -rotate-90">
+                          <div className="pointer-events-auto rounded-xl border border-white/12 bg-slate-950 p-1 shadow-[0_14px_32px_-20px_rgba(0,0,0,0.9)]">
+                            <div className="flex h-28 w-10 items-center justify-center rounded-lg bg-white/[0.04]">
+                              <div className="w-20 -rotate-90">
                               <input
                                 type="range"
                                 min={0}
@@ -845,6 +846,7 @@ export function VideoPane({
                                 className="plm-video-range plm-video-range-volume w-20"
                                 aria-label="音量"
                               />
+                              </div>
                             </div>
                           </div>
                         </div>
