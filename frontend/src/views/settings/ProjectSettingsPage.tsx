@@ -24,6 +24,9 @@ import {
   useSetLayerConfig,
 } from "@/ui/queries/workbench"
 import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
+import { useThemeStore } from "@/ui/store/themeStore"
+import { THEME_PRESETS } from "@/ui/theme/themePresets"
+import { cn } from "@/ui/utils"
 
 const BUILTIN_WHISPER_BASE_URL = "builtin://whisper"
 let nextTemplateItemId = 1
@@ -105,6 +108,8 @@ export function ProjectSettingsPage() {
   const navigate = useNavigate()
   const pid = projectId ?? ""
   const capabilitiesQ = useSystemCapabilities()
+  const selectedTheme = useThemeStore((state) => state.theme)
+  const setTheme = useThemeStore((state) => state.setTheme)
   const directoryBinding = useProjectDirectoryBinding(pid)
   const directoryPermission = directoryBinding.permission
   const browserLocalMediaEnabled = capabilitiesQ.data?.browserLocalMediaEnabled ?? false
@@ -285,6 +290,49 @@ export function ProjectSettingsPage() {
 
   return (
     <div className="space-y-5">
+      <Card className="theme-card">
+        <CardHeader>
+          <CardTitle>界面主题</CardTitle>
+          <CardDescription>主题只保存在当前浏览器，切换后工作台、树视图和登录页会一起生效。</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 lg:grid-cols-3">
+            {THEME_PRESETS.map((theme) => {
+              const isActive = selectedTheme === theme.id
+              return (
+                <button
+                  key={theme.id}
+                  type="button"
+                  className={cn(
+                    "theme-status-surface flex flex-col items-start gap-3 rounded-[1.2rem] border p-4 text-left transition-all duration-200",
+                    isActive
+                      ? "border-primary/45 shadow-[0_20px_46px_-30px_rgba(37,99,235,0.42)]"
+                      : "hover:-translate-y-px hover:border-primary/20",
+                  )}
+                  onClick={() => setTheme(theme.id)}
+                >
+                  <div className="flex w-full items-center justify-between gap-3">
+                    <div className="text-sm font-semibold text-foreground">{theme.label}</div>
+                    {isActive ? <span className="theme-meta-strong">当前</span> : null}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {theme.preview.map((color) => (
+                      <span
+                        key={`${theme.id}-${color}`}
+                        className="h-7 w-7 rounded-full border border-black/5 shadow-inner"
+                        style={{ backgroundColor: color }}
+                      />
+                    ))}
+                  </div>
+                  <p className="text-sm leading-6 text-muted-foreground">{theme.description}</p>
+                </button>
+              )
+            })}
+          </div>
+          <p className="text-xs text-muted-foreground">这是本地界面偏好，不会改动项目数据，也不会影响其他浏览器。</p>
+        </CardContent>
+      </Card>
+
       {browserLocalMediaEnabled ? (
         <Card className="theme-card">
           <CardHeader>

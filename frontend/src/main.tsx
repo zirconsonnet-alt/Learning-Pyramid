@@ -7,6 +7,7 @@ import { RouterProvider } from "react-router-dom"
 import { DevtoolsSlot } from "@/DevtoolsSlot"
 import { router } from "@/router"
 import { FeedbackViewport } from "@/ui/components/FeedbackViewport"
+import { ThemeController } from "@/ui/theme/ThemeController"
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -21,6 +22,7 @@ const queryClient = new QueryClient({
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
+      <ThemeController />
       <RouterProvider router={router} />
       <FeedbackViewport />
       <DevtoolsSlot />

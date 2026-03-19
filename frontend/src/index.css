@@ -33,6 +33,118 @@
     --ring: 214 74% 39%;
 
     --radius: 1rem;
+
+    --theme-body-background:
+      radial-gradient(circle at top center, rgba(216, 226, 238, 0.24), transparent 38%),
+      linear-gradient(180deg, rgba(252, 253, 255, 1) 0%, rgba(244, 246, 248, 1) 100%);
+    --theme-shell-glow: radial-gradient(circle at top, rgba(216, 226, 238, 0.18), transparent 54%);
+    --theme-shell-header-bg: rgba(255, 255, 255, 0.92);
+    --theme-shell-header-border: #e4e9ef;
+    --theme-shell-header-shadow: 0 16px 40px -34px rgba(15, 23, 42, 0.22);
+    --theme-card-border: #dfe6ee;
+    --theme-card-bg: rgba(255, 255, 255, 0.95);
+    --theme-card-shadow: 0 20px 48px -34px rgba(15, 23, 42, 0.16);
+    --theme-card-main-border: #e1e8f0;
+    --theme-card-main-bg: #ffffff;
+    --theme-card-main-shadow: 0 24px 56px -34px rgba(15, 23, 42, 0.18);
+    --theme-card-header-bg: linear-gradient(180deg, rgba(247, 249, 252, 0.92) 0%, rgba(255, 255, 255, 0) 100%);
+    --theme-meta-border: #cfdef1;
+    --theme-meta-bg: #eef5ff;
+    --theme-meta-text: #2b537f;
+    --theme-status-border: #e1e8ef;
+    --theme-status-bg: #ffffff;
+    --theme-status-shadow: 0 14px 36px -30px rgba(15, 23, 42, 0.14);
+    --theme-canvas-bg:
+      linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(243, 246, 249, 0.94)),
+      rgba(241, 245, 249, 0.82);
+  }
+
+  :root[data-theme="paper"] {
+    --background: 36 28% 97%;
+    --foreground: 220 30% 16%;
+    --card: 0 0% 100%;
+    --card-foreground: 220 30% 16%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 30% 16%;
+    --primary: 213 70% 41%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 36 24% 94%;
+    --secondary-foreground: 220 20% 28%;
+    --muted: 36 20% 94%;
+    --muted-foreground: 216 12% 42%;
+    --accent: 36 30% 96%;
+    --accent-foreground: 220 24% 20%;
+    --border: 32 20% 84%;
+    --input: 32 20% 82%;
+    --ring: 213 70% 41%;
+
+    --theme-body-background:
+      radial-gradient(circle at top center, rgba(228, 216, 198, 0.34), transparent 40%),
+      linear-gradient(180deg, rgba(255, 252, 247, 1) 0%, rgba(247, 242, 236, 1) 100%);
+    --theme-shell-glow: radial-gradient(circle at top, rgba(228, 216, 198, 0.24), transparent 56%);
+    --theme-shell-header-bg: rgba(255, 251, 246, 0.92);
+    --theme-shell-header-border: #eadfce;
+    --theme-shell-header-shadow: 0 18px 44px -36px rgba(74, 61, 48, 0.24);
+    --theme-card-border: #e9dfd2;
+    --theme-card-bg: rgba(255, 253, 249, 0.95);
+    --theme-card-shadow: 0 20px 48px -34px rgba(90, 72, 55, 0.14);
+    --theme-card-main-border: #e8ddcf;
+    --theme-card-main-bg: #fffdf9;
+    --theme-card-main-shadow: 0 24px 56px -34px rgba(90, 72, 55, 0.16);
+    --theme-card-header-bg: linear-gradient(180deg, rgba(252, 247, 241, 0.94) 0%, rgba(255, 255, 255, 0) 100%);
+    --theme-meta-border: #d8e0ea;
+    --theme-meta-bg: #f3f6fa;
+    --theme-meta-text: #4b6582;
+    --theme-status-border: #e7ddd1;
+    --theme-status-bg: #fffdfa;
+    --theme-status-shadow: 0 14px 36px -30px rgba(90, 72, 55, 0.14);
+    --theme-canvas-bg:
+      linear-gradient(180deg, rgba(251, 247, 242, 0.98), rgba(246, 240, 233, 0.94)),
+      rgba(244, 238, 231, 0.82);
+  }
+
+  :root[data-theme="ink"] {
+    --background: 216 30% 96%;
+    --foreground: 222 42% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 42% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 42% 12%;
+    --primary: 221 83% 53%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 216 24% 92%;
+    --secondary-foreground: 221 22% 24%;
+    --muted: 216 18% 92%;
+    --muted-foreground: 217 16% 38%;
+    --accent: 216 26% 94%;
+    --accent-foreground: 223 30% 18%;
+    --border: 217 19% 80%;
+    --input: 217 19% 78%;
+    --ring: 221 83% 53%;
+
+    --theme-body-background:
+      radial-gradient(circle at top center, rgba(191, 207, 226, 0.28), transparent 36%),
+      linear-gradient(180deg, rgba(244, 247, 252, 1) 0%, rgba(233, 238, 245, 1) 100%);
+    --theme-shell-glow: radial-gradient(circle at top, rgba(173, 191, 214, 0.24), transparent 52%);
+    --theme-shell-header-bg: rgba(248, 250, 253, 0.92);
+    --theme-shell-header-border: #d3dbe6;
+    --theme-shell-header-shadow: 0 18px 44px -34px rgba(15, 23, 42, 0.26);
+    --theme-card-border: #d1dae5;
+    --theme-card-bg: rgba(255, 255, 255, 0.96);
+    --theme-card-shadow: 0 22px 50px -34px rgba(15, 23, 42, 0.18);
+    --theme-card-main-border: #cfd9e4;
+    --theme-card-main-bg: #ffffff;
+    --theme-card-main-shadow: 0 26px 58px -34px rgba(15, 23, 42, 0.2);
+    --theme-card-header-bg: linear-gradient(180deg, rgba(240, 245, 251, 0.96) 0%, rgba(255, 255, 255, 0) 100%);
+    --theme-meta-border: #cad9f2;
+    --theme-meta-bg: #e8f0fe;
+    --theme-meta-text: #284b82;
+    --theme-status-border: #d3dde8;
+    --theme-status-bg: #ffffff;
+    --theme-status-shadow: 0 16px 40px -30px rgba(15, 23, 42, 0.16);
+    --theme-canvas-bg:
+      linear-gradient(180deg, rgba(241, 245, 250, 0.98), rgba(233, 239, 246, 0.94)),
+      rgba(229, 236, 244, 0.82);
   }
 
   .dark {
@@ -72,9 +184,8 @@
   body {
     @apply bg-background text-foreground antialiased;
     font-family: "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-    background-image:
-      radial-gradient(circle at top center, rgba(216, 226, 238, 0.24), transparent 38%),
-      linear-gradient(180deg, rgba(252, 253, 255, 1) 0%, rgba(244, 246, 248, 1) 100%);
+    background: var(--theme-body-background);
+    background-attachment: fixed;
   }
 
   .plm-video-player::-webkit-media-controls-fullscreen-button {
@@ -156,18 +267,33 @@
 }
 
 @layer components {
+  .theme-shell-glow {
+    background: var(--theme-shell-glow);
+  }
+
+  .theme-shell-header {
+    border-bottom: 1px solid var(--theme-shell-header-border);
+    background: var(--theme-shell-header-bg);
+    box-shadow: var(--theme-shell-header-shadow);
+  }
+
   .theme-card {
-    @apply rounded-[1.25rem] border border-[#dfe6ee] bg-white/95 text-card-foreground shadow-[0_20px_48px_-34px_rgba(15,23,42,0.16)];
+    @apply rounded-[1.25rem] border text-card-foreground;
+    border-color: var(--theme-card-border);
+    background: var(--theme-card-bg);
+    box-shadow: var(--theme-card-shadow);
   }
 
   .theme-card-main {
-    @apply rounded-[1.5rem] border border-[#e1e8f0] bg-white text-card-foreground shadow-[0_24px_56px_-34px_rgba(15,23,42,0.18)];
+    @apply rounded-[1.5rem] border text-card-foreground;
+    border-color: var(--theme-card-main-border);
+    background: var(--theme-card-main-bg);
+    box-shadow: var(--theme-card-main-shadow);
   }
 
   .theme-card-header {
     @apply border-b border-border/60 pb-4;
-    background:
-      linear-gradient(180deg, rgba(247, 249, 252, 0.92) 0%, rgba(255, 255, 255, 0) 100%);
+    background: var(--theme-card-header-bg);
   }
 
   .theme-card-header-plain {
@@ -175,20 +301,27 @@
   }
 
   .theme-meta {
-    @apply inline-flex items-center rounded-full border border-[#cfdef1] bg-[#eef5ff] px-2.5 py-1 text-xs font-medium text-[#2b537f];
+    @apply inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium;
+    border-color: var(--theme-meta-border);
+    background: var(--theme-meta-bg);
+    color: var(--theme-meta-text);
   }
 
   .theme-meta-strong {
-    @apply inline-flex items-center rounded-full border border-primary/10 bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground shadow-[0_12px_24px_-20px_rgba(37,99,235,0.7)];
+    @apply inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium text-primary-foreground;
+    border-color: hsl(var(--primary) / 0.12);
+    background: hsl(var(--primary));
+    box-shadow: 0 12px 24px -20px hsl(var(--primary) / 0.72);
   }
 
   .theme-status-surface {
-    @apply rounded-2xl border border-[#e1e8ef] bg-white shadow-[0_14px_36px_-30px_rgba(15,23,42,0.14)];
+    @apply rounded-2xl border;
+    border-color: var(--theme-status-border);
+    background: var(--theme-status-bg);
+    box-shadow: var(--theme-status-shadow);
   }
 
   .theme-canvas {
-    background:
-      linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(243, 246, 249, 0.94)),
-      rgba(241, 245, 249, 0.82);
+    background: var(--theme-canvas-bg);
   }
 }
