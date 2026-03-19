@@ -776,7 +776,7 @@ export function VideoPane({
               )}
             >
               <div className="pointer-events-auto text-white [text-shadow:0_1px_8px_rgba(0,0,0,0.55)]">
-                <div className="relative">
+                <div className="relative -mb-1">
                   <input
                     type="range"
                     min={0}
@@ -790,7 +790,7 @@ export function VideoPane({
                   />
                 </div>
 
-                <div className="mt-0.5 rounded-[1rem] border border-white/14 bg-[linear-gradient(180deg,rgba(2,6,23,0.72),rgba(2,6,23,0.88))] px-2.5 py-1.5 shadow-[0_18px_44px_-28px_rgba(0,0,0,0.9)] backdrop-blur-xl">
+                <div className="mt-0 rounded-[1rem] border border-white/14 bg-[linear-gradient(180deg,rgba(2,6,23,0.72),rgba(2,6,23,0.88))] px-2.5 py-1.5 shadow-[0_18px_44px_-28px_rgba(0,0,0,0.9)] backdrop-blur-xl">
                   <div className="flex items-center gap-1 text-xs sm:gap-1.5 sm:text-sm">
                     <Button
                       type="button"
