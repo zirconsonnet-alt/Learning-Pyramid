@@ -73,8 +73,7 @@
     @apply bg-background text-foreground antialiased;
     font-family: "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
     background-image:
-      radial-gradient(circle at top left, rgba(211, 223, 239, 0.28), transparent 34%),
-      radial-gradient(circle at top right, rgba(229, 234, 241, 0.2), transparent 24%),
+      radial-gradient(circle at top center, rgba(216, 226, 238, 0.24), transparent 38%),
       linear-gradient(180deg, rgba(252, 253, 255, 1) 0%, rgba(244, 246, 248, 1) 100%);
   }
 

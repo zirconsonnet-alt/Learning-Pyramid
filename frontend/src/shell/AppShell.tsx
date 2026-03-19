@@ -196,7 +196,7 @@ export function AppShell() {
 
   return (
     <div className="min-h-dvh">
-      <div className="pointer-events-none fixed inset-x-0 top-0 z-0 h-72 bg-[radial-gradient(circle_at_top_left,_rgba(208,222,238,0.32),_transparent_40%),radial-gradient(circle_at_top_right,_rgba(229,234,241,0.22),_transparent_30%)]" />
+      <div className="pointer-events-none fixed inset-x-0 top-0 z-0 h-72 bg-[radial-gradient(circle_at_top,_rgba(216,226,238,0.18),_transparent_54%)]" />
       <header className="sticky top-0 z-20 border-b border-[#e4e9ef] bg-white/92 shadow-[0_16px_40px_-34px_rgba(15,23,42,0.22)] backdrop-blur-2xl supports-[backdrop-filter]:bg-white/86">
         <div className="container py-3 sm:py-4">
           <div className="relative flex w-full items-center gap-3 sm:gap-4">
