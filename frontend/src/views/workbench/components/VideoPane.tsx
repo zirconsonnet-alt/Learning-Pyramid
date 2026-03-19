@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import {
   Maximize2,
   Minimize2,
@@ -135,6 +135,7 @@ export function VideoPane({
   const browserLocalMediaEnabled = capabilitiesQ.data?.browserLocalMediaEnabled ?? false
   const displayPlaybackMs = durationMs > 0 ? Math.min(playbackMs, durationMs) : playbackMs
   const progressMax = Math.max(durationMs, 1)
+  const playbackProgressPercent = progressMax > 0 ? Math.min(100, Math.max(0, (displayPlaybackMs / progressMax) * 100)) : 0
   const durationLabel = durationMs > 0 ? formatPlaybackClock(durationMs) : "--:--"
   const chromeVisible = isChromeAwake || !isPlaying || isCapturePanelOpen
   const playbackRateLabel = `${Number.isInteger(playbackRate) ? playbackRate.toFixed(0) : playbackRate.toFixed(2).replace(/0$/, "")}x`
@@ -785,7 +786,8 @@ export function VideoPane({
                     value={Math.min(displayPlaybackMs, progressMax)}
                     onChange={(event) => applySeekMs(Number(event.target.value))}
                     disabled={durationMs <= 0}
-                    className="plm-video-range w-full"
+                    className="plm-video-range plm-video-range-progress w-full"
+                    style={{ "--plm-range-progress": `${playbackProgressPercent}%` } as CSSProperties}
                     aria-label="播放进度"
                   />
                 </div>
@@ -844,6 +846,7 @@ export function VideoPane({
                                 value={isMuted ? 0 : volumePercent}
                                 onChange={(event) => setVideoVolume(Number(event.target.value))}
                                 className="plm-video-range plm-video-range-volume w-20"
+                                style={{ "--plm-range-progress": `${isMuted ? 0 : volumePercent}%` } as CSSProperties}
                                 aria-label="音量"
                               />
                               </div>

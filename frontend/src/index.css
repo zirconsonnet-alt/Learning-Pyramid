@@ -85,6 +85,9 @@
   }
 
   .plm-video-range {
+    --plm-range-progress: 0%;
+    --plm-range-active: rgba(125, 211, 252, 0.96);
+    --plm-range-inactive: rgba(148, 163, 184, 0.45);
     height: 0.62rem;
     appearance: none;
     background: transparent;
@@ -100,7 +103,13 @@
   .plm-video-range::-webkit-slider-runnable-track {
     height: 0.16rem;
     border-radius: 999px;
-    background: linear-gradient(90deg, rgba(191, 219, 254, 0.95), rgba(125, 211, 252, 0.88));
+    background: linear-gradient(
+      90deg,
+      var(--plm-range-active) 0%,
+      var(--plm-range-active) var(--plm-range-progress),
+      var(--plm-range-inactive) var(--plm-range-progress),
+      var(--plm-range-inactive) 100%
+    );
   }
 
   .plm-video-range::-webkit-slider-thumb {
@@ -108,31 +117,42 @@
     width: 0.62rem;
     height: 0.62rem;
     margin-top: -0.24rem;
-    border: 2px solid rgba(255, 255, 255, 0.92);
+    border: 2px solid rgba(241, 245, 249, 0.96);
     border-radius: 999px;
     background: #0f172a;
-    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.4);
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.5);
   }
 
   .plm-video-range::-moz-range-track {
     height: 0.16rem;
     border: 0;
     border-radius: 999px;
-    background: linear-gradient(90deg, rgba(191, 219, 254, 0.95), rgba(125, 211, 252, 0.88));
+    background: linear-gradient(
+      90deg,
+      var(--plm-range-active) 0%,
+      var(--plm-range-active) var(--plm-range-progress),
+      var(--plm-range-inactive) var(--plm-range-progress),
+      var(--plm-range-inactive) 100%
+    );
   }
 
   .plm-video-range::-moz-range-thumb {
     width: 0.62rem;
     height: 0.62rem;
-    border: 2px solid rgba(255, 255, 255, 0.92);
+    border: 2px solid rgba(241, 245, 249, 0.96);
     border-radius: 999px;
     background: #0f172a;
-    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.4);
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.5);
   }
 
-  .plm-video-range-volume::-webkit-slider-runnable-track,
-  .plm-video-range-volume::-moz-range-track {
-    background: linear-gradient(90deg, rgba(229, 231, 235, 0.88), rgba(191, 219, 254, 0.85));
+  .plm-video-range-progress {
+    --plm-range-active: rgba(125, 211, 252, 0.96);
+    --plm-range-inactive: rgba(226, 232, 240, 0.32);
+  }
+
+  .plm-video-range-volume {
+    --plm-range-active: rgba(191, 219, 254, 0.95);
+    --plm-range-inactive: rgba(255, 255, 255, 0.18);
   }
 }
 
