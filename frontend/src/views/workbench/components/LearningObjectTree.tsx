@@ -6,17 +6,14 @@ import { ApiError } from "@/ui/api/http"
 import { ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { listLearningObjectNodes, type LearningObjectNode } from "@/ui/api/learningObjects"
 import { Button } from "@/ui/components/ui/button"
+import {
+  isSyntheticFilesContainer,
+  sortLearningObjectNodeIdsForDisplay,
+} from "@/ui/learningObjectDisplayOrder"
 import { scanProjectDirectoryMedia, useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
 import { useImportLearningObjectsFromBrowser } from "@/ui/queries/workbench"
 import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { cn } from "@/ui/utils"
-
-function isSyntheticFilesContainer(node: LearningObjectNode | undefined) {
-  if (!node || node.kind !== "container") return false
-  const title = node.title.trim()
-  const relativePath = (node.relativePath ?? "").trim()
-  return title === "Files" && (relativePath === "__files__" || relativePath.endsWith("/__files__"))
-}
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -134,17 +131,32 @@ export function LearningObjectTree({
   })
 
   const { nodeById, rootIds, containerIds } = useMemo(() => {
-    const map: Record<string, LearningObjectNode> = {}
+    const rawMap: Record<string, LearningObjectNode> = {}
     const roots: string[] = []
     const containers: string[] = []
 
     for (const node of q.data ?? []) {
-      map[node.nodeId] = node
+      rawMap[node.nodeId] = node
       if (node.parentId === null) roots.push(node.nodeId)
       if (node.kind === "container") containers.push(node.nodeId)
     }
 
-    return { nodeById: map, rootIds: roots, containerIds: containers }
+    const map: Record<string, LearningObjectNode> = {}
+    for (const node of q.data ?? []) {
+      map[node.nodeId] =
+        node.kind === "container"
+          ? {
+              ...node,
+              children: sortLearningObjectNodeIdsForDisplay(node.children, rawMap),
+            }
+          : node
+    }
+
+    return {
+      nodeById: map,
+      rootIds: sortLearningObjectNodeIdsForDisplay(roots, map),
+      containerIds: sortLearningObjectNodeIdsForDisplay(containers, map),
+    }
   }, [q.data])
 
   const [expanded, setExpanded] = useState<Set<string> | null>(null)

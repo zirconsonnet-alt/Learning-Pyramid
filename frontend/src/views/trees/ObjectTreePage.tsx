@@ -8,17 +8,14 @@ import { listInstances, type Instance } from "@/ui/api/instances"
 import { listLearningObjectNodes, type LearningObjectNode } from "@/ui/api/learningObjects"
 import { ContentEmptyState, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import {
+  isSyntheticFilesContainer,
+  sortLearningObjectNodeIdsForDisplay,
+} from "@/ui/learningObjectDisplayOrder"
+import {
   LearningObjectTreeCanvas,
   type LearningObjectTreeCanvasNode,
   type ObjectTreeVisualType,
 } from "@/views/trees/components/LearningObjectTreeCanvas"
-
-function isSyntheticFilesContainer(node: LearningObjectNode | undefined) {
-  if (!node || node.kind !== "container") return false
-  const title = node.title.trim()
-  const relativePath = (node.relativePath ?? "").trim()
-  return title === "Files" && (relativePath === "__files__" || relativePath.endsWith("/__files__"))
-}
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -97,14 +94,23 @@ export function ObjectTreePage() {
       })
 
     const rawNodeById: Record<string, LearningObjectNode> = {}
-    const roots = normalizedNodes
-      .filter((node) => node.parentId === null)
-      .map((node) => node.nodeId)
-      .sort((a, b) => a.localeCompare(b))
 
     for (const node of normalizedNodes) {
       rawNodeById[node.nodeId] = node
     }
+
+    for (const node of normalizedNodes) {
+      if (node.kind !== "container") continue
+      rawNodeById[node.nodeId] = {
+        ...node,
+        children: sortLearningObjectNodeIdsForDisplay(node.children, rawNodeById),
+      }
+    }
+
+    const roots = sortLearningObjectNodeIdsForDisplay(
+      normalizedNodes.filter((node) => node.parentId === null).map((node) => node.nodeId),
+      rawNodeById,
+    )
 
     const depthMap: Record<string, number> = {}
     function getDepth(nodeId: string): number {
@@ -145,7 +151,8 @@ export function ObjectTreePage() {
 
     const map: Record<string, LearningObjectTreeCanvasNode> = {}
 
-    for (const node of normalizedNodes) {
+    for (const nodeId of Object.keys(rawNodeById)) {
+      const node = rawNodeById[nodeId]
       const depth = depthMap[node.nodeId] ?? 0
       const uiType = classifyObjectNode(node, depth)
       const displayTitle = formatObjectTitle(node, depth)
