@@ -18,6 +18,7 @@ import { useInstances } from "@/ui/queries/workbench"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { formatLearningTaskNodeDisplayTitle } from "@/views/learningTasks/displayTitle"
 import { RecallPointListCard } from "@/views/recallPoints/components/RecallPointListCard"
+import { DetailSummaryCard } from "@/views/shared/DetailSummaryCard"
 import { NodeExportCard } from "@/views/shared/NodeExportCard"
 
 function formatApiError(err: unknown) {
@@ -64,6 +65,12 @@ export function LearningTaskNodePage() {
   const learningTaskId = nodeQ.data?.kind === "leaf" ? nodeQ.data.boundLearningTaskId : ""
   const learningTaskQ = useLearningTask(pid, learningTaskId)
   const pageDescription = isContainer ? "聚合节点详情。" : "学习任务详情。"
+  const relatedInstanceLabel = (() => {
+    const ids = Array.from(new Set((recallPointsQ.data ?? []).map((item) => item.anchor.instanceId)))
+    if (ids.length === 0) return "未关联视频"
+    if (ids.length === 1) return instanceTitleById[ids[0]] ?? "关联视频"
+    return `${ids.length} 个关联视频`
+  })()
 
   return (
     <div className="space-y-4">
@@ -93,48 +100,34 @@ export function LearningTaskNodePage() {
       ) : null}
 
       {nodeQ.data && isContainer ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>节点概览</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-3 md:grid-cols-3">
-              <div className="rounded-md border bg-muted/30 p-3">
-                <div className="text-xs text-muted-foreground">节点类型</div>
-                <div className="mt-1 font-medium text-foreground">聚合节点</div>
-              </div>
-              <div className="rounded-md border bg-muted/30 p-3">
-                <div className="text-xs text-muted-foreground">子节点数</div>
-                <div className="mt-1 font-medium text-foreground">{childCount ?? 0}</div>
-              </div>
-              <div className="rounded-md border bg-muted/30 p-3">
-                <div className="text-xs text-muted-foreground">节点标题</div>
-                <div className="mt-1 font-medium text-foreground">
-                  {formatLearningTaskNodeDisplayTitle(nodeQ.data.title, { sourceLayerIndex })}
-                </div>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap gap-3">
-              {bindingQ.data?.reviewChainId ? (
-                <Button asChild>
-                  <Link to={`/p/${pid}/review-chains/${bindingQ.data.reviewChainId}`}>查看复习链</Link>
-                </Button>
-              ) : null}
-            </div>
-          </CardContent>
-        </Card>
+        <DetailSummaryCard
+          title="节点摘要"
+          description="先确认这个聚合节点覆盖的规模，再继续查看下方的复述点。"
+          items={[
+            { label: "节点类型", value: "聚合节点" },
+            { label: "子节点数", value: childCount ?? 0 },
+            {
+              label: "复习关系",
+              value: bindingQ.data?.reviewChainId ? (
+                <Link className="text-primary underline-offset-4 hover:underline" to={`/p/${pid}/review-chains/${bindingQ.data.reviewChainId}`}>
+                  查看复习链
+                </Link>
+              ) : (
+                "暂未关联"
+              ),
+            },
+          ]}
+        />
       ) : null}
 
       {!isContainer && learningTaskId ? (
-        <>
-          <LeafLearningTaskCard
-            projectId={pid}
-            learningTaskId={learningTaskId}
-            learningTaskQ={learningTaskQ}
-            reviewChainId={bindingQ.data?.reviewChainId ?? null}
-          />
-        </>
+        <LeafLearningTaskCard
+          projectId={pid}
+          learningTaskId={learningTaskId}
+          learningTaskQ={learningTaskQ}
+          relatedInstanceLabel={relatedInstanceLabel}
+          reviewChainId={bindingQ.data?.reviewChainId ?? null}
+        />
       ) : null}
 
       <RecallPointListCard
@@ -164,51 +157,54 @@ function LeafLearningTaskCard(props: {
   projectId: string
   learningTaskId: string
   learningTaskQ: ReturnType<typeof useLearningTask>
+  relatedInstanceLabel: string
   reviewChainId: string | null
 }) {
-  const { projectId, learningTaskId, learningTaskQ, reviewChainId } = props
+  const { projectId, learningTaskId, learningTaskQ, relatedInstanceLabel, reviewChainId } = props
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>学习任务信息</CardTitle>
-        <CardDescription>这里只保留任务规模、所在层和复习链这些真正有判断价值的信息。</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {learningTaskQ.isLoading ? <LoadingNotice title="正在加载学习任务" message="正在读取这个叶子节点绑定的学习任务。" /> : null}
-        {learningTaskQ.error ? <ErrorNotice title="学习任务加载失败" message={formatApiError(learningTaskQ.error)} /> : null}
-        {learningTaskQ.data ? (
-          <>
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="rounded-md border bg-muted/30 p-3">
-                <div className="text-xs text-muted-foreground">复述点数量</div>
-                <div className="mt-1 font-medium text-foreground">{learningTaskQ.data.size}</div>
-              </div>
-              <div className="rounded-md border bg-muted/30 p-3">
-                <div className="text-xs text-muted-foreground">所在层</div>
-                <div className="mt-1 font-medium text-foreground">
-                  {learningTaskQ.data.targetLayerIndex === null ? "-" : `L${learningTaskQ.data.targetLayerIndex}`}
-                </div>
-              </div>
-            </div>
+    <div className="space-y-4">
+      <DetailSummaryCard
+        title="任务摘要"
+        description="先快速扫清这个任务的规模和上下文，再决定是改名、看复习关系，还是继续处理复述点。"
+        items={[
+          { label: "复述点", value: learningTaskQ.data?.size ?? "-" },
+          {
+            label: "层级",
+            value: learningTaskQ.data?.targetLayerIndex === null || learningTaskQ.data == null ? "-" : `L${learningTaskQ.data.targetLayerIndex}`,
+          },
+          { label: "关联视频", value: relatedInstanceLabel },
+          {
+            label: "复习关系",
+            value: reviewChainId ? (
+              <Link className="text-primary underline-offset-4 hover:underline" to={`/p/${projectId}/review-chains/${reviewChainId}`}>
+                查看复习链
+              </Link>
+            ) : (
+              "暂未关联"
+            ),
+          },
+        ]}
+      />
 
-            {reviewChainId ? (
-              <div className="flex flex-wrap gap-3">
-                <Button asChild>
-                  <Link to={`/p/${projectId}/review-chains/${reviewChainId}`}>查看复习链</Link>
-                </Button>
-              </div>
-            ) : null}
-
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle>任务名称</CardTitle>
+          <CardDescription>修改后会同步体现在任务树与相关入口里。</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {learningTaskQ.isLoading ? <LoadingNotice title="正在加载学习任务" message="正在读取这个叶子节点绑定的学习任务。" /> : null}
+          {learningTaskQ.error ? <ErrorNotice title="学习任务加载失败" message={formatApiError(learningTaskQ.error)} /> : null}
+          {learningTaskQ.data ? (
             <LearningTaskTitleEditor
               projectId={projectId}
               learningTaskId={learningTaskId}
               taskTitle={learningTaskQ.data.title}
             />
-          </>
-        ) : null}
-      </CardContent>
-    </Card>
+          ) : null}
+        </CardContent>
+      </Card>
+    </div>
   )
 }
 
@@ -233,7 +229,7 @@ function LearningTaskTitleEditor({
 
   return (
     <form
-      className="grid gap-3 rounded-md border p-4 md:grid-cols-[minmax(0,1fr)_auto]"
+      className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]"
       onSubmit={(event) => {
         event.preventDefault()
         if (!canSave) return
@@ -248,7 +244,7 @@ function LearningTaskTitleEditor({
       }}
     >
       <div className="space-y-2">
-        <Label htmlFor={`learningTaskTitle-${learningTaskId}`}>重命名学习任务</Label>
+        <Label htmlFor={`learningTaskTitle-${learningTaskId}`}>当前名称</Label>
         <Input
           id={`learningTaskTitle-${learningTaskId}`}
           value={titleDraft}
@@ -258,7 +254,7 @@ function LearningTaskTitleEditor({
         />
       </div>
       <div className="flex items-end">
-        <Button type="submit" disabled={!canSave}>
+        <Button type="submit" disabled={!canSave} variant={canSave ? "default" : "secondary"}>
           {editTaskM.isPending ? "保存中..." : "保存任务名称"}
         </Button>
       </div>

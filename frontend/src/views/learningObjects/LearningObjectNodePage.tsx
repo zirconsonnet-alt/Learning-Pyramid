@@ -16,6 +16,7 @@ import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import { formatInstanceReference } from "@/ui/displayIdentifiers"
 import { RecallPointListCard } from "@/views/recallPoints/components/RecallPointListCard"
+import { DetailSummaryCard } from "@/views/shared/DetailSummaryCard"
 import { NodeExportCard } from "@/views/shared/NodeExportCard"
 
 function formatApiError(err: unknown) {
@@ -100,7 +101,29 @@ export function LearningObjectNodePage() {
   }
 
   const title = nodeQ.data?.title?.trim() || "学习对象节点"
-  const isContainer = nodeQ.data?.kind === "container"
+  const summaryItems = nodeQ.data
+    ? nodeQ.data.kind === "container"
+      ? [
+          { label: "节点类型", value: formatNodeType(nodeQ.data.kind, depth) },
+          { label: "子节点数", value: nodeQ.data.children.length },
+          { label: "层级深度", value: `D${depth}` },
+        ]
+      : [
+          { label: "节点类型", value: formatNodeType(nodeQ.data.kind, depth) },
+          { label: "材料名", value: boundInstance?.materialDisplayName ?? "未绑定实例" },
+          { label: "材料状态", value: boundInstance ? (boundInstance.presence === "MISSING" ? "缺失" : "正常") : "未知" },
+          {
+            label: "实例入口",
+            value: boundInstance ? (
+              <Link className="text-primary underline-offset-4 hover:underline" to={`/p/${pid}/instances/${boundInstance.instanceId}`}>
+                查看实例
+              </Link>
+            ) : (
+              "暂不可用"
+            ),
+          },
+        ]
+    : []
 
   return (
     <div className="space-y-4">
@@ -114,74 +137,44 @@ export function LearningObjectNodePage() {
         </Button>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>节点概览</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {nodeQ.isLoading ? <LoadingNotice title="正在加载对象节点" message="正在读取这个节点的结构信息、绑定实例和覆盖范围。" /> : null}
-          {nodeQ.error ? <ErrorNotice title="对象节点加载失败" message={formatApiError(nodeQ.error)} /> : null}
-          {nodesQ.error ? <ErrorNotice title="对象树结构加载失败" message={formatApiError(nodesQ.error)} /> : null}
-          {instancesQ.error ? <ErrorNotice title="实例信息加载失败" message={formatApiError(instancesQ.error)} /> : null}
-          {!nodeQ.isLoading && !nodeQ.error && !nodeQ.data ? (
-            <ContentNotice
-              title="未找到这个对象节点"
-              message="这个对象节点可能已经被重建或移除。你可以返回学习对象树重新选择。"
-              action={
-                <Button variant="outline" asChild>
-                  <Link to={`/p/${pid}/object-tree`}>返回学习对象树</Link>
-                </Button>
-              }
-            />
+      {nodeQ.isLoading ? <LoadingNotice title="正在加载对象节点" message="正在读取这个节点的结构信息、绑定实例和覆盖范围。" /> : null}
+      {nodeQ.error ? <ErrorNotice title="对象节点加载失败" message={formatApiError(nodeQ.error)} /> : null}
+      {nodesQ.error ? <ErrorNotice title="对象树结构加载失败" message={formatApiError(nodesQ.error)} /> : null}
+      {instancesQ.error ? <ErrorNotice title="实例信息加载失败" message={formatApiError(instancesQ.error)} /> : null}
+      {!nodeQ.isLoading && !nodeQ.error && !nodeQ.data ? (
+        <ContentNotice
+          title="未找到这个对象节点"
+          message="这个对象节点可能已经被重建或移除。你可以返回学习对象树重新选择。"
+          action={
+            <Button variant="outline" asChild>
+              <Link to={`/p/${pid}/object-tree`}>返回学习对象树</Link>
+            </Button>
+          }
+        />
+      ) : null}
+
+      {nodeQ.data ? (
+        <>
+          <DetailSummaryCard
+            title="节点摘要"
+            description="先确认这是哪类对象节点、覆盖了什么材料，再继续查看下方的复述点。"
+            items={summaryItems}
+          />
+
+          {boundInstance ? (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle>实例引用</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="rounded-xl border border-[#dbe4ee] bg-[#f8fafc] px-4 py-3 text-sm text-slate-700">
+                  当前节点绑定实例：<span className="font-medium text-slate-900">{formatInstanceReference(boundInstance.instanceId)}</span>
+                </div>
+              </CardContent>
+            </Card>
           ) : null}
-
-          {nodeQ.data ? (
-            <>
-              <div className="grid gap-3 md:grid-cols-3">
-                <div className="rounded-md border bg-muted/30 p-3">
-                  <div className="text-xs text-muted-foreground">节点类型</div>
-                  <div className="mt-1 font-medium text-foreground">{formatNodeType(nodeQ.data.kind, depth)}</div>
-                </div>
-                <div className="rounded-md border bg-muted/30 p-3">
-                  <div className="text-xs text-muted-foreground">{isContainer ? "子节点数" : "树深度"}</div>
-                  <div className="mt-1 font-medium text-foreground">
-                    {nodeQ.data.kind === "container" ? nodeQ.data.children.length : `D${depth}`}
-                  </div>
-                </div>
-                <div className="rounded-md border bg-muted/30 p-3">
-                  <div className="text-xs text-muted-foreground">节点标题</div>
-                  <div className="mt-1 font-medium text-foreground">{nodeQ.data.title || "未命名节点"}</div>
-                </div>
-              </div>
-
-              {boundInstance ? (
-                <div className="grid gap-3 md:grid-cols-3">
-                  <div className="rounded-md border bg-muted/30 p-3">
-                    <div className="text-xs text-muted-foreground">材料名</div>
-                    <div className="mt-1 font-medium text-foreground">{boundInstance.materialDisplayName}</div>
-                  </div>
-                  <div className="rounded-md border bg-muted/30 p-3">
-                    <div className="text-xs text-muted-foreground">材料状态</div>
-                    <div className="mt-1 font-medium text-foreground">{boundInstance.presence === "MISSING" ? "缺失" : "正常"}</div>
-                  </div>
-                  <div className="rounded-md border bg-muted/30 p-3">
-                    <div className="text-xs text-muted-foreground">实例引用</div>
-                    <div className="mt-1 break-all font-medium text-foreground">{formatInstanceReference(boundInstance.instanceId)}</div>
-                  </div>
-                </div>
-              ) : null}
-
-              <div className="flex flex-wrap gap-3">
-                {boundInstance ? (
-                  <Button variant="outline" asChild>
-                    <Link to={`/p/${pid}/instances/${boundInstance.instanceId}`}>查看实例</Link>
-                  </Button>
-                ) : null}
-              </div>
-            </>
-          ) : null}
-        </CardContent>
-      </Card>
+        </>
+      ) : null}
 
       <RecallPointListCard
         projectId={pid}

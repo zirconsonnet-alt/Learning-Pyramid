@@ -1,4 +1,4 @@
-import { ArrowUpRight, ImageIcon, PlayCircle, Sparkles } from "lucide-react"
+import { ImageIcon, PlayCircle, Sparkles } from "lucide-react"
 import { Link } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
@@ -43,7 +43,7 @@ export function RecallPointListCard({
 }) {
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="pb-3">
         <CardTitle>{title}</CardTitle>
         {description ? <CardDescription>{description}</CardDescription> : null}
       </CardHeader>
@@ -64,48 +64,49 @@ export function RecallPointListCard({
             const imageCount = richContentImageAssetIds(rp.question).length + richContentImageAssetIds(rp.answer).length
             const instanceLabel = formatInstanceLabel(rp.anchor.instanceId, instanceTitleById)
             return (
-              <div key={rp.recallPointId} className="rounded-[1.15rem] border border-[#e2e8ef] bg-white p-4 shadow-[0_12px_30px_-28px_rgba(15,23,42,0.35)]">
-                <div className="flex flex-col gap-3">
-                  <div className="flex flex-wrap items-center gap-2 text-xs">
-                    <span className="rounded-full bg-[#eef5ff] px-2.5 py-1 font-medium text-primary">第 {index + 1} 条</span>
-                    <span className="rounded-full border border-[#dbe4ee] bg-[#f8fafc] px-2.5 py-1 font-medium text-slate-600">
-                      {instanceLabel}
-                    </span>
-                    {imageCount > 0 ? (
-                      <span className="inline-flex items-center gap-1 rounded-full border border-[#dbe4ee] bg-[#fffaf0] px-2.5 py-1 font-medium text-amber-700">
-                        <ImageIcon className="h-3.5 w-3.5" />
-                        {imageCount} 张图片
-                      </span>
-                    ) : null}
-                    {rp.insights.length > 0 ? (
+              <div key={rp.recallPointId} className="rounded-[1rem] border border-[#dbe4ee] bg-[#fbfdff] p-4 shadow-[0_12px_28px_-28px_rgba(15,23,42,0.6)]">
+                <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                  <div className="min-w-0 flex-1 space-y-3">
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <span className="rounded-full bg-[#eef5ff] px-2.5 py-1 font-medium text-primary">第 {index + 1} 条</span>
                       <span className="rounded-full border border-[#dbe4ee] bg-[#f8fafc] px-2.5 py-1 font-medium text-slate-600">
-                        {rp.insights.length} 条理解
+                        {instanceLabel}
                       </span>
-                    ) : null}
+                      {imageCount > 0 ? (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-[#dbe4ee] bg-[#fffaf0] px-2.5 py-1 font-medium text-amber-700">
+                          <ImageIcon className="h-3.5 w-3.5" />
+                          {imageCount} 张图片
+                        </span>
+                      ) : null}
+                      {rp.insights.length > 0 ? (
+                        <span className="rounded-full border border-[#dbe4ee] bg-[#f8fafc] px-2.5 py-1 font-medium text-slate-600">
+                          {rp.insights.length} 条理解
+                        </span>
+                      ) : null}
+                    </div>
+
+                    <div className="space-y-2 border-l-2 border-[#dbeafe] pl-4">
+                      <div>
+                        <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">问题</div>
+                        <div className="text-[15px] font-semibold leading-6 text-slate-900">{questionPreview || "未填写问题"}</div>
+                      </div>
+                      <div>
+                        <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">答案</div>
+                        <div className="text-sm leading-6 text-slate-600">{answerPreview || "未填写答案"}</div>
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="space-y-2">
-                    <div>
-                      <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">问题</div>
-                      <div className="text-[15px] font-semibold leading-6 text-slate-900">{questionPreview || "未填写问题"}</div>
-                    </div>
-                    <div>
-                      <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">答案</div>
-                      <div className="text-sm leading-6 text-slate-600">{answerPreview || "未填写答案"}</div>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap gap-2">
-                    <Button variant="outline" size="sm" className="rounded-full" asChild>
-                      <Link to={buildWorkbenchHref(projectId, rp.anchor.instanceId, rp.anchor.position)}>
-                        <PlayCircle className="h-4 w-4" />
-                        回到工作台定位视频
+                  <div className="flex shrink-0 flex-wrap gap-2 md:w-[11rem] md:flex-col md:items-stretch">
+                    <Button size="sm" className="rounded-full md:w-full" asChild>
+                      <Link to={`/p/${projectId}/recall-points/${rp.recallPointId}`}>
+                        查看详情
                       </Link>
                     </Button>
-                    <Button variant="ghost" size="sm" className="rounded-full" asChild>
-                      <Link to={`/p/${projectId}/recall-points/${rp.recallPointId}`}>
-                        查看复述点详情
-                        <ArrowUpRight className="h-4 w-4" />
+                    <Button variant="outline" size="sm" className="rounded-full md:w-full" asChild>
+                      <Link to={buildWorkbenchHref(projectId, rp.anchor.instanceId, rp.anchor.position)}>
+                        <PlayCircle className="h-4 w-4" />
+                        定位到视频
                       </Link>
                     </Button>
                   </div>
