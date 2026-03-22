@@ -56,6 +56,14 @@ function formatQueueItemReference(kind: "CONVERGENCE" | "REVIEW_TASK", id: strin
   return kind === "REVIEW_TASK" ? formatReviewTaskReference(id) : formatConvergenceReference(id)
 }
 
+function reviewTaskDetailPath(projectId: string, reviewTaskId: string) {
+  return `/p/${projectId}/review-tasks/${reviewTaskId}`
+}
+
+function convergenceDetailPath(projectId: string, convergenceId: string) {
+  return `/p/${projectId}/convergences/${convergenceId}`
+}
+
 export function ReviewChainPage() {
   const { projectId, reviewChainId } = useParams()
   const navigate = useNavigate()
@@ -95,6 +103,8 @@ export function ReviewChainPage() {
 
   const queue = chainQ.data?.queue ?? []
   const headItem = chainQ.data && chainQ.data.headIndex < queue.length ? queue[chainQ.data.headIndex] : null
+  const headReviewTaskPath = headItem?.kind === "REVIEW_TASK" ? reviewTaskDetailPath(pid, headItem.id) : null
+  const headConvergencePath = headItem?.kind === "CONVERGENCE" ? convergenceDetailPath(pid, headItem.id) : null
 
   return (
     <div className="space-y-4">
@@ -142,7 +152,21 @@ export function ReviewChainPage() {
                 <div className="rounded-md border bg-muted/30 p-3">
                   <div className="text-xs text-muted-foreground">当前 head</div>
                   <div className="mt-1 font-medium text-foreground">
-                    {headItem ? `${describeQueueItemKind(headItem.kind)} · ${formatQueueItemReference(headItem.kind, headItem.id)}` : "已完成"}
+                    {headItem ? (
+                      headReviewTaskPath ? (
+                        <Link className="text-primary hover:underline" to={headReviewTaskPath}>
+                          {describeQueueItemKind(headItem.kind)} · {formatQueueItemReference(headItem.kind, headItem.id)}
+                        </Link>
+                      ) : headConvergencePath ? (
+                        <Link className="text-primary hover:underline" to={headConvergencePath}>
+                          {describeQueueItemKind(headItem.kind)} · {formatQueueItemReference(headItem.kind, headItem.id)}
+                        </Link>
+                      ) : (
+                        `${describeQueueItemKind(headItem.kind)} · ${formatQueueItemReference(headItem.kind, headItem.id)}`
+                      )
+                    ) : (
+                      "已完成"
+                    )}
                   </div>
                 </div>
               </div>
@@ -169,11 +193,38 @@ export function ReviewChainPage() {
                           <div className="text-xs text-muted-foreground">队列位次 #{index + 1}</div>
                           <div className="mt-1 flex items-center gap-2">
                             <span className="rounded-full border px-2 py-0.5 text-xs">{describeQueueItemKind(item.kind)}</span>
-                            <span className="text-xs text-muted-foreground">{formatQueueItemReference(item.kind, item.id)}</span>
+                            {item.kind === "REVIEW_TASK" ? (
+                              <Link
+                                className="text-xs font-medium text-primary hover:underline"
+                                to={reviewTaskDetailPath(pid, item.id)}
+                              >
+                                {formatQueueItemReference(item.kind, item.id)}
+                              </Link>
+                            ) : item.kind === "CONVERGENCE" ? (
+                              <Link
+                                className="text-xs font-medium text-primary hover:underline"
+                                to={convergenceDetailPath(pid, item.id)}
+                              >
+                                {formatQueueItemReference(item.kind, item.id)}
+                              </Link>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">{formatQueueItemReference(item.kind, item.id)}</span>
+                            )}
                           </div>
                         </div>
-                        <div className="text-xs text-muted-foreground">
-                          {isHead ? "当前 head" : isDone ? "已推进" : "待执行"}
+                        <div className="flex items-center gap-3">
+                          <div className="text-xs text-muted-foreground">
+                            {isHead ? "当前 head" : isDone ? "已推进" : "待执行"}
+                          </div>
+                          {item.kind === "REVIEW_TASK" ? (
+                            <Button size="sm" variant="outline" asChild>
+                              <Link to={reviewTaskDetailPath(pid, item.id)}>查看详情</Link>
+                            </Button>
+                          ) : item.kind === "CONVERGENCE" ? (
+                            <Button size="sm" variant="outline" asChild>
+                              <Link to={convergenceDetailPath(pid, item.id)}>查看详情</Link>
+                            </Button>
+                          ) : null}
                         </div>
                       </div>
 

@@ -9,6 +9,7 @@ import { RoutePendingPage } from "@/views/system/RoutePendingPage"
 const AuthPage = lazy(async () => ({ default: (await import("@/views/auth/AuthPage")).AuthPage }))
 const GuidePage = lazy(async () => ({ default: (await import("@/views/guide/GuidePage")).GuidePage }))
 const InstancePage = lazy(async () => ({ default: (await import("@/views/instances/InstancePage")).InstancePage }))
+const ConvergencePage = lazy(async () => ({ default: (await import("@/views/convergences/ConvergencePage")).ConvergencePage }))
 const LearningObjectNodePage = lazy(async () => ({
   default: (await import("@/views/learningObjects/LearningObjectNodePage")).LearningObjectNodePage,
 }))
@@ -50,6 +51,7 @@ export const router = createBrowserRouter([
       { path: "/p/:projectId/instances/:instanceId", element: lazyElement(<InstancePage />) },
       { path: "/p/:projectId/object-tree", element: lazyElement(<ObjectTreePage />) },
       { path: "/p/:projectId/review-chains/:reviewChainId", element: lazyElement(<ReviewChainPage />) },
+      { path: "/p/:projectId/convergences/:convergenceId", element: lazyElement(<ConvergencePage />) },
       { path: "/p/:projectId/review-tasks/:reviewTaskId", element: lazyElement(<ReviewTaskPage />) },
       { path: "/p/:projectId/recall-points/:recallPointId", element: lazyElement(<RecallPointPage />) },
     ],
