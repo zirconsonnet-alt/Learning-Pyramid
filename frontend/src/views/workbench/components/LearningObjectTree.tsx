@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
+import { ChevronRight } from "lucide-react"
 import { Link } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
@@ -19,6 +20,27 @@ function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
   if (err instanceof Error) return err.message
   return "未知错误"
+}
+
+function splitLeafDisplayTitle(node: LearningObjectNode) {
+  if (node.kind !== "leaf") {
+    return { main: node.title, suffix: null as string | null }
+  }
+
+  const title = node.title.trim()
+  const fallbackFileName = node.relativePath?.split("/").pop()?.trim() ?? ""
+  const dotIndex = fallbackFileName.lastIndexOf(".")
+  if (dotIndex <= 0 || dotIndex >= fallbackFileName.length - 1) {
+    return { main: title || fallbackFileName || "未命名材料", suffix: null as string | null }
+  }
+
+  const suffix = fallbackFileName.slice(dotIndex)
+  if (title && title.toLowerCase().endsWith(suffix.toLowerCase())) {
+    const main = title.slice(0, title.length - suffix.length).trim()
+    return { main: main || title, suffix }
+  }
+
+  return { main: title || fallbackFileName.slice(0, dotIndex), suffix }
 }
 
 function TreeNode({
@@ -63,19 +85,29 @@ function TreeNode({
 
     const isOpen = expanded.has(nodeId)
     return (
-      <div>
-        <div
-          className="flex cursor-pointer items-center gap-2 rounded-xl px-3 py-2 text-sm text-[#40566f] transition-colors hover:bg-white hover:text-foreground"
-          style={{ paddingLeft: depth * 14 }}
+      <div className="space-y-1">
+        <button
+          type="button"
+          className={cn(
+            "group flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm transition-colors",
+            isOpen ? "bg-[#f7f9fc] text-[#20354b]" : "text-[#4a5d73] hover:bg-[#f7f9fc] hover:text-[#20354b]",
+          )}
+          style={{ paddingLeft: depth * 14 + 10 }}
           onClick={() => toggle(nodeId)}
-          role="button"
-          tabIndex={0}
+          aria-expanded={isOpen}
         >
-          <span className="w-4 text-center text-muted-foreground">{isOpen ? "▾" : "▸"}</span>
-          <span className="truncate">{data.title}</span>
-        </div>
+          <span
+            className={cn(
+              "flex h-4 w-4 shrink-0 items-center justify-center rounded-md text-[#9aa7b4] transition-colors",
+              isOpen && "bg-white text-[#6b7d90]",
+            )}
+          >
+            <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", isOpen && "rotate-90")} />
+          </span>
+          <span className="truncate font-medium">{data.title}</span>
+        </button>
         {isOpen ? (
-          <div className="space-y-1">
+          <div className="ml-3 space-y-1 border-l border-[#edf2f7] pl-3">
             {data.children.map((childId) => (
               <TreeNode
                 key={childId}
@@ -94,22 +126,31 @@ function TreeNode({
     )
   }
 
+  const isSelected = selectedInstanceId === data.instanceId
+  const { main, suffix } = splitLeafDisplayTitle(data)
+
   return (
-    <div
+    <button
+      type="button"
       className={cn(
-        "flex cursor-pointer items-center gap-2 rounded-xl px-3 py-2 text-sm transition-colors hover:bg-white",
-        selectedInstanceId === data.instanceId
-          ? "bg-primary text-primary-foreground shadow-[0_16px_30px_-22px_rgba(37,99,235,0.42)]"
-          : "text-[#30465f]",
+        "group relative flex w-full items-center gap-3 overflow-hidden rounded-xl px-3 py-2.5 text-left transition-colors",
+        isSelected ? "bg-[#eef5ff] text-[#153f74]" : "text-[#33475b] hover:bg-[#f6f8fb]",
       )}
-      style={{ paddingLeft: depth * 14 }}
+      style={{ paddingLeft: depth * 14 + 10 }}
       onClick={() => onSelectInstance(data.instanceId)}
-      role="button"
-      tabIndex={0}
+      aria-current={isSelected ? "true" : undefined}
     >
-      <span className={cn("w-4 text-center", selectedInstanceId === data.instanceId ? "text-white/80" : "text-muted-foreground")}>•</span>
-      <span className="truncate">{data.title}</span>
-    </div>
+      <span className={cn("absolute inset-y-1.5 left-0 w-[3px] rounded-r-full", isSelected ? "bg-[#3b82f6]" : "bg-transparent")} />
+      <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", isSelected ? "bg-[#60a5fa]" : "bg-[#c9d3de]")} />
+      <span className="min-w-0 flex items-baseline gap-2">
+        <span className={cn("truncate text-sm font-medium", isSelected ? "text-[#153f74]" : "text-[#2f4358]")}>{main}</span>
+        {suffix ? (
+          <span className={cn("shrink-0 text-[11px] font-medium tracking-[0.04em]", isSelected ? "text-[#7aa7e8]" : "text-[#9aa7b5]")}>
+            {suffix}
+          </span>
+        ) : null}
+      </span>
+    </button>
   )
 }
 
@@ -223,7 +264,7 @@ export function LearningObjectTree({
   }
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-1.5">
       {rootIds.map((rootId) => (
         <TreeNode
           key={rootId}

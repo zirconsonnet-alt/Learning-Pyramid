@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { FolderTree, ListChecks, RadioTower, Sparkles } from "lucide-react"
-import { Link, useNavigate, useParams } from "react-router-dom"
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
 import type { Layer } from "@/ui/api/layers"
@@ -60,10 +60,7 @@ function StatusStrip(props: { label: string; value: string; hint?: string; warni
 
 function LearningTaskNodeLink(props: { projectId: string; node: LearningTaskNode; sourceLayerIndex?: number }) {
   const { projectId, node, sourceLayerIndex } = props
-  const to =
-    node.kind === "leaf"
-      ? `/p/${projectId}/learning-tasks/${node.boundLearningTaskId}`
-      : `/p/${projectId}/learning-task-nodes/${node.nodeId}`
+  const to = `/p/${projectId}/learning-task-nodes/${node.nodeId}`
   return (
     <Button size="sm" variant="outline" asChild className="max-w-full justify-start rounded-full">
       <Link to={to}>{formatLearningTaskNodeDisplayTitle(node.title, { sourceLayerIndex })}</Link>
@@ -139,6 +136,7 @@ function LayerReviewChainCard(props: {
 export function WorkbenchPage() {
   const { projectId } = useParams()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const pid = projectId ?? ""
 
   const ensure = useWorkbenchStore((s) => s.ensure)
@@ -188,6 +186,22 @@ export function WorkbenchPage() {
       setSelectedInstanceId(pid, null)
     }
   }, [instancesQ.data, pid, selectedInstanceId, setSelectedInstanceId])
+
+  useEffect(() => {
+    if (!pid) return
+    const requestedInstanceId = searchParams.get("instanceId")?.trim() ?? ""
+    if (!requestedInstanceId) return
+    setSelectedInstanceId(pid, requestedInstanceId)
+
+    const requestedPosition = searchParams.get("position")?.trim() ?? ""
+    const requestedMs = parseAnchorMs(requestedPosition)
+    if (requestedMs === null) return
+
+    setSeekTo((current) => {
+      if (current && current.instanceId === requestedInstanceId && current.ms === requestedMs) return current
+      return { instanceId: requestedInstanceId, ms: requestedMs, nonce: Date.now() }
+    })
+  }, [pid, searchParams, setSelectedInstanceId])
 
   async function onManualRollUp(layerIndex: number) {
     if (queueHasGate) {
@@ -244,18 +258,16 @@ export function WorkbenchPage() {
                 </div>
               </div>
             </CardHeader>
-            <CardContent>
-              <div className="theme-canvas rounded-[1.1rem] border border-[#e2e8ef] p-3">
-                <LearningObjectTree
-                  projectId={pid}
-                  selectedInstanceId={selectedInstanceId}
-                  onSelectInstance={(instanceId) => {
-                    setSelectedInstanceId(pid, instanceId)
-                    setSeekTo(null)
-                    setCurrentMs(0)
-                  }}
-                />
-              </div>
+            <CardContent className="pt-2">
+              <LearningObjectTree
+                projectId={pid}
+                selectedInstanceId={selectedInstanceId}
+                onSelectInstance={(instanceId) => {
+                  setSelectedInstanceId(pid, instanceId)
+                  setSeekTo(null)
+                  setCurrentMs(0)
+                }}
+              />
             </CardContent>
           </Card>
         </div>

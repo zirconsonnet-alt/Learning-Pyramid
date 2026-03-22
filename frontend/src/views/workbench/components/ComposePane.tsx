@@ -1,7 +1,9 @@
-import { useRef } from "react"
+import { useEffect, useMemo, useRef } from "react"
+import { useQueries } from "@tanstack/react-query"
 import { BookPlus } from "lucide-react"
 
 import { ApiError } from "@/ui/api/http"
+import { listRecallPointsByLearningTaskNode } from "@/ui/api/learningTaskNodes"
 import type { Instance } from "@/ui/api/instances"
 import { richContentHasMeaning, richText } from "@/ui/api/richContent"
 import { RichContentEditor } from "@/ui/components/RichContentEditor"
@@ -10,6 +12,7 @@ import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
+import { useLearningTaskNodes } from "@/ui/queries/learningTasks"
 import { useSubmitLearningTask } from "@/ui/queries/workbench"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { useWorkbenchStore, type DraftRecallPoint } from "@/ui/store/workbenchStore"
@@ -47,6 +50,10 @@ function isDraftComplete(draft: DraftRecallPoint) {
   return richContentHasMeaning(draft.question) && richContentHasMeaning(draft.answer)
 }
 
+function buildRecommendedTaskTitle(instanceDisplayName: string, previousLearningCount: number) {
+  return previousLearningCount <= 0 ? instanceDisplayName : `${instanceDisplayName}（${previousLearningCount + 1}）`
+}
+
 export function ComposePane({
   projectId,
   selectedInstanceId,
@@ -71,11 +78,51 @@ export function ComposePane({
   const cardRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const questionRefs = useRef<Record<string, HTMLTextAreaElement | null>>({})
   const answerRefs = useRef<Record<string, HTMLTextAreaElement | null>>({})
+  const lastRecommendedTitleRef = useRef("")
 
   const submit = useSubmitLearningTask(projectId)
+  const learningTaskNodesQ = useLearningTaskNodes(projectId)
 
   const drafts = (ps?.drafts ?? []).filter((d) => (selectedInstanceId ? d.instanceId === selectedInstanceId : true))
   const taskTitle = ps?.taskTitle ?? ""
+  const leafNodeIds = useMemo(
+    () =>
+      (learningTaskNodesQ.data ?? [])
+        .filter((node) => node.kind === "leaf")
+        .map((node) => node.nodeId),
+    [learningTaskNodesQ.data],
+  )
+  const learningTaskRecallPointQs = useQueries({
+    queries: leafNodeIds.map((nodeId) => ({
+      queryKey: ["recallPointsByTaskNode", projectId, nodeId],
+      queryFn: () => listRecallPointsByLearningTaskNode(projectId, nodeId),
+      enabled: !!projectId && !!selectedInstanceId,
+    })),
+  })
+  const previousLearningCountForInstance = useMemo(() => {
+    if (!selectedInstanceId) return 0
+    let count = 0
+    for (const query of learningTaskRecallPointQs) {
+      const recallPoints = query.data ?? []
+      if (recallPoints.length === 0) continue
+      if (recallPoints.every((rp) => rp.anchor.instanceId === selectedInstanceId)) count += 1
+    }
+    return count
+  }, [learningTaskRecallPointQs, selectedInstanceId])
+  const recommendedTaskTitle = useMemo(() => {
+    if (!instance) return ""
+    return buildRecommendedTaskTitle(instance.materialDisplayName, previousLearningCountForInstance)
+  }, [instance, previousLearningCountForInstance])
+
+  useEffect(() => {
+    const previousRecommendedTitle = lastRecommendedTitleRef.current
+    const trimmedTitle = taskTitle.trim()
+    const shouldAdoptRecommended = !trimmedTitle || taskTitle === previousRecommendedTitle
+    if (recommendedTaskTitle && shouldAdoptRecommended && taskTitle !== recommendedTaskTitle) {
+      setTaskTitle(projectId, recommendedTaskTitle)
+    }
+    lastRecommendedTitleRef.current = recommendedTaskTitle
+  }, [projectId, recommendedTaskTitle, setTaskTitle, taskTitle])
 
   function createDraft(instanceId: string, ms: number): DraftRecallPoint {
     const position = `t=${ms}`
@@ -116,6 +163,13 @@ export function ComposePane({
       showErrorFeedback("提交学习任务失败", formatApiError(err))
     }
   }
+
+  const canSubmit =
+    !queueHasGate &&
+    !submit.isPending &&
+    !!taskTitle.trim() &&
+    drafts.length > 0 &&
+    !drafts.some((d) => !richContentHasMeaning(d.question) || !richContentHasMeaning(d.answer))
 
   function focusDraft(draft: DraftRecallPoint) {
     cardRefs.current[draft.localId]?.scrollIntoView({
@@ -276,19 +330,22 @@ export function ComposePane({
               id="taskTitle"
               value={taskTitle}
               onChange={(e) => setTaskTitle(projectId, e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" || e.nativeEvent.isComposing) return
+                e.preventDefault()
+                if (canSubmit) {
+                  void onSubmit()
+                } else if (!taskTitle.trim() && recommendedTaskTitle) {
+                  setTaskTitle(projectId, recommendedTaskTitle)
+                }
+              }}
               className="h-11 flex-1 bg-white"
-              placeholder={instance ? `${instance.materialDisplayName} - 学习任务` : "例如：第一节 - 学习任务"}
+              placeholder={instance ? recommendedTaskTitle : "例如：第一节"}
             />
             <Button
               className="h-11 shrink-0 rounded-xl px-5 md:min-w-[7rem]"
               onClick={() => void onSubmit()}
-              disabled={
-                queueHasGate ||
-                submit.isPending ||
-                !taskTitle.trim() ||
-                drafts.length === 0 ||
-                drafts.some((d) => !richContentHasMeaning(d.question) || !richContentHasMeaning(d.answer))
-              }
+              disabled={!canSubmit}
             >
               {submit.isPending ? "提交中..." : "提交学习"}
             </Button>

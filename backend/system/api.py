@@ -29,6 +29,7 @@ from backend.models.enums import (
     MediaAssetKind,
     MaterialSourceKind,
     ProjectState,
+    RecallPointState,
     RecallPointReviewResult,
     ReviewChainTemplateItemKind,
     ReviewChainState,
@@ -150,7 +151,16 @@ class SystemAPI:
                 return ".jpg" if ext == ".jpeg" else ext
         raise PreconditionFailure(f"Unsupported image mime type: {mime_type}")
 
-    def _create_project_sql_direct(self, sql_store: SqlStore, title: str, project_root: str | None) -> ProjectId:
+    def _create_project_sql_direct(
+        self,
+        sql_store: SqlStore,
+        title: str,
+        project_root: str | None,
+        *,
+        initial_source_kind: MaterialSourceKind,
+    ) -> ProjectId:
+        if not isinstance(initial_source_kind, MaterialSourceKind):
+            raise PreconditionFailure("create_project.initial_source_kind must be MaterialSourceKind")
         pid = self.idgen.new_project_id()
         resolved_project_root = project_root
         if resolved_project_root is None:
@@ -183,7 +193,7 @@ class SystemAPI:
         )
         material_source_binding = ProjectMaterialSourceBinding.create(
             pid,
-            source_kind=MaterialSourceKind.SERVER_FS,
+            source_kind=initial_source_kind,
             updated_at=now_utc_ms(),
         )
         project_config = default_project_config(project_id=pid, updated_at=now_utc_ms())
@@ -392,7 +402,7 @@ class SystemAPI:
         finally:
             self.sys.rollback(s)
 
-        if binding.source_kind == MaterialSourceKind.BROWSER_LOCAL:
+        if binding.source_kind in {MaterialSourceKind.BROWSER_LOCAL, MaterialSourceKind.MANUAL}:
             self._startup_fs_sync_done.add(pid_k)
             return
 
@@ -407,6 +417,9 @@ class SystemAPI:
         s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
         try:
             cfg = self.sys.project_storage_config_repo.get(s)
+            binding = self.sys.project_material_source_binding_repo.get(s)
+            if binding.source_kind != MaterialSourceKind.SERVER_FS:
+                raise PreconditionFailure("sync_learning_objects_from_fs: source_kind must be SERVER_FS")
             if cfg.fs_sync_policy == FsSyncPolicy.DISABLED:
                 raise PreconditionFailure("sync_learning_objects_from_fs: fs_sync_policy is DISABLED")
 
@@ -1042,11 +1055,22 @@ class SystemAPI:
         return self.sys.begin_session(project_id, mode)
 
     # 4.5.2
-    def create_project(self, title: str, project_root: str | None = None) -> ProjectId:
+    def create_project(
+        self,
+        title: str,
+        project_root: str | None = None,
+        *,
+        initial_source_kind: MaterialSourceKind = MaterialSourceKind.SERVER_FS,
+    ) -> ProjectId:
         sql_store = self._sql_store()
         if sql_store is not None:
-            return self._create_project_sql_direct(sql_store, title, project_root)
-        return self.sys.create_project(title, project_root)
+            return self._create_project_sql_direct(
+                sql_store,
+                title,
+                project_root,
+                initial_source_kind=initial_source_kind,
+            )
+        return self.sys.create_project(title, project_root, initial_source_kind=initial_source_kind)
 
     def list_projects(self) -> Tuple:
         sql_store = self._sql_store()
@@ -1056,6 +1080,35 @@ class SystemAPI:
         projects = [ps.project for ps in self.sys.g.projects.values() if ps.project is not None and ps.project.state == ProjectState.ACTIVE]
         projects.sort(key=lambda p: id_canonical_text(p.project_id))
         return tuple(projects)
+
+    def edit_project(self, project_id: ProjectId, title: str) -> None:
+        self._ensure_startup_fs_sync_done(project_id)
+        s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
+        try:
+            if title is None or not str(title).strip():
+                raise PreconditionFailure("edit_project.title must be non-empty")
+
+            project = self.sys.project_repo.get(s, project_id)
+            updated_project = Project(
+                project_id=project.project_id,
+                title=title,
+                state=project.state,
+                created_at=project.created_at,
+                deleted_at=project.deleted_at,
+            )
+            updated_project.validate_write_time()
+            self.sys.project_repo.update(s, updated_project)
+            self._append_audit_event(
+                s,
+                kind=AuditEventKind.EDIT_PROJECT,
+                api_name="edit_project",
+                payload={"projectId": str(project_id)},
+            )
+            self.sys.commit(s)
+        except Exception:
+            if s.state == SessionState.OPEN:
+                self.sys.rollback(s)
+            raise
 
     def delete_project(self, project_id: ProjectId) -> None:
         sql_store = self._sql_store()
@@ -1154,7 +1207,32 @@ class SystemAPI:
 
     # 4.5.3
     def add_instance(self, project_id: ProjectId, material_id: str) -> InstanceId:
-        raise PreconditionFailure("add_instance is disabled; materials are discovered from the configured directory")
+        self._ensure_startup_fs_sync_done(project_id)
+        s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
+        try:
+            cfg = self.sys.project_storage_config_repo.get(s)
+            binding = self.sys.project_material_source_binding_repo.get(s)
+            manual_materials_allowed = binding.source_kind == MaterialSourceKind.MANUAL or (
+                binding.source_kind == MaterialSourceKind.SERVER_FS and cfg.fs_sync_policy == FsSyncPolicy.DISABLED
+            )
+            if not manual_materials_allowed:
+                raise PreconditionFailure("add_instance is disabled when materials are managed by sync/import")
+
+            iid = self.idgen.new_instance_id(project_id)
+            instance = Instance.create(project_id, iid, material_id, presence=InstancePresence.PRESENT, last_seen_at=None)
+            self.sys.instance_repo.add(s, instance)
+            self._append_audit_event(
+                s,
+                kind=AuditEventKind.ADD_INSTANCE,
+                api_name="add_instance",
+                payload={"instanceId": str(iid), "materialId": instance.material_id.as_posix()},
+            )
+            self.sys.commit(s)
+            return iid
+        except Exception:
+            if s.state == SessionState.OPEN:
+                self.sys.rollback(s)
+            raise
 
     def add_learning_object_leaf(
         self,
@@ -1167,8 +1245,12 @@ class SystemAPI:
         s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
         try:
             storage_cfg = self.sys.project_storage_config_repo.get(s)
-            if storage_cfg.fs_sync_policy != FsSyncPolicy.DISABLED:
-                raise PreconditionFailure("add_learning_object_leaf is disabled when fs_sync_policy != DISABLED")
+            binding = self.sys.project_material_source_binding_repo.get(s)
+            manual_materials_allowed = binding.source_kind == MaterialSourceKind.MANUAL or (
+                binding.source_kind == MaterialSourceKind.SERVER_FS and storage_cfg.fs_sync_policy == FsSyncPolicy.DISABLED
+            )
+            if not manual_materials_allowed:
+                raise PreconditionFailure("add_learning_object_leaf is disabled when materials are managed by sync/import")
 
             if title is None or not str(title).strip():
                 raise PreconditionFailure("add_learning_object_leaf.title must be non-empty")
@@ -1241,8 +1323,12 @@ class SystemAPI:
         s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
         try:
             storage_cfg = self.sys.project_storage_config_repo.get(s)
-            if storage_cfg.fs_sync_policy != FsSyncPolicy.DISABLED:
-                raise PreconditionFailure("add_learning_object_container is disabled when fs_sync_policy != DISABLED")
+            binding = self.sys.project_material_source_binding_repo.get(s)
+            manual_materials_allowed = binding.source_kind == MaterialSourceKind.MANUAL or (
+                binding.source_kind == MaterialSourceKind.SERVER_FS and storage_cfg.fs_sync_policy == FsSyncPolicy.DISABLED
+            )
+            if not manual_materials_allowed:
+                raise PreconditionFailure("add_learning_object_container is disabled when materials are managed by sync/import")
 
             if title is None or not str(title).strip():
                 raise PreconditionFailure("add_learning_object_container.title must be non-empty")
@@ -1402,7 +1488,11 @@ class SystemAPI:
             # Ensure instance_id is resolvable.
             self.sys.instance_repo.get(s, instance_id)
             want = id_canonical_text(instance_id)
-            out = [rp.recall_point_id for rp in self.sys.recall_point_repo.all(s) if id_canonical_text(rp.anchor.instance_id) == want]
+            out = [
+                rp.recall_point_id
+                for rp in self.sys.recall_point_repo.all(s)
+                if rp.state == RecallPointState.ACTIVE and id_canonical_text(rp.anchor.instance_id) == want
+            ]
             out.sort(key=lambda x: id_canonical_text(x))
             return tuple(out)
         finally:
@@ -1434,7 +1524,10 @@ class SystemAPI:
             want_from = id_canonical_text(from_instance_id)
             if recall_point_ids is None:
                 for rp in self.sys.recall_point_repo.all(s):
-                    if id_canonical_text(rp.anchor.instance_id) == want_from:
+                    if (
+                        rp.state == RecallPointState.ACTIVE
+                        and id_canonical_text(rp.anchor.instance_id) == want_from
+                    ):
                         targets.append(rp)
             else:
                 for rp_id in tuple(recall_point_ids):
@@ -1442,6 +1535,8 @@ class SystemAPI:
                         rp = self.sys.recall_point_repo.get(s, rp_id)
                     except NotFound:
                         raise PreconditionFailure("bulk_remap_recall_points_instance.recall_point_ids contains non-resolvable id")
+                    if rp.state != RecallPointState.ACTIVE:
+                        raise PreconditionFailure("bulk_remap_recall_points_instance.recall_point_ids must all be ACTIVE")
                     if id_canonical_text(rp.anchor.instance_id) != want_from:
                         raise PreconditionFailure("bulk_remap_recall_points_instance.recall_point_ids must all belong to from_instance_id")
                     targets.append(rp)
@@ -1680,6 +1775,8 @@ class SystemAPI:
             # (2) Migrate RecallPoints (user mapping)
             if remap_dict:
                 for rp in self.sys.recall_point_repo.all(s):
+                    if rp.state != RecallPointState.ACTIVE:
+                        continue
                     old_key = id_canonical_text(rp.anchor.instance_id)
                     new_key = remap_dict.get(old_key)
                     if new_key is None:
@@ -1777,6 +1874,31 @@ class SystemAPI:
     # -------------------------
     # Internal protocols (4.3.x)
     # -------------------------
+    def _next_registration_seq(self, s: MutationSession, target_layer_index: int) -> int:
+        current = [
+            int(reg.registration_seq)
+            for reg in self.sys.entry_repo.all(s)
+            if int(reg.target_layer_index) == int(target_layer_index)
+        ]
+        return max(current, default=0) + 1
+
+    def _get_entry_registration_for_review_chain(self, s: MutationSession, review_chain_id: ReviewChainId) -> EntryRegistration:
+        for reg in self.sys.entry_repo.all(s):
+            if id_canonical_text(reg.review_chain_id) == id_canonical_text(review_chain_id):
+                return reg
+        raise PreconditionFailure("ReviewChainStep: review_chain_id not registered by any entry")
+
+    def _ordered_managed_review_chain_ids(self, s: MutationSession, layer_index: int) -> Tuple[ReviewChainId, ...]:
+        layer = self.sys.layer_repo.get_by_index(s, layer_index)
+        managed_keys = {id_canonical_text(cid) for cid in layer.orchestrator_managed_review_chain_ids}
+        ordered_regs = [
+            reg
+            for reg in self.sys.entry_repo.all(s)
+            if int(reg.target_layer_index) == int(layer_index) and id_canonical_text(reg.review_chain_id) in managed_keys
+        ]
+        ordered_regs.sort(key=lambda reg: (int(reg.registration_seq), id_canonical_text(reg.entry_node)))
+        return tuple(reg.review_chain_id for reg in ordered_regs)
+
     def _task_register(self, s: MutationSession, entry_node: LearningTaskNodeId, target_layer_index: int) -> ReviewChainId:
         seed_rp_ids = self.sys.learning_task_node_repo.covered_rp_ids(s, entry_node)
         if not seed_rp_ids:
@@ -1841,15 +1963,19 @@ class SystemAPI:
         chain.validate_local_invariants()
         self.sys.review_chain_repo.add(s, chain)
 
+        registration_seq = self._next_registration_seq(s, target_layer_index)
+
         reg = EntryRegistration(
             project_id=s.project_id,
             entry_node=entry_node,
             target_layer_index=target_layer_index,
             review_chain_id=chain_id,
+            registration_seq=registration_seq,
         )
         reg.validate_local_invariants()
         self.sys.entry_repo.add(s, reg)
         self.sys.layer_repo.upsert_managed_chain(s, target_layer_index, chain_id)
+        self.sys.aggq_repo.enqueue(s, target_layer_index, entry_node)
         # Spec 4.2.4 quota reset: any successful Task Register producing a new entry in this layer resets quota to 1.
         self._set_normal_tick_quota_remaining(s, target_layer_index, 1)
         return chain_id
@@ -1921,43 +2047,31 @@ class SystemAPI:
         self.sys.convergence_repo.append_review_task_id(s, convergence_id, rt_id)
         return ("PRODUCED", rt_id)
 
-    def _review_chain_step(self, s: MutationSession, layer_index: int, review_chain_id: ReviewChainId) -> None:
-        chain = self.sys.review_chain_repo.get(s, review_chain_id)
-        head = chain.head_item()
-        if head is None:
-            self.sys.layer_repo.remove_managed_chain(s, layer_index, review_chain_id)
-            return
-
-        if head.kind == ReviewChainItemKind.REVIEW_TASK:
-            t = self.sys.review_task_repo.get(s, head.id)  # type: ignore[arg-type]
-            if t.state == ReviewTaskState.PENDING:
-                self.sys.queue_repo.enqueue_if_absent(s, t.review_task_id)
-                return
-            self.sys.review_chain_repo.advance_head(s, review_chain_id)
-            if chain.head_index + 1 >= len(chain.queue):
+    def _review_chain_step(self, s: MutationSession, layer_index: int, review_chain_id: ReviewChainId) -> Tuple[str, Optional[ReviewTaskId]]:
+        while True:
+            chain = self.sys.review_chain_repo.get(s, review_chain_id)
+            head = chain.head_item()
+            if head is None:
                 self.sys.layer_repo.remove_managed_chain(s, layer_index, review_chain_id)
-            return
+                return ("NO_EFFECT", None)
 
-        if head.kind == ReviewChainItemKind.CONVERGENCE:
-            # Convergence Step needs entry_node to compute latest covered_rp_ids (4.3.6).
-            entry_node: Optional[LearningTaskNodeId] = None
-            for reg in self.sys.entry_repo.all(s):
-                if id_canonical_text(reg.review_chain_id) == id_canonical_text(review_chain_id):
-                    entry_node = reg.entry_node
-                    break
-            if entry_node is None:
-                raise PreconditionFailure("ReviewChainStep: review_chain_id not registered by any entry")
+            if head.kind == ReviewChainItemKind.REVIEW_TASK:
+                t = self.sys.review_task_repo.get(s, head.id)  # type: ignore[arg-type]
+                if t.state == ReviewTaskState.PENDING:
+                    return ("READY_EXISTING", t.review_task_id)
+                self.sys.review_chain_repo.advance_head(s, review_chain_id)
+                continue
 
-            kind, rt_id = self._convergence_step(s, head.id, entry_node)  # type: ignore[arg-type]
+            reg = self._get_entry_registration_for_review_chain(s, review_chain_id)
+            kind, rt_id = self._convergence_step(s, head.id, reg.entry_node)  # type: ignore[arg-type]
             if kind == "PRODUCED" and rt_id is not None:
-                self.sys.queue_repo.enqueue_if_absent(s, rt_id)
-                return
+                return ("PRODUCED_NEW", rt_id)
             if kind == "TERMINATED":
                 self.sys.review_chain_repo.advance_head(s, review_chain_id)
-                if chain.head_index + 1 >= len(chain.queue):
-                    self.sys.layer_repo.remove_managed_chain(s, layer_index, review_chain_id)
-                return
-            return
+                continue
+            if kind == "BLOCKED":
+                return ("BLOCKED", None)
+            return ("NO_EFFECT", None)
 
     def _orchestrator_gate_ok(self, s: MutationSession, layer_index: int) -> bool:
         if not self.sys.queue_repo.is_empty(s):
@@ -1973,8 +2087,6 @@ class SystemAPI:
                 continue
             if head.kind == ReviewChainItemKind.REVIEW_TASK:
                 t = self.sys.review_task_repo.get(s, head.id)  # type: ignore[arg-type]
-                if t.state == ReviewTaskState.PENDING:
-                    return False
                 continue
 
             c = self.sys.convergence_repo.get(s, head.id)  # type: ignore[arg-type]
@@ -1991,11 +2103,16 @@ class SystemAPI:
         if not self._orchestrator_gate_ok(s, layer_index):
             return TickAttemptResult.GATE_BLOCKED
 
-        layer = self.sys.layer_repo.get_by_index(s, layer_index)
-        managed = tuple(layer.orchestrator_managed_review_chain_ids)
-        for cid in managed:
-            self._review_chain_step(s, layer_index, cid)
-        return TickAttemptResult.EMPTY if self.sys.queue_repo.is_empty(s) else TickAttemptResult.PRODUCED
+        produced_batch: list[ReviewTaskId] = []
+        for cid in self._ordered_managed_review_chain_ids(s, layer_index):
+            result, review_task_id = self._review_chain_step(s, layer_index, cid)
+            if result in {"READY_EXISTING", "PRODUCED_NEW"} and review_task_id is not None:
+                produced_batch.append(review_task_id)
+
+        for review_task_id in produced_batch:
+            self.sys.queue_repo.enqueue_if_absent(s, review_task_id)
+
+        return TickAttemptResult.EMPTY if not produced_batch else TickAttemptResult.PRODUCED
 
     def _get_aggregation_thresholds(self, s: MutationSession, layer_index: int) -> tuple[int, int]:
         layer = self.sys.layer_repo.get_by_index(s, layer_index)
@@ -2062,7 +2179,7 @@ class SystemAPI:
 
     def _roll_up_phase_b(self, s: MutationSession, layer_index: int) -> None:
         """
-        Spec 4.4.3 ROLL_UP Phase B: register pending parent node to upper layer, enqueue to upper aggq,
+        Spec 4.4.3 ROLL_UP Phase B: register pending parent node to upper layer,
         clear pending pointer, and mark this layer DONE.
 
         IMPORTANT: This phase MUST NOT call Orchestrator Tick (4.3.4) or any step-like progression.
@@ -2092,7 +2209,6 @@ class SystemAPI:
             self.sys.layer_repo.add(s, layer)
 
         self._task_register(s, parent_node_id, upper)
-        self.sys.aggq_repo.enqueue(s, upper, parent_node_id)
         # Spec 4.4.2: enqueue to upper does NOT implicitly trigger upper CLEARING.
         self._enter_clearing_if_threshold_met(s, upper)
 
@@ -2261,7 +2377,6 @@ class SystemAPI:
 
             self.sys.layer_repo.get_by_index(s, target_layer_index)
             self._task_register(s, entry_node_id, target_layer_index)
-            self.sys.aggq_repo.enqueue(s, target_layer_index, entry_node_id)
 
             # Spec 4.4.2 T1: threshold satisfaction enters/keeps CLEARING.
             self._enter_clearing_if_threshold_met(s, target_layer_index)
@@ -2369,6 +2484,24 @@ class SystemAPI:
                 s,
                 kind=AuditEventKind.EDIT_RECALL_POINT,
                 api_name="edit_recall_point",
+                payload={"recallPointId": str(recall_point_id)},
+            )
+            self.sys.commit(s)
+        except Exception:
+            if s.state == SessionState.OPEN:
+                self.sys.rollback(s)
+            raise
+
+    def delete_recall_point(self, project_id: ProjectId, recall_point_id: RecallPointId) -> None:
+        self._ensure_startup_fs_sync_done(project_id)
+        s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
+        try:
+            deleted_at = now_utc_ms()
+            self.sys.recall_point_repo.mark_deleted(s, recall_point_id, deleted_at)
+            self._append_audit_event(
+                s,
+                kind=AuditEventKind.DELETE_RECALL_POINT,
+                api_name="delete_recall_point",
                 payload={"recallPointId": str(recall_point_id)},
             )
             self.sys.commit(s)
@@ -2754,7 +2887,7 @@ class SystemAPI:
         try:
             cfg = self.sys.project_config_repo.get(s)
 
-            rps = self.sys.recall_point_repo.all(s)
+            rps = tuple(rp for rp in self.sys.recall_point_repo.all(s) if rp.state == RecallPointState.ACTIVE)
             N = len(rps)
             T = int(cfg.push_config.min_recall_points_to_enable)
             if N < T:
@@ -2862,6 +2995,8 @@ class SystemAPI:
             raise PreconditionFailure(f"request_asr window too large (max {MAX_ASR_WINDOW_MS}ms)")
 
         rp = self.sys.recall_point_repo.get(s, recall_point_id)  # may raise NotFound
+        if rp.state != RecallPointState.ACTIVE:
+            raise PreconditionFailure("request_asr precondition failed: recall_point_id must resolve to ACTIVE RecallPoint")
         source_instance_id = rp.anchor.instance_id
         if not str(source_instance_id):
             raise PreconditionFailure("request_asr precondition failed: source_instance_id missing")
@@ -2879,8 +3014,9 @@ class SystemAPI:
             raise PreconditionFailure("request_asr precondition failed: source_instance_id not resolvable")
 
         storage = self.sys.project_storage_config_repo.get(s)
+        binding = self.sys.project_material_source_binding_repo.get(s)
         try:
-            file_path = resolve_material_file_path(storage, inst.material_id)
+            file_path = resolve_material_file_path(storage, inst.material_id, source_kind=binding.source_kind)
         except PreconditionFailure as exc:
             raise PreconditionFailure(f"request_asr precondition failed: {exc}") from exc
 
@@ -3044,7 +3180,7 @@ class SystemAPI:
             recall_point_key_set = {
                 id_canonical_text(rp.recall_point_id)
                 for rp in self.sys.recall_point_repo.all(s)
-                if id_canonical_text(rp.anchor.instance_id) in inst_set
+                if rp.state == RecallPointState.ACTIVE and id_canonical_text(rp.anchor.instance_id) in inst_set
             }
             items = [
                 art
@@ -3243,7 +3379,7 @@ class SystemAPI:
             inst_set = {id_canonical_text(x) for x in inst_ids}
             items: list[RecallPoint] = []
             for rp in self.sys.recall_point_repo.all(s):
-                if id_canonical_text(rp.anchor.instance_id) in inst_set:
+                if rp.state == RecallPointState.ACTIVE and id_canonical_text(rp.anchor.instance_id) in inst_set:
                     items.append(rp)
             items.sort(key=lambda r: id_canonical_text(r.recall_point_id))
             return tuple(items)
@@ -3371,9 +3507,12 @@ class SystemAPI:
             inst = self.sys.instance_repo.get(s, instance_id)
             if getattr(inst, "presence", None) == InstancePresence.MISSING:
                 return ValidationResult.unreachable("material is MISSING")
+            binding = self.sys.project_material_source_binding_repo.get(s)
+            if binding.source_kind == MaterialSourceKind.MANUAL:
+                return ValidationResult.ok()
             storage_cfg = self.sys.project_storage_config_repo.get(s)
             try:
-                p = resolve_material_file_path(storage_cfg, inst.material_id)
+                p = resolve_material_file_path(storage_cfg, inst.material_id, source_kind=binding.source_kind)
                 if not p.exists():
                     return ValidationResult.unreachable(f"material not found: {p}")
                 if not p.is_file():
@@ -3417,6 +3556,7 @@ API_WHITELIST: dict[str, SchedulingEffect] = {
     "System.begin_session": SchedulingEffect.NONE,
     "create_project": SchedulingEffect.NONE,
     "list_projects": SchedulingEffect.NONE,
+    "edit_project": SchedulingEffect.NONE,
     "get_project_config": SchedulingEffect.NONE,
     "get_project_storage_config": SchedulingEffect.NONE,
     "get_project_material_source_binding": SchedulingEffect.NONE,
@@ -3438,6 +3578,7 @@ API_WHITELIST: dict[str, SchedulingEffect] = {
     "get_review_chain": SchedulingEffect.NONE,
     "get_review_chain_entry_registration": SchedulingEffect.NONE,
     "edit_recall_point": SchedulingEffect.NONE,
+    "delete_recall_point": SchedulingEffect.NONE,
     "edit_learning_task": SchedulingEffect.NONE,
     "set_layer_config": SchedulingEffect.NONE,
     "executor_commit_review_task": SchedulingEffect.ORCHESTRATION_MUTATING,

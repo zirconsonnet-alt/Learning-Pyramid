@@ -141,3 +141,29 @@ def test_project_material_source_binding_can_be_read_and_updated(auth_env: None)
     audit_events = client.get(f"/api/projects/{project_id}/audit-log-events")
     assert audit_events.status_code == 200
     assert audit_events.json()["data"][-1]["apiName"] == "set_project_material_source_binding"
+
+
+def test_project_can_be_renamed(auth_env: None) -> None:
+    client = TestClient(create_app())
+
+    client.post(
+        "/api/auth/register",
+        json={"email": "owner@example.com", "password": "password123"},
+    )
+    created = client.post("/api/projects", json={"title": "Original Project"})
+    project_id = created.json()["data"]["projectId"]
+
+    renamed = client.patch(f"/api/projects/{project_id}", json={"title": "Renamed Project"})
+    assert renamed.status_code == 200
+    assert renamed.json() == {"ok": True, "data": None}
+
+    projects = client.get("/api/projects")
+    assert projects.status_code == 200
+    items = projects.json()["data"]
+    assert len(items) == 1
+    assert items[0]["projectId"] == project_id
+    assert items[0]["title"] == "Renamed Project"
+
+    audit_events = client.get(f"/api/projects/{project_id}/audit-log-events")
+    assert audit_events.status_code == 200
+    assert audit_events.json()["data"][-1]["apiName"] == "edit_project"

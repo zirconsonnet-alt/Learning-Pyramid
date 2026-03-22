@@ -45,6 +45,16 @@ class ProjectMaterialSourceBindingTests(unittest.TestCase):
         self.assertEqual(binding.source_kind, MaterialSourceKind.BROWSER_LOCAL)
         self.assertEqual(binding.source_root_label, "Authorized Videos")
 
+    def test_create_allows_manual_source_kind(self) -> None:
+        binding = ProjectMaterialSourceBinding.create(
+            ProjectId("proj_1"),
+            source_kind=MaterialSourceKind.MANUAL,
+            source_root_label="Paper Materials",
+        )
+
+        self.assertEqual(binding.source_kind, MaterialSourceKind.MANUAL)
+        self.assertEqual(binding.source_root_label, "Paper Materials")
+
     def test_mapper_serializes_binding(self) -> None:
         binding = ProjectMaterialSourceBinding.create(
             ProjectId("proj_1"),
@@ -75,6 +85,28 @@ class ProjectMaterialSourceBindingTests(unittest.TestCase):
             api.sys.rollback(session)
 
         self.assertEqual(binding.source_kind, MaterialSourceKind.SERVER_FS)
+
+    def test_create_project_supports_manual_initial_binding(self) -> None:
+        api = SystemAPI(InMemorySystem())
+        project_id = api.create_project("proj", initial_source_kind=MaterialSourceKind.MANUAL)
+
+        session = api.sys.begin_session(project_id, SessionMode.READ_ONLY)
+        try:
+            binding = api.sys.project_material_source_binding_repo.get(session)
+        finally:
+            api.sys.rollback(session)
+
+        self.assertEqual(binding.source_kind, MaterialSourceKind.MANUAL)
+
+    def test_manual_project_allows_manual_instance_and_reports_reachable(self) -> None:
+        api = SystemAPI(InMemorySystem())
+        project_id = api.create_project("proj", initial_source_kind=MaterialSourceKind.MANUAL)
+
+        instance_id = api.add_instance(project_id, "books/calculus/chapter-1/page-12-q4")
+        instance = api.get_instance(project_id, instance_id)
+
+        self.assertEqual(instance.material_id.as_posix(), "books/calculus/chapter-1/page-12-q4")
+        self.assertEqual(api.validate_material_reachable(project_id, instance_id).code.value, "OK")
 
     def test_json_snapshot_round_trip_preserves_binding(self) -> None:
         with TemporaryDirectory() as tmp:

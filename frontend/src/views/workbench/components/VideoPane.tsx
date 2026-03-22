@@ -99,7 +99,7 @@ export function VideoPane({
 }) {
   const playerShellRef = useRef<HTMLDivElement | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
-  const questionInputRef = useRef<HTMLInputElement | null>(null)
+  const questionInputRef = useRef<HTMLTextAreaElement | null>(null)
   const answerTextareaRef = useRef<HTMLTextAreaElement | null>(null)
   const pendingSeekRef = useRef<{ instanceId: string; ms: number; nonce: number } | null>(null)
   const fullscreenTransitionRef = useRef(false)
@@ -964,11 +964,11 @@ export function VideoPane({
                   <div className="mt-3 space-y-3">
                     <label className="block">
                       <div className="mb-1 text-xs text-white/62">问题</div>
-                      <input
+                      <textarea
                         ref={questionInputRef}
-                        type="text"
                         value={questionText}
-                        className="w-full rounded-xl border border-white/10 bg-white/[0.05] px-3 py-2 text-sm text-white outline-none placeholder:text-white/28 focus:border-cyan-200/24 focus:bg-white/[0.08]"
+                        rows={3}
+                        className="min-h-[84px] w-full rounded-xl border border-white/10 bg-white/[0.05] px-3 py-2 text-sm text-white outline-none placeholder:text-white/28 focus:border-cyan-200/24 focus:bg-white/[0.08]"
                         placeholder="输入复述点问题"
                         onChange={(event) => {
                           setQuestionText(event.target.value)
@@ -981,7 +981,7 @@ export function VideoPane({
                             return
                           }
                           if (event.nativeEvent.isComposing) return
-                          if (event.key === "Enter") {
+                          if (event.key === "Enter" && !(event.ctrlKey || event.metaKey)) {
                             event.preventDefault()
                             answerTextareaRef.current?.focus()
                           }
@@ -1007,7 +1007,7 @@ export function VideoPane({
                             return
                           }
                           if (event.nativeEvent.isComposing) return
-                          if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+                          if (event.key === "Enter" && !(event.ctrlKey || event.metaKey)) {
                             event.preventDefault()
                             void saveCaptureDraft()
                           }
@@ -1017,7 +1017,7 @@ export function VideoPane({
                   </div>
 
                   <div className={cn("mt-2 text-xs", captureError ? "text-rose-200" : "text-white/44")}>
-                    {captureError ?? "Ctrl+Enter 保存，Esc 取消"}
+                    {captureError ?? "问题中 Enter 切到答案，Ctrl+Enter 换行；答案中 Enter 保存，Ctrl+Enter 换行，Esc 取消"}
                   </div>
 
                   <div className="mt-3 flex items-center justify-end gap-2">

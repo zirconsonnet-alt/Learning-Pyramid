@@ -166,6 +166,8 @@ export function useSubmitLearningTask(projectId: string) {
         qc.invalidateQueries({ queryKey: ["layers", projectId] }),
         qc.invalidateQueries({ queryKey: ["aggQueue", projectId] }),
         qc.invalidateQueries({ queryKey: ["aggregationEvents", projectId] }),
+        qc.invalidateQueries({ queryKey: ["learningTaskNodes", projectId] }),
+        qc.invalidateQueries({ queryKey: ["recallPointsByTaskNode", projectId] }),
       ])
     },
   })
@@ -199,13 +201,23 @@ export function useReviewBundle(projectId: string, headId: string) {
 export function useCommitReviewTask(projectId: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (p: { reviewTaskId: string; canRecall: number[] }) => commitReviewTask(projectId, p.reviewTaskId, p.canRecall),
+    mutationFn: (p: {
+      reviewTaskId: string
+      canRecall: number[]
+      appendedInsights?: { recallPointId: string; insight: RichContent }[]
+    }) =>
+      commitReviewTask(projectId, p.reviewTaskId, {
+        canRecall: p.canRecall,
+        appendedInsights: p.appendedInsights,
+      }),
     onSuccess: async () => {
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["queue", projectId] }),
         qc.invalidateQueries({ queryKey: ["layers", projectId] }),
         qc.invalidateQueries({ queryKey: ["aggQueue", projectId] }),
         qc.invalidateQueries({ queryKey: ["aggregationEvents", projectId] }),
+        qc.invalidateQueries({ queryKey: ["reviewTask", projectId] }),
+        qc.invalidateQueries({ queryKey: ["recallPoint", projectId] }),
       ])
     },
   })

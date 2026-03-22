@@ -24,6 +24,7 @@ from backend.models.enums import (
     MaterialSourceKind,
     MediaAssetKind,
     ProjectState,
+    RecallPointState,
     RecallPointReviewResult,
     ReviewChainTemplateItemKind,
     ReviewChainState,
@@ -502,6 +503,8 @@ def _encode_recall_point(rp: RecallPoint) -> dict[str, Any]:
         "projectId": str(rp.project_id),
         "recallPointId": str(rp.recall_point_id),
         "createdAtMs": _ts_to_ms(rp.created_at),
+        "state": rp.state.value,
+        "deletedAtMs": None if rp.deleted_at is None else _ts_to_ms(rp.deleted_at),
         "question": _encode_rich_content(rp.question),
         "answer": _encode_rich_content(rp.answer),
         "anchor": _encode_anchor(rp.anchor),
@@ -532,6 +535,8 @@ def _decode_recall_point(d: dict[str, Any]) -> RecallPoint:
         answer=answer,
         anchor=_decode_anchor(d["anchor"]),
         insights=tuple(_decode_rich_content(x) for x in d.get("insights", [])),
+        state=RecallPointState(str(d.get("state", RecallPointState.ACTIVE.value))),
+        deleted_at=None if d.get("deletedAtMs") is None else _ms_to_ts(int(d["deletedAtMs"])),
     )
 
 
@@ -802,6 +807,7 @@ def _encode_entry_reg(r: EntryRegistration) -> dict[str, Any]:
         "entryNode": str(r.entry_node),
         "targetLayerIndex": r.target_layer_index,
         "reviewChainId": str(r.review_chain_id),
+        "registrationSeq": int(r.registration_seq),
     }
 
 
@@ -811,6 +817,7 @@ def _decode_entry_reg(d: dict[str, Any]) -> EntryRegistration:
         entry_node=LearningTaskNodeId(d["entryNode"]),
         target_layer_index=int(d["targetLayerIndex"]),
         review_chain_id=ReviewChainId(d["reviewChainId"]),
+        registration_seq=int(d.get("registrationSeq", 0)),
     )
 
 

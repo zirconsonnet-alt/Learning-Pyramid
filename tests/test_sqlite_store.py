@@ -871,6 +871,7 @@ def test_sqlite_store_externalizes_core_entities_from_snapshot_row(tmp_path: Pat
                 entry_node=task_node.node_id,
                 target_layer_index=0,
                 review_chain_id=review_chain.review_chain_id,
+                registration_seq=1,
             ),
         )
         asr_artifact = AsrArtifact(
@@ -942,7 +943,7 @@ def test_sqlite_store_externalizes_core_entities_from_snapshot_row(tmp_path: Pat
         ).fetchone()
         entry_reg_row = conn.execute(
             """
-            SELECT target_layer_index, review_chain_id
+            SELECT target_layer_index, review_chain_id, registration_seq
             FROM entry_registration_index
             WHERE project_id = ? AND entry_node = ?
             """,
@@ -1056,7 +1057,7 @@ def test_sqlite_store_externalizes_core_entities_from_snapshot_row(tmp_path: Pat
     assert row is not None
     assert learning_task_row == ("Lesson 2 task", 1)
     assert learning_task_node_row == ("LEAF", str(learning_task.learning_task_id), "Lesson 2 node")
-    assert entry_reg_row == (0, str(review_chain.review_chain_id))
+    assert entry_reg_row == (0, str(review_chain.review_chain_id), 1)
     assert range_snapshot_row == (1,)
     assert review_task_row == (str(range_snapshot.range_id), "PENDING")
     assert convergence_row == (str(range_snapshot.range_id), "conv_rule_externalized", 1, "IN_PROGRESS")
@@ -1112,6 +1113,7 @@ def test_sqlite_store_externalizes_core_entities_from_snapshot_row(tmp_path: Pat
     assert list(restored_project["learningTasks"].keys()) == [str(learning_task.learning_task_id)]
     assert list(restored_project["learningTaskNodes"].keys()) == [str(task_node.node_id)]
     assert list(restored_project["entryRegs"].keys()) == [str(task_node.node_id)]
+    assert restored_project["entryRegs"][str(task_node.node_id)]["registrationSeq"] == 1
     assert list(restored_project["rangeSnapshots"].keys()) == [str(range_snapshot.range_id)]
     assert list(restored_project["reviewTasks"].keys()) == [str(review_task.review_task_id)]
     assert list(restored_project["convergences"].keys()) == [str(convergence.convergence_id)]
@@ -1218,6 +1220,7 @@ def test_sqlite_store_compacts_legacy_snapshot_rows_on_reload(tmp_path: Path) ->
                 entry_node=task_node.node_id,
                 target_layer_index=0,
                 review_chain_id=review_chain.review_chain_id,
+                registration_seq=1,
             ),
         )
         asr_artifact = AsrArtifact(
@@ -1361,7 +1364,7 @@ def test_sqlite_store_compacts_legacy_snapshot_rows_on_reload(tmp_path: Path) ->
         ).fetchone()
         entry_reg_row = conn.execute(
             """
-            SELECT target_layer_index, review_chain_id
+            SELECT target_layer_index, review_chain_id, registration_seq
             FROM entry_registration_index
             WHERE project_id = ? AND entry_node = ?
             """,
@@ -1476,7 +1479,7 @@ def test_sqlite_store_compacts_legacy_snapshot_rows_on_reload(tmp_path: Path) ->
     assert payload_row[0] is not None
     assert learning_task_row == ("Legacy task", 1)
     assert task_node_row == ("LEAF", str(learning_task.learning_task_id), "Legacy task node")
-    assert entry_reg_row == (0, str(review_chain.review_chain_id))
+    assert entry_reg_row == (0, str(review_chain.review_chain_id), 1)
     assert range_snapshot_row == (1,)
     assert review_task_row == (str(range_snapshot.range_id), "PENDING")
     assert convergence_row == (str(range_snapshot.range_id), "conv_rule_legacy", 1, "IN_PROGRESS")
@@ -1696,6 +1699,7 @@ def test_system_api_reads_project_views_from_sqlite_project_rows(tmp_path: Path)
                 entry_node=task_node.node_id,
                 target_layer_index=0,
                 review_chain_id=review_chain.review_chain_id,
+                registration_seq=1,
             ),
         )
         aggregation_event = AggregationEvent(

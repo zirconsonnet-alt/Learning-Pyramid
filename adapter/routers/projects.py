@@ -11,7 +11,12 @@ from adapter.mappers import (
     project_storage_config_to_dto,
     project_to_dto,
 )
-from adapter.schemas import CreateProjectRequest, SetExternalServicesRequest, SetProjectMaterialSourceBindingRequest
+from adapter.schemas import (
+    CreateProjectRequest,
+    EditProjectRequest,
+    SetExternalServicesRequest,
+    SetProjectMaterialSourceBindingRequest,
+)
 from backend.models.project_config import LocalServiceConfig
 from backend.models.enums import MaterialSourceKind
 from backend.models.errors import PreconditionFailure
@@ -21,6 +26,14 @@ from backend.system.runtime_features import current_runtime_features
 
 
 router = APIRouter()
+
+
+def _parse_material_source_kind(raw: str | None) -> MaterialSourceKind:
+    value = str(raw or MaterialSourceKind.SERVER_FS.value).strip()
+    try:
+        return MaterialSourceKind(value)
+    except ValueError as exc:
+        raise PreconditionFailure("sourceKind must be one of SERVER_FS, BROWSER_LOCAL, MANUAL") from exc
 
 
 @router.get("/projects")
@@ -41,7 +54,11 @@ def create_project(
     api: SystemAPI = Depends(get_api),
     auth_store: AuthStore = Depends(get_auth_store),
 ) -> dict:
-    pid = api.create_project(req.title)
+    pid = api.create_project(
+        req.title,
+        project_root=req.projectRoot,
+        initial_source_kind=_parse_material_source_kind(req.initialSourceKind),
+    )
     if current_runtime_features().auth_enabled:
         user = require_request_auth_user(request)
         auth_store.add_project_owner(pid, user.user_id)
@@ -53,6 +70,12 @@ def delete_project(projectId: str, api: SystemAPI = Depends(get_api), auth_store
     api.delete_project(projectId)  # type: ignore[arg-type]
     if current_runtime_features().auth_enabled:
         auth_store.remove_project_memberships(projectId)
+    return {"ok": True, "data": None}
+
+
+@router.patch("/projects/{projectId}")
+def edit_project(projectId: str, req: EditProjectRequest, api: SystemAPI = Depends(get_api)) -> dict:
+    api.edit_project(projectId, req.title)  # type: ignore[arg-type]
     return {"ok": True, "data": None}
 
 
@@ -89,11 +112,9 @@ def set_project_material_source_binding(
     req: SetProjectMaterialSourceBindingRequest,
     api: SystemAPI = Depends(get_api),
 ) -> dict:
-    if str(req.sourceKind).strip() != MaterialSourceKind.SERVER_FS.value:
-        raise PreconditionFailure("Desktop agent material sources have been removed")
     api.set_project_material_source_binding(  # type: ignore[arg-type]
         projectId,
-        source_kind=MaterialSourceKind.SERVER_FS,
+        source_kind=_parse_material_source_kind(req.sourceKind),
         source_root_label=req.sourceRootLabel,
     )
     return {"ok": True, "data": None}

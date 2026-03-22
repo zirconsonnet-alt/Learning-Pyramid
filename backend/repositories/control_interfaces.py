@@ -46,7 +46,8 @@ class EntryRegistryRepository(Protocol):
 
     def all(self, session: MutationSession) -> Sequence[EntryRegistration]:
         """
-        返回顺序：按 id_canonical_text(entry_node) 升序（确定性）。
+        返回顺序：先按 target_layer_index 升序，再按 registration_seq 升序，
+        最后按 id_canonical_text(entry_node) 升序（确定性）。
         """
 
 
@@ -84,4 +85,3 @@ class OrchestratorManagedSetView(Protocol):
     """
 
     def managed_review_chain_ids(self, session: MutationSession, layer_index: int) -> Tuple[ReviewChainId, ...]: ...
-

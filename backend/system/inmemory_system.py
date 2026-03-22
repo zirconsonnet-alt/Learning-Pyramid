@@ -20,9 +20,11 @@ from backend.models.enums import (
     AsrProvider,
     ConvergenceState,
     FsSyncPolicy,
-    MaterialSourceKind,
+    InstancePresence,
     LayerMode,
+    MaterialSourceKind,
     ProjectState,
+    RecallPointState,
     ReviewChainState,
     ReviewTaskState,
     SessionMode,
@@ -318,6 +320,18 @@ class ProjectRepository:
 
         ps = self.g.projects.get(str(project_id))
         return None if ps is None else ps.project
+
+    def update(self, session: MutationSession, project: Project) -> None:
+        session.assert_open()
+        if session.mode != SessionMode.READ_WRITE:
+            raise PreconditionFailure("READ_ONLY session cannot write")
+        if project.project_id != session.project_id:
+            raise PreconditionFailure("ProjectRepository.update must use matching session.project_id")
+        existed = self.maybe_get(session, project.project_id)
+        if existed is None:
+            raise NotFound(project.project_id)
+        project.validate_write_time()
+        session._staged.project = project
 
     def mark_deleted(self, session: MutationSession, project_id: ProjectId, deleted_at: Timestamp) -> None:
         """
@@ -787,6 +801,8 @@ class RecallPointRepository:
         existed = _overlay_maybe_get(ps.recall_points, session._staged.recall_points, k)
         if existed is None:
             raise NotFound(rp.recall_point_id)
+        if existed.state != RecallPointState.ACTIVE:
+            raise PreconditionFailure("RecallPointRepository.update only allows ACTIVE RecallPoint")
         if rp.project_id != session.project_id:
             raise PreconditionFailure("RecallPoint.project_id must match session.project_id")
         rp.validate_write_time()
@@ -808,6 +824,8 @@ class RecallPointRepository:
             answer=rp.answer,
             anchor=rp.anchor,
             insights=tuple(existed.insights),
+            state=existed.state,
+            deleted_at=existed.deleted_at,
         )
         session._staged.recall_points[k] = updated
 
@@ -816,6 +834,8 @@ class RecallPointRepository:
         if session.mode != SessionMode.READ_WRITE:
             raise PreconditionFailure("READ_ONLY session cannot write")
         rp = self.get(session, recall_point_id)
+        if rp.state != RecallPointState.ACTIVE:
+            raise PreconditionFailure("RecallPointRepository.append_insight only allows ACTIVE RecallPoint")
 
         validate_rich_content_write_time(insight)
         self._assert_rich_content_assets_resolvable(session, insight)
@@ -828,6 +848,28 @@ class RecallPointRepository:
             answer=rp.answer,
             anchor=rp.anchor,
             insights=tuple(rp.insights) + (insight,),
+            state=rp.state,
+            deleted_at=rp.deleted_at,
+        )
+        session._staged.recall_points[id_canonical_text(recall_point_id)] = updated
+
+    def mark_deleted(self, session: MutationSession, recall_point_id: RecallPointId, deleted_at: Timestamp) -> None:
+        session.assert_open()
+        if session.mode != SessionMode.READ_WRITE:
+            raise PreconditionFailure("READ_ONLY session cannot write")
+        rp = self.get(session, recall_point_id)
+        if rp.state == RecallPointState.DELETED:
+            return
+        updated = RecallPoint(
+            project_id=rp.project_id,
+            recall_point_id=rp.recall_point_id,
+            created_at=rp.created_at,
+            question=rp.question,
+            answer=rp.answer,
+            anchor=rp.anchor,
+            insights=tuple(rp.insights),
+            state=RecallPointState.DELETED,
+            deleted_at=deleted_at,
         )
         session._staged.recall_points[id_canonical_text(recall_point_id)] = updated
 
@@ -905,8 +947,9 @@ class RecallPointReviewRecordRepository:
 
 
 class LearningTaskRepository:
-    def __init__(self, g: GlobalStore) -> None:
+    def __init__(self, g: GlobalStore, recall_point_repo: RecallPointRepository) -> None:
         self.g = g
+        self.recall_point_repo = recall_point_repo
 
     def _assert_recall_point_ownership_unique(
         self, session: MutationSession, learning_task_id_key: str, recall_point_ids: Tuple[RecallPointId, ...]
@@ -926,6 +969,17 @@ class LearningTaskRepository:
                 if id_canonical_text(rp_id) in want:
                     raise PreconditionFailure("RecallPointId already belongs to another LearningTask")
 
+    def _assert_recall_points_resolvable_and_active(
+        self, session: MutationSession, recall_point_ids: Tuple[RecallPointId, ...]
+    ) -> None:
+        for rp_id in recall_point_ids:
+            try:
+                rp = self.recall_point_repo.get(session, rp_id)
+            except NotFound:
+                raise PreconditionFailure("LearningTask.recall_point_ids contains non-resolvable id")
+            if rp.state != RecallPointState.ACTIVE:
+                raise PreconditionFailure("LearningTask.recall_point_ids must all be ACTIVE")
+
     def add(self, session: MutationSession, task: LearningTask) -> None:
         session.assert_open()
         if session.mode != SessionMode.READ_WRITE:
@@ -935,6 +989,7 @@ class LearningTaskRepository:
         if k in ps.learning_tasks or k in session._staged.learning_tasks:
             raise PreconditionFailure("learning_task_id already exists")
         task.validate_write_time()
+        self._assert_recall_points_resolvable_and_active(session, task.recall_point_ids)
         # 4.1.6 写前门禁（在产生 staged 写入前判定）
         self._assert_recall_point_ownership_unique(session, k, task.recall_point_ids)
         session._staged.learning_tasks[k] = task
@@ -992,9 +1047,15 @@ class LearningTaskRepository:
 
 
 class LearningTaskNodeRepository:
-    def __init__(self, g: GlobalStore, learning_task_repo: LearningTaskRepository) -> None:
+    def __init__(
+        self,
+        g: GlobalStore,
+        learning_task_repo: LearningTaskRepository,
+        recall_point_repo: RecallPointRepository,
+    ) -> None:
         self.g = g
         self.learning_task_repo = learning_task_repo
+        self.recall_point_repo = recall_point_repo
 
     def _assert_tree_consistent_for_query(self, session: MutationSession) -> None:
         ps = session._baseline
@@ -1089,7 +1150,12 @@ class LearningTaskNodeRepository:
         n = self.get(session, node_id)
         if isinstance(n, LearningTaskLeaf):
             t = self.learning_task_repo.get(session, n.bound_learning_task_id)
-            return tuple(t.recall_point_ids)
+            out: list[RecallPointId] = []
+            for rp_id in t.recall_point_ids:
+                rp = self.recall_point_repo.get(session, rp_id)
+                if rp.state == RecallPointState.ACTIVE:
+                    out.append(rp_id)
+            return tuple(out)
         out: list[RecallPointId] = []
         for cid in n.children:
             out.extend(self._covered_rp_ids_no_validate(session, cid))
@@ -1621,6 +1687,13 @@ class EntryRegistryRepository:
         for existing in regs.values():
             if id_canonical_text(existing.review_chain_id) == id_canonical_text(reg.review_chain_id):
                 raise PreconditionFailure("review_chain_id already registered by another entry")
+            if (
+                int(existing.registration_seq) > 0
+                and int(reg.registration_seq) > 0
+                and existing.target_layer_index == reg.target_layer_index
+                and int(existing.registration_seq) == int(reg.registration_seq)
+            ):
+                raise PreconditionFailure("registration_seq already registered in target layer")
         session._staged.entry_regs[k] = reg
 
     def get(self, session: MutationSession, entry_node: LearningTaskNodeId) -> EntryRegistration:
@@ -1640,7 +1713,7 @@ class EntryRegistryRepository:
         ps = session._baseline
         regs = _overlay_entry_regs(ps, session._staged)
         items = list(regs.values())
-        items.sort(key=lambda r: id_canonical_text(r.entry_node))
+        items.sort(key=lambda r: (int(r.target_layer_index), int(r.registration_seq), id_canonical_text(r.entry_node)))
         return tuple(items)
 
 
@@ -1748,8 +1821,10 @@ class AuditLogRepository:
         return tuple(items)
 
 class AsrArtifactRepository:
-    def __init__(self, g: GlobalStore) -> None:
+    def __init__(self, g: GlobalStore, recall_point_repo: RecallPointRepository, instance_repo: InstanceRepository) -> None:
         self.g = g
+        self.recall_point_repo = recall_point_repo
+        self.instance_repo = instance_repo
 
     def add(self, session: MutationSession, artifact: AsrArtifact) -> None:
         session.assert_open()
@@ -1758,6 +1833,16 @@ class AsrArtifactRepository:
         if artifact.project_id != session.project_id:
             raise PreconditionFailure("AsrArtifact.project_id must match session.project_id")
         artifact.validate_write_time()
+        try:
+            rp = self.recall_point_repo.get(session, artifact.recall_point_id)
+        except NotFound:
+            raise PreconditionFailure("AsrArtifact.recall_point_id not resolvable")
+        if rp.state != RecallPointState.ACTIVE:
+            raise PreconditionFailure("AsrArtifact.recall_point_id must resolve to ACTIVE RecallPoint")
+        try:
+            self.instance_repo.get(session, artifact.source_instance_id)
+        except NotFound:
+            raise PreconditionFailure("AsrArtifact.source_instance_id not resolvable")
 
         ps = session._baseline
         arts = _overlay_asr_artifacts(ps, session._staged)
@@ -2004,6 +2089,15 @@ def _validate_commit_entry_registry_and_management(ps: ProjectStore, st: Project
             raise CommitTimeValidationFailure("EntryRegistry has duplicate review_chain_id")
         seen.add(k)
 
+    seen_registration_seq: Set[Tuple[int, int]] = set()
+    for reg in regs.values():
+        if int(reg.registration_seq) <= 0:
+            continue
+        key = (int(reg.target_layer_index), int(reg.registration_seq))
+        if key in seen_registration_seq:
+            raise CommitTimeValidationFailure("EntryRegistry has duplicate registration_seq in target layer")
+        seen_registration_seq.add(key)
+
     for reg in regs.values():
         if id_canonical_text(reg.entry_node) not in task_nodes:
             raise CommitTimeValidationFailure("Entry node not resolvable")
@@ -2061,8 +2155,8 @@ class InMemorySystem:
         self.instance_repo = InstanceRepository(self.g)
         self.learning_object_repo = LearningObjectNodeRepository(self.g)
         self.recall_point_repo = RecallPointRepository(self.g, self.instance_repo, self.media_asset_repo)
-        self.learning_task_repo = LearningTaskRepository(self.g)
-        self.learning_task_node_repo = LearningTaskNodeRepository(self.g, self.learning_task_repo)
+        self.learning_task_repo = LearningTaskRepository(self.g, self.recall_point_repo)
+        self.learning_task_node_repo = LearningTaskNodeRepository(self.g, self.learning_task_repo, self.recall_point_repo)
         self.range_repo = RangeSnapshotRepository(self.g)
 
         self.review_task_repo = ReviewTaskRepository(self.g)
@@ -2078,7 +2172,7 @@ class InMemorySystem:
         self.aggq_repo = AggregationQueueRepository(self.g)
         self.event_repo = AggregationEventRepository(self.g)
         self.audit_log_repo = AuditLogRepository(self.g)
-        self.asr_artifact_repo = AsrArtifactRepository(self.g)
+        self.asr_artifact_repo = AsrArtifactRepository(self.g, self.recall_point_repo, self.instance_repo)
 
     def _begin_project_bootstrap_session(self, project_id: ProjectId) -> MutationSession:
         """
@@ -2577,10 +2671,18 @@ class InMemorySystem:
         ):
             self.g._write_lock_held = False
 
-    def create_project(self, title: str, project_root: str | None = None) -> ProjectId:
+    def create_project(
+        self,
+        title: str,
+        project_root: str | None = None,
+        *,
+        initial_source_kind: MaterialSourceKind = MaterialSourceKind.SERVER_FS,
+    ) -> ProjectId:
         pid = self.g.idgen.new_project_id()
         s = self._begin_project_bootstrap_session(pid)
         try:
+            if not isinstance(initial_source_kind, MaterialSourceKind):
+                raise PreconditionFailure("create_project.initial_source_kind must be MaterialSourceKind")
             resolved_project_root = project_root
             if resolved_project_root is None:
                 auto_project_root, _ = allocate_project_root(title)
@@ -2613,7 +2715,7 @@ class InMemorySystem:
 
             binding = ProjectMaterialSourceBinding.create(
                 pid,
-                source_kind=MaterialSourceKind.SERVER_FS,
+                source_kind=initial_source_kind,
                 updated_at=now_utc_ms(),
             )
             self.project_material_source_binding_repo.set(s, binding)

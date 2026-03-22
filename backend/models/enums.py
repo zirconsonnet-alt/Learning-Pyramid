@@ -6,6 +6,11 @@ class ProjectState(str, Enum):
     DELETED = "DELETED"
 
 
+class RecallPointState(str, Enum):
+    ACTIVE = "ACTIVE"
+    DELETED = "DELETED"
+
+
 # 0a 列举的其它枚举，模型层先给出（后续章节会用到）
 class ReviewTaskState(str, Enum):
     PENDING = "PENDING"
@@ -58,6 +63,7 @@ class FsSyncPolicy(str, Enum):
 class MaterialSourceKind(str, Enum):
     SERVER_FS = "SERVER_FS"
     BROWSER_LOCAL = "BROWSER_LOCAL"
+    MANUAL = "MANUAL"
 
 
 class AsrProvider(str, Enum):
@@ -91,6 +97,7 @@ class AggregationEventReason(str, Enum):
 class AuditEventKind(str, Enum):
     PROJECT_CREATED = "PROJECT_CREATED"
     PROJECT_DELETED = "PROJECT_DELETED"
+    EDIT_PROJECT = "EDIT_PROJECT"
     ADD_INSTANCE = "ADD_INSTANCE"
     ADD_LEARNING_OBJECT_LEAF = "ADD_LEARNING_OBJECT_LEAF"
     ADD_LEARNING_OBJECT_CONTAINER = "ADD_LEARNING_OBJECT_CONTAINER"
@@ -98,6 +105,7 @@ class AuditEventKind(str, Enum):
     SET_PROJECT_MATERIAL_SOURCE_BINDING = "SET_PROJECT_MATERIAL_SOURCE_BINDING"
     SUBMIT_LEARNING_TASK = "SUBMIT_LEARNING_TASK"
     EDIT_RECALL_POINT = "EDIT_RECALL_POINT"
+    DELETE_RECALL_POINT = "DELETE_RECALL_POINT"
     APPEND_RECALL_POINT_INSIGHT = "APPEND_RECALL_POINT_INSIGHT"
     EDIT_LEARNING_TASK = "EDIT_LEARNING_TASK"
     EDIT_PROJECT_CONFIG = "EDIT_PROJECT_CONFIG"

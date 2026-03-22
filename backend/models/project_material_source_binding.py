@@ -45,7 +45,11 @@ class ProjectMaterialSourceBinding:
             raise PreconditionFailure("ProjectMaterialSourceBinding.project_id must be non-empty")
         if not isinstance(self.source_kind, MaterialSourceKind):
             raise PreconditionFailure("ProjectMaterialSourceBinding.source_kind must be MaterialSourceKind")
-        if self.source_kind not in {MaterialSourceKind.SERVER_FS, MaterialSourceKind.BROWSER_LOCAL}:
+        if self.source_kind not in {
+            MaterialSourceKind.SERVER_FS,
+            MaterialSourceKind.BROWSER_LOCAL,
+            MaterialSourceKind.MANUAL,
+        }:
             raise PreconditionFailure("ProjectMaterialSourceBinding.source_kind is not supported")
 
         if self.source_root_label is not None and not str(self.source_root_label).strip():

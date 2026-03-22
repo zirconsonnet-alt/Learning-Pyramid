@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useQueries } from "@tanstack/react-query"
 import { useNavigate, useParams } from "react-router-dom"
 
@@ -12,6 +12,7 @@ import { formatMaterialReference, formatRecallPointReference } from "@/ui/displa
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
 import { scanProjectDirectoryMedia, useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
+import { useEditProject, useProject } from "@/ui/queries/projects"
 import { useSystemCapabilities } from "@/ui/queries/system"
 import {
   useBulkRemapRecallPointsInstance,
@@ -107,6 +108,8 @@ export function ProjectSettingsPage() {
   const { projectId } = useParams()
   const navigate = useNavigate()
   const pid = projectId ?? ""
+  const projectQ = useProject(pid, { enabled: !!pid })
+  const editProjectM = useEditProject()
   const capabilitiesQ = useSystemCapabilities()
   const selectedTheme = useThemeStore((state) => state.theme)
   const setTheme = useThemeStore((state) => state.setTheme)
@@ -290,6 +293,22 @@ export function ProjectSettingsPage() {
 
   return (
     <div className="space-y-5">
+      <ProjectTitleCard
+        isLoading={projectQ.isLoading}
+        isPending={editProjectM.isPending}
+        projectTitle={projectQ.project?.title ?? ""}
+        queryError={projectQ.error}
+        saveError={editProjectM.error}
+        onSave={async (title) => {
+          try {
+            await editProjectM.mutateAsync({ projectId: pid, title })
+            showSuccessFeedback("项目名称已更新", `当前项目现在显示为“${title}”。`)
+          } catch (err) {
+            showErrorFeedback("更新项目名称失败", formatApiError(err))
+          }
+        }}
+      />
+
       <Card className="theme-card">
         <CardHeader>
           <CardTitle>界面主题</CardTitle>
@@ -633,6 +652,74 @@ export function ProjectSettingsPage() {
         </CardContent>
       </Card>
     </div>
+  )
+}
+
+function ProjectTitleCard({
+  isLoading,
+  isPending,
+  projectTitle,
+  queryError,
+  saveError,
+  onSave,
+}: {
+  isLoading: boolean
+  isPending: boolean
+  projectTitle: string
+  queryError: unknown
+  saveError: unknown
+  onSave: (title: string) => Promise<void>
+}) {
+  const [titleDraft, setTitleDraft] = useState(projectTitle)
+
+  useEffect(() => {
+    setTitleDraft(projectTitle)
+  }, [projectTitle])
+
+  const trimmedTitle = titleDraft.trim()
+  const canSave = !isLoading && !isPending && !!trimmedTitle && trimmedTitle !== projectTitle.trim()
+
+  return (
+    <Card className="theme-card">
+      <CardHeader>
+        <CardTitle>项目名称</CardTitle>
+        <CardDescription>这里改名后，项目列表、顶部标题和工作区里的项目名称会一起刷新。</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4 text-sm">
+        <div className="theme-status-surface rounded-[1.2rem] border border-border/70 p-4">
+          <div className="text-xs text-muted-foreground">当前名称</div>
+          <div className="mt-1 text-base font-semibold text-foreground">{projectTitle || (isLoading ? "加载中..." : "未找到项目")}</div>
+        </div>
+
+        <form
+          className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]"
+          onSubmit={(event) => {
+            event.preventDefault()
+            if (!canSave) return
+            void onSave(trimmedTitle)
+          }}
+        >
+          <div className="space-y-2">
+            <Label htmlFor="projectTitle">新名称</Label>
+            <Input
+              id="projectTitle"
+              value={titleDraft}
+              onChange={(event) => setTitleDraft(event.target.value)}
+              placeholder="请输入项目名称"
+              disabled={isLoading || isPending}
+            />
+          </div>
+          <div className="flex items-end">
+            <Button type="submit" disabled={!canSave}>
+              {isPending ? "保存中..." : "保存项目名称"}
+            </Button>
+          </div>
+        </form>
+
+        {queryError ? <p className="text-sm text-destructive">{formatApiError(queryError)}</p> : null}
+        {saveError ? <p className="text-sm text-destructive">{formatApiError(saveError)}</p> : null}
+      </CardContent>
+    </Card>
   )
 }
 

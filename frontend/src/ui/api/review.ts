@@ -62,6 +62,9 @@ export type RangeSnapshot = z.infer<typeof RangeSnapshotSchema>
 export const RecallPointSchema = z.object({
   projectId: z.string(),
   recallPointId: z.string(),
+  createdAt: z.string(),
+  state: z.enum(["ACTIVE", "DELETED"]),
+  deletedAt: z.string().nullable(),
   question: RichContentSchema,
   answer: RichContentSchema,
   anchor: z.object({ instanceId: z.string(), position: z.string() }),
@@ -113,11 +116,32 @@ export function editRecallPoint(
   })
 }
 
-export function commitReviewTask(projectId: string, reviewTaskId: string, canRecall: number[]) {
+export function deleteRecallPoint(projectId: string, recallPointId: string) {
+  return apiRequest({
+    path: `/projects/${projectId}/recall-points/${recallPointId}`,
+    method: "DELETE",
+    responseSchema: z.null(),
+  })
+}
+
+export function commitReviewTask(
+  projectId: string,
+  reviewTaskId: string,
+  params: {
+    canRecall: number[]
+    appendedInsights?: { recallPointId: string; insight: z.infer<typeof RichContentSchema> }[]
+  },
+) {
   return apiRequest({
     path: `/projects/${projectId}/review-tasks/${reviewTaskId}/commit`,
     method: "POST",
-    body: { canRecall },
+    body: {
+      canRecall: params.canRecall,
+      appendedInsights: params.appendedInsights?.map((item) => ({
+        recallPointId: item.recallPointId,
+        insight: RichContentSchema.parse(normalizeRichContent(item.insight)),
+      })),
+    },
     responseSchema: z.null(),
   })
 }

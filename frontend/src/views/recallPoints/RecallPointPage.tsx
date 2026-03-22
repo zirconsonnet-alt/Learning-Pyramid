@@ -1,4 +1,4 @@
-import { Sparkles } from "lucide-react"
+import { Sparkles, Trash2 } from "lucide-react"
 import { useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useParams } from "react-router-dom"
@@ -11,7 +11,7 @@ import {
   richText,
   type RichContent,
 } from "@/ui/api/richContent"
-import { editRecallPoint, getRecallPoint, type RecallPoint } from "@/ui/api/review"
+import { deleteRecallPoint, editRecallPoint, getRecallPoint, type RecallPoint } from "@/ui/api/review"
 import { RichContentEditor } from "@/ui/components/RichContentEditor"
 import { RichContentRenderer } from "@/ui/components/RichContentRenderer"
 import { ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
@@ -35,6 +35,7 @@ export function RecallPointPage() {
   const pid = projectId ?? ""
   const rpid = recallPointId ?? ""
   const nav = useNavigate()
+  const qc = useQueryClient()
   const { projectTitle } = useProject(pid)
 
   const qKey = useMemo(() => ["recallPoint", pid, rpid], [pid, rpid])
@@ -42,6 +43,22 @@ export function RecallPointPage() {
     queryKey: qKey,
     queryFn: () => getRecallPoint(pid, rpid),
     enabled: !!pid && !!rpid,
+  })
+  const deleteM = useMutation({
+    mutationFn: () => deleteRecallPoint(pid, rpid),
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["recallPoint", pid] }),
+        qc.invalidateQueries({ queryKey: ["recallPointsByInstance", pid] }),
+        qc.invalidateQueries({ queryKey: ["recallPointsByTaskNode", pid] }),
+        qc.invalidateQueries({ queryKey: ["recallPointsByObjectNode", pid] }),
+      ])
+      showSuccessFeedback("复述点已删除", "这条复述点已被标记为墓碑，并从当前内容视图中移除。")
+      nav(-1)
+    },
+    onError: (err) => {
+      showErrorFeedback("删除复述点失败", formatApiError(err))
+    },
   })
 
   const rp = q.data ?? null
@@ -71,6 +88,19 @@ export function RecallPointPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {rp?.state === "ACTIVE" ? (
+            <Button
+              variant="destructive"
+              disabled={deleteM.isPending}
+              onClick={() => {
+                if (!window.confirm("删除后会将这条复述点标记为墓碑，并从当前内容视图中移除。确定继续吗？")) return
+                deleteM.mutate()
+              }}
+            >
+              <Trash2 className="h-4 w-4" />
+              {deleteM.isPending ? "删除中..." : "删除"}
+            </Button>
+          ) : null}
           <Button variant="outline" onClick={() => nav(-1)}>
             返回
           </Button>
@@ -94,7 +124,9 @@ export function RecallPointPage() {
         <Card>
           <CardHeader>
             <CardTitle>编辑</CardTitle>
-            <CardDescription>更新问题、答案和锚点位置。</CardDescription>
+            <CardDescription>
+              {rp.state === "DELETED" ? "这条复述点已逻辑删除，仅保留历史引用；当前页面不再允许编辑。" : "更新问题、答案和锚点位置。"}
+            </CardDescription>
           </CardHeader>
           <RecallPointEditor key={rp.recallPointId} projectId={pid} recallPointId={rpid} qKey={qKey} recallPoint={rp} />
         </Card>
@@ -173,6 +205,7 @@ function RecallPointEditor({
     !!projectId &&
     !!recallPointId &&
     !!recallPoint &&
+    recallPoint.state === "ACTIVE" &&
     richContentHasMeaning(question) &&
     richContentHasMeaning(answer) &&
     !!positionText.trim()
@@ -185,7 +218,7 @@ function RecallPointEditor({
       </div>
       <div className="grid gap-2">
         <Label htmlFor="anchorPos">锚点位置</Label>
-        <Input id="anchorPos" value={positionText} onChange={(e) => setPositionText(e.target.value)} disabled={!recallPoint || editM.isPending} />
+        <Input id="anchorPos" value={positionText} onChange={(e) => setPositionText(e.target.value)} disabled={!recallPoint || recallPoint.state !== "ACTIVE" || editM.isPending} />
       </div>
       <div className="grid gap-3">
         <Label>问题内容</Label>
@@ -193,7 +226,7 @@ function RecallPointEditor({
           projectId={projectId}
           field="question"
           value={question}
-          disabled={!recallPoint || editM.isPending}
+          disabled={!recallPoint || recallPoint.state !== "ACTIVE" || editM.isPending}
           placeholder="请输入问题/提示语，或直接 Ctrl+V 粘贴图片"
           onTextChange={(text) => setQuestion((prev) => setRichContentText(prev, text))}
           onAppendImage={(assetId) => setQuestion((prev) => appendImageBlock(prev, assetId))}
@@ -206,7 +239,7 @@ function RecallPointEditor({
           projectId={projectId}
           field="answer"
           value={answer}
-          disabled={!recallPoint || editM.isPending}
+          disabled={!recallPoint || recallPoint.state !== "ACTIVE" || editM.isPending}
           placeholder="请输入答案/复述内容，或直接 Ctrl+V 粘贴图片"
           onTextChange={(text) => setAnswer((prev) => setRichContentText(prev, text))}
           onAppendImage={(assetId) => setAnswer((prev) => appendImageBlock(prev, assetId))}

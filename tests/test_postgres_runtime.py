@@ -131,6 +131,7 @@ def test_postgres_runtime_records_schema_migrations_and_uses_hot_indexes() -> No
             ("auth", 1, "initial_auth_schema"),
             ("store", 1, "initial_store_schema"),
             ("store", 2, "store_hot_indexes"),
+            ("store", 3, "entry_registration_seq"),
         ]
 
         index_rows = conn.execute(

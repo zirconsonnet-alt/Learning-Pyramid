@@ -25,6 +25,7 @@ from backend.models.enums import (
     LayerMode,
     MediaAssetKind,
     ProjectState,
+    RecallPointState,
     RecallPointReviewResult,
     ReviewChainState,
     ReviewTaskState,
@@ -450,6 +451,7 @@ class SQLiteSnapshotStore:
                         entry_node TEXT NOT NULL,
                         target_layer_index INTEGER NOT NULL,
                         review_chain_id TEXT NOT NULL,
+                        registration_seq INTEGER NOT NULL DEFAULT 0,
                         PRIMARY KEY (project_id, entry_node),
                         FOREIGN KEY(project_id) REFERENCES project_snapshots(project_id) ON DELETE CASCADE
                     )
@@ -466,6 +468,12 @@ class SQLiteSnapshotStore:
                     CREATE INDEX IF NOT EXISTS idx_entry_registration_index_review_chain
                     ON entry_registration_index (project_id, review_chain_id)
                     """
+                )
+                self._ensure_column(
+                    conn,
+                    "entry_registration_index",
+                    "registration_seq",
+                    "INTEGER NOT NULL DEFAULT 0",
                 )
                 conn.execute(
                     """
@@ -808,6 +816,8 @@ class SQLiteSnapshotStore:
                 position=str(anchor_payload.get("position", "")),
             ),
             insights=tuple(cls._decode_rich_content(item) for item in list(raw.get("insights", []))),
+            state=RecallPointState(str(raw.get("state", RecallPointState.ACTIVE.value))),
+            deleted_at=cls._ms_to_ts(None if raw.get("deletedAtMs") is None else int(raw.get("deletedAtMs"))),
         )
 
     def _refresh_project_entity_indexes(
@@ -1030,15 +1040,17 @@ class SQLiteSnapshotStore:
                     project_id,
                     entry_node,
                     target_layer_index,
-                    review_chain_id
+                    review_chain_id,
+                    registration_seq
                 )
-                VALUES (?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?)
                 """,
                 (
                     project_id,
                     str(entry_node),
                     int(entry_reg_payload.get("targetLayerIndex", 0)),
                     str(entry_reg_payload.get("reviewChainId", "")),
+                    int(entry_reg_payload.get("registrationSeq", 0)),
                 ),
             )
 
@@ -1494,6 +1506,8 @@ class SQLiteSnapshotStore:
             "projectId": str(project_id),
             "recallPointId": str(row["recall_point_id"]),
             "createdAtMs": int(row["created_at_ms"]),
+            "state": RecallPointState.ACTIVE.value,
+            "deletedAtMs": None,
             "question": [{"kind": "TEXT", "text": str(row["question_plain_text"])}],
             "answer": [{"kind": "TEXT", "text": str(row["answer_plain_text"])}],
             "anchor": {
@@ -1537,6 +1551,7 @@ class SQLiteSnapshotStore:
             "entryNode": str(row["entry_node"]),
             "targetLayerIndex": int(row["target_layer_index"]),
             "reviewChainId": str(row["review_chain_id"]),
+            "registrationSeq": int(row["registration_seq"]),
         }
 
     @staticmethod
@@ -1735,6 +1750,7 @@ class SQLiteSnapshotStore:
             entry_node=LearningTaskNodeId(str(payload["entryNode"])),
             target_layer_index=int(payload["targetLayerIndex"]),
             review_chain_id=ReviewChainId(str(payload["reviewChainId"])),
+            registration_seq=int(payload["registrationSeq"]),
         )
 
     @classmethod
@@ -2050,10 +2066,10 @@ class SQLiteSnapshotStore:
 
         entry_reg_rows = conn.execute(
             """
-            SELECT entry_node, target_layer_index, review_chain_id
+            SELECT entry_node, target_layer_index, review_chain_id, registration_seq
             FROM entry_registration_index
             WHERE project_id = ?
-            ORDER BY entry_node ASC
+            ORDER BY target_layer_index ASC, registration_seq ASC, entry_node ASC
             """,
             (str(project_id),),
         ).fetchall()
@@ -2722,7 +2738,8 @@ class SQLiteSnapshotStore:
         try:
             rows = conn.execute(
                 """
-                SELECT recall_point_id
+                SELECT recall_point_id, created_at_ms, anchor_instance_id, anchor_position, question_plain_text,
+                       answer_plain_text, insights_count, payload_json
                 FROM recall_point_index
                 WHERE project_id = ? AND anchor_instance_id = ?
                 ORDER BY recall_point_id ASC
@@ -2731,7 +2748,13 @@ class SQLiteSnapshotStore:
             ).fetchall()
         finally:
             conn.close()
-        return tuple(RecallPointId(str(row["recall_point_id"])) for row in rows)
+        out: list[RecallPointId] = []
+        for row in rows:
+            raw = self._recall_point_payload_from_index_row(project_id=str(project_id), row=row, legacy_payloads={})
+            rp = self._decode_recall_point(project_id=str(project_id), raw=raw)
+            if rp.state == RecallPointState.ACTIVE:
+                out.append(rp.recall_point_id)
+        return tuple(out)
 
     def get_recall_point(self, project_id: str, recall_point_id: str) -> RecallPoint | None:
         conn = self._connect()
@@ -2821,7 +2844,9 @@ class SQLiteSnapshotStore:
         items: list[RecallPoint] = []
         for row in rows:
             raw = self._recall_point_payload_from_index_row(project_id=str(project_id), row=row, legacy_payloads={})
-            items.append(self._decode_recall_point(project_id=str(project_id), raw=raw))
+            rp = self._decode_recall_point(project_id=str(project_id), raw=raw)
+            if rp.state == RecallPointState.ACTIVE:
+                items.append(rp)
         return tuple(items)
 
     def get_review_chain_entry_registration(self, project_id: str, review_chain_id: str) -> EntryRegistration | None:
@@ -2829,10 +2854,10 @@ class SQLiteSnapshotStore:
         try:
             row = conn.execute(
                 """
-                SELECT entry_node, target_layer_index, review_chain_id
+                SELECT entry_node, target_layer_index, review_chain_id, registration_seq
                 FROM entry_registration_index
                 WHERE project_id = ? AND review_chain_id = ?
-                ORDER BY entry_node ASC
+                ORDER BY target_layer_index ASC, registration_seq ASC, entry_node ASC
                 LIMIT 1
                 """,
                 (str(project_id), str(review_chain_id)),
@@ -2998,12 +3023,12 @@ class SQLiteSnapshotStore:
         try:
             row = conn.execute(
                 """
-                SELECT eri.entry_node, eri.target_layer_index, eri.review_chain_id
+                SELECT eri.entry_node, eri.target_layer_index, eri.review_chain_id, eri.registration_seq
                 FROM learning_task_node_index ltn
                 JOIN entry_registration_index eri
                   ON eri.project_id = ltn.project_id AND eri.entry_node = ltn.node_id
                 WHERE ltn.project_id = ? AND ltn.node_kind = 'LEAF' AND ltn.bound_learning_task_id = ?
-                ORDER BY ltn.node_id ASC
+                ORDER BY eri.target_layer_index ASC, eri.registration_seq ASC, ltn.node_id ASC
                 LIMIT 1
                 """,
                 (str(project_id), str(learning_task_id)),
@@ -3019,7 +3044,7 @@ class SQLiteSnapshotStore:
         try:
             row = conn.execute(
                 """
-                SELECT entry_node, target_layer_index, review_chain_id
+                SELECT entry_node, target_layer_index, review_chain_id, registration_seq
                 FROM entry_registration_index
                 WHERE project_id = ? AND entry_node = ?
                 """,
@@ -3119,6 +3144,7 @@ class SQLiteSnapshotStore:
             recall_point_map[str(recall_point_id)]
             for recall_point_id in ordered_recall_point_ids
             if str(recall_point_id) in recall_point_map
+            and recall_point_map[str(recall_point_id)].state == RecallPointState.ACTIVE
         )
 
     def get_review_task_queue(self, project_id: str) -> tuple[ReviewTaskId | None, tuple[ReviewTaskId, ...]] | None:

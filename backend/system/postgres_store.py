@@ -10,7 +10,7 @@ from backend.models.aggregation_event import AggregationEvent
 from backend.models.asr_artifact import AsrArtifact
 from backend.models.audit_log_event import AuditLogEvent
 from backend.models.entry_registration import EntryRegistration
-from backend.models.enums import InstancePresence, ProjectState
+from backend.models.enums import InstancePresence, ProjectState, RecallPointState
 from backend.models.instance import Instance
 from backend.models.learning_object_node import LearningObjectContainer, LearningObjectLeaf, LearningObjectNode
 from backend.models.learning_task import LearningTask
@@ -368,7 +368,7 @@ class PostgresStore(SQLiteSnapshotStore):
 
         entry_reg_rows = conn.execute(
             """
-            SELECT entry_node, target_layer_index, review_chain_id
+            SELECT entry_node, target_layer_index, review_chain_id, registration_seq
             FROM entry_registration_index
             WHERE project_id = %s
             ORDER BY entry_node ASC
@@ -715,14 +715,21 @@ class PostgresStore(SQLiteSnapshotStore):
     def list_recall_point_ids_by_instance(self, project_id: str, instance_id: str) -> tuple[RecallPointId, ...]:
         rows = self._fetchall(
             """
-            SELECT recall_point_id
+            SELECT recall_point_id, created_at_ms, anchor_instance_id, anchor_position, question_plain_text,
+                   answer_plain_text, insights_count, payload_json
             FROM recall_point_index
             WHERE project_id = %s AND anchor_instance_id = %s
             ORDER BY recall_point_id ASC
             """,
             (str(project_id), str(instance_id)),
         )
-        return tuple(RecallPointId(str(row["recall_point_id"])) for row in rows)
+        out: list[RecallPointId] = []
+        for row in rows:
+            raw = self._recall_point_payload_from_index_row(project_id=str(project_id), row=row, legacy_payloads={})
+            rp = self._decode_recall_point(project_id=str(project_id), raw=raw)
+            if rp.state == RecallPointState.ACTIVE:
+                out.append(rp.recall_point_id)
+        return tuple(out)
 
     def get_recall_point(self, project_id: str, recall_point_id: str) -> RecallPoint | None:
         row = self._fetchone(
@@ -794,13 +801,15 @@ class PostgresStore(SQLiteSnapshotStore):
         items: list[RecallPoint] = []
         for row in rows:
             raw = self._recall_point_payload_from_index_row(project_id=str(project_id), row=row, legacy_payloads={})
-            items.append(self._decode_recall_point(project_id=str(project_id), raw=raw))
+            rp = self._decode_recall_point(project_id=str(project_id), raw=raw)
+            if rp.state == RecallPointState.ACTIVE:
+                items.append(rp)
         return tuple(items)
 
     def get_review_chain_entry_registration(self, project_id: str, review_chain_id: str) -> EntryRegistration | None:
         row = self._fetchone(
             """
-            SELECT entry_node, target_layer_index, review_chain_id
+            SELECT entry_node, target_layer_index, review_chain_id, registration_seq
             FROM entry_registration_index
             WHERE project_id = %s AND review_chain_id = %s
             ORDER BY entry_node ASC
@@ -939,7 +948,7 @@ class PostgresStore(SQLiteSnapshotStore):
     def get_learning_task_entry_registration(self, project_id: str, learning_task_id: str) -> EntryRegistration | None:
         row = self._fetchone(
             """
-            SELECT eri.entry_node, eri.target_layer_index, eri.review_chain_id
+            SELECT eri.entry_node, eri.target_layer_index, eri.review_chain_id, eri.registration_seq
             FROM learning_task_node_index ltn
             JOIN entry_registration_index eri
               ON eri.project_id = ltn.project_id AND eri.entry_node = ltn.node_id
@@ -956,7 +965,7 @@ class PostgresStore(SQLiteSnapshotStore):
     def get_learning_task_node_entry_registration(self, project_id: str, node_id: str) -> EntryRegistration | None:
         row = self._fetchone(
             """
-            SELECT entry_node, target_layer_index, review_chain_id
+            SELECT entry_node, target_layer_index, review_chain_id, registration_seq
             FROM entry_registration_index
             WHERE project_id = %s AND entry_node = %s
             """,
@@ -1044,6 +1053,7 @@ class PostgresStore(SQLiteSnapshotStore):
             recall_point_map[str(recall_point_id)]
             for recall_point_id in ordered_recall_point_ids
             if str(recall_point_id) in recall_point_map
+            and recall_point_map[str(recall_point_id)].state == RecallPointState.ACTIVE
         )
 
     def get_review_task_queue(self, project_id: str) -> tuple[ReviewTaskId | None, tuple[ReviewTaskId, ...]] | None:

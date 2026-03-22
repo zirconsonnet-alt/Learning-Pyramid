@@ -13,17 +13,38 @@ export type Project = z.infer<typeof ProjectSchema>
 
 const ProjectListSchema = z.array(ProjectSchema)
 const CreateProjectResultSchema = z.object({ projectId: z.string() })
+export const MaterialSourceKindSchema = z.enum(["SERVER_FS", "BROWSER_LOCAL", "MANUAL"])
+export type MaterialSourceKind = z.infer<typeof MaterialSourceKindSchema>
 
 export function listProjects() {
   return apiRequest({ path: "/projects", responseSchema: ProjectListSchema })
 }
 
-export function createProject(title: string) {
+export function createProject(
+  title: string,
+  options?: {
+    projectRoot?: string
+    initialSourceKind?: MaterialSourceKind
+  },
+) {
   return apiRequest({
     path: "/projects",
     method: "POST",
-    body: { title },
+    body: {
+      title,
+      projectRoot: options?.projectRoot,
+      initialSourceKind: options?.initialSourceKind,
+    },
     responseSchema: CreateProjectResultSchema,
+  })
+}
+
+export function editProject(projectId: string, title: string) {
+  return apiRequest({
+    path: `/projects/${projectId}`,
+    method: "PATCH",
+    body: { title },
+    responseSchema: z.null(),
   })
 }
 

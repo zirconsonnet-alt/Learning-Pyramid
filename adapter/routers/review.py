@@ -13,6 +13,7 @@ from adapter.mappers import (
 )
 from adapter.schemas import CommitReviewTaskRequest, EditRecallPointRequest
 from backend.models.enums import ContentBlockKind
+from backend.models.errors import PreconditionFailure
 from backend.models.learning_task_node import LearningTaskLeaf
 from backend.models.recall_point import Anchor
 from backend.models.rich_content import ContentBlock, RichContent
@@ -97,6 +98,12 @@ def edit_recall_point(
     api.edit_recall_point(  # type: ignore[arg-type]
         projectId, recallPointId, _to_rich_content(req.question), _to_rich_content(req.answer), anc
     )
+    return {"ok": True, "data": None}
+
+
+@router.delete("/projects/{projectId}/recall-points/{recallPointId}")
+def delete_recall_point(projectId: str, recallPointId: str, api: SystemAPI = Depends(get_api)) -> dict:
+    api.delete_recall_point(projectId, RecallPointId(recallPointId))  # type: ignore[arg-type]
     return {"ok": True, "data": None}
 
 

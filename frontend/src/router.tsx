@@ -15,10 +15,10 @@ const LearningObjectNodePage = lazy(async () => ({
 const LearningTaskNodePage = lazy(async () => ({
   default: (await import("@/views/learningTasks/LearningTaskNodePage")).LearningTaskNodePage,
 }))
-const LearningTaskPage = lazy(async () => ({ default: (await import("@/views/learningTasks/LearningTaskPage")).LearningTaskPage }))
 const ProjectsPage = lazy(async () => ({ default: (await import("@/views/projects/ProjectsPage")).ProjectsPage }))
 const RecallPointPage = lazy(async () => ({ default: (await import("@/views/recallPoints/RecallPointPage")).RecallPointPage }))
 const ReviewChainPage = lazy(async () => ({ default: (await import("@/views/reviewChains/ReviewChainPage")).ReviewChainPage }))
+const ReviewTaskPage = lazy(async () => ({ default: (await import("@/views/reviewTasks/ReviewTaskPage")).ReviewTaskPage }))
 const ProjectSettingsPage = lazy(async () => ({ default: (await import("@/views/settings/ProjectSettingsPage")).ProjectSettingsPage }))
 const ObjectTreePage = lazy(async () => ({ default: (await import("@/views/trees/ObjectTreePage")).ObjectTreePage }))
 const TaskTreePage = lazy(async () => ({ default: (await import("@/views/trees/TaskTreePage")).TaskTreePage }))
@@ -45,12 +45,12 @@ export const router = createBrowserRouter([
       { path: "/p/:projectId/workbench", element: lazyElement(<WorkbenchPage />) },
       { path: "/p/:projectId/settings", element: lazyElement(<ProjectSettingsPage />) },
       { path: "/p/:projectId/task-tree", element: lazyElement(<TaskTreePage />) },
-      { path: "/p/:projectId/learning-tasks/:learningTaskId", element: lazyElement(<LearningTaskPage />) },
       { path: "/p/:projectId/learning-task-nodes/:nodeId", element: lazyElement(<LearningTaskNodePage />) },
       { path: "/p/:projectId/learning-object-nodes/:nodeId", element: lazyElement(<LearningObjectNodePage />) },
       { path: "/p/:projectId/instances/:instanceId", element: lazyElement(<InstancePage />) },
       { path: "/p/:projectId/object-tree", element: lazyElement(<ObjectTreePage />) },
       { path: "/p/:projectId/review-chains/:reviewChainId", element: lazyElement(<ReviewChainPage />) },
+      { path: "/p/:projectId/review-tasks/:reviewTaskId", element: lazyElement(<ReviewTaskPage />) },
       { path: "/p/:projectId/recall-points/:recallPointId", element: lazyElement(<RecallPointPage />) },
     ],
   },

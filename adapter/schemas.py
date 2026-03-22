@@ -9,6 +9,11 @@ from pydantic import conlist
 class CreateProjectRequest(BaseModel):
     title: str = Field(min_length=1)
     projectRoot: Optional[str] = None
+    initialSourceKind: Optional[str] = None
+
+
+class EditProjectRequest(BaseModel):
+    title: str = Field(min_length=1)
 
 
 class SetProjectMaterialSourceBindingRequest(BaseModel):

@@ -5,14 +5,27 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from backend.models.asr_artifact import AsrArtifact, AsrSegment
-from backend.models.enums import AsrProvider, FsSyncPolicy, InstancePresence, SessionMode
+from backend.models.enums import (
+    AsrProvider,
+    FsSyncPolicy,
+    InstancePresence,
+    RecallPointState,
+    ReviewChainTemplateItemKind,
+    SessionMode,
+)
 from backend.models.errors import PreconditionFailure
 from backend.models.instance import Instance
 from backend.models.learning_task_node import LearningTaskContainer, LearningTaskLeaf
-from backend.models.project_config import LocalServiceConfig
+from backend.models.project_config import (
+    LocalServiceConfig,
+    ProjectConfig,
+    RecallPointPushConfig,
+    ReviewChainTemplateItem,
+)
 from backend.models.project_storage_config import ProjectStorageConfig
 from backend.models.range_snapshot import RangeSnapshot
 from backend.models.recall_point import Anchor, RecallPoint
+from backend.models.review_chain import ReviewChainItemKind
 from backend.models.rich_content import rich_text
 from backend.models.types import (
     AsrArtifactId,
@@ -21,7 +34,7 @@ from backend.models.types import (
     RecallPointId,
     now_utc_ms,
 )
-from backend.system.api import SystemAPI
+from backend.system.api import SystemAPI, TickAttemptResult
 from backend.system.inmemory_system import InMemorySystem
 from backend.system.local_whisper import BUILTIN_WHISPER_BASE_URL
 from backend.system.persistence_store import JsonSnapshotStore, SnapshotStore, SQLiteSnapshotStore
@@ -81,6 +94,54 @@ class _SpecAlignmentBackendMixin:
         learning_root = project_root / "learning_objects"
         learning_root.mkdir(parents=True)
         return project_root, learning_root
+
+    def _tick_once(self, api: SystemAPI, project_id: object, layer_index: int = 0) -> TickAttemptResult:
+        system = api.sys
+        session = system.begin_session(project_id, SessionMode.READ_WRITE)
+        try:
+            result = api._orchestrator_tick_once(session, layer_index)
+            system.commit(session)
+            return result
+        except Exception:
+            if session.state == "OPEN":
+                system.rollback(session)
+            raise
+
+    def _build_review_then_convergence_fixture(self) -> dict[str, object]:
+        api, root = self._new_api()
+        project_root, learning_root = self._make_project_dirs(root, "videos")
+        (learning_root / "lesson.mp4").write_text("video", encoding="utf-8")
+
+        project_id = api.create_project("ml", project_root.as_posix())
+        api.sync_learning_objects_from_fs(project_id)
+        instance = api.list_instances(project_id)[0]
+        api.set_layer_config(
+            project_id,
+            0,
+            (
+                ReviewChainTemplateItem(kind=ReviewChainTemplateItemKind.REVIEW_TASK),
+                ReviewChainTemplateItem(kind=ReviewChainTemplateItemKind.CONVERGENCE),
+            ),
+            None,
+            None,
+        )
+
+        entry_node_id = api.submit_learning_task(
+            project_id,
+            items=[(rich_text("Q1"), rich_text("A1"), Anchor(instance.instance_id, position="t=0"))],
+            title="Lesson 1",
+        )
+        reg = api.get_learning_task_node_entry_registration(project_id, entry_node_id)
+        queue_head, queue_ids = api.get_queue(project_id)
+
+        return {
+            "api": api,
+            "project_id": project_id,
+            "entry_node_id": entry_node_id,
+            "review_chain_id": reg.review_chain_id,
+            "queue_head": queue_head,
+            "queue_ids": queue_ids,
+        }
 
     def _build_export_fixture(self) -> dict[str, object]:
         api, root = self._new_api()
@@ -643,6 +704,114 @@ class _SpecAlignmentBackendMixin:
         self.assertIsInstance(source, dict)
         self.assertEqual(source["filePath"], str(media_file.resolve()))
 
+    def test_deleted_recall_point_stays_historical_but_leaves_current_views(self) -> None:
+        api, root = self._new_api()
+        project_root, learning_root = self._make_project_dirs(root, "videos")
+        (learning_root / "lesson.mp4").write_text("video", encoding="utf-8")
+
+        project_id = api.create_project("ml", project_root.as_posix())
+        api.sync_learning_objects_from_fs(project_id)
+        instance = api.list_instances(project_id)[0]
+
+        entry_node_id = api.submit_learning_task(
+            project_id,
+            items=[(rich_text("Q1"), rich_text("A1"), Anchor(instance.instance_id, position="t=1000"))],
+            title="Lesson 1",
+        )
+        entry_node = api.get_learning_task_node(project_id, entry_node_id)
+        learning_task = api.get_learning_task(project_id, entry_node.bound_learning_task_id)  # type: ignore[attr-defined]
+        recall_point_id = learning_task.recall_point_ids[0]
+        learning_object_leaf = next(
+            node
+            for node in api.list_learning_object_nodes(project_id)
+            if getattr(node, "instance_id", None) == instance.instance_id
+        )
+
+        system = api.sys
+        session = system.begin_session(project_id, SessionMode.READ_WRITE)
+        try:
+            system.asr_artifact_repo.add(
+                session,
+                AsrArtifact(
+                    project_id=project_id,
+                    asr_artifact_id=AsrArtifactId("asr_deleted_scope_1"),
+                    created_at=now_utc_ms(),
+                    provider=AsrProvider.WHISPER,
+                    recall_point_id=recall_point_id,
+                    source_instance_id=instance.instance_id,
+                    center_ms=1000,
+                    pre_ms=300,
+                    post_ms=300,
+                    segments=(AsrSegment(start_ms=900, end_ms=1100, text="task transcript"),),
+                ),
+            )
+            system.commit(session)
+        except Exception:
+            if session.state == "OPEN":
+                system.rollback(session)
+            raise
+
+        api.delete_recall_point(project_id, recall_point_id)
+
+        deleted = api.get_recall_point(project_id, recall_point_id)
+        self.assertEqual(deleted.state, RecallPointState.DELETED)
+        self.assertIsNotNone(deleted.deleted_at)
+        self.assertEqual(str(api.get_asr_artifact(project_id, AsrArtifactId("asr_deleted_scope_1")).recall_point_id), str(recall_point_id))
+        self.assertTrue(
+            any(event.api_name == "delete_recall_point" for event in api.list_audit_log_events(project_id))
+        )
+
+        api.edit_learning_task(project_id, learning_task.learning_task_id, "Lesson 1 Renamed")
+        renamed = api.get_learning_task(project_id, learning_task.learning_task_id)
+        self.assertEqual(renamed.title, "Lesson 1 Renamed")
+        self.assertEqual(tuple(renamed.recall_point_ids), tuple(learning_task.recall_point_ids))
+
+        self.assertEqual(api.list_recall_points_by_instance(project_id, instance.instance_id), tuple())
+        self.assertEqual(api.list_recall_points_by_learning_task_node(project_id, entry_node_id), tuple())
+        self.assertEqual(api.export_recall_points_by_learning_task_node(project_id, entry_node_id), tuple())
+        self.assertEqual(api.list_recall_points_by_learning_object_node(project_id, learning_object_leaf.node_id), tuple())
+        self.assertEqual(api.export_recall_points_by_learning_object_node(project_id, learning_object_leaf.node_id), tuple())
+        self.assertEqual(api.export_asr_by_learning_task_node(project_id, entry_node_id), tuple())
+        self.assertEqual(api.export_asr_by_learning_object_node(project_id, learning_object_leaf.node_id), tuple())
+
+        read_session = system.begin_session(project_id, SessionMode.READ_ONLY)
+        try:
+            historical_instances = system.learning_task_repo.covered_instance_id_set(
+                read_session,
+                learning_task.learning_task_id,
+                system.recall_point_repo,
+            )
+            self.assertEqual(historical_instances, {instance.instance_id})
+        finally:
+            system.rollback(read_session)
+
+        with self.assertRaises(PreconditionFailure):
+            api.request_asr(project_id, recall_point_id, center_ms=1000, pre_ms=300, post_ms=300)
+
+        session = system.begin_session(project_id, SessionMode.READ_WRITE)
+        try:
+            cfg = system.project_config_repo.get(session)
+            system.project_config_repo.set(
+                session,
+                ProjectConfig(
+                    project_id=cfg.project_id,
+                    layer_configs=dict(cfg.layer_configs),
+                    external_services=cfg.external_services,
+                    push_config=RecallPointPushConfig(
+                        min_recall_points_to_enable=1,
+                        max_history_len=cfg.push_config.max_history_len,
+                    ),
+                    updated_at=now_utc_ms(),
+                ),
+            )
+            system.commit(session)
+        except Exception:
+            if session.state == "OPEN":
+                system.rollback(session)
+            raise
+
+        self.assertEqual(api.get_push_candidates(project_id, max_results=5), tuple())
+
     def test_export_asr_by_learning_task_node_returns_scoped_artifacts(self) -> None:
         api, root = self._new_api()
         project_root, learning_root = self._make_project_dirs(root, "videos")
@@ -751,6 +920,120 @@ class _SpecAlignmentBackendMixin:
         reg_from_chain = api.get_review_chain_entry_registration(project_id, reg_from_task.review_chain_id)
         self.assertEqual(reg_from_chain.entry_node, entry_node_id)
         self.assertEqual(reg_from_chain.target_layer_index, 0)
+        self.assertEqual(reg_from_chain.registration_seq, 1)
+
+    def test_review_task_head_template_enqueues_on_first_tick(self) -> None:
+        fx = self._build_review_then_convergence_fixture()
+        api = fx["api"]
+        project_id = fx["project_id"]
+        review_chain_id = fx["review_chain_id"]
+        queue_head = fx["queue_head"]
+        queue_ids = fx["queue_ids"]
+
+        chain = api.get_review_chain(project_id, review_chain_id)
+        head = chain.head_item()
+        self.assertIsNotNone(head)
+        assert head is not None
+        self.assertEqual(head.kind, ReviewChainItemKind.REVIEW_TASK)
+        self.assertIsNotNone(queue_head)
+        self.assertEqual(queue_ids, (queue_head,))
+        self.assertEqual(str(queue_head), str(head.id))
+
+    def test_done_review_task_head_produces_followup_task_on_next_tick(self) -> None:
+        fx = self._build_review_then_convergence_fixture()
+        api = fx["api"]
+        project_id = fx["project_id"]
+        review_chain_id = fx["review_chain_id"]
+        first_head = fx["queue_head"]
+
+        self.assertIsNotNone(first_head)
+        assert first_head is not None
+        api.executor_commit_review_task(project_id, first_head, [0])
+
+        empty_head, empty_queue = api.get_queue(project_id)
+        self.assertIsNone(empty_head)
+        self.assertEqual(empty_queue, tuple())
+
+        tick_res = self._tick_once(api, project_id, 0)
+        self.assertEqual(tick_res, TickAttemptResult.PRODUCED)
+
+        chain = api.get_review_chain(project_id, review_chain_id)
+        head = chain.head_item()
+        self.assertIsNotNone(head)
+        assert head is not None
+        self.assertEqual(head.kind, ReviewChainItemKind.CONVERGENCE)
+
+        next_head, next_queue = api.get_queue(project_id)
+        self.assertIsNotNone(next_head)
+        self.assertEqual(next_queue, (next_head,))
+        self.assertNotEqual(str(next_head), str(first_head))
+
+    def test_submit_b_batches_old_chain_before_new_chain(self) -> None:
+        fx = self._build_review_then_convergence_fixture()
+        api = fx["api"]
+        project_id = fx["project_id"]
+        first_head = fx["queue_head"]
+
+        self.assertIsNotNone(first_head)
+        assert first_head is not None
+        api.executor_commit_review_task(project_id, first_head, [0])
+
+        empty_head, empty_queue = api.get_queue(project_id)
+        self.assertIsNone(empty_head)
+        self.assertEqual(empty_queue, tuple())
+
+        instance = api.list_instances(project_id)[0]
+        entry_node_b = api.submit_learning_task(
+            project_id,
+            items=[(rich_text("Q2"), rich_text("A2"), Anchor(instance.instance_id, position="t=10"))],
+            title="Lesson 2",
+        )
+
+        reg_a = api.get_learning_task_node_entry_registration(project_id, fx["entry_node_id"])
+        reg_b = api.get_learning_task_node_entry_registration(project_id, entry_node_b)
+        self.assertEqual(reg_a.registration_seq, 1)
+        self.assertEqual(reg_b.registration_seq, 2)
+
+        queue_head, queue_ids = api.get_queue(project_id)
+        self.assertEqual(len(queue_ids), 2)
+        self.assertEqual(queue_head, queue_ids[0])
+
+        chain_a = api.get_review_chain(project_id, reg_a.review_chain_id)
+        head_a = chain_a.head_item()
+        self.assertIsNotNone(head_a)
+        assert head_a is not None
+        self.assertEqual(head_a.kind, ReviewChainItemKind.CONVERGENCE)
+        convergence_a = api.get_convergence(project_id, head_a.id)
+        self.assertEqual(str(queue_ids[0]), str(convergence_a.review_task_ids[-1]))
+
+        chain_b = api.get_review_chain(project_id, reg_b.review_chain_id)
+        head_b = chain_b.head_item()
+        self.assertIsNotNone(head_b)
+        assert head_b is not None
+        self.assertEqual(head_b.kind, ReviewChainItemKind.REVIEW_TASK)
+        self.assertEqual(str(queue_ids[1]), str(head_b.id))
+
+    def test_orchestrator_tick_stays_blocked_while_global_queue_non_empty(self) -> None:
+        fx = self._build_review_then_convergence_fixture()
+        api = fx["api"]
+        project_id = fx["project_id"]
+        review_chain_id = fx["review_chain_id"]
+
+        before_chain = api.get_review_chain(project_id, review_chain_id)
+        before_head, before_queue = api.get_queue(project_id)
+
+        self.assertIsNotNone(before_head)
+        self.assertEqual(before_queue, (before_head,))
+
+        tick_res = self._tick_once(api, project_id, 0)
+        self.assertEqual(tick_res, TickAttemptResult.GATE_BLOCKED)
+
+        after_chain = api.get_review_chain(project_id, review_chain_id)
+        after_head, after_queue = api.get_queue(project_id)
+        self.assertEqual(after_chain.head_index, before_chain.head_index)
+        self.assertEqual(after_chain.queue, before_chain.queue)
+        self.assertEqual(after_head, before_head)
+        self.assertEqual(after_queue, before_queue)
 
     def test_first_failed_review_does_not_immediately_enqueue_followup_round(self) -> None:
         api, root = self._new_api()

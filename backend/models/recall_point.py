@@ -1,5 +1,7 @@
 from dataclasses import dataclass
+from typing import Optional
 
+from .enums import RecallPointState
 from .errors import PreconditionFailure
 from .rich_content import RichContent, validate_rich_content_write_time
 from .types import InstanceId, ProjectId, RecallPointId, Timestamp
@@ -31,6 +33,8 @@ class RecallPoint:
     answer: RichContent
     anchor: Anchor
     insights: tuple[RichContent, ...] = tuple()
+    state: RecallPointState = RecallPointState.ACTIVE
+    deleted_at: Optional[Timestamp] = None
 
     def validate_write_time(self) -> None:
         # 1.4.3 写前条件
@@ -38,6 +42,10 @@ class RecallPoint:
             raise PreconditionFailure("RecallPoint.recall_point_id must be non-empty")
         if self.created_at is None:
             raise PreconditionFailure("RecallPoint.created_at must be provided")
+        if self.state != RecallPointState.ACTIVE:
+            raise PreconditionFailure("RecallPoint.state must be ACTIVE on write")
+        if self.deleted_at is not None:
+            raise PreconditionFailure("RecallPoint.deleted_at must be None on write")
         validate_rich_content_write_time(self.question)
         validate_rich_content_write_time(self.answer)
         if self.anchor is None:

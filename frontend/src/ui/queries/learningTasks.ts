@@ -1,7 +1,7 @@
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { ApiError } from "@/ui/api/http"
-import { getLearningTask } from "@/ui/api/learningTasks"
+import { editLearningTask, getLearningTask } from "@/ui/api/learningTasks"
 import { getLearningTaskNode, getLearningTaskNodeBinding, listLearningTaskNodes } from "@/ui/api/learningTaskNodes"
 
 export function useLearningTask(projectId: string, learningTaskId: string) {
@@ -41,5 +41,21 @@ export function useLearningTaskNodeBinding(projectId: string, nodeId: string) {
     },
     enabled: !!projectId && !!nodeId,
     retry: false,
+  })
+}
+
+export function useEditLearningTask(projectId: string, learningTaskId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (title: string) => editLearningTask(projectId, learningTaskId, title),
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["learningTask", projectId, learningTaskId] }),
+        qc.invalidateQueries({ queryKey: ["learningTaskNodes", projectId] }),
+        qc.invalidateQueries({ queryKey: ["learningTaskNode", projectId] }),
+        qc.invalidateQueries({ queryKey: ["learningTaskNodeBinding", projectId] }),
+        qc.invalidateQueries({ queryKey: ["reviewChainBinding", projectId] }),
+      ])
+    },
   })
 }

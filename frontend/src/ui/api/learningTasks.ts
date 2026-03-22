@@ -50,3 +50,12 @@ export function getLearningTask(projectId: string, learningTaskId: string) {
     responseSchema: LearningTaskSchema,
   })
 }
+
+export function editLearningTask(projectId: string, learningTaskId: string, title: string) {
+  return apiRequest({
+    path: `/projects/${projectId}/learning-tasks/${learningTaskId}`,
+    method: "PATCH",
+    body: { title },
+    responseSchema: z.null(),
+  })
+}

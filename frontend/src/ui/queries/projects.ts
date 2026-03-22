@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
-import { createProject, deleteProject, listProjects } from "@/ui/api/projects"
+import { createProject, deleteProject, editProject, listProjects } from "@/ui/api/projects"
 
 export function useProjects(enabled = true) {
   return useQuery({ queryKey: ["projects"], queryFn: listProjects, enabled })
@@ -31,6 +31,16 @@ export function useDeleteProject() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (projectId: string) => deleteProject(projectId),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["projects"] })
+    },
+  })
+}
+
+export function useEditProject() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (params: { projectId: string; title: string }) => editProject(params.projectId, params.title),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["projects"] })
     },

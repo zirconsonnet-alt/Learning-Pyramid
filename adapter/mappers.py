@@ -106,6 +106,9 @@ def recall_point_to_dto(rp: RecallPoint) -> Dict[str, Any]:
     return {
         "projectId": str(rp.project_id),
         "recallPointId": str(rp.recall_point_id),
+        "createdAt": _jsonable(rp.created_at),
+        "state": _jsonable(rp.state),
+        "deletedAt": _jsonable(rp.deleted_at),
         "question": _rich_content_to_dto(rp.question),
         "answer": _rich_content_to_dto(rp.answer),
         "anchor": {"instanceId": str(rp.anchor.instance_id), "position": rp.anchor.position},

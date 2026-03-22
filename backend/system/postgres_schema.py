@@ -269,9 +269,47 @@ def _store_hot_index_sql() -> str:
     )
 
 
+def _store_entry_registration_seq_sql() -> str:
+    return "\n".join(
+        (
+            "-- Add registration sequence for entry registrations",
+            "ALTER TABLE entry_registration_index",
+            "ADD COLUMN IF NOT EXISTS registration_seq BIGINT NOT NULL DEFAULT 0;",
+            "WITH existing_max AS (",
+            "    SELECT",
+            "        project_id,",
+            "        target_layer_index,",
+            "        COALESCE(MAX(NULLIF(registration_seq, 0)), 0) AS max_seq",
+            "    FROM entry_registration_index",
+            "    GROUP BY project_id, target_layer_index",
+            "),",
+            "zero_rows AS (",
+            "    SELECT",
+            "        project_id,",
+            "        entry_node,",
+            "        target_layer_index,",
+            "        ROW_NUMBER() OVER (PARTITION BY project_id, target_layer_index ORDER BY entry_node ASC) AS rn",
+            "    FROM entry_registration_index",
+            "    WHERE registration_seq = 0",
+            ")",
+            "UPDATE entry_registration_index eri",
+            "SET registration_seq = existing_max.max_seq + zero_rows.rn",
+            "FROM zero_rows",
+            "JOIN existing_max",
+            "  ON existing_max.project_id = zero_rows.project_id",
+            " AND existing_max.target_layer_index = zero_rows.target_layer_index",
+            "WHERE eri.project_id = zero_rows.project_id",
+            "  AND eri.entry_node = zero_rows.entry_node;",
+            "CREATE INDEX IF NOT EXISTS idx_entry_registration_index_layer_seq",
+            "ON entry_registration_index (project_id, target_layer_index, registration_seq, entry_node);",
+        )
+    )
+
+
 POSTGRES_MIGRATIONS: tuple[PostgresMigration, ...] = (
     PostgresMigration(scope="store", version=1, name="initial_store_schema", sql_factory=_bootstrap_store_schema_sql),
     PostgresMigration(scope="store", version=2, name="store_hot_indexes", sql_factory=_store_hot_index_sql),
+    PostgresMigration(scope="store", version=3, name="entry_registration_seq", sql_factory=_store_entry_registration_seq_sql),
     PostgresMigration(scope="auth", version=1, name="initial_auth_schema", sql_factory=_bootstrap_auth_schema_sql),
 )
 

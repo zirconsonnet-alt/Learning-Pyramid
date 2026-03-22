@@ -14,6 +14,7 @@ class EntryRegistration:
     entry_node: LearningTaskNodeId
     target_layer_index: int
     review_chain_id: ReviewChainId
+    registration_seq: int
 
     def validate_local_invariants(self) -> None:
         if not str(self.entry_node):
@@ -22,4 +23,5 @@ class EntryRegistration:
             raise PreconditionFailure("EntryRegistration.review_chain_id must be non-empty")
         if self.target_layer_index < 0:
             raise PreconditionFailure("EntryRegistration.target_layer_index must be >= 0")
-
+        if self.registration_seq < 0:
+            raise PreconditionFailure("EntryRegistration.registration_seq must be >= 0")
