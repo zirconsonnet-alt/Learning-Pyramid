@@ -328,11 +328,11 @@ export function ProjectsPage() {
       </div>
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent>
+        <DialogContent className="p-4">
           <DialogHeader>
             <DialogTitle>创建新项目</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="space-y-3 mt-3">
             <div className="grid gap-2">
               <Label htmlFor="title">项目标题</Label>
               <Input
