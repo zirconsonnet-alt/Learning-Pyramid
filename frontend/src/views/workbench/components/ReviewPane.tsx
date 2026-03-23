@@ -140,9 +140,8 @@ export function ReviewPane({
           <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#e2e8f0] bg-[#f5f7fa] text-primary">
             <ClipboardCheck className="h-5 w-5" />
           </div>
-          <div className="space-y-1">
+          <div>
             <CardTitle>复习任务</CardTitle>
-            <p className="text-sm text-muted-foreground">先主动回忆，再决定记得或不记得；需要时可补看答案、回到视频、追加理解。</p>
           </div>
         </div>
 

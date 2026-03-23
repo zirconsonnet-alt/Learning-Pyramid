@@ -2,20 +2,20 @@ export const THEME_PRESETS = [
   {
     id: "mist",
     label: "雾蓝",
-    description: "冷静的白灰蓝工作台，适合默认长时使用。",
-    preview: ["#f5f7fa", "#ffffff", "#2563eb", "#334155"],
+    description: "冷静、轻薄、空气感。",
+    preview: ["#dfeaf5", "#fdfeff", "#1f8de0", "#224968"],
   },
   {
     id: "paper",
     label: "暖白",
-    description: "更接近纸面的暖白底，降低冷灰疲劳感。",
-    preview: ["#fffbf6", "#ffffff", "#3b82f6", "#4b5563"],
+    description: "柔和、纸感、低刺激。",
+    preview: ["#f3e8dc", "#fffdf8", "#365cc0", "#6b5036"],
   },
   {
     id: "ink",
     label: "深描",
-    description: "更高对比的浅色主题，信息边界更清楚。",
-    preview: ["#eef2f7", "#ffffff", "#1d4ed8", "#0f172a"],
+    description: "锐利、专注、高对比。",
+    preview: ["#bcc8d8", "#f7fbff", "#1672ff", "#172334"],
   },
 ] as const
 

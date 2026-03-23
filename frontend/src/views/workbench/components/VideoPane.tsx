@@ -20,7 +20,9 @@ import { Card, CardContent } from "@/ui/components/ui/card"
 import { resolveProjectFile, useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
 import { useSystemCapabilities } from "@/ui/queries/system"
 import { showInfoFeedback } from "@/ui/store/feedbackStore"
+import { addDailyPlaybackMs } from "@/ui/store/workbenchDailyStats"
 import { clearPlaybackResumeMs, loadPlaybackResumeMs, savePlaybackResumeMs } from "@/ui/store/playbackResume"
+import { saveVideoDurationMs } from "@/ui/store/videoDurations"
 import { useWorkbenchStore } from "@/ui/store/workbenchStore"
 import { cn } from "@/ui/utils"
 
@@ -88,6 +90,7 @@ export function VideoPane({
   setCurrentMs,
   seekTo,
   onSeekApplied,
+  onDurationResolved,
   queueHasGate,
 }: {
   projectId: string
@@ -95,6 +98,7 @@ export function VideoPane({
   setCurrentMs: (v: number) => void
   seekTo?: { instanceId: string; ms: number; nonce: number } | null
   onSeekApplied?: (nonce: number) => void
+  onDurationResolved?: (instanceId: string, durationMs: number) => void
   queueHasGate: boolean
 }) {
   const playerShellRef = useRef<HTMLDivElement | null>(null)
@@ -108,6 +112,7 @@ export function VideoPane({
   const lastAppliedNonceRef = useRef<number | null>(null)
   const restoreSavedPositionRef = useRef(true)
   const lastPersistedPlaybackSecondRef = useRef<number | null>(null)
+  const lastPlaybackTrackedAtRef = useRef<number | null>(null)
 
   const [playbackMs, setPlaybackMs] = useState(0)
   const [durationMs, setDurationMs] = useState(0)
@@ -140,6 +145,19 @@ export function VideoPane({
   const chromeVisible = isChromeAwake || !isPlaying || isCapturePanelOpen
   const playbackRateLabel = `${Number.isInteger(playbackRate) ? playbackRate.toFixed(0) : playbackRate.toFixed(2).replace(/0$/, "")}x`
 
+  const flushPlaybackDuration = useCallback(() => {
+    if (!instanceId) {
+      lastPlaybackTrackedAtRef.current = null
+      return
+    }
+    const now = performance.now()
+    const previous = lastPlaybackTrackedAtRef.current
+    lastPlaybackTrackedAtRef.current = now
+    if (previous === null) return
+    const deltaMs = Math.max(0, Math.min(now - previous, 5000))
+    if (deltaMs > 0) addDailyPlaybackMs(projectId, deltaMs)
+  }, [instanceId, projectId])
+
   const clearChromeHideTimer = useCallback(() => {
     if (chromeHideTimerRef.current !== null) {
       window.clearTimeout(chromeHideTimerRef.current)
@@ -164,7 +182,12 @@ export function VideoPane({
 
   const syncVideoUiState = useCallback((video?: HTMLVideoElement | null) => {
     if (!video) return
-    setDurationMs(readDurationMs(video))
+    const nextDurationMs = readDurationMs(video)
+    setDurationMs(nextDurationMs)
+    if (instanceId && nextDurationMs > 0) {
+      saveVideoDurationMs(projectId, instanceId, nextDurationMs)
+      onDurationResolved?.(instanceId, nextDurationMs)
+    }
     setIsPlaying(!video.paused && !video.ended)
     const effectiveMuted = video.muted || video.volume <= 0
     setIsMuted(effectiveMuted)
@@ -173,7 +196,7 @@ export function VideoPane({
     if (video.volume > 0) {
       lastNonZeroVolumeRef.current = video.volume
     }
-  }, [])
+  }, [instanceId, onDurationResolved, projectId])
 
   const persistPlaybackPosition = useCallback(
     (ms: number) => {
@@ -388,6 +411,9 @@ export function VideoPane({
   function handleTimeUpdate() {
     const video = videoRef.current
     if (!video) return
+    if (!video.paused && !video.ended) {
+      flushPlaybackDuration()
+    }
     const nextMs = Math.max(0, Math.floor(video.currentTime * 1000))
     syncPlaybackClock(nextMs)
     if (!instanceId) return
@@ -416,6 +442,7 @@ export function VideoPane({
     lastAppliedNonceRef.current = null
     restoreSavedPositionRef.current = true
     lastPersistedPlaybackSecondRef.current = null
+    lastPlaybackTrackedAtRef.current = null
     clearChromeHideTimer()
   }, [clearChromeHideTimer, instance?.instanceId, localSrc, serverMediaStreamEnabled, syncPlaybackClock])
 
@@ -710,7 +737,7 @@ export function VideoPane({
           <div
             ref={playerShellRef}
             className={cn(
-              "group relative overflow-hidden rounded-[1.2rem] border border-slate-900/10 bg-[#050816]",
+              "group relative h-[clamp(18rem,52vh,36rem)] overflow-hidden rounded-[1.2rem] border border-slate-900/10 bg-[#050816] sm:h-[clamp(20rem,56vh,40rem)]",
               isShellFullscreen && "h-full w-full bg-black p-4",
             )}
             onPointerMove={wakeChrome}
@@ -719,7 +746,7 @@ export function VideoPane({
             <video
               ref={videoRef}
               className={cn(
-                "plm-video-player w-full bg-black",
+                "plm-video-player h-full w-full bg-black",
                 isShellFullscreen
                   ? "h-[calc(100dvh-2rem)] max-h-full rounded-[1.2rem] border border-white/10 object-contain"
                   : "rounded-[1.2rem] object-contain",
@@ -744,13 +771,22 @@ export function VideoPane({
               onCanPlay={handleCanPlay}
               onDurationChange={() => syncVideoUiState(videoRef.current)}
               onPlay={() => {
+                lastPlaybackTrackedAtRef.current = performance.now()
                 setIsPlaying(true)
                 wakeChrome()
               }}
-              onPause={() => setIsPlaying(false)}
+              onPause={() => {
+                flushPlaybackDuration()
+                lastPlaybackTrackedAtRef.current = null
+                setIsPlaying(false)
+              }}
               onVolumeChange={() => syncVideoUiState(videoRef.current)}
               onError={handleVideoError}
-              onEnded={handleEnded}
+              onEnded={() => {
+                flushPlaybackDuration()
+                lastPlaybackTrackedAtRef.current = null
+                handleEnded()
+              }}
               onTimeUpdate={handleTimeUpdate}
               onSeeked={handleTimeUpdate}
             />

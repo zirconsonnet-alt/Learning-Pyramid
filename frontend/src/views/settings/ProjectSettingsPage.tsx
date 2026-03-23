@@ -25,9 +25,6 @@ import {
   useSetLayerConfig,
 } from "@/ui/queries/workbench"
 import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
-import { useThemeStore } from "@/ui/store/themeStore"
-import { THEME_PRESETS } from "@/ui/theme/themePresets"
-import { cn } from "@/ui/utils"
 
 const BUILTIN_WHISPER_BASE_URL = "builtin://whisper"
 let nextTemplateItemId = 1
@@ -111,8 +108,6 @@ export function ProjectSettingsPage() {
   const projectQ = useProject(pid, { enabled: !!pid })
   const editProjectM = useEditProject()
   const capabilitiesQ = useSystemCapabilities()
-  const selectedTheme = useThemeStore((state) => state.theme)
-  const setTheme = useThemeStore((state) => state.setTheme)
   const directoryBinding = useProjectDirectoryBinding(pid)
   const directoryPermission = directoryBinding.permission
   const browserLocalMediaEnabled = capabilitiesQ.data?.browserLocalMediaEnabled ?? false
@@ -308,49 +303,6 @@ export function ProjectSettingsPage() {
           }
         }}
       />
-
-      <Card className="theme-card">
-        <CardHeader>
-          <CardTitle>界面主题</CardTitle>
-          <CardDescription>主题只保存在当前浏览器，切换后工作台、树视图和登录页会一起生效。</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-3 lg:grid-cols-3">
-            {THEME_PRESETS.map((theme) => {
-              const isActive = selectedTheme === theme.id
-              return (
-                <button
-                  key={theme.id}
-                  type="button"
-                  className={cn(
-                    "theme-status-surface flex flex-col items-start gap-3 rounded-[1.2rem] border p-4 text-left transition-all duration-200",
-                    isActive
-                      ? "border-primary/45 shadow-[0_20px_46px_-30px_rgba(37,99,235,0.42)]"
-                      : "hover:-translate-y-px hover:border-primary/20",
-                  )}
-                  onClick={() => setTheme(theme.id)}
-                >
-                  <div className="flex w-full items-center justify-between gap-3">
-                    <div className="text-sm font-semibold text-foreground">{theme.label}</div>
-                    {isActive ? <span className="theme-meta-strong">当前</span> : null}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {theme.preview.map((color) => (
-                      <span
-                        key={`${theme.id}-${color}`}
-                        className="h-7 w-7 rounded-full border border-black/5 shadow-inner"
-                        style={{ backgroundColor: color }}
-                      />
-                    ))}
-                  </div>
-                  <p className="text-sm leading-6 text-muted-foreground">{theme.description}</p>
-                </button>
-              )
-            })}
-          </div>
-          <p className="text-xs text-muted-foreground">这是本地界面偏好，不会改动项目数据，也不会影响其他浏览器。</p>
-        </CardContent>
-      </Card>
 
       {browserLocalMediaEnabled ? (
         <Card className="theme-card">
@@ -681,36 +633,38 @@ function ProjectTitleCard({
 
   return (
     <Card className="theme-card">
-      <CardHeader>
-        <CardTitle>项目名称</CardTitle>
-        <CardDescription>这里改名后，项目列表、顶部标题和工作区里的项目名称会一起刷新。</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4 text-sm">
-        <div className="theme-status-surface rounded-[1.2rem] border border-border/70 p-4">
-          <div className="text-xs text-muted-foreground">当前名称</div>
-          <div className="mt-1 text-base font-semibold text-foreground">{projectTitle || (isLoading ? "加载中..." : "未找到项目")}</div>
+      <CardHeader className="pb-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <CardTitle>项目名称</CardTitle>
+          <div className="theme-meta max-w-full px-3 py-1.5 text-sm">
+            <span className="mr-2 text-muted-foreground">当前</span>
+            <span className="truncate font-semibold text-foreground">{projectTitle || (isLoading ? "加载中..." : "未找到项目")}</span>
+          </div>
         </div>
-
+      </CardHeader>
+      <CardContent className="space-y-3 pt-0 text-sm">
         <form
-          className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]"
+          className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center"
           onSubmit={(event) => {
             event.preventDefault()
             if (!canSave) return
             void onSave(trimmedTitle)
           }}
         >
-          <div className="space-y-2">
-            <Label htmlFor="projectTitle">新名称</Label>
+          <div>
+            <Label htmlFor="projectTitle" className="sr-only">
+              新名称
+            </Label>
             <Input
               id="projectTitle"
               value={titleDraft}
               onChange={(event) => setTitleDraft(event.target.value)}
-              placeholder="请输入项目名称"
+              placeholder="输入新的项目名称"
               disabled={isLoading || isPending}
             />
           </div>
-          <div className="flex items-end">
-            <Button type="submit" disabled={!canSave}>
+          <div className="flex items-center justify-end">
+            <Button type="submit" disabled={!canSave} className="w-full md:w-auto">
               {isPending ? "保存中..." : "保存项目名称"}
             </Button>
           </div>

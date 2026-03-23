@@ -1,5 +1,5 @@
 import { useQueries } from "@tanstack/react-query"
-import { Link, useNavigate, useParams } from "react-router-dom"
+import { useNavigate, useParams } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
 import type { ReviewTask } from "@/ui/api/review"
@@ -14,6 +14,7 @@ import {
 } from "@/ui/displayIdentifiers"
 import { useProject } from "@/ui/queries/projects"
 import { useConvergence } from "@/ui/queries/reviewChains"
+import { ReviewTaskSummaryCard } from "@/views/reviewTasks/components/ReviewTaskSummaryCard"
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -38,10 +39,6 @@ function describeReviewTaskState(state: string) {
   if (state === "PENDING") return "待执行"
   if (state === "DONE") return "已完成"
   return state
-}
-
-function reviewTaskDetailPath(projectId: string, reviewTaskId: string) {
-  return `/p/${projectId}/review-tasks/${reviewTaskId}`
 }
 
 export function ConvergencePage() {
@@ -161,39 +158,18 @@ export function ConvergencePage() {
             if (!reviewTask) return null
 
             return (
-              <div key={reviewTaskId} className="rounded-xl border p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="space-y-1">
-                    <div className="text-xs text-muted-foreground">第 {index + 1} 轮</div>
-                    <div className="font-medium text-foreground">{formatReviewTaskReference(reviewTaskId)}</div>
-                    <div className="text-xs text-muted-foreground">
-                      状态：<span className="text-foreground">{describeReviewTaskState(reviewTask.state)}</span>
-                    </div>
-                  </div>
-                  <Button size="sm" variant="outline" asChild>
-                    <Link to={reviewTaskDetailPath(pid, reviewTaskId)}>查看复习任务</Link>
-                  </Button>
-                </div>
-
-                <div className="mt-3 grid gap-3 text-sm md:grid-cols-2 xl:grid-cols-4">
-                  <div className="rounded-md border bg-muted/20 p-3">
-                    <div className="text-xs text-muted-foreground">创建时间</div>
-                    <div className="mt-1 font-medium text-foreground">{formatTs(reviewTask.createdAt)}</div>
-                  </div>
-                  <div className="rounded-md border bg-muted/20 p-3">
-                    <div className="text-xs text-muted-foreground">执行时间</div>
-                    <div className="mt-1 font-medium text-foreground">{formatTs(reviewTask.executedAt)}</div>
-                  </div>
-                  <div className="rounded-md border bg-muted/20 p-3">
-                    <div className="text-xs text-muted-foreground">输入范围</div>
-                    <div className="mt-1 font-medium text-foreground">{formatRangeReference(reviewTask.inputRangeId)}</div>
-                  </div>
-                  <div className="rounded-md border bg-muted/20 p-3">
-                    <div className="text-xs text-muted-foreground">结果范围</div>
-                    <div className="mt-1 font-medium text-foreground">{formatRangeReference(reviewTask.resultRangeId)}</div>
-                  </div>
-                </div>
-              </div>
+              <ReviewTaskSummaryCard
+                key={reviewTaskId}
+                fields={[
+                  { label: "创建时间", value: formatTs(reviewTask.createdAt) },
+                  { label: "执行时间", value: formatTs(reviewTask.executedAt) },
+                  { label: "输入范围", value: formatRangeReference(reviewTask.inputRangeId) },
+                ]}
+                kicker={`第 ${index + 1} 轮`}
+                projectId={pid}
+                reviewTaskId={reviewTaskId}
+                stateLabel={describeReviewTaskState(reviewTask.state)}
+              />
             )
           })}
 

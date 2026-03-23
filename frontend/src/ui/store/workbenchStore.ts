@@ -17,7 +17,7 @@ type ProjectWorkbenchState = {
   roots: string[]
   selectedInstanceId: string | null
   drafts: DraftRecallPoint[]
-  taskTitle: string
+  taskTitlesByInstanceId: Record<string, string>
 }
 
 type WorkbenchState = {
@@ -34,11 +34,11 @@ type WorkbenchState = {
   removeDraftImage: (projectId: string, localId: string, field: "question" | "answer", imageIndex: number) => void
   removeDraft: (projectId: string, localId: string) => void
   clearDraftsForInstance: (projectId: string, instanceId: string) => void
-  setTaskTitle: (projectId: string, title: string) => void
+  setTaskTitle: (projectId: string, instanceId: string, title: string) => void
 }
 
 function emptyProjectState(): ProjectWorkbenchState {
-  return { roots: [], selectedInstanceId: null, drafts: [], taskTitle: "" }
+  return { roots: [], selectedInstanceId: null, drafts: [], taskTitlesByInstanceId: {} }
 }
 
 export const useWorkbenchStore = create<WorkbenchState>()(
@@ -125,19 +125,25 @@ export const useWorkbenchStore = create<WorkbenchState>()(
             },
           }
         }),
-      setTaskTitle: (projectId, taskTitle) =>
-        set((s) => ({
-          byProjectId: {
-            ...s.byProjectId,
-            [projectId]: { ...(s.byProjectId[projectId] ?? emptyProjectState()), taskTitle },
-          },
-        })),
+      setTaskTitle: (projectId, instanceId, taskTitle) =>
+        set((s) => {
+          const ps = s.byProjectId[projectId] ?? emptyProjectState()
+          return {
+            byProjectId: {
+              ...s.byProjectId,
+              [projectId]: {
+                ...ps,
+                taskTitlesByInstanceId: { ...ps.taskTitlesByInstanceId, [instanceId]: taskTitle },
+              },
+            },
+          }
+        }),
     }),
     {
       name: "plm-workbench",
-      version: 2,
+      version: 3,
       migrate: (persistedState: unknown, version) => {
-        if (!persistedState || typeof persistedState !== "object" || version >= 2) return persistedState as WorkbenchState
+        if (!persistedState || typeof persistedState !== "object" || version >= 3) return persistedState as WorkbenchState
         const raw = persistedState as {
           byProjectId?: Record<
             string,
@@ -145,6 +151,7 @@ export const useWorkbenchStore = create<WorkbenchState>()(
               roots?: unknown
               selectedInstanceId?: unknown
               taskTitle?: unknown
+              taskTitlesByInstanceId?: unknown
               drafts?: Array<Record<string, unknown>>
             }
           >
@@ -157,7 +164,18 @@ export const useWorkbenchStore = create<WorkbenchState>()(
               : [],
             selectedInstanceId:
               typeof projectState.selectedInstanceId === "string" ? projectState.selectedInstanceId : null,
-            taskTitle: typeof projectState.taskTitle === "string" ? projectState.taskTitle : "",
+            taskTitlesByInstanceId:
+              projectState.taskTitlesByInstanceId && typeof projectState.taskTitlesByInstanceId === "object"
+                ? Object.fromEntries(
+                    Object.entries(projectState.taskTitlesByInstanceId as Record<string, unknown>).filter(
+                      (entry): entry is [string, string] => typeof entry[0] === "string" && typeof entry[1] === "string",
+                    ),
+                  )
+                : typeof projectState.selectedInstanceId === "string" &&
+                    typeof projectState.taskTitle === "string" &&
+                    projectState.taskTitle
+                  ? { [projectState.selectedInstanceId]: projectState.taskTitle }
+                  : {},
             drafts: Array.isArray(projectState.drafts)
               ? projectState.drafts.map((draft) => ({
                   localId: typeof draft.localId === "string" ? draft.localId : `${Date.now()}`,

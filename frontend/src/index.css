@@ -4,147 +4,195 @@
 
 @layer base {
   :root {
-    --background: 210 20% 98%;
-    --foreground: 218 35% 14%;
+    --background: 208 40% 95%;
+    --foreground: 214 42% 16%;
 
     --card: 0 0% 100%;
-    --card-foreground: 218 35% 14%;
+    --card-foreground: 214 42% 16%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 218 35% 14%;
+    --popover-foreground: 214 42% 16%;
 
-    --primary: 214 74% 39%;
+    --primary: 206 86% 46%;
     --primary-foreground: 210 40% 98%;
 
-    --secondary: 210 17% 95%;
-    --secondary-foreground: 217 20% 26%;
+    --secondary: 207 34% 90%;
+    --secondary-foreground: 214 25% 24%;
 
-    --muted: 210 15% 95%;
-    --muted-foreground: 216 14% 39%;
+    --muted: 208 24% 91%;
+    --muted-foreground: 215 18% 38%;
 
-    --accent: 210 24% 97%;
-    --accent-foreground: 218 24% 20%;
+    --accent: 206 48% 93%;
+    --accent-foreground: 214 30% 20%;
 
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 210 40% 98%;
 
-    --border: 214 20% 88%;
-    --input: 214 20% 86%;
-    --ring: 214 74% 39%;
+    --border: 208 30% 79%;
+    --input: 208 28% 75%;
+    --ring: 206 86% 46%;
 
     --radius: 1rem;
 
     --theme-body-background:
-      radial-gradient(circle at top center, rgba(216, 226, 238, 0.24), transparent 38%),
-      linear-gradient(180deg, rgba(252, 253, 255, 1) 0%, rgba(244, 246, 248, 1) 100%);
-    --theme-shell-glow: radial-gradient(circle at top, rgba(216, 226, 238, 0.18), transparent 54%);
-    --theme-shell-header-bg: rgba(255, 255, 255, 0.92);
-    --theme-shell-header-border: #e4e9ef;
-    --theme-shell-header-shadow: 0 16px 40px -34px rgba(15, 23, 42, 0.22);
-    --theme-card-border: #dfe6ee;
-    --theme-card-bg: rgba(255, 255, 255, 0.95);
-    --theme-card-shadow: 0 20px 48px -34px rgba(15, 23, 42, 0.16);
-    --theme-card-main-border: #e1e8f0;
-    --theme-card-main-bg: #ffffff;
-    --theme-card-main-shadow: 0 24px 56px -34px rgba(15, 23, 42, 0.18);
-    --theme-card-header-bg: linear-gradient(180deg, rgba(247, 249, 252, 0.92) 0%, rgba(255, 255, 255, 0) 100%);
-    --theme-meta-border: #cfdef1;
-    --theme-meta-bg: #eef5ff;
-    --theme-meta-text: #2b537f;
-    --theme-status-border: #e1e8ef;
-    --theme-status-bg: #ffffff;
-    --theme-status-shadow: 0 14px 36px -30px rgba(15, 23, 42, 0.14);
+      radial-gradient(circle at top center, rgba(156, 192, 226, 0.48), transparent 36%),
+      linear-gradient(180deg, rgba(242, 248, 255, 1) 0%, rgba(223, 234, 246, 1) 100%);
+    --theme-shell-glow: radial-gradient(circle at top, rgba(132, 175, 221, 0.28), transparent 54%);
+    --theme-shell-header-bg: rgba(244, 249, 255, 0.9);
+    --theme-shell-header-border: #c6d8eb;
+    --theme-shell-header-shadow: 0 18px 42px -32px rgba(27, 64, 110, 0.28);
+    --theme-card-border: #ccdced;
+    --theme-card-bg: rgba(247, 251, 255, 0.86);
+    --theme-card-shadow: 0 22px 48px -34px rgba(25, 61, 103, 0.18);
+    --theme-card-main-border: #bfd4e8;
+    --theme-card-main-bg: #fdfefe;
+    --theme-card-main-shadow: 0 26px 58px -34px rgba(20, 58, 101, 0.22);
+    --theme-card-header-bg: linear-gradient(180deg, rgba(230, 240, 251, 0.96) 0%, rgba(253, 254, 255, 0) 100%);
+    --theme-meta-border: #bad0e9;
+    --theme-meta-bg: #e0eefc;
+    --theme-meta-text: #24507b;
+    --theme-status-border: #c5d9ec;
+    --theme-status-bg: rgba(252, 254, 255, 0.94);
+    --theme-status-shadow: 0 16px 38px -30px rgba(24, 64, 105, 0.18);
     --theme-canvas-bg:
-      linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(243, 246, 249, 0.94)),
-      rgba(241, 245, 249, 0.82);
+      linear-gradient(180deg, rgba(238, 245, 252, 0.98), rgba(226, 236, 247, 0.94)),
+      rgba(219, 231, 244, 0.82);
+    --theme-primary-bg: hsl(206 86% 46%);
+    --theme-primary-hover: hsl(206 90% 40%);
+    --theme-primary-shadow: 0 18px 34px -18px rgba(19, 123, 219, 0.44);
+    --theme-secondary-border: #ccdae8;
+    --theme-secondary-bg: rgba(233, 242, 251, 0.92);
+    --theme-secondary-hover-bg: rgba(222, 235, 248, 0.98);
+    --theme-outline-bg: rgba(249, 252, 255, 0.92);
+    --theme-outline-text: #32506a;
+    --theme-outline-hover-bg: rgba(235, 243, 252, 0.96);
+    --theme-outline-hover-text: #123b63;
+    --theme-outline-shadow: 0 10px 24px -20px rgba(20, 58, 101, 0.2);
+    --theme-ghost-hover-bg: rgba(219, 233, 247, 0.7);
+    --theme-input-bg: rgba(249, 252, 255, 0.96);
+    --theme-input-disabled-bg: rgba(227, 235, 244, 0.9);
+    --theme-input-shadow: 0 8px 22px -18px rgba(20, 58, 101, 0.24);
+    --theme-selection-bg: rgba(219, 236, 252, 0.92);
   }
 
   :root[data-theme="paper"] {
-    --background: 36 28% 97%;
-    --foreground: 220 30% 16%;
-    --card: 0 0% 100%;
-    --card-foreground: 220 30% 16%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 220 30% 16%;
-    --primary: 213 70% 41%;
+    --background: 38 42% 94%;
+    --foreground: 28 22% 18%;
+    --card: 42 42% 98%;
+    --card-foreground: 28 22% 18%;
+    --popover: 42 42% 98%;
+    --popover-foreground: 28 22% 18%;
+    --primary: 219 67% 44%;
     --primary-foreground: 210 40% 98%;
-    --secondary: 36 24% 94%;
-    --secondary-foreground: 220 20% 28%;
-    --muted: 36 20% 94%;
-    --muted-foreground: 216 12% 42%;
-    --accent: 36 30% 96%;
-    --accent-foreground: 220 24% 20%;
-    --border: 32 20% 84%;
-    --input: 32 20% 82%;
-    --ring: 213 70% 41%;
+    --secondary: 38 34% 90%;
+    --secondary-foreground: 28 16% 27%;
+    --muted: 36 28% 90%;
+    --muted-foreground: 25 12% 40%;
+    --accent: 38 40% 92%;
+    --accent-foreground: 28 18% 22%;
+    --border: 32 24% 78%;
+    --input: 32 24% 74%;
+    --ring: 219 67% 44%;
 
     --theme-body-background:
-      radial-gradient(circle at top center, rgba(228, 216, 198, 0.34), transparent 40%),
-      linear-gradient(180deg, rgba(255, 252, 247, 1) 0%, rgba(247, 242, 236, 1) 100%);
-    --theme-shell-glow: radial-gradient(circle at top, rgba(228, 216, 198, 0.24), transparent 56%);
-    --theme-shell-header-bg: rgba(255, 251, 246, 0.92);
-    --theme-shell-header-border: #eadfce;
-    --theme-shell-header-shadow: 0 18px 44px -36px rgba(74, 61, 48, 0.24);
-    --theme-card-border: #e9dfd2;
-    --theme-card-bg: rgba(255, 253, 249, 0.95);
-    --theme-card-shadow: 0 20px 48px -34px rgba(90, 72, 55, 0.14);
-    --theme-card-main-border: #e8ddcf;
-    --theme-card-main-bg: #fffdf9;
-    --theme-card-main-shadow: 0 24px 56px -34px rgba(90, 72, 55, 0.16);
-    --theme-card-header-bg: linear-gradient(180deg, rgba(252, 247, 241, 0.94) 0%, rgba(255, 255, 255, 0) 100%);
-    --theme-meta-border: #d8e0ea;
-    --theme-meta-bg: #f3f6fa;
-    --theme-meta-text: #4b6582;
-    --theme-status-border: #e7ddd1;
-    --theme-status-bg: #fffdfa;
-    --theme-status-shadow: 0 14px 36px -30px rgba(90, 72, 55, 0.14);
+      radial-gradient(circle at top center, rgba(228, 198, 156, 0.34), transparent 40%),
+      linear-gradient(180deg, rgba(255, 249, 240, 1) 0%, rgba(242, 232, 220, 1) 100%);
+    --theme-shell-glow: radial-gradient(circle at top, rgba(228, 198, 156, 0.24), transparent 56%);
+    --theme-shell-header-bg: rgba(255, 248, 239, 0.9);
+    --theme-shell-header-border: #dfcdb7;
+    --theme-shell-header-shadow: 0 18px 42px -34px rgba(105, 77, 42, 0.24);
+    --theme-card-border: #e0cfba;
+    --theme-card-bg: rgba(255, 251, 244, 0.9);
+    --theme-card-shadow: 0 22px 48px -34px rgba(109, 85, 57, 0.14);
+    --theme-card-main-border: #d9c5ad;
+    --theme-card-main-bg: #fffdf8;
+    --theme-card-main-shadow: 0 26px 58px -34px rgba(97, 74, 48, 0.16);
+    --theme-card-header-bg: linear-gradient(180deg, rgba(249, 238, 224, 0.96) 0%, rgba(255, 253, 248, 0) 100%);
+    --theme-meta-border: #d9c7b4;
+    --theme-meta-bg: #f5eadf;
+    --theme-meta-text: #7a5b39;
+    --theme-status-border: #e0cfbc;
+    --theme-status-bg: rgba(255, 252, 247, 0.95);
+    --theme-status-shadow: 0 14px 36px -30px rgba(101, 78, 53, 0.15);
     --theme-canvas-bg:
-      linear-gradient(180deg, rgba(251, 247, 242, 0.98), rgba(246, 240, 233, 0.94)),
-      rgba(244, 238, 231, 0.82);
+      linear-gradient(180deg, rgba(252, 245, 237, 0.98), rgba(244, 235, 224, 0.94)),
+      rgba(240, 229, 216, 0.82);
+    --theme-primary-bg: hsl(219 67% 44%);
+    --theme-primary-hover: hsl(219 72% 38%);
+    --theme-primary-shadow: 0 18px 34px -18px rgba(45, 94, 191, 0.4);
+    --theme-secondary-border: #dccab5;
+    --theme-secondary-bg: rgba(247, 236, 222, 0.92);
+    --theme-secondary-hover-bg: rgba(241, 228, 211, 0.96);
+    --theme-outline-bg: rgba(255, 252, 247, 0.94);
+    --theme-outline-text: #664d34;
+    --theme-outline-hover-bg: rgba(249, 239, 226, 0.96);
+    --theme-outline-hover-text: #4f3924;
+    --theme-outline-shadow: 0 10px 24px -20px rgba(97, 74, 48, 0.18);
+    --theme-ghost-hover-bg: rgba(238, 225, 209, 0.72);
+    --theme-input-bg: rgba(255, 252, 247, 0.96);
+    --theme-input-disabled-bg: rgba(238, 228, 216, 0.9);
+    --theme-input-shadow: 0 8px 22px -18px rgba(97, 74, 48, 0.22);
+    --theme-selection-bg: rgba(234, 225, 245, 0.88);
   }
 
   :root[data-theme="ink"] {
-    --background: 216 30% 96%;
-    --foreground: 222 42% 12%;
-    --card: 0 0% 100%;
-    --card-foreground: 222 42% 12%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222 42% 12%;
-    --primary: 221 83% 53%;
+    --background: 217 26% 88%;
+    --foreground: 223 44% 11%;
+    --card: 210 30% 98%;
+    --card-foreground: 223 44% 11%;
+    --popover: 210 30% 98%;
+    --popover-foreground: 223 44% 11%;
+    --primary: 216 96% 52%;
     --primary-foreground: 210 40% 98%;
-    --secondary: 216 24% 92%;
-    --secondary-foreground: 221 22% 24%;
-    --muted: 216 18% 92%;
-    --muted-foreground: 217 16% 38%;
-    --accent: 216 26% 94%;
-    --accent-foreground: 223 30% 18%;
-    --border: 217 19% 80%;
-    --input: 217 19% 78%;
-    --ring: 221 83% 53%;
+    --secondary: 217 28% 82%;
+    --secondary-foreground: 222 24% 20%;
+    --muted: 216 20% 84%;
+    --muted-foreground: 217 16% 33%;
+    --accent: 215 40% 86%;
+    --accent-foreground: 223 34% 17%;
+    --border: 217 22% 67%;
+    --input: 217 22% 63%;
+    --ring: 216 96% 52%;
 
     --theme-body-background:
-      radial-gradient(circle at top center, rgba(191, 207, 226, 0.28), transparent 36%),
-      linear-gradient(180deg, rgba(244, 247, 252, 1) 0%, rgba(233, 238, 245, 1) 100%);
-    --theme-shell-glow: radial-gradient(circle at top, rgba(173, 191, 214, 0.24), transparent 52%);
-    --theme-shell-header-bg: rgba(248, 250, 253, 0.92);
-    --theme-shell-header-border: #d3dbe6;
-    --theme-shell-header-shadow: 0 18px 44px -34px rgba(15, 23, 42, 0.26);
-    --theme-card-border: #d1dae5;
-    --theme-card-bg: rgba(255, 255, 255, 0.96);
-    --theme-card-shadow: 0 22px 50px -34px rgba(15, 23, 42, 0.18);
-    --theme-card-main-border: #cfd9e4;
-    --theme-card-main-bg: #ffffff;
-    --theme-card-main-shadow: 0 26px 58px -34px rgba(15, 23, 42, 0.2);
-    --theme-card-header-bg: linear-gradient(180deg, rgba(240, 245, 251, 0.96) 0%, rgba(255, 255, 255, 0) 100%);
-    --theme-meta-border: #cad9f2;
-    --theme-meta-bg: #e8f0fe;
-    --theme-meta-text: #284b82;
-    --theme-status-border: #d3dde8;
-    --theme-status-bg: #ffffff;
-    --theme-status-shadow: 0 16px 40px -30px rgba(15, 23, 42, 0.16);
+      radial-gradient(circle at top center, rgba(84, 115, 158, 0.34), transparent 34%),
+      linear-gradient(180deg, rgba(214, 224, 238, 1) 0%, rgba(181, 194, 212, 1) 100%);
+    --theme-shell-glow: radial-gradient(circle at top, rgba(79, 114, 158, 0.26), transparent 50%);
+    --theme-shell-header-bg: rgba(236, 243, 251, 0.84);
+    --theme-shell-header-border: #8fa5c2;
+    --theme-shell-header-shadow: 0 20px 46px -30px rgba(18, 31, 53, 0.34);
+    --theme-card-border: #9db2cb;
+    --theme-card-bg: rgba(244, 248, 253, 0.84);
+    --theme-card-shadow: 0 24px 52px -32px rgba(17, 29, 51, 0.24);
+    --theme-card-main-border: #869db9;
+    --theme-card-main-bg: #f7fbff;
+    --theme-card-main-shadow: 0 28px 60px -30px rgba(15, 27, 48, 0.3);
+    --theme-card-header-bg: linear-gradient(180deg, rgba(217, 228, 242, 0.98) 0%, rgba(247, 251, 255, 0) 100%);
+    --theme-meta-border: #8da5c8;
+    --theme-meta-bg: #d9e5f8;
+    --theme-meta-text: #193f7b;
+    --theme-status-border: #95aac4;
+    --theme-status-bg: rgba(243, 248, 254, 0.92);
+    --theme-status-shadow: 0 18px 42px -28px rgba(15, 27, 48, 0.24);
     --theme-canvas-bg:
-      linear-gradient(180deg, rgba(241, 245, 250, 0.98), rgba(233, 239, 246, 0.94)),
-      rgba(229, 236, 244, 0.82);
+      linear-gradient(180deg, rgba(221, 231, 243, 0.98), rgba(200, 213, 230, 0.94)),
+      rgba(189, 203, 222, 0.82);
+    --theme-primary-bg: hsl(216 96% 52%);
+    --theme-primary-hover: hsl(216 100% 45%);
+    --theme-primary-shadow: 0 18px 34px -18px rgba(20, 114, 255, 0.48);
+    --theme-secondary-border: #93a8c2;
+    --theme-secondary-bg: rgba(222, 230, 241, 0.92);
+    --theme-secondary-hover-bg: rgba(212, 223, 237, 0.98);
+    --theme-outline-bg: rgba(245, 249, 254, 0.9);
+    --theme-outline-text: #24374f;
+    --theme-outline-hover-bg: rgba(225, 235, 247, 0.96);
+    --theme-outline-hover-text: #0d2547;
+    --theme-outline-shadow: 0 12px 26px -20px rgba(15, 27, 48, 0.26);
+    --theme-ghost-hover-bg: rgba(199, 213, 231, 0.72);
+    --theme-input-bg: rgba(248, 251, 255, 0.94);
+    --theme-input-disabled-bg: rgba(212, 221, 234, 0.92);
+    --theme-input-shadow: 0 8px 22px -18px rgba(15, 27, 48, 0.28);
+    --theme-selection-bg: rgba(208, 225, 249, 0.92);
   }
 
   .dark {

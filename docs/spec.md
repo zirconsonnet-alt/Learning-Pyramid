@@ -95,7 +95,7 @@
 本规格出现的常用语义类型（非穷尽，但应覆盖全文使用）：
 
 * ID 类（`xxxId` 或同类标识符）：`ProjectId`、`InstanceId`、`LearningObjectNodeId`、`RecallPointId`、`LearningTaskId`、`LearningTaskNodeId`、`RangeId`（实现可复用旧 `FocusSetId` 的底层类型）、`ReviewTaskId`、`ConvergenceId`、`ConvergenceRuleId`、`ReviewChainId`、`ReviewTaskQueueId`、`LayerId`、`DimensionId`、`JudgementOptionId`、`AggregationEventId`（4.4.5）、`MediaAssetId`、`AsrArtifactId`。
-* 枚举类（`Enum`）：`ProjectState`、`LayerMode`、`ContentBlockKind`、`ReviewChainTemplateItemKind`。
+* 枚举类（`Enum`）：`ProjectState`、`RecallPointState`、`LayerMode`、`ContentBlockKind`、`ReviewChainTemplateItemKind`。
   * 增补：`InstancePresence`、`FsSyncPolicy`、`MaterialSourceKind`。
 * 标量/值域类（`Scalar`）：`PurePath`、`Timestamp`、`LabelVector = {0,1}^{|D|}`（判别映射的值域；等价表示为长度为 `|D|` 的 0/1 向量）、`RichContent`、`ContentBlock`、`ReviewChainTemplate`、`ReviewChainTemplateItem`、`LayerConfig`。
 * 校验结果类（`Result`）：`ValidationResult`、`ValidationCode`（0b.7.2/0b.7.3）。
@@ -103,6 +103,7 @@
 枚举/常量取值清单：
 
 * `ProjectState = {ACTIVE, DELETED}`
+* `RecallPointState = {ACTIVE, DELETED}`
 * `ReviewTaskState = {PENDING, DONE}`（3.1）
 * `ConvergenceState = {IN_PROGRESS, TERMINATED}`（3.2）
 * `ReviewChainState = {IN_PROGRESS, TERMINATED}`（3.3）
@@ -112,13 +113,13 @@
 * `ValidationCode = {OK, NOT_FOUND, UNREACHABLE, INVALID_INPUT}`（0b.7.2/0b.7.3）
 * `ContentBlockKind = {TEXT, IMAGE}`（0a.12）
 * `ReviewChainTemplateItemKind = {CONVERGENCE, REVIEW_TASK}`（1.0.5 / 4.3.2）
-* `AuditEventKind = {PROJECT_CREATED, PROJECT_DELETED, ADD_INSTANCE, ADD_LEARNING_OBJECT_LEAF, ADD_LEARNING_OBJECT_CONTAINER, SYNC_LEARNING_OBJECTS_FROM_FS, SET_PROJECT_MATERIAL_SOURCE_BINDING, BULK_REMAP_RECALL_POINTS_INSTANCE, SUBMIT_LEARNING_TASK, EDIT_RECALL_POINT, EDIT_LEARNING_TASK, EDIT_PROJECT_CONFIG, EXECUTOR_COMMIT_REVIEW_TASK, MANUAL_ROLL_UP, REQUEST_ASR}`（4.6；最小集合；实现可在保持兼容前提下增补，但不得改变既有值语义）
+* `AuditEventKind = {PROJECT_CREATED, PROJECT_DELETED, EDIT_PROJECT, ADD_INSTANCE, ADD_LEARNING_OBJECT_LEAF, ADD_LEARNING_OBJECT_CONTAINER, SYNC_LEARNING_OBJECTS_FROM_FS, SET_PROJECT_MATERIAL_SOURCE_BINDING, BULK_REMAP_RECALL_POINTS_INSTANCE, SUBMIT_LEARNING_TASK, EDIT_RECALL_POINT, DELETE_RECALL_POINT, EDIT_LEARNING_TASK, EDIT_PROJECT_CONFIG, EXECUTOR_COMMIT_REVIEW_TASK, MANUAL_ROLL_UP, REQUEST_ASR}`（4.6；最小集合；实现可在保持兼容前提下增补，但不得改变既有值语义）
 * `AuditResultCode = {OK}`（1.8 / 4.6；本规格仅强制记录成功提交的审计事件）
 * `SessionMode = {READ_ONLY, READ_WRITE}`（0b.1.6）
 
 * `InstancePresence = {PRESENT, MISSING}`（1.1.1）
 * `FsSyncPolicy = {DISABLED, STARTUP_SYNC, MANUAL_SYNC}`（1.0.4 / 0b.1.5b / 4.5）
-* `MaterialSourceKind = {SERVER_FS, BROWSER_LOCAL}`（1.0.4a / 0b.1.5b / 4.5）
+* `MaterialSourceKind = {SERVER_FS, BROWSER_LOCAL, MANUAL}`（1.0.4a / 0b.1.5b / 4.5）
 
 ---
 
@@ -209,7 +210,7 @@
 * 项目 bootstrap 的最小产物（强约束）：
   * 在 `project_id` 作用域内持久化且仅持久化一条 `ReviewTaskQueue` 记录，满足 `queue_id == GLOBAL_QUEUE`。
   * 在 `project_id` 作用域内持久化且仅持久化一条 `ProjectStorageConfig` 记录，且 `project_root` 非空、`learning_object_root` 非空（见 1.0.4）。
-  * 在 `project_id` 作用域内持久化且仅持久化一条 `ProjectMaterialSourceBinding` 记录；其默认值必须写死为 `source_kind == SERVER_FS`（见 1.0.4a）。
+  * 在 `project_id` 作用域内持久化且仅持久化一条 `ProjectMaterialSourceBinding` 记录；其默认值必须写死为 `source_kind == SERVER_FS`，但若 `create_project(...)` 显式指定初始材料源类型，则必须写入该显式值（见 1.0.4a / 4.5）。
   * 在 `project_id` 作用域内持久化且仅持久化一条 `ProjectConfig` 记录（见 1.0.5）；其默认值必须写死为：  
     - `layer_index = 0` 的 `review_chain_template == [CONVERGENCE]`（等价于 4.3.2 的默认行为）；  
     - `layer_index = 0` 的 `aggregation_threshold == (K_node=10, K_point=200)`（用于初始化 Layer 的控制字段；聚合时读取 Layer 当前值，见 4.4.2）。  
@@ -229,11 +230,13 @@
 
 目的  
 当项目启用“材料源同步/导入”能力时，系统必须将该项目当前 `ProjectMaterialSourceBinding` 指向的权威材料源视为 `LearningObjectNode` 树与 `Instance` 集合的唯一结构事实源。0b.1.5b 协议负责把材料源快照归一化为相对路径集合，并据此原子重建学习对象树、创建新增 `Instance`、以及将未再出现的 `Instance` 标记为 `MISSING`。  
+当 `source_kind == MANUAL` 时，本协议不适用；该项目的 `LearningObjectNode/Instance` 仅通过 4.5 的显式手工写入口维护，系统不得为其假定任何文件系统或浏览器目录快照。  
 
 术语（强约束）  
 - `source_kind == SERVER_FS`：权威材料源为服务端本地目录 `resolve(project_root / learning_object_root)`。  
 - `source_kind == BROWSER_LOCAL`：权威材料源为“当前浏览器中已授权并绑定到该项目的本地目录快照”；服务端不得持久化该本地目录的绝对路径，只能接收其显示标签 `source_root_label/root_title` 与一组相对文件路径作为显式导入输入。  
-- 下文凡称“项目启用 0b.1.5b 协议”，均指：`ProjectMaterialSourceBinding.source_kind` 指向的权威材料源处于启用状态；其中 `SERVER_FS` 的启用条件为 `ProjectStorageConfig.fs_sync_policy != DISABLED`，`BROWSER_LOCAL` 仅允许通过显式导入入口触发。  
+- `source_kind == MANUAL`：权威材料集合与学习对象树由显式手工写入口维护；`material_id`/`relative_path` 可为项目内稳定的虚拟标识，不要求对应任何可达本地文件。  
+- 下文凡称“项目启用 0b.1.5b 协议”，均指：`ProjectMaterialSourceBinding.source_kind` 指向的权威材料源处于启用状态；其中 `SERVER_FS` 的启用条件为 `ProjectStorageConfig.fs_sync_policy != DISABLED`，`BROWSER_LOCAL` 仅允许通过显式导入入口触发，`MANUAL` 永远不构成“启用 0b.1.5b 协议”。  
 
 一致性与原子性（强约束）  
 - 同步/导入必须通过一次系统内部 `MutationSession(project_id, READ_WRITE)` + 单次 `commit()` 原子完成；任一步失败则整体回滚，对外不可见（0b.1.2）。  
@@ -249,6 +252,10 @@
   - 系统启动时不得把服务端 `project_root / learning_object_root` 误当作该项目的权威材料源做隐式扫描。  
   - 系统启动时不得因为“浏览器本地目录尚未重新授权/当前无导入输入”而拒绝项目进入可读写就绪态；若此前已有已提交导入结果，则必须继续把该结果视为当前已提交事实。  
   - 系统必须仅通过 4.5 的 `import_learning_objects_from_browser_scan(...)` 对外入口接收浏览器侧显式导入输入；不得为 `BROWSER_LOCAL` 提供启动期自动同步。  
+- 当 `source_kind == MANUAL` 时：  
+  - 系统不得执行任何自动同步或隐式导入。  
+  - 系统不得把 `project_root / learning_object_root`、浏览器授权目录、或其他外部目录误当作该项目的权威材料源。  
+  - 已提交的 `LearningObjectNode/Instance` 必须持续作为当前事实，直到用户通过 4.5 的显式手工写入口修改它们。  
 
 `SERVER_FS` 输入语义（强约束）  
 - 扫描根目录 `abs_root := resolve(project_root / learning_object_root)`；其中 `project_root` 来自 `ProjectStorageConfig.project_root`（1.0.4）。  
@@ -595,6 +602,8 @@ READ_ONLY（只读会话；强约束）
 
 * `ProjectRepository.add(session: MutationSession, project: Project) -> None`
   * 新增；若 `project_id` 已存在，抛 `PreconditionFailure`。
+* `ProjectRepository.update(session: MutationSession, project: Project) -> None`
+  * 更新既有项目；最小实现只允许改写 `title`，`project_id/created_at/state/deleted_at` 必须保持与更新前已提交值一致；若项目不存在，抛 `NotFound`。
 * `ProjectRepository.get(session: MutationSession, project_id: ProjectId) -> Project`
   * 不存在抛 `NotFound`。
 * `ProjectRepository.maybe_get(session: MutationSession, project_id: ProjectId) -> Optional[Project]`
@@ -665,12 +674,13 @@ READ_ONLY（只读会话；强约束）
 #### 1.0.4a ProjectMaterialSourceBinding（项目材料源绑定）
 
 用途  
-在 `project_id` 作用域内持久化“当前权威材料源如何生成 `Instance/LearningObjectNode`”这一控制事实。当前最小实现中，该对象允许在 `SERVER_FS` 与 `BROWSER_LOCAL` 两种权威材料源之间切换，并通过统一控制面约束 0b.1.5b 协议采用哪一条材料导入路径。
+在 `project_id` 作用域内持久化“当前权威材料源如何生成 `Instance/LearningObjectNode`”这一控制事实。当前最小实现中，该对象允许在 `SERVER_FS`、`BROWSER_LOCAL` 与 `MANUAL` 三种材料管理模式之间切换，并通过统一控制面约束 0b.1.5b 协议采用哪一条材料导入路径，或明确声明该项目完全由手工材料事实维护。
 
 存储字段  
 - `project_id: ProjectId`
 - `source_kind: MaterialSourceKind`
-  - 语义：当前权威材料源类型；最小实现中取值必须为 `SERVER_FS` 或 `BROWSER_LOCAL`。
+  - 语义：当前权威材料源类型；最小实现中取值必须为 `SERVER_FS`、`BROWSER_LOCAL` 或 `MANUAL`。
+  - 语义补充：当 `source_kind == MANUAL` 时，`Instance/LearningObjectNode` 不由 0b.1.5b 的快照同步维护，而只由 4.5 的显式写入口维护。
 - `source_root_label: Optional[str]`
   - 语义：材料源根目录的展示标签；可用于 UI 展示或审计摘要。
   - 强约束：该字段不得参与路径规范化、排序、ID 生成或同构判定。
@@ -685,7 +695,7 @@ READ_ONLY（只读会话；强约束）
   - 语义：upsert；若已存在则覆盖更新（覆盖 `source_kind/source_root_label/updated_at`）。
   - 写前条件（强约束；0b.5）：
     - `binding.project_id == session.project_id`（不得跨项目写入）。
-    - `binding.source_kind ∈ {SERVER_FS, BROWSER_LOCAL}`。
+    - `binding.source_kind ∈ {SERVER_FS, BROWSER_LOCAL, MANUAL}`。
 
 读接口  
 - `get(session: MutationSession) -> ProjectMaterialSourceBinding`
@@ -693,7 +703,7 @@ READ_ONLY（只读会话；强约束）
 
 一致性与校验  
 - 索引不变式：同一 `project_id` 作用域内必须且只能存在一条 `ProjectMaterialSourceBinding` 记录（由项目 bootstrap 最小产物保证，0b.1.5a）。
-- 更新该绑定不得隐式重建 `Instance/LearningObjectNode`；既有已提交树与实例集合必须保持不变，直到下一次显式成功导入或同步完成。
+- 更新该绑定不得隐式重建 `Instance/LearningObjectNode`；既有已提交树与实例集合必须保持不变，直到下一次显式成功导入、同步完成，或在 `source_kind == MANUAL` 下收到新的显式手工写入。
 
 <a id="toc-1-0-5"></a>
 
@@ -812,27 +822,28 @@ Non-retroactive guarantee（强约束；可测试口径）
 #### 1.1.1 数据模型
 
 用途  
-表示一份可访问材料的最小引用单位。
+表示一份可被系统稳定引用的最小材料单位。该材料既可以对应可访问的数字文件，也可以对应手工登记的非文件材料（如书本、纸质讲义、题册等）。
 
 存储字段  
 - `project_id: ProjectId`
 - `instance_id: InstanceId`
   - 语义：实例唯一标识
 - `material_id: PurePath`
-  - 语义：材料定位/标识
+  - 语义：项目内稳定的材料定位/标识
   - 约束（强约束）：当项目启用 0b.1.5b 的同步/导入协议时，`material_id` 必须等于该材料相对当前权威材料源根路径的相对路径（`PurePath`；POSIX 语义），由 0b.1.5b 协议产生。
+  - 语义补充：当当前 `ProjectMaterialSourceBinding.source_kind == MANUAL` 时，`material_id` 允许仅作为项目内稳定的虚拟标识使用；它必须保持 POSIX 文本规范化，但不要求映射到任何可达本地文件路径。
   - 写入：若 `material_id` 输入为 `str`，实现必须以**稳定且跨平台一致**的规则转换为 `PurePath`（强约束：必须使用 POSIX 语义的 `PurePosixPath` 作为唯一规范化实现）：
     - 先执行字符串归一化：将 `\` 统一替换为 `/`（仅做分隔符归一，不做可达性探测与外部访问）。
     - 再以 `PurePosixPath(normalized)` 构造并存储为 `PurePath`。
     - 禁止在写入期做可达性探测、外部访问或隐式修复。
 
 - `presence: InstancePresence`
-  - 语义：该材料在“最近一次成功提交的权威材料源快照”中的存在性标记（`PRESENT | MISSING`）。
-  - 写入来源（强约束）：当项目启用 0b.1.5b 的同步/导入协议时，该字段仅允许由 0b.1.5b 协议写入；对外入口不得直接改写。
+  - 语义：该材料在“最近一次成功提交的权威材料源快照”中的存在性标记（`PRESENT | MISSING`）；当当前 `source_kind == MANUAL` 时，该字段只表示该 `Instance` 记录当前仍被项目保留。
+  - 写入来源（强约束）：当项目启用 0b.1.5b 的同步/导入协议时，该字段仅允许由 0b.1.5b 协议写入；当当前 `source_kind == MANUAL` 时，显式手工写入口创建的新 `Instance` 必须写入默认值 `PRESENT`，系统不得因为缺少本地文件而隐式改写为 `MISSING`。
   - 默认值（强约束）：`PRESENT`（新建 Instance 时）。
 - `last_seen_at: Optional[Timestamp]`
-  - 语义：最近一次在同步扫描中被观测到的时间戳；当 `presence == MISSING` 时允许为 `None` 或保留旧值。
-  - 写入来源（强约束）：同上，仅允许由同步/导入协议写入。
+  - 语义：最近一次在同步扫描中被观测到的时间戳；当 `presence == MISSING` 时允许为 `None` 或保留旧值。对于手工材料，允许始终为 `None`。
+  - 写入来源（强约束）：当项目启用 0b.1.5b 的同步/导入协议时，同步/导入协议负责维护；对手工材料，该字段允许保持 `None` 且不得成为写前条件失败原因。
 
 
 派生字段  
@@ -874,7 +885,10 @@ Non-retroactive guarantee（强约束；可测试口径）
     - `presence`（`PRESENT/MISSING`）只表达“最近一次成功同步/导入的权威材料源快照中该路径是否存在”；0b.1.5b 协议负责更新该字段。  
     - 文件暂不可访问、权限受限、或当前运行时暂不可播放，均不得写成 `MISSING`；这些只属于 `validate_material_reachable(...) == UNREACHABLE` 的运行时可达性语义。  
     - 丢失材料不得导致 Instance 被删除（否则会破坏 RecallPoint 强引用）；只能标记为 `MISSING`，并由用户手动迁移相关 RecallPoint 的 `anchor.instance_id`。  
-  - `validate_material_reachable(session, instance_id)` 仍为系统必备显式校验接口：其实现应至少满足：当 `presence == MISSING` 时返回 `UNREACHABLE`；其余探测细节由实现决定，但不得改写既有已提交事实。  
+  - 当当前 `ProjectMaterialSourceBinding.source_kind == MANUAL` 时：  
+    - 系统不得因为 `material_id` 无法映射到本地文件、或当前设备上不存在对应材料，而把该 `Instance` 视为无效。  
+    - 对纸质/外部材料，`RecallPoint.anchor.instance_id` 仍可合法强引用此类 `Instance`。  
+  - `validate_material_reachable(session, instance_id)` 仍为系统必备显式校验接口：其实现应至少满足：当 `presence == MISSING` 时返回 `UNREACHABLE`；其余探测细节由实现决定，但不得改写既有已提交事实。对于手工材料，实现不得仅因“无本地文件可探测”而返回 `UNREACHABLE`。  
   - 系统不得在读路径触发隐式校验或隐式修复。
 
 ---
@@ -937,6 +951,7 @@ Non-retroactive guarantee（强约束；可测试口径）
 - `children` 的顺序是权威事实源（authoritative order）；对已提交状态，该顺序必须保持稳定。  
 - `children` 中不允许出现重复的 `child_id`（同一容器内也不允许）。  
 - `children` 允许为空序列；此时该容器的覆盖实例序列为空（见下文派生定义）。  
+- 当项目未启用 0b.1.5b 协议时，空容器可作为稳定的手工挂载点/纲目节点存在；其本身不绑定 `Instance`，但可用于组织书本、章节、题册等非文件材料。
 - 同一容器下的子节点应保持同质：要么全是叶子，要么全是容器（不混杂；当 `children` 为空时同质性约束按 vacuous truth 视为成立）。
   - Leaf/Container 的判定以 `LearningObjectNodeRepository` 中对 `child_id` 的解析结果之对象类型为准；无法解析视为校验失败（提交期；见 1.2.3）。
 
@@ -1041,11 +1056,11 @@ Queries 失败语义（强约束；用于实现一致性）
 #### 1.3.1 数据模型
 
 用途
-定位到某实例材料内部的一个位置，用于把复述点锚定在材料上。
+定位到某实例材料内部的一个位置，用于把复述点锚定在材料上。该位置既可以是系统可理解的位置编码，也可以是不透明的人类文本锚点。
 
 字段
 * `instance_id: InstanceId`
-* `position: str`（位置编码；格式由材料类型决定）
+* `position: str`（位置编码或不透明文本锚点；格式由材料类型决定）
 
 派生字段
 * `anchor_repr(anchor) -> str := f"{instance_id}:{position}"`
@@ -1064,6 +1079,7 @@ Queries 失败语义（强约束；用于实现一致性）
 非目标
 
 * `position` 的规范格式不在本 domain 强制；上层可定义 UI 规范化或显式校验接口，但不得把该类校验并入系统级 `commit()` 强制集合（0b.7.1/0b.7.2）。
+* `position` 允许是不透明的人类文本，例如 `第123页 第4题`、`p.56 #2`、`Chapter 3 Example 1`；系统必须按原样持久化与展示，不得要求其可被语义解析。
 
 ---
 
@@ -1083,6 +1099,10 @@ Queries 失败语义（强约束；用于实现一致性）
 - `recall_point_id: RecallPointId`  
 - `created_at: Timestamp`
   - 语义：创建时间戳（UTC；系统生成，见 0a.10）。
+- `state: RecallPointState`
+  - 语义：复述点当前状态；默认值必须为 `ACTIVE`。
+- `deleted_at: Optional[Timestamp]`
+  - 语义：逻辑删除（墓碑删除）时间戳；`state == ACTIVE` 时必须为 `None`，`state == DELETED` 时必须非空。
 - `question: RichContent`  
 - `answer: RichContent`  
 - `insights: Tuple[RichContent, ...]`
@@ -1107,23 +1127,31 @@ Queries 失败语义（强约束；用于实现一致性）
   - 写前检查：必须满足 1.4.3 的 Write-time preconditions（其中 Anchor 的前置条件见 1.3.1）；额外写前条件（强引用）：`InstanceRepository` 可解析 `anchor.instance_id`；失败为 `PreconditionFailure` 且不产生任何写入（0b.5）。  
 - `update(session: MutationSession, rp: RecallPoint) -> None`
   - 允许更新既有 RecallPoint。可更新字段为 `question`、`answer`、`anchor`；`insights` 不可通过 `update` 覆盖、删除或重排（只允许通过 `append_insight` 追加，既有顺序保持稳定）。`recall_point_id` 不可变。  
+  - 强约束：`state/deleted_at` 不可通过 `update` 修改；墓碑删除只能通过 `mark_deleted(...)` 发生。  
   - NotFound：若 `recall_point_id` 不存在，必须抛 `NotFound`。
-  - 写前检查：必须满足 1.4.3 的 Write-time preconditions（其中 Anchor 的前置条件见 1.3.1）；额外写前条件（强引用）：`InstanceRepository` 可解析 `anchor.instance_id`；失败为 `PreconditionFailure` 且不产生任何写入（0b.5）。
+  - 写前检查：必须满足 1.4.3 的 Write-time preconditions（其中 Anchor 的前置条件见 1.3.1）；额外写前条件（强引用）：`InstanceRepository` 可解析 `anchor.instance_id`，且目标 RecallPoint 当前 `state == ACTIVE`；失败为 `PreconditionFailure` 且不产生任何写入（0b.5）。
   - 并发写口径继承 0b.4（single-writer），因此 update 不需要版本/CAS；其行为在串行写事务序列下定义。
 
 - `append_insight(session: MutationSession, recall_point_id: RecallPointId, insight: RichContent) -> None`
   - 语义：将 `insight` 追加到目标 RecallPoint 的 `insights` 尾部（append-only；顺序稳定）。  
   - NotFound：若 `recall_point_id` 不存在，必须抛 `NotFound`。  
   - 写前检查（强约束；0b.5）：  
+    - 目标 RecallPoint 当前 `state == ACTIVE`；若为 `DELETED`，必须抛 `PreconditionFailure`。  
     - `insight` 必须满足 0a.12 的 RichContent 写前条件。  
     - 若 `insight` 含 `IMAGE` 内容块，则其 `asset_id` 必须能在 `MediaAssetRepository` 中解析到；否则必须抛 `PreconditionFailure`，且不产生任何 staged 写入。  
+
+- `mark_deleted(session: MutationSession, recall_point_id: RecallPointId, deleted_at: Timestamp) -> None`
+  - 语义：将目标 RecallPoint 标记为逻辑删除（墓碑删除）；提交生效后对象仍必须可解析。
+  - NotFound：若 `recall_point_id` 不存在，必须抛 `NotFound`。
+  - 幂等语义（强约束）：若目标已处于 `DELETED`，允许幂等返回成功，且不得改写任何字段。
 
 
 
 读接口  
-- `get(session: MutationSession, recall_point_id: RecallPointId) -> RecallPoint`：不存在则抛 `NotFound`。  
+- `get(session: MutationSession, recall_point_id: RecallPointId) -> RecallPoint`：不存在则抛 `NotFound`；`DELETED` 的墓碑对象仍必须返回。  
 - `maybe_get(session: MutationSession, recall_point_id: RecallPointId) -> Optional[RecallPoint]`  
 - `all(session: MutationSession) -> Sequence[RecallPoint]`
+  - 语义：返回该项目内全部已提交 RecallPoint（包含 `ACTIVE` 与 `DELETED`）；墓碑对象不得在仓库层被隐式隐藏。
 
 <a id="toc-1-4-3"></a>
 
@@ -1134,6 +1162,8 @@ Queries 失败语义（强约束；用于实现一致性）
 
 写前条件  
 - `recall_point_id` 非空。  
+- `state == ACTIVE`。  
+- `deleted_at is None`。  
 - `question` 必须为合法 RichContent（0a.12；不得为空）。  
 - `answer` 必须为合法 RichContent（0a.12；不得为空）。  
 - `anchor.instance_id` 非空。  
@@ -1146,7 +1176,8 @@ Queries 失败语义（强约束；用于实现一致性）
 - `commit()` 失败：必须整体回滚且对外不可见；会话进入失败关闭态，不得复用。  
 - `get`：不存在抛 `NotFound`。  
 - `add`：ID 已存在为 `PreconditionFailure`（且不产生任何写入）。  
-- `update`：ID 不存在抛 `NotFound`。  
+- `update`：ID 不存在抛 `NotFound`；目标为 `DELETED` 时抛 `PreconditionFailure`。  
+- `append_insight`：目标为 `DELETED` 时抛 `PreconditionFailure`。  
 
 跨仓库可解析性（强引用；提交生效必须可解析）
 
@@ -1158,6 +1189,13 @@ Queries 失败语义（强约束；用于实现一致性）
 
 更新语义（强约束）  
 - RecallPoint 更新只改变该 RecallPoint 的内容事实；系统不对其他对象做隐式级联修改或重排。任何引用该 `recall_point_id` 的 `LearningTask.recall_point_ids`、RangeSnapshot 快照、既有 ReviewTask 的 `input_range_id`/`result_range_id` 均不因 RecallPoint 更新而变化。  
+
+删除语义（强约束；墓碑删除）
+- `RecallPoint` 的删除必须为逻辑删除（墓碑删除），不得物理删除单条记录；项目删除（4.1.7）是唯一允许清除墓碑对象的路径。
+- `mark_deleted(...)` 成功提交后，目标 RecallPoint 必须满足：`state == DELETED` 且 `deleted_at` 为调用时提供的系统时间戳；其 `question/answer/insights/anchor/created_at` 保持既有已提交值不变。
+- `DELETED` 的 RecallPoint 仍必须可通过 `get/maybe_get/all` 解析，以维持既有 `LearningTask`、`RangeSnapshot`、`ReviewTask`、`RecallPointReviewRecord`、`AsrArtifact` 等历史引用的完整性。
+- 非追溯性（强约束）：删除不得追溯改写任何既有 `LearningTask.recall_point_ids`、`RangeSnapshot.recall_point_ids`、既有 `ReviewTask.input_range_id/result_range_id`，也不得取消、重排或缩短任何已创建但尚未执行的 `ReviewTask` 输入范围；这些对象仍按其历史已提交事实继续存在。
+- 自删除提交生效起，该 RecallPoint 不得再进入任何新的 `LearningTask.recall_point_ids`、任何新的 `covered_rp_ids(...)`、任何新的 `seed_range_id` / `result_range_id`、任何新的聚合上推范围、任何推荐候选，以及任何节点作用域的“当前内容”导出结果。
 
 ---
 
@@ -1182,7 +1220,10 @@ Queries 失败语义（强约束；用于实现一致性）
 
 派生字段  
 - `size: int = len(recall_point_ids)`  
-- `covered_instance_id_set(task, recall_points_repo) -> Set[InstanceId]`：遍历 `recall_point_ids`，取其 `anchor.instance_id` 去重
+- `covered_instance_id_set(task, recall_points_repo) -> Set[InstanceId]`
+  - 语义：遍历 `recall_point_ids`，取其 `anchor.instance_id` 去重。
+  - 历史视角（强约束）：该派生量按 `LearningTask.recall_point_ids` 的已提交存储内容解释，不做 `ACTIVE/DELETED` 过滤；若其中某个 `RecallPointId` 仍可解析到墓碑对象，则其 `anchor.instance_id` 仍计入本派生量。
+  - 说明：若需要“当前内容视角”的范围派生，必须使用 1.6.1 的 `covered_rp_ids(...)` 及其下游派生；实现不得把本派生量隐式解释为当前内容视图。
 
 <a id="toc-1-5-2"></a>
 
@@ -1196,11 +1237,11 @@ Queries 失败语义（强约束；用于实现一致性）
 写接口  
 - `add(session: MutationSession, task: LearningTask) -> None`
   - 新增；若 `learning_task_id` 已存在，必须抛 `PreconditionFailure`（0b.5）。  
-  - 写前检查：必须满足 1.5.3 的 Write-time preconditions；失败为 `PreconditionFailure` 且不产生任何写入。  
+  - 写前检查：必须满足 1.5.3 的 `add` 写前条件；失败为 `PreconditionFailure` 且不产生任何写入。  
 - `update(session: MutationSession, task: LearningTask) -> None`
   - 语义：更新既有 LearningTask。最小允许更新字段为 `title`；`learning_task_id` 与 `recall_point_ids` 在本最小规格中视为不可变。  
   - NotFound：若 `learning_task_id` 不存在，必须抛 `NotFound`。  
-  - 写前检查：必须满足 1.5.3 的 Write-time preconditions；失败为 `PreconditionFailure` 且不产生任何写入。  
+  - 写前检查：必须满足 1.5.3 的 `update(title-only)` 写前条件；失败为 `PreconditionFailure` 且不产生任何写入。  
 
 读接口  
 - `get(session: MutationSession, learning_task_id: LearningTaskId) -> LearningTask`  
@@ -1209,7 +1250,7 @@ Queries 失败语义（强约束；用于实现一致性）
 
 Queries（常用派生查询的仓库承诺）  
 - `covered_instance_id_set(session: MutationSession, learning_task_id: LearningTaskId, recall_points_repo: RecallPointRepository) -> Set[InstanceId]`  
-  - Postcondition：遍历任务的 `recall_point_ids`，取对应 RecallPoint 的 `anchor.instance_id` 去重。  
+  - Postcondition：按历史视角遍历任务的 `recall_point_ids`，取对应 RecallPoint（包含可解析墓碑对象）的 `anchor.instance_id` 去重。  
 
 <a id="toc-1-5-3"></a>
 
@@ -1218,10 +1259,17 @@ Queries（常用派生查询的仓库承诺）
 索引不变式  
 - `learning_task_id` 唯一。  
 
-写前条件  
+`add` 写前条件  
 - `learning_task_id` 非空。  
 - `recall_point_ids` 非空。  
+- `recall_point_ids` 中每个 `RecallPointId` 必须可解析，且其 `RecallPoint.state == ACTIVE`。  
 - `title` 非空（去除首尾空白后必须非空）。  
+
+`update(title-only)` 写前条件  
+- `learning_task_id` 非空。  
+- `title` 非空（去除首尾空白后必须非空）。  
+- `recall_point_ids` 必须与更新前已提交值完全一致；实现不得在该入口中改写、重排、过滤或重新绑定既有 `recall_point_ids`。  
+- 强约束：由于本入口不允许改写 `recall_point_ids`，实现不得因其中历史上已存在但当前 `state == DELETED` 的 RecallPoint 而拒绝 title-only 更新。  
 
 提交期强制校验  
 - 任务内去重（commit 强制）：`recall_point_ids` 中不得出现重复 `RecallPointId`；否则 `commit()` 必须失败并整体回滚，对外不可见。  
@@ -1279,12 +1327,13 @@ Queries（常用派生查询的仓库承诺）
 
 定义  
 给定任一 `node: LearningTaskNodeId`，其覆盖复述点序列定义为：
-- 若 `node` 为叶子节点：返回其 `bound_learning_task_id` 对应 LearningTask 的 `recall_point_ids`。
-- 若 `node` 为容器节点：按 `children` 的顺序进行 DFS 遍历，拼接叶子任务的 `recall_point_ids`，得到一个有序序列。
+- 若 `node` 为叶子节点：返回其 `bound_learning_task_id` 对应 LearningTask 的 `recall_point_ids` 中所有满足 `RecallPoint.state == ACTIVE` 的 ID 子序列（保持原顺序）。
+- 若 `node` 为容器节点：按 `children` 的顺序进行 DFS 遍历，拼接各子节点的 ACTIVE 复述点子序列，得到一个有序序列。
 
 序列稳定性（必须写死的规则）  
 - 遍历顺序以 `LearningTaskNodeRepository` 中的 `children` 顺序为权威。  
 - 去重策略（强约束）：必须**不去重**（完全保留序列语义），以保证 seed_range 与 RangeSnapshot 的 `intern`（内容寻址）语义稳定。  
+- ACTIVE 过滤（强约束）：`covered_rp_ids(...)` 是“当前内容视角”派生结果；历史上仍存在于 `LearningTask.recall_point_ids` 中、但当前已 `DELETED` 的 RecallPoint，必须在该派生结果中被过滤掉。  
 - 与 4.1.6 的关系（语义联动）：若系统强制 4.1.6“复述点归属唯一”，则不同 LearningTask 之间不会共享同一 `RecallPointId`，因此 `covered_rp_ids` 在“不去重”策略下天然不引入跨任务重复；若 4.1.6 不强制，则不同叶子任务可能引用相同 `RecallPointId`，从而 `covered_rp_ids` 可能出现重复 ID，并导致 RangeSnapshot `intern` 的命中与快照规模发生显著变化（潜在膨胀）。  
 
 <a id="toc-1-6-2"></a>
@@ -1364,6 +1413,10 @@ Queries（常用派生查询的仓库承诺）
 - 复习结果范围（ReviewTask.result_range_id）的去重存储；
 - 聚合父节点“覆盖范围”的去重存储（covered_rp_ids -> intern）。
 
+重要声明（强约束）
+- `RangeSnapshot` 是历史快照池，不因 RecallPoint 后续被墓碑删除而自动改写。
+- `RangeSnapshot.recall_point_ids` 中出现 `DELETED` 的 RecallPointId 仍视为合法历史引用；其可解析性口径仅要求该 ID 仍能在 `RecallPointRepository` 中解析到墓碑对象。
+
 存储字段  
 - 结构字段  
   - `project_id: ProjectId`
@@ -1423,6 +1476,7 @@ Queries
 
 显式校验接口 / 非目标  
 - `recall_point_ids` 的可解析性校验必须通过显式校验接口 `validate_recall_point_ids_resolvable(session, range_id) -> ValidationResult` 完成；该校验不得在读路径或 `commit()` 中隐式触发，且不得改写既有已提交事实。  
+- 强约束：对 `validate_recall_point_ids_resolvable(...)` 而言，`DELETED` 的 RecallPoint 仍视为 `resolvable`；只有“无法解析到任何 RecallPoint 对象”才构成 `NOT_FOUND`。  
 
 ---
 
@@ -1511,7 +1565,8 @@ Queries
 - `provider: AsrProvider`
 
 - `recall_point_id: RecallPointId`
-  - 语义：本转写产物围绕的复述点；必须可解析。
+  - 语义：本转写产物围绕的复述点；必须可解析，且在新建产物时其 `RecallPoint.state` 必须为 `ACTIVE`。
+  - 强约束：墓碑对象可为历史引用保留解析性，但不得作为新 `AsrArtifact` 的创建目标。
 - `source_instance_id: InstanceId`
   - 语义：该复述点最终落在的材料实例（由 recall_point.anchor.instance_id 派生并在创建时固化）。
 - `center_ms: int`
@@ -1532,7 +1587,7 @@ Queries
   - 新增；若 `asr_artifact_id` 已存在，抛 `PreconditionFailure`。
   - 写前条件（强约束；0b.5）：
     - `artifact.project_id == session.project_id`；否则必须抛 `PreconditionFailure`。
-    - `RecallPointRepository.get(session, artifact.recall_point_id)` 必须可解析；若不可解析（`NotFound`），对外必须映射为 `PreconditionFailure`，且失败不得产生任何 staged 写入。
+    - `RecallPointRepository.get(session, artifact.recall_point_id)` 必须可解析，且目标 `RecallPoint.state == ACTIVE`；若不可解析（`NotFound`）或目标为 `DELETED`，对外必须映射为 `PreconditionFailure`，且失败不得产生任何 staged 写入。
     - `InstanceRepository.get(session, artifact.source_instance_id)` 必须可解析；若不可解析（`NotFound`），对外必须映射为 `PreconditionFailure`，且失败不得产生任何 staged 写入。
 - `upsert_by_cache_key(session: MutationSession, artifact: AsrArtifact) -> AsrArtifactId`
   - 语义：按缓存键复用或写入。若命中同一缓存键，则返回既有 `asr_artifact_id` 且不得改写既有 segments（保持可追溯）。  
@@ -1545,7 +1600,7 @@ Queries
 
 一致性与校验  
 - `asr_artifact_id` 项目内唯一。  
-- `recall_point_id` / `source_instance_id` 必须可解析（写前条件）。  
+- `recall_point_id` / `source_instance_id` 必须可解析（写前条件）；其中 `recall_point_id` 在新建产物时还必须满足其 `RecallPoint.state == ACTIVE`。  
 - ASR 外部接口可达性不得进入提交期强制集合；失败必须以显式错误返回给调用方，并且不得留下部分 staged 写入（0b.5）。  
 
 <a id="toc-1-9"></a>
@@ -1700,6 +1755,8 @@ Write-set（写入产物；同一 commit 原子生效）
 1) RecallPoint
 - 为每个输入 item 分配新的 `RecallPointId`，写入：
   - `created_at`：由系统时钟生成的 UTC 时间戳（ms 语义；0a.10）。
+  - `state = ACTIVE`
+  - `deleted_at = None`
   - `question, answer, anchor`
 
 2) LearningTask
@@ -1772,7 +1829,7 @@ Read-set（读取项）
 * `rp_ids: Sequence[RecallPointId]`：输入范围的复述点序列（顺序即遍历顺序）
 * `focus_rp_ids: Sequence[RecallPointId]`：
 
-  * `focus_rp_ids = [rp_ids[i] for i if can_recall[i] == 0]`（保序）
+  * `focus_rp_ids = [rp_ids[i] for i if can_recall[i] == 0 and RecallPointRepository.get(session, rp_ids[i]).state == ACTIVE]`（保序）
 
 Write-set（写入产物；同一 commit 原子生效）
 
@@ -1795,12 +1852,14 @@ Write-set（写入产物；同一 commit 原子生效）
 
 3. 重点列表生成（不能复述项）
 
-* `focus_rp_ids = [rp_ids[i] for i if can_recall[i] == 0]`
+* `focus_rp_ids = [rp_ids[i] for i if can_recall[i] == 0 and RecallPointRepository.get(session, rp_ids[i]).state == ACTIVE]`
+  * 强约束：历史输入范围中的 `DELETED` RecallPoint 不得再进入新的 `result_range_id`；若全部“不能复述项”都已 `DELETED`，则本次结果必须等价于空重点（`result_range_id = None`）。
 
 强保证（commit 生效时保证）
 
 * 长度一致：`len(can_recall) == len(rp_ids)`。
 * `focus_rp_ids` 保序：保持输入 `rp_ids` 的相对顺序。
+* `focus_rp_ids` 只允许包含当前 `state == ACTIVE` 的 RecallPointId。
 * 若 `focus_rp_ids` 非空：对应的 `result_range_id` 指向一个可解析的 RangeSnapshot（由 intern 保证）。
 * 任一强制校验失败则整体回滚（0b.1.2）。
 
@@ -1836,7 +1895,7 @@ SCHEDULING_EFFECT = NONE（强约束）
 - `request_asr(session: MutationSession, recall_point_id: RecallPointId, center_ms: int, pre_ms: int, post_ms: int, provider: AsrProvider=WHISPER) -> AsrArtifactId`
   - 会话要求：`session.mode == READ_WRITE`。  
   - 写前条件：  
-    - `RecallPointRepository.get(session, recall_point_id)` 可解析；否则 `NotFound`。  
+    - `RecallPointRepository.get(session, recall_point_id)` 可解析，且其 `RecallPoint.state == ACTIVE`；若不可解析则 `NotFound`，若目标为 `DELETED` 则必须返回 `PreconditionFailure`。  
     - 必须能从该 RecallPoint 的 anchor 推导出 `source_instance_id`（材料实例）；否则 `PreconditionFailure`。  
     - `pre_ms >= 0` 且 `post_ms >= 0`，窗口长度不超过上限；否则 `PreconditionFailure`。  
     - `ProjectConfig.external_services.asr` 可缺失；若缺失，系统必须尝试自动发现并拉起本机 Whisper 运行时。仅当显式配置缺失且本机运行时也不可用时，才返回 `PreconditionFailure`。  
@@ -1852,6 +1911,7 @@ SCHEDULING_EFFECT = NONE（强约束）
 说明（强约束）  
 - 本协议不定义“视频容器解析/解码”细节；其属于实现内部能力。对外可观察语义仅限于：成功则产生 `AsrArtifact(segments)`，失败则不产生任何写入。  
 - 当 `ProjectConfig.external_services.asr` 缺失时，自动发现并拉起本机 Whisper 运行时属于协议允许的默认实现，而不是 spec 偏差。  
+- 墓碑边界（强约束）：`DELETED` 的 RecallPoint 仍可作为历史事实被读取或被既有 `AsrArtifact` 引用，但不得再通过本协议生成新的 ASR 产物。  
 - 若材料非音视频或无法提取音频，则必须 `PreconditionFailure`，并给出可解释错误摘要（例如“不支持的材料类型”）。  
 
 
@@ -2034,16 +2094,20 @@ ReviewChain 提供“推进一步”的本地语义：只描述队首元素在�
 派生定义（不落库）：
 
 可推进态（advanceable）满足任一：
-- 队首为空（`head_index` 已越过队列末尾）
-- 队首为 `CONVERGENCE` 且该 Convergence 在其本地语义下“可推进”
-- 队首为 `REVIEW_TASK` 且其 `state == DONE`（可出队）
+- 对当前链调用一次 4.3.5 `ReviewChain Step` 会返回 `READY_EXISTING(review_task_id)`、`PRODUCED_NEW(review_task_id)` 或 `NO_EFFECT`
+- 直观等价口径：
+  - 队首为空（`head_index` 已越过队列末尾；对应 `NO_EFFECT`）
+  - 队首为 `REVIEW_TASK` 且其 `state == PENDING`（对应 `READY_EXISTING(...)`）
+  - 队首为 `REVIEW_TASK` 且其 `state == DONE`（允许在单链内惰性清理后继续暴露后续可见产物或空链）
+  - 队首为 `CONVERGENCE` 且该 Convergence 在其本地语义下“可推进”（即可生成下一轮任务，或可终止并继续单链惰性清理）
 
 阻塞态（blocked）：
-- 队首为 `REVIEW_TASK` 且其 `state == PENDING`
+- 仅当对当前链调用一次 4.3.5 `ReviewChain Step` 会返回 `BLOCKED` 时，视为 blocked。
 
 与 ReviewTaskQueue 的关系（定义层面；非系统门禁）：  
-- ReviewChain.queue 中的 REVIEW_TASK 项是“可被入队的候选”。
-- 当队首为 CONVERGENCE 且其推进返回 PRODUCED(t) 时，t 成为队列候选并必须按 T1’ 确保入队；t 不要求出现在 ReviewChain.queue 中。
+- ReviewChain.queue 中的 `REVIEW_TASK` 项，以及由 `CONVERGENCE` 新生成的 ReviewTask，都是“可被执行的候选”。
+- 当 4.3.5 返回 `READY_EXISTING(t)` 或 `PRODUCED_NEW(t)` 时，`t` 成为本次 4.3.4 `Orchestrator Tick` 的批处理候选；系统必须在同一次 Tick 的统一落队阶段按 T1’ 将其落入全局 `ReviewTaskQueue`。  
+  `t` 不要求事先出现在 `ReviewChain.queue` 中。
 
 <a id="toc-3-3-4"></a>
 
@@ -2087,8 +2151,9 @@ ReviewTaskQueue 是暂存待执行 ReviewTaskId 的先进先出队列。队列�
 
 本节只定义不变量的语义，不定义其强制机制：
 
-- T1’（队首触发入队，定义层面）  
-  当系统对某条 ReviewChain 执行推进（ReviewChain Step，4.3.5），且该链队首元素为 `state == PENDING` 的 ReviewTask 时，该 `review_task_id` 必须被 enqueue 到队列尾部（若已在队列中则不得重复入队）。
+- T1’（可见产物批量入队，定义层面）  
+  当系统在一次 `Orchestrator Tick`（4.3.4）内处理某条 ReviewChain，且 4.3.5 返回 `READY_EXISTING(t)` 或 `PRODUCED_NEW(t)` 时，`t` 必须先进入本次 Tick 的 `produced_batch`。  
+  当该 Tick 完成对全部目标链的处理后，系统必须按 `produced_batch` 的顺序将这些 `ReviewTaskId` 依次落入项目内全局队列；落队必须使用幂等语义，且不得改变既有位置稳定性。
 
 - Q1（完备性与唯一性，定义层面）  
   任一已入队的 ReviewTaskId 必须且仅能在队列中出现一次，且其对应 ReviewTask 的 `state == PENDING`。
@@ -2104,7 +2169,7 @@ ReviewTaskQueue 是暂存待执行 ReviewTaskId 的先进先出队列。队列�
 强约束：本仓库所有队列操作均隐式作用于 `session.project_id` 作用域内且 `queue_id == GLOBAL_QUEUE` 的唯一队列实例；实现不得暴露对其他 `queue_id` 或其他 `project_id` 的读写接口。
 
 队列操作承诺（用于支撑第 4 章协议的最小接口面）：
-- `enqueue_if_absent(session: MutationSession, review_task_id: ReviewTaskId) -> None`：原子幂等入队（追加到队尾）。若该 `review_task_id` 已在队列中出现，则不得重复入队且不得改变其既有位置；用于实现 4.3.5 的“确保入队”并支撑 Q1（唯一性）。
+- `enqueue_if_absent(session: MutationSession, review_task_id: ReviewTaskId) -> None`：原子幂等入队（追加到队尾）。若该 `review_task_id` 已在队列中出现，则不得重复入队且不得改变其既有位置；用于实现 4.3.4 的统一落队阶段并支撑 Q1（唯一性）。
 - `remove_by_id(session: MutationSession, review_task_id: ReviewTaskId) -> None`：按 id 移除（从队列中删除该 `review_task_id` 的出现）；用于实现 4.3.3 的 Q2 原子“`PENDING -> DONE` + 出队”闭环。  
   - 幂等语义（强约束）：若该 `review_task_id` 不在队列中，则不得产生写入且不得报错。
 
@@ -2148,7 +2213,7 @@ ReviewTaskQueue 是暂存待执行 ReviewTaskId 的先进先出队列。队列�
   - [4.3.2 内部协议：学习任务登记到编排器（Task Register）](#toc-4-3-2)
   - [4.3.3 内部协议：复习任务执行结果落库（ReviewTask Commit）](#toc-4-3-3)
   - [4.3.4 内部协议：编排推进（Orchestrator Tick）](#toc-4-3-4)
-  - [4.3.5 内部协议：复习链推进（ReviewChain Step）](#toc-4-3-5)
+- [4.3.5 内部协议：复习链推进到首个可见产物（ReviewChain Step）](#toc-4-3-5)
   - [4.3.6 内部协议：收敛推进（Convergence Step）](#toc-4-3-6)
 - [4.4 Layer 子系统：聚合（Aggregation Subsystem）](#toc-4-4)
   - [4.4.1 聚合队列（AggregationQueue，Layer-owned State）](#toc-4-4-1)
@@ -2178,7 +2243,7 @@ ReviewTaskQueue 是暂存待执行 ReviewTaskId 的先进先出队列。队列�
 
 项目内全局队列单例：每个 `project_id` 作用域内恰好存在一个 `ReviewTaskQueue` 实例；所有入队/出队均作用于该项目内全局队列。`queue_id` 为系统常量（例如 `GLOBAL_QUEUE`）；该实例必须在项目 bootstrap 阶段（0b.1.5a）完成初始化；之后永不更换。
 
-入队幂等与位置稳定性（强约束）：对任一 `review_task_id`，一旦其已在队列中出现，则后续的“确保入队”（4.3.5 / 3.4.4）不得重复入队，且不得改变其既有队列位置；该约束用于保证队列稳定性与协议可重复执行。
+入队幂等与位置稳定性（强约束）：对任一 `review_task_id`，一旦其已在队列中出现，则后续的“确保入队”（4.3.4 / 3.4.4）不得重复入队，且不得改变其既有队列位置；该约束用于保证队列稳定性与协议可重复执行。
 
 提交期强制校验口径（强约束；0b.7.1 / 4.1.2）
 
@@ -2221,6 +2286,11 @@ ReviewTaskQueue 是暂存待执行 ReviewTaskId 的先进先出队列。队列�
   - 若在 session 内执行门禁判定，也必须在产生任何 staged 写入之前拒绝（失败不产生任何写入）。  
 - 该门禁不得作为系统级 `commit()` 的提交期强制校验项。  
 
+统一澄清（强约束）
+- “项目内全局 `ReviewTaskQueue` 为空”是 `Orchestrator Tick`（4.3.4）的**进入门禁**；其判定口径固定为 Tick 开始时的同一一致读视图。
+- Tick 执行过程中由本次 Tick 收集到的 `produced_batch` 不得反向阻断同一 Tick 对后续链的处理。
+- `produced_batch` 中的任务只有在 Tick 的统一落队阶段生效；生效后才重新受到本小节门禁约束。
+
 <a id="toc-4-1-4"></a>
 
 #### 4.1.4 链存在性与登记（每个 entry_node 恰一条链，且必须被管理）
@@ -2233,6 +2303,10 @@ ReviewTaskQueue 是暂存待执行 ReviewTaskId 的先进先出队列。队列�
 - 将该 chain 登记到“entry_node 所属层”的 Orchestrator 管理范围。
 
 系统中每个 `entry_node` 恰有一条 ReviewChain。
+
+旧链/新链排序事实源（强约束）
+- “旧链优先”的唯一权威事实源必须是持久化登记序号；实现不得从 `Layer.orchestrator_managed_review_chain_ids` 的 ID 排序、内存插入顺序或其他隐式顺序推导旧/新关系。
+- 本规格写死：同一 `project_id + target_layer_index` 作用域内，`EntryRegistration.registration_seq` 越小表示链越旧。
 
 提交期强制校验口径（强约束；0b.7.1 / 4.1.4）
 
@@ -2264,16 +2338,20 @@ ReviewTaskQueue 是暂存待执行 ReviewTaskId 的先进先出队列。队列�
   - `entry_node: LearningTaskNodeId`
   - `target_layer_index: int`
   - `review_chain_id: ReviewChainId`
+  - `registration_seq: int`
+    - 语义：同一 `project_id + target_layer_index` 作用域内的链登记顺序号。
+    - 强约束：必须严格单调递增、唯一；`registration_seq` 越小表示链越旧。
 
 仓库接口（最小）
 - `EntryRegistryRepository.add(session: MutationSession, reg: EntryRegistration) -> None`
   - 新增；若同一 `project_id` 下 `entry_node` 已存在则抛 `PreconditionFailure`（0b.5）。
   - （推荐写前条件；用于更早失败、但不改变提交期闭包）：若同一 `project_id` 下 `review_chain_id` 已被其他 entry 登记，则抛 `PreconditionFailure`（失败不产生任何写入）。
+  - （强约束；写前条件）：若同一 `project_id + target_layer_index` 下 `registration_seq` 已存在，则必须抛 `PreconditionFailure`（失败不产生任何写入）。
 - `EntryRegistryRepository.get(session: MutationSession, entry_node: LearningTaskNodeId) -> EntryRegistration`
   - 不存在则抛 `NotFound`。
 - `EntryRegistryRepository.maybe_get(session: MutationSession, entry_node: LearningTaskNodeId) -> Optional[EntryRegistration]`
 - `EntryRegistryRepository.all(session: MutationSession) -> Sequence[EntryRegistration]`
-  - 返回顺序：按 `id_canonical_text(entry_node)` 升序（确定性）。
+  - 返回顺序：先按 `target_layer_index` 升序，再按 `registration_seq` 升序，最后按 `id_canonical_text(entry_node)` 升序（确定性）。
 
 3) 链存在性事实源
 - `ReviewChainRepository.get(session: MutationSession, review_chain_id: ReviewChainId) -> ReviewChain`（3.3.4）。
@@ -2404,7 +2482,7 @@ LayerMode 枚举：
 
 强约束：
 - Orchestrator Tick（4.3.4）不对外暴露；只能由 Layer 在内部按本小节触发策略调用；系统不提供用户/上层显式触发 Tick 的接口/路径。
-- 本章中“Tick 返回空产物”指：本次 Tick 未产生任何新的 ReviewTask 入队（项目内全局队列仍为空）。
+- 本章中“Tick 返回空产物”指：本次 Tick 的 `produced_batch` 为空，因此统一落队阶段不得对项目内全局 `ReviewTaskQueue` 产生写入（项目内全局队列在本次 Tick 结束后仍为空）。
 
 触发源 A（entry 产生）：
 - 当本层产生新的 `entry_node: LearningTaskNodeId`（叶子或容器）并完成 Task Register（4.3.2）后：
@@ -2454,7 +2532,7 @@ LayerMode 枚举：
 
 #### 4.3.1 编排器（Orchestrator）
 
-Orchestrator 是 Layer-owned 组件，管理多条 ReviewChain，并在满足前置条件时批量驱动这些链推进，产生 ReviewTask 并入队。
+Orchestrator 是 Layer-owned 组件，管理多条 ReviewChain，并在满足前置条件时按“旧链优先”批量驱动这些链推进到首个可见产物；所有产物必须在同一次 Tick 的末尾统一入队。
 
 前置条件/门禁（与队列、链可推进态一致）：
 - 门禁：项目内全局 `ReviewTaskQueue` 为空
@@ -2463,6 +2541,7 @@ Orchestrator 是 Layer-owned 组件，管理多条 ReviewChain，并在满足前
 
 一致性要求：
 - “全链可推进态”必须排除任何会导致 Convergence Step 返回 `BLOCKED` 的链首收敛；即当队首为 `CONVERGENCE` 时，要求该 Convergence 在 3.2.4 语义下可生成或可终止。
+- “advanceable” 的判定标准写死为：对该链调用一次 4.3.5 `ReviewChain Step` 是否会返回非 `BLOCKED` 结果；单链协议只负责暴露可见产物，不负责直接把产物写入全局队列。
 
 “全链可推进态”的判定算法（强约束；用于避免实现分叉）  
 Orchestrator 的门禁判定必须使用与 3.3.3（advanceable/blocked）一致的可计算口径，并满足以下要求：
@@ -2471,9 +2550,11 @@ Orchestrator 的门禁判定必须使用与 3.3.3（advanceable/blocked）一致
 * TERMINATED 处理：`TERMINATED` 的链视为 advanceable（应跳过，不得阻塞）。  
 * 判定步骤（对每条被管理的链）：  
   - 若链队首为空：advanceable。  
-  - 若队首为 `REVIEW_TASK(t)`：当且仅当 `t.state == DONE` 时 advanceable；`t.state == PENDING` 为 blocked。  
+  - 若队首为 `REVIEW_TASK(t)`：  
+    - 若 `t.state == PENDING`：advanceable；4.3.5 将返回 `READY_EXISTING(t)`。  
+    - 若 `t.state == DONE`：advanceable；4.3.5 允许在单链内继续惰性清理，并最终返回 `READY_EXISTING(...)`、`PRODUCED_NEW(...)` 或 `NO_EFFECT`。  
   - 若队首为 `CONVERGENCE(c)`：必须读取 `c` 及其末尾 ReviewTask（若存在）以判定：  
-    - 若 `c.state == TERMINATED`：advanceable。  
+    - 若 `c.state == TERMINATED`：advanceable；4.3.5 可继续惰性清理后续链项。  
     - 若 `c.review_task_ids` 非空且末尾 ReviewTask `state == PENDING`：blocked。  
     - 其余情形：advanceable（表示本轮可生成或可终止）。  
 
@@ -2488,6 +2569,7 @@ Orchestrator 的门禁判定必须使用与 3.3.3（advanceable/blocked）一致
 写入（同一 commit 原子生效）：
 - 计算首轮范围（确定性）：
   - `seed_rp_ids := LearningTaskNodeRepository.covered_rp_ids(session, entry_node)`（见 1.6.1；序列稳定性必须由 children 顺序诱导）
+  - 若 `seed_rp_ids` 为空：必须抛 `PreconditionFailure`；系统不得对空范围调用 `RangeSnapshotRepository.intern(...)`。
 - `seed_range_id := RangeSnapshotRepository.intern(session, tuple(seed_rp_ids))`
 - 读取该层配置（确定性；控制面输入，不得引入外部读取）：
   - `cfg := ProjectConfigRepository.get(session)`
@@ -2498,14 +2580,18 @@ Orchestrator 的门禁判定必须使用与 3.3.3（advanceable/blocked）一致
   - 对 `template.items` 依次实例化并追加到 `queue`：
     - 若 `kind == CONVERGENCE`：创建一个新的 `Convergence(seed_range_id = seed_range_id)`，并追加 `CONVERGENCE(c)`。
     - 若 `kind == REVIEW_TASK(count=n)`：创建 `n` 个 `ReviewTask(input_range_id = seed_range_id, state = PENDING)`，并依次追加 `REVIEW_TASK(t)`。
-  - 说明：上述创建的 ReviewTask 不要求在本协议内立即入队；其入队由 ReviewChain Step（4.3.5）的 T1’ 规则负责。
-- 创建 ReviewChain（初始队列为上步构建的 `queue`）
-- 注册到本层 Orchestrator
+  - 说明：上述创建的 ReviewTask 不要求在本协议内立即入队；其入队只能由后续一次 `Orchestrator Tick`（4.3.4）在统一落队阶段按 T1’ 完成。
+- 创建 `ReviewChain(review_chain_id)`（初始队列为上步构建的 `queue`）
+- 分配登记顺序号（强约束；旧链排序事实源）：
+  - `registration_seq := 1 + max({reg.registration_seq | reg.target_layer_index == target_layer_index}, default=0)`
+  - 上述读取与分配必须在与本次 Task Register 相同的 mutation session / 一致读视图内完成。
+  - 若同一事务内向同一 `target_layer_index` 连续登记多条新链，后登记者必须取得更大的 `registration_seq`；实现不得复用或回填序号。
+- 创建 `EntryRegistration(entry_node, target_layer_index, review_chain_id, registration_seq)`，并将该 `review_chain_id` 注册到本层 Orchestrator 管理范围
 - 将 `entry_node` 入队到目标层的 `AggregationQueue`：`AggregationQueueRepository.enqueue(session, target_layer_index, entry_node)`
 
 强约束（写死；用于封闭聚合候选来源）
 - 任一经由 Task Register 成功登记的 `entry_node`，必须在同一系统事务内进入其所属层 `target_layer_index` 的 `AggregationQueue`。
-- 该入队与 ReviewChain/Convergence/EntryRegistration 的创建必须同事务原子生效；任一步失败则整体回滚。
+- `registration_seq` 的分配与 ReviewChain/Convergence/EntryRegistration 的创建、以及上述 `AggregationQueue` 入队，必须同事务原子生效；任一步失败则整体回滚。
 
 说明：
 - 上述 `AggregationQueue` 入队是 4.4 聚合子系统的候选集闭环的一部分；实现不得改由其他异步路径、后台扫描或隐式修复补入。
@@ -2545,14 +2631,37 @@ Orchestrator 的门禁判定必须使用与 3.3.3（advanceable/blocked）一致
 门禁：
 - 项目内全局 `ReviewTaskQueue` 为空 + 全链可推进
 
+推进顺序（强约束）
+- 本层 Orchestrator 必须按被管理链对应的 `EntryRegistration.registration_seq` 升序推进；即旧链必须先于新链。
+- 强约束：链间推进顺序不得从 `Layer.orchestrator_managed_review_chain_ids` 的 ID 排序推导；该字段仅是“被管理集合”的事实源，不是“旧链优先”的顺序源。
+
 一致读视图/事务性要求（TOCTOU 防护）：
 - Orchestrator Tick 的门禁判定（“队列为空 + 全链可推进”）、对链执行 ReviewChain Step（4.3.5）（从而间接调用 Convergence Step，4.3.6）以及本次 Tick 产生的全部写入，必须在同一系统事务内基于同一一致读视图完成（见 0b.1 的 mutation session + commit 语义）；实现不得在“先判定可推进、后另起事务推进”的方式下运行 Tick。
 
+执行阶段（强约束；同一系统事务内原子完成）
+1) 令 `ordered_chains` 为当前 `target_layer_index` 下全部受管链按 `registration_seq` 升序排列后的序列。
+2) 初始化 `produced_batch := []`。
+3) 依次处理 `ordered_chains` 中每条链：
+   - 调用 4.3.5 `ReviewChain Step`。
+   - 若返回 `READY_EXISTING(t)` 或 `PRODUCED_NEW(t)`，则将 `t` 追加到 `produced_batch`。
+   - 若返回 `NO_EFFECT`，继续处理下一条链。
+   - 若返回 `BLOCKED`，则视为门禁判定与链状态失配；本次 Tick 必须失败且不得留下任何 staged 写入。
+   - 每条链在一次 Tick 中最多向 `produced_batch` 贡献一个 `ReviewTaskId`。
+4) 当 `ordered_chains` 全部处理完成后，必须按 `produced_batch` 的顺序依次调用 `ReviewTaskQueueRepository.enqueue_if_absent(session, review_task_id)`，将其统一落入项目内全局队列。
+
+返回语义（强约束）
+- 若 `produced_batch` 为空：Tick 返回空产物。
+- 若 `produced_batch` 非空：Tick 返回该批产物，且这些任务在项目内全局队列中的 FIFO 顺序必须与 `produced_batch` 完全一致。
+
+用户可感知顺序保证（强约束）
+- 当 `layer_mode == AUTO_TICK_ON_ENTRY` 且新 `entry_node` 完成 Task Register 后触发 Orchestrator Tick 时，本次 Tick 必须先处理所有更旧的受管链，再处理该新链。
+- 对模板 `[REVIEW_TASK(count=1), CONVERGENCE]`，若提交 `B` 时旧链 `A` 的上一轮 ReviewTask 已 `DONE` 且项目内全局队列为空，则本次 Tick 后新增任务的队列顺序必须为：`A` 的下一轮任务先于 `B` 的首轮任务。
+
 <a id="toc-4-3-5"></a>
 
-#### 4.3.5 内部协议：复习链推进（ReviewChain Step）
+#### 4.3.5 内部协议：复习链推进到首个可见产物（ReviewChain Step）
 
-定义对单条链推进一次的控制面协议入口（可调用 Convergence Step，并处理出队/终止）。
+定义对单条链“连续推进直到首个可见产物、空链或阻塞”为止的控制面协议入口（可调用 Convergence Step，并处理惰性清理）。
 
 调用门禁：
 - 本协议仅在 4.1.3 门禁允许时被调用（即项目内全局 `ReviewTaskQueue` 为空）。
@@ -2560,30 +2669,35 @@ Orchestrator 的门禁判定必须使用与 3.3.3（advanceable/blocked）一致
 输入：
 - `review_chain_id: ReviewChainId`
 
+输出（Result，纯协议返回值，不持久化）：
+- `READY_EXISTING(review_task_id: ReviewTaskId)`：链内已有可直接执行的 `PENDING` ReviewTask
+- `PRODUCED_NEW(review_task_id: ReviewTaskId)`：经由 `Convergence Step` 新生成了一个 ReviewTask
+- `NO_EFFECT`：本次推进未得到可见产物（例如链被清空、惰性清理后无后续项）
+- `BLOCKED`：本链当前不可生成可执行任务
+
 读/写（同一 commit 原子生效）：
-- 读取队首元素 `head_item`：
-  - 若队首为空：返回空（不产生任何写入）。  
-  - 若队首为 `REVIEW_TASK`：  
-    - 若其 `state == PENDING`：按 T1’ **确保入队**（3.4.3 / 3.4.4；幂等且不得改变既有位置），并返回（不前进 head）。  
-    - 若其 `state == DONE`：链 head 前进一格（出队该元素），并返回。  
-  - 若队首为 `CONVERGENCE(c)`：  
-    - 调用 Convergence Step(c)（4.3.6），得到 `result`：  
-      - 若 `result == PRODUCED(t)`：  
-        - 不改变本链 queue/head_index（队首保持为该 `CONVERGENCE(c)`）。  
-        - 按 T1’ **确保入队**（将 `t` 入项目内全局 ReviewTaskQueue，幂等且位置稳定），并返回。  
-      - 若 `result == TERMINATED`：  
-        - 链 head 前进一格（出队该 `CONVERGENCE` 项），并返回。  
-      - 若 `result == BLOCKED`：  
-        - 返回空（不产生写入）。备注：在 Orchestrator Tick 门禁下该分支不应发生；若发生，说明门禁判定或链状态失配。
+- 强约束：本协议不得直接调用 `ReviewTaskQueueRepository.enqueue_if_absent(...)`，也不得直接改写项目内全局 `ReviewTaskQueue`；全局队列写入只能由 4.3.4 的统一落队阶段完成。
+- 推进规则（强约束）：
+  - 循环读取当前队首元素 `head_item`：
+    - 若队首为空：返回 `NO_EFFECT`。  
+    - 若队首为 `REVIEW_TASK(t)`：  
+      - 若其 `state == DONE`：链 `head_index` 前进一格（出队该元素），并继续循环。  
+      - 若其 `state == PENDING`：返回 `READY_EXISTING(t)`；不得在本协议内入队。  
+    - 若队首为 `CONVERGENCE(c)`：  
+      - 调用 `Convergence Step(c)`（4.3.6），得到 `result`：  
+        - 若 `result == PRODUCED(t)`：返回 `PRODUCED_NEW(t)`；不得在本协议内入队。  
+        - 若 `result == TERMINATED`：链 `head_index` 前进一格（出队该 `CONVERGENCE` 项），并继续循环。  
+        - 若 `result == BLOCKED`：返回 `BLOCKED`。  
 
 说明：  
-- 本协议只负责“队首入队触发 + 出队”的控制面闭环；执行器对队列 head 的取用与 DONE 落库由 ReviewTask Commit（4.3.3）定义。  
+- 本协议不是“推进一步”，而是“推进到首个用户可见产物”；因此允许在单链内部连续跨过 `DONE` 的 `REVIEW_TASK` 与已终止的 `CONVERGENCE`。  
+- 在 Orchestrator Tick 的门禁已成立时，本协议不应返回 `BLOCKED`；若返回则说明门禁判定或链状态失配。  
 
 <a id="toc-4-3-6"></a>
 
 #### 4.3.6 内部协议：收敛推进（Convergence Step）
 
-定义在控制面中推进 Convergence 的协议入口：在满足 3.2.4 本地语义时创建 ReviewTask，并把该 ReviewTaskId 追加到对应 Convergence 的 `review_task_ids`；是否入队由 ReviewChain Step 的 T1’ 规则触发（3.4.3 / 4.3.5）。
+定义在控制面中推进 Convergence 的协议入口：在满足 3.2.4 本地语义时创建 ReviewTask，并把该 ReviewTaskId 追加到对应 Convergence 的 `review_task_ids`；该任务是否进入本次 Tick 的 `produced_batch` 以及何时入队，由 4.3.5 / 4.3.4 的批处理语义决定。
 
 输入：
 - `convergence_id: ConvergenceId`
@@ -2611,7 +2725,7 @@ Orchestrator 的门禁判定必须使用与 3.3.3（advanceable/blocked）一致
 - 在 Orchestrator Tick 的门禁成立（项目内全局队列为空 + 全链可推进）时，Convergence Step 不得返回 `BLOCKED`；若出现则视为门禁或链状态判定实现错误。
 
 说明：
-- 本协议只负责生成 ReviewTaskId 并写入 Convergence 的轮次序列；是否入队由 ReviewChain Step 的 T1’ 规则触发。
+- 本协议只负责生成 ReviewTaskId 并写入 Convergence 的轮次序列；不得直接改写项目内全局 `ReviewTaskQueue`。是否进入队列只由 4.3.4 的统一落队阶段决定。
 
 ---
 
@@ -2676,6 +2790,7 @@ CLEARING（两段式循环）：
 
 说明（与复习范围的关系）  
 - 父节点的可复习范围由 `LearningTaskNodeRepository.covered_rp_ids(session, parent_node)` 决定（见 1.6.1），并通过 `RangeSnapshotRepository.intern(session, ...)` 得到 `seed_range_id` 后登记到上层。
+  - 强约束：若 `covered_rp_ids(session, parent_node)` 为空，则本次上推不得继续执行 Task Register；必须视为 `PreconditionFailure`。
 
 随后必须执行 Task Register：
 - 把父 entry_node（LearningTaskNodeId）登记到上层 Layer（保持依赖单向）
@@ -2740,6 +2855,7 @@ CLEARING（两段式循环）：
 
 3) 对新父节点执行 Task Register（4.3.2）并入上层聚合队列（4.4.4）
 - 计算 `seed_rp_ids := LearningTaskNodeRepository.covered_rp_ids(session, parent_node_id)`（见 1.6.1；不去重；顺序由 children 诱导的 DFS 稳定决定）。
+- 若 `seed_rp_ids` 为空：必须抛 `PreconditionFailure`；不得继续创建上层 `seed_range_id` / Convergence / ReviewChain。
 - `seed_range_id := RangeSnapshotRepository.intern(session, tuple(seed_rp_ids))`
 - 创建 Convergence、创建 ReviewChain（初始队列含该 Convergence）、注册到上层 Layer 的 Orchestrator 管理范围。
 - 将 `parent_node_id` 入队到上层 Layer 的 `aggregation_queue`：`AggregationQueueRepository.enqueue(session, upper_layer_index, parent_node_id)`（如上层不存在则初始化创建）。
@@ -2801,19 +2917,23 @@ Failure 语义
   - `SCHEDULING_EFFECT = NONE`
 
 2) 项目管理（不产生调度副作用）
-- `create_project(title: str, project_root: str) -> ProjectId`
+- `create_project(title: str, project_root: str, initial_source_kind: MaterialSourceKind = SERVER_FS) -> ProjectId`
   - 语义：在一次系统级事务内创建 `Project` 并完成该项目 bootstrap（0b.1.5a）。在该成功提交的同一事务内，系统至少必须写入：  
     - `Project`  
     - 项目内全局队列单例 `ReviewTaskQueue(queue_id == GLOBAL_QUEUE)`  
     - `ProjectStorageConfig(project_root = 规范化后的路径, learning_object_root = PurePosixPath("learning_objects"), fs_sync_policy = STARTUP_SYNC)`（见 1.0.4 / 0b.1.5b）  
       - 强约束（写死默认目录名）：`learning_object_root = PurePosixPath("learning_objects")`。  
       - 若实现允许用户配置该相对路径，则必须通过新增白名单入口扩展；在最小版中不得提供该对外配置入口（避免实现分叉）。  
-    - `ProjectMaterialSourceBinding(source_kind = SERVER_FS)`（见 1.0.4a / 0b.1.5b）  
+    - `ProjectMaterialSourceBinding(source_kind = initial_source_kind)`（见 1.0.4a / 0b.1.5b）  
     - `ProjectConfig`（见 1.0.5；必须写入 `layer_index = 0` 的默认配置，并同时写入 `external_services/push_config` 的写死默认值）  
     - 必须初始化 `layer_index = 0` 的 `Layer`（字段默认值见 0b.1.5a）  
     - 必须初始化 `layer_index = 0` 的 `AggregationQueue`（字段默认值见 0b.1.5a）  
+  - 写前条件补充（强约束；0b.5）：`initial_source_kind ∈ {SERVER_FS, BROWSER_LOCAL, MANUAL}`。
   - `SCHEDULING_EFFECT = NONE`
 - `list_projects() -> Sequence[Project]`
+  - `SCHEDULING_EFFECT = NONE`
+- `edit_project(project_id: ProjectId, title: str) -> None`
+  - 语义：在一次系统事务内更新该项目的 `title`；不得改写 `project_id/created_at/state/deleted_at`，不得触发任何调度推进。
   - `SCHEDULING_EFFECT = NONE`
 - `get_project_config(project_id: ProjectId) -> ProjectConfig`
   - 语义：读取并返回该项目的 `ProjectConfig`（1.0.5）；不得产生任何写入。
@@ -2826,6 +2946,7 @@ Failure 语义
   - 约束：
     - 更新绑定本身不得隐式触发 `sync_learning_objects_from_fs(...)`、`import_learning_objects_from_browser_scan(...)` 或任何调度推进。
     - 已提交的 `Instance/LearningObjectNode` 集合必须保持不变，直到后续显式同步或导入成功。
+    - 当 `source_kind == MANUAL` 时，后续材料事实必须仅通过手工写入口维护；系统不得再把目录扫描或浏览器导入视为当前权威事实，除非绑定再次被显式切换。
   - `SCHEDULING_EFFECT = NONE`
 - `delete_project(project_id: ProjectId) -> None`
   - 语义：按 4.1.7 删除该项目作用域内全部持久化对象。
@@ -2834,17 +2955,17 @@ Failure 语义
 3) 对象创建/导入（不产生调度副作用）
 - `add_instance(project_id: ProjectId, material_id: str) -> InstanceId`
   - 语义：在 `project_id` 作用域内创建一个新的 `Instance` 并返回其 `instance_id`。
-  - 约束：`material_id` 的规范化与存储语义必须满足 1.1.1（使用 POSIX 语义 `PurePosixPath` 规范化；不得做可达性探测、外部访问或隐式修复）。
+  - 约束：`material_id` 的规范化与存储语义必须满足 1.1.1（使用 POSIX 语义 `PurePosixPath` 规范化；不得做可达性探测、外部访问或隐式修复）。当当前 `source_kind == MANUAL` 时，`material_id` 可以仅作为稳定的虚拟材料标识使用，例如书名/册别/章节路径样式标识。
   - 额外约束（强约束）：当项目启用 0b.1.5b 的同步/导入协议时，本入口必须抛 `PreconditionFailure`（`Instance` 集合由材料源协议唯一维护，0b.1.5b）。
   - `SCHEDULING_EFFECT = NONE`
 - `add_learning_object_leaf(project_id: ProjectId, parent_id: Optional[LearningObjectNodeId], instance_id: InstanceId, title: str) -> LearningObjectNodeId`
   - 语义：在 `project_id` 作用域内创建一个新的 `LearningObjectLeaf` 并返回其 `node_id`。
-  - 约束：不得触发任何调度推进；树一致性由 1.2.3 的提交期强制校验保证。
+  - 约束：不得触发任何调度推进；树一致性由 1.2.3 的提交期强制校验保证。当当前 `source_kind == MANUAL` 时，本入口可用于把书本、题册、讲义等非文件材料挂到手工目录树下。
   - 额外约束（强约束）：当项目启用 0b.1.5b 的同步/导入协议时，本入口必须抛 `PreconditionFailure`（`LearningObject` 树由材料源协议唯一维护，0b.1.5b）。
   - `SCHEDULING_EFFECT = NONE`
 - `add_learning_object_container(project_id: ProjectId, parent_id: Optional[LearningObjectNodeId], children: Sequence[LearningObjectNodeId], title: str) -> LearningObjectNodeId`
   - 语义：在 `project_id` 作用域内创建一个新的 `LearningObjectContainer` 并返回其 `node_id`。
-  - 约束：不得触发任何调度推进；`children` 顺序为权威顺序；树一致性由 1.2.3 的提交期强制校验保证。
+  - 约束：不得触发任何调度推进；`children` 顺序为权威顺序；树一致性由 1.2.3 的提交期强制校验保证。允许 `children == ()`；当当前 `source_kind == MANUAL` 时，空容器可作为手工纲目/空目录挂载点使用。
   - 额外约束（强约束）：当项目启用 0b.1.5b 的同步/导入协议时，本入口必须抛 `PreconditionFailure`（`LearningObject` 树由材料源协议唯一维护，0b.1.5b）。
   - `SCHEDULING_EFFECT = NONE`
 
@@ -2879,13 +3000,13 @@ Failure 语义
   - `SCHEDULING_EFFECT = NONE`
 
 - `list_recall_points_by_instance(project_id: ProjectId, instance_id: InstanceId) -> Sequence[RecallPointId]`
-  - 语义：返回所有 `RecallPoint.anchor.instance_id == instance_id` 的复述点 ID（返回顺序按 `id_canonical_text(recall_point_id)` 升序）。
+  - 语义：返回所有满足 `RecallPoint.anchor.instance_id == instance_id` 且 `RecallPoint.state == ACTIVE` 的复述点 ID（返回顺序按 `id_canonical_text(recall_point_id)` 升序）。
   - `SCHEDULING_EFFECT = NONE`
 
 - `bulk_remap_recall_points_instance(project_id: ProjectId, from_instance_id: InstanceId, to_instance_id: InstanceId, recall_point_ids: Optional[Sequence[RecallPointId]] = None) -> int`
   - 语义：批量将目标 RecallPoint 的 `anchor.instance_id` 从 `from_instance_id` 迁移到 `to_instance_id`；用于用户对 MISSING Instance 的手动修复。
-  - 若 `recall_point_ids` 为空：默认迁移所有引用 `from_instance_id` 的 RecallPoint。
-  - 写前条件（强约束；0b.5）：`from_instance_id/to_instance_id` 必须可解析；建议要求 `to_instance_id.presence == PRESENT`；迁移的 RecallPoint 必须均可解析。
+  - 若 `recall_point_ids` 为空：默认迁移所有满足 `anchor.instance_id == from_instance_id` 且 `state == ACTIVE` 的 RecallPoint。
+  - 写前条件（强约束；0b.5）：`from_instance_id/to_instance_id` 必须可解析；建议要求 `to_instance_id.presence == PRESENT`；迁移的 RecallPoint 必须均可解析，且必须全部满足 `state == ACTIVE`。
   - `SCHEDULING_EFFECT = NONE`
 
 5) 学习提交（会产生调度副作用）
@@ -2895,9 +3016,14 @@ Failure 语义
   - `SCHEDULING_EFFECT = ORCHESTRATION_MUTATING`
   - 门禁：受 4.1.3(a) 约束（项目内全局 ReviewTaskQueue 非空时必须拒绝）。
 
-6) 编辑类写入（不产生调度副作用）
+6) 编辑/删除类写入（不产生调度副作用）
 - `edit_recall_point(project_id: ProjectId, recall_point_id: RecallPointId, question: RichContent, answer: RichContent, anchor: Anchor) -> None`
   - 语义：只调用 `RecallPointRepository.update(...)` 产生业务事实更新；不得调用任一 4.3.x 推进协议；不得创建/入队 ReviewTask。
+  - `SCHEDULING_EFFECT = NONE`
+  - 门禁：允许在队列非空时执行（4.1.3(b)）。
+- `delete_recall_point(project_id: ProjectId, recall_point_id: RecallPointId) -> None`
+  - 语义：在一次系统事务内调用 `RecallPointRepository.mark_deleted(...)` 对目标复述点执行墓碑删除；不得物理删除对象，不得隐式级联改写既有 `LearningTask`、`LearningTaskNode`、`RangeSnapshot`、`ReviewTask`、`Convergence`、`ReviewChain`、`RecallPointReviewRecord` 或 `AsrArtifact`。
+  - 约束：不得调用任一 4.3.x 推进协议；不得创建/入队新的 ReviewTask。
   - `SCHEDULING_EFFECT = NONE`
   - 门禁：允许在队列非空时执行（4.1.3(b)）。
 - `edit_learning_task(project_id: ProjectId, learning_task_id: LearningTaskId, title: str) -> None`
@@ -2936,10 +3062,10 @@ Failure 语义
 
 9) 节点作用域数据导出（不产生调度副作用）
 - `export_recall_points_by_learning_object_node(project_id: ProjectId, node_id: LearningObjectNodeId) -> Sequence[RecallPointData]`
-  - 语义：返回该学习对象节点覆盖到的全部复述点数据；纯读取；返回顺序必须按 `recall_point_id` 升序。
+  - 语义：返回该学习对象节点覆盖到的全部**当前内容**复述点数据；纯读取；必须排除 `state == DELETED` 的 RecallPoint；返回顺序必须按 `recall_point_id` 升序。
   - `SCHEDULING_EFFECT = NONE`
 - `export_recall_points_by_learning_task_node(project_id: ProjectId, node_id: LearningTaskNodeId) -> Sequence[RecallPointData]`
-  - 语义：返回该学习任务节点覆盖到的全部复述点数据；纯读取；返回顺序必须按该节点覆盖顺序稳定返回。
+  - 语义：返回该学习任务节点覆盖到的全部**当前内容**复述点数据；纯读取；其集合必须严格等于 `LearningTaskNodeRepository.covered_rp_ids(...)` 所返回的 ACTIVE RecallPoint 集合；返回顺序必须按该节点覆盖顺序稳定返回。
   - `SCHEDULING_EFFECT = NONE`
 - `export_asr_by_learning_object_node(project_id: ProjectId, node_id: LearningObjectNodeId) -> Sequence[AsrArtifactData]`
   - 语义：返回该学习对象节点覆盖范围内、当前已提交的全部 ASR 转写产物；纯读取；不得隐式触发新的 ASR 请求。
@@ -2950,12 +3076,12 @@ Failure 语义
 
 10) ASR 转写（不产生调度副作用）
 - `request_asr(project_id: ProjectId, recall_point_id: RecallPointId, center_ms: int, pre_ms: int, post_ms: int, provider: AsrProvider=WHISPER) -> AsrArtifactId`
-  - 语义：按 2.9 生成或复用 `AsrArtifact`。
+  - 语义：按 2.9 生成或复用 `AsrArtifact`；目标 `recall_point_id` 必须对应 `state == ACTIVE` 的 RecallPoint。
   - `SCHEDULING_EFFECT = NONE`
 
 11) 推荐/推送视图（不产生调度副作用）
 - `get_push_candidates(project_id: ProjectId, max_results: int) -> Sequence[RecallPointId]`
-  - 语义：按 4.7 计算推送候选；纯读取，不产生任何持久化写入。
+  - 语义：按 4.7 计算推送候选；候选集合必须只包含 `state == ACTIVE` 的 RecallPointId；纯读取，不产生任何持久化写入。
   - `SCHEDULING_EFFECT = NONE`
 
 
@@ -2991,6 +3117,7 @@ Failure 语义
 事件类型映射（强约束；最小集合）
 - `create_project(...)` -> `PROJECT_CREATED`
 - `delete_project(...)` -> `PROJECT_DELETED`
+- `edit_project(...)` -> `EDIT_PROJECT`
 - `add_instance(...)` -> `ADD_INSTANCE`
 - `add_learning_object_leaf(...)` -> `ADD_LEARNING_OBJECT_LEAF`
 - `add_learning_object_container(...)` -> `ADD_LEARNING_OBJECT_CONTAINER`
@@ -3000,6 +3127,7 @@ Failure 语义
 - `bulk_remap_recall_points_instance(...)` -> `BULK_REMAP_RECALL_POINTS_INSTANCE`
 - `submit_learning_task(...)` -> `SUBMIT_LEARNING_TASK`
 - `edit_recall_point(...)` -> `EDIT_RECALL_POINT`
+- `delete_recall_point(...)` -> `DELETE_RECALL_POINT`
 - `edit_learning_task(...)` -> `EDIT_LEARNING_TASK`
 - `set_layer_config(...)` -> `EDIT_PROJECT_CONFIG`
 - `executor_commit_review_task(...)` -> `EXECUTOR_COMMIT_REVIEW_TASK`
@@ -3026,12 +3154,13 @@ Payload 最小摘要建议（非强制；推荐）
 #### 4.7.1 启用门槛（阈值）
 
 设：
-- `N := |RecallPointRepository.all(session)|`（项目内复述点总数）
+- `N := |{rp ∈ RecallPointRepository.all(session) | rp.state == ACTIVE}|`（项目内 ACTIVE 复述点总数）
 - `T := ProjectConfig.push_config.min_recall_points_to_enable`
 
 强约束：
 - 若 `N < T`：系统必须视为“推送未启用”，`get_push_candidates(...)` 必须返回空列表（或实现定义的确定性退化策略，但不得调用本地模型服务）。  
 - 若 `N >= T`：推送启用；系统允许进入特征向量编码与模型调用路径。
+- 强约束：`state == DELETED` 的 RecallPoint 必须完全排除在推送候选集合、候选排序、特征编码与模型输入之外。
 
 #### 4.7.2 复述点特征向量（最小版，强约束）
 
@@ -3042,6 +3171,7 @@ Payload 最小摘要建议（非强制；推荐）
 
 定义（强约束；写死）
 - 对任一 `recall_point_id`：
+  - 写前约束（读取侧语义）：进入本节编码路径的 `recall_point_id` 必须满足其 `RecallPoint.state == ACTIVE`。
   - 令 `t0 := RecallPoint.created_at`。
   - 令 `R := RecallPointReviewRecordRepository.all_by_recall_point(session, recall_point_id)`，按 `occurred_at` 升序。
   - 仅取 `R` 的末尾至多 `max_history_len` 条（见 ProjectConfig.push_config）。
@@ -3090,13 +3220,16 @@ Payload 最小摘要建议（非强制；推荐）
 
 4.8.2 导出接口语义（强约束）
 
+总原则（强约束）
+- 本节导出接口属于“当前内容视图”；除非未来新增单独的历史导出接口，否则 `state == DELETED` 的 RecallPoint 不得出现在任何导出结果中。
+
 - `export_recall_points_by_learning_object_node(...)`
   - 输入作用域：由 `LearningObjectNodeRepository.covered_instance_id_sequence(...)` 定义。
-  - 返回集合：所有 `anchor.instance_id` 落在该节点覆盖实例集合中的 `RecallPoint`。
+  - 返回集合：所有满足 `anchor.instance_id` 落在该节点覆盖实例集合中且 `state == ACTIVE` 的 `RecallPoint`。
   - 返回顺序：按 `recall_point_id` 升序。
 - `export_recall_points_by_learning_task_node(...)`
   - 输入作用域：由 `LearningTaskNodeRepository.covered_rp_ids(...)` 定义。
-  - 返回集合：该节点覆盖的全部 `RecallPoint`。
+  - 返回集合：该节点覆盖的全部 ACTIVE `RecallPoint`。
   - 返回顺序：必须与 `covered_rp_ids(...)` 的顺序一致。
 - `export_asr_by_learning_object_node(...)`
   - 输入作用域：与 `export_recall_points_by_learning_object_node(...)` 相同。

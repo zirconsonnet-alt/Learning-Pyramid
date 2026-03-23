@@ -1,15 +1,21 @@
 import { useEffect, useMemo, useState } from "react"
+import { useQueries } from "@tanstack/react-query"
 import { FolderTree, ListChecks, RadioTower, Sparkles } from "lucide-react"
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 
+import { getBaseUrl } from "@/ui/api/http"
 import { ApiError } from "@/ui/api/http"
+import { listRecallPointsByInstance } from "@/ui/api/instances"
 import type { Layer } from "@/ui/api/layers"
 import type { Instance } from "@/ui/api/instances"
 import type { LearningTaskNode } from "@/ui/api/learningTaskNodes"
-import { ContentEmptyState, ContentNotice } from "@/ui/components/contentEmptyState"
+import { ContentNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
+import { resolveProjectFile, useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
+import { useAuditLogEvents } from "@/ui/queries/auditLog"
 import { useLearningTaskNodes } from "@/ui/queries/learningTasks"
+import { useSystemCapabilities } from "@/ui/queries/system"
 import {
   useAggregationQueue,
   useInstances,
@@ -18,7 +24,9 @@ import {
   useQueue,
 } from "@/ui/queries/workbench"
 import { useAppStore } from "@/ui/store/appStore"
+import { getLocalDateKey, loadDailyWorkbenchStats } from "@/ui/store/workbenchDailyStats"
 import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
+import { loadVideoDurationMap, saveVideoDurationMs } from "@/ui/store/videoDurations"
 import { useWorkbenchStore } from "@/ui/store/workbenchStore"
 import { cn } from "@/ui/utils"
 import { ComposePane } from "@/views/workbench/components/ComposePane"
@@ -40,31 +48,125 @@ function parseAnchorMs(position: string): number | null {
   return Number.isFinite(n) ? n : null
 }
 
-function StatusStrip(props: { label: string; value: string; hint?: string; warning?: boolean }) {
-  const { label, value, hint, warning = false } = props
+function formatDurationCompact(ms: number) {
+  if (!Number.isFinite(ms) || ms <= 0) return "0m"
+  const totalMinutes = Math.floor(ms / 60000)
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+  if (hours <= 0) return `${Math.max(1, minutes)}m`
+  if (minutes === 0) return `${hours}h`
+  return `${hours}h ${minutes}m`
+}
+
+function parseAuditPayloadCount(payload: string, key: string) {
+  try {
+    const parsed = JSON.parse(payload) as Record<string, unknown>
+    const value = parsed[key]
+    return typeof value === "number" && Number.isFinite(value) ? value : 0
+  } catch {
+    return 0
+  }
+}
+
+function isRelativeMaterialId(materialId: string) {
+  const normalized = String(materialId).replace(/\\/g, "/").trim()
+  if (!normalized) return false
+  if (normalized.startsWith("/")) return false
+  if (/^[A-Za-z]:\//.test(normalized)) return false
+  return !normalized.split("/").some((part) => part === "." || part === "..")
+}
+
+function readMediaDurationMs(src: string) {
+  return new Promise<number>((resolve, reject) => {
+    const video = document.createElement("video")
+    let settled = false
+
+    const cleanup = () => {
+      video.removeEventListener("loadedmetadata", handleLoadedMetadata)
+      video.removeEventListener("error", handleError)
+      video.pause()
+      video.removeAttribute("src")
+      video.load()
+    }
+
+    const finish = (fn: () => void) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      fn()
+    }
+
+    const handleLoadedMetadata = () => {
+      const durationMs = Number.isFinite(video.duration) && video.duration > 0 ? Math.floor(video.duration * 1000) : 0
+      finish(() => resolve(durationMs))
+    }
+
+    const handleError = () => finish(() => reject(new Error("读取媒体 metadata 失败")))
+
+    video.preload = "metadata"
+    video.addEventListener("loadedmetadata", handleLoadedMetadata, { once: true })
+    video.addEventListener("error", handleError, { once: true })
+    video.src = src
+  })
+}
+
+async function resolveInstanceDurationMs(params: {
+  projectId: string
+  instance: Instance
+  serverMediaStreamEnabled: boolean
+  browserLocalMediaEnabled: boolean
+  directoryPermission: "unsupported" | "missing" | "prompt" | "granted" | "denied"
+}) {
+  const { projectId, instance, serverMediaStreamEnabled, browserLocalMediaEnabled, directoryPermission } = params
+  if (serverMediaStreamEnabled) {
+    return await readMediaDurationMs(`${getBaseUrl()}/projects/${projectId}/media/instances/${instance.instanceId}`)
+  }
+  if (!browserLocalMediaEnabled || directoryPermission !== "granted") return null
+  if (!isRelativeMaterialId(instance.materialId)) return null
+
+  const file = await resolveProjectFile(projectId, instance.materialId)
+  if (!file) return null
+
+  const objectUrl = URL.createObjectURL(file)
+  try {
+    return await readMediaDurationMs(objectUrl)
+  } finally {
+    URL.revokeObjectURL(objectUrl)
+  }
+}
+
+function StatusMetricRow(props: { label: string; value: string; emphasize?: boolean }) {
+  const { label, value } = props
   return (
-    <div
-      className={cn(
-        "theme-status-surface flex items-start justify-between gap-4 px-4 py-3",
-        warning && "border-amber-200/70 bg-amber-50/80",
-      )}
-    >
-      <div className="min-w-0">
-        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#5f6f82]">{label}</div>
-        {hint ? <div className="mt-1 text-sm text-muted-foreground">{hint}</div> : null}
+    <div className="flex items-center justify-between gap-4 py-2.5">
+      <div className="text-[13px] font-medium text-[#70839a]">{label}</div>
+      <div className={cn("text-[15px] font-semibold tracking-[-0.02em]", props.emphasize ? "text-[#1f3952]" : "text-[#33495f]")}>
+        {value}
       </div>
-      <div className={cn("theme-meta shrink-0", warning && "border-amber-300 bg-amber-100 text-amber-800")}>{value}</div>
     </div>
   )
 }
 
-function LearningTaskNodeLink(props: { projectId: string; node: LearningTaskNode; sourceLayerIndex?: number }) {
-  const { projectId, node, sourceLayerIndex } = props
+function LearningTaskNodeListItem(props: { projectId: string; node: LearningTaskNode; index: number; sourceLayerIndex?: number }) {
+  const { projectId, node, index, sourceLayerIndex } = props
   const to = `/p/${projectId}/learning-task-nodes/${node.nodeId}`
   return (
-    <Button size="sm" variant="outline" asChild className="max-w-full justify-start rounded-full">
-      <Link to={to}>{formatLearningTaskNodeDisplayTitle(node.title, { sourceLayerIndex })}</Link>
-    </Button>
+    <Link
+      to={to}
+      className="group flex items-start gap-3 rounded-[1.1rem] border border-[#e3e9f1] bg-white px-4 py-3 text-left transition-colors hover:border-primary/20 hover:bg-[#fbfdff]"
+    >
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[#f3f7fc] text-sm font-semibold text-[#2f5d93]">
+        {index}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[15px] font-medium text-[#21384d]">
+          {formatLearningTaskNodeDisplayTitle(node.title, { sourceLayerIndex })}
+        </span>
+        <span className="mt-1 block text-xs text-[#70839a]">
+          待推进 {sourceLayerIndex !== undefined ? `· 来源 L${sourceLayerIndex}` : ""}
+        </span>
+      </span>
+    </Link>
   )
 }
 
@@ -83,16 +185,22 @@ function LayerReviewChainCard(props: {
   const currentNodeIds = aggQ.data?.currentNodeIds ?? []
 
   return (
-    <div className="theme-status-surface rounded-[1.2rem] border border-border/70 p-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="theme-meta border-[#dbe3ec] bg-[#f8fafc] text-[#334155]">L{layer.layerIndex}</div>
-          <div className="theme-meta">
-            {aggQ.isLoading ? "加载中..." : `${candidateCount} 节点`}
+    <div className="rounded-[1.2rem] border border-[#e2e8ef] bg-white p-4 sm:p-5">
+      <div className="flex flex-col gap-3 sm:grid sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center sm:gap-4">
+        <div className="flex min-w-0 items-center">
+          <div className="theme-meta shrink-0 px-4 py-1.5 text-sm font-semibold">
+            L{layer.layerIndex}
+          </div>
+        </div>
+        <div className="min-w-0">
+          <div className="theme-meta max-w-full px-4 py-1.5 text-sm">
+            <span className="truncate">
+              {aggQ.isLoading ? "正在加载节点..." : `${candidateCount} 个待推进节点`}
+            </span>
           </div>
         </div>
         <Button
-          size="sm"
+          className="shrink-0"
           onClick={() => onRollUp(layer.layerIndex)}
           disabled={queueHasGate || isRollingUp || !aggQ.data || candidateCount === 0}
         >
@@ -100,32 +208,31 @@ function LayerReviewChainCard(props: {
         </Button>
       </div>
 
-      <div className="mt-3 flex flex-wrap gap-2">
+      <div className="mt-4 space-y-3">
         {currentNodeIds.length > 0 ? (
-          currentNodeIds.map((nodeId) => {
+          currentNodeIds.map((nodeId, index) => {
             const node = learningTaskNodesById[nodeId]
             if (!node) {
               return (
-                <div key={nodeId} className="rounded-full border px-3 py-2 text-sm text-muted-foreground">
-                  {learningTaskNodesLoading ? "加载学习任务中..." : "节点加载中..."}
+                <div key={nodeId} className="rounded-[1.1rem] border border-[#e3e9f1] bg-[#fbfcfe] px-4 py-3 text-sm text-[#6f7f93]">
+                  {learningTaskNodesLoading ? "正在加载学习任务..." : "节点信息同步中..."}
                 </div>
               )
             }
             return (
-              <LearningTaskNodeLink
+              <LearningTaskNodeListItem
                 key={nodeId}
                 projectId={projectId}
                 node={node}
+                index={index + 1}
                 sourceLayerIndex={Math.max(0, layer.layerIndex - 1)}
               />
             )
           })
         ) : (
-          <ContentEmptyState
-            title={`L${layer.layerIndex} 当前还没有待上推任务`}
-            message="继续录入并提交学习任务，或先完成下游复习；出现可上推任务后会显示在这里。"
-            className="w-full bg-[#f8fafc] px-3 py-3"
-          />
+          <div className="rounded-[1.1rem] border border-dashed border-[#dbe3ec] bg-[#fbfcfe] px-4 py-4">
+            <div className="text-sm font-medium text-[#21384d]">暂无待上推任务</div>
+          </div>
         )}
       </div>
       {aggQ.error ? <div className="mt-2 text-xs text-destructive">{formatApiError(aggQ.error)}</div> : null}
@@ -147,6 +254,7 @@ export function WorkbenchPage() {
 
   const [currentMs, setCurrentMs] = useState(0)
   const [seekTo, setSeekTo] = useState<{ instanceId: string; ms: number; nonce: number } | null>(null)
+  const [centerPanelMode, setCenterPanelMode] = useState<"main" | "rollup">("main")
 
   useEffect(() => {
     if (!pid) return
@@ -163,10 +271,16 @@ export function WorkbenchPage() {
   const learningTaskNodesQ = useLearningTaskNodes(pid)
   const queueQ = useQueue(pid)
   const layersQ = useLayers(pid)
+  const auditLogQ = useAuditLogEvents(pid)
   const rollUpM = useManualRollUp(pid)
+  const capabilitiesQ = useSystemCapabilities()
+  const directoryBinding = useProjectDirectoryBinding(pid)
 
   const selectedInstanceId = ps?.selectedInstanceId ?? null
   const queueHasGate = !!queueQ.data?.headId
+  const queueLength = queueQ.data?.ids.length ?? 0
+  const serverMediaStreamEnabled = capabilitiesQ.data?.serverMediaStreamEnabled ?? false
+  const browserLocalMediaEnabled = capabilitiesQ.data?.browserLocalMediaEnabled ?? false
 
   const instance: Instance | null = useMemo(() => {
     const items = instancesQ.data ?? []
@@ -178,6 +292,36 @@ export function WorkbenchPage() {
     for (const node of learningTaskNodesQ.data ?? []) map[node.nodeId] = node
     return map
   }, [learningTaskNodesQ.data])
+  const [todayPlaybackMs, setTodayPlaybackMs] = useState(() => loadDailyWorkbenchStats(pid).playbackMs)
+  const [videoDurationByInstanceId, setVideoDurationByInstanceId] = useState<Record<string, number>>({})
+  const [durationProbeAttemptedByInstanceId, setDurationProbeAttemptedByInstanceId] = useState<Record<string, true>>({})
+  const [durationProbeInFlightInstanceId, setDurationProbeInFlightInstanceId] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!pid) return
+    setTodayPlaybackMs(loadDailyWorkbenchStats(pid).playbackMs)
+    const timer = window.setInterval(() => {
+      setTodayPlaybackMs(loadDailyWorkbenchStats(pid).playbackMs)
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [pid])
+
+  const todayDateKey = getLocalDateKey()
+  const todayAuditStats = useMemo(() => {
+    let submittedRecallPoints = 0
+    let reviewedRecallPoints = 0
+    for (const event of auditLogQ.data ?? []) {
+      const occurredAt = new Date(event.occurredAt)
+      if (Number.isNaN(occurredAt.getTime()) || getLocalDateKey(occurredAt) !== todayDateKey) continue
+      if (event.kind === "SUBMIT_LEARNING_TASK") {
+        submittedRecallPoints += parseAuditPayloadCount(event.payload, "itemsCount")
+      }
+      if (event.kind === "EXECUTOR_COMMIT_REVIEW_TASK") {
+        reviewedRecallPoints += parseAuditPayloadCount(event.payload, "canRecallLen")
+      }
+    }
+    return { submittedRecallPoints, reviewedRecallPoints }
+  }, [auditLogQ.data, todayDateKey])
 
   useEffect(() => {
     if (!pid) return
@@ -202,6 +346,115 @@ export function WorkbenchPage() {
       return { instanceId: requestedInstanceId, ms: requestedMs, nonce: Date.now() }
     })
   }, [pid, searchParams, setSelectedInstanceId])
+
+  useEffect(() => {
+    if (!pid) {
+      setVideoDurationByInstanceId({})
+      return
+    }
+    const instanceIds = (instancesQ.data ?? []).map((item) => item.instanceId)
+    setVideoDurationByInstanceId(loadVideoDurationMap(pid, instanceIds))
+  }, [instancesQ.data, pid])
+
+  useEffect(() => {
+    setDurationProbeAttemptedByInstanceId({})
+    setDurationProbeInFlightInstanceId(null)
+  }, [browserLocalMediaEnabled, directoryBinding.permission, pid, serverMediaStreamEnabled])
+
+  const recallPointIdsByInstanceQs = useQueries({
+    queries: (instancesQ.data ?? []).map((instance) => ({
+      queryKey: ["recallPointsByInstance", pid, instance.instanceId],
+      queryFn: () => listRecallPointsByInstance(pid, instance.instanceId),
+      enabled: !!pid && !!instance.instanceId,
+      staleTime: 30_000,
+    })),
+  })
+
+  const watchedInstanceIds = useMemo(() => {
+    const out = new Set<string>()
+    for (let index = 0; index < (instancesQ.data ?? []).length; index += 1) {
+      const instance = instancesQ.data?.[index]
+      if (!instance) continue
+      const recallPointIds = recallPointIdsByInstanceQs[index]?.data?.recallPointIds ?? []
+      if (recallPointIds.length > 0) {
+        out.add(instance.instanceId)
+      }
+    }
+    return out
+  }, [instancesQ.data, recallPointIdsByInstanceQs])
+
+  const pendingDurationProbeInstance = useMemo(() => {
+    if (durationProbeInFlightInstanceId) return null
+    for (const item of instancesQ.data ?? []) {
+      if (videoDurationByInstanceId[item.instanceId]) continue
+      if (durationProbeAttemptedByInstanceId[item.instanceId]) continue
+      return item
+    }
+    return null
+  }, [durationProbeAttemptedByInstanceId, durationProbeInFlightInstanceId, instancesQ.data, videoDurationByInstanceId])
+
+  useEffect(() => {
+    if (!pid || !pendingDurationProbeInstance) return
+    let cancelled = false
+    const targetInstance = pendingDurationProbeInstance
+
+    setDurationProbeAttemptedByInstanceId((current) =>
+      current[targetInstance.instanceId] ? current : { ...current, [targetInstance.instanceId]: true },
+    )
+    setDurationProbeInFlightInstanceId(targetInstance.instanceId)
+
+    void (async () => {
+      try {
+        const durationMs = await resolveInstanceDurationMs({
+          projectId: pid,
+          instance: targetInstance,
+          serverMediaStreamEnabled,
+          browserLocalMediaEnabled,
+          directoryPermission: directoryBinding.permission,
+        })
+        if (cancelled || !durationMs || durationMs <= 0) return
+        saveVideoDurationMs(pid, targetInstance.instanceId, durationMs)
+        setVideoDurationByInstanceId((current) =>
+          current[targetInstance.instanceId] === durationMs ? current : { ...current, [targetInstance.instanceId]: durationMs },
+        )
+      } catch {
+        // Ignore metadata probe failures and keep the dashboard responsive.
+      } finally {
+        if (!cancelled) {
+          setDurationProbeInFlightInstanceId((current) => (current === targetInstance.instanceId ? null : current))
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [browserLocalMediaEnabled, directoryBinding.permission, pendingDurationProbeInstance, pid, serverMediaStreamEnabled])
+
+  const videoProgress = useMemo(() => {
+    const items = instancesQ.data ?? []
+    let totalMs = 0
+    let watchedMs = 0
+    for (const item of items) {
+      const durationMs = videoDurationByInstanceId[item.instanceId] ?? 0
+      totalMs += durationMs
+      if (watchedInstanceIds.has(item.instanceId)) {
+        watchedMs += durationMs
+      }
+    }
+    return { totalMs, watchedMs }
+  }, [instancesQ.data, videoDurationByInstanceId, watchedInstanceIds])
+
+  const videoProgressPercent = videoProgress.totalMs > 0 ? Math.min(100, Math.max(0, (videoProgress.watchedMs / videoProgress.totalMs) * 100)) : 0
+  const remainingDurationProbeCount = useMemo(
+    () =>
+      (instancesQ.data ?? []).filter(
+        (item) =>
+          !videoDurationByInstanceId[item.instanceId] &&
+          (!durationProbeAttemptedByInstanceId[item.instanceId] || item.instanceId === durationProbeInFlightInstanceId),
+      ).length,
+    [durationProbeAttemptedByInstanceId, durationProbeInFlightInstanceId, instancesQ.data, videoDurationByInstanceId],
+  )
 
   async function onManualRollUp(layerIndex: number) {
     if (queueHasGate) {
@@ -230,6 +483,14 @@ export function WorkbenchPage() {
     setSeekTo({ instanceId: a.instanceId, ms, nonce: Date.now() })
   }
 
+  const workStatusDetail = queueQ.isLoading
+    ? "正在同步状态"
+    : queueLength > 0
+      ? `${queueLength} 个任务待复习`
+      : selectedInstanceId
+        ? "正在学习"
+        : "等待开始"
+
   if (!pid) {
     return (
       <div className="space-y-4">
@@ -246,15 +507,14 @@ export function WorkbenchPage() {
     <div className="space-y-5">
       <div className="grid gap-5 xl:grid-cols-[300px_minmax(0,1.2fr)_320px]">
         <div className="space-y-4">
-          <Card className="theme-card-main">
-            <CardHeader className="theme-card-header space-y-2">
+          <Card id="workbench-content-tree" className="theme-card-main">
+            <CardHeader className="theme-card-header">
               <div className="flex items-center gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#e2e8f0] bg-[#f5f7fa] text-primary">
                   <FolderTree className="h-5 w-5" />
                 </div>
                 <div>
                   <CardTitle>内容目录</CardTitle>
-                  <CardDescription>从学习对象树选择一个视频实例，作为当前播放与录入上下文。</CardDescription>
                 </div>
               </div>
             </CardHeader>
@@ -280,87 +540,160 @@ export function WorkbenchPage() {
             setCurrentMs={setCurrentMs}
             seekTo={seekTo}
             onSeekApplied={(nonce) => setSeekTo((s) => (s && s.nonce === nonce ? null : s))}
+            onDurationResolved={(instanceId, durationMs) =>
+              setVideoDurationByInstanceId((current) =>
+                current[instanceId] === durationMs ? current : { ...current, [instanceId]: durationMs },
+              )
+            }
             queueHasGate={queueHasGate}
           />
-          {queueQ.data?.headId ? (
-            <ReviewPane
-              key={queueQ.data.headId}
-              projectId={pid}
-              headId={queueQ.data.headId}
-              instances={instancesQ.data ?? []}
-              onOpenAnchor={onOpenAnchor}
-            />
+          <div className="rounded-[1.25rem] border border-[#dfe6ef] bg-[#f7f9fc] p-1">
+            <div className="grid grid-cols-2 gap-1">
+              <button
+                type="button"
+                className={cn(
+                  "rounded-[1rem] border px-4 py-2.5 text-sm font-medium transition-colors",
+                  centerPanelMode === "main"
+                    ? "border-primary/20 bg-white text-primary shadow-[0_10px_22px_-20px_rgba(30,58,95,0.32)]"
+                    : "border-transparent bg-transparent text-[#41566f] hover:border-[#dde5ef] hover:bg-white/80",
+                )}
+                onClick={() => setCenterPanelMode("main")}
+              >
+                {queueQ.data?.headId ? "复习任务" : "复述点录入"}
+              </button>
+              <button
+                type="button"
+                className={cn(
+                  "rounded-[1rem] border px-4 py-2.5 text-sm font-medium transition-colors",
+                  centerPanelMode === "rollup"
+                    ? "border-primary/20 bg-white text-primary shadow-[0_10px_22px_-20px_rgba(30,58,95,0.32)]"
+                    : "border-transparent bg-transparent text-[#41566f] hover:border-[#dde5ef] hover:bg-white/80",
+                )}
+                onClick={() => setCenterPanelMode("rollup")}
+              >
+                层推进与学习任务
+              </button>
+            </div>
+          </div>
+
+          {centerPanelMode === "main" ? (
+            <div id={queueQ.data?.headId ? "workbench-review-pane" : "workbench-compose-pane"}>
+              {queueQ.data?.headId ? (
+                <ReviewPane
+                  key={queueQ.data.headId}
+                  projectId={pid}
+                  headId={queueQ.data.headId}
+                  instances={instancesQ.data ?? []}
+                  onOpenAnchor={onOpenAnchor}
+                />
+              ) : (
+                <ComposePane
+                  projectId={pid}
+                  selectedInstanceId={selectedInstanceId}
+                  instance={instance}
+                  currentMs={currentMs}
+                  queueHasGate={queueHasGate}
+                />
+              )}
+            </div>
           ) : (
-            <ComposePane
-              projectId={pid}
-              selectedInstanceId={selectedInstanceId}
-              instance={instance}
-              currentMs={currentMs}
-              queueHasGate={queueHasGate}
-            />
+            <Card className="theme-card-main" id="workbench-rollup-pane">
+              <CardHeader className="theme-card-header">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#e2e8f0] bg-[#f5f7fa] text-primary">
+                    <ListChecks className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <CardTitle>层推进与学习任务</CardTitle>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4 pt-2 text-sm">
+                {layersQ.isLoading ? <div className="rounded-[1.15rem] bg-[#f6f8fb] px-4 py-4 text-sm text-[#647589]">正在加载层级任务...</div> : null}
+                {layersQ.error ? <p className="text-sm text-destructive">{formatApiError(layersQ.error)}</p> : null}
+                {!layersQ.isLoading && !layersQ.error && (layersQ.data?.length ?? 0) === 0 ? (
+                  <div className="flex items-start gap-3 rounded-[1.2rem] bg-[#f6f8fb] px-4 py-4">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[#eef5ff] text-primary">
+                      <Sparkles className="h-4 w-4" />
+                    </div>
+                    <div className="text-sm font-medium text-foreground">当前还没有层配置</div>
+                  </div>
+                ) : null}
+                <div className="space-y-2">
+                  {(layersQ.data ?? []).map((l) => (
+                    <LayerReviewChainCard
+                      key={l.layerId}
+                      projectId={pid}
+                      layer={l}
+                      learningTaskNodesById={learningTaskNodesById}
+                      learningTaskNodesLoading={learningTaskNodesQ.isLoading}
+                      queueHasGate={queueHasGate}
+                      isRollingUp={rollUpM.isPending}
+                      onRollUp={(layerIndex) => void onManualRollUp(layerIndex)}
+                    />
+                  ))}
+                </div>
+                {rollUpM.error ? <p className="text-sm text-destructive">{formatApiError(rollUpM.error)}</p> : null}
+              </CardContent>
+            </Card>
           )}
         </div>
 
         <div className="space-y-4">
           <Card className="theme-card-main">
-            <CardHeader className="theme-card-header space-y-2">
+            <CardHeader className="theme-card-header">
               <div className="flex items-center gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#e2e8f0] bg-[#f5f7fa] text-primary">
                   <RadioTower className="h-5 w-5" />
                 </div>
                 <div>
                   <CardTitle>工作状态</CardTitle>
-                  <CardDescription>观察当前队列和门禁状态，确保工作流保持连续。</CardDescription>
+                  <div className="mt-1 text-[15px] font-medium text-[#314a63]">{workStatusDetail}</div>
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              <StatusStrip label="队列长度" value={queueQ.data ? `${queueQ.data.ids.length}` : "-"} hint={queueHasGate ? "存在待复习项目，提交学习将暂时关闭。" : "当前没有待处理的复习门禁。"} warning={queueHasGate} />
-              <StatusStrip label="当前操作" value={queueHasGate ? "复习" : "录入"} hint={queueHasGate ? "先完成复习再继续新增学习任务。" : "现在可以继续添加复述点并提交学习。"} />
-            </CardContent>
-          </Card>
-
-          <Card className="theme-card-main">
-            <CardHeader className="theme-card-header space-y-2">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#e2e8f0] bg-[#f5f7fa] text-primary">
-                  <ListChecks className="h-5 w-5" />
-                </div>
-                <div>
-                  <CardTitle>层推进与学习任务</CardTitle>
-                  <CardDescription>查看每一层待推进的学习任务节点，并在空闲时执行上推。</CardDescription>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4 text-sm">
-              {layersQ.isLoading ? <p className="text-sm text-muted-foreground">加载中...</p> : null}
-              {layersQ.error ? <p className="text-sm text-destructive">{formatApiError(layersQ.error)}</p> : null}
-              {!layersQ.isLoading && !layersQ.error && (layersQ.data?.length ?? 0) === 0 ? (
-                <div className="theme-status-surface flex items-start gap-3 px-4 py-4">
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[#eef5ff] text-primary">
-                    <Sparkles className="h-4 w-4" />
+            <CardContent className="space-y-5 pt-4 text-sm">
+              <section className="space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-[12px] font-medium text-[#7b8ba0]">视频进度</div>
+                    <div className="mt-1 text-[17px] font-semibold tracking-[-0.02em] text-[#314a63]">
+                      {formatDurationCompact(videoProgress.watchedMs)} / {formatDurationCompact(videoProgress.totalMs)}
+                    </div>
                   </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-foreground">当前还没有层配置</div>
-                    <div className="text-sm text-muted-foreground">请先在项目设置里确认层配置；保存后会显示各层候选任务。</div>
+                  <div className="text-[13px] font-semibold text-[#49627c]">
+                    {Math.round(videoProgressPercent)}%
                   </div>
                 </div>
-              ) : null}
-              <div className="space-y-2">
-                {(layersQ.data ?? []).map((l) => (
-                  <LayerReviewChainCard
-                    key={l.layerId}
-                    projectId={pid}
-                    layer={l}
-                    learningTaskNodesById={learningTaskNodesById}
-                    learningTaskNodesLoading={learningTaskNodesQ.isLoading}
-                    queueHasGate={queueHasGate}
-                    isRollingUp={rollUpM.isPending}
-                    onRollUp={(layerIndex) => void onManualRollUp(layerIndex)}
+                <div className="h-2 overflow-hidden rounded-full bg-[#e7edf5]">
+                  <div
+                    className="h-full rounded-full bg-[linear-gradient(90deg,#245c96_0%,#5f9fda_100%)] transition-[width] duration-500"
+                    style={{ width: `${videoProgressPercent}%` }}
                   />
-                ))}
-              </div>
-              {rollUpM.error ? <p className="text-sm text-destructive">{formatApiError(rollUpM.error)}</p> : null}
+                </div>
+                {remainingDurationProbeCount > 0 ? (
+                  <div className="text-[12px] text-[#7b8ba0]">正在统计 {remainingDurationProbeCount} 个视频时长</div>
+                ) : null}
+              </section>
+
+              <div className="h-px bg-border/70" />
+
+              <section>
+                <div className="text-[12px] font-medium text-[#7b8ba0]">今日统计</div>
+                <div className="mt-2 divide-y divide-border/60">
+                  <StatusMetricRow label="学习时长" value={formatDurationCompact(todayPlaybackMs)} emphasize />
+                  <StatusMetricRow
+                    label="录入复述点数"
+                    value={auditLogQ.isLoading ? "..." : `${todayAuditStats.submittedRecallPoints}`}
+                  />
+                  <StatusMetricRow
+                    label="复习复述点数"
+                    value={auditLogQ.isLoading ? "..." : `${todayAuditStats.reviewedRecallPoints}`}
+                  />
+                </div>
+              </section>
+              {queueQ.error ? <p className="text-sm text-destructive">{formatApiError(queueQ.error)}</p> : null}
+              {auditLogQ.error ? <p className="text-sm text-destructive">{formatApiError(auditLogQ.error)}</p> : null}
             </CardContent>
           </Card>
         </div>

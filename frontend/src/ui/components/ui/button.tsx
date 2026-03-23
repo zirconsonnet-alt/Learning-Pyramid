@@ -10,12 +10,12 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          "bg-primary text-primary-foreground shadow-[0_16px_30px_-18px_rgba(37,99,235,0.5)] hover:-translate-y-px hover:bg-[hsl(214_74%_34%)] disabled:bg-slate-300 disabled:text-slate-500",
+          "[background:var(--theme-primary-bg)] text-primary-foreground [box-shadow:var(--theme-primary-shadow)] hover:-translate-y-px hover:[background:var(--theme-primary-hover)] disabled:bg-slate-300 disabled:text-slate-500",
         secondary:
-          "border border-[#dde5ee] bg-secondary text-secondary-foreground hover:bg-[#eef2f6] disabled:bg-slate-200 disabled:text-slate-500",
+          "border [border-color:var(--theme-secondary-border)] [background:var(--theme-secondary-bg)] text-secondary-foreground hover:[background:var(--theme-secondary-hover-bg)] disabled:bg-slate-200 disabled:text-slate-500",
         outline:
-          "border border-input bg-white text-slate-700 shadow-[0_10px_24px_-20px_rgba(15,23,42,0.16)] hover:border-primary/25 hover:bg-[#f7fafc] hover:text-slate-950 disabled:border-border/70 disabled:bg-white disabled:text-muted-foreground",
-        ghost: "text-slate-500 hover:bg-[#f1f5f9] hover:text-slate-950",
+          "border border-input [background:var(--theme-outline-bg)] [color:var(--theme-outline-text)] [box-shadow:var(--theme-outline-shadow)] hover:border-primary/25 hover:[background:var(--theme-outline-hover-bg)] hover:[color:var(--theme-outline-hover-text)] disabled:border-border/70 disabled:[background:var(--theme-outline-bg)] disabled:text-muted-foreground",
+        ghost: "text-slate-500 hover:[background:var(--theme-ghost-hover-bg)] hover:text-slate-950",
         destructive: "bg-destructive text-destructive-foreground shadow-[0_14px_28px_-18px_rgba(220,38,38,0.45)] hover:bg-destructive/90",
       },
       size: {

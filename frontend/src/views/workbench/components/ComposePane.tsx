@@ -84,7 +84,7 @@ export function ComposePane({
   const learningTaskNodesQ = useLearningTaskNodes(projectId)
 
   const drafts = (ps?.drafts ?? []).filter((d) => (selectedInstanceId ? d.instanceId === selectedInstanceId : true))
-  const taskTitle = ps?.taskTitle ?? ""
+  const taskTitle = selectedInstanceId ? ps?.taskTitlesByInstanceId?.[selectedInstanceId] ?? "" : ""
   const leafNodeIds = useMemo(
     () =>
       (learningTaskNodesQ.data ?? [])
@@ -118,11 +118,15 @@ export function ComposePane({
     const previousRecommendedTitle = lastRecommendedTitleRef.current
     const trimmedTitle = taskTitle.trim()
     const shouldAdoptRecommended = !trimmedTitle || taskTitle === previousRecommendedTitle
+    if (!selectedInstanceId) {
+      lastRecommendedTitleRef.current = ""
+      return
+    }
     if (recommendedTaskTitle && shouldAdoptRecommended && taskTitle !== recommendedTaskTitle) {
-      setTaskTitle(projectId, recommendedTaskTitle)
+      setTaskTitle(projectId, selectedInstanceId, recommendedTaskTitle)
     }
     lastRecommendedTitleRef.current = recommendedTaskTitle
-  }, [projectId, recommendedTaskTitle, setTaskTitle, taskTitle])
+  }, [projectId, recommendedTaskTitle, selectedInstanceId, setTaskTitle, taskTitle])
 
   function createDraft(instanceId: string, ms: number): DraftRecallPoint {
     const position = `t=${ms}`
@@ -196,11 +200,8 @@ export function ComposePane({
           <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#e2e8f0] bg-[#f5f7fa] text-primary">
             <BookPlus className="h-5 w-5" />
           </div>
-          <div className="space-y-1">
+          <div>
             <CardTitle>复述点录入</CardTitle>
-            <p className="text-sm text-muted-foreground">
-              围绕当前视频持续记录锚点、问题和答案，再统一提交为学习任务。
-            </p>
           </div>
         </div>
         {instance ? <div className="theme-meta">{instance.materialDisplayName}</div> : null}
@@ -216,7 +217,7 @@ export function ComposePane({
         ) : null}
 
         {drafts.length > 0 ? (
-          <div className="theme-canvas rounded-[1.2rem] border border-[#e2e8ef] p-4">
+          <div className="rounded-[1.2rem] border border-[#e2e8ef] bg-white p-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="text-sm font-semibold text-foreground">填写进度</div>
               <div className="theme-meta shrink-0">{drafts.length} 个复述点</div>
@@ -232,7 +233,7 @@ export function ComposePane({
                     className={
                       completed
                         ? "flex size-10 items-center justify-center rounded-xl border border-primary/20 bg-primary text-sm font-semibold text-primary-foreground shadow-[0_12px_24px_-20px_rgba(30,58,95,0.55)] transition-transform hover:-translate-y-0.5"
-                        : "flex size-10 items-center justify-center rounded-xl border border-[#d9e2eb] bg-[#f8fafc] text-sm font-semibold text-[#475569] transition-colors hover:border-primary/25 hover:bg-white hover:text-primary"
+                        : "flex size-10 items-center justify-center rounded-xl border border-[#d9e2eb] bg-white text-sm font-semibold text-[#5e738b] transition-colors hover:border-primary/25 hover:text-primary"
                     }
                     title={completed ? `第 ${index + 1} 个复述点，已填写` : `第 ${index + 1} 个复述点，尚未填写完成`}
                     aria-label={completed ? `第 ${index + 1} 个复述点，已填写` : `第 ${index + 1} 个复述点，尚未填写完成`}
@@ -245,15 +246,17 @@ export function ComposePane({
           </div>
         ) : null}
 
-        {drafts.length === 0 ? (
+        {drafts.length === 0 && selectedInstanceId ? (
+          <div className="rounded-[1.2rem] border border-dashed border-[#dbe3ec] bg-[#fbfcfe] px-4 py-5 text-[15px] font-medium text-[#52657b]">
+            暂无复述点
+          </div>
+        ) : null}
+
+        {drafts.length === 0 && !selectedInstanceId ? (
           <ContentEmptyState
             icon={BookPlus}
-            title={selectedInstanceId ? "还没有开始录入复述点" : "先选择一个视频再开始录入"}
-            message={
-              selectedInstanceId
-                ? "点击上方“添加复述点”，就能从当前播放位置开始填写问题和答案。"
-                : "请先从左侧内容目录里选择一个视频，随后就能开始录入复述点。"
-            }
+            title="先选择一个视频再开始录入"
+            message="请先从左侧内容目录里选择一个视频，随后就能开始录入复述点。"
           />
         ) : null}
 
@@ -329,14 +332,17 @@ export function ComposePane({
             <Input
               id="taskTitle"
               value={taskTitle}
-              onChange={(e) => setTaskTitle(projectId, e.target.value)}
+              onChange={(e) => {
+                if (!selectedInstanceId) return
+                setTaskTitle(projectId, selectedInstanceId, e.target.value)
+              }}
               onKeyDown={(e) => {
                 if (e.key !== "Enter" || e.nativeEvent.isComposing) return
                 e.preventDefault()
                 if (canSubmit) {
                   void onSubmit()
-                } else if (!taskTitle.trim() && recommendedTaskTitle) {
-                  setTaskTitle(projectId, recommendedTaskTitle)
+                } else if (!taskTitle.trim() && recommendedTaskTitle && selectedInstanceId) {
+                  setTaskTitle(projectId, selectedInstanceId, recommendedTaskTitle)
                 }
               }}
               className="h-11 flex-1 bg-white"

@@ -9,6 +9,8 @@ import { Button } from "@/ui/components/ui/button"
 import { useCurrentUser, useLogout } from "@/ui/queries/auth"
 import { useProject } from "@/ui/queries/projects"
 import { useSystemCapabilities } from "@/ui/queries/system"
+import { useThemeStore } from "@/ui/store/themeStore"
+import { THEME_PRESETS } from "@/ui/theme/themePresets"
 import { cn } from "@/ui/utils"
 
 function formatApiError(err: unknown) {
@@ -80,6 +82,8 @@ export function AppShell() {
   const canAccessApp = !authEnabled || Boolean(currentUserQ.data)
   const { projectTitle } = useProject(pid, { enabled: canAccessApp })
   const logout = useLogout()
+  const selectedTheme = useThemeStore((state) => state.theme)
+  const setTheme = useThemeStore((state) => state.setTheme)
   const area = describeArea(location.pathname, projectTitle || pid || "当前项目", Boolean(pid))
   const deploymentLabel = capabilitiesQ.data?.appMode === "hosted" ? "托管模式" : "本地模式"
   const areaContext = area.context && area.context !== area.title ? area.context : null
@@ -89,6 +93,9 @@ export function AppShell() {
   const menuRef = useRef<HTMLDivElement | null>(null)
   const menuButtonRef = useRef<HTMLButtonElement | null>(null)
   const projectNavItems = useMemo(() => getProjectNavItems(pid), [pid])
+  const hasProjectContext = Boolean(pid)
+  const inlineNavItems = GLOBAL_NAV_ITEMS
+  const menuNavItems = hasProjectContext ? projectNavItems : GLOBAL_NAV_ITEMS
 
   useEffect(() => {
     setNavMenuOpen(false)
@@ -222,25 +229,26 @@ export function AppShell() {
             </div>
 
             <div className="flex shrink-0 items-center gap-2">
-              {GLOBAL_NAV_ITEMS.map((item) => {
-                const Icon = item.icon
-                return (
-                  <NavLink
-                    key={item.to}
-                    to={item.to}
-                    className={({ isActive }) =>
-                      cn(
-                        "inline-flex h-10 items-center gap-2 rounded-2xl border border-[#e3e8ef] bg-white px-2.5 text-sm text-[#5b6b82] shadow-[0_14px_28px_-24px_rgba(15,23,42,0.16)] transition-colors hover:border-primary/15 hover:text-foreground min-[420px]:px-3.5",
-                        isActive && "border-primary/15 bg-[#eef5ff] text-foreground",
-                      )
-                    }
-                  >
-                    <Icon className="h-4 w-4 shrink-0 text-primary" />
-                    <span className="hidden min-[420px]:inline">{item.label}</span>
-                    <span className="sr-only min-[420px]:hidden">{item.label}</span>
-                  </NavLink>
-                )
-              })}
+              <div className="hidden items-center gap-2 sm:flex">
+                {inlineNavItems.map((item) => {
+                  const Icon = item.icon
+                  return (
+                    <NavLink
+                      key={item.to}
+                      to={item.to}
+                      className={({ isActive }) =>
+                        cn(
+                          "inline-flex h-10 items-center gap-2 rounded-2xl border border-[#e3e8ef] bg-white px-3 text-sm text-[#5b6b82] shadow-[0_14px_28px_-24px_rgba(15,23,42,0.16)] transition-colors hover:border-primary/15 hover:text-foreground",
+                          isActive && "border-primary/15 bg-[#eef5ff] text-foreground",
+                        )
+                      }
+                    >
+                      <Icon className="h-4 w-4 shrink-0 text-primary" />
+                      <span>{item.label}</span>
+                    </NavLink>
+                  )
+                })}
+              </div>
 
               <Button
                 ref={menuButtonRef}
@@ -252,7 +260,7 @@ export function AppShell() {
                 aria-haspopup="menu"
               >
                 <Menu className="h-5 w-5" />
-                <span className="sr-only">打开项目菜单</span>
+                <span className="sr-only">打开导航菜单</span>
               </Button>
             </div>
 
@@ -262,22 +270,8 @@ export function AppShell() {
                 className="absolute right-0 top-[calc(100%+0.65rem)] z-30 w-[min(22rem,calc(100vw-1rem))] overflow-hidden rounded-[1.6rem] border border-[#e3e8ef] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(246,248,251,0.96))] shadow-[0_24px_60px_-30px_rgba(15,23,42,0.24)] backdrop-blur-2xl"
               >
                 <div className="max-h-[min(70vh,calc(100dvh-5.5rem))] overflow-y-auto overscroll-contain p-3 [-webkit-overflow-scrolling:touch]">
-                  {pid ? (
-                    <>
-                      <div className="px-2 pb-2 pt-1">
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#73839a]">当前项目</div>
-                        <div className="mt-1 truncate text-sm font-semibold text-foreground">{projectTitle || pid}</div>
-                      </div>
-                      <MainNav items={projectNavItems} onNavigate={() => setNavMenuOpen(false)} />
-                    </>
-                  ) : (
-                    <div className="rounded-2xl border border-dashed border-border/70 bg-[#f8fafc] px-4 py-3 text-sm text-muted-foreground">
-                      当前没有项目上下文。
-                    </div>
-                  )}
-
                   {authEnabled && currentUserQ.data ? (
-                    <div className="mt-3 rounded-[1.25rem] border border-[#e3e8ef] bg-white p-3">
+                    <div className="rounded-[1.25rem] border border-[#e3e8ef] bg-white p-3">
                       <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#6a7e98]">当前账号</div>
                       <div className="mt-1 truncate text-sm font-medium text-foreground">{currentUserQ.data.email}</div>
                       <Button
@@ -294,6 +288,54 @@ export function AppShell() {
                       </Button>
                     </div>
                   ) : null}
+
+                  {menuNavItems.length > 0 ? (
+                    <div className="mt-3">
+                      <MainNav items={menuNavItems} onNavigate={() => setNavMenuOpen(false)} />
+                    </div>
+                  ) : null}
+
+                  <div className="theme-status-surface mt-3 p-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">界面主题</div>
+                    <div className="mt-3 space-y-2">
+                      {THEME_PRESETS.map((theme) => {
+                        const isActive = selectedTheme === theme.id
+                        return (
+                          <button
+                            key={theme.id}
+                            type="button"
+                            className={cn(
+                              "flex w-full items-center justify-between gap-3 rounded-2xl border px-3 py-2.5 text-left transition-colors",
+                              isActive
+                                ? "border-primary/30 [background:var(--theme-selection-bg)]"
+                                : "[border-color:var(--theme-card-border)] [background:var(--theme-outline-bg)] hover:border-primary/15 hover:[background:var(--theme-outline-hover-bg)]",
+                            )}
+                            onClick={() => {
+                              setTheme(theme.id)
+                              setNavMenuOpen(false)
+                            }}
+                          >
+                            <div className="min-w-0">
+                              <div className="text-sm font-medium text-foreground">{theme.label}</div>
+                              <div className="mt-0.5 text-xs text-muted-foreground">{theme.description}</div>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-2">
+                              <div className="flex items-center gap-1.5">
+                                {theme.preview.map((color) => (
+                                  <span
+                                    key={`${theme.id}-${color}`}
+                                    className="h-4 w-4 rounded-full border border-black/5 shadow-inner"
+                                    style={{ backgroundColor: color }}
+                                  />
+                                ))}
+                              </div>
+                              {isActive ? <span className="theme-meta-strong">当前</span> : null}
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
                 </div>
               </div>
             ) : null}

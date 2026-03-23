@@ -16,6 +16,7 @@ import {
 import { useProject } from "@/ui/queries/projects"
 import { useReviewChain } from "@/ui/queries/reviewChains"
 import { cn } from "@/ui/utils"
+import { ReviewTaskSummaryCard } from "@/views/reviewTasks/components/ReviewTaskSummaryCard"
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -179,6 +180,29 @@ export function ReviewChainPage() {
                   const reviewTask = item.kind === "REVIEW_TASK" ? (detailQ?.data as ReviewTask | undefined) : undefined
                   const convergence = item.kind === "CONVERGENCE" ? (detailQ?.data as Convergence | undefined) : undefined
 
+                  if (item.kind === "REVIEW_TASK" && reviewTask) {
+                    return (
+                      <ReviewTaskSummaryCard
+                        key={`${item.kind}:${item.id}`}
+                        className={cn(
+                          isHead && "border-primary bg-primary/5",
+                          isDone && "opacity-70",
+                        )}
+                        fields={[
+                          { label: "创建时间", value: formatTs(reviewTask.createdAt) },
+                          { label: "执行时间", value: formatTs(reviewTask.executedAt) },
+                          { label: "输入范围", value: formatRangeReference(reviewTask.inputRangeId) },
+                        ]}
+                        kicker={`队列位次 #${index + 1}`}
+                        projectId={pid}
+                        reviewTaskId={item.id}
+                        stateLabel={describeReviewTaskState(reviewTask.state)}
+                        statusText={isHead ? "当前 head" : isDone ? "已推进" : "待执行"}
+                        tag={describeQueueItemKind(item.kind)}
+                      />
+                    )
+                  }
+
                   return (
                     <div
                       key={`${item.kind}:${item.id}`}
@@ -230,14 +254,6 @@ export function ReviewChainPage() {
 
                       {detailQ?.isLoading ? <p className="mt-2 text-xs text-muted-foreground">加载详情中...</p> : null}
                       {detailQ?.error ? <p className="mt-2 text-xs text-destructive">{formatApiError(detailQ.error)}</p> : null}
-
-                      {item.kind === "REVIEW_TASK" && reviewTask ? (
-                        <div className="mt-2 grid gap-2 text-xs text-muted-foreground md:grid-cols-3">
-                          <div>状态：<span className="text-foreground">{describeReviewTaskState(reviewTask.state)}</span></div>
-                          <div>创建时间：<span className="text-foreground">{formatTs(reviewTask.createdAt)}</span></div>
-                          <div>输入范围：<span className="text-foreground">{formatRangeReference(reviewTask.inputRangeId)}</span></div>
-                        </div>
-                      ) : null}
 
                       {item.kind === "CONVERGENCE" && convergence ? (
                         <div className="mt-2 grid gap-2 text-xs text-muted-foreground md:grid-cols-3">

@@ -1,7 +1,9 @@
-import { useState } from "react"
-import { ArrowRight, Plus, Settings2, Sparkles, Trash2 } from "lucide-react"
+import { useMemo, useState } from "react"
+import { useQueries } from "@tanstack/react-query"
+import { ArrowRight, ArrowUpDown, ChevronDown, Plus, Settings2, Trash2 } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 
+import { listAuditLogEvents, type AuditLogEvent } from "@/ui/api/auditLog"
 import { ApiError } from "@/ui/api/http"
 import type { Project } from "@/ui/api/projects"
 import { Button } from "@/ui/components/ui/button"
@@ -22,6 +24,8 @@ import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore
 import { useWorkbenchStore } from "@/ui/store/workbenchStore"
 import { cn } from "@/ui/utils"
 
+type ProjectSortMode = "recent" | "created"
+
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
   if (err instanceof Error) return err.message
@@ -41,6 +45,64 @@ function formatProjectState(state: string) {
   return state
 }
 
+function formatLastStudyText(occurredAt: string | null) {
+  if (!occurredAt) {
+    return {
+      text: "还未开始学习",
+      className: "text-[#7b8797]",
+    }
+  }
+
+  const dt = new Date(occurredAt)
+  if (Number.isNaN(dt.getTime())) {
+    return {
+      text: "学习时间未知",
+      className: "text-[#7b8797]",
+    }
+  }
+
+  const now = new Date()
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const targetStart = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate())
+  const dayDiff = Math.max(0, Math.floor((todayStart.getTime() - targetStart.getTime()) / 86_400_000))
+
+  if (dayDiff === 0) {
+    return {
+      text: "今天已学习",
+      className: "text-primary",
+    }
+  }
+
+  if (dayDiff === 1) {
+    return {
+      text: "昨天学习过",
+      className: "text-[#64748b]",
+    }
+  }
+
+  if (dayDiff <= 7) {
+    return {
+      text: `上次学习 ${dayDiff} 天前`,
+      className: "text-[#6b7280]",
+    }
+  }
+
+  return {
+    text: `已 ${dayDiff} 天未学习`,
+    className: "text-[#b7791f]",
+  }
+}
+
+function getProjectLastStudyAt(events: AuditLogEvent[] | undefined) {
+  let latest: string | null = null
+  for (const event of events ?? []) {
+    if (event.result !== "OK" && event.result !== "SUCCESS") continue
+    if (event.kind !== "SUBMIT_LEARNING_TASK" && event.kind !== "EXECUTOR_COMMIT_REVIEW_TASK") continue
+    if (!latest || Date.parse(event.occurredAt) > Date.parse(latest)) latest = event.occurredAt
+  }
+  return latest
+}
+
 export function ProjectsPage() {
   const nav = useNavigate()
   const { data, isLoading, error } = useProjects()
@@ -48,16 +110,62 @@ export function ProjectsPage() {
   const del = useDeleteProject()
 
   const selectedProjectId = useAppStore((s) => s.selectedProjectId)
+  const recentProjectIds = useAppStore((s) => s.recentProjectIds)
   const setSelectedProjectId = useAppStore((s) => s.setSelectedProjectId)
+  const removeRecentProjectId = useAppStore((s) => s.removeRecentProjectId)
 
   const projects = data ?? []
 
   const [title, setTitle] = useState("")
   const [createOpen, setCreateOpen] = useState(false)
+  const [sortMode, setSortMode] = useState<ProjectSortMode>("recent")
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null)
   const [deleteConfirmation, setDeleteConfirmation] = useState("")
   const deleteExpectedText = deleteTarget?.title ?? ""
   const deleteMatches = deleteConfirmation.trim() === deleteExpectedText
+  const projectActivityQs = useQueries({
+    queries: projects.map((project) => ({
+      queryKey: ["auditLogEvents", project.projectId],
+      queryFn: () => listAuditLogEvents(project.projectId),
+      enabled: !isLoading && !error,
+      staleTime: 60_000,
+      refetchInterval: 60_000,
+    })),
+  })
+
+  const lastStudyByProjectId = useMemo(() => {
+    const entries = projects.map((project, index) => [project.projectId, getProjectLastStudyAt(projectActivityQs[index]?.data)] as const)
+    return Object.fromEntries(entries)
+  }, [projectActivityQs, projects])
+  const activityLoadingByProjectId = useMemo(() => {
+    const entries = projects.map((project, index) => [project.projectId, Boolean(projectActivityQs[index]?.isLoading)] as const)
+    return Object.fromEntries(entries)
+  }, [projectActivityQs, projects])
+
+  const sortedProjects = useMemo(() => {
+    const items = [...projects]
+    if (sortMode === "created") {
+      return items.sort((a, b) => {
+        const aTime = Date.parse(a.createdAt)
+        const bTime = Date.parse(b.createdAt)
+        return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0)
+      })
+    }
+
+    const recentRank = new Map(recentProjectIds.map((projectId, index) => [projectId, index]))
+    return items.sort((a, b) => {
+      const aRank = recentRank.get(a.projectId)
+      const bRank = recentRank.get(b.projectId)
+      if (aRank !== undefined || bRank !== undefined) {
+        if (aRank === undefined) return 1
+        if (bRank === undefined) return -1
+        if (aRank !== bRank) return aRank - bRank
+      }
+      const aTime = Date.parse(a.createdAt)
+      const bTime = Date.parse(b.createdAt)
+      return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0)
+    })
+  }, [projects, recentProjectIds, sortMode])
 
   function openDeleteDialog(project: Project) {
     del.reset()
@@ -93,7 +201,7 @@ export function ProjectsPage() {
     try {
       await del.mutateAsync(deleteTarget.projectId)
       useWorkbenchStore.getState().resetProject(deleteTarget.projectId)
-      if (selectedProjectId === deleteTarget.projectId) setSelectedProjectId(null)
+      removeRecentProjectId(deleteTarget.projectId)
       closeDeleteDialog()
       showSuccessFeedback("项目已删除", `“${deletedTitle}” 已从当前工作区移除。`)
     } catch (err) {
@@ -111,13 +219,27 @@ export function ProjectsPage() {
       <div className="space-y-8">
         <section className="space-y-4">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-            <div>
+            <div className="flex items-center gap-3">
               <h2 className="text-2xl font-semibold tracking-tight text-foreground">所有项目</h2>
+              <span className="theme-meta px-3 py-1 text-sm">{projects.length} 个项目</span>
             </div>
-            <Button variant="outline" onClick={() => setCreateOpen(true)}>
-              <Plus className="h-4 w-4" />
-              新建项目
-            </Button>
+            <div className="relative">
+              <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-[#6a7e98]">
+                <ArrowUpDown className="h-4 w-4" />
+              </div>
+              <select
+                id="projectSort"
+                className="h-11 appearance-none rounded-2xl border border-[#dbe4ef] bg-white/90 pl-10 pr-11 text-sm font-medium text-[#42566f] shadow-[0_14px_30px_-26px_rgba(15,23,42,0.2)] outline-none transition-colors hover:border-primary/20 focus:border-primary/30"
+                value={sortMode}
+                onChange={(event) => setSortMode(event.target.value as ProjectSortMode)}
+              >
+                <option value="recent">最近使用</option>
+                <option value="created">最新创建</option>
+              </select>
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 text-[#6a7e98]">
+                <ChevronDown className="h-4 w-4" />
+              </div>
+            </div>
           </div>
 
           {isLoading ? (
@@ -125,78 +247,81 @@ export function ProjectsPage() {
           ) : null}
           {error ? <div className="rounded-2xl border border-destructive/20 bg-destructive/5 px-5 py-4 text-sm text-destructive">{formatApiError(error)}</div> : null}
 
-          {!isLoading && !error && projects.length === 0 ? (
-            <Card className="border-dashed border-border/80 bg-white/80">
-              <CardContent className="flex flex-col items-center gap-4 px-8 py-14 text-center">
-                <div className="flex h-14 w-14 items-center justify-center rounded-3xl bg-[#edf4ff] text-primary">
-                  <Sparkles className="h-6 w-6" />
-                </div>
-                <h3 className="text-xl font-semibold text-foreground">还没有项目</h3>
-                <Button size="lg" onClick={() => setCreateOpen(true)}>
-                  <Plus className="h-4 w-4" />
-                  创建第一个项目
-                </Button>
-              </CardContent>
-            </Card>
-          ) : null}
-
-          {!isLoading && !error && projects.length > 0 ? (
+          {!isLoading && !error ? (
             <div className="grid gap-4 xl:grid-cols-2">
-              {projects.map((p) => (
-                <Card
-                  key={p.projectId}
-                  className={cn(
-                    "h-full border-white/80 bg-white/90 transition-all duration-200",
-                    selectedProjectId === p.projectId && "border-primary/20 shadow-[0_24px_60px_-38px_rgba(30,58,95,0.34)] ring-1 ring-primary/10",
-                  )}
-                >
-                  <CardHeader className="space-y-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0 space-y-2">
-                        <CardTitle className="truncate text-xl">{p.title}</CardTitle>
-                        <CardDescription className="flex flex-wrap items-center gap-2 text-xs">
-                          <span className="theme-meta">{formatProjectState(p.state)}</span>
-                          <span>创建于 {formatTs(p.createdAt)}</span>
-                        </CardDescription>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        {selectedProjectId === p.projectId ? <span className="theme-meta-strong">当前工作项目</span> : null}
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        onClick={() => {
-                          openProject(p.projectId, "workbench")
-                        }}
-                      >
-                        <ArrowRight className="h-4 w-4" />
-                        进入工作台
-                      </Button>
-                      <Button
-                        variant="outline"
-                        onClick={() => {
-                          openProject(p.projectId, "settings")
-                        }}
-                      >
-                        <Settings2 className="h-4 w-4" />
-                        项目设置
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        disabled={del.isPending}
-                        onClick={() => {
-                          openDeleteDialog(p)
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                        删除
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
+              {sortedProjects.map((p) => (
+                (() => {
+                  const lastStudyDisplay = formatLastStudyText(lastStudyByProjectId[p.projectId] ?? null)
+                  const activityLoading = activityLoadingByProjectId[p.projectId]
+                  return (
+                    <Card
+                      key={p.projectId}
+                      className={cn(
+                        "h-full border-white/80 bg-white/90 transition-all duration-200",
+                        selectedProjectId === p.projectId && "border-primary/20 shadow-[0_24px_60px_-38px_rgba(30,58,95,0.34)] ring-1 ring-primary/10",
+                      )}
+                    >
+                      <CardHeader className="space-y-4">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0 space-y-2">
+                            <CardTitle className="truncate text-xl">{p.title}</CardTitle>
+                            <CardDescription className="flex flex-wrap items-center gap-2 text-xs">
+                              <span className="theme-meta">{formatProjectState(p.state)}</span>
+                              <span className={cn("font-medium", activityLoading ? "text-[#7b8797]" : lastStudyDisplay.className)}>
+                                {activityLoading ? "学习记录载入中" : lastStudyDisplay.text}
+                              </span>
+                            </CardDescription>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            {selectedProjectId === p.projectId ? <span className="theme-meta-strong">当前工作项目</span> : null}
+                          </div>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            onClick={() => {
+                              openProject(p.projectId, "workbench")
+                            }}
+                          >
+                            <ArrowRight className="h-4 w-4" />
+                            进入工作台
+                          </Button>
+                          <Button
+                            variant="outline"
+                            onClick={() => {
+                              openProject(p.projectId, "settings")
+                            }}
+                          >
+                            <Settings2 className="h-4 w-4" />
+                            项目设置
+                          </Button>
+                          <Button
+                            variant="destructive"
+                            disabled={del.isPending}
+                            onClick={() => {
+                              openDeleteDialog(p)
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            删除
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )
+                })()
               ))}
+              <button
+                type="button"
+                onClick={() => setCreateOpen(true)}
+                className="group flex h-full min-h-[12.75rem] flex-col items-start gap-5 rounded-[1.75rem] border border-dashed border-[#d5deea] bg-white/75 p-8 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/25 hover:bg-white"
+              >
+                <div className="flex h-14 w-14 items-center justify-center rounded-3xl bg-[#edf4ff] text-primary transition-transform duration-200 group-hover:scale-105">
+                  <Plus className="h-6 w-6" />
+                </div>
+                <div className="text-xl font-semibold text-foreground">新建项目</div>
+              </button>
             </div>
           ) : null}
         </section>

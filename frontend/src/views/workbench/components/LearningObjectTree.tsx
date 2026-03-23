@@ -22,25 +22,24 @@ function formatApiError(err: unknown) {
   return "未知错误"
 }
 
-function splitLeafDisplayTitle(node: LearningObjectNode) {
+function getLeafDisplayTitle(node: LearningObjectNode) {
   if (node.kind !== "leaf") {
-    return { main: node.title, suffix: null as string | null }
+    return node.title
   }
 
   const title = node.title.trim()
   const fallbackFileName = node.relativePath?.split("/").pop()?.trim() ?? ""
   const dotIndex = fallbackFileName.lastIndexOf(".")
   if (dotIndex <= 0 || dotIndex >= fallbackFileName.length - 1) {
-    return { main: title || fallbackFileName || "未命名材料", suffix: null as string | null }
+    return title || fallbackFileName || "未命名材料"
   }
 
   const suffix = fallbackFileName.slice(dotIndex)
   if (title && title.toLowerCase().endsWith(suffix.toLowerCase())) {
-    const main = title.slice(0, title.length - suffix.length).trim()
-    return { main: main || title, suffix }
+    return title.slice(0, title.length - suffix.length).trim() || title
   }
 
-  return { main: title || fallbackFileName.slice(0, dotIndex), suffix }
+  return title || fallbackFileName.slice(0, dotIndex)
 }
 
 function TreeNode({
@@ -127,7 +126,7 @@ function TreeNode({
   }
 
   const isSelected = selectedInstanceId === data.instanceId
-  const { main, suffix } = splitLeafDisplayTitle(data)
+  const title = getLeafDisplayTitle(data)
 
   return (
     <button
@@ -142,13 +141,8 @@ function TreeNode({
     >
       <span className={cn("absolute inset-y-1.5 left-0 w-[3px] rounded-r-full", isSelected ? "bg-[#3b82f6]" : "bg-transparent")} />
       <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", isSelected ? "bg-[#60a5fa]" : "bg-[#c9d3de]")} />
-      <span className="min-w-0 flex items-baseline gap-2">
-        <span className={cn("truncate text-sm font-medium", isSelected ? "text-[#153f74]" : "text-[#2f4358]")}>{main}</span>
-        {suffix ? (
-          <span className={cn("shrink-0 text-[11px] font-medium tracking-[0.04em]", isSelected ? "text-[#7aa7e8]" : "text-[#9aa7b5]")}>
-            {suffix}
-          </span>
-        ) : null}
+      <span className="min-w-0">
+        <span className={cn("block truncate text-sm font-medium", isSelected ? "text-[#153f74]" : "text-[#2f4358]")}>{title}</span>
       </span>
     </button>
   )
@@ -241,14 +235,7 @@ export function LearningObjectTree({
     const canImportHere = directoryBinding.permission === "granted" && !directoryBinding.loading
     return (
       <div className="space-y-3 rounded-[1rem] border border-dashed border-border/70 bg-white p-4">
-        <div className="space-y-1">
-          <p className="text-sm font-medium text-foreground">当前还没有学习对象</p>
-          <p className="text-sm text-muted-foreground">
-            {canImportHere
-              ? "当前目录已经授权，可以直接在这里导入内容目录。"
-              : "请先到项目设置里绑定本地目录并导入内容目录，完成后就能在这里看到视频和目录树。"}
-          </p>
-        </div>
+        <div className="text-sm font-medium text-foreground">当前还没有学习对象</div>
         <div className="flex flex-wrap gap-2">
           {canImportHere ? (
             <Button size="sm" className="rounded-full" onClick={() => void onImportHere()} disabled={importLearningObjectsM.isPending}>
