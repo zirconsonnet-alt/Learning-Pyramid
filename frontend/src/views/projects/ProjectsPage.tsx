@@ -332,7 +332,7 @@ export function ProjectsPage() {
           <DialogHeader>
             <DialogTitle>创建新项目</DialogTitle>
           </DialogHeader>
-          <div className="space-y-3 mt-3">
+          <div>
             <div className="grid gap-2">
               <Label htmlFor="title">项目标题</Label>
               <Input
