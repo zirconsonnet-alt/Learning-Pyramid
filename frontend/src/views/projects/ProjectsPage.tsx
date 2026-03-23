@@ -331,7 +331,6 @@ export function ProjectsPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>创建新项目</DialogTitle>
-            <DialogDescription>输入项目标题后立即创建。</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="grid gap-2">
