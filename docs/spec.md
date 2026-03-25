@@ -94,9 +94,9 @@
 
 本规格出现的常用语义类型（非穷尽，但应覆盖全文使用）：
 
-* ID 类（`xxxId` 或同类标识符）：`ProjectId`、`InstanceId`、`LearningObjectNodeId`、`RecallPointId`、`LearningTaskId`、`LearningTaskNodeId`、`RangeId`（实现可复用旧 `FocusSetId` 的底层类型）、`ReviewTaskId`、`ConvergenceId`、`ConvergenceRuleId`、`ReviewChainId`、`ReviewTaskQueueId`、`LayerId`、`DimensionId`、`JudgementOptionId`、`AggregationEventId`（4.4.5）、`MediaAssetId`、`AsrArtifactId`。
+* ID 类（`xxxId` 或同类标识符）：`ProjectId`、`InstanceId`、`LearningObjectNodeId`、`RecallPointId`、`LearningTaskId`、`LearningTaskNodeId`、`RangeId`（实现可复用旧 `FocusSetId` 的底层类型）、`ReviewTaskId`、`ConvergenceId`、`ConvergenceRuleId`、`ReviewChainId`、`ReviewTaskQueueId`、`LayerId`、`DimensionId`、`JudgementOptionId`、`AggregationEventId`（4.4.5）、`MediaAssetId`、`AsrArtifactId`、`TempContextFragmentId`、`QASessionId`、`CandidateRecallPointId`、`MemoryCanvasId`、`MemoryCanvasVersionId`、`CanvasEdgeId`、`StoryArtifactId`。
 * 枚举类（`Enum`）：`ProjectState`、`RecallPointState`、`LayerMode`、`ContentBlockKind`、`ReviewChainTemplateItemKind`。
-  * 增补：`InstancePresence`、`FsSyncPolicy`、`MaterialSourceKind`。
+  * 增补：`InstancePresence`、`FsSyncPolicy`、`MaterialSourceKind`、`ClientRuntimeKind`、`RuntimeCapability`、`CandidateRecallPointState`。
 * 标量/值域类（`Scalar`）：`PurePath`、`Timestamp`、`LabelVector = {0,1}^{|D|}`（判别映射的值域；等价表示为长度为 `|D|` 的 0/1 向量）、`RichContent`、`ContentBlock`、`ReviewChainTemplate`、`ReviewChainTemplateItem`、`LayerConfig`。
 * 校验结果类（`Result`）：`ValidationResult`、`ValidationCode`（0b.7.2/0b.7.3）。
 
@@ -113,13 +113,16 @@
 * `ValidationCode = {OK, NOT_FOUND, UNREACHABLE, INVALID_INPUT}`（0b.7.2/0b.7.3）
 * `ContentBlockKind = {TEXT, IMAGE}`（0a.12）
 * `ReviewChainTemplateItemKind = {CONVERGENCE, REVIEW_TASK}`（1.0.5 / 4.3.2）
-* `AuditEventKind = {PROJECT_CREATED, PROJECT_DELETED, EDIT_PROJECT, ADD_INSTANCE, ADD_LEARNING_OBJECT_LEAF, ADD_LEARNING_OBJECT_CONTAINER, SYNC_LEARNING_OBJECTS_FROM_FS, SET_PROJECT_MATERIAL_SOURCE_BINDING, BULK_REMAP_RECALL_POINTS_INSTANCE, SUBMIT_LEARNING_TASK, EDIT_RECALL_POINT, DELETE_RECALL_POINT, EDIT_LEARNING_TASK, EDIT_PROJECT_CONFIG, EXECUTOR_COMMIT_REVIEW_TASK, MANUAL_ROLL_UP, REQUEST_ASR}`（4.6；最小集合；实现可在保持兼容前提下增补，但不得改变既有值语义）
+* `AuditEventKind = {PROJECT_CREATED, PROJECT_DELETED, EDIT_PROJECT, ADD_INSTANCE, ADD_LEARNING_OBJECT_LEAF, ADD_LEARNING_OBJECT_CONTAINER, SYNC_LEARNING_OBJECTS_FROM_FS, SET_PROJECT_MATERIAL_SOURCE_BINDING, BIND_NATIVE_LOCAL_ROOT, BULK_REMAP_RECALL_POINTS_INSTANCE, SUBMIT_LEARNING_TASK, EDIT_RECALL_POINT, DELETE_RECALL_POINT, EDIT_LEARNING_TASK, EDIT_PROJECT_CONFIG, EXECUTOR_COMMIT_REVIEW_TASK, MANUAL_ROLL_UP, REQUEST_ASR, EXTRACT_TEMP_CONTEXT_FRAGMENT, REQUEST_LOCAL_LLM, CREATE_QA_SESSION, GENERATE_CANDIDATE_RECALL_POINT, ACCEPT_CANDIDATE_RECALL_POINT, REJECT_CANDIDATE_RECALL_POINT, CREATE_MEMORY_CANVAS, SAVE_MEMORY_CANVAS_VERSION, SET_CANVAS_EDGES, GENERATE_STORY_ARTIFACT}`（4.6；最小集合；实现可在保持兼容前提下增补，但不得改变既有值语义）
 * `AuditResultCode = {OK}`（1.8 / 4.6；本规格仅强制记录成功提交的审计事件）
 * `SessionMode = {READ_ONLY, READ_WRITE}`（0b.1.6）
 
 * `InstancePresence = {PRESENT, MISSING}`（1.1.1）
 * `FsSyncPolicy = {DISABLED, STARTUP_SYNC, MANUAL_SYNC}`（1.0.4 / 0b.1.5b / 4.5）
-* `MaterialSourceKind = {SERVER_FS, BROWSER_LOCAL, MANUAL}`（1.0.4a / 0b.1.5b / 4.5）
+* `MaterialSourceKind = {SERVER_FS, BROWSER_LOCAL, NATIVE_LOCAL, MANUAL}`（1.0.4a / 0b.1.5b / 4.5）
+* `ClientRuntimeKind = {MOBILE_WEB, DESKTOP_WEB, DESKTOP_NATIVE}`（0b.1.6 / 1.0.5 / 2 / 4.5）
+* `RuntimeCapability = {VIDEO_PLAYBACK, LIGHT_REVIEW, NATIVE_FS_BINDING, LOCAL_ASR, LOCAL_LLM_QA, LOCAL_RECOMMENDER, MEMORY_CANVAS_EDIT, STORY_GENERATION}`（0b.1.6 / 1.0.5 / 2 / 4.5）
+* `CandidateRecallPointState = {PENDING, ACCEPTED, REJECTED}`（1.11c / 2.12 / 2.13 / 2.14）
 
 ---
 
@@ -211,11 +214,11 @@
   * 在 `project_id` 作用域内持久化且仅持久化一条 `ReviewTaskQueue` 记录，满足 `queue_id == GLOBAL_QUEUE`。
   * 在 `project_id` 作用域内持久化且仅持久化一条 `ProjectStorageConfig` 记录，且 `project_root` 非空、`learning_object_root` 非空（见 1.0.4）。
   * 在 `project_id` 作用域内持久化且仅持久化一条 `ProjectMaterialSourceBinding` 记录；其默认值必须写死为 `source_kind == SERVER_FS`，但若 `create_project(...)` 显式指定初始材料源类型，则必须写入该显式值（见 1.0.4a / 4.5）。
-  * 在 `project_id` 作用域内持久化且仅持久化一条 `ProjectConfig` 记录（见 1.0.5）；其默认值必须写死为：  
-    - `layer_index = 0` 的 `review_chain_template == [CONVERGENCE]`（等价于 4.3.2 的默认行为）；  
-    - `layer_index = 0` 的 `aggregation_threshold == (K_node=10, K_point=200)`（用于初始化 Layer 的控制字段；聚合时读取 Layer 当前值，见 4.4.2）。  
-    - `external_services == {asr=None, recommender=None}`（见 1.0.5）。
-    - `push_config.min_recall_points_to_enable == 30` 且 `push_config.max_history_len == 20`（见 1.0.5）。  
+* 在 `project_id` 作用域内持久化且仅持久化一条 `ProjectConfig` 记录（见 1.0.5）；其默认值必须写死为：  
+  - `layer_index = 0` 的 `review_chain_template == [CONVERGENCE]`（等价于 4.3.2 的默认行为）；  
+  - `layer_index = 0` 的 `aggregation_threshold == (K_node=10, K_point=200)`（用于初始化 Layer 的控制字段；聚合时读取 Layer 当前值，见 4.4.2）。  
+  - `push_config.min_recall_points_to_enable == 30` 且 `push_config.max_history_len == 20`（见 1.0.5）。  
+* `NativeRuntimeConfig / LocalModelConfig` 不属于项目 bootstrap 最小产物；其属于调用端运行时配置，不得持久化进 `ProjectConfig`，也不得作为 `create_project(...)` 成功提交的前置条件。
   * 在 `project_id` 下初始化且仅初始化 `layer_index = 0` 的 `Layer`（4.2.5）；其默认值必须写死为：  
     - `layer_mode = AUTO_TICK_ON_ENTRY`  
     - `orchestrator_managed_review_chain_ids = ()`（空 Tuple）  
@@ -235,8 +238,9 @@
 术语（强约束）  
 - `source_kind == SERVER_FS`：权威材料源为服务端本地目录 `resolve(project_root / learning_object_root)`。  
 - `source_kind == BROWSER_LOCAL`：权威材料源为“当前浏览器中已授权并绑定到该项目的本地目录快照”；服务端不得持久化该本地目录的绝对路径，只能接收其显示标签 `source_root_label/root_title` 与一组相对文件路径作为显式导入输入。  
+- `source_kind == NATIVE_LOCAL`：权威材料源为 `DESKTOP_NATIVE` 运行时已稳定绑定的本地目录快照；系统可持久化其 `source_root_label`，但不得把绝对路径、操作系统目录句柄或 Native 专有授权令牌写入 `ProjectConfig` 或其他项目事实；这些仅属于 `NativeRuntimeConfig`。  
 - `source_kind == MANUAL`：权威材料集合与学习对象树由显式手工写入口维护；`material_id`/`relative_path` 可为项目内稳定的虚拟标识，不要求对应任何可达本地文件。  
-- 下文凡称“项目启用 0b.1.5b 协议”，均指：`ProjectMaterialSourceBinding.source_kind` 指向的权威材料源处于启用状态；其中 `SERVER_FS` 的启用条件为 `ProjectStorageConfig.fs_sync_policy != DISABLED`，`BROWSER_LOCAL` 仅允许通过显式导入入口触发，`MANUAL` 永远不构成“启用 0b.1.5b 协议”。  
+- 下文凡称“项目启用 0b.1.5b 协议”，均指：`ProjectMaterialSourceBinding.source_kind` 指向的权威材料源处于启用状态；其中 `SERVER_FS` 的启用条件为 `ProjectStorageConfig.fs_sync_policy != DISABLED`，`BROWSER_LOCAL` 仅允许通过显式导入入口触发，`NATIVE_LOCAL` 仅允许通过 `DESKTOP_NATIVE` 运行时显式绑定/同步入口触发，`MANUAL` 永远不构成“启用 0b.1.5b 协议”。  
 
 一致性与原子性（强约束）  
 - 同步/导入必须通过一次系统内部 `MutationSession(project_id, READ_WRITE)` + 单次 `commit()` 原子完成；任一步失败则整体回滚，对外不可见（0b.1.2）。  
@@ -252,6 +256,10 @@
   - 系统启动时不得把服务端 `project_root / learning_object_root` 误当作该项目的权威材料源做隐式扫描。  
   - 系统启动时不得因为“浏览器本地目录尚未重新授权/当前无导入输入”而拒绝项目进入可读写就绪态；若此前已有已提交导入结果，则必须继续把该结果视为当前已提交事实。  
   - 系统必须仅通过 4.5 的 `import_learning_objects_from_browser_scan(...)` 对外入口接收浏览器侧显式导入输入；不得为 `BROWSER_LOCAL` 提供启动期自动同步。  
+- 当 `source_kind == NATIVE_LOCAL` 时：  
+  - 系统启动时不得把服务端 `project_root / learning_object_root` 误当作该项目的权威材料源做隐式扫描。  
+  - 系统不得要求 `MOBILE_WEB` / `DESKTOP_WEB` 提供 Native 目录绑定能力；对非 `DESKTOP_NATIVE` 运行时只能读取既有已提交事实。  
+  - 系统必须仅通过 4.5 的 `sync_learning_objects_from_native_scan(...)` 或把 `source_kind` 显式切换为 `NATIVE_LOCAL` 的入口接收 Native 目录快照；不得为 `NATIVE_LOCAL` 提供服务端启动期自动同步。  
 - 当 `source_kind == MANUAL` 时：  
   - 系统不得执行任何自动同步或隐式导入。  
   - 系统不得把 `project_root / learning_object_root`、浏览器授权目录、或其他外部目录误当作该项目的权威材料源。  
@@ -293,6 +301,14 @@
 - 顺序口径（强约束；按最小实现写死）：  
   - 对任一“文件桶”子容器，其 `children` 必须按 `child.relative_path.as_posix()` 的 Unicode code point 字典序升序排列；  
   - 对任一目录主容器，其 `children` 必须按“全部直接子目录（按 `relative_path.as_posix()` 升序）+ 末尾一个文件桶子容器”的顺序写入。  
+
+`NATIVE_LOCAL` 输入语义（强约束）  
+- 4.5 的 Native 同步入口必须接收：  
+  - `root_title: Optional[str]`：Native 运行时当前稳定绑定目录的显示名；仅用于 UI 与审计摘要。  
+  - `relative_file_paths: Sequence[PurePath | str]`：相对该 Native 目录根的文件路径集合。  
+- `relative_file_paths` 的规范化、去重、扩展名限制、路径文本规则、大小写冲突处理、ID 生成与 `BROWSER_LOCAL` 完全一致；实现不得对 `NATIVE_LOCAL` 另起一套路径语义。  
+- `NATIVE_LOCAL` 不要求用户在每次会话中重新授权同一稳定目录；但“稳定目录绑定”本身只属于 `DESKTOP_NATIVE` 运行时配置，不得被写入 `ProjectConfig`。  
+- `NATIVE_LOCAL` 的权威 `LearningObjectNode` 树采用与 `BROWSER_LOCAL` 相同的“目录主容器 + 文件桶子容器”派生树口径；实现不得在同一项目中对这两类本地目录快照采用不同的树形派生规则。  
 
 路径文本与跨平台一致性（强约束；写死）  
 - 对任意材料源输入得到的 `rel_path`，其权威路径文本均定义为 `rel_path.as_posix()`；系统不得对路径做 Unicode `NFC/NFD` 归一化或 locale 相关变换（按 Unicode code point 原样处理）。  
@@ -346,6 +362,7 @@ ID 生成（强约束；用于稳定引用）
 
 并补充强约束（写死；用于消除实现分叉）：
 * `MutationSession` 必须绑定只读字段 `project_id: ProjectId`。
+* `MutationSession` 还必须绑定只读字段 `runtime_kind: ClientRuntimeKind` 与 `runtime_capabilities: FrozenSet[RuntimeCapability]`；二者来自当前调用端运行时上下文，只用于门禁与能力判定，不属于任何项目持久化事实。
 * `System.begin_session(project_id, mode)` 在返回 session 之前，必须先在系统内部已提交基线视图下完成项目存在性检查：判定 `project_id` 对应的 `Project` 可解析且 `state == ACTIVE`；否则必须抛 `NotFound`。
   * 该检查是 `begin_session` 的系统级引导检查（bootstrap/readiness check），不得通过任何“要求显式 session 参数”的仓库接口执行。
   * 强约束：该检查只读取已提交状态（baseline），不得观察任何未提交写入，不得产生任何 staged 写入，不得触发隐式修复或隐式校验。
@@ -575,6 +592,13 @@ READ_ONLY（只读会话；强约束）
 - [1.8 AuditLogEvent（运行日志/审计事件）](#toc-1-8)
 - [1.9 MediaAsset（项目富媒体资产）](#toc-1-9)
 - [1.11 AsrArtifact（ASR 转写产物）](#toc-1-11)
+- [1.11a TempContextFragment（临时上下文片段）](#toc-1-11a)
+- [1.11b QASession（本地问答会话）](#toc-1-11b)
+- [1.11c CandidateRecallPoint（候选复述点）](#toc-1-11c)
+- [1.11d MemoryCanvas（记忆画布）](#toc-1-11d)
+- [1.11e MemoryCanvasVersion（记忆画布版本）](#toc-1-11e)
+- [1.11f CanvasEdge（画布连线）](#toc-1-11f)
+- [1.11g StoryArtifact（故事化产物）](#toc-1-11g)
 - [1.12 RecallPointReviewRecord（复述点复习记录）](#toc-1-12)
 - [1.13 AggregationQueue（聚合队列，Layer-owned State）](#toc-1-13)
 - [1.14 AggregationEvent（聚合事件记录）](#toc-1-14)
@@ -674,15 +698,16 @@ READ_ONLY（只读会话；强约束）
 #### 1.0.4a ProjectMaterialSourceBinding（项目材料源绑定）
 
 用途  
-在 `project_id` 作用域内持久化“当前权威材料源如何生成 `Instance/LearningObjectNode`”这一控制事实。当前最小实现中，该对象允许在 `SERVER_FS`、`BROWSER_LOCAL` 与 `MANUAL` 三种材料管理模式之间切换，并通过统一控制面约束 0b.1.5b 协议采用哪一条材料导入路径，或明确声明该项目完全由手工材料事实维护。
+在 `project_id` 作用域内持久化“当前权威材料源如何生成 `Instance/LearningObjectNode`”这一控制事实。当前最小实现中，该对象允许在 `SERVER_FS`、`BROWSER_LOCAL`、`NATIVE_LOCAL` 与 `MANUAL` 四种材料管理模式之间切换，并通过统一控制面约束 0b.1.5b 协议采用哪一条材料导入路径，或明确声明该项目完全由手工材料事实维护。
 
 存储字段  
 - `project_id: ProjectId`
 - `source_kind: MaterialSourceKind`
-  - 语义：当前权威材料源类型；最小实现中取值必须为 `SERVER_FS`、`BROWSER_LOCAL` 或 `MANUAL`。
+  - 语义：当前权威材料源类型；最小实现中取值必须为 `SERVER_FS`、`BROWSER_LOCAL`、`NATIVE_LOCAL` 或 `MANUAL`。
   - 语义补充：当 `source_kind == MANUAL` 时，`Instance/LearningObjectNode` 不由 0b.1.5b 的快照同步维护，而只由 4.5 的显式写入口维护。
 - `source_root_label: Optional[str]`
   - 语义：材料源根目录的展示标签；可用于 UI 展示或审计摘要。
+  - 语义补充：当 `source_kind == NATIVE_LOCAL` 时，该字段仅表示已绑定根目录的稳定显示名；绝对路径与 Native 目录句柄不在项目事实层持久化。
   - 强约束：该字段不得参与路径规范化、排序、ID 生成或同构判定。
 - `updated_at: Timestamp`
   - 语义：最后更新时间戳；必须由系统时钟生成（0a.10）。
@@ -695,7 +720,7 @@ READ_ONLY（只读会话；强约束）
   - 语义：upsert；若已存在则覆盖更新（覆盖 `source_kind/source_root_label/updated_at`）。
   - 写前条件（强约束；0b.5）：
     - `binding.project_id == session.project_id`（不得跨项目写入）。
-    - `binding.source_kind ∈ {SERVER_FS, BROWSER_LOCAL, MANUAL}`。
+    - `binding.source_kind ∈ {SERVER_FS, BROWSER_LOCAL, NATIVE_LOCAL, MANUAL}`。
 
 读接口  
 - `get(session: MutationSession) -> ProjectMaterialSourceBinding`
@@ -704,6 +729,7 @@ READ_ONLY（只读会话；强约束）
 一致性与校验  
 - 索引不变式：同一 `project_id` 作用域内必须且只能存在一条 `ProjectMaterialSourceBinding` 记录（由项目 bootstrap 最小产物保证，0b.1.5a）。
 - 更新该绑定不得隐式重建 `Instance/LearningObjectNode`；既有已提交树与实例集合必须保持不变，直到下一次显式成功导入、同步完成，或在 `source_kind == MANUAL` 下收到新的显式手工写入。
+- 当 `source_kind == NATIVE_LOCAL` 时，绑定更新只改变“下一次 Native 同步/导入读取哪类权威材料源”的控制事实；它本身不得要求系统立刻验证本地目录可达性。
 
 <a id="toc-1-0-5"></a>
 
@@ -717,7 +743,7 @@ READ_ONLY（只读会话；强约束）
 重要声明（强约束；写死）  
 - 配置更新为**未来生效**：不得追溯改写任何已提交的结构事实（见本节“Non-retroactive guarantee”）。  
 - 聚合触发判定（4.4.2）读取的是 `Layer` 当前持有的 `(K_node, K_point)` 控制字段；不得在聚合判定时读取或依赖 `ProjectConfig`（避免“不可重放”的双源行为）。  
-- 配置可写范围最小版（强约束；写死）：本规格的最小对外入口集合（4.5）仅要求可编辑 `layer_configs`（通过 `set_layer_config` 合并语义）。`external_services` 与 `push_config` 在最小版中为“创建时写入、只读使用”的配置事实：必须在项目 bootstrap 时写入默认值（见 0b.1.5a / 4.5 `create_project`），后续若要支持编辑，必须通过新增白名单入口扩展实现；在未扩展前，实现不得提供任何对外写入口修改这两者（避免实现分叉）。
+- 配置可写范围最小版（强约束；写死）：本规格的最小对外入口集合（4.5）仅要求可编辑 `layer_configs`（通过 `set_layer_config` 合并语义）。`push_config` 在最小版中为“创建时写入、只读使用”的配置事实：必须在项目 bootstrap 时写入默认值（见 0b.1.5a / 4.5 `create_project`）；`NativeRuntimeConfig / LocalModelConfig` 属于运行时层，不得写入 `ProjectConfig`，也不得通过项目级入口共享给其他端。
 
 存储字段（最小）
 - `project_id: ProjectId`
@@ -728,8 +754,6 @@ READ_ONLY（只读会话；强约束）
   - 强约束（写死默认值；用于跨实现一致）：`layer_configs` 必须至少包含 `layer_index == 0` 的一条配置，其默认值必须满足：  
     - `review_chain_template == [CONVERGENCE]`  
     - `aggregation_threshold == (K_node=10, K_point=200)`  
-- `external_services: ProjectExternalServicesConfig`
-  - 默认值（强约束；写死）：`{asr=None, recommender=None}`
 - `push_config: RecallPointPushConfig`
   - 默认值（强约束；写死）：  
     - `min_recall_points_to_enable = 30`  
@@ -762,27 +786,33 @@ ReviewChainTemplateItem（值对象；最小）
     - `item.kind == CONVERGENCE`：`item.count` 必须为 `None` 或省略。  
     - `item.kind == REVIEW_TASK`：`item.count` 缺省视为 `1`，且必须满足 `count >= 1`。  
 - `K_node >= 1` 且 `K_point >= 1`。
-- `external_services: ProjectExternalServicesConfig`
-  - 语义：本项目可选外部能力（ASR/推荐模型）的本地服务配置；仅作为配置事实存储，不做可达性探测。
-  - 约束：若对应配置未提供（None），则该能力在本项目内视为“不可用”，系统必须拒绝相关入口或返回明确的 `PreconditionFailure`（见 4.5 / 4.7）。
-
 - `push_config: RecallPointPushConfig`
-  - 语义：复述点推送（推荐）功能配置。强约束：该配置只影响“推送视图/推荐判断”，不得改写任何既有结构事实（LearningTask/LearningTaskNode/队列/链等）。
+  - 语义：复述点推荐/压缩感/漂移视图的阈值配置。强约束：该配置只影响只读视图判断，不得改写任何既有结构事实（LearningTask/LearningTaskNode/队列/链等）。
 
-类型定义（强约束；值对象）
-- `ProjectExternalServicesConfig`
+相关运行时配置（强约束；非项目事实，不进入仓库存储）
+- `NativeRuntimeConfig`
+  - `runtime_kind: ClientRuntimeKind`
+  - `capabilities: FrozenSet[RuntimeCapability]`
+  - `local_models: LocalModelConfig`
+  - 语义：由当前调用端运行时提供；可随设备与安装环境变化。它不是 `ProjectConfig` 字段，不参与 bootstrap，也不参与 `ProjectConfigRepository.set/get`。
+- `LocalModelConfig`
   - `asr: Optional[LocalServiceConfig]`
+  - `llm_qa: Optional[LocalServiceConfig]`
   - `recommender: Optional[LocalServiceConfig]`
+  - `story_generator: Optional[LocalServiceConfig]`
+  - 语义：只在 `DESKTOP_NATIVE` 且对应 `RuntimeCapability` 存在时可被使用；其他端必须视为不可用。
 - `LocalServiceConfig`
   - `base_url: str`
     - 语义：本地服务基址（例如 `http://127.0.0.1:12345`）。
     - 写前条件：必须为非空字符串；不得包含尾随空白。
+  - `model_name: Optional[str]`
+    - 语义：可选模型标识；仅用于运行时调用与日志摘要，不得进入项目级审计 payload 的敏感字段。
   - `api_key: Optional[str]`
     - 语义：可选鉴权字段；由调用方提供；系统不得将其写入审计 payload（避免泄漏）。
 
 - `RecallPointPushConfig`
   - `min_recall_points_to_enable: int`
-    - 语义：当项目内复述点总数 `|RecallPointRepository.all(session)|` 小于该阈值时，系统必须禁用“推送”判定路径（4.7），并返回空候选或使用固定规则（由实现决定，但必须确定性）。
+    - 语义：当项目内复述点总数 `|RecallPointRepository.all(session)|` 小于该阈值时，系统必须禁用 4.7 的推荐模型路径，并返回空候选或使用固定规则（由实现决定，但必须确定性）。
   - `max_history_len: int`
     - 语义：为特征向量编码保留的最大历史条目数（见 4.7.2）；超出则仅保留最近 `max_history_len` 条记录。
 
@@ -793,7 +823,7 @@ ReviewChainTemplateItem（值对象；最小）
 
 写接口  
 - `set(session: MutationSession, config: ProjectConfig) -> None`
-  - 语义：upsert；若已存在则**覆盖更新完整 ProjectConfig 对象**，即覆盖 `layer_configs / external_services / push_config / updated_at`。  
+  - 语义：upsert；若已存在则**覆盖更新完整 ProjectConfig 对象**，即覆盖 `layer_configs / push_config / updated_at`。  
   - 强约束：实现不得把该接口解释为“仅更新 `layer_configs`”；若系统仅希望更新层配置，必须通过 4.5 的 `set_layer_config(...)` 入口执行，而非改变本仓库接口语义。  
 
 读接口  
@@ -917,7 +947,7 @@ Non-retroactive guarantee（强约束；可测试口径）
     - 当项目启用 0b.1.5b 的同步/导入协议时，该字段为权威结构源，用于目录树同构（0b.1.5b）。  
   - `source: Enum{FILESYSTEM, MANUAL}`
     - 语义：该节点的写入来源。  
-    - 强约束：当项目启用 0b.1.5b 的同步/导入协议时，该字段必须为 `FILESYSTEM`；此处 `FILESYSTEM` 表示“由当前权威材料源同步/导入协议生成”，既可来自 `SERVER_FS`，也可来自 `BROWSER_LOCAL`。  
+    - 强约束：当项目启用 0b.1.5b 的同步/导入协议时，该字段必须为 `FILESYSTEM`；此处 `FILESYSTEM` 表示“由当前权威材料源同步/导入协议生成”，可来自 `SERVER_FS`、`BROWSER_LOCAL` 或 `NATIVE_LOCAL`。  
     - 强约束：当通过 4.5 的 `add_learning_object_leaf/container` 手工写入口创建/修改节点（且仅允许在项目未启用 0b.1.5b 同步协议时）时，创建的新节点必须写入 `MANUAL`。
 
   - `parent_id: Optional[LearningObjectNodeId]`
@@ -945,7 +975,7 @@ Non-retroactive guarantee（强约束；可测试口径）
 
 语义  
 - 叶子节点必须且只能绑定一个 `instance_id`。
-- 当项目启用 0b.1.5b 的同步/导入协议时：`LearningObjectNode` 树必须与当前权威材料源定义的权威结构严格同构（0b.1.5b）；其中 `SERVER_FS` 采用“目录/文件直接孩子集合严格同构”，`BROWSER_LOCAL` 采用“目录主容器 + 文件桶子容器”的派生树同构口径。  
+- 当项目启用 0b.1.5b 的同步/导入协议时：`LearningObjectNode` 树必须与当前权威材料源定义的权威结构严格同构（0b.1.5b）；其中 `SERVER_FS` 采用“目录/文件直接孩子集合严格同构”，`BROWSER_LOCAL` 与 `NATIVE_LOCAL` 采用“目录主容器 + 文件桶子容器”的派生树同构口径。  
 - 容器节点不绑定 `instance_id`。  
 - `children` 定义该容器的直接子节点 `node_id` 有序序列；任何遍历/聚合均以该顺序为准。  
 - `children` 的顺序是权威事实源（authoritative order）；对已提交状态，该顺序必须保持稳定。  
@@ -1563,6 +1593,9 @@ Queries
 - `asr_artifact_id: AsrArtifactId`
 - `created_at: Timestamp`
 - `provider: AsrProvider`
+- `producer_runtime_kind: ClientRuntimeKind`
+  - 语义：创建该 ASR 产物的运行时类型。
+  - 强约束：新建 `AsrArtifact` 时必须满足 `producer_runtime_kind == DESKTOP_NATIVE`；其他端只允许读取既有 `AsrArtifact`，不得创建新产物。
 
 - `recall_point_id: RecallPointId`
   - 语义：本转写产物围绕的复述点；必须可解析，且在新建产物时其 `RecallPoint.state` 必须为 `ACTIVE`。
@@ -1601,7 +1634,243 @@ Queries
 一致性与校验  
 - `asr_artifact_id` 项目内唯一。  
 - `recall_point_id` / `source_instance_id` 必须可解析（写前条件）；其中 `recall_point_id` 在新建产物时还必须满足其 `RecallPoint.state == ACTIVE`。  
+- 新建产物时 `producer_runtime_kind` 必须为 `DESKTOP_NATIVE`；该限制属于运行时门禁，不得通过修改 `ProjectConfig` 绕过。  
 - ASR 外部接口可达性不得进入提交期强制集合；失败必须以显式错误返回给调用方，并且不得留下部分 staged 写入（0b.5）。  
+
+<a id="toc-1-11a"></a>
+
+### 1.11a TempContextFragment（临时上下文片段）
+
+用途  
+把 ASR 片段、用户选中的局部文本或其等价局部证据固化为“临时上下文片段”，供 Native-only 的本地问答与候选点生成协议引用。该对象是辅助事实，不属于正式 `RecallPoint`，也不得直接进入导出主格式。
+
+重要声明（强约束）  
+- `TempContextFragment` 只服务于 `DESKTOP_NATIVE` 的本地交互能力；其创建不得生成 `ReviewTask`、不得写入 `can_recall`、不得推进主调度闭环。  
+- 该对象允许长期保存以支撑历史回看，但仍属于临时/辅助层，不得被 4.8 的标准导出接口隐式混入。  
+
+存储字段（最小）
+- `project_id: ProjectId`
+- `temp_context_fragment_id: TempContextFragmentId`
+- `created_at: Timestamp`
+- `producer_runtime_kind: ClientRuntimeKind`
+  - 强约束：新建时必须为 `DESKTOP_NATIVE`。
+- `source_recall_point_id: RecallPointId`
+- `source_asr_artifact_id: Optional[AsrArtifactId]`
+- `start_ms: Optional[int]`
+- `end_ms: Optional[int]`
+- `origin: Enum{ASR_SEGMENTS, USER_SELECTION}`
+- `text: str`
+
+仓库接口  
+- 关联仓库：`TempContextFragmentRepository`
+- `add(session: MutationSession, fragment: TempContextFragment) -> None`
+- `get(session: MutationSession, temp_context_fragment_id: TempContextFragmentId) -> TempContextFragment`
+- `all_by_recall_point(session: MutationSession, recall_point_id: RecallPointId) -> Sequence[TempContextFragment]`
+
+一致性与校验  
+- `temp_context_fragment_id` 项目内唯一。  
+- `source_recall_point_id` 必须可解析。若 `source_asr_artifact_id` 非空，则其 `recall_point_id` 必须等于 `source_recall_point_id`。  
+- 创建 `TempContextFragment` 不得隐式修改任何 `RecallPoint / LearningTask / ReviewTask`。
+
+<a id="toc-1-11b"></a>
+
+### 1.11b QASession（本地问答会话）
+
+用途  
+记录一次或多次本地问答交互的会话化上下文。它用于承载 Native-only 的 prompt / response 历史与上下文片段引用，但不构成正式学习事实。
+
+重要声明（强约束）  
+- `QASession` 的存在不得改变任何 `RecallPoint`、`LearningTask`、`ReviewTask`、`ReviewChain` 或 `Convergence` 的语义。  
+- 本对象允许引用 `TempContextFragment`、`RecallPoint`、`StoryArtifact` 等辅助对象，但任何模型回答都不得自动覆盖正式 `RecallPoint` 文本。  
+
+存储字段（最小）
+- `project_id: ProjectId`
+- `qa_session_id: QASessionId`
+- `created_at: Timestamp`
+- `updated_at: Timestamp`
+- `producer_runtime_kind: ClientRuntimeKind`
+  - 强约束：新建与追加 turn 时必须为 `DESKTOP_NATIVE`。
+- `context_fragment_ids: Tuple[TempContextFragmentId, ...]`
+- `turns: Tuple[QATurn, ...]`
+  - `QATurn = {question: str, answer: str, created_at: Timestamp}`
+
+仓库接口  
+- 关联仓库：`QASessionRepository`
+- `add(session: MutationSession, qa_session: QASession) -> None`
+- `append_turn(session: MutationSession, qa_session_id: QASessionId, turn: QATurn, context_fragment_ids: Optional[Tuple[TempContextFragmentId, ...]] = None) -> None`
+- `get(session: MutationSession, qa_session_id: QASessionId) -> QASession`
+- `all(session: MutationSession) -> Sequence[QASession]`
+
+一致性与校验  
+- `qa_session_id` 项目内唯一。  
+- `context_fragment_ids` 中每个 `TempContextFragmentId` 必须可解析。  
+- `turns` 允许追加但不得重写既有 turn 的 `question/answer` 文本。
+
+<a id="toc-1-11c"></a>
+
+### 1.11c CandidateRecallPoint（候选复述点）
+
+用途  
+表示由本地问答会话或其上下文派生出的“候选复述点”。它与正式 `RecallPoint` 严格分离：在被用户显式接受之前，它不得进入学习/复习主闭环。
+
+重要声明（强约束）  
+- `CandidateRecallPoint` 不是正式 `RecallPoint`；任何推荐、弹幕、画布、故事或本地问答都不得把它当成已提交学习事实。  
+- 只有 2.13 `accept_candidate_recall_point(...)` 才允许把候选点转化为正式学习事实；拒绝或未处理状态都不得触发任务调度。  
+
+存储字段（最小）
+- `project_id: ProjectId`
+- `candidate_recall_point_id: CandidateRecallPointId`
+- `qa_session_id: QASessionId`
+- `created_at: Timestamp`
+- `state: CandidateRecallPointState`
+- `question: RichContent`
+- `answer: RichContent`
+- `suggested_anchor: Optional[Anchor]`
+- `supporting_fragment_ids: Tuple[TempContextFragmentId, ...]`
+- `decision_at: Optional[Timestamp]`
+- `accepted_recall_point_id: Optional[RecallPointId]`
+
+仓库接口  
+- 关联仓库：`CandidateRecallPointRepository`
+- `add(session: MutationSession, candidate: CandidateRecallPoint) -> None`
+- `mark_accepted(session: MutationSession, candidate_recall_point_id: CandidateRecallPointId, accepted_recall_point_id: RecallPointId, decision_at: Timestamp) -> None`
+- `mark_rejected(session: MutationSession, candidate_recall_point_id: CandidateRecallPointId, decision_at: Timestamp) -> None`
+- `get(session: MutationSession, candidate_recall_point_id: CandidateRecallPointId) -> CandidateRecallPoint`
+- `all_by_qa_session(session: MutationSession, qa_session_id: QASessionId) -> Sequence[CandidateRecallPoint]`
+
+一致性与校验  
+- `candidate_recall_point_id` 项目内唯一。  
+- `state` 只允许单向跃迁：`PENDING -> ACCEPTED` 或 `PENDING -> REJECTED`；一旦决策完成不得再次改写。  
+- 当 `state == ACCEPTED` 时，`accepted_recall_point_id` 必须可解析；当 `state != ACCEPTED` 时该字段必须为空。  
+
+<a id="toc-1-11d"></a>
+
+### 1.11d MemoryCanvas（记忆画布）
+
+用途  
+为用户提供围绕正式复述点、候选点、临时上下文片段与故事化产物进行整理的持久化画布。画布只承担组织与观察作用，不得直接写入正式复习结果。
+
+重要声明（强约束）  
+- 画布是只读事实与用户整理动作的容器；它不得成为 `can_recall` 的写入口。  
+- 画布当前态与历史版本必须分离，以支持“继续编辑”和“回看旧版本”这两类需求。  
+
+值对象  
+- `CanvasObjectRef = {kind: Enum{RECALL_POINT, CANDIDATE_RECALL_POINT, TEMP_CONTEXT_FRAGMENT, STORY_ARTIFACT}, object_id: str}`
+
+存储字段（最小）
+- `project_id: ProjectId`
+- `memory_canvas_id: MemoryCanvasId`
+- `title: str`
+- `created_at: Timestamp`
+- `updated_at: Timestamp`
+- `producer_runtime_kind: ClientRuntimeKind`
+  - 强约束：新建与编辑时必须为 `DESKTOP_NATIVE`。
+- `object_refs: Tuple[CanvasObjectRef, ...]`
+- `latest_version_id: Optional[MemoryCanvasVersionId]`
+
+仓库接口  
+- 关联仓库：`MemoryCanvasRepository`
+- `add(session: MutationSession, canvas: MemoryCanvas) -> None`
+- `set_latest_version(session: MutationSession, memory_canvas_id: MemoryCanvasId, latest_version_id: MemoryCanvasVersionId, updated_at: Timestamp) -> None`
+- `get(session: MutationSession, memory_canvas_id: MemoryCanvasId) -> MemoryCanvas`
+- `all(session: MutationSession) -> Sequence[MemoryCanvas]`
+
+一致性与校验  
+- `memory_canvas_id` 项目内唯一。  
+- `object_refs` 里的对象必须全部可解析。  
+- `MemoryCanvas` 只保存“当前工作上下文与版本指针”，不得把版本历史内联覆盖。
+
+<a id="toc-1-11e"></a>
+
+### 1.11e MemoryCanvasVersion（记忆画布版本）
+
+用途  
+记录画布在某一时刻被用户显式保存的不可变快照，用于历史回看、回溯比较与审计。
+
+值对象  
+- `CanvasNodeSnapshot = {object_ref: CanvasObjectRef, x: float, y: float, note: Optional[str]}`
+- `CanvasEdgeSnapshot = {from_ref: CanvasObjectRef, to_ref: CanvasObjectRef, label: Optional[str]}`
+
+存储字段（最小）
+- `project_id: ProjectId`
+- `memory_canvas_version_id: MemoryCanvasVersionId`
+- `memory_canvas_id: MemoryCanvasId`
+- `version_no: int`
+- `saved_at: Timestamp`
+- `nodes: Tuple[CanvasNodeSnapshot, ...]`
+- `edges: Tuple[CanvasEdgeSnapshot, ...]`
+- `summary_note: Optional[str]`
+
+仓库接口  
+- 关联仓库：`MemoryCanvasVersionRepository`
+- `add(session: MutationSession, version: MemoryCanvasVersion) -> None`
+- `get(session: MutationSession, memory_canvas_version_id: MemoryCanvasVersionId) -> MemoryCanvasVersion`
+- `all_by_canvas(session: MutationSession, memory_canvas_id: MemoryCanvasId) -> Sequence[MemoryCanvasVersion]`
+
+一致性与校验  
+- `memory_canvas_version_id` 项目内唯一。  
+- 对同一 `memory_canvas_id`，`version_no` 必须严格递增且不可复用。  
+- 历史版本一经写入不得修改。
+
+<a id="toc-1-11f"></a>
+
+### 1.11f CanvasEdge（画布连线）
+
+用途  
+保存画布当前工作态下的边关系，使“编辑中的当前边集”与“已保存版本快照”分离。
+
+存储字段（最小）
+- `project_id: ProjectId`
+- `canvas_edge_id: CanvasEdgeId`
+- `memory_canvas_id: MemoryCanvasId`
+- `from_ref: CanvasObjectRef`
+- `to_ref: CanvasObjectRef`
+- `label: Optional[str]`
+- `updated_at: Timestamp`
+
+仓库接口  
+- 关联仓库：`CanvasEdgeRepository`
+- `replace_all_for_canvas(session: MutationSession, memory_canvas_id: MemoryCanvasId, edges: Tuple[CanvasEdge, ...]) -> None`
+- `all_by_canvas(session: MutationSession, memory_canvas_id: MemoryCanvasId) -> Sequence[CanvasEdge]`
+
+一致性与校验  
+- `canvas_edge_id` 项目内唯一。  
+- `from_ref` 与 `to_ref` 必须都属于对应 `MemoryCanvas.object_refs` 的当前对象集合。  
+- `replace_all_for_canvas(...)` 的语义是“整组替换当前边集”；不得改写任何既有 `MemoryCanvasVersion`。
+
+<a id="toc-1-11g"></a>
+
+### 1.11g StoryArtifact（故事化产物）
+
+用途  
+表示由本地模型基于正式事实、候选点、上下文片段或画布关系生成的故事化理解产物。它用于辅助理解与记忆，不用于替代正式 `RecallPoint`。
+
+重要声明（强约束）  
+- `StoryArtifact` 是派生/辅助对象，不是正式学习事实。  
+- `StoryArtifact` 不能覆盖、替换或隐式改写任何 `RecallPoint.question/answer/insights`；若用户希望把其中内容纳入正式事实，必须通过显式编辑或候选点接受路径完成。  
+
+存储字段（最小）
+- `project_id: ProjectId`
+- `story_artifact_id: StoryArtifactId`
+- `created_at: Timestamp`
+- `producer_runtime_kind: ClientRuntimeKind`
+  - 强约束：新建时必须为 `DESKTOP_NATIVE`。
+- `title: str`
+- `body: RichContent`
+- `source_refs: Tuple[CanvasObjectRef, ...]`
+- `qa_session_id: Optional[QASessionId]`
+- `memory_canvas_id: Optional[MemoryCanvasId]`
+
+仓库接口  
+- 关联仓库：`StoryArtifactRepository`
+- `add(session: MutationSession, story_artifact: StoryArtifact) -> None`
+- `get(session: MutationSession, story_artifact_id: StoryArtifactId) -> StoryArtifact`
+- `all(session: MutationSession) -> Sequence[StoryArtifact]`
+
+一致性与校验  
+- `story_artifact_id` 项目内唯一。  
+- `source_refs` 中的对象必须可解析。  
+- `StoryArtifact` 的写入不得隐式创建 `RecallPoint`、不得创建 `ReviewTask`、不得推进调度。  
 
 <a id="toc-1-9"></a>
 
@@ -1658,7 +1927,7 @@ Queries
 
 用途（强约束；业务事实）
 - 记录每个复述点在每次复习中的结果与时间，用于：  
-  (a) 生成“复述点特征向量”（4.7.2），支持本地 ML/规则模型判定是否推送；  
+  (a) 生成“复述点特征向量”（4.7.2），支持本地 ML/规则模型进行推荐、压缩感与漂移分析；  
   (b) 向用户提供“复习历史”只读视图。  
 - 该对象不是审计日志：允许被系统读取并用于派生计算/推荐判断。  
 - 该对象为 append-only：只允许追加新记录，不允许修改或删除单条记录（项目删除除外）。
@@ -1727,13 +1996,23 @@ Queries
 
 ## 2. 事务协议（Transaction Protocols）
 
-本章定义“面向业务事实（business facts）”的写入协议：一次提交（mutation session + commit）只负责创建/更新第 1 章定义的核心对象（RecallPoint / LearningTask / LearningTaskNode / RangeSnapshot），不直接创建运行时调度对象（ReviewTask / Convergence / ReviewChain / Orchestrator / Queue）。运行时调度对象的创建与推进由第 3/4 章的内部调度协议负责。
+本章定义“面向业务事实（business facts）与 Native-only 辅助对象”的写入协议：一次提交（mutation session + commit）只负责创建/更新第 1 章定义的核心对象与辅助对象（例如 `RecallPoint / LearningTask / LearningTaskNode / RangeSnapshot / AsrArtifact / TempContextFragment / QASession / CandidateRecallPoint / MemoryCanvas / MemoryCanvasVersion / CanvasEdge / StoryArtifact`），不直接创建运行时调度对象（`ReviewTask / Convergence / ReviewChain / Orchestrator / Queue`）。运行时调度对象的创建与推进由第 3/4 章的内部调度协议负责。
 
 通用事务语义继承第 0b.1：会话内可暂时违背跨对象结构约束；`commit()` 对最终态一次性校验，失败则整组变更回滚；本章协议的读视图语义完全继承 0b.2：READ_ONLY 为 baseline read，READ_WRITE 为 in-session overlay read（read-your-writes）；不触发隐式修复。
 
 本章目录：
 - [2.1 协议：学习任务提交（LearningTask Submit）](#toc-2-1)
 - [2.2 协议：复习提交（Review Submit）](#toc-2-2)
+- [2.9 协议：Native-only ASR 转写（Request ASR）](#toc-2-9)
+- [2.10 协议：提取临时上下文片段（Extract Temp Context Fragment）](#toc-2-10)
+- [2.11 协议：本地问答（Ask Local LLM）](#toc-2-11)
+- [2.12 协议：从问答生成候选复述点（Generate Candidate Recall Points）](#toc-2-12)
+- [2.13 协议：接受候选复述点（Accept Candidate Recall Point）](#toc-2-13)
+- [2.14 协议：拒绝候选复述点（Reject Candidate Recall Point）](#toc-2-14)
+- [2.15 协议：创建记忆画布（Create Memory Canvas）](#toc-2-15)
+- [2.16 协议：保存记忆画布版本（Save Memory Canvas Version）](#toc-2-16)
+- [2.17 协议：设置画布连线（Set Canvas Edges）](#toc-2-17)
+- [2.18 协议：生成故事化产物（Generate Story Artifact）](#toc-2-18)
 
 ---
 
@@ -1882,10 +2161,10 @@ Failure 语义
 
 <a id="toc-2-9"></a>
 
-### 2.9 ASR（Whisper）转写协议（RecallPoint -> Video Window -> Transcript）
+### 2.9 协议：Native-only ASR 转写（Request ASR）
 
 目的  
-对某个 `RecallPoint` 的来源材料（通常为视频/音频）在其附近窗口执行 ASR 转写，生成 `AsrArtifact`（1.11），供节点详情页导出与用户后续独立使用。
+对某个 `RecallPoint` 的来源材料（通常为视频/音频）在其附近窗口执行本地 ASR 转写，生成 `AsrArtifact`（1.11），供节点详情页导出与用户后续独立使用。
 
 SCHEDULING_EFFECT = NONE（强约束）  
 - 本协议不得创建/入队任何 ReviewTask，不得推进 ReviewChain，不得触发 Orchestrator Tick。  
@@ -1894,25 +2173,244 @@ SCHEDULING_EFFECT = NONE（强约束）
 对外入口（并且必须纳入 4.5 系统对外入口白名单）  
 - `request_asr(session: MutationSession, recall_point_id: RecallPointId, center_ms: int, pre_ms: int, post_ms: int, provider: AsrProvider=WHISPER) -> AsrArtifactId`
   - 会话要求：`session.mode == READ_WRITE`。  
+  - 运行时要求：`session.runtime_kind == DESKTOP_NATIVE` 且 `LOCAL_ASR ∈ session.runtime_capabilities`；其他端只允许读取既有 `AsrArtifact`，不得调用本协议。  
   - 写前条件：  
     - `RecallPointRepository.get(session, recall_point_id)` 可解析，且其 `RecallPoint.state == ACTIVE`；若不可解析则 `NotFound`，若目标为 `DELETED` 则必须返回 `PreconditionFailure`。  
     - 必须能从该 RecallPoint 的 anchor 推导出 `source_instance_id`（材料实例）；否则 `PreconditionFailure`。  
     - `pre_ms >= 0` 且 `post_ms >= 0`，窗口长度不超过上限；否则 `PreconditionFailure`。  
-    - `ProjectConfig.external_services.asr` 可缺失；若缺失，系统必须尝试自动发现并拉起本机 Whisper 运行时。仅当显式配置缺失且本机运行时也不可用时，才返回 `PreconditionFailure`。  
+    - `NativeRuntimeConfig.local_models.asr` 必须可用；若本地 ASR 模型未配置或 Native 运行时不可用，则必须返回 `PreconditionFailure`。  
   - 缓存语义（强约束；写死）：  
     - 若 `AsrArtifactRepository.maybe_get_by_cache_key(...)` 命中，则必须直接返回既有 `asr_artifact_id`，且不得再次调用 ASR 服务。  
   - 外部调用：  
-    - 实现必须以“材料实例 + 时间窗口”提取音频片段并调用 ASR 服务；ASR 服务既可以是 `ProjectConfig.external_services.asr` 显式配置的 HTTP 接口，也可以是在配置缺失时自动发现并拉起的本机 Whisper 运行时。音频提取与外部调用均不得在提交期强制校验中发生（0b.7.2）。  
+    - 实现必须以“材料实例 + 时间窗口”提取音频片段并调用 Native 本地 ASR 服务；其配置来源只能是 `NativeRuntimeConfig.local_models.asr`。音频提取与外部调用均不得在提交期强制校验中发生（0b.7.2）。  
+    - 新建 `AsrArtifact` 时，系统必须写入 `producer_runtime_kind = session.runtime_kind`。  
   - 失败语义：  
-    - 若 `ProjectConfig.external_services.asr` 缺失且本机 Whisper 运行时也不可用，必须返回 `PreconditionFailure`。  
+    - 若本地 ASR 模型配置缺失或进程不可用，必须返回 `PreconditionFailure`。  
     - ASR 服务不可达、超时或返回无效响应时，必须返回显式错误 `ExternalServiceError`（实现可复用更细分类名，但对外语义必须稳定），且不得留下部分 staged 写入（0b.5）。  
     - 允许返回空 segments 作为成功（例如静音或识别空）；空不视为错误。  
 
 说明（强约束）  
 - 本协议不定义“视频容器解析/解码”细节；其属于实现内部能力。对外可观察语义仅限于：成功则产生 `AsrArtifact(segments)`，失败则不产生任何写入。  
-- 当 `ProjectConfig.external_services.asr` 缺失时，自动发现并拉起本机 Whisper 运行时属于协议允许的默认实现，而不是 spec 偏差。  
+- 本协议是 Native-only 写入口；`MOBILE_WEB` / `DESKTOP_WEB` 不得承担 ASR 生成职责。  
 - 墓碑边界（强约束）：`DELETED` 的 RecallPoint 仍可作为历史事实被读取或被既有 `AsrArtifact` 引用，但不得再通过本协议生成新的 ASR 产物。  
 - 若材料非音视频或无法提取音频，则必须 `PreconditionFailure`，并给出可解释错误摘要（例如“不支持的材料类型”）。  
+
+---
+
+<a id="toc-2-10"></a>
+
+### 2.10 协议：提取临时上下文片段（Extract Temp Context Fragment）
+
+目的  
+把围绕某个复述点的局部证据提取为 `TempContextFragment`（1.11a），供本地问答与候选点生成使用。
+
+SCHEDULING_EFFECT = NONE（强约束）  
+- 本协议不得创建/入队任何 `ReviewTask`，不得推进 ReviewChain，不得触发 Orchestrator Tick。  
+- 允许写入：仅允许写入 `TempContextFragment`（1.11a）。  
+
+对外入口  
+- `extract_temp_context_fragment(session: MutationSession, recall_point_id: RecallPointId, source_asr_artifact_id: Optional[AsrArtifactId], start_ms: Optional[int], end_ms: Optional[int], text: Optional[str]) -> TempContextFragmentId`
+  - 会话要求：`session.mode == READ_WRITE`。  
+  - 运行时要求：`session.runtime_kind == DESKTOP_NATIVE`。  
+  - 写前条件：  
+    - `RecallPointRepository.get(session, recall_point_id)` 可解析。  
+    - `source_asr_artifact_id` 若非空，则必须可解析，且其 `recall_point_id == recall_point_id`。  
+    - `text` 与 `(source_asr_artifact_id, start_ms, end_ms)` 至少要提供一类有效来源；两者均缺失时必须返回 `PreconditionFailure`。  
+  - 写入语义：  
+    - 若提供 `source_asr_artifact_id`，系统可从目标 `AsrArtifact.segments` 中裁剪或拼接局部文本；若同时提供 `text`，则以调用方显式给定文本为权威保存值。  
+    - 新建 `TempContextFragment(producer_runtime_kind = session.runtime_kind, source_recall_point_id = recall_point_id, ...)`。  
+  - 失败语义：任何输入校验失败或片段抽取失败都不得留下部分 staged 写入。  
+
+---
+
+<a id="toc-2-11"></a>
+
+### 2.11 协议：本地问答（Ask Local LLM）
+
+目的  
+基于一个或多个 `TempContextFragment` 进行本地问答，并把问答 turn 持久化到 `QASession`（1.11b）。
+
+SCHEDULING_EFFECT = NONE（强约束）  
+- 本协议不得创建/入队任何 `ReviewTask`，不得推进 ReviewChain，不得触发 Orchestrator Tick。  
+- 允许写入：仅允许写入 `QASession`（1.11b）。  
+
+对外入口  
+- `ask_local_llm(session: MutationSession, prompt: str, context_fragment_ids: Sequence[TempContextFragmentId], qa_session_id: Optional[QASessionId] = None) -> QASession`
+  - 会话要求：`session.mode == READ_WRITE`。  
+  - 运行时要求：`session.runtime_kind == DESKTOP_NATIVE` 且 `LOCAL_LLM_QA ∈ session.runtime_capabilities`。  
+  - 写前条件：  
+    - `prompt` 必须为非空字符串。  
+    - `context_fragment_ids` 中每个 `TempContextFragmentId` 必须可解析。  
+    - `NativeRuntimeConfig.local_models.llm_qa` 必须可用；否则 `PreconditionFailure`。  
+    - `qa_session_id` 若非空，则必须可解析。  
+  - 写入语义：  
+    - 当 `qa_session_id` 为空时，系统必须新建一个 `QASession`，并把本次问答写成其首个 `QATurn`。  
+    - 当 `qa_session_id` 非空时，系统必须在既有 `QASession` 尾部追加一个新的 `QATurn`，并更新 `updated_at`。  
+    - 本地模型响应必须仅写入 `QASession.turns.answer`；不得直接改写任何正式 `RecallPoint`。  
+  - 失败语义：模型服务不可达、超时、返回无效响应时，必须返回显式错误且不得留下部分 staged 写入。  
+
+---
+
+<a id="toc-2-12"></a>
+
+### 2.12 协议：从问答生成候选复述点（Generate Candidate Recall Points）
+
+目的  
+从 `QASession` 中提炼可供用户确认的 `CandidateRecallPoint`（1.11c）集合。
+
+SCHEDULING_EFFECT = NONE（强约束）  
+- 本协议不得创建正式 `RecallPoint`、不得创建/入队 `ReviewTask`、不得推进主调度。  
+
+对外入口  
+- `generate_candidate_recall_points_from_qa(session: MutationSession, qa_session_id: QASessionId, max_items: int = 5) -> Sequence[CandidateRecallPointId]`
+  - 会话要求：`session.mode == READ_WRITE`。  
+  - 运行时要求：`session.runtime_kind == DESKTOP_NATIVE` 且 `LOCAL_LLM_QA ∈ session.runtime_capabilities`。  
+  - 写前条件：  
+    - `qa_session_id` 必须可解析。  
+    - `max_items >= 1`。  
+  - 写入语义：  
+    - 系统必须基于 `QASession.turns` 与 `context_fragment_ids` 生成至多 `max_items` 个 `CandidateRecallPoint`。  
+    - 所有新候选项必须写入 `state = PENDING`，并与来源 `qa_session_id` 建立显式关联。  
+    - 候选项允许缺少 `suggested_anchor`；但缺少锚点的候选项在接受时必须由调用方补齐正式 `Anchor`。  
+  - 强约束：本协议生成的是候选层对象，不得直接创建正式 `RecallPoint`。  
+
+---
+
+<a id="toc-2-13"></a>
+
+### 2.13 协议：接受候选复述点（Accept Candidate Recall Point）
+
+目的  
+把一个 `CandidateRecallPoint` 显式转化为正式学习事实，同时保留其“来自候选层”的可追溯关系。
+
+SCHEDULING_EFFECT = NONE（子协议层面；强约束）  
+- 本协议本身只负责业务事实写入：创建正式 `RecallPoint / LearningTask / LearningTaskNode` 并更新候选状态。  
+- 是否触发任务登记与调度，只能由 4.5 的对外入口在同一事务内组合调用 4.3.2 决定；本子协议不得直接创建/入队 `ReviewTask`。  
+
+对外入口  
+- `accept_candidate_recall_point(session: MutationSession, candidate_recall_point_id: CandidateRecallPointId, anchor: Anchor, title: Optional[str] = None) -> (learning_task_node_id: LearningTaskNodeId, recall_point_id: RecallPointId)`
+  - 会话要求：`session.mode == READ_WRITE`。  
+  - 运行时要求：`session.runtime_kind == DESKTOP_NATIVE`。  
+  - 写前条件：  
+    - `CandidateRecallPointRepository.get(session, candidate_recall_point_id)` 必须可解析，且 `state == PENDING`。  
+    - `anchor.instance_id` 必须可解析。  
+  - 写入语义：  
+    - 系统必须以该候选项的 `question/answer` 与调用方提供的正式 `anchor` 作为单 item 输入，执行一次等价于 2.1 的正式学习事实创建。  
+    - 系统必须在同一事务内将候选项更新为 `state = ACCEPTED`，并写入 `accepted_recall_point_id` 与 `decision_at`。  
+  - 强约束：本协议不得写入任何 `can_recall` 或复习结果；正式“会/不会”仍只能由 `executor_commit_review_task(...)` 写入。  
+
+---
+
+<a id="toc-2-14"></a>
+
+### 2.14 协议：拒绝候选复述点（Reject Candidate Recall Point）
+
+目的  
+显式放弃一个候选复述点，而不影响正式学习事实。
+
+SCHEDULING_EFFECT = NONE（强约束）  
+
+对外入口  
+- `reject_candidate_recall_point(session: MutationSession, candidate_recall_point_id: CandidateRecallPointId) -> None`
+  - 会话要求：`session.mode == READ_WRITE`。  
+  - 运行时要求：`session.runtime_kind == DESKTOP_NATIVE`。  
+  - 写前条件：  
+    - 目标候选项必须可解析，且 `state == PENDING`。  
+  - 写入语义：  
+    - 在同一事务内将目标候选项更新为 `state = REJECTED`，并写入 `decision_at`。  
+  - 强约束：拒绝不得级联删除或改写其来源 `QASession / TempContextFragment`。  
+
+---
+
+<a id="toc-2-15"></a>
+
+### 2.15 协议：创建记忆画布（Create Memory Canvas）
+
+目的  
+创建一个新的 `MemoryCanvas`（1.11d），用于组织正式与辅助对象之间的关系。
+
+SCHEDULING_EFFECT = NONE（强约束）  
+
+对外入口  
+- `create_memory_canvas(session: MutationSession, title: str, object_refs: Sequence[CanvasObjectRef]) -> MemoryCanvasId`
+  - 会话要求：`session.mode == READ_WRITE`。  
+  - 运行时要求：`session.runtime_kind == DESKTOP_NATIVE` 且 `MEMORY_CANVAS_EDIT ∈ session.runtime_capabilities`。  
+  - 写前条件：  
+    - `title` 必须非空。  
+    - `object_refs` 可为空，但若非空则每个对象必须可解析。  
+  - 写入语义：  
+    - 新建 `MemoryCanvas(producer_runtime_kind = session.runtime_kind, latest_version_id = None, ...)`。  
+  - 强约束：创建画布不得隐式生成版本；版本只能通过 2.16 显式保存。  
+
+---
+
+<a id="toc-2-16"></a>
+
+### 2.16 协议：保存记忆画布版本（Save Memory Canvas Version）
+
+目的  
+把当前画布工作态保存为不可变版本，支持历史回看。
+
+SCHEDULING_EFFECT = NONE（强约束）  
+
+对外入口  
+- `save_memory_canvas_version(session: MutationSession, memory_canvas_id: MemoryCanvasId, nodes: Sequence[CanvasNodeSnapshot], summary_note: Optional[str] = None) -> MemoryCanvasVersionId`
+  - 会话要求：`session.mode == READ_WRITE`。  
+  - 运行时要求：`session.runtime_kind == DESKTOP_NATIVE` 且 `MEMORY_CANVAS_EDIT ∈ session.runtime_capabilities`。  
+  - 写前条件：  
+    - `memory_canvas_id` 必须可解析。  
+    - `nodes` 中每个 `object_ref` 必须属于该画布当前 `object_refs`。  
+  - 写入语义：  
+    - 系统必须读取当前 `CanvasEdgeRepository.all_by_canvas(...)` 的边集，并把它与 `nodes` 一起冻结写入新的 `MemoryCanvasVersion`。  
+    - 系统必须在同一事务内更新 `MemoryCanvas.latest_version_id`。  
+  - 强约束：既有 `MemoryCanvasVersion` 不得被覆盖。  
+
+---
+
+<a id="toc-2-17"></a>
+
+### 2.17 协议：设置画布连线（Set Canvas Edges）
+
+目的  
+更新画布当前工作态的边关系。
+
+SCHEDULING_EFFECT = NONE（强约束）  
+
+对外入口  
+- `set_canvas_edges(session: MutationSession, memory_canvas_id: MemoryCanvasId, edges: Sequence[(from_ref: CanvasObjectRef, to_ref: CanvasObjectRef, label: Optional[str])]) -> None`
+  - 会话要求：`session.mode == READ_WRITE`。  
+  - 运行时要求：`session.runtime_kind == DESKTOP_NATIVE` 且 `MEMORY_CANVAS_EDIT ∈ session.runtime_capabilities`。  
+  - 写前条件：  
+    - `memory_canvas_id` 必须可解析。  
+    - 所有 `from_ref/to_ref` 都必须属于目标画布的 `object_refs`。  
+  - 写入语义：  
+    - `CanvasEdgeRepository.replace_all_for_canvas(...)` 必须以“整组替换”方式写入当前边集。  
+  - 强约束：该更新只影响当前工作态，不得追溯改写既有 `MemoryCanvasVersion.edges`。  
+
+---
+
+<a id="toc-2-18"></a>
+
+### 2.18 协议：生成故事化产物（Generate Story Artifact）
+
+目的  
+基于本地模型为正式与辅助对象生成一个独立的 `StoryArtifact`（1.11g），用于帮助理解与记忆。
+
+SCHEDULING_EFFECT = NONE（强约束）  
+- 本协议只允许写入 `StoryArtifact`，不得隐式改写正式学习事实。  
+
+对外入口  
+- `generate_story_artifact(session: MutationSession, title: str, source_refs: Sequence[CanvasObjectRef], qa_session_id: Optional[QASessionId] = None, memory_canvas_id: Optional[MemoryCanvasId] = None) -> StoryArtifactId`
+  - 会话要求：`session.mode == READ_WRITE`。  
+  - 运行时要求：`session.runtime_kind == DESKTOP_NATIVE` 且 `STORY_GENERATION ∈ session.runtime_capabilities`。  
+  - 写前条件：  
+    - `title` 必须非空。  
+    - `source_refs` 必须非空，且每个引用都必须可解析。  
+    - `NativeRuntimeConfig.local_models.story_generator` 必须可用；否则 `PreconditionFailure`。  
+    - `qa_session_id / memory_canvas_id` 若非空，则必须可解析。  
+  - 写入语义：  
+    - 系统必须把模型响应固化为新的 `StoryArtifact(producer_runtime_kind = session.runtime_kind, ...)`。  
+  - 强约束：`StoryArtifact` 的写入不得覆盖任何 `RecallPoint.question/answer/insights`，也不得创建新的 `CandidateRecallPoint`，除非调用方后续显式触发相应协议。  
 
 
 <a id="toc-3"></a>
@@ -2413,6 +2911,13 @@ Enforcement 点（强约束；前置条件失败，0b.5）
 * `Layer`
 * `MediaAsset`
 * `AsrArtifact`
+* `TempContextFragment`
+* `QASession`
+* `CandidateRecallPoint`
+* `MemoryCanvas`
+* `MemoryCanvasVersion`
+* `CanvasEdge`
+* `StoryArtifact`
 * `RecallPointReviewRecord`
 * `ProjectConfig`
 * `ProjectStorageConfig`
@@ -2914,6 +3419,7 @@ Failure 语义
 
 1) 会话入口（不产生调度副作用）
 - `System.begin_session(project_id: ProjectId, mode: SessionMode) -> MutationSession`
+  - 语义补充：返回的 `MutationSession` 必须同时绑定当前调用端的 `runtime_kind/runtime_capabilities`（见 0b.1.6）；这些运行时字段不属于项目事实。
   - `SCHEDULING_EFFECT = NONE`
 
 2) 项目管理（不产生调度副作用）
@@ -2925,10 +3431,10 @@ Failure 语义
       - 强约束（写死默认目录名）：`learning_object_root = PurePosixPath("learning_objects")`。  
       - 若实现允许用户配置该相对路径，则必须通过新增白名单入口扩展；在最小版中不得提供该对外配置入口（避免实现分叉）。  
     - `ProjectMaterialSourceBinding(source_kind = initial_source_kind)`（见 1.0.4a / 0b.1.5b）  
-    - `ProjectConfig`（见 1.0.5；必须写入 `layer_index = 0` 的默认配置，并同时写入 `external_services/push_config` 的写死默认值）  
+    - `ProjectConfig`（见 1.0.5；必须写入 `layer_index = 0` 的默认配置与 `push_config` 的写死默认值）  
     - 必须初始化 `layer_index = 0` 的 `Layer`（字段默认值见 0b.1.5a）  
     - 必须初始化 `layer_index = 0` 的 `AggregationQueue`（字段默认值见 0b.1.5a）  
-  - 写前条件补充（强约束；0b.5）：`initial_source_kind ∈ {SERVER_FS, BROWSER_LOCAL, MANUAL}`。
+  - 写前条件补充（强约束；0b.5）：`initial_source_kind ∈ {SERVER_FS, BROWSER_LOCAL, NATIVE_LOCAL, MANUAL}`。
   - `SCHEDULING_EFFECT = NONE`
 - `list_projects() -> Sequence[Project]`
   - `SCHEDULING_EFFECT = NONE`
@@ -2937,6 +3443,7 @@ Failure 语义
   - `SCHEDULING_EFFECT = NONE`
 - `get_project_config(project_id: ProjectId) -> ProjectConfig`
   - 语义：读取并返回该项目的 `ProjectConfig`（1.0.5）；不得产生任何写入。
+  - 边界：返回值不得包含 `NativeRuntimeConfig / LocalModelConfig`；这些属于运行时层而非项目事实。
   - `SCHEDULING_EFFECT = NONE`
 - `get_project_material_source_binding(project_id: ProjectId) -> ProjectMaterialSourceBinding`
   - 语义：读取并返回该项目当前的权威材料源绑定（1.0.4a）；不得产生任何写入。
@@ -2944,8 +3451,9 @@ Failure 语义
 - `set_project_material_source_binding(project_id: ProjectId, source_kind: MaterialSourceKind, source_root_label: Optional[str]) -> None`
   - 语义：在一次系统事务内覆盖该项目的 `ProjectMaterialSourceBinding`（1.0.4a）。
   - 约束：
-    - 更新绑定本身不得隐式触发 `sync_learning_objects_from_fs(...)`、`import_learning_objects_from_browser_scan(...)` 或任何调度推进。
+    - 更新绑定本身不得隐式触发 `sync_learning_objects_from_fs(...)`、`import_learning_objects_from_browser_scan(...)`、`sync_learning_objects_from_native_scan(...)` 或任何调度推进。
     - 已提交的 `Instance/LearningObjectNode` 集合必须保持不变，直到后续显式同步或导入成功。
+    - 当 `source_kind == NATIVE_LOCAL` 时，本入口只写入“项目当前选择 Native 本地目录模式”的控制事实与展示标签；稳定目录句柄与绝对路径仍只属于当前 Native 运行时。
     - 当 `source_kind == MANUAL` 时，后续材料事实必须仅通过手工写入口维护；系统不得再把目录扫描或浏览器导入视为当前权威事实，除非绑定再次被显式切换。
   - `SCHEDULING_EFFECT = NONE`
 - `delete_project(project_id: ProjectId) -> None`
@@ -2995,6 +3503,15 @@ Failure 语义
   - `SCHEDULING_EFFECT = NONE`
   - 门禁（强约束）：本入口不得调用 4.3.x 任一协议；不得创建/入队 ReviewTask。是否允许在队列非空时执行由实现决定，但若允许必须不改变任何调度相关对象。
   - Failure：非法相对路径、空导入、非支持媒体扩展名或目录结构损坏必须抛明确错误且不产生任何写入（0b.5）。
+- `sync_learning_objects_from_native_scan(project_id: ProjectId, root_title: Optional[str], relative_file_paths: Sequence[PurePath | str]) -> SyncReport`
+  - 语义：当且仅当 `source_kind == NATIVE_LOCAL` 时，按 0b.1.5b 接收一次来自 `DESKTOP_NATIVE` 运行时稳定目录绑定的快照同步：对 `relative_file_paths` 做与 `BROWSER_LOCAL` 相同的规范化、构造父目录闭包与文件桶派生树；若与已提交结果一致则幂等返回；若不一致则重建 `LearningObjectNode` 树、为新增文件创建 `Instance`、并将缺失文件对应 `Instance` 标记为 `MISSING`。
+  - 额外语义（强约束）：若本次同步成功且当前绑定不是 `NATIVE_LOCAL`，系统必须在同一事务内将该项目的 `ProjectMaterialSourceBinding.source_kind` 更新为 `NATIVE_LOCAL`，并把 `source_root_label` 更新为当前 Native 目录显示名（若空则写入最小实现默认值 `"已绑定目录"`）。
+  - 返回约束（强约束）：
+    - 若本次同步未产生任何持久化变更，则必须返回 `SyncReport(unchanged=true, created_instances_count=0, marked_missing_count=0, replaced_learning_object_nodes_count=0, warnings=...)`。
+    - 若本次同步成功且产生了变更，则必须返回 `unchanged=false`，且三个 count 字段必须准确反映本次提交实际生效的变更数量。
+  - `SCHEDULING_EFFECT = NONE`
+  - 门禁（强约束）：本入口不得调用 4.3.x 任一协议；不得创建/入队 ReviewTask。是否允许在队列非空时执行由实现决定，但若允许必须不改变任何调度相关对象。
+  - Failure：非法相对路径、空输入、非支持媒体扩展名、运行时不在 `DESKTOP_NATIVE`、或目录结构损坏必须抛明确错误且不产生任何写入（0b.5）。
 - `list_missing_instances(project_id: ProjectId) -> Sequence[InstanceId]`
   - 语义：返回本项目内所有 `presence == MISSING` 的 InstanceId（按 `id_canonical_text(instance_id)` 升序）。
   - `SCHEDULING_EFFECT = NONE`
@@ -3074,14 +3591,76 @@ Failure 语义
   - 语义：返回该学习任务节点覆盖范围内、当前已提交的全部 ASR 转写产物；纯读取；不得隐式触发新的 ASR 请求。
   - `SCHEDULING_EFFECT = NONE`
 
-10) ASR 转写（不产生调度副作用）
+10) Native-only 写入口
 - `request_asr(project_id: ProjectId, recall_point_id: RecallPointId, center_ms: int, pre_ms: int, post_ms: int, provider: AsrProvider=WHISPER) -> AsrArtifactId`
   - 语义：按 2.9 生成或复用 `AsrArtifact`；目标 `recall_point_id` 必须对应 `state == ACTIVE` 的 RecallPoint。
+  - 额外门禁：当前会话必须来自 `DESKTOP_NATIVE` 且具备 `LOCAL_ASR` 能力。
+  - `SCHEDULING_EFFECT = NONE`
+- `extract_temp_context_fragment(project_id: ProjectId, recall_point_id: RecallPointId, source_asr_artifact_id: Optional[AsrArtifactId], start_ms: Optional[int], end_ms: Optional[int], text: Optional[str]) -> TempContextFragmentId`
+  - 语义：按 2.10 生成 `TempContextFragment`。
+  - 额外门禁：当前会话必须来自 `DESKTOP_NATIVE`。
+  - `SCHEDULING_EFFECT = NONE`
+- `ask_local_llm(project_id: ProjectId, prompt: str, context_fragment_ids: Sequence[TempContextFragmentId], qa_session_id: Optional[QASessionId] = None) -> QASession`
+  - 语义：按 2.11 创建或追加 `QASession`。
+  - 额外门禁：当前会话必须来自 `DESKTOP_NATIVE` 且具备 `LOCAL_LLM_QA` 能力。
+  - `SCHEDULING_EFFECT = NONE`
+- `generate_candidate_recall_points_from_qa(project_id: ProjectId, qa_session_id: QASessionId, max_items: int = 5) -> Sequence[CandidateRecallPointId]`
+  - 语义：按 2.12 生成 `CandidateRecallPoint`。
+  - 额外门禁：当前会话必须来自 `DESKTOP_NATIVE` 且具备 `LOCAL_LLM_QA` 能力。
+  - `SCHEDULING_EFFECT = NONE`
+- `accept_candidate_recall_point(project_id: ProjectId, candidate_recall_point_id: CandidateRecallPointId, anchor: Anchor, title: Optional[str] = None) -> (learning_task_node_id: LearningTaskNodeId, recall_point_id: RecallPointId)`
+  - 语义：在一次系统事务内执行 2.13，并在同一事务内完成该入口节点的登记（4.3.2）；是否触发 Tick 由 Layer 的 `layer_mode` 决定（4.2.4）。
+  - 额外门禁：当前会话必须来自 `DESKTOP_NATIVE`。
+  - `SCHEDULING_EFFECT = ORCHESTRATION_MUTATING`
+  - 门禁：受 4.1.3(a) 约束（项目内全局 ReviewTaskQueue 非空时必须拒绝）。
+- `reject_candidate_recall_point(project_id: ProjectId, candidate_recall_point_id: CandidateRecallPointId) -> None`
+  - 语义：按 2.14 将候选点标记为 `REJECTED`。
+  - 额外门禁：当前会话必须来自 `DESKTOP_NATIVE`。
+  - `SCHEDULING_EFFECT = NONE`
+- `create_memory_canvas(project_id: ProjectId, title: str, object_refs: Sequence[CanvasObjectRef]) -> MemoryCanvasId`
+  - 语义：按 2.15 创建 `MemoryCanvas`。
+  - 额外门禁：当前会话必须来自 `DESKTOP_NATIVE` 且具备 `MEMORY_CANVAS_EDIT` 能力。
+  - `SCHEDULING_EFFECT = NONE`
+- `save_memory_canvas_version(project_id: ProjectId, memory_canvas_id: MemoryCanvasId, nodes: Sequence[CanvasNodeSnapshot], summary_note: Optional[str] = None) -> MemoryCanvasVersionId`
+  - 语义：按 2.16 保存画布版本。
+  - 额外门禁：当前会话必须来自 `DESKTOP_NATIVE` 且具备 `MEMORY_CANVAS_EDIT` 能力。
+  - `SCHEDULING_EFFECT = NONE`
+- `set_canvas_edges(project_id: ProjectId, memory_canvas_id: MemoryCanvasId, edges: Sequence[(from_ref: CanvasObjectRef, to_ref: CanvasObjectRef, label: Optional[str])]) -> None`
+  - 语义：按 2.17 更新画布当前边集。
+  - 额外门禁：当前会话必须来自 `DESKTOP_NATIVE` 且具备 `MEMORY_CANVAS_EDIT` 能力。
+  - `SCHEDULING_EFFECT = NONE`
+- `generate_story_artifact(project_id: ProjectId, title: str, source_refs: Sequence[CanvasObjectRef], qa_session_id: Optional[QASessionId] = None, memory_canvas_id: Optional[MemoryCanvasId] = None) -> StoryArtifactId`
+  - 语义：按 2.18 生成 `StoryArtifact`。
+  - 额外门禁：当前会话必须来自 `DESKTOP_NATIVE` 且具备 `STORY_GENERATION` 能力。
   - `SCHEDULING_EFFECT = NONE`
 
-11) 推荐/推送视图（不产生调度副作用）
-- `get_push_candidates(project_id: ProjectId, max_results: int) -> Sequence[RecallPointId]`
-  - 语义：按 4.7 计算推送候选；候选集合必须只包含 `state == ACTIVE` 的 RecallPointId；纯读取，不产生任何持久化写入。
+11) 只读 projection / 推荐 / 压缩 / 漂移 / 画布视图
+- `list_timeline_anchors(project_id: ProjectId, instance_id: InstanceId) -> Sequence[TimelineAnchor]`
+  - 语义：返回该材料实例上的时间锚点视图；纯读取。
+  - `SCHEDULING_EFFECT = NONE`
+- `get_memory_barrage_at_time(project_id: ProjectId, instance_id: InstanceId, center_ms: int, window_ms: int = 30_000) -> Sequence[MemoryBarrageItem]`
+  - 语义：返回目标时间窗内的“弹幕式记忆投影”；该结果只能由既有事实投影得到，不得写入任何“会/不会”结果。
+  - `SCHEDULING_EFFECT = NONE`
+- `list_review_recommendations(project_id: ProjectId, max_results: int) -> Sequence[ReviewRecommendation]`
+  - 语义：按 4.7 计算结构化推荐项；纯读取。
+  - `SCHEDULING_EFFECT = NONE`
+- `get_compression_summary(project_id: ProjectId, learning_task_node_id: Optional[LearningTaskNodeId] = None) -> CompressionSummary`
+  - 语义：按 4.7 返回压缩感摘要；纯读取。
+  - `SCHEDULING_EFFECT = NONE`
+- `list_drift_alerts(project_id: ProjectId, max_results: int) -> Sequence[DriftAlert]`
+  - 语义：按 4.7 返回漂移预警；纯读取。
+  - `SCHEDULING_EFFECT = NONE`
+- `list_memory_canvases(project_id: ProjectId) -> Sequence[MemoryCanvas]`
+  - 语义：返回项目内全部画布元数据；纯读取。
+  - `SCHEDULING_EFFECT = NONE`
+- `get_memory_canvas(project_id: ProjectId, memory_canvas_id: MemoryCanvasId) -> (canvas: MemoryCanvas, current_edges: Sequence[CanvasEdge], latest_version: Optional[MemoryCanvasVersion])`
+  - 语义：返回指定画布的当前工作态视图；纯读取。
+  - `SCHEDULING_EFFECT = NONE`
+- `list_canvas_versions(project_id: ProjectId, memory_canvas_id: MemoryCanvasId) -> Sequence[MemoryCanvasVersion]`
+  - 语义：返回指定画布的全部历史版本；纯读取。
+  - `SCHEDULING_EFFECT = NONE`
+- `list_story_artifacts(project_id: ProjectId, memory_canvas_id: Optional[MemoryCanvasId] = None) -> Sequence[StoryArtifact]`
+  - 语义：返回故事化产物列表；纯读取。
   - `SCHEDULING_EFFECT = NONE`
 
 
@@ -3113,6 +3692,7 @@ Failure 语义
 - 除 `System.begin_session(...)` 与 `list_projects()` 外，4.5 中所有会产生持久化业务事实变更的对外入口，在其成功提交路径上必须追加且仅追加一条 `AuditLogEvent`（1.8）。
 - `AuditLogEvent.api_name` 必须等于该入口名；`AuditLogEvent.result` 必须为 `OK`。
 - `payload` 只允许摘要字段：计数、ID、布尔、哈希；不得写入完整大对象内容。
+- 对少数“同一 API 名但存在运行时分支语义”的入口，允许按成功分支选择不同 `AuditEventKind`；但一次 API 成功提交路径上仍必须且只能落一条审计事件。
 
 事件类型映射（强约束；最小集合）
 - `create_project(...)` -> `PROJECT_CREATED`
@@ -3121,9 +3701,10 @@ Failure 语义
 - `add_instance(...)` -> `ADD_INSTANCE`
 - `add_learning_object_leaf(...)` -> `ADD_LEARNING_OBJECT_LEAF`
 - `add_learning_object_container(...)` -> `ADD_LEARNING_OBJECT_CONTAINER`
-- `set_project_material_source_binding(...)` -> `SET_PROJECT_MATERIAL_SOURCE_BINDING`
+- `set_project_material_source_binding(...)` -> `SET_PROJECT_MATERIAL_SOURCE_BINDING | BIND_NATIVE_LOCAL_ROOT`（当成功分支把 `source_kind` 设为 `NATIVE_LOCAL` 时必须落 `BIND_NATIVE_LOCAL_ROOT`）
 - `sync_learning_objects_from_fs(...)` -> `SYNC_LEARNING_OBJECTS_FROM_FS`
 - `import_learning_objects_from_browser_scan(...)` -> `SYNC_LEARNING_OBJECTS_FROM_FS`（最小实现复用同一审计事件种类；以 `api_name` 区分具体入口）
+- `sync_learning_objects_from_native_scan(...)` -> `SYNC_LEARNING_OBJECTS_FROM_FS`（最小实现复用同一审计事件种类；以 `api_name` 区分具体入口）
 - `bulk_remap_recall_points_instance(...)` -> `BULK_REMAP_RECALL_POINTS_INSTANCE`
 - `submit_learning_task(...)` -> `SUBMIT_LEARNING_TASK`
 - `edit_recall_point(...)` -> `EDIT_RECALL_POINT`
@@ -3133,81 +3714,96 @@ Failure 语义
 - `executor_commit_review_task(...)` -> `EXECUTOR_COMMIT_REVIEW_TASK`
 - `manual_roll_up(...)` -> `MANUAL_ROLL_UP`
 - `request_asr(...)` -> `REQUEST_ASR`
+- `extract_temp_context_fragment(...)` -> `EXTRACT_TEMP_CONTEXT_FRAGMENT`
+- `ask_local_llm(...)` -> `CREATE_QA_SESSION | REQUEST_LOCAL_LLM`（当该调用新建 `QASession` 时记 `CREATE_QA_SESSION`；向既有会话追加 turn 时记 `REQUEST_LOCAL_LLM`）
+- `generate_candidate_recall_points_from_qa(...)` -> `GENERATE_CANDIDATE_RECALL_POINT`
+- `accept_candidate_recall_point(...)` -> `ACCEPT_CANDIDATE_RECALL_POINT`
+- `reject_candidate_recall_point(...)` -> `REJECT_CANDIDATE_RECALL_POINT`
+- `create_memory_canvas(...)` -> `CREATE_MEMORY_CANVAS`
+- `save_memory_canvas_version(...)` -> `SAVE_MEMORY_CANVAS_VERSION`
+- `set_canvas_edges(...)` -> `SET_CANVAS_EDGES`
+- `generate_story_artifact(...)` -> `GENERATE_STORY_ARTIFACT`
 
 Payload 最小摘要建议（非强制；推荐）
 - 学习提交：`items_count`、`entry_node_id`（若可得）
 - 复习提交落库：`review_task_id`、`can_recall_len`、`result_range_id`（可空）
 - 导入/建树：相关 ID、`source_kind` 与计数摘要
+- 本地问答：`qa_session_id`、`context_fragment_count`、`turn_count_delta`
+- 候选点确认：`candidate_recall_point_id`、`decision`
+- 画布/故事：`memory_canvas_id`、`version_no`、`source_ref_count`
 
 
 ---
 
 <a id="toc-4-7"></a>
 
-### 4.7 复述点推送与本地模型（Recall Point Push & Local ML）
+### 4.7 推荐 / 压缩感 / 漂移分析与记忆投影（Read-only Recommendation / Compression / Drift / Projection Views）
 
 定位（强约束）
-- 本模块提供“只读推送视图”：系统在不改写任何业务事实与调度状态的前提下，计算并返回“建议现在复习/复述的复述点”候选集合。  
-- 推送判断允许依赖 `RecallPointReviewRecord`（1.12）等业务事实，但不得写入任何持久化状态（纯读取 + 派生）。  
-- 本模块不得绕过 4.1.3 的复习优先门禁：它不创建任务、不入队、不推进链，只提供视图，因此不受队列非空限制。
+- 本模块提供一组**只读视图**：时间锚点、记忆弹幕、复习推荐、压缩感摘要、漂移预警、画布读取、故事读取。它们只能读取已提交事实或辅助对象，不得写入任何业务事实与调度状态。  
+- 推荐判断允许依赖 `RecallPointReviewRecord`（1.12）、`CandidateRecallPoint`（1.11c）、`MemoryCanvas`（1.11d）等对象，但不得创建正式 `ReviewTask`，也不得绕过 4.1.3 的复习优先门禁。  
+- 弹幕层是只读 projection：它只能投影既有事实，不得承载“会/不会”写协议，也不得成为 `can_recall` 的旁路入口。  
 
-#### 4.7.1 启用门槛（阈值）
+#### 4.7.1 只读视图返回形态（最小）
+
+- `TimelineAnchor = {recall_point_id: RecallPointId, instance_id: InstanceId, center_ms: int, label: str}`
+- `MemoryBarrageItem = {occurred_at_ms: int, source_kind: Enum{RECALL_POINT, CANDIDATE_RECALL_POINT, TEMP_CONTEXT_FRAGMENT, STORY_ARTIFACT}, source_id: str, text: str}`
+- `ReviewRecommendation = {subject_kind: Enum{RECALL_POINT, CANDIDATE_RECALL_POINT, MEMORY_CANVAS, STORY_ARTIFACT}, subject_id: str, score: float, reasons: Tuple[str, ...], suggested_action: Enum{OPEN_REVIEW, ACCEPT_CANDIDATE, OPEN_CANVAS, READ_STORY}}`
+- `CompressionSummary = {target_learning_task_node_id: Optional[LearningTaskNodeId], score: float, reasons: Tuple[str, ...], summary_text: Optional[str]}`
+- `DriftAlert = {subject_kind: Enum{RECALL_POINT, LEARNING_TASK_NODE, MEMORY_CANVAS}, subject_id: str, severity: Enum{INFO, WARNING, CRITICAL}, reasons: Tuple[str, ...], suggested_action: Optional[str]}`
+
+强约束：
+- 以上返回形态均为只读值对象，不属于仓库存储对象。  
+- `get_memory_barrage_at_time(...)` 的结果只允许由既有 `RecallPoint`、候选点、临时片段、故事化产物投影得到；不得为弹幕层引入独立写协议。  
+
+#### 4.7.2 推荐启用门槛与复述点特征向量（强约束）
 
 设：
 - `N := |{rp ∈ RecallPointRepository.all(session) | rp.state == ACTIVE}|`（项目内 ACTIVE 复述点总数）
 - `T := ProjectConfig.push_config.min_recall_points_to_enable`
 
 强约束：
-- 若 `N < T`：系统必须视为“推送未启用”，`get_push_candidates(...)` 必须返回空列表（或实现定义的确定性退化策略，但不得调用本地模型服务）。  
-- 若 `N >= T`：推送启用；系统允许进入特征向量编码与模型调用路径。
-- 强约束：`state == DELETED` 的 RecallPoint 必须完全排除在推送候选集合、候选排序、特征编码与模型输入之外。
+- 若 `N < T`：系统必须视为“推荐未启用”，`list_review_recommendations(...)` 必须返回空列表（或实现定义的确定性退化策略，但不得调用本地推荐模型）。  
+- 若 `N >= T`：推荐启用；系统允许进入特征向量编码与本地推荐模型调用路径。  
+- `state == DELETED` 的 `RecallPoint` 必须完全排除在候选集合、候选排序、特征编码与模型输入之外。  
 
-#### 4.7.2 复述点特征向量（最小版，强约束）
-
-目标（最小）
-- 用最简单、可解释、可序列化的方式，把一个复述点编码为一条特征序列：  
-  `Δt_0, y_0, Δt_1, y_1, ..., Δt_k, y_k`  
-  其中 `Δt_i` 为时间间隔（毫秒），`y_i ∈ {0,1}` 为复习结果（1=能复述，0=不能复述）。
-
-定义（强约束；写死）
-- 对任一 `recall_point_id`：
-  - 写前约束（读取侧语义）：进入本节编码路径的 `recall_point_id` 必须满足其 `RecallPoint.state == ACTIVE`。
-  - 令 `t0 := RecallPoint.created_at`。
-  - 令 `R := RecallPointReviewRecordRepository.all_by_recall_point(session, recall_point_id)`，按 `occurred_at` 升序。
-  - 仅取 `R` 的末尾至多 `max_history_len` 条（见 ProjectConfig.push_config）。
-- 编码规则：
+复述点特征向量（最小版，强约束）  
+- 对任一 `recall_point_id`：  
+  - 进入编码路径前必须满足其 `RecallPoint.state == ACTIVE`。  
+  - 令 `t0 := RecallPoint.created_at`。  
+  - 令 `R := RecallPointReviewRecordRepository.all_by_recall_point(session, recall_point_id)`，按 `occurred_at` 升序。  
+  - 仅取 `R` 的末尾至多 `ProjectConfig.push_config.max_history_len` 条。  
+- 编码规则：  
   - 若 `R` 为空：特征向量为空序列（`[]`）。  
-  - 否则：
-    - `Δt_0 := R[0].occurred_at - t0`（毫秒，允许为 0）。
-    - 对 `i >= 1`：`Δt_i := R[i].occurred_at - R[i-1].occurred_at`。
-    - `y_i := 1` 当且仅当 `R[i].result == CAN_RECALL`；否则 `y_i := 0`。
-- 输出承载形态（推荐；非强制）：  
-  `features = [{"dt_ms": Δt_i, "y": y_i} for i in 0..k]`  
-  或等价的扁平数组 `[Δt_0, y_0, Δt_1, y_1, ...]`。
+  - 否则：  
+    - `Δt_0 := R[0].occurred_at - t0`（毫秒，允许为 0）。  
+    - 对 `i >= 1`：`Δt_i := R[i].occurred_at - R[i-1].occurred_at`。  
+    - `y_i := 1` 当且仅当 `R[i].result == CAN_RECALL`；否则 `y_i := 0`。  
+- 输出承载形态（推荐；非强制）：`features = [{"dt_ms": Δt_i, "y": y_i} for i in 0..k]` 或等价扁平数组 `[Δt_0, y_0, Δt_1, y_1, ...]`。  
 
-#### 4.7.3 本地模型服务调用（可选能力；配置驱动）
+#### 4.7.3 本地模型与失败处理（强约束）
 
 配置来源（强约束）
-- 模型服务配置来自 `ProjectConfig.external_services.recommender`（1.0.5）。  
-- 若该配置为 None：系统必须禁用模型调用，仅能返回空候选或固定规则候选（实现自定，但必须确定性）。
+- 推荐模型配置只能来自 `NativeRuntimeConfig.local_models.recommender`（1.0.5）；服务端项目配置不得携带该信息。  
+- 若当前运行时不是 `DESKTOP_NATIVE`，或缺少 `LOCAL_RECOMMENDER` capability，或运行时模型配置缺失，则系统必须禁用模型调用，仅能返回空列表或固定规则结果（实现自定，但必须确定性）。  
 
-调用形态（强约束；本地端口）
-- 系统通过 HTTP 访问 `base_url`（例如 `http://127.0.0.1:PORT`）调用本地推荐服务；该访问不经过公网。
+调用形态（强约束）
+- 本地推荐、压缩感与漂移分析允许通过 Native 本地服务执行；该访问属于运行时能力，不得被描述为项目级共享能力。  
 
 失败处理（强约束）
-- 模型服务不可达、超时、返回格式错误：不得导致系统崩溃；`get_push_candidates` 必须返回空列表或回退到确定性规则（实现自定），且不得写入任何持久化状态。
+- 模型服务不可达、超时、返回格式错误：不得导致系统崩溃；`list_review_recommendations(...)` 必须返回空列表或回退到确定性规则，`get_compression_summary(...)` / `list_drift_alerts(...)` 必须返回空摘要或空列表，且不得写入任何持久化状态。  
 
 <a id="toc-4-8"></a>
 
 ### 4.8 节点作用域数据导出（RecallPoint / ASR Export）
 
 目的  
-系统内部不再提供 LLM 陪伴学习能力；系统职责收缩为“学习对象与数据管理工具”。用户应能够在学习对象节点或学习任务节点详情页中导出该节点覆盖范围内的复述点数据与 ASR 转写结果，再自行交给外部 LLM 或其他工具处理。
+服务端 / Web 端不提供内建 LLM 陪伴学习能力；系统职责仍以“学习对象与数据管理工具”为主。`DESKTOP_NATIVE` 可在本地运行时使用用户自配模型、本地 ASR 与本地推荐模型，但这些能力不改变导出边界。用户应能够在学习对象节点或学习任务节点详情页中导出该节点覆盖范围内的复述点数据与 ASR 转写结果，再自行交给外部工具处理。
 
 强约束（写死）  
 - 导出能力必须是纯读取：不得创建/入队任何 ReviewTask，不得推进 ReviewChain，不得触发 Convergence，不得触发 Orchestrator Tick。  
 - 导出能力不得隐式触发新的 ASR 请求；若需要生成缺失的 ASR，必须通过 2.9 `request_asr(...)` 显式执行。  
-- 导出结果必须只包含已提交事实或已提交派生事实（`RecallPoint` / `AsrArtifact`）；不得把临时上下文、提示词或外部模型响应混入导出内容。  
+- 导出结果必须只包含已提交事实或已提交派生事实（`RecallPoint` / `AsrArtifact`）；不得把临时上下文、提示词、模型响应、`QASession`、`TempContextFragment` 或 `StoryArtifact` 混入现有导出格式。  
 
 4.8.1 导出数据形态（强约束）
 
@@ -3215,7 +3811,7 @@ Payload 最小摘要建议（非强制；推荐）
   - 最小字段：`recall_point_id`、`question`、`answer`、`anchor`、`insights`
   - 语义：字段语义与 1.4 `RecallPoint` 保持一致；导出时不得重写内容、不得丢失顺序。
 - `AsrArtifactData`
-  - 最小字段：`asr_artifact_id`、`provider`、`recall_point_id`、`source_instance_id`、`center_ms`、`pre_ms`、`post_ms`、`segments`
+  - 最小字段：`asr_artifact_id`、`provider`、`producer_runtime_kind`、`recall_point_id`、`source_instance_id`、`center_ms`、`pre_ms`、`post_ms`、`segments`
   - 语义：字段语义与 1.11 `AsrArtifact` 保持一致；`segments` 顺序必须与持久化事实一致。
 
 4.8.2 导出接口语义（强约束）
@@ -3250,15 +3846,17 @@ Payload 最小摘要建议（非强制；推荐）
 
 <a id="toc-4-9"></a>
 
-### 4.9 ASR（Whisper）集成：复述点附近范围自动转写
+### 4.9 ASR（Whisper）集成：Native-only 复述点附近范围转写
 
 目的  
-将 ASR（Whisper）转写能力纳入 PLM，以“围绕复述点的附近窗口”为单位生成可引用的转写片段，用于节点详情页导出与用户复习理解。ASR 服务既可以来自显式配置的接口，也可以在配置缺失时回退到自动发现的本机 Whisper 运行时。
+将 ASR（Whisper）转写能力纳入 `DESKTOP_NATIVE` 运行时，以“围绕复述点的附近窗口”为单位生成可引用的转写片段，用于节点详情页导出与用户复习理解。ASR 配置只能来自 Native 运行时，不再属于项目级共享能力。
 
 强约束（写死）
 - ASR 只对“可提取音频”的材料有效；材料类型判定与音频提取属于实现内部，但失败必须明确返回且不产生写入（0b.5）。  
 - ASR 产物为派生事实，不得进入系统级提交期强制集合（0b.7.2）。  
 - 同一缓存键命中必须复用既有结果，不得重复调用 ASR 服务（1.11）。  
+- ASR 运行时配置只能来自 `NativeRuntimeConfig.local_models.asr`；不得再从 `ProjectConfig` 读取或推断。  
+- 服务端 / Web 端只能读取已存在 `AsrArtifact`；不得承担新 ASR 产物的生成职责。  
 
 窗口定义（强约束；写死）  
 - 默认窗口：`pre_ms = 30_000`，`post_ms = 30_000`（±30s）；实现可允许配置，但必须对外可预测且稳定。  

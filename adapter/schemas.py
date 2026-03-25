@@ -24,6 +24,70 @@ class AuthCredentialsRequest(BaseModel):
     email: str = Field(min_length=3)
     password: str = Field(min_length=8)
 
+
+class UpdateProfileRequest(BaseModel):
+    nickname: str = Field(min_length=1, max_length=40)
+    bio: Optional[str] = Field(default="", max_length=500)
+
+
+class ChangePasswordRequest(BaseModel):
+    currentPassword: str = Field(min_length=8)
+    newPassword: str = Field(min_length=8)
+
+
+class CreateStudyGroupRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    description: Optional[str] = Field(default="", max_length=1000)
+    visibility: str = Field(min_length=1)
+    joinPolicy: str = Field(min_length=1)
+
+
+class UpdateStudyGroupRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    description: Optional[str] = Field(default="", max_length=1000)
+    visibility: str = Field(min_length=1)
+    joinPolicy: str = Field(min_length=1)
+
+
+class CreateStudyGroupPostRequest(BaseModel):
+    kind: str = Field(min_length=1)
+    content: str = Field(min_length=1, max_length=2000)
+
+
+class CreateStudyGroupPostCommentRequest(BaseModel):
+    content: str = Field(min_length=1, max_length=1000)
+
+
+class UpdateUserStatusRequest(BaseModel):
+    status: str = Field(min_length=1)
+
+
+class UpdateStudyGroupStatusRequest(BaseModel):
+    status: str = Field(min_length=1)
+
+
+class UpdateUserRoleRequest(BaseModel):
+    role: str = Field(min_length=1)
+    enabled: bool = True
+
+
+class UpdateStudyGroupMemberRoleRequest(BaseModel):
+    role: str = Field(min_length=1)
+
+
+class CreateStudyGroupJoinRequest(BaseModel):
+    message: Optional[str] = Field(default="", max_length=300)
+
+
+class ReviewStudyGroupJoinRequestRequest(BaseModel):
+    status: str = Field(min_length=1)
+
+
+class InviteStudyGroupMemberRequest(BaseModel):
+    publicUid: str = Field(min_length=1)
+    role: str = Field(default="member", min_length=1)
+
+
 class AddInstanceRequest(BaseModel):
     materialId: str = Field(min_length=1)
 
@@ -105,15 +169,6 @@ class SetLayerConfigRequest(BaseModel):
     kNode: Optional[int] = None
     kPoint: Optional[int] = None
 
-
-class LocalServiceConfigDTO(BaseModel):
-    baseUrl: str = Field(min_length=1)
-    apiKey: Optional[str] = None
-    model: Optional[str] = None
-
-
-class SetExternalServicesRequest(BaseModel):
-    asr: Optional[LocalServiceConfigDTO] = None
 
 class RequestAsrRequest(BaseModel):
     recallPointId: str = Field(min_length=1)

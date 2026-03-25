@@ -78,3 +78,45 @@ def test_submit_learning_task_accepts_image_rich_content(tmp_path: Path) -> None
     assert len(recall_points) == 1
     assert any(block.kind == ContentBlockKind.IMAGE and str(block.asset_id) == str(asset.asset_id) for block in recall_points[0].question)
     assert any(block.kind == ContentBlockKind.IMAGE and str(block.asset_id) == str(asset.asset_id) for block in recall_points[0].answer)
+
+
+def test_edit_recall_point_keeps_server_image_assets_after_reload(tmp_path: Path) -> None:
+    db_path = tmp_path / "plm_store.sqlite3"
+    project_root = tmp_path / "project-edit-image"
+    learning_root = project_root / "learning_objects"
+    learning_root.mkdir(parents=True)
+    (learning_root / "lesson.mp4").write_bytes(b"video")
+
+    api = SystemAPI(InMemorySystem(persist_store=SQLiteSnapshotStore(db_path)))
+    project_id = api.create_project("Edit Recall Image", project_root=str(project_root))
+    api.sync_learning_objects_from_fs(project_id)
+    instance = api.list_instances(project_id)[0]
+    entry_node_id = api.submit_learning_task(
+        project_id,
+        items=[(tuple([ContentBlock(kind=ContentBlockKind.TEXT, text="原问题")]), tuple([ContentBlock(kind=ContentBlockKind.TEXT, text="原答案")]), Anchor(instance_id=instance.instance_id, position="t=2048"))],
+        title="先建一条复述点",
+    )
+    recall_point = api.list_recall_points_by_learning_task_node(project_id, entry_node_id)[0]
+    asset = api.create_media_asset(project_id, content=PNG_BYTES, mime_type="image/png", filename="kept.png")
+
+    question = (
+        ContentBlock(kind=ContentBlockKind.TEXT, text="图里是什么？"),
+        ContentBlock(kind=ContentBlockKind.IMAGE, asset_id=asset.asset_id),
+    )
+    answer = (
+        ContentBlock(kind=ContentBlockKind.TEXT, text="这是会被服务器持久化的图片"),
+        ContentBlock(kind=ContentBlockKind.IMAGE, asset_id=asset.asset_id),
+    )
+    api.edit_recall_point(project_id, recall_point.recall_point_id, question, answer, recall_point.anchor)
+
+    updated = api.get_recall_point(project_id, recall_point.recall_point_id)
+    assert any(block.kind == ContentBlockKind.IMAGE and str(block.asset_id) == str(asset.asset_id) for block in updated.question)
+    assert any(block.kind == ContentBlockKind.IMAGE and str(block.asset_id) == str(asset.asset_id) for block in updated.answer)
+
+    reloaded = SystemAPI(InMemorySystem(persist_store=SQLiteSnapshotStore(db_path)))
+    restored = reloaded.get_recall_point(project_id, recall_point.recall_point_id)
+    restored_path = reloaded.resolve_media_asset_file_path(project_id, asset.asset_id)
+
+    assert any(block.kind == ContentBlockKind.IMAGE and str(block.asset_id) == str(asset.asset_id) for block in restored.question)
+    assert any(block.kind == ContentBlockKind.IMAGE and str(block.asset_id) == str(asset.asset_id) for block in restored.answer)
+    assert restored_path.read_bytes() == PNG_BYTES

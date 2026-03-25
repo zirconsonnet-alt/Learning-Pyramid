@@ -14,6 +14,7 @@ export const AsrArtifactSchema = z.object({
   asrArtifactId: z.string(),
   createdAt: z.string(),
   provider: z.string(),
+  producerRuntimeKind: z.enum(["MOBILE_WEB", "DESKTOP_WEB", "DESKTOP_NATIVE"]),
   recallPointId: z.string(),
   sourceInstanceId: z.string(),
   centerMs: z.number().int(),

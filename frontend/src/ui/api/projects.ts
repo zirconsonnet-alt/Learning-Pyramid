@@ -13,7 +13,7 @@ export type Project = z.infer<typeof ProjectSchema>
 
 const ProjectListSchema = z.array(ProjectSchema)
 const CreateProjectResultSchema = z.object({ projectId: z.string() })
-export const MaterialSourceKindSchema = z.enum(["SERVER_FS", "BROWSER_LOCAL", "MANUAL"])
+export const MaterialSourceKindSchema = z.enum(["SERVER_FS", "BROWSER_LOCAL", "NATIVE_LOCAL", "MANUAL"])
 export type MaterialSourceKind = z.infer<typeof MaterialSourceKindSchema>
 
 export function listProjects() {

@@ -1,10 +1,11 @@
-import { useState } from "react"
+import { useState, type KeyboardEventHandler, type Ref } from "react"
 import { LoaderCircle, Trash2 } from "lucide-react"
 
 import { uploadMediaAsset } from "@/ui/api/mediaAssets"
 import { type RichContent, richContentImageAssetIds, richContentText } from "@/ui/api/richContent"
 import { Button } from "@/ui/components/ui/button"
 import { mediaAssetUrl } from "@/ui/api/mediaAssets"
+import { cn } from "@/ui/utils"
 
 type RichContentField = "question" | "answer"
 
@@ -17,6 +18,11 @@ export function RichContentEditor({
   onAppendImage,
   onRemoveImage,
   onTextChange,
+  className,
+  textareaClassName,
+  imageClassName,
+  textareaRef,
+  onTextKeyDown,
 }: {
   projectId: string
   field: RichContentField
@@ -26,6 +32,11 @@ export function RichContentEditor({
   onAppendImage: (assetId: string) => void
   onRemoveImage: (imageIndex: number) => void
   onTextChange: (text: string) => void
+  className?: string
+  textareaClassName?: string
+  imageClassName?: string
+  textareaRef?: Ref<HTMLTextAreaElement>
+  onTextKeyDown?: KeyboardEventHandler<HTMLTextAreaElement>
 }) {
   const [isUploading, setIsUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
@@ -56,12 +67,14 @@ export function RichContentEditor({
   }
 
   return (
-    <div className="space-y-3">
+    <div className={cn("space-y-3", className)}>
       <textarea
-        className="min-h-[96px] w-full rounded-md border bg-background px-3 py-2 text-sm"
+        ref={textareaRef}
+        className={cn("min-h-[96px] w-full rounded-md border bg-background px-3 py-2 text-sm", textareaClassName)}
         value={text}
         onChange={(event) => onTextChange(event.target.value)}
         onPaste={handlePaste}
+        onKeyDown={onTextKeyDown}
         disabled={disabled || isUploading}
         placeholder={placeholder}
       />
@@ -80,7 +93,7 @@ export function RichContentEditor({
               <img
                 src={mediaAssetUrl(projectId, assetId)}
                 alt={`${field}-${imageIndex + 1}`}
-                className="h-28 w-28 rounded-xl border border-border/70 bg-muted/20 object-cover"
+                className={cn("h-28 w-28 rounded-xl border border-border/70 bg-muted/20 object-cover", imageClassName)}
                 loading="lazy"
               />
               <Button

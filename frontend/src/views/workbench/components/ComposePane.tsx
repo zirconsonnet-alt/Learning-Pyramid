@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useQueries } from "@tanstack/react-query"
-import { BookPlus } from "lucide-react"
+import { BookPlus, ChevronLeft, ChevronRight } from "lucide-react"
 
 import { ApiError } from "@/ui/api/http"
 import { listRecallPointsByLearningTaskNode } from "@/ui/api/learningTaskNodes"
@@ -12,10 +12,12 @@ import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
+import { formatInstanceReference, simplifyMaterialDisplayName } from "@/ui/displayIdentifiers"
 import { useLearningTaskNodes } from "@/ui/queries/learningTasks"
 import { useSubmitLearningTask } from "@/ui/queries/workbench"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { useWorkbenchStore, type DraftRecallPoint } from "@/ui/store/workbenchStore"
+import { cn } from "@/ui/utils"
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -54,6 +56,20 @@ function buildRecommendedTaskTitle(instanceDisplayName: string, previousLearning
   return previousLearningCount <= 0 ? instanceDisplayName : `${instanceDisplayName}（${previousLearningCount + 1}）`
 }
 
+function createDraft(instanceId: string, ms: number): DraftRecallPoint {
+  const position = `t=${ms}`
+  const now = Date.now()
+  return {
+    localId: newLocalId(),
+    instanceId,
+    position,
+    question: richText(""),
+    answer: richText(""),
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
 export function ComposePane({
   projectId,
   selectedInstanceId,
@@ -79,6 +95,7 @@ export function ComposePane({
   const questionRefs = useRef<Record<string, HTMLTextAreaElement | null>>({})
   const answerRefs = useRef<Record<string, HTMLTextAreaElement | null>>({})
   const lastRecommendedTitleRef = useRef("")
+  const [activeDraftId, setActiveDraftId] = useState<string | null>(null)
 
   const submit = useSubmitLearningTask(projectId)
   const learningTaskNodesQ = useLearningTaskNodes(projectId)
@@ -111,7 +128,11 @@ export function ComposePane({
   }, [learningTaskRecallPointQs, selectedInstanceId])
   const recommendedTaskTitle = useMemo(() => {
     if (!instance) return ""
-    return buildRecommendedTaskTitle(instance.materialDisplayName, previousLearningCountForInstance)
+    const instanceTitle = simplifyMaterialDisplayName(
+      formatInstanceReference(instance.instanceId, instance.materialDisplayName),
+      "未命名材料",
+    )
+    return buildRecommendedTaskTitle(instanceTitle, previousLearningCountForInstance)
   }, [instance, previousLearningCountForInstance])
 
   useEffect(() => {
@@ -128,24 +149,12 @@ export function ComposePane({
     lastRecommendedTitleRef.current = recommendedTaskTitle
   }, [projectId, recommendedTaskTitle, selectedInstanceId, setTaskTitle, taskTitle])
 
-  function createDraft(instanceId: string, ms: number): DraftRecallPoint {
-    const position = `t=${ms}`
-    const now = Date.now()
-    return {
-      localId: newLocalId(),
-      instanceId,
-      position,
-      question: richText(""),
-      answer: richText(""),
-      createdAt: now,
-      updatedAt: now,
-    }
-  }
-
   function onAdd() {
     if (!selectedInstanceId) return
     const draft = createDraft(selectedInstanceId, currentMs)
     addDraft(projectId, draft)
+    setActiveDraftId(draft.localId)
+    window.setTimeout(() => focusDraftFields(draft), 80)
   }
 
   async function onSubmit() {
@@ -175,12 +184,13 @@ export function ComposePane({
     drafts.length > 0 &&
     !drafts.some((d) => !richContentHasMeaning(d.question) || !richContentHasMeaning(d.answer))
 
-  function focusDraft(draft: DraftRecallPoint) {
-    cardRefs.current[draft.localId]?.scrollIntoView({
-      behavior: "smooth",
-      block: "center",
-    })
+  const completedDraftCount = drafts.filter((draft) => isDraftComplete(draft)).length
+  const completionPercent = drafts.length > 0 ? Math.round((completedDraftCount / drafts.length) * 100) : 0
+  const resolvedActiveDraftId = drafts.some((draft) => draft.localId === activeDraftId) ? activeDraftId : (drafts[0]?.localId ?? null)
+  const activeDraftIndex = resolvedActiveDraftId ? drafts.findIndex((draft) => draft.localId === resolvedActiveDraftId) : -1
+  const activeDraft = activeDraftIndex >= 0 ? drafts[activeDraftIndex] : null
 
+  function focusDraftFields(draft: DraftRecallPoint) {
     const questionFilled = richContentHasMeaning(draft.question)
     const answerFilled = richContentHasMeaning(draft.answer)
     const target =
@@ -190,7 +200,22 @@ export function ComposePane({
           ? answerRefs.current[draft.localId]
           : questionRefs.current[draft.localId]
 
-    window.setTimeout(() => target?.focus(), 160)
+    cardRefs.current[draft.localId]?.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    })
+    target?.focus()
+  }
+
+  function focusDraft(draft: DraftRecallPoint) {
+    setActiveDraftId(draft.localId)
+    window.setTimeout(() => focusDraftFields(draft), 80)
+  }
+
+  function goToDraft(index: number) {
+    const nextDraft = drafts[index]
+    if (!nextDraft) return
+    setActiveDraftId(nextDraft.localId)
   }
 
   return (
@@ -217,24 +242,60 @@ export function ComposePane({
         ) : null}
 
         {drafts.length > 0 ? (
-          <div className="rounded-[1.2rem] border border-[#e2e8ef] bg-white p-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div className="text-sm font-semibold text-foreground">填写进度</div>
-              <div className="theme-meta shrink-0">{drafts.length} 个复述点</div>
+          <div className="space-y-4">
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center justify-end gap-2">
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-9 w-9 rounded-full"
+                    onClick={() => goToDraft(activeDraftIndex - 1)}
+                    disabled={activeDraftIndex <= 0}
+                    aria-label="上一张复述点卡片"
+                    title="上一张"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <div className="theme-meta shrink-0">
+                    {activeDraftIndex >= 0 ? `${activeDraftIndex + 1} / ${drafts.length}` : `${drafts.length} 个复述点`}
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-9 w-9 rounded-full"
+                    onClick={() => goToDraft(activeDraftIndex + 1)}
+                    disabled={activeDraftIndex < 0 || activeDraftIndex >= drafts.length - 1}
+                    aria-label="下一张复述点卡片"
+                    title="下一张"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-[#e8edf4]">
+                <div className="h-full rounded-full bg-primary transition-[width] duration-300" style={{ width: `${completionPercent}%` }} />
+              </div>
             </div>
-            <div className="mt-4 flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2">
               {drafts.map((draft, index) => {
                 const completed = isDraftComplete(draft)
+                const isActive = draft.localId === resolvedActiveDraftId
                 return (
                   <button
                     key={`draft-progress-${draft.localId}`}
                     type="button"
                     onClick={() => focusDraft(draft)}
-                    className={
+                    aria-current={isActive ? "true" : undefined}
+                    className={cn(
+                      "flex size-10 items-center justify-center rounded-xl border text-sm font-semibold transition-all",
                       completed
-                        ? "flex size-10 items-center justify-center rounded-xl border border-primary/20 bg-primary text-sm font-semibold text-primary-foreground shadow-[0_12px_24px_-20px_rgba(30,58,95,0.55)] transition-transform hover:-translate-y-0.5"
-                        : "flex size-10 items-center justify-center rounded-xl border border-[#d9e2eb] bg-white text-sm font-semibold text-[#5e738b] transition-colors hover:border-primary/25 hover:text-primary"
-                    }
+                        ? "border-primary/20 bg-primary text-primary-foreground shadow-[0_12px_24px_-20px_rgba(30,58,95,0.55)] hover:-translate-y-0.5"
+                        : "border-[#d9e2eb] bg-white text-[#5e738b] hover:border-primary/25 hover:text-primary",
+                      isActive && "ring-2 ring-primary/25 ring-offset-2 ring-offset-background",
+                    )}
                     title={completed ? `第 ${index + 1} 个复述点，已填写` : `第 ${index + 1} 个复述点，尚未填写完成`}
                     aria-label={completed ? `第 ${index + 1} 个复述点，已填写` : `第 ${index + 1} 个复述点，尚未填写完成`}
                   >
@@ -260,69 +321,72 @@ export function ComposePane({
           />
         ) : null}
 
-        <div className="space-y-3">
-          {drafts.map((d) => {
-            const ms = parseAnchorMs(d.position)
-            return (
-              <div
-                key={d.localId}
-                ref={(node) => {
-                  cardRefs.current[d.localId] = node
-                }}
-                className="theme-status-surface rounded-[1.2rem] border border-border/70 p-4"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div className="theme-meta">
-                    锚点：{ms === null ? d.position : msToClock(ms)}（{d.position}）
-                  </div>
-                  <Button variant="ghost" size="sm" onClick={() => removeDraft(projectId, d.localId)}>
-                    删除
-                  </Button>
+        {activeDraft ? (
+          <div
+            key={activeDraft.localId}
+            ref={(node) => {
+              cardRefs.current[activeDraft.localId] = node
+            }}
+            className="theme-status-surface rounded-[1.2rem] border border-border/70 p-4"
+          >
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="theme-meta">
+                  第 {activeDraftIndex + 1} 个复述点
                 </div>
-                <div className="mt-2 grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label>问题</Label>
-                    <div
-                      ref={(node) => {
-                        const textarea = node?.querySelector("textarea") ?? null
-                        questionRefs.current[d.localId] = textarea
-                      }}
-                    >
-                      <RichContentEditor
-                        projectId={projectId}
-                        field="question"
-                        value={d.question}
-                        placeholder="请输入问题/提示语"
-                        onTextChange={(text) => updateDraftText(projectId, d.localId, "question", text)}
-                        onAppendImage={(assetId) => appendDraftImage(projectId, d.localId, "question", assetId)}
-                        onRemoveImage={(imageIndex) => removeDraftImage(projectId, d.localId, "question", imageIndex)}
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>答案</Label>
-                    <div
-                      ref={(node) => {
-                        const textarea = node?.querySelector("textarea") ?? null
-                        answerRefs.current[d.localId] = textarea
-                      }}
-                    >
-                      <RichContentEditor
-                        projectId={projectId}
-                        field="answer"
-                        value={d.answer}
-                        placeholder="请输入答案/复述内容"
-                        onTextChange={(text) => updateDraftText(projectId, d.localId, "answer", text)}
-                        onAppendImage={(assetId) => appendDraftImage(projectId, d.localId, "answer", assetId)}
-                        onRemoveImage={(imageIndex) => removeDraftImage(projectId, d.localId, "answer", imageIndex)}
-                      />
-                    </div>
-                  </div>
+                <div className="theme-meta">
+                  锚点：{(() => {
+                    const ms = parseAnchorMs(activeDraft.position)
+                    return `${ms === null ? activeDraft.position : msToClock(ms)}（${activeDraft.position}）`
+                  })()}
                 </div>
               </div>
-            )
-          })}
-        </div>
+              <Button variant="ghost" size="sm" onClick={() => removeDraft(projectId, activeDraft.localId)}>
+                删除
+              </Button>
+            </div>
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>问题</Label>
+                <div
+                  ref={(node) => {
+                    const textarea = node?.querySelector("textarea") ?? null
+                    questionRefs.current[activeDraft.localId] = textarea
+                  }}
+                >
+                  <RichContentEditor
+                    projectId={projectId}
+                    field="question"
+                    value={activeDraft.question}
+                    placeholder="请输入问题/提示语"
+                    onTextChange={(text) => updateDraftText(projectId, activeDraft.localId, "question", text)}
+                    onAppendImage={(assetId) => appendDraftImage(projectId, activeDraft.localId, "question", assetId)}
+                    onRemoveImage={(imageIndex) => removeDraftImage(projectId, activeDraft.localId, "question", imageIndex)}
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>答案</Label>
+                <div
+                  ref={(node) => {
+                    const textarea = node?.querySelector("textarea") ?? null
+                    answerRefs.current[activeDraft.localId] = textarea
+                  }}
+                >
+                  <RichContentEditor
+                    projectId={projectId}
+                    field="answer"
+                    value={activeDraft.answer}
+                    placeholder="请输入答案/复述内容"
+                    onTextChange={(text) => updateDraftText(projectId, activeDraft.localId, "answer", text)}
+                    onAppendImage={(assetId) => appendDraftImage(projectId, activeDraft.localId, "answer", assetId)}
+                    onRemoveImage={(imageIndex) => removeDraftImage(projectId, activeDraft.localId, "answer", imageIndex)}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         <div className="border-t border-[#e2e8ef] pt-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-center">
@@ -361,7 +425,7 @@ export function ComposePane({
           !submit.error &&
           drafts.length > 0 &&
           !drafts.some((d) => !richContentHasMeaning(d.question) || !richContentHasMeaning(d.answer)) ? (
-            <p className="mt-2 text-xs text-[#64748b]">已准备好提交，共 {drafts.length} 个复述点。</p>
+            <p className="mt-2 text-xs text-[#64748b]">已准备好提交，共 {drafts.length} 个复述点，已完成 {completedDraftCount} 个。</p>
           ) : null}
         </div>
       </CardContent>

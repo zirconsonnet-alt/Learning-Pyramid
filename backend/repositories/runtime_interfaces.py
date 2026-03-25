@@ -1,7 +1,7 @@
 from typing import Optional, Protocol, Tuple
 
 from backend.models.convergence import Convergence
-from backend.models.enums import ConvergenceState
+from backend.models.enums import ClientRuntimeKind, ConvergenceState, RuntimeCapability
 from backend.models.review_chain import ReviewChain
 from backend.models.review_task import ReviewTask
 from backend.models.review_task_queue import ReviewTaskQueue
@@ -18,6 +18,8 @@ from backend.models.types import (
 
 class MutationSession(Protocol):
     project_id: ProjectId
+    runtime_kind: ClientRuntimeKind
+    runtime_capabilities: frozenset[RuntimeCapability]
 
 
 class ReviewTaskRepository(Protocol):
@@ -97,4 +99,3 @@ class ReviewTaskQueueRepository(Protocol):
         语义：返回 session.project_id 作用域内全部队列记录的 queue_id 主键集合，
         并按 id_canonical_text(queue_id) 升序。
         """
-

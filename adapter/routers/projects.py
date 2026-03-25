@@ -14,10 +14,8 @@ from adapter.mappers import (
 from adapter.schemas import (
     CreateProjectRequest,
     EditProjectRequest,
-    SetExternalServicesRequest,
     SetProjectMaterialSourceBindingRequest,
 )
-from backend.models.project_config import LocalServiceConfig
 from backend.models.enums import MaterialSourceKind
 from backend.models.errors import PreconditionFailure
 from backend.system.api import SystemAPI
@@ -33,7 +31,7 @@ def _parse_material_source_kind(raw: str | None) -> MaterialSourceKind:
     try:
         return MaterialSourceKind(value)
     except ValueError as exc:
-        raise PreconditionFailure("sourceKind must be one of SERVER_FS, BROWSER_LOCAL, MANUAL") from exc
+        raise PreconditionFailure("sourceKind must be one of SERVER_FS, BROWSER_LOCAL, NATIVE_LOCAL, MANUAL") from exc
 
 
 @router.get("/projects")
@@ -83,15 +81,6 @@ def edit_project(projectId: str, req: EditProjectRequest, api: SystemAPI = Depen
 def get_project_config(projectId: str, api: SystemAPI = Depends(get_api)) -> dict:
     cfg = api.get_project_config(projectId)  # type: ignore[arg-type]
     return {"ok": True, "data": project_config_to_dto(cfg)}
-
-
-@router.post("/projects/{projectId}/external-services")
-def set_external_services(projectId: str, req: SetExternalServicesRequest, api: SystemAPI = Depends(get_api)) -> dict:
-    api.set_external_services_config(  # type: ignore[arg-type]
-        projectId,
-        asr=None if req.asr is None else LocalServiceConfig(base_url=req.asr.baseUrl, api_key=req.asr.apiKey, model=req.asr.model),
-    )
-    return {"ok": True, "data": None}
 
 
 @router.get("/projects/{projectId}/project-storage-config")

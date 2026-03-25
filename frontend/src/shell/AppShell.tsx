@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import { Menu, Sparkles, Workflow } from "lucide-react"
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate, useParams } from "react-router-dom"
 
-import { GLOBAL_NAV_ITEMS, MainNav, getProjectNavItems } from "@/shell/MainNav"
+import { MainNav, getGlobalNavItems, getProjectNavItems } from "@/shell/MainNav"
 import { ApiError } from "@/ui/api/http"
 import { ErrorNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
@@ -31,6 +31,27 @@ function describeArea(pathname: string, projectTitle: string, hasProject: boolea
     return {
       title: "产品指南",
       context: "了解系统能力与使用方式",
+    }
+  }
+
+  if (pathname.startsWith("/groups")) {
+    return {
+      title: "学习小组",
+      context: "加入小组、找同学并一起互动学习",
+    }
+  }
+
+  if (pathname.startsWith("/profile")) {
+    return {
+      title: "个人资料",
+      context: "管理账号信息与安全设置",
+    }
+  }
+
+  if (pathname.startsWith("/admin")) {
+    return {
+      title: "后台管理",
+      context: "管理用户状态与学习小组运行情况",
     }
   }
 
@@ -70,6 +91,12 @@ function describeArea(pathname: string, projectTitle: string, hasProject: boolea
   }
 }
 
+const THEME_PRESET_ACTIVE_BORDER = "#b7a4f6"
+const THEME_PRESET_ACTIVE_RING = "0 0 0 1px rgba(183, 164, 246, 0.96)"
+const THEME_PRESET_ACTIVE_GLOW = "0 22px 40px -28px rgba(111, 90, 204, 0.54)"
+const THEME_PRESET_CURRENT_BADGE_BG = "linear-gradient(135deg, #4b68d8 0%, #2f50b9 100%)"
+const THEME_PRESET_CURRENT_BADGE_SHADOW = "0 14px 28px -22px rgba(47, 80, 185, 0.7)"
+
 export function AppShell() {
   const nav = useNavigate()
   const location = useLocation()
@@ -85,21 +112,25 @@ export function AppShell() {
   const selectedTheme = useThemeStore((state) => state.theme)
   const setTheme = useThemeStore((state) => state.setTheme)
   const area = describeArea(location.pathname, projectTitle || pid || "当前项目", Boolean(pid))
-  const deploymentLabel = capabilitiesQ.data?.appMode === "hosted" ? "托管模式" : "本地模式"
-  const areaContext = area.context && area.context !== area.title ? area.context : null
   const capabilitiesUnavailableError = capabilitiesQ.error && !capabilitiesQ.data ? formatApiError(capabilitiesQ.error) : null
   const currentUserUnavailableError =
     authEnabled && currentUserQ.error && currentUserQ.data === undefined ? formatApiError(currentUserQ.error) : null
+  const locationToken = `${location.pathname}${location.search}${location.hash}`
   const menuRef = useRef<HTMLDivElement | null>(null)
   const menuButtonRef = useRef<HTMLButtonElement | null>(null)
+  const previousLocationRef = useRef(locationToken)
   const projectNavItems = useMemo(() => getProjectNavItems(pid), [pid])
   const hasProjectContext = Boolean(pid)
-  const inlineNavItems = GLOBAL_NAV_ITEMS
-  const menuNavItems = hasProjectContext ? projectNavItems : GLOBAL_NAV_ITEMS
+  const isAdmin = Boolean(currentUserQ.data?.roles.some((role) => role === "super_admin" || role === "admin"))
+  const globalNavItems = useMemo(() => getGlobalNavItems({ includeAdmin: isAdmin }), [isAdmin])
+  const inlineNavItems = globalNavItems
+  const menuNavItems = hasProjectContext ? projectNavItems : globalNavItems
 
   useEffect(() => {
+    if (previousLocationRef.current === locationToken) return
+    previousLocationRef.current = locationToken
     setNavMenuOpen(false)
-  }, [location.hash, location.pathname, location.search])
+  }, [locationToken])
 
   useEffect(() => {
     if (!navMenuOpen) return
@@ -205,26 +236,21 @@ export function AppShell() {
     <div className="min-h-dvh">
       <div className="theme-shell-glow pointer-events-none fixed inset-x-0 top-0 z-0 h-72" />
       <header className="theme-shell-header sticky top-0 z-20 backdrop-blur-2xl">
-        <div className="container py-3 sm:py-4">
+        <div className="container py-2.5">
           <div className="relative flex w-full items-center gap-3 sm:gap-4">
             <Link
               to="/projects"
-              className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-[1.35rem] bg-[linear-gradient(160deg,#294f79,#1b3556)] text-primary-foreground shadow-[0_18px_38px_-28px_rgba(15,23,42,0.46)] transition-all hover:-translate-y-px hover:shadow-[0_22px_44px_-28px_rgba(15,23,42,0.52)]"
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[1.05rem] bg-[linear-gradient(160deg,#294f79,#1b3556)] text-primary-foreground shadow-[0_16px_34px_-26px_rgba(15,23,42,0.42)] transition-all hover:-translate-y-px hover:shadow-[0_20px_40px_-26px_rgba(15,23,42,0.48)]"
               aria-label="返回项目中心"
             >
-              <Workflow className="h-5 w-5" />
+              <Workflow className="h-4.5 w-4.5" />
             </Link>
 
             <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2 text-xs text-[#6a7e98]">
-                <span className="font-semibold tracking-[0.03em] text-[#465a74]">LearningPyramid</span>
-                <span className="inline-flex items-center rounded-full border border-[#e0e6ed] bg-[#f7f9fb] px-2 py-0.5 text-[11px] font-medium text-[#66798e]">
-                  {deploymentLabel}
-                </span>
-              </div>
-              <div className="mt-1.5 min-w-0">
-                <div className="truncate text-base font-semibold tracking-tight text-foreground sm:text-lg">{area.title}</div>
-                {areaContext ? <div className="mt-0.5 truncate text-sm text-[#6a7e98]">{areaContext}</div> : null}
+              <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="text-[13px] font-semibold tracking-[0.04em] text-[#465a74]">LearningPyramid</span>
+                <span className="text-xs text-[#93a2b5]">/</span>
+                <div className="min-w-0 truncate text-sm font-medium tracking-tight text-foreground sm:text-[15px]">{area.title}</div>
               </div>
             </div>
 
@@ -238,12 +264,12 @@ export function AppShell() {
                       to={item.to}
                       className={({ isActive }) =>
                         cn(
-                          "inline-flex h-10 items-center gap-2 rounded-2xl border border-[#e3e8ef] bg-white px-3 text-sm text-[#5b6b82] shadow-[0_14px_28px_-24px_rgba(15,23,42,0.16)] transition-colors hover:border-primary/15 hover:text-foreground",
+                          "inline-flex h-9 items-center gap-2 rounded-xl border border-[#e3e8ef] bg-white px-3 text-[13px] text-[#5b6b82] shadow-[0_12px_24px_-24px_rgba(15,23,42,0.14)] transition-colors hover:border-primary/15 hover:text-foreground",
                           isActive && "border-primary/15 bg-[#eef5ff] text-foreground",
                         )
                       }
                     >
-                      <Icon className="h-4 w-4 shrink-0 text-primary" />
+                      <Icon className="h-3.5 w-3.5 shrink-0 text-primary" />
                       <span>{item.label}</span>
                     </NavLink>
                   )
@@ -254,12 +280,12 @@ export function AppShell() {
                 ref={menuButtonRef}
                 variant="outline"
                 size="icon"
-                className="h-11 w-11 shrink-0 rounded-2xl border-[#e3e8ef] bg-white"
+                className="h-10 w-10 shrink-0 rounded-xl border-[#e3e8ef] bg-white"
                 onClick={() => setNavMenuOpen((current) => !current)}
                 aria-expanded={navMenuOpen}
                 aria-haspopup="menu"
               >
-                <Menu className="h-5 w-5" />
+                <Menu className="h-4.5 w-4.5" />
                 <span className="sr-only">打开导航菜单</span>
               </Button>
             </div>
@@ -273,7 +299,8 @@ export function AppShell() {
                   {authEnabled && currentUserQ.data ? (
                     <div className="rounded-[1.25rem] border border-[#e3e8ef] bg-white p-3">
                       <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#6a7e98]">当前账号</div>
-                      <div className="mt-1 truncate text-sm font-medium text-foreground">{currentUserQ.data.email}</div>
+                      <div className="mt-1 truncate text-sm font-medium text-foreground">{currentUserQ.data.nickname}</div>
+                      <div className="mt-1 truncate text-xs text-muted-foreground">{currentUserQ.data.email}</div>
                       <Button
                         variant="outline"
                         size="sm"
@@ -300,36 +327,56 @@ export function AppShell() {
                     <div className="mt-3 space-y-2">
                       {THEME_PRESETS.map((theme) => {
                         const isActive = selectedTheme === theme.id
+                        const previewCardStyle: CSSProperties = {
+                          background: theme.surface.background,
+                          borderColor: isActive ? THEME_PRESET_ACTIVE_BORDER : theme.surface.border,
+                          boxShadow: isActive
+                            ? `${THEME_PRESET_ACTIVE_RING}, ${THEME_PRESET_ACTIVE_GLOW}, ${theme.surface.shadow}`
+                            : theme.surface.shadow,
+                        }
                         return (
                           <button
                             key={theme.id}
                             type="button"
                             className={cn(
-                              "flex w-full items-center justify-between gap-3 rounded-2xl border px-3 py-2.5 text-left transition-colors",
-                              isActive
-                                ? "border-primary/30 [background:var(--theme-selection-bg)]"
-                                : "[border-color:var(--theme-card-border)] [background:var(--theme-outline-bg)] hover:border-primary/15 hover:[background:var(--theme-outline-hover-bg)]",
+                              "flex w-full items-center justify-between gap-3 rounded-2xl border px-3 py-2.5 text-left transition-all duration-200 hover:-translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b7a4f6]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent",
                             )}
+                            style={previewCardStyle}
                             onClick={() => {
                               setTheme(theme.id)
                               setNavMenuOpen(false)
                             }}
                           >
                             <div className="min-w-0">
-                              <div className="text-sm font-medium text-foreground">{theme.label}</div>
-                              <div className="mt-0.5 text-xs text-muted-foreground">{theme.description}</div>
+                              <div className="text-sm font-medium" style={{ color: theme.surface.title }}>
+                                {theme.label}
+                              </div>
+                              <div className="mt-0.5 text-xs" style={{ color: theme.surface.description }}>
+                                {theme.description}
+                              </div>
                             </div>
                             <div className="flex shrink-0 items-center gap-2">
                               <div className="flex items-center gap-1.5">
                                 {theme.preview.map((color) => (
                                   <span
                                     key={`${theme.id}-${color}`}
-                                    className="h-4 w-4 rounded-full border border-black/5 shadow-inner"
-                                    style={{ backgroundColor: color }}
+                                    className="h-4 w-4 rounded-full shadow-inner"
+                                    style={{ backgroundColor: color, border: `1px solid ${theme.surface.swatchBorder}` }}
                                   />
                                 ))}
                               </div>
-                              {isActive ? <span className="theme-meta-strong">当前</span> : null}
+                              {isActive ? (
+                                <span
+                                  className="inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold text-white"
+                                  style={{
+                                    borderColor: "rgba(255, 255, 255, 0.22)",
+                                    background: THEME_PRESET_CURRENT_BADGE_BG,
+                                    boxShadow: THEME_PRESET_CURRENT_BADGE_SHADOW,
+                                  }}
+                                >
+                                  当前
+                                </span>
+                              ) : null}
                             </div>
                           </button>
                         )
@@ -343,7 +390,7 @@ export function AppShell() {
         </div>
       </header>
 
-      <main className="container relative z-10 py-6 lg:py-8">
+      <main className="container relative z-10 py-5 lg:py-6">
         <Outlet />
       </main>
     </div>

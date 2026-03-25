@@ -96,6 +96,25 @@ class PostgresStore(SQLiteSnapshotStore):
             finally:
                 pool.release(conn)
 
+    @staticmethod
+    def _migration_health_error(status: dict[str, object]) -> str | None:
+        conflicts = list(status.get("conflicts", []))
+        if conflicts:
+            item = conflicts[0]
+            if isinstance(item, dict):
+                return (
+                    "Conflicting PostgreSQL store migrations detected for "
+                    f"{item.get('scope')}:{item.get('version')}"
+                )
+            return "Conflicting PostgreSQL store migrations detected"
+        pending = list(status.get("pending", []))
+        if pending:
+            item = pending[0]
+            if isinstance(item, dict):
+                return f"Pending PostgreSQL store migration {item.get('scope')}:{item.get('version')}"
+            return "Pending PostgreSQL store migrations detected"
+        return None
+
     def healthcheck(self) -> dict[str, object]:
         health = get_postgres_pool(self._dsn).healthcheck()
         health["backend"] = "postgres"
@@ -105,7 +124,19 @@ class PostgresStore(SQLiteSnapshotStore):
             pool = get_postgres_pool(self._dsn)
             conn = pool.acquire()
             try:
-                health["migrations"] = postgres_migration_status(conn, target="store")
+                status = postgres_migration_status(conn, target="store")
+                health["migrations"] = status
+                migration_error = self._migration_health_error(status)
+                if migration_error:
+                    health["ok"] = False
+                    health["error"] = migration_error
+                else:
+                    conn.execute("SELECT 1 FROM project_snapshots LIMIT 1").fetchone()
+                    health["probe"] = {"ok": True, "target": "project_snapshots"}
+            except Exception as exc:
+                health["ok"] = False
+                health["error"] = str(exc)
+                health["probe"] = {"ok": False, "error": str(exc)}
             finally:
                 pool.release(conn)
         return health

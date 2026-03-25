@@ -12,6 +12,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from backend.system.postgres_schema import (
     apply_postgres_migrations,
+    conflicting_postgres_migrations,
     pending_postgres_migrations,
     postgres_migration_status,
     validate_postgres_migration_plan,
@@ -61,12 +62,22 @@ def main() -> int:
             return 0
         if args.check:
             pending = pending_postgres_migrations(conn, target=str(args.scope))
-            if pending:
+            conflicts = conflicting_postgres_migrations(conn, target=str(args.scope))
+            if pending or conflicts:
                 sys.stdout.write(
                     json.dumps(
                         {
                             "ok": False,
                             "pending": [{"scope": item[0], "version": item[1], "name": item[2]} for item in pending],
+                            "conflicts": [
+                                {
+                                    "scope": item[0],
+                                    "version": item[1],
+                                    "appliedName": item[2],
+                                    "expectedName": item[3],
+                                }
+                                for item in conflicts
+                            ],
                         },
                         ensure_ascii=False,
                         indent=2,
@@ -74,7 +85,7 @@ def main() -> int:
                 )
                 sys.stdout.write("\n")
                 return 1
-            sys.stdout.write(json.dumps({"ok": True, "pending": []}, ensure_ascii=False, indent=2))
+            sys.stdout.write(json.dumps({"ok": True, "pending": [], "conflicts": []}, ensure_ascii=False, indent=2))
             sys.stdout.write("\n")
             return 0
         apply_postgres_migrations(conn, target=str(args.scope))

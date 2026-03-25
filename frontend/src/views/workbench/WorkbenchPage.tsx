@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useQueries } from "@tanstack/react-query"
 import { FolderTree, ListChecks, RadioTower, Sparkles } from "lucide-react"
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
@@ -75,6 +75,8 @@ function isRelativeMaterialId(materialId: string) {
   if (/^[A-Za-z]:\//.test(normalized)) return false
   return !normalized.split("/").some((part) => part === "." || part === "..")
 }
+
+const DURATION_PROBE_CONCURRENCY = 4
 
 function readMediaDurationMs(src: string) {
   return new Promise<number>((resolve, reject) => {
@@ -255,6 +257,7 @@ export function WorkbenchPage() {
   const [currentMs, setCurrentMs] = useState(0)
   const [seekTo, setSeekTo] = useState<{ instanceId: string; ms: number; nonce: number } | null>(null)
   const [centerPanelMode, setCenterPanelMode] = useState<"main" | "rollup">("main")
+  const videoPaneRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     if (!pid) return
@@ -295,7 +298,8 @@ export function WorkbenchPage() {
   const [todayPlaybackMs, setTodayPlaybackMs] = useState(() => loadDailyWorkbenchStats(pid).playbackMs)
   const [videoDurationByInstanceId, setVideoDurationByInstanceId] = useState<Record<string, number>>({})
   const [durationProbeAttemptedByInstanceId, setDurationProbeAttemptedByInstanceId] = useState<Record<string, true>>({})
-  const [durationProbeInFlightInstanceId, setDurationProbeInFlightInstanceId] = useState<string | null>(null)
+  const [durationProbeInFlightByInstanceId, setDurationProbeInFlightByInstanceId] = useState<Record<string, true>>({})
+  const durationProbeSessionRef = useRef(0)
 
   useEffect(() => {
     if (!pid) return
@@ -358,7 +362,8 @@ export function WorkbenchPage() {
 
   useEffect(() => {
     setDurationProbeAttemptedByInstanceId({})
-    setDurationProbeInFlightInstanceId(null)
+    setDurationProbeInFlightByInstanceId({})
+    durationProbeSessionRef.current += 1
   }, [browserLocalMediaEnabled, directoryBinding.permission, pid, serverMediaStreamEnabled])
 
   const recallPointIdsByInstanceQs = useQueries({
@@ -383,53 +388,76 @@ export function WorkbenchPage() {
     return out
   }, [instancesQ.data, recallPointIdsByInstanceQs])
 
-  const pendingDurationProbeInstance = useMemo(() => {
-    if (durationProbeInFlightInstanceId) return null
+  const pendingDurationProbeInstances = useMemo(() => {
+    const availableSlots = Math.max(0, DURATION_PROBE_CONCURRENCY - Object.keys(durationProbeInFlightByInstanceId).length)
+    if (availableSlots <= 0) return []
+    const pending: Instance[] = []
     for (const item of instancesQ.data ?? []) {
       if (videoDurationByInstanceId[item.instanceId]) continue
       if (durationProbeAttemptedByInstanceId[item.instanceId]) continue
-      return item
+      if (durationProbeInFlightByInstanceId[item.instanceId]) continue
+      pending.push(item)
+      if (pending.length >= availableSlots) break
     }
-    return null
-  }, [durationProbeAttemptedByInstanceId, durationProbeInFlightInstanceId, instancesQ.data, videoDurationByInstanceId])
+    return pending
+  }, [durationProbeAttemptedByInstanceId, durationProbeInFlightByInstanceId, instancesQ.data, videoDurationByInstanceId])
 
   useEffect(() => {
-    if (!pid || !pendingDurationProbeInstance) return
-    let cancelled = false
-    const targetInstance = pendingDurationProbeInstance
+    if (!pid || pendingDurationProbeInstances.length <= 0) return
+    const probeSession = durationProbeSessionRef.current
+    const pendingInstanceIds = pendingDurationProbeInstances.map((item) => item.instanceId)
 
-    setDurationProbeAttemptedByInstanceId((current) =>
-      current[targetInstance.instanceId] ? current : { ...current, [targetInstance.instanceId]: true },
-    )
-    setDurationProbeInFlightInstanceId(targetInstance.instanceId)
-
-    void (async () => {
-      try {
-        const durationMs = await resolveInstanceDurationMs({
-          projectId: pid,
-          instance: targetInstance,
-          serverMediaStreamEnabled,
-          browserLocalMediaEnabled,
-          directoryPermission: directoryBinding.permission,
-        })
-        if (cancelled || !durationMs || durationMs <= 0) return
-        saveVideoDurationMs(pid, targetInstance.instanceId, durationMs)
-        setVideoDurationByInstanceId((current) =>
-          current[targetInstance.instanceId] === durationMs ? current : { ...current, [targetInstance.instanceId]: durationMs },
-        )
-      } catch {
-        // Ignore metadata probe failures and keep the dashboard responsive.
-      } finally {
-        if (!cancelled) {
-          setDurationProbeInFlightInstanceId((current) => (current === targetInstance.instanceId ? null : current))
-        }
+    setDurationProbeAttemptedByInstanceId((current) => {
+      let changed = false
+      const next = { ...current }
+      for (const instanceId of pendingInstanceIds) {
+        if (next[instanceId]) continue
+        next[instanceId] = true
+        changed = true
       }
-    })()
+      return changed ? next : current
+    })
+    setDurationProbeInFlightByInstanceId((current) => {
+      let changed = false
+      const next = { ...current }
+      for (const instanceId of pendingInstanceIds) {
+        if (next[instanceId]) continue
+        next[instanceId] = true
+        changed = true
+      }
+      return changed ? next : current
+    })
 
-    return () => {
-      cancelled = true
+    for (const targetInstance of pendingDurationProbeInstances) {
+      void (async () => {
+        try {
+          const durationMs = await resolveInstanceDurationMs({
+            projectId: pid,
+            instance: targetInstance,
+            serverMediaStreamEnabled,
+            browserLocalMediaEnabled,
+            directoryPermission: directoryBinding.permission,
+          })
+          if (durationProbeSessionRef.current !== probeSession || !durationMs || durationMs <= 0) return
+          saveVideoDurationMs(pid, targetInstance.instanceId, durationMs)
+          setVideoDurationByInstanceId((current) =>
+            current[targetInstance.instanceId] === durationMs ? current : { ...current, [targetInstance.instanceId]: durationMs },
+          )
+        } catch {
+          // Ignore metadata probe failures and keep the dashboard responsive.
+        } finally {
+          if (durationProbeSessionRef.current === probeSession) {
+            setDurationProbeInFlightByInstanceId((current) => {
+              if (!current[targetInstance.instanceId]) return current
+              const next = { ...current }
+              delete next[targetInstance.instanceId]
+              return next
+            })
+          }
+        }
+      })()
     }
-  }, [browserLocalMediaEnabled, directoryBinding.permission, pendingDurationProbeInstance, pid, serverMediaStreamEnabled])
+  }, [browserLocalMediaEnabled, directoryBinding.permission, pendingDurationProbeInstances, pid, serverMediaStreamEnabled])
 
   const videoProgress = useMemo(() => {
     const items = instancesQ.data ?? []
@@ -451,9 +479,9 @@ export function WorkbenchPage() {
       (instancesQ.data ?? []).filter(
         (item) =>
           !videoDurationByInstanceId[item.instanceId] &&
-          (!durationProbeAttemptedByInstanceId[item.instanceId] || item.instanceId === durationProbeInFlightInstanceId),
+          (!durationProbeAttemptedByInstanceId[item.instanceId] || durationProbeInFlightByInstanceId[item.instanceId]),
       ).length,
-    [durationProbeAttemptedByInstanceId, durationProbeInFlightInstanceId, instancesQ.data, videoDurationByInstanceId],
+    [durationProbeAttemptedByInstanceId, durationProbeInFlightByInstanceId, instancesQ.data, videoDurationByInstanceId],
   )
 
   async function onManualRollUp(layerIndex: number) {
@@ -474,7 +502,15 @@ export function WorkbenchPage() {
   }
 
   function onOpenAnchor(a: { instanceId: string; position: string }) {
+    setCenterPanelMode("main")
     setSelectedInstanceId(pid, a.instanceId)
+    window.requestAnimationFrame(() => {
+      if (videoPaneRef.current) {
+        videoPaneRef.current.scrollIntoView({ behavior: "smooth", block: "start" })
+        return
+      }
+      window.scrollTo({ top: 0, behavior: "smooth" })
+    })
     const ms = parseAnchorMs(a.position)
     if (ms === null) {
       setSeekTo(null)
@@ -505,9 +541,12 @@ export function WorkbenchPage() {
 
   return (
     <div className="space-y-5">
-      <div className="grid gap-5 xl:grid-cols-[300px_minmax(0,1.2fr)_320px]">
-        <div className="space-y-4">
-          <Card id="workbench-content-tree" className="theme-card-main">
+      <div className="grid gap-5 xl:items-start xl:grid-cols-[300px_minmax(0,1.2fr)_320px]">
+        <aside className="xl:sticky xl:top-28 xl:self-start">
+          <Card
+            id="workbench-content-tree"
+            className="theme-card-main xl:flex xl:max-h-[calc(100dvh-9rem)] xl:min-h-0 xl:flex-col xl:overflow-hidden"
+          >
             <CardHeader className="theme-card-header">
               <div className="flex items-center gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#e2e8f0] bg-[#f5f7fa] text-primary">
@@ -518,7 +557,7 @@ export function WorkbenchPage() {
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="pt-2">
+            <CardContent className="pt-2 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:overscroll-contain xl:pr-3">
               <LearningObjectTree
                 projectId={pid}
                 selectedInstanceId={selectedInstanceId}
@@ -530,24 +569,26 @@ export function WorkbenchPage() {
               />
             </CardContent>
           </Card>
-        </div>
+        </aside>
 
-        <div className="space-y-4">
-          <VideoPane
-            key={instance?.instanceId ?? "none"}
-            projectId={pid}
-            instance={instance}
-            setCurrentMs={setCurrentMs}
-            seekTo={seekTo}
-            onSeekApplied={(nonce) => setSeekTo((s) => (s && s.nonce === nonce ? null : s))}
-            onDurationResolved={(instanceId, durationMs) =>
-              setVideoDurationByInstanceId((current) =>
-                current[instanceId] === durationMs ? current : { ...current, [instanceId]: durationMs },
-              )
-            }
-            queueHasGate={queueHasGate}
-          />
-          <div className="rounded-[1.25rem] border border-[#dfe6ef] bg-[#f7f9fc] p-1">
+        <section className="space-y-4 xl:min-w-0">
+          <div ref={videoPaneRef} id="workbench-video-pane" className="shrink-0 scroll-mt-28">
+            <VideoPane
+              key={instance?.instanceId ?? "none"}
+              projectId={pid}
+              instance={instance}
+              setCurrentMs={setCurrentMs}
+              seekTo={seekTo}
+              onSeekApplied={(nonce) => setSeekTo((s) => (s && s.nonce === nonce ? null : s))}
+              onDurationResolved={(instanceId, durationMs) =>
+                setVideoDurationByInstanceId((current) =>
+                  current[instanceId] === durationMs ? current : { ...current, [instanceId]: durationMs },
+                )
+              }
+              queueHasGate={queueHasGate}
+            />
+          </div>
+          <div className="shrink-0 rounded-[1.25rem] border border-[#dfe6ef] bg-[#f7f9fc] p-1">
             <div className="grid grid-cols-2 gap-1">
               <button
                 type="button"
@@ -577,7 +618,7 @@ export function WorkbenchPage() {
           </div>
 
           {centerPanelMode === "main" ? (
-            <div id={queueQ.data?.headId ? "workbench-review-pane" : "workbench-compose-pane"}>
+            <div id={queueQ.data?.headId ? "workbench-review-pane" : "workbench-compose-pane"} className="shrink-0">
               {queueQ.data?.headId ? (
                 <ReviewPane
                   key={queueQ.data.headId}
@@ -597,7 +638,7 @@ export function WorkbenchPage() {
               )}
             </div>
           ) : (
-            <Card className="theme-card-main" id="workbench-rollup-pane">
+            <Card className="theme-card-main shrink-0" id="workbench-rollup-pane">
               <CardHeader className="theme-card-header">
                 <div className="flex items-center gap-3">
                   <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#e2e8f0] bg-[#f5f7fa] text-primary">
@@ -637,10 +678,10 @@ export function WorkbenchPage() {
               </CardContent>
             </Card>
           )}
-        </div>
+        </section>
 
-        <div className="space-y-4">
-          <Card className="theme-card-main">
+        <aside className="xl:sticky xl:top-28 xl:self-start">
+          <Card className="theme-card-main xl:flex xl:max-h-[calc(100dvh-9rem)] xl:min-h-0 xl:flex-col xl:overflow-hidden">
             <CardHeader className="theme-card-header">
               <div className="flex items-center gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#e2e8f0] bg-[#f5f7fa] text-primary">
@@ -652,7 +693,7 @@ export function WorkbenchPage() {
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="space-y-5 pt-4 text-sm">
+            <CardContent className="space-y-5 pt-4 text-sm xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:overscroll-contain xl:pr-3">
               <section className="space-y-3">
                 <div className="flex items-center justify-between gap-3">
                   <div>
@@ -696,7 +737,7 @@ export function WorkbenchPage() {
               {auditLogQ.error ? <p className="text-sm text-destructive">{formatApiError(auditLogQ.error)}</p> : null}
             </CardContent>
           </Card>
-        </div>
+        </aside>
       </div>
     </div>
   )

@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Any, Optional, Protocol, Sequence, Tuple, runtime_checkable
 
+from backend.models.enums import ClientRuntimeKind, RuntimeCapability
 from backend.models.learning_task import LearningTask
 from backend.models.learning_task_node import LearningTaskNode
 from backend.models.range_snapshot import RangeSnapshot
@@ -21,6 +22,8 @@ from backend.models.types import (
 @runtime_checkable
 class MutationSession(Protocol):
     project_id: ProjectId
+    runtime_kind: ClientRuntimeKind
+    runtime_capabilities: frozenset[RuntimeCapability]
 
 
 class ProtocolIdGenerator(Protocol):

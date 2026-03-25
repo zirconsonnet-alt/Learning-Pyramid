@@ -18,6 +18,7 @@ from backend.models.enums import (
     AuditEventKind,
     AuditResultCode,
     AsrProvider,
+    ClientRuntimeKind,
     ConvergenceState,
     FsSyncPolicy,
     InstancePresence,
@@ -27,6 +28,7 @@ from backend.models.enums import (
     RecallPointState,
     ReviewChainState,
     ReviewTaskState,
+    RuntimeCapability,
     SessionMode,
 )
 from backend.models.errors import (
@@ -51,7 +53,6 @@ from backend.models.project_config import (
     DEFAULT_AGGREGATION_K_POINT,
     LayerConfig,
     ProjectConfig,
-    default_external_services_config,
     default_layer_config,
     default_project_config,
     default_push_config,
@@ -68,6 +69,7 @@ from backend.models.review_task_queue import ReviewTaskQueue
 from backend.system.persistence_json import SCHEMA_VERSION, decode_snapshot, encode_project_payload, encode_snapshot
 from backend.system.persistence_store import JsonSnapshotStore, SnapshotStore
 from backend.system.project_paths import allocate_project_root
+from backend.system.runtime_features import default_client_runtime_kind, default_runtime_capabilities
 from backend.models.types import (
     AsrArtifactId,
     ConvergenceId,
@@ -174,6 +176,8 @@ class SessionState:
 class MutationSession:
     project_id: ProjectId
     mode: SessionMode
+    runtime_kind: ClientRuntimeKind = ClientRuntimeKind.DESKTOP_WEB
+    runtime_capabilities: frozenset[RuntimeCapability] = field(default_factory=frozenset)
     state: str = SessionState.OPEN
     _baseline: ProjectStore = field(default=None)
     _staged: ProjectStaged = field(default_factory=ProjectStaged)
@@ -2183,7 +2187,14 @@ class InMemorySystem:
             raise ConcurrencyConflictError("Another READ_WRITE session is OPEN")
         self.g._write_lock_held = True
         ps = ProjectStore(project=None)
-        return MutationSession(project_id=project_id, mode=SessionMode.READ_WRITE, _baseline=ps)
+        runtime_kind = default_client_runtime_kind()
+        return MutationSession(
+            project_id=project_id,
+            mode=SessionMode.READ_WRITE,
+            runtime_kind=runtime_kind,
+            runtime_capabilities=default_runtime_capabilities(runtime_kind),
+            _baseline=ps,
+        )
 
     def _ensure_system_project_id_seq(self) -> None:
         """
@@ -2490,7 +2501,6 @@ class InMemorySystem:
                 pcfg = ProjectConfig(
                     project_id=ps.project.project_id,
                     layer_configs={0: cfg0},
-                    external_services=default_external_services_config(),
                     push_config=default_push_config(),
                     updated_at=now_utc_ms(),
                 )
@@ -2538,14 +2548,29 @@ class InMemorySystem:
             schema_version=SCHEMA_VERSION,
         )
 
-    def begin_session(self, project_id: ProjectId, mode: SessionMode) -> MutationSession:
+    def begin_session(
+        self,
+        project_id: ProjectId,
+        mode: SessionMode,
+        *,
+        runtime_kind: ClientRuntimeKind | None = None,
+        runtime_capabilities: frozenset[RuntimeCapability] | None = None,
+    ) -> MutationSession:
         _ensure_project_active(self.g, project_id)
         if mode == SessionMode.READ_WRITE:
             if self.g._write_lock_held:
                 raise ConcurrencyConflictError("Another READ_WRITE session is OPEN")
             self.g._write_lock_held = True
         ps = self.g.projects[str(project_id)]
-        return MutationSession(project_id=project_id, mode=mode, _baseline=ps)
+        resolved_runtime_kind = runtime_kind or default_client_runtime_kind()
+        resolved_runtime_capabilities = runtime_capabilities or default_runtime_capabilities(resolved_runtime_kind)
+        return MutationSession(
+            project_id=project_id,
+            mode=mode,
+            runtime_kind=resolved_runtime_kind,
+            runtime_capabilities=resolved_runtime_capabilities,
+            _baseline=ps,
+        )
 
     def commit(self, session: MutationSession) -> None:
         session.assert_open()

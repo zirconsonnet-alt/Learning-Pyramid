@@ -5,7 +5,7 @@ import { getAggregationQueue, listAggregationEvents, listLayers, manualRollUp } 
 import { getLearningObjectNode, importLearningObjectsFromBrowser } from "@/ui/api/learningObjects"
 import { addInstance, bulkRemapRecallPointsInstance, listInstances, listMissingInstances, listRecallPointsByInstance } from "@/ui/api/instances"
 import { submitLearningTask } from "@/ui/api/learningTasks"
-import { getProjectConfig, setExternalServices, setLayerConfig } from "@/ui/api/projectConfig"
+import { getProjectConfig, setLayerConfig } from "@/ui/api/projectConfig"
 import type { ReviewChainTemplateItem } from "@/ui/api/projectConfig"
 import { getProjectStorageConfig } from "@/ui/api/projectStorageConfig"
 import { getQueue } from "@/ui/api/queue"
@@ -121,16 +121,6 @@ export function useSetLayerConfig(projectId: string) {
         qc.invalidateQueries({ queryKey: ["projectConfig", projectId] }),
         qc.invalidateQueries({ queryKey: ["layers", projectId] }),
       ])
-    },
-  })
-}
-
-export function useSetExternalServices(projectId: string) {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (p: { asr: { baseUrl: string; apiKey?: string; model?: string } | null }) => setExternalServices(projectId, p),
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["projectConfig", projectId] })
     },
   })
 }

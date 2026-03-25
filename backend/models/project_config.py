@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple, TypeAlias
+from typing import Dict, FrozenSet, Optional, Tuple, TypeAlias
 
-from backend.models.enums import ReviewChainTemplateItemKind
+from backend.models.enums import ClientRuntimeKind, ReviewChainTemplateItemKind, RuntimeCapability
 from backend.models.errors import PreconditionFailure
 from backend.models.types import ProjectId, Timestamp
 
@@ -83,7 +83,7 @@ def default_layer_config() -> LayerConfig:
 class LocalServiceConfig:
     base_url: str
     api_key: Optional[str] = None
-    model: Optional[str] = None
+    model_name: Optional[str] = None
 
     def validate_write_time(self) -> None:
         if self.base_url is None or not str(self.base_url).strip():
@@ -92,20 +92,49 @@ class LocalServiceConfig:
             raise PreconditionFailure("LocalServiceConfig.base_url must not contain trailing whitespace")
         if self.api_key is not None and str(self.api_key) != str(self.api_key).rstrip():
             raise PreconditionFailure("LocalServiceConfig.api_key must not contain trailing whitespace")
-        if self.model is not None and str(self.model) != str(self.model).rstrip():
-            raise PreconditionFailure("LocalServiceConfig.model must not contain trailing whitespace")
+        if self.model_name is not None and str(self.model_name) != str(self.model_name).rstrip():
+            raise PreconditionFailure("LocalServiceConfig.model_name must not contain trailing whitespace")
+
+    @property
+    def model(self) -> Optional[str]:
+        return self.model_name
 
 
 @dataclass(frozen=True, slots=True)
-class ProjectExternalServicesConfig:
+class LocalModelConfig:
     asr: Optional[LocalServiceConfig] = None
+    llm_qa: Optional[LocalServiceConfig] = None
     recommender: Optional[LocalServiceConfig] = None
+    story_generator: Optional[LocalServiceConfig] = None
 
     def validate_write_time(self) -> None:
         if self.asr is not None:
             self.asr.validate_write_time()
+        if self.llm_qa is not None:
+            self.llm_qa.validate_write_time()
         if self.recommender is not None:
             self.recommender.validate_write_time()
+        if self.story_generator is not None:
+            self.story_generator.validate_write_time()
+
+
+@dataclass(frozen=True, slots=True)
+class NativeRuntimeConfig:
+    runtime_kind: ClientRuntimeKind
+    capabilities: FrozenSet[RuntimeCapability]
+    local_models: LocalModelConfig
+
+    def validate_runtime(self) -> None:
+        if not isinstance(self.runtime_kind, ClientRuntimeKind):
+            raise PreconditionFailure("NativeRuntimeConfig.runtime_kind must be ClientRuntimeKind")
+        if self.capabilities is None:
+            raise PreconditionFailure("NativeRuntimeConfig.capabilities must not be null")
+        for capability in self.capabilities:
+            if not isinstance(capability, RuntimeCapability):
+                raise PreconditionFailure("NativeRuntimeConfig.capabilities contains invalid capability")
+        if self.local_models is None:
+            raise PreconditionFailure("NativeRuntimeConfig.local_models must not be null")
+        self.local_models.validate_write_time()
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,8 +149,8 @@ class RecallPointPushConfig:
             raise PreconditionFailure("RecallPointPushConfig.max_history_len must be >= 0")
 
 
-def default_external_services_config() -> ProjectExternalServicesConfig:
-    return ProjectExternalServicesConfig(asr=None, recommender=None)
+def default_local_model_config() -> LocalModelConfig:
+    return LocalModelConfig(asr=None, llm_qa=None, recommender=None, story_generator=None)
 
 
 def default_push_config() -> RecallPointPushConfig:
@@ -135,7 +164,6 @@ def default_push_config() -> RecallPointPushConfig:
 class ProjectConfig:
     project_id: ProjectId
     layer_configs: Dict[int, LayerConfig]
-    external_services: ProjectExternalServicesConfig
     push_config: RecallPointPushConfig
     updated_at: Timestamp
 
@@ -144,8 +172,6 @@ class ProjectConfig:
             raise PreconditionFailure("ProjectConfig.project_id must be non-empty")
         if self.layer_configs is None:
             raise PreconditionFailure("ProjectConfig.layer_configs must not be null")
-        if self.external_services is None:
-            raise PreconditionFailure("ProjectConfig.external_services must not be null")
         if self.push_config is None:
             raise PreconditionFailure("ProjectConfig.push_config must not be null")
         if 0 not in self.layer_configs:
@@ -158,7 +184,6 @@ class ProjectConfig:
                 raise PreconditionFailure("ProjectConfig.layer_configs contains null LayerConfig")
             cfg.validate_write_time()
 
-        self.external_services.validate_write_time()
         self.push_config.validate_write_time()
 
 
@@ -166,7 +191,6 @@ def default_project_config(*, project_id: ProjectId, updated_at: Timestamp) -> P
     return ProjectConfig(
         project_id=project_id,
         layer_configs={0: default_layer_config()},
-        external_services=default_external_services_config(),
         push_config=default_push_config(),
         updated_at=updated_at,
     )

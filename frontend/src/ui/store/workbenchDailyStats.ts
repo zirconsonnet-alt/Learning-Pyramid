@@ -49,3 +49,29 @@ export function addDailyPlaybackMs(projectId: string, deltaMs: number, dateKey =
     dateKey,
   )
 }
+
+export function loadDailyPlaybackTotalsByDate(projectIds: string[]) {
+  if (typeof window === "undefined" || projectIds.length === 0) return {} as Record<string, number>
+
+  const projectIdSet = new Set(projectIds.filter(Boolean))
+  const totalsByDate: Record<string, number> = {}
+
+  for (let index = 0; index < window.localStorage.length; index += 1) {
+    const key = window.localStorage.key(index)
+    if (!key || !key.startsWith(STORAGE_PREFIX)) continue
+
+    const remainder = key.slice(STORAGE_PREFIX.length)
+    const separatorIndex = remainder.lastIndexOf(":")
+    if (separatorIndex <= 0 || separatorIndex >= remainder.length - 1) continue
+
+    const projectId = remainder.slice(0, separatorIndex)
+    const dateKey = remainder.slice(separatorIndex + 1)
+    if (!projectIdSet.has(projectId)) continue
+
+    const playbackMs = loadDailyWorkbenchStats(projectId, dateKey).playbackMs
+    if (playbackMs <= 0) continue
+    totalsByDate[dateKey] = (totalsByDate[dateKey] ?? 0) + playbackMs
+  }
+
+  return totalsByDate
+}

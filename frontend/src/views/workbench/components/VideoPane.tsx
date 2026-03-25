@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
+import { useQueries } from "@tanstack/react-query"
 import {
   Maximize2,
   Minimize2,
@@ -14,17 +15,33 @@ import {
 } from "lucide-react"
 
 import type { Instance } from "@/ui/api/instances"
-import { richText } from "@/ui/api/richContent"
+import { getRecallPoint, type RecallPoint } from "@/ui/api/review"
+import {
+  appendImageBlock,
+  removeImageBlockAt,
+  richContentHasMeaning,
+  richText,
+  setRichContentText,
+  type RichContent,
+} from "@/ui/api/richContent"
+import { RichContentEditor } from "@/ui/components/RichContentEditor"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent } from "@/ui/components/ui/card"
 import { resolveProjectFile, useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
 import { useSystemCapabilities } from "@/ui/queries/system"
+import { useRecallPointsByInstance } from "@/ui/queries/workbench"
 import { showInfoFeedback } from "@/ui/store/feedbackStore"
 import { addDailyPlaybackMs } from "@/ui/store/workbenchDailyStats"
 import { clearPlaybackResumeMs, loadPlaybackResumeMs, savePlaybackResumeMs } from "@/ui/store/playbackResume"
 import { saveVideoDurationMs } from "@/ui/store/videoDurations"
 import { useWorkbenchStore } from "@/ui/store/workbenchStore"
 import { cn } from "@/ui/utils"
+import {
+  VideoBarrageDetailCard,
+  VideoBarrageLayer,
+} from "./videoBarrage"
+import { useVideoBarrage } from "./useVideoBarrage"
+import { loadVideoBarrageEnabled, VIDEO_BARRAGE_STORAGE_KEY } from "./videoBarrageState"
 
 const FULLSCREEN_KEYBOARD_SEEK_STEP_MS = 5000
 const CHROME_HIDE_DELAY_MS = 1600
@@ -42,10 +59,13 @@ function isRelativeMaterialId(materialId: string) {
   return !normalized.split("/").some((part) => part === "." || part === "..")
 }
 
-function isEditableTarget(target: EventTarget | null) {
-  if (!(target instanceof HTMLElement)) return false
-  if (target.isContentEditable) return true
-  return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement
+function isShortcutBlockedTarget(target: EventTarget | null) {
+  if (!(target instanceof Element)) return false
+  if (target instanceof HTMLElement && target.isContentEditable) return true
+  if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) {
+    return true
+  }
+  return Boolean(target.closest("input, textarea, select, [contenteditable='true']"))
 }
 
 function isElementInFullscreen(element: Element | null) {
@@ -103,6 +123,7 @@ export function VideoPane({
 }) {
   const playerShellRef = useRef<HTMLDivElement | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const barrageLayerRef = useRef<HTMLDivElement | null>(null)
   const questionInputRef = useRef<HTMLTextAreaElement | null>(null)
   const answerTextareaRef = useRef<HTMLTextAreaElement | null>(null)
   const pendingSeekRef = useRef<{ instanceId: string; ms: number; nonce: number } | null>(null)
@@ -127,9 +148,10 @@ export function VideoPane({
   const [isChromeAwake, setIsChromeAwake] = useState(true)
   const [isCapturePanelOpen, setIsCapturePanelOpen] = useState(false)
   const [captureAnchorMs, setCaptureAnchorMs] = useState(0)
-  const [questionText, setQuestionText] = useState("")
-  const [answerText, setAnswerText] = useState("")
+  const [questionContent, setQuestionContent] = useState<RichContent>(() => richText(""))
+  const [answerContent, setAnswerContent] = useState<RichContent>(() => richText(""))
   const [captureError, setCaptureError] = useState<string | null>(null)
+  const [isBarrageEnabled, setIsBarrageEnabled] = useState(() => loadVideoBarrageEnabled())
 
   const addDraft = useWorkbenchStore((s) => s.addDraft)
 
@@ -144,6 +166,19 @@ export function VideoPane({
   const durationLabel = durationMs > 0 ? formatPlaybackClock(durationMs) : "--:--"
   const chromeVisible = isChromeAwake || !isPlaying || isCapturePanelOpen
   const playbackRateLabel = `${Number.isInteger(playbackRate) ? playbackRate.toFixed(0) : playbackRate.toFixed(2).replace(/0$/, "")}x`
+  const recallPointIdsQ = useRecallPointsByInstance(projectId, instanceId ?? "")
+  const recallPointQs = useQueries({
+    queries: (recallPointIdsQ.data?.recallPointIds ?? []).map((recallPointId) => ({
+      queryKey: ["recallPoint", projectId, recallPointId],
+      queryFn: () => getRecallPoint(projectId, recallPointId),
+      enabled: !!projectId && !!instanceId && !!recallPointId,
+      staleTime: 30_000,
+    })),
+  })
+  const recallPoints = useMemo<RecallPoint[]>(
+    () => recallPointQs.flatMap((query) => (query.data ? [query.data] : [])),
+    [recallPointQs],
+  )
 
   const flushPlaybackDuration = useCallback(() => {
     if (!instanceId) {
@@ -326,8 +361,8 @@ export function VideoPane({
   const closeCapturePanel = useCallback(() => {
     setIsCapturePanelOpen(false)
     setCaptureError(null)
-    setQuestionText("")
-    setAnswerText("")
+    setQuestionContent(richText(""))
+    setAnswerContent(richText(""))
   }, [])
 
   const openCapturePanel = useCallback(
@@ -351,8 +386,8 @@ export function VideoPane({
       if (!keepFullscreen && !isElementInFullscreen(playerShellRef.current)) return
 
       setCaptureAnchorMs(captureMs)
-      setQuestionText("")
-      setAnswerText("")
+      setQuestionContent(richText(""))
+      setAnswerContent(richText(""))
       setCaptureError(null)
       setIsCapturePanelOpen(true)
       wakeChrome()
@@ -379,10 +414,8 @@ export function VideoPane({
       showInfoFeedback("当前处于复习模式", message)
       return
     }
-    const normalizedQuestion = questionText.trim()
-    const normalizedAnswer = answerText.trim()
-    if (!normalizedQuestion || !normalizedAnswer) {
-      setCaptureError("问题和答案都要填写。")
+    if (!richContentHasMeaning(questionContent) || !richContentHasMeaning(answerContent)) {
+      setCaptureError("问题和答案都要填写，可输入文字或粘贴图片。")
       return
     }
 
@@ -391,20 +424,20 @@ export function VideoPane({
       localId: newLocalId(),
       instanceId,
       position: `t=${captureAnchorMs}`,
-      question: richText(normalizedQuestion),
-      answer: richText(normalizedAnswer),
+      question: questionContent,
+      answer: answerContent,
       createdAt: now,
       updatedAt: now,
     })
     closeCapturePanel()
   }, [
     addDraft,
-    answerText,
+    answerContent,
     captureAnchorMs,
     closeCapturePanel,
     instanceId,
     projectId,
-    questionText,
+    questionContent,
     queueHasGate,
   ])
 
@@ -424,6 +457,15 @@ export function VideoPane({
   }
 
   useEffect(() => {
+    if (typeof window === "undefined") return
+    try {
+      window.localStorage.setItem(VIDEO_BARRAGE_STORAGE_KEY, isBarrageEnabled ? "1" : "0")
+    } catch {
+      // Ignore storage write failures and keep playback responsive.
+    }
+  }, [isBarrageEnabled])
+
+  useEffect(() => {
     syncPlaybackClock(0)
     setDurationMs(0)
     setIsPlaying(false)
@@ -435,8 +477,8 @@ export function VideoPane({
     setIsChromeAwake(true)
     setIsCapturePanelOpen(false)
     setCaptureAnchorMs(0)
-    setQuestionText("")
-    setAnswerText("")
+    setQuestionContent(richText(""))
+    setAnswerContent(richText(""))
     setCaptureError(null)
     pendingSeekRef.current = null
     lastAppliedNonceRef.current = null
@@ -596,6 +638,18 @@ export function VideoPane({
     return localSrc
   }, [instance, localSrc, projectId, serverMediaStreamEnabled])
 
+  const { hoveredBarrage } = useVideoBarrage({
+    projectId,
+    instanceId,
+    recallPoints,
+    playerShellRef,
+    videoRef,
+    barrageLayerRef,
+    sourceKey: src ?? "",
+    isEnabled: isBarrageEnabled,
+    isCapturePanelOpen,
+  })
+
   const playbackError = useMemo(() => {
     if (!instance) return null
     if (mediaElementError) return mediaElementError
@@ -693,7 +747,7 @@ export function VideoPane({
       }
 
       if (event.altKey || event.ctrlKey || event.metaKey) return
-      if (isEditableTarget(event.target)) return
+      if (isShortcutBlockedTarget(event.target)) return
 
       if (event.code === "Space") {
         event.preventDefault()
@@ -701,7 +755,7 @@ export function VideoPane({
         return
       }
 
-      if (event.code === "KeyN") {
+      if ((event.key === "Enter" || event.code === "NumpadEnter") && !isCapturePanelOpen) {
         event.preventDefault()
         if (event.repeat || !instanceId) return
         void openCapturePanel(undefined, true)
@@ -805,6 +859,18 @@ export function VideoPane({
                 </Button>
               </div>
             ) : null}
+
+            <VideoBarrageLayer
+              layerRef={barrageLayerRef}
+              isEnabled={isBarrageEnabled}
+              isCapturePanelOpen={isCapturePanelOpen}
+            />
+            <VideoBarrageDetailCard
+              projectId={projectId}
+              hoveredBarrage={hoveredBarrage}
+              isEnabled={isBarrageEnabled}
+              isCapturePanelOpen={isCapturePanelOpen}
+            />
 
             <div
               className={cn(
@@ -944,16 +1010,32 @@ export function VideoPane({
                           {playbackRateLabel}
                         </Button>
                       </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className={cn(
+                          "h-7 min-w-[4.5rem] rounded-full px-2 text-[10px] sm:text-[11px]",
+                          isBarrageEnabled
+                            ? "border border-cyan-200/18 bg-cyan-300/18 text-cyan-50 hover:bg-cyan-300/24"
+                            : "border border-white/10 text-white/72 hover:bg-white/10 hover:text-white",
+                        )}
+                        aria-pressed={isBarrageEnabled}
+                        onClick={() => setIsBarrageEnabled((current) => !current)}
+                        title={isBarrageEnabled ? "弹幕已开启，点击关闭" : "弹幕已关闭，点击开启"}
+                      >
+                        {isBarrageEnabled ? "弹幕开" : "弹幕关"}
+                      </Button>
                       {isShellFullscreen ? (
                         <Button
                           type="button"
-                          size="icon"
-                          variant="ghost"
-                          className="h-7 w-7 rounded-full text-white hover:bg-white/10"
-                          onClick={() => void openCapturePanel()}
-                          disabled={!instanceId || queueHasGate}
-                          title="记复述点"
-                        >
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7 rounded-full text-white hover:bg-white/10"
+                        onClick={() => void openCapturePanel()}
+                        disabled={!instanceId || queueHasGate}
+                        title="记复述点 (Enter)"
+                      >
                           <NotebookPen className="h-3.5 w-3.5" />
                           <span className="sr-only">记复述点</span>
                         </Button>
@@ -991,6 +1073,7 @@ export function VideoPane({
                       variant="ghost"
                       className="h-8 w-8 rounded-full text-white/72 hover:bg-white/10 hover:text-white"
                       onClick={closeCapturePanel}
+                      title="关闭记复述点"
                     >
                       <X className="h-4 w-4" />
                       <span className="sr-only">关闭记复述点</span>
@@ -1000,17 +1083,27 @@ export function VideoPane({
                   <div className="mt-3 space-y-3">
                     <label className="block">
                       <div className="mb-1 text-xs text-white/62">问题</div>
-                      <textarea
-                        ref={questionInputRef}
-                        value={questionText}
-                        rows={3}
-                        className="min-h-[84px] w-full rounded-xl border border-white/10 bg-white/[0.05] px-3 py-2 text-sm text-white outline-none placeholder:text-white/28 focus:border-cyan-200/24 focus:bg-white/[0.08]"
-                        placeholder="输入复述点问题"
-                        onChange={(event) => {
-                          setQuestionText(event.target.value)
+                      <RichContentEditor
+                        projectId={projectId}
+                        field="question"
+                        value={questionContent}
+                        textareaRef={questionInputRef}
+                        placeholder="输入复述点问题，或直接 Ctrl+V 粘贴图片"
+                        textareaClassName="min-h-[84px] rounded-xl border-white/10 bg-white/[0.05] px-3 py-2 text-sm text-white outline-none placeholder:text-white/28 focus:border-cyan-200/24 focus:bg-white/[0.08]"
+                        imageClassName="h-24 w-24 rounded-xl border-white/10 bg-white/[0.06] object-cover"
+                        onTextChange={(text) => {
+                          setQuestionContent((prev) => setRichContentText(prev, text))
                           if (captureError) setCaptureError(null)
                         }}
-                        onKeyDown={(event) => {
+                        onAppendImage={(assetId) => {
+                          setQuestionContent((prev) => appendImageBlock(prev, assetId))
+                          if (captureError) setCaptureError(null)
+                        }}
+                        onRemoveImage={(imageIndex) => {
+                          setQuestionContent((prev) => removeImageBlockAt(prev, imageIndex))
+                          if (captureError) setCaptureError(null)
+                        }}
+                        onTextKeyDown={(event) => {
                           if (event.key === "Escape") {
                             event.preventDefault()
                             closeCapturePanel()
@@ -1027,16 +1120,27 @@ export function VideoPane({
 
                     <label className="block">
                       <div className="mb-1 text-xs text-white/62">答案</div>
-                      <textarea
-                        ref={answerTextareaRef}
-                        value={answerText}
-                        className="min-h-[124px] w-full rounded-xl border border-white/10 bg-white/[0.05] px-3 py-2 text-sm text-white outline-none placeholder:text-white/28 focus:border-cyan-200/24 focus:bg-white/[0.08]"
-                        placeholder="输入答案或你的复述内容"
-                        onChange={(event) => {
-                          setAnswerText(event.target.value)
+                      <RichContentEditor
+                        projectId={projectId}
+                        field="answer"
+                        value={answerContent}
+                        textareaRef={answerTextareaRef}
+                        placeholder="输入答案或你的复述内容，或直接 Ctrl+V 粘贴图片"
+                        textareaClassName="min-h-[124px] rounded-xl border-white/10 bg-white/[0.05] px-3 py-2 text-sm text-white outline-none placeholder:text-white/28 focus:border-cyan-200/24 focus:bg-white/[0.08]"
+                        imageClassName="h-24 w-24 rounded-xl border-white/10 bg-white/[0.06] object-cover"
+                        onTextChange={(text) => {
+                          setAnswerContent((prev) => setRichContentText(prev, text))
                           if (captureError) setCaptureError(null)
                         }}
-                        onKeyDown={(event) => {
+                        onAppendImage={(assetId) => {
+                          setAnswerContent((prev) => appendImageBlock(prev, assetId))
+                          if (captureError) setCaptureError(null)
+                        }}
+                        onRemoveImage={(imageIndex) => {
+                          setAnswerContent((prev) => removeImageBlockAt(prev, imageIndex))
+                          if (captureError) setCaptureError(null)
+                        }}
+                        onTextKeyDown={(event) => {
                           if (event.key === "Escape") {
                             event.preventDefault()
                             closeCapturePanel()
@@ -1053,7 +1157,7 @@ export function VideoPane({
                   </div>
 
                   <div className={cn("mt-2 text-xs", captureError ? "text-rose-200" : "text-white/44")}>
-                    {captureError ?? "问题中 Enter 切到答案，Ctrl+Enter 换行；答案中 Enter 保存，Ctrl+Enter 换行，Esc 取消"}
+                    {captureError ?? "全屏时 Enter 可打开录入；问题中 Enter 切到答案，答案中 Enter 保存，Ctrl+Enter 换行，Ctrl+V 粘贴图片会先上传到服务器。"}
                   </div>
 
                   <div className="mt-3 flex items-center justify-end gap-2">

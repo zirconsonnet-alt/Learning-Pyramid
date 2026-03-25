@@ -8,6 +8,7 @@ from pathlib import Path
 
 import psycopg
 import pytest
+from backend.models.errors import PreconditionFailure
 from backend.repositories.persistence_interfaces import ProjectSnapshotRecord
 from backend.system.api import SystemAPI
 from backend.system.auth_store import PostgresAuthStore, SQLiteAuthStore
@@ -87,6 +88,8 @@ def test_postgres_auth_store_round_trip() -> None:
 
     assert resolved.user_id == user.user_id
     assert auth.authenticate_user("user@example.com", "password-123").user_id == user.user_id
+    with pytest.raises(PreconditionFailure, match="email already exists"):
+        auth.create_user("user@example.com", "password-456")
 
 
 def test_migrate_sqlite_to_postgres_round_trip(tmp_path: Path) -> None:
@@ -129,6 +132,12 @@ def test_postgres_runtime_records_schema_migrations_and_uses_hot_indexes() -> No
         ).fetchall()
         assert rows == [
             ("auth", 1, "initial_auth_schema"),
+            ("auth", 2, "auth_user_profiles"),
+            ("auth", 3, "auth_roles_and_study_groups"),
+            ("auth", 4, "auth_group_join_requests"),
+            ("auth", 5, "auth_group_post_comments"),
+            ("auth", 6, "auth_admin_action_logs"),
+            ("auth", 7, "auth_identity_uniques"),
             ("store", 1, "initial_store_schema"),
             ("store", 2, "store_hot_indexes"),
             ("store", 3, "entry_registration_seq"),
@@ -145,6 +154,19 @@ def test_postgres_runtime_records_schema_migrations_and_uses_hot_indexes() -> No
         ).fetchall()
         index_names = {str(row[0]) for row in index_rows}
         assert "idx_recall_point_index_instance" in index_names
+
+        auth_index_rows = conn.execute(
+            """
+            SELECT tablename, indexname
+            FROM pg_indexes
+            WHERE schemaname = current_schema()
+              AND tablename IN ('users', 'user_profiles')
+            ORDER BY tablename ASC, indexname ASC
+            """
+        ).fetchall()
+        auth_indexes = {(str(row[0]), str(row[1])) for row in auth_index_rows}
+        assert ("users", "idx_users_email_unique") in auth_indexes
+        assert ("user_profiles", "idx_user_profiles_public_uid_unique") in auth_indexes
 
         conn.execute(
             """
@@ -296,6 +318,7 @@ def test_apply_postgres_migrations_status_and_check_commands() -> None:
     pending_body = json.loads(pending.stdout)
     assert pending_body["ok"] is False
     assert any(item["scope"] == "store" for item in pending_body["pending"])
+    assert pending_body["conflicts"] == []
 
     applied = subprocess.run(
         [
@@ -327,5 +350,95 @@ def test_apply_postgres_migrations_status_and_check_commands() -> None:
     assert status.returncode == 0, status.stderr
     status_body = json.loads(status.stdout)
     assert status_body["pending"] == []
-    assert status_body["scopes"]["store"]["version"] == 2
-    assert status_body["scopes"]["auth"]["version"] == 10
+    assert status_body["conflicts"] == []
+    assert status_body["scopes"]["store"]["version"] == 3
+    assert status_body["scopes"]["auth"]["version"] == 7
+
+
+def test_postgres_auth_conflicts_fail_check_and_startup() -> None:
+    dsn = require_postgres_test_dsn()
+    reset_postgres_database(dsn)
+
+    repo_root = Path(__file__).resolve().parent.parent
+    conn = psycopg.connect(dsn)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                scope TEXT NOT NULL,
+                version BIGINT NOT NULL,
+                name TEXT NOT NULL,
+                applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (scope, version)
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO schema_migrations (scope, version, name) VALUES (%s, %s, %s)",
+            ("auth", 1, "initial_auth_schema"),
+        )
+        conn.execute(
+            "INSERT INTO schema_migrations (scope, version, name) VALUES (%s, %s, %s)",
+            ("auth", 2, "desktop_agent_auth_tables"),
+        )
+        conn.execute(
+            "INSERT INTO schema_migrations (scope, version, name) VALUES (%s, %s, %s)",
+            ("auth", 8, "desktop_agent_diagnostic_events"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    checked = subprocess.run(
+        [
+            sys.executable,
+            "tools/apply_postgres_migrations.py",
+            "--postgres-dsn",
+            dsn,
+            "--scope",
+            "auth",
+            "--check",
+        ],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert checked.returncode == 1
+    checked_body = json.loads(checked.stdout)
+    assert checked_body["pending"] != []
+    assert checked_body["conflicts"] == [
+        {
+            "scope": "auth",
+            "version": 2,
+            "appliedName": "desktop_agent_auth_tables",
+            "expectedName": "auth_user_profiles",
+        },
+        {
+            "scope": "auth",
+            "version": 8,
+            "appliedName": "desktop_agent_diagnostic_events",
+            "expectedName": None,
+        },
+    ]
+
+    with pytest.raises(RuntimeError, match="Conflicting PostgreSQL schema_migrations rows detected"):
+        PostgresAuthStore(dsn)
+
+
+def test_postgres_auth_healthcheck_detects_missing_required_tables() -> None:
+    dsn = require_postgres_test_dsn()
+    reset_postgres_database(dsn)
+
+    auth = PostgresAuthStore(dsn)
+    conn = psycopg.connect(dsn)
+    try:
+        conn.execute("DROP TABLE user_profiles")
+        conn.commit()
+    finally:
+        conn.close()
+
+    health = auth.healthcheck()
+    assert health["ok"] is False
+    assert "user_profiles" in str(health.get("error", ""))
+    assert health["probe"] == {"ok": False, "error": health["error"]}

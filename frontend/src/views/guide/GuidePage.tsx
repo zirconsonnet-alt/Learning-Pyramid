@@ -388,36 +388,6 @@ export function GuidePage() {
 
   return (
     <div className="space-y-6">
-      <section className="theme-card-main overflow-hidden">
-        <div className="theme-card-header px-6 py-6 sm:px-8">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-            <div className="max-w-3xl space-y-3">
-              <span className="theme-meta-strong">文档</span>
-              <div className="space-y-2">
-                <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">用户指南</h1>
-                <p className="text-sm leading-7 text-muted-foreground">
-                  这里集中展示 LearningPyramid 的系统使用说明与方法说明，帮助你先完成上手，再理解背后的学习逻辑。
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div className="grid gap-3 border-t border-border/60 px-6 py-5 text-sm text-muted-foreground sm:grid-cols-3 sm:px-8">
-          <div>
-            <div className="font-medium text-foreground">内容来源</div>
-            <div className="mt-1">内容直接来自仓库内维护的用户文档，网页不再单独维护一份副本。</div>
-          </div>
-          <div>
-            <div className="font-medium text-foreground">默认阅读</div>
-            <div className="mt-1">建议先阅读系统使用说明，先跑通一次完整流程；再阅读方法说明，理解系统为什么这样组织复习。</div>
-          </div>
-          <div>
-            <div className="font-medium text-foreground">阅读方式</div>
-            <div className="mt-1">可以按左侧目录选章节阅读，也可以用右侧导航快速跳转到当前文档重点部分。</div>
-          </div>
-        </div>
-      </section>
-
       <div className="grid gap-6 xl:grid-cols-[18rem_minmax(0,1fr)_16rem]">
         <aside className="xl:sticky xl:top-28 xl:self-start">
           <section className="theme-card p-4">

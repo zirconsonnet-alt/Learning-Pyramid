@@ -26,6 +26,13 @@ ConvergenceId = NewType("ConvergenceId", str)
 ConvergenceRuleId = NewType("ConvergenceRuleId", str)
 MediaAssetId = NewType("MediaAssetId", str)
 AsrArtifactId = NewType("AsrArtifactId", str)
+TempContextFragmentId = NewType("TempContextFragmentId", str)
+QASessionId = NewType("QASessionId", str)
+CandidateRecallPointId = NewType("CandidateRecallPointId", str)
+MemoryCanvasId = NewType("MemoryCanvasId", str)
+MemoryCanvasVersionId = NewType("MemoryCanvasVersionId", str)
+CanvasEdgeId = NewType("CanvasEdgeId", str)
+StoryArtifactId = NewType("StoryArtifactId", str)
 
 # =========
 # Scalar types

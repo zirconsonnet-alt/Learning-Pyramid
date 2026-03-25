@@ -14,11 +14,18 @@ from backend.system.runtime_features import current_runtime_features
 router = APIRouter()
 
 
-def _user_to_dto(user: AuthUser) -> dict[str, str]:
+def _user_to_dto(user: AuthUser, auth_store: AuthStore) -> dict[str, object]:
     return {
         "userId": user.user_id,
         "email": user.email,
         "createdAt": user.created_at,
+        "publicUid": user.public_uid,
+        "nickname": user.nickname,
+        "bio": user.bio,
+        "avatarUrl": None if not user.avatar_key else f"/api/profile/avatar/{user.user_id}?v={user.updated_at}",
+        "status": user.status,
+        "updatedAt": user.updated_at,
+        "roles": list(auth_store.list_user_roles(user.user_id)),
     }
 
 
@@ -31,7 +38,7 @@ def register_auth_user(req: AuthCredentialsRequest, auth_store: AuthStore = Depe
         raise HTTPException(status_code=403, detail="Sign-up is disabled in this deployment")
     user = auth_store.create_user(req.email, req.password)
     session_token = auth_store.create_session(user.user_id)
-    resp = JSONResponse(content={"ok": True, "data": _user_to_dto(user)})
+    resp = JSONResponse(content={"ok": True, "data": _user_to_dto(user, auth_store)})
     set_auth_cookie(resp, session_token)
     return resp
 
@@ -46,7 +53,7 @@ def login_auth_user(req: AuthCredentialsRequest, auth_store: AuthStore = Depends
     except PreconditionFailure as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     session_token = auth_store.create_session(user.user_id)
-    resp = JSONResponse(content={"ok": True, "data": _user_to_dto(user)})
+    resp = JSONResponse(content={"ok": True, "data": _user_to_dto(user, auth_store)})
     set_auth_cookie(resp, session_token)
     return resp
 
@@ -70,4 +77,4 @@ def get_current_auth_user(request: Request, auth_store: AuthStore = Depends(get_
     if not features.auth_enabled:
         return {"ok": True, "data": None}
     user = resolve_session_user(request, auth_store)
-    return {"ok": True, "data": None if user is None else _user_to_dto(user)}
+    return {"ok": True, "data": None if user is None else _user_to_dto(user, auth_store)}

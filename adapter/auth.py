@@ -52,6 +52,25 @@ def require_request_auth_user(request: Request) -> AuthUser:
     return user
 
 
+def request_user_has_global_role(request: Request, auth_store: AuthStore, roles: tuple[str, ...] | list[str]) -> bool:
+    user = require_request_auth_user(request)
+    return auth_store.user_has_global_role(user.user_id, roles)
+
+
+def require_admin_user(request: Request, auth_store: AuthStore) -> AuthUser:
+    user = require_request_auth_user(request)
+    if not auth_store.user_has_global_role(user.user_id, ("super_admin", "admin")):
+        raise HTTPException(status_code=403, detail="Administrator access required")
+    return user
+
+
+def require_super_admin_user(request: Request, auth_store: AuthStore) -> AuthUser:
+    user = require_request_auth_user(request)
+    if not auth_store.user_has_global_role(user.user_id, ("super_admin",)):
+        raise HTTPException(status_code=403, detail="Super administrator access required")
+    return user
+
+
 def resolve_session_user(request: Request, auth_store: AuthStore) -> AuthUser | None:
     token = str(request.cookies.get(SESSION_COOKIE_NAME, "")).strip()
     if not token:

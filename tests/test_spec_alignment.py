@@ -7,6 +7,7 @@ from unittest.mock import patch
 from backend.models.asr_artifact import AsrArtifact, AsrSegment
 from backend.models.enums import (
     AsrProvider,
+    ClientRuntimeKind,
     FsSyncPolicy,
     InstancePresence,
     RecallPointState,
@@ -17,7 +18,6 @@ from backend.models.errors import PreconditionFailure
 from backend.models.instance import Instance
 from backend.models.learning_task_node import LearningTaskContainer, LearningTaskLeaf
 from backend.models.project_config import (
-    LocalServiceConfig,
     ProjectConfig,
     RecallPointPushConfig,
     ReviewChainTemplateItem,
@@ -178,6 +178,7 @@ class _SpecAlignmentBackendMixin:
                 asr_artifact_id=AsrArtifactId("asr_manual_1"),
                 created_at=now_utc_ms(),
                 provider=AsrProvider.WHISPER,
+                producer_runtime_kind=ClientRuntimeKind.DESKTOP_NATIVE,
                 recall_point_id=recall_point.recall_point_id,
                 source_instance_id=instance.instance_id,
                 center_ms=1200,
@@ -494,29 +495,14 @@ class _SpecAlignmentBackendMixin:
         self.assertFalse(hasattr(api, "get_llm_session"))
         self.assertFalse(hasattr(api, "list_llm_sessions"))
 
-    def test_set_external_services_config_updates_project_config(self) -> None:
+    def test_project_config_does_not_store_runtime_local_services(self) -> None:
         api, root = self._new_api()
         project_root, _ = self._make_project_dirs(root, "videos")
 
         project_id = api.create_project("ml", project_root.as_posix())
-        api.set_external_services_config(
-            project_id,
-            asr=LocalServiceConfig(
-                base_url="http://127.0.0.1:9001",
-                api_key="asr-secret",
-                model="small",
-            ),
-        )
-
         cfg = api.get_project_config(project_id)
-        self.assertIsNotNone(cfg.external_services.asr)
-        self.assertEqual(cfg.external_services.asr.base_url, "http://127.0.0.1:9001")
-        self.assertEqual(cfg.external_services.asr.api_key, "asr-secret")
-        self.assertEqual(cfg.external_services.asr.model, "small")
-
-        audit_tail = api.list_audit_log_events(project_id)[-1]
-        self.assertEqual(audit_tail.api_name, "set_external_services_config")
-        self.assertNotIn("asr-secret", audit_tail.payload)
+        self.assertFalse(hasattr(cfg, "external_services"))
+        self.assertFalse(hasattr(api, "set_external_services_config"))
 
     def test_request_asr_passes_configured_model_to_external_service(self) -> None:
         api, root = self._new_api()
@@ -534,10 +520,6 @@ class _SpecAlignmentBackendMixin:
         entry_node = api.get_learning_task_node(project_id, entry_node_id)
         learning_task = api.get_learning_task(project_id, entry_node.bound_learning_task_id)  # type: ignore[attr-defined]
         recall_point_id = learning_task.recall_point_ids[0]
-        api.set_external_services_config(
-            project_id,
-            asr=LocalServiceConfig(base_url="http://127.0.0.1:9001", model="small"),
-        )
 
         captured_payloads: list[dict[str, object]] = []
 
@@ -556,13 +538,24 @@ class _SpecAlignmentBackendMixin:
                 ]
             }
 
-        with patch.object(SystemAPI, "_http_post_json", side_effect=fake_post_json):
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PLM_NATIVE_ASR_BASE_URL": "http://127.0.0.1:9001",
+                    "PLM_NATIVE_ASR_MODEL": "small",
+                },
+                clear=False,
+            ),
+            patch.object(SystemAPI, "_http_post_json", side_effect=fake_post_json),
+        ):
             artifact_id = api.request_asr(project_id, recall_point_id, center_ms=1000, pre_ms=300, post_ms=300)
 
         self.assertTrue(str(artifact_id))
         self.assertEqual(len(captured_payloads), 1)
         self.assertEqual(captured_payloads[0]["provider"], "WHISPER")
         self.assertEqual(captured_payloads[0]["model"], "small")
+        self.assertEqual(api.get_asr_artifact(project_id, artifact_id).producer_runtime_kind, ClientRuntimeKind.DESKTOP_NATIVE)
 
     def test_request_asr_uses_local_whisper_when_config_is_missing(self) -> None:
         api, root = self._new_api()
@@ -591,7 +584,14 @@ class _SpecAlignmentBackendMixin:
             return {"segments": [{"startMs": 700, "endMs": 1100, "text": "auto transcript"}]}
 
         with (
-            patch("backend.system.api.can_auto_use_local_whisper", return_value=True),
+            patch.dict(
+                os.environ,
+                {
+                    "PLM_NATIVE_ASR_BASE_URL": "",
+                    "PLM_NATIVE_ASR_MODEL": "",
+                },
+                clear=False,
+            ),
             patch("backend.system.api.ensure_local_whisper_runtime", return_value="http://127.0.0.1:9911"),
             patch.object(SystemAPI, "_http_post_json", side_effect=fake_post_json),
         ):
@@ -617,10 +617,6 @@ class _SpecAlignmentBackendMixin:
         entry_node = api.get_learning_task_node(project_id, entry_node_id)
         learning_task = api.get_learning_task(project_id, entry_node.bound_learning_task_id)  # type: ignore[attr-defined]
         recall_point_id = learning_task.recall_point_ids[0]
-        api.set_external_services_config(
-            project_id,
-            asr=LocalServiceConfig(base_url=BUILTIN_WHISPER_BASE_URL, model="medium"),
-        )
 
         captured_payloads: list[dict[str, object]] = []
 
@@ -632,6 +628,14 @@ class _SpecAlignmentBackendMixin:
             return {"segments": [{"startMs": 700, "endMs": 1100, "text": "builtin transcript"}]}
 
         with (
+            patch.dict(
+                os.environ,
+                {
+                    "PLM_NATIVE_ASR_BASE_URL": BUILTIN_WHISPER_BASE_URL,
+                    "PLM_NATIVE_ASR_MODEL": "medium",
+                },
+                clear=False,
+            ),
             patch("backend.system.api.ensure_local_whisper_runtime", return_value="http://127.0.0.1:9912"),
             patch.object(SystemAPI, "_http_post_json", side_effect=fake_post_json),
         ):
@@ -681,11 +685,6 @@ class _SpecAlignmentBackendMixin:
                 system.rollback(session)
             raise
 
-        api.set_external_services_config(
-            project_id,
-            asr=LocalServiceConfig(base_url="http://127.0.0.1:9001", model="small"),
-        )
-
         captured_payloads: list[dict[str, object]] = []
 
         def fake_post_json(*, url: str, payload: dict[str, object], api_key: str | None, timeout_sec: float) -> dict[str, object]:
@@ -695,7 +694,17 @@ class _SpecAlignmentBackendMixin:
             captured_payloads.append(payload)
             return {"segments": [{"startMs": 700, "endMs": 1100, "text": "manual transcript"}]}
 
-        with patch.object(SystemAPI, "_http_post_json", side_effect=fake_post_json):
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PLM_NATIVE_ASR_BASE_URL": "http://127.0.0.1:9001",
+                    "PLM_NATIVE_ASR_MODEL": "small",
+                },
+                clear=False,
+            ),
+            patch.object(SystemAPI, "_http_post_json", side_effect=fake_post_json),
+        ):
             artifact_id = api.request_asr(project_id, RecallPointId("rp_manual_rel_1"), center_ms=1000, pre_ms=300, post_ms=300)
 
         self.assertTrue(str(artifact_id))
@@ -737,6 +746,7 @@ class _SpecAlignmentBackendMixin:
                     asr_artifact_id=AsrArtifactId("asr_deleted_scope_1"),
                     created_at=now_utc_ms(),
                     provider=AsrProvider.WHISPER,
+                    producer_runtime_kind=ClientRuntimeKind.DESKTOP_NATIVE,
                     recall_point_id=recall_point_id,
                     source_instance_id=instance.instance_id,
                     center_ms=1000,
@@ -796,7 +806,6 @@ class _SpecAlignmentBackendMixin:
                 ProjectConfig(
                     project_id=cfg.project_id,
                     layer_configs=dict(cfg.layer_configs),
-                    external_services=cfg.external_services,
                     push_config=RecallPointPushConfig(
                         min_recall_points_to_enable=1,
                         max_history_len=cfg.push_config.max_history_len,
@@ -840,6 +849,7 @@ class _SpecAlignmentBackendMixin:
                     asr_artifact_id=AsrArtifactId("asr_task_1"),
                     created_at=now_utc_ms(),
                     provider=AsrProvider.WHISPER,
+                    producer_runtime_kind=ClientRuntimeKind.DESKTOP_NATIVE,
                     recall_point_id=scoped_rp_id,
                     source_instance_id=instance.instance_id,
                     center_ms=1000,

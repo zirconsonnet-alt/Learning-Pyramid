@@ -48,6 +48,7 @@ class ProjectMaterialSourceBinding:
         if self.source_kind not in {
             MaterialSourceKind.SERVER_FS,
             MaterialSourceKind.BROWSER_LOCAL,
+            MaterialSourceKind.NATIVE_LOCAL,
             MaterialSourceKind.MANUAL,
         }:
             raise PreconditionFailure("ProjectMaterialSourceBinding.source_kind is not supported")

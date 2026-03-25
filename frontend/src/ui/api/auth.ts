@@ -6,6 +6,13 @@ export const AuthUserSchema = z.object({
   userId: z.string(),
   email: z.string(),
   createdAt: z.string(),
+  publicUid: z.string(),
+  nickname: z.string(),
+  bio: z.string(),
+  avatarUrl: z.string().nullable(),
+  status: z.string(),
+  updatedAt: z.string(),
+  roles: z.array(z.string()),
 })
 export type AuthUser = z.infer<typeof AuthUserSchema>
 

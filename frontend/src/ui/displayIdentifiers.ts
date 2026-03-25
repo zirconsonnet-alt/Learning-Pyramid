@@ -34,6 +34,17 @@ export function formatInstanceReference(
   return formatOpaqueReference(instanceId, "材料实例", 6, empty)
 }
 
+export function simplifyMaterialDisplayName(value: string | null | undefined, empty = "材料待确认") {
+  const normalized = value?.trim()
+  if (!normalized) return empty
+  const leaf = normalized.split("/").at(-1)?.split("\\").at(-1)?.trim() ?? normalized
+  const dotIndex = leaf.lastIndexOf(".")
+  if (dotIndex <= 0 || dotIndex >= leaf.length - 1) return leaf || normalized
+  const extension = leaf.slice(dotIndex + 1)
+  if (!/^[a-z0-9]{1,8}$/i.test(extension)) return leaf
+  return leaf.slice(0, dotIndex).trim() || leaf
+}
+
 export function formatMaterialReference(materialId: string | null | undefined, empty = "材料待确认") {
   return formatOpaqueReference(materialId, "材料", 6, empty)
 }

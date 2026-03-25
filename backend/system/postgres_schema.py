@@ -39,8 +39,16 @@ STORE_TABLE_ORDER: tuple[str, ...] = (
 
 AUTH_TABLE_ORDER: tuple[str, ...] = (
     "users",
+    "user_profiles",
+    "user_global_roles",
     "sessions",
     "project_memberships",
+    "study_groups",
+    "study_group_members",
+    "study_group_posts",
+    "study_group_post_comments",
+    "study_group_join_requests",
+    "admin_action_logs",
 )
 
 _BOOTSTRAP_SQL_CACHE: dict[str, str] = {}
@@ -306,11 +314,190 @@ def _store_entry_registration_seq_sql() -> str:
     )
 
 
+def _auth_user_profiles_sql() -> str:
+    return "\n".join(
+        (
+            "-- Add user profile table for hosted user settings",
+            "CREATE TABLE IF NOT EXISTS user_profiles (",
+            "    user_id TEXT PRIMARY KEY,",
+            "    public_uid TEXT NOT NULL UNIQUE,",
+            "    nickname TEXT NOT NULL,",
+            "    bio TEXT NOT NULL DEFAULT '',",
+            "    avatar_key TEXT,",
+            "    status TEXT NOT NULL DEFAULT 'active',",
+            "    updated_at TEXT NOT NULL,",
+            "    password_changed_at TEXT NOT NULL,",
+            "    FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE",
+            ");",
+            "INSERT INTO user_profiles (user_id, public_uid, nickname, bio, avatar_key, status, updated_at, password_changed_at)",
+            "SELECT",
+            "    u.user_id,",
+            "    CONCAT('LP', UPPER(SUBSTRING(MD5(u.user_id || ':' || u.email) FROM 1 FOR 8))),",
+            "    SPLIT_PART(u.email, '@', 1),",
+            "    '',",
+            "    NULL,",
+            "    'active',",
+            "    u.created_at,",
+            "    u.created_at",
+            "FROM users u",
+            "ON CONFLICT (user_id) DO NOTHING;",
+            "CREATE INDEX IF NOT EXISTS idx_user_profiles_public_uid ON user_profiles (public_uid);",
+        )
+    )
+
+
+def _auth_roles_and_study_groups_sql() -> str:
+    return "\n".join(
+        (
+            "-- Add global roles and study group tables for hosted collaboration",
+            "CREATE TABLE IF NOT EXISTS user_global_roles (",
+            "    user_id TEXT NOT NULL,",
+            "    role TEXT NOT NULL,",
+            "    granted_by_user_id TEXT NOT NULL,",
+            "    created_at TEXT NOT NULL,",
+            "    PRIMARY KEY(user_id, role),",
+            "    FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE,",
+            "    FOREIGN KEY(granted_by_user_id) REFERENCES users(user_id) ON DELETE CASCADE",
+            ");",
+            "CREATE TABLE IF NOT EXISTS study_groups (",
+            "    group_id TEXT PRIMARY KEY,",
+            "    name TEXT NOT NULL,",
+            "    description TEXT NOT NULL DEFAULT '',",
+            "    visibility TEXT NOT NULL,",
+            "    join_policy TEXT NOT NULL,",
+            "    status TEXT NOT NULL,",
+            "    owner_user_id TEXT NOT NULL,",
+            "    avatar_key TEXT,",
+            "    created_at TEXT NOT NULL,",
+            "    updated_at TEXT NOT NULL,",
+            "    FOREIGN KEY(owner_user_id) REFERENCES users(user_id) ON DELETE CASCADE",
+            ");",
+            "CREATE TABLE IF NOT EXISTS study_group_members (",
+            "    group_id TEXT NOT NULL,",
+            "    user_id TEXT NOT NULL,",
+            "    role TEXT NOT NULL,",
+            "    joined_at TEXT NOT NULL,",
+            "    PRIMARY KEY(group_id, user_id),",
+            "    FOREIGN KEY(group_id) REFERENCES study_groups(group_id) ON DELETE CASCADE,",
+            "    FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE",
+            ");",
+            "CREATE TABLE IF NOT EXISTS study_group_posts (",
+            "    post_id TEXT PRIMARY KEY,",
+            "    group_id TEXT NOT NULL,",
+            "    author_user_id TEXT NOT NULL,",
+            "    kind TEXT NOT NULL,",
+            "    content TEXT NOT NULL,",
+            "    created_at TEXT NOT NULL,",
+            "    updated_at TEXT NOT NULL,",
+            "    FOREIGN KEY(group_id) REFERENCES study_groups(group_id) ON DELETE CASCADE,",
+            "    FOREIGN KEY(author_user_id) REFERENCES users(user_id) ON DELETE CASCADE",
+            ");",
+            "CREATE INDEX IF NOT EXISTS idx_user_global_roles_role ON user_global_roles (role, created_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_study_group_members_user_id ON study_group_members (user_id, joined_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_study_group_posts_group_id ON study_group_posts (group_id, created_at DESC);",
+            "INSERT INTO user_global_roles (user_id, role, granted_by_user_id, created_at)",
+            "SELECT owner.user_id, 'super_admin', owner.user_id, owner.created_at",
+            "FROM (",
+            "    SELECT user_id, created_at",
+            "    FROM users",
+            "    ORDER BY created_at ASC, user_id ASC",
+            "    LIMIT 1",
+            ") owner",
+            "WHERE NOT EXISTS (SELECT 1 FROM user_global_roles)",
+            "ON CONFLICT (user_id, role) DO NOTHING;",
+        )
+    )
+
+
+def _auth_group_join_requests_sql() -> str:
+    return "\n".join(
+        (
+            "-- Add study group join request workflow",
+            "CREATE TABLE IF NOT EXISTS study_group_join_requests (",
+            "    request_id TEXT PRIMARY KEY,",
+            "    group_id TEXT NOT NULL,",
+            "    requester_user_id TEXT NOT NULL,",
+            "    message TEXT NOT NULL DEFAULT '',",
+            "    status TEXT NOT NULL,",
+            "    created_at TEXT NOT NULL,",
+            "    reviewed_at TEXT,",
+            "    reviewed_by_user_id TEXT,",
+            "    FOREIGN KEY(group_id) REFERENCES study_groups(group_id) ON DELETE CASCADE,",
+            "    FOREIGN KEY(requester_user_id) REFERENCES users(user_id) ON DELETE CASCADE,",
+            "    FOREIGN KEY(reviewed_by_user_id) REFERENCES users(user_id) ON DELETE SET NULL",
+            ");",
+            "CREATE INDEX IF NOT EXISTS idx_study_group_join_requests_group_status",
+            "ON study_group_join_requests (group_id, status, created_at DESC);",
+        )
+    )
+
+
+def _auth_group_post_comments_sql() -> str:
+    return "\n".join(
+        (
+            "-- Add study group post comments for group interaction",
+            "CREATE TABLE IF NOT EXISTS study_group_post_comments (",
+            "    comment_id TEXT PRIMARY KEY,",
+            "    group_id TEXT NOT NULL,",
+            "    post_id TEXT NOT NULL,",
+            "    author_user_id TEXT NOT NULL,",
+            "    content TEXT NOT NULL,",
+            "    created_at TEXT NOT NULL,",
+            "    updated_at TEXT NOT NULL,",
+            "    FOREIGN KEY(group_id) REFERENCES study_groups(group_id) ON DELETE CASCADE,",
+            "    FOREIGN KEY(post_id) REFERENCES study_group_posts(post_id) ON DELETE CASCADE,",
+            "    FOREIGN KEY(author_user_id) REFERENCES users(user_id) ON DELETE CASCADE",
+            ");",
+            "CREATE INDEX IF NOT EXISTS idx_study_group_post_comments_post_id",
+            "ON study_group_post_comments (post_id, created_at ASC);",
+        )
+    )
+
+
+def _auth_admin_action_logs_sql() -> str:
+    return "\n".join(
+        (
+            "-- Add admin action logs for hosted moderation traceability",
+            "CREATE TABLE IF NOT EXISTS admin_action_logs (",
+            "    log_id TEXT PRIMARY KEY,",
+            "    actor_user_id TEXT NOT NULL,",
+            "    action_type TEXT NOT NULL,",
+            "    target_kind TEXT NOT NULL,",
+            "    target_id TEXT NOT NULL,",
+            "    summary TEXT NOT NULL,",
+            "    created_at TEXT NOT NULL,",
+            "    FOREIGN KEY(actor_user_id) REFERENCES users(user_id) ON DELETE CASCADE",
+            ");",
+            "CREATE INDEX IF NOT EXISTS idx_admin_action_logs_created_at",
+            "ON admin_action_logs (created_at DESC);",
+        )
+    )
+
+
+def _auth_identity_uniques_sql() -> str:
+    return "\n".join(
+        (
+            "-- Enforce unique hosted auth identifiers",
+            "DROP INDEX IF EXISTS idx_user_profiles_public_uid;",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique",
+            "ON users (email);",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_user_profiles_public_uid_unique",
+            "ON user_profiles (public_uid);",
+        )
+    )
+
+
 POSTGRES_MIGRATIONS: tuple[PostgresMigration, ...] = (
     PostgresMigration(scope="store", version=1, name="initial_store_schema", sql_factory=_bootstrap_store_schema_sql),
     PostgresMigration(scope="store", version=2, name="store_hot_indexes", sql_factory=_store_hot_index_sql),
     PostgresMigration(scope="store", version=3, name="entry_registration_seq", sql_factory=_store_entry_registration_seq_sql),
     PostgresMigration(scope="auth", version=1, name="initial_auth_schema", sql_factory=_bootstrap_auth_schema_sql),
+    PostgresMigration(scope="auth", version=2, name="auth_user_profiles", sql_factory=_auth_user_profiles_sql),
+    PostgresMigration(scope="auth", version=3, name="auth_roles_and_study_groups", sql_factory=_auth_roles_and_study_groups_sql),
+    PostgresMigration(scope="auth", version=4, name="auth_group_join_requests", sql_factory=_auth_group_join_requests_sql),
+    PostgresMigration(scope="auth", version=5, name="auth_group_post_comments", sql_factory=_auth_group_post_comments_sql),
+    PostgresMigration(scope="auth", version=6, name="auth_admin_action_logs", sql_factory=_auth_admin_action_logs_sql),
+    PostgresMigration(scope="auth", version=7, name="auth_identity_uniques", sql_factory=_auth_identity_uniques_sql),
 )
 
 
@@ -442,14 +629,39 @@ def pending_postgres_migrations(conn, *, target: MigrationTarget = "all") -> tup
     return tuple(pending)
 
 
+def conflicting_postgres_migrations(conn, *, target: MigrationTarget = "all") -> tuple[tuple[str, int, str, str | None], ...]:
+    expected_by_key = {
+        (str(migration.scope), int(migration.version)): migration.name for migration in _selected_migrations(target)
+    }
+    target_scopes = {scope for scope, _ in expected_by_key.keys()}
+    conflicts: list[tuple[str, int, str, str | None]] = []
+    for scope, version, applied_name in applied_postgres_migrations(conn):
+        if scope not in target_scopes:
+            continue
+        expected_name = expected_by_key.get((scope, int(version)))
+        if expected_name != applied_name:
+            conflicts.append((scope, int(version), applied_name, expected_name))
+    return tuple(conflicts)
+
+
 def postgres_migration_status(conn, *, target: MigrationTarget = "all") -> dict[str, object]:
     applied = applied_postgres_migrations(conn)
     expected = expected_postgres_migration_status(target=target)
     pending = pending_postgres_migrations(conn, target=target)
+    conflicts = conflicting_postgres_migrations(conn, target=target)
     payload: dict[str, object] = {
         "scopes": {},
         "expected": expected,
         "pending": [{"scope": item[0], "version": item[1], "name": item[2]} for item in pending],
+        "conflicts": [
+            {
+                "scope": item[0],
+                "version": item[1],
+                "appliedName": item[2],
+                "expectedName": item[3],
+            }
+            for item in conflicts
+        ],
     }
     scopes: dict[str, dict[str, object]] = {}
     for scope in ("store", "auth"):
@@ -467,6 +679,13 @@ def postgres_migration_status(conn, *, target: MigrationTarget = "all") -> dict[
 def apply_postgres_migrations(conn, *, target: MigrationTarget = "all") -> tuple[tuple[str, int, str], ...]:
     _ensure_schema_migrations_table(conn)
     conn.commit()
+    conflicts = conflicting_postgres_migrations(conn, target=target)
+    if conflicts:
+        details = ", ".join(
+            f"{scope}:{version} applied={applied_name} expected={expected_name or '<none>'}"
+            for scope, version, applied_name, expected_name in conflicts
+        )
+        raise RuntimeError(f"Conflicting PostgreSQL schema_migrations rows detected: {details}")
     applied = {(scope, version) for scope, version, _ in applied_postgres_migrations(conn)}
     executed: list[tuple[str, int, str]] = []
 

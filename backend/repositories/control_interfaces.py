@@ -3,12 +3,15 @@ from typing import Optional, Protocol, Sequence, Tuple
 from backend.models.aggregation_event import AggregationEvent
 from backend.models.aggregation_queue import AggregationQueue
 from backend.models.entry_registration import EntryRegistration
+from backend.models.enums import ClientRuntimeKind, RuntimeCapability
 from backend.models.layer import Layer
 from backend.models.types import LayerId, LearningTaskNodeId, ProjectId, ReviewChainId
 
 
 class MutationSession(Protocol):
     project_id: ProjectId
+    runtime_kind: ClientRuntimeKind
+    runtime_capabilities: frozenset[RuntimeCapability]
 
 
 class LayerRepository(Protocol):

@@ -16,6 +16,7 @@ from backend.models.enums import (
     AuditEventKind,
     AuditResultCode,
     AsrProvider,
+    ClientRuntimeKind,
     ContentBlockKind,
     ConvergenceState,
     FsSyncPolicy,
@@ -40,13 +41,10 @@ from backend.models.media_asset import MediaAsset
 from backend.models.project import Project
 from backend.models.project_config import (
     LayerConfig,
-    LocalServiceConfig,
     ProjectConfig,
-    ProjectExternalServicesConfig,
     RecallPointPushConfig,
     ReviewChainTemplateItem,
     default_layer_config,
-    default_external_services_config,
     default_push_config,
 )
 from backend.models.project_material_source_binding import ProjectMaterialSourceBinding
@@ -186,38 +184,6 @@ def _decode_layer_config(d: dict[str, Any]) -> LayerConfig:
     )
 
 
-def _encode_local_service_config(c: LocalServiceConfig) -> dict[str, Any]:
-    out: dict[str, Any] = {"baseUrl": c.base_url}
-    if c.api_key is not None:
-        out["apiKey"] = c.api_key
-    if c.model is not None:
-        out["model"] = c.model
-    return out
-
-
-def _decode_local_service_config(d: dict[str, Any]) -> LocalServiceConfig:
-    return LocalServiceConfig(
-        base_url=str(d.get("baseUrl", "")),
-        api_key=None if d.get("apiKey") is None else str(d["apiKey"]),
-        model=None if d.get("model") is None else str(d["model"]),
-    )
-
-
-def _encode_external_services(c: ProjectExternalServicesConfig) -> dict[str, Any]:
-    return {
-        "asr": None if c.asr is None else _encode_local_service_config(c.asr),
-        "recommender": None if c.recommender is None else _encode_local_service_config(c.recommender),
-    }
-
-
-def _decode_external_services(d: dict[str, Any]) -> ProjectExternalServicesConfig:
-    if not d:
-        return default_external_services_config()
-    asr = None if d.get("asr") is None else _decode_local_service_config(dict(d["asr"]))
-    rec = None if d.get("recommender") is None else _decode_local_service_config(dict(d["recommender"]))
-    return ProjectExternalServicesConfig(asr=asr, recommender=rec)
-
-
 def _encode_push_config(c: RecallPointPushConfig) -> dict[str, Any]:
     return {
         "minRecallPointsToEnable": int(c.min_recall_points_to_enable),
@@ -239,7 +205,6 @@ def _encode_project_config(c: ProjectConfig) -> dict[str, Any]:
     return {
         "projectId": str(c.project_id),
         "layerConfigs": {str(int(k)): _encode_layer_config(v) for k, v in c.layer_configs.items()},
-        "externalServices": _encode_external_services(c.external_services),
         "pushConfig": _encode_push_config(c.push_config),
         "updatedAtMs": _ts_to_ms(c.updated_at),
     }
@@ -253,7 +218,6 @@ def _decode_project_config(d: dict[str, Any]) -> ProjectConfig:
     return ProjectConfig(
         project_id=ProjectId(d["projectId"]),
         layer_configs=layer_cfgs,
-        external_services=_decode_external_services(dict(d.get("externalServices", {}))),
         push_config=_decode_push_config(dict(d.get("pushConfig", {}))),
         updated_at=_ms_to_ts(int(d["updatedAtMs"])),
     )
@@ -585,6 +549,7 @@ def _encode_asr_artifact(a: AsrArtifact) -> dict[str, Any]:
         "asrArtifactId": str(a.asr_artifact_id),
         "createdAtMs": _ts_to_ms(a.created_at),
         "provider": a.provider.value,
+        "producerRuntimeKind": a.producer_runtime_kind.value,
         "recallPointId": str(a.recall_point_id),
         "sourceInstanceId": str(a.source_instance_id),
         "centerMs": int(a.center_ms),
@@ -595,11 +560,17 @@ def _encode_asr_artifact(a: AsrArtifact) -> dict[str, Any]:
 
 
 def _decode_asr_artifact(d: dict[str, Any]) -> AsrArtifact:
+    raw_runtime_kind = d.get("producerRuntimeKind", ClientRuntimeKind.DESKTOP_NATIVE.value)
+    try:
+        producer_runtime_kind = ClientRuntimeKind(str(raw_runtime_kind))
+    except ValueError:
+        producer_runtime_kind = ClientRuntimeKind.DESKTOP_NATIVE
     return AsrArtifact(
         project_id=ProjectId(d["projectId"]),
         asr_artifact_id=AsrArtifactId(d["asrArtifactId"]),
         created_at=_ms_to_ts(int(d.get("createdAtMs", 0))),
         provider=AsrProvider(str(d.get("provider", AsrProvider.WHISPER.value))),
+        producer_runtime_kind=producer_runtime_kind,
         recall_point_id=RecallPointId(d["recallPointId"]),
         source_instance_id=InstanceId(d["sourceInstanceId"]),
         center_ms=int(d.get("centerMs", 0)),

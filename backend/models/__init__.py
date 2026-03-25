@@ -1,10 +1,12 @@
 from .enums import (
     AggregationCycleState,
     AggregationEventReason,
+    ClientRuntimeKind,
     ConvergenceState,
     LayerMode,
     MaterialSourceKind,
     ProjectState,
+    RuntimeCapability,
     ReviewChainState,
     ReviewTaskState,
     SessionMode,
@@ -80,6 +82,8 @@ __all__ = [
     "LayerMode",
     "AggregationEventReason",
     "MaterialSourceKind",
+    "ClientRuntimeKind",
+    "RuntimeCapability",
     # errors
     "PLMError",
     "NotFound",

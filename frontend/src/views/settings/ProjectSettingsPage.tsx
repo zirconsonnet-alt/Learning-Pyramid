@@ -21,12 +21,10 @@ import {
   useLayers,
   useProjectConfig,
   useProjectStorageConfig,
-  useSetExternalServices,
   useSetLayerConfig,
 } from "@/ui/queries/workbench"
 import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 
-const BUILTIN_WHISPER_BASE_URL = "builtin://whisper"
 let nextTemplateItemId = 1
 
 type TemplateEditorItem = {
@@ -118,7 +116,6 @@ export function ProjectSettingsPage() {
   const instancesQ = useInstances(pid)
   const importLearningObjectsM = useImportLearningObjectsFromBrowser(pid)
   const setLayerConfigM = useSetLayerConfig(pid)
-  const setExternalServicesM = useSetExternalServices(pid)
   const bulkRemapM = useBulkRemapRecallPointsInstance(pid)
 
   const layerIndexes = useMemo(() => (layersQ.data ?? []).map((l) => l.layerIndex).sort((a, b) => a - b), [layersQ.data])
@@ -139,7 +136,6 @@ export function ProjectSettingsPage() {
     [effectiveLayerConfig.reviewChainTemplate],
   )
   const layerConfigVersion = `${effectiveConfigLayerIndex}:${effectiveLayerConfig.aggregationKNode}:${effectiveLayerConfig.aggregationKPoint}:${templateConfigSignature}`
-  const effectiveAsrModel = projectConfigQ.data?.externalServices?.asr?.model ?? ""
 
   const [remapTargets, setRemapTargets] = useState<Record<string, string>>({})
   const [directoryAction, setDirectoryAction] = useState<"authorize" | "request" | "clear" | "import" | null>(null)
@@ -490,32 +486,19 @@ export function ProjectSettingsPage() {
               </CardHeader>
             </Card>
           ) : (
-            <AsrSettingsCard
-              key={effectiveAsrModel}
-              disabled={!pid}
-              initialModel={effectiveAsrModel}
-              isLoading={projectConfigQ.isLoading}
-              isPending={setExternalServicesM.isPending}
-              queryError={projectConfigQ.error}
-              saveError={setExternalServicesM.error}
-              onSave={async (model) => {
-                const trimmedAsrModel = model.trim()
-                try {
-                  await setExternalServicesM.mutateAsync({
-                    asr: {
-                      baseUrl: BUILTIN_WHISPER_BASE_URL,
-                      model: trimmedAsrModel || undefined,
-                    },
-                  })
-                  showSuccessFeedback(
-                    "转写设置已保存",
-                    trimmedAsrModel ? `当前模型已切换为 ${trimmedAsrModel}。` : "当前已恢复默认转写模型。",
-                  )
-                } catch (err) {
-                  showErrorFeedback("保存转写设置失败", formatApiError(err))
-                }
-              }}
-            />
+            <Card className="theme-card">
+              <CardHeader>
+                <CardTitle>语音转写</CardTitle>
+                <CardDescription>ASR 现在属于 Native 运行时能力，不再存进项目配置。</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                <div className="rounded-[1.1rem] border border-border/70 bg-muted/20 px-4 py-3 text-muted-foreground">
+                  当前页面只展示项目事实。桌面 Native 的本地 Whisper、模型名和服务地址需要从运行时配置读取。
+                </div>
+                {projectConfigQ.isLoading ? <p className="text-sm text-muted-foreground">项目配置加载中...</p> : null}
+                {projectConfigQ.error ? <p className="text-sm text-destructive">{formatApiError(projectConfigQ.error)}</p> : null}
+              </CardContent>
+            </Card>
           )}
         </div>
       </div>
@@ -670,68 +653,6 @@ function ProjectTitleCard({
           </div>
         </form>
 
-        {queryError ? <p className="text-sm text-destructive">{formatApiError(queryError)}</p> : null}
-        {saveError ? <p className="text-sm text-destructive">{formatApiError(saveError)}</p> : null}
-      </CardContent>
-    </Card>
-  )
-}
-
-function AsrSettingsCard({
-  disabled,
-  initialModel,
-  isLoading,
-  isPending,
-  onSave,
-  queryError,
-  saveError,
-}: {
-  disabled: boolean
-  initialModel: string
-  isLoading: boolean
-  isPending: boolean
-  onSave: (model: string) => Promise<void>
-  queryError: unknown
-  saveError: unknown
-}) {
-  const [asrModel, setAsrModel] = useState(initialModel)
-
-  return (
-    <Card className="theme-card">
-      <CardHeader>
-        <CardTitle>语音转写</CardTitle>
-        <CardDescription>按项目覆盖本机 Whisper 使用的模型。</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4 text-sm">
-        <div className="flex items-center justify-between gap-3 rounded-[1.1rem] border border-border/70 bg-muted/20 px-4 py-3">
-          <div>
-            <div className="text-xs text-muted-foreground">转写引擎</div>
-            <div className="mt-1 font-medium text-foreground">内置 Whisper 运行时</div>
-          </div>
-          <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-700">
-            已启用
-          </span>
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="asrModel">模型（可选）</Label>
-          <Input
-            id="asrModel"
-            value={asrModel}
-            onChange={(e) => setAsrModel(e.target.value)}
-            placeholder="留空使用默认 small，例如：small / medium / large-v3"
-            disabled={isPending}
-          />
-          <p className="text-xs text-muted-foreground">只在需要切换模型时填写，留空会继续使用默认值。</p>
-        </div>
-
-        <div className="flex justify-end">
-          <Button onClick={() => void onSave(asrModel)} disabled={isPending || disabled}>
-            {isPending ? "保存中..." : "保存转写设置"}
-          </Button>
-        </div>
-
-        {isLoading ? <p className="text-sm text-muted-foreground">加载当前转写设置中...</p> : null}
         {queryError ? <p className="text-sm text-destructive">{formatApiError(queryError)}</p> : null}
         {saveError ? <p className="text-sm text-destructive">{formatApiError(saveError)}</p> : null}
       </CardContent>

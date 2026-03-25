@@ -183,28 +183,12 @@ def _layer_config_to_dto(c: LayerConfig) -> Dict[str, Any]:
     }
 
 
-def _local_service_config_to_dto(c) -> Dict[str, Any]:
-    out: Dict[str, Any] = {"baseUrl": str(c.base_url)}
-    if getattr(c, "api_key", None) is not None:
-        out["apiKey"] = str(c.api_key)
-    if getattr(c, "model", None) is not None:
-        out["model"] = str(c.model)
-    return out
-
-
 def project_config_to_dto(c: ProjectConfig) -> Dict[str, Any]:
-    external = getattr(c, "external_services", None)
     push = getattr(c, "push_config", None)
     return {
         "projectId": str(c.project_id),
         "updatedAt": _jsonable(c.updated_at),
         "layerConfigs": {str(int(k)): _layer_config_to_dto(v) for k, v in c.layer_configs.items()},
-        "externalServices": None
-        if external is None
-        else {
-            "asr": None if external.asr is None else _local_service_config_to_dto(external.asr),
-            "recommender": None if external.recommender is None else _local_service_config_to_dto(external.recommender),
-        },
         "pushConfig": None
         if push is None
         else {
@@ -343,6 +327,7 @@ def asr_artifact_to_dto(a: AsrArtifact) -> Dict[str, Any]:
         "asrArtifactId": str(a.asr_artifact_id),
         "createdAt": _jsonable(a.created_at),
         "provider": _jsonable(a.provider),
+        "producerRuntimeKind": _jsonable(a.producer_runtime_kind),
         "recallPointId": str(a.recall_point_id),
         "sourceInstanceId": str(a.source_instance_id),
         "centerMs": int(a.center_ms),

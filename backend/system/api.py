@@ -22,6 +22,7 @@ from backend.models.enums import (
     AuditEventKind,
     AuditResultCode,
     AsrProvider,
+    ClientRuntimeKind,
     ConvergenceState,
     FsSyncPolicy,
     InstancePresence,
@@ -34,6 +35,7 @@ from backend.models.enums import (
     ReviewChainTemplateItemKind,
     ReviewChainState,
     ReviewTaskState,
+    RuntimeCapability,
     SessionMode,
 )
 from backend.models.errors import DirectoryStructureCorruptedError, ExternalServiceError, NotFound, PreconditionFailure
@@ -48,7 +50,6 @@ from backend.models.project_config import (
     LayerConfig,
     LocalServiceConfig,
     ProjectConfig,
-    ProjectExternalServicesConfig,
     ReviewChainTemplate,
     default_project_config,
     default_layer_config,
@@ -87,12 +88,12 @@ from backend.protocols.interfaces import LearningItem
 from backend.protocols.learning_task_submit import learning_task_submit
 from backend.protocols.review_submit_binary import review_submit_binary
 from backend.repositories.persistence_interfaces import SystemStateRecord
-from backend.system.local_whisper import can_auto_use_local_whisper, ensure_local_whisper_runtime, is_builtin_whisper_base_url
+from backend.system.local_whisper import ensure_local_whisper_runtime, is_builtin_whisper_base_url
 from backend.system.material_paths import resolve_material_file_path
 from backend.system.persistence_json import SCHEMA_VERSION, encode_project_payload_record, encode_project_shell_payload
 from backend.system.persistence_store import SqlStore
 from backend.system.project_paths import allocate_project_root
-from backend.system.runtime_features import current_runtime_features
+from backend.system.runtime_features import current_native_runtime_config, current_runtime_features
 from backend.system.inmemory_system import (
     DEFAULT_AGGREGATION_K_NODE,
     DEFAULT_AGGREGATION_K_POINT,
@@ -330,6 +331,18 @@ class SystemAPI:
         self.sys.audit_log_repo.append(s, ev)
 
     @staticmethod
+    def _require_runtime_capability(
+        s: MutationSession,
+        *,
+        capability: RuntimeCapability,
+        api_name: str,
+    ) -> None:
+        if s.runtime_kind != ClientRuntimeKind.DESKTOP_NATIVE:
+            raise PreconditionFailure(f"{api_name} is only available for DESKTOP_NATIVE runtime")
+        if capability not in s.runtime_capabilities:
+            raise PreconditionFailure(f"{api_name} requires runtime capability {capability.value}")
+
+    @staticmethod
     def _resolve_local_service_url(cfg: LocalServiceConfig, *, default_path: str) -> str:
         base = str(cfg.base_url).strip()
         u = urlparse(base)
@@ -418,8 +431,8 @@ class SystemAPI:
         try:
             cfg = self.sys.project_storage_config_repo.get(s)
             binding = self.sys.project_material_source_binding_repo.get(s)
-            if binding.source_kind != MaterialSourceKind.SERVER_FS:
-                raise PreconditionFailure("sync_learning_objects_from_fs: source_kind must be SERVER_FS")
+            if binding.source_kind not in {MaterialSourceKind.SERVER_FS, MaterialSourceKind.NATIVE_LOCAL}:
+                raise PreconditionFailure("sync_learning_objects_from_fs: source_kind must be SERVER_FS or NATIVE_LOCAL")
             if cfg.fs_sync_policy == FsSyncPolicy.DISABLED:
                 raise PreconditionFailure("sync_learning_objects_from_fs: fs_sync_policy is DISABLED")
 
@@ -2603,7 +2616,6 @@ class SystemAPI:
             next_cfg = ProjectConfig(
                 project_id=cfg.project_id,
                 layer_configs=layer_configs,
-                external_services=cfg.external_services,
                 push_config=cfg.push_config,
                 updated_at=now_utc_ms(),
             )
@@ -2631,47 +2643,6 @@ class SystemAPI:
                 self.sys.rollback(s)
             raise
 
-    def set_external_services_config(
-        self,
-        project_id: ProjectId,
-        *,
-        asr: Optional[LocalServiceConfig],
-    ) -> None:
-        self._ensure_startup_fs_sync_done(project_id)
-        s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
-        try:
-            cfg = self.sys.project_config_repo.get(s)
-            next_external_services = ProjectExternalServicesConfig(
-                asr=asr,
-                recommender=cfg.external_services.recommender,
-            )
-            next_external_services.validate_write_time()
-
-            next_cfg = ProjectConfig(
-                project_id=cfg.project_id,
-                layer_configs=dict(cfg.layer_configs),
-                external_services=next_external_services,
-                push_config=cfg.push_config,
-                updated_at=now_utc_ms(),
-            )
-            next_cfg.validate_write_time()
-            self.sys.project_config_repo.set(s, next_cfg)
-
-            self._append_audit_event(
-                s,
-                kind=AuditEventKind.EDIT_PROJECT_CONFIG,
-                api_name="set_external_services_config",
-                payload={
-                    "asrEnabled": asr is not None,
-                    "asrBaseUrl": None if asr is None else str(asr.base_url),
-                },
-            )
-            self.sys.commit(s)
-        except Exception:
-            if s.state == SessionState.OPEN:
-                self.sys.rollback(s)
-            raise
-
     def set_project_material_source_binding(
         self,
         project_id: ProjectId,
@@ -2691,7 +2662,11 @@ class SystemAPI:
             self.sys.project_material_source_binding_repo.set(s, binding)
             self._append_audit_event(
                 s,
-                kind=AuditEventKind.SET_PROJECT_MATERIAL_SOURCE_BINDING,
+                kind=(
+                    AuditEventKind.BIND_NATIVE_LOCAL_ROOT
+                    if binding.source_kind == MaterialSourceKind.NATIVE_LOCAL
+                    else AuditEventKind.SET_PROJECT_MATERIAL_SOURCE_BINDING
+                ),
                 api_name="set_project_material_source_binding",
                 payload={
                     "sourceKind": binding.source_kind.value,
@@ -2895,7 +2870,10 @@ class SystemAPI:
 
             max_history_len = int(cfg.push_config.max_history_len)
 
-            rec_cfg = cfg.external_services.recommender if getattr(cfg, "external_services", None) is not None else None
+            rec_cfg = current_native_runtime_config(
+                runtime_kind=s.runtime_kind,
+                runtime_capabilities=s.runtime_capabilities,
+            ).local_models.recommender
 
             # Deterministic fallback (spec allows as fallback / disabled-model behavior).
             scored: list[tuple[tuple[int, object, str], RecallPointId]] = []
@@ -2994,6 +2972,12 @@ class SystemAPI:
         if int(pre_ms) + int(post_ms) > MAX_ASR_WINDOW_MS:
             raise PreconditionFailure(f"request_asr window too large (max {MAX_ASR_WINDOW_MS}ms)")
 
+        self._require_runtime_capability(
+            s,
+            capability=RuntimeCapability.LOCAL_ASR,
+            api_name="request_asr",
+        )
+
         rp = self.sys.recall_point_repo.get(s, recall_point_id)  # may raise NotFound
         if rp.state != RecallPointState.ACTIVE:
             raise PreconditionFailure("request_asr precondition failed: recall_point_id must resolve to ACTIVE RecallPoint")
@@ -3001,8 +2985,13 @@ class SystemAPI:
         if not str(source_instance_id):
             raise PreconditionFailure("request_asr precondition failed: source_instance_id missing")
 
-        cfg = self.sys.project_config_repo.get(s)
-        asr_cfg = cfg.external_services.asr if getattr(cfg, "external_services", None) is not None else None
+        runtime_cfg = current_native_runtime_config(
+            runtime_kind=s.runtime_kind,
+            runtime_capabilities=s.runtime_capabilities,
+        )
+        asr_cfg = runtime_cfg.local_models.asr
+        if asr_cfg is None:
+            raise PreconditionFailure("request_asr runtime is unavailable")
 
         hit = self.sys.asr_artifact_repo.maybe_get_by_cache_key(s, recall_point_id, provider, int(center_ms), int(pre_ms), int(post_ms))
         if hit is not None:
@@ -3029,14 +3018,7 @@ class SystemAPI:
             raise PreconditionFailure(f"request_asr precondition failed: unsupported material type: {ext or '(no ext)'}")
 
         use_local_whisper = False
-        if asr_cfg is None:
-            if not can_auto_use_local_whisper():
-                raise PreconditionFailure("ASR service not configured and local Whisper was not found")
-            url = f"{ensure_local_whisper_runtime()}/asr/request"
-            api_key = None
-            model_name = None
-            use_local_whisper = True
-        elif is_builtin_whisper_base_url(asr_cfg.base_url):
+        if is_builtin_whisper_base_url(asr_cfg.base_url):
             url = f"{ensure_local_whisper_runtime()}/asr/request"
             api_key = None
             model_name = asr_cfg.model
@@ -3088,6 +3070,7 @@ class SystemAPI:
             asr_artifact_id=self.idgen.new_asr_artifact_id(s.project_id),
             created_at=now_utc_ms(),
             provider=provider,
+            producer_runtime_kind=s.runtime_kind,
             recall_point_id=recall_point_id,
             source_instance_id=source_instance_id,
             center_ms=int(center_ms),
@@ -3130,6 +3113,7 @@ class SystemAPI:
                     "asrArtifactId": str(aid),
                     "recallPointId": str(recall_point_id),
                     "provider": prov.value,
+                    "producerRuntimeKind": s.runtime_kind.value,
                     "centerMs": int(center_ms),
                     "preMs": int(pre_ms),
                     "postMs": int(post_ms),
@@ -3157,6 +3141,9 @@ class SystemAPI:
             return self.sys.asr_artifact_repo.get(s, asr_artifact_id)
         finally:
             self.sys.rollback(s)
+
+    def list_review_recommendations(self, project_id: ProjectId, max_results: int) -> Tuple[RecallPointId, ...]:
+        return self.get_push_candidates(project_id, max_results)
 
     def export_recall_points_by_learning_object_node(
         self, project_id: ProjectId, node_id: LearningObjectNodeId
@@ -3588,6 +3575,7 @@ API_WHITELIST: dict[str, SchedulingEffect] = {
     "export_asr_by_learning_object_node": SchedulingEffect.NONE,
     "export_asr_by_learning_task_node": SchedulingEffect.NONE,
     "request_asr": SchedulingEffect.NONE,
+    "list_review_recommendations": SchedulingEffect.NONE,
     "get_push_candidates": SchedulingEffect.NONE,
     "validate_material_reachable": SchedulingEffect.NONE,
     "validate_recall_point_ids_resolvable": SchedulingEffect.NONE,

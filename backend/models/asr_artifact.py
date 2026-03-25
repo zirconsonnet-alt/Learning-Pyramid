@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
-from backend.models.enums import AsrProvider
+from backend.models.enums import AsrProvider, ClientRuntimeKind
 from backend.models.errors import PreconditionFailure
 from backend.models.types import AsrArtifactId, InstanceId, ProjectId, RecallPointId, Timestamp
 
@@ -34,6 +34,7 @@ class AsrArtifact:
     asr_artifact_id: AsrArtifactId
     created_at: Timestamp
     provider: AsrProvider
+    producer_runtime_kind: ClientRuntimeKind
     recall_point_id: RecallPointId
     source_instance_id: InstanceId
     center_ms: int
@@ -53,6 +54,8 @@ class AsrArtifact:
             raise PreconditionFailure("AsrArtifact.created_at must be provided")
         if not isinstance(self.provider, AsrProvider):
             raise PreconditionFailure("AsrArtifact.provider must be AsrProvider")
+        if not isinstance(self.producer_runtime_kind, ClientRuntimeKind):
+            raise PreconditionFailure("AsrArtifact.producer_runtime_kind must be ClientRuntimeKind")
         if not str(self.recall_point_id):
             raise PreconditionFailure("AsrArtifact.recall_point_id must be non-empty")
         if not str(self.source_instance_id):
@@ -61,4 +64,3 @@ class AsrArtifact:
             raise PreconditionFailure("AsrArtifact.pre_ms/post_ms must be >= 0")
         for seg in self.segments:
             seg.validate_write_time()
-
