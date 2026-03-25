@@ -13,6 +13,9 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+    $PSNativeCommandUseErrorActionPreference = $false
+}
 
 function Require-Command {
     param([string]$Name)
@@ -80,6 +83,7 @@ function Test-SshKeyAcceptedByServer {
         return $false
     }
 
+    $connectHostInfo = Resolve-DeployConnectHost -ServerHost $ServerHost
     $testArgs = @(
         "-o", "BatchMode=yes",
         "-o", "PreferredAuthentications=publickey",
@@ -87,14 +91,33 @@ function Test-SshKeyAcceptedByServer {
         "-o", "PasswordAuthentication=no",
         "-o", "KbdInteractiveAuthentication=no",
         "-o", "IdentitiesOnly=yes",
-        "-o", "ConnectTimeout=10",
+        "-o", "ConnectTimeout=10"
+    )
+    if ($connectHostInfo.HostKeyAlias) {
+        $testArgs += @("-o", "HostKeyAlias=$($connectHostInfo.HostKeyAlias)")
+    }
+    $testArgs += @(
         "-i", $KeyPath,
         "-p", "$SshPort",
-        "${ServerUser}@${ServerHost}",
+        "${ServerUser}@$($connectHostInfo.ConnectHost)",
         "printf 'ssh-key-ok\n'"
     )
-    & ssh @testArgs *> $null
-    return ($LASTEXITCODE -eq 0)
+
+    for ($attempt = 1; $attempt -le 5; $attempt++) {
+        $outputLines = @(& ssh @testArgs 2>&1)
+        if ($LASTEXITCODE -eq 0) {
+            return $true
+        }
+
+        $outputText = ($outputLines | Out-String)
+        if ($attempt -ge 5 -or -not (Test-IsTransientSshFailure -ExitCode $LASTEXITCODE -OutputText $outputText)) {
+            return $false
+        }
+
+        Start-Sleep -Seconds 2
+    }
+
+    return $false
 }
 
 function Invoke-InstallProjectSshKey {
@@ -241,6 +264,131 @@ function Invoke-WithRetry {
     }
 }
 
+function Test-IsIpAddress {
+    param([string]$Value)
+    $parsed = $null
+    return [System.Net.IPAddress]::TryParse($Value, [ref]$parsed)
+}
+
+function Resolve-DeployConnectHost {
+    param([string]$ServerHost)
+    if (Test-IsIpAddress -Value $ServerHost) {
+        return @{
+            ConnectHost = $ServerHost
+            HostKeyAlias = $null
+        }
+    }
+
+    $resolvedAddresses = Invoke-WithRetry -Description "Resolving deploy host $ServerHost" -MaxAttempts 6 -DelaySeconds 2 -Action {
+        try {
+            $addresses = [System.Net.Dns]::GetHostAddresses($ServerHost) |
+                Where-Object {
+                    $_.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork -or
+                    $_.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetworkV6
+                }
+            if (-not $addresses -or $addresses.Count -eq 0) {
+                throw "No IP address records returned."
+            }
+            return $addresses
+        }
+        catch {
+            throw "DNS lookup failed for ${ServerHost}: $($_.Exception.Message)"
+        }
+    }
+
+    $selectedAddress = $resolvedAddresses |
+        Sort-Object {
+            if ($_.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork) {
+                0
+            }
+            else {
+                1
+            }
+        } |
+        Select-Object -First 1
+
+    return @{
+        ConnectHost = $selectedAddress.IPAddressToString
+        HostKeyAlias = $ServerHost
+    }
+}
+
+function Test-IsTransientSshFailure {
+    param(
+        [int]$ExitCode,
+        [string]$OutputText
+    )
+    if ($ExitCode -eq 0) {
+        return $false
+    }
+
+    $retryPatterns = @(
+        "Could not resolve hostname",
+        "No such host is known",
+        "Name or service not known",
+        "Temporary failure in name resolution",
+        "Connection closed by",
+        "kex_exchange_identification",
+        "Connection reset by",
+        "Connection timed out",
+        "Operation timed out",
+        "Broken pipe",
+        "No route to host",
+        "Network is unreachable",
+        "Connection refused"
+    )
+
+    foreach ($pattern in $retryPatterns) {
+        if ($OutputText -like "*$pattern*") {
+            return $true
+        }
+    }
+
+    return ($ExitCode -eq 255)
+}
+
+function Invoke-ExternalCommandWithRetry {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Description,
+        [Parameter(Mandatory = $true)]
+        [scriptblock]$Command,
+        [int]$MaxAttempts = 6,
+        [int]$DelaySeconds = 3
+    )
+
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        $previousErrorActionPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = "Continue"
+            $outputLines = @(& $Command 2>&1)
+            $exitCode = $LASTEXITCODE
+        }
+        finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
+
+        foreach ($line in $outputLines) {
+            if ($null -ne $line) {
+                Write-Host $line
+            }
+        }
+
+        if ($exitCode -eq 0) {
+            return
+        }
+
+        $outputText = ($outputLines | Out-String)
+        $shouldRetry = Test-IsTransientSshFailure -ExitCode $exitCode -OutputText $outputText
+        if (-not $shouldRetry -or $attempt -ge $MaxAttempts) {
+            throw "${Description} failed with exit code ${exitCode}."
+        }
+
+        Write-Warning "${Description} failed on attempt ${attempt}/${MaxAttempts}. Retrying in ${DelaySeconds}s."
+        Start-Sleep -Seconds $DelaySeconds
+    }
+}
+
 function New-DeployPayloadArchive {
     param(
         [string]$BundlePath,
@@ -357,10 +505,9 @@ function Invoke-SshPreflightAuthCheck {
     )
     $checkArgs = @($BaseSshArgs + @($Destination, "printf 'ssh-auth-ok\n'"))
     Write-Host "Checking SSH authentication before upload..."
-    & ssh @checkArgs
-    if ($LASTEXITCODE -ne 0) {
-        throw "SSH authentication check failed before upload."
-    }
+    Invoke-ExternalCommandWithRetry -Description "SSH authentication check" -Command {
+        & ssh @checkArgs
+    } -MaxAttempts 6 -DelaySeconds 3
 }
 
 Require-Command python
@@ -372,6 +519,8 @@ $repoRoot = Get-RepoRoot
 Assert-CleanGitWorktree -RepoRoot $repoRoot -AllowDirty:$AllowDirtyWorktree -PromptOnDirty:$PromptOnDirtyWorktree
 $deployScratchRoot = Get-DeployScratchRoot -RepoRoot $repoRoot
 Remove-StaleDeployTempDirectories -Roots @([System.IO.Path]::GetTempPath(), $deployScratchRoot)
+$connectHostInfo = Resolve-DeployConnectHost -ServerHost $ServerHost
+$connectHost = $connectHostInfo.ConnectHost
 
 $sshCommonArgs = @(
     "-o", "ServerAliveInterval=15",
@@ -379,6 +528,10 @@ $sshCommonArgs = @(
     "-o", "TCPKeepAlive=yes",
     "-o", "ConnectTimeout=15"
 )
+if ($connectHostInfo.HostKeyAlias) {
+    $sshCommonArgs += @("-o", "HostKeyAlias=$($connectHostInfo.HostKeyAlias)")
+    Write-Host "Resolved deploy host: $ServerHost -> $connectHost"
+}
 $resolvedSshKeyPath = $null
 if ($DisableSshKey) {
     $sshCommonArgs += @(
@@ -410,12 +563,12 @@ if (-not $SkipBuild) {
 $bundlePath = Get-LatestBundlePath -RepoRoot $repoRoot
 $bundleHash = (Get-FileHash -Path $bundlePath -Algorithm SHA256).Hash.ToUpperInvariant()
 $remotePayloadPath = "$RemoteRoot/upload/deploy-payload.zip"
-$remoteTarget = "${ServerUser}@${ServerHost}:${remotePayloadPath}"
+$remoteTarget = "${ServerUser}@${connectHost}:${remotePayloadPath}"
 $payloadArchiveTempRoot = $null
 $payloadArchivePath = $null
 $sshReuseTempRoot = $null
 $sshReuseControlArgs = @()
-$sshDestination = "${ServerUser}@${ServerHost}"
+$sshDestination = "${ServerUser}@${connectHost}"
 
 $payloadInfo = New-DeployPayloadArchive -BundlePath $bundlePath -ScratchRoot $deployScratchRoot
 $payloadArchiveTempRoot = $payloadInfo.TempRoot
@@ -446,10 +599,9 @@ try {
     }
 
     Write-Host "Uploading deploy payload: $payloadArchivePath"
-    & scp @scpArgs $payloadArchivePath $remoteTarget
-    if ($LASTEXITCODE -ne 0) {
-        throw "scp upload failed"
-    }
+    Invoke-ExternalCommandWithRetry -Description "scp upload" -Command {
+        & scp @scpArgs $payloadArchivePath $remoteTarget
+    } -MaxAttempts 6 -DelaySeconds 3
 
     $remoteScript = @"
 set -euo pipefail
@@ -601,10 +753,9 @@ exit 1
 "@
 
     Write-Host "Deploying on server..."
-    $remoteScript | & ssh @sshArgs $sshDestination bash -s
-    if ($LASTEXITCODE -ne 0) {
-        throw "Remote deploy failed. See remote output above."
-    }
+    Invoke-ExternalCommandWithRetry -Description "Remote deploy" -Command {
+        $remoteScript | & ssh @sshArgs $sshDestination bash -s
+    } -MaxAttempts 4 -DelaySeconds 5
 }
 finally {
     Stop-SshConnectionReuse -BaseSshArgs $baseSshArgs -ControlArgs $sshReuseControlArgs -Destination $sshDestination -TempRoot $sshReuseTempRoot

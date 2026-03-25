@@ -542,11 +542,11 @@ export function ReviewPane({
         ) : null}
 
         {rangeQ.data ? (
-          <div className="flex flex-col items-end gap-2 pt-2">
+          <div className="flex flex-col items-center gap-2 pt-2">
             <Button onClick={() => void onSubmit()} disabled={commit.isPending || !canSubmit} className="min-w-[140px]">
               {commit.isPending ? "提交中..." : "提交本轮复习"}
             </Button>
-            {commit.error ? <p className="text-sm text-destructive">{formatApiError(commit.error)}</p> : null}
+            {commit.error ? <p className="text-center text-sm text-destructive">{formatApiError(commit.error)}</p> : null}
           </div>
         ) : null}
       </CardContent>

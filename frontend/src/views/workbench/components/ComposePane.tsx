@@ -220,19 +220,36 @@ export function ComposePane({
 
   return (
     <Card className="theme-card-main">
-      <CardHeader className="theme-card-header flex-row items-start justify-between gap-3 space-y-0">
+      <CardHeader className="theme-card-header flex-col gap-4 space-y-0 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#e2e8f0] bg-[#f5f7fa] text-primary">
             <BookPlus className="h-5 w-5" />
           </div>
           <div>
             <CardTitle>复述点录入</CardTitle>
+            {instance ? <div className="mt-1 text-xs text-[#6a7b90]">{instance.materialDisplayName}</div> : null}
           </div>
         </div>
-        {instance ? <div className="theme-meta">{instance.materialDisplayName}</div> : null}
-        <Button onClick={onAdd} disabled={!selectedInstanceId}>
-          添加复述点
-        </Button>
+
+        <div className="flex min-w-[220px] flex-col gap-3">
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-3 text-sm">
+              <span className="theme-meta">{drafts.length} 个复述点</span>
+              <span className="font-medium text-slate-700">
+                已完成 {completedDraftCount} / {drafts.length}
+              </span>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-[#e8edf4]">
+              <div
+                className="h-full rounded-full bg-primary transition-[width] duration-300"
+                style={{ width: `${completionPercent}%` }}
+              />
+            </div>
+          </div>
+          <Button onClick={onAdd} disabled={!selectedInstanceId} className="sm:self-end">
+            添加复述点
+          </Button>
+        </div>
       </CardHeader>
       <CardContent className="space-y-4 pt-5">
         {queueHasGate ? (
@@ -242,68 +259,30 @@ export function ComposePane({
         ) : null}
 
         {drafts.length > 0 ? (
-          <div className="space-y-4">
-            <div className="flex flex-col gap-4">
-              <div className="flex items-center justify-end gap-2">
-                <div className="flex items-center gap-2">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-9 w-9 rounded-full"
-                    onClick={() => goToDraft(activeDraftIndex - 1)}
-                    disabled={activeDraftIndex <= 0}
-                    aria-label="上一张复述点卡片"
-                    title="上一张"
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                  </Button>
-                  <div className="theme-meta shrink-0">
-                    {activeDraftIndex >= 0 ? `${activeDraftIndex + 1} / ${drafts.length}` : `${drafts.length} 个复述点`}
-                  </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-9 w-9 rounded-full"
-                    onClick={() => goToDraft(activeDraftIndex + 1)}
-                    disabled={activeDraftIndex < 0 || activeDraftIndex >= drafts.length - 1}
-                    aria-label="下一张复述点卡片"
-                    title="下一张"
-                  >
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-              <div className="h-2 overflow-hidden rounded-full bg-[#e8edf4]">
-                <div className="h-full rounded-full bg-primary transition-[width] duration-300" style={{ width: `${completionPercent}%` }} />
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {drafts.map((draft, index) => {
-                const completed = isDraftComplete(draft)
-                const isActive = draft.localId === resolvedActiveDraftId
-                return (
-                  <button
-                    key={`draft-progress-${draft.localId}`}
-                    type="button"
-                    onClick={() => focusDraft(draft)}
-                    aria-current={isActive ? "true" : undefined}
-                    className={cn(
-                      "flex size-10 items-center justify-center rounded-xl border text-sm font-semibold transition-all",
-                      completed
-                        ? "border-primary/20 bg-primary text-primary-foreground shadow-[0_12px_24px_-20px_rgba(30,58,95,0.55)] hover:-translate-y-0.5"
-                        : "border-[#d9e2eb] bg-white text-[#5e738b] hover:border-primary/25 hover:text-primary",
-                      isActive && "ring-2 ring-primary/25 ring-offset-2 ring-offset-background",
-                    )}
-                    title={completed ? `第 ${index + 1} 个复述点，已填写` : `第 ${index + 1} 个复述点，尚未填写完成`}
-                    aria-label={completed ? `第 ${index + 1} 个复述点，已填写` : `第 ${index + 1} 个复述点，尚未填写完成`}
-                  >
-                    {index + 1}
-                  </button>
-                )
-              })}
-            </div>
+          <div className="flex flex-wrap gap-2">
+            {drafts.map((draft, index) => {
+              const completed = isDraftComplete(draft)
+              const isActive = draft.localId === resolvedActiveDraftId
+              return (
+                <button
+                  key={`draft-progress-${draft.localId}`}
+                  type="button"
+                  onClick={() => focusDraft(draft)}
+                  aria-current={isActive ? "true" : undefined}
+                  className={cn(
+                    "flex size-10 items-center justify-center rounded-xl border text-sm font-semibold transition-all",
+                    completed
+                      ? "border-primary/20 bg-primary text-primary-foreground shadow-[0_12px_24px_-20px_rgba(30,58,95,0.55)]"
+                      : "border-[#d9e2eb] bg-white text-[#5e738b] hover:border-primary/25 hover:text-primary",
+                    isActive && "ring-2 ring-primary/25 ring-offset-2 ring-offset-background",
+                  )}
+                  title={completed ? `第 ${index + 1} 个复述点，已填写` : `第 ${index + 1} 个复述点，尚未填写完成`}
+                  aria-label={completed ? `第 ${index + 1} 个复述点，已填写` : `第 ${index + 1} 个复述点，尚未填写完成`}
+                >
+                  {index + 1}
+                </button>
+              )
+            })}
           </div>
         ) : null}
 
@@ -322,38 +301,106 @@ export function ComposePane({
         ) : null}
 
         {activeDraft ? (
-          <div
-            key={activeDraft.localId}
-            ref={(node) => {
-              cardRefs.current[activeDraft.localId] = node
-            }}
-            className="theme-status-surface rounded-[1.2rem] border border-border/70 p-4"
-          >
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="theme-meta">
-                  第 {activeDraftIndex + 1} 个复述点
-                </div>
-                <div className="theme-meta">
-                  锚点：{(() => {
-                    const ms = parseAnchorMs(activeDraft.position)
-                    return `${ms === null ? activeDraft.position : msToClock(ms)}（${activeDraft.position}）`
-                  })()}
-                </div>
-              </div>
-              <Button variant="ghost" size="sm" onClick={() => removeDraft(projectId, activeDraft.localId)}>
-                删除
+          <div className="grid gap-3 md:grid-cols-[auto_minmax(0,1fr)_auto] md:items-stretch">
+            <div className="hidden md:flex">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-full min-h-[360px] w-12 rounded-[1.15rem] border border-[#dbe4ee] bg-white/70 text-[#5e738b] hover:bg-white"
+                onClick={() => goToDraft(activeDraftIndex - 1)}
+                disabled={activeDraftIndex <= 0}
+                aria-label="上一张复述点卡片"
+                title="上一张"
+              >
+                <ChevronLeft className="h-5 w-5" />
               </Button>
             </div>
-            <div className="mt-4 grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label>问题</Label>
-                <div
-                  ref={(node) => {
-                    const textarea = node?.querySelector("textarea") ?? null
-                    questionRefs.current[activeDraft.localId] = textarea
-                  }}
+
+            <div
+              key={activeDraft.localId}
+              ref={(node) => {
+                cardRefs.current[activeDraft.localId] = node
+              }}
+              className="theme-status-surface rounded-[1.15rem] border border-[#e2e8ef] px-4 py-3"
+            >
+              <div className="flex items-center justify-between gap-3 md:hidden">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-10 w-10 rounded-full border border-[#dbe4ee] bg-white/80"
+                  onClick={() => goToDraft(activeDraftIndex - 1)}
+                  disabled={activeDraftIndex <= 0}
+                  aria-label="上一张复述点卡片"
+                  title="上一张"
                 >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <div className="theme-meta shrink-0">
+                  {activeDraftIndex >= 0 ? `第 ${activeDraftIndex + 1} 个 / 共 ${drafts.length} 个复述点` : `${drafts.length} 个复述点`}
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-10 w-10 rounded-full border border-[#dbe4ee] bg-white/80"
+                  onClick={() => goToDraft(activeDraftIndex + 1)}
+                  disabled={activeDraftIndex < 0 || activeDraftIndex >= drafts.length - 1}
+                  aria-label="下一张复述点卡片"
+                  title="下一张"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+
+              <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between md:mt-0">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                    <span>第 {activeDraftIndex + 1} 个复述点</span>
+                    <span
+                      className={cn(
+                        "rounded-full px-2 py-0.5 tracking-[0.08em]",
+                        isDraftComplete(activeDraft) ? "bg-primary/10 text-primary" : "bg-slate-100 text-slate-600",
+                      )}
+                    >
+                      {isDraftComplete(activeDraft) ? "已填写完成" : "待填写"}
+                    </span>
+                  </div>
+
+                  <div className="mt-2 text-[15px] font-semibold leading-6 text-slate-900">
+                    {richContentHasMeaning(activeDraft.question) ? "继续完善这个复述点的提问与作答。" : "从当前视频锚点开始录入这个复述点。"}
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <span className="rounded-full border border-[#dbe4ee] bg-white px-2.5 py-1 font-medium text-slate-600">
+                      锚点：
+                      {(() => {
+                        const ms = parseAnchorMs(activeDraft.position)
+                        return `${ms === null ? activeDraft.position : msToClock(ms)}（${activeDraft.position}）`
+                      })()}
+                    </span>
+                    {instance ? (
+                      <span className="rounded-full border border-[#dbe4ee] bg-white px-2.5 py-1 font-medium text-slate-600">
+                        {instance.materialDisplayName}
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="rounded-full text-muted-foreground"
+                  onClick={() => removeDraft(projectId, activeDraft.localId)}
+                >
+                  删除
+                </Button>
+              </div>
+
+              <div className="mt-3 grid gap-3 xl:grid-cols-2">
+                <div className="rounded-2xl border border-[#e2e8ef] bg-white p-3">
+                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">问题</div>
                   <RichContentEditor
                     projectId={projectId}
                     field="question"
@@ -362,17 +409,16 @@ export function ComposePane({
                     onTextChange={(text) => updateDraftText(projectId, activeDraft.localId, "question", text)}
                     onAppendImage={(assetId) => appendDraftImage(projectId, activeDraft.localId, "question", assetId)}
                     onRemoveImage={(imageIndex) => removeDraftImage(projectId, activeDraft.localId, "question", imageIndex)}
+                    textareaRef={(node) => {
+                      questionRefs.current[activeDraft.localId] = node
+                    }}
+                    textareaClassName="min-h-[180px] resize-y rounded-2xl border-[#dbe4ee] bg-[#fbfdff] text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-primary focus:ring-2 focus:ring-primary/15"
+                    imageClassName="h-28 w-full max-w-[220px] rounded-2xl border border-[#dbe4ee] bg-[#fbfdff] object-cover"
                   />
                 </div>
-              </div>
-              <div className="space-y-2">
-                <Label>答案</Label>
-                <div
-                  ref={(node) => {
-                    const textarea = node?.querySelector("textarea") ?? null
-                    answerRefs.current[activeDraft.localId] = textarea
-                  }}
-                >
+
+                <div className="rounded-2xl border border-[#e2e8ef] bg-white p-3">
+                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">答案</div>
                   <RichContentEditor
                     projectId={projectId}
                     field="answer"
@@ -381,9 +427,29 @@ export function ComposePane({
                     onTextChange={(text) => updateDraftText(projectId, activeDraft.localId, "answer", text)}
                     onAppendImage={(assetId) => appendDraftImage(projectId, activeDraft.localId, "answer", assetId)}
                     onRemoveImage={(imageIndex) => removeDraftImage(projectId, activeDraft.localId, "answer", imageIndex)}
+                    textareaRef={(node) => {
+                      answerRefs.current[activeDraft.localId] = node
+                    }}
+                    textareaClassName="min-h-[180px] resize-y rounded-2xl border-[#dbe4ee] bg-[#fbfdff] text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-primary focus:ring-2 focus:ring-primary/15"
+                    imageClassName="h-28 w-full max-w-[220px] rounded-2xl border border-[#dbe4ee] bg-[#fbfdff] object-cover"
                   />
                 </div>
               </div>
+            </div>
+
+            <div className="hidden md:flex">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-full min-h-[360px] w-12 rounded-[1.15rem] border border-[#dbe4ee] bg-white/70 text-[#5e738b] hover:bg-white"
+                onClick={() => goToDraft(activeDraftIndex + 1)}
+                disabled={activeDraftIndex < 0 || activeDraftIndex >= drafts.length - 1}
+                aria-label="下一张复述点卡片"
+                title="下一张"
+              >
+                <ChevronRight className="h-5 w-5" />
+              </Button>
             </div>
           </div>
         ) : null}
