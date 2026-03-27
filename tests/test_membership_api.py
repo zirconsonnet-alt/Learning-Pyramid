@@ -8,13 +8,21 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
-from adapter.deps import get_api, get_auth_store, get_membership_marketing_store, get_membership_payment_service, get_membership_store
+from adapter.deps import (
+    get_api,
+    get_auth_rate_limit_store,
+    get_auth_store,
+    get_membership_marketing_store,
+    get_membership_payment_service,
+    get_membership_store,
+)
 from adapter.main import create_app
 from backend.system.membership_payment_service import MembershipRemotePaymentStatus, MembershipRemoteRefundStatus
 
 
 def _reset_caches() -> None:
     get_api.cache_clear()
+    get_auth_rate_limit_store.cache_clear()
     get_auth_store.cache_clear()
     get_membership_marketing_store.cache_clear()
     get_membership_payment_service.cache_clear()
@@ -26,6 +34,7 @@ def auth_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("PLM_APP_MODE", "hosted")
     monkeypatch.setenv("PLM_ENABLE_AUTH", "true")
     monkeypatch.setenv("PLM_ALLOW_SIGNUP", "true")
+    monkeypatch.setenv("PLM_ENABLE_MANUAL_TEST_PAYMENT", "true")
     monkeypatch.setenv("PLM_ENABLE_ASR", "false")
     monkeypatch.setenv("PLM_ENABLE_SERVER_MEDIA_STREAM", "false")
     monkeypatch.setenv("PLM_PROJECTS_ROOT", str(tmp_path / "projects"))
@@ -153,6 +162,44 @@ def test_membership_round_one_flow(auth_env: None) -> None:
     assert renewal_preview.json()["data"]["firstOrderDiscountCent"] == 0
     assert renewal_preview.json()["data"]["couponDiscountCent"] == 0
     assert renewal_preview.json()["data"]["payableAmountCent"] == 1990
+
+
+def test_hosted_mode_disables_manual_test_payment_by_default(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PLM_APP_MODE", "hosted")
+    monkeypatch.setenv("PLM_ENABLE_AUTH", "true")
+    monkeypatch.setenv("PLM_ALLOW_SIGNUP", "true")
+    monkeypatch.setenv("PLM_ENABLE_ASR", "false")
+    monkeypatch.setenv("PLM_ENABLE_SERVER_MEDIA_STREAM", "false")
+    monkeypatch.setenv("PLM_PROJECTS_ROOT", str(tmp_path / "projects"))
+    monkeypatch.setenv("PLM_STORE_PATH", "")
+    monkeypatch.setenv("PLM_LEGACY_STORE_PATH", "")
+    monkeypatch.setenv("PLM_STORE_DB_PATH", str(tmp_path / "plm_store.sqlite3"))
+    monkeypatch.setenv("PLM_AUTH_DB_PATH", str(tmp_path / "plm_auth.sqlite3"))
+    monkeypatch.setenv("PLM_MEMBERSHIP_DB_PATH", str(tmp_path / "plm_membership.sqlite3"))
+    monkeypatch.setenv("PLM_DATA_DIR", str(tmp_path / "runtime-data"))
+    _reset_caches()
+
+    client = TestClient(create_app())
+    register = client.post("/api/auth/register", json={"email": "member@example.com", "password": "password123"})
+    assert register.status_code == 200
+
+    membership = client.get("/api/membership/me")
+    assert membership.status_code == 200
+    assert membership.json()["data"]["supportedPaymentProviders"] == []
+
+    created = client.post("/api/membership/orders", json={"provider": "manual_test"})
+    assert created.status_code == 400
+    assert created.json()["error"]["code"] == "PRECONDITION"
+    assert created.json()["error"]["message"] == "membership payments are unavailable in this deployment"
+
+    confirmed = client.post(
+        "/api/payments/membership/callback/manual_test",
+        json={"orderId": "mord_test", "providerTradeNo": "manual_mord_test"},
+    )
+    assert confirmed.status_code == 400
+    assert confirmed.json()["error"]["code"] == "PRECONDITION"
+    assert confirmed.json()["error"]["message"] == "membership payments are unavailable in this deployment"
+    _reset_caches()
 
 
 def test_create_membership_order_reuses_existing_pending_order(auth_env: None) -> None:
@@ -550,6 +597,44 @@ def test_wechat_native_order_can_be_created_and_synced(auth_env: None, monkeypat
     assert synced_data["remote"]["remoteStatus"] == "paid"
     assert synced_data["remote"]["providerTradeNo"] == "4200000000000000000001"
     assert synced_data["membership"]["currentStatus"] == "active"
+
+
+def test_user_membership_callback_rejects_wechat_native(auth_env: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _enable_wechat_native(monkeypatch, tmp_path)
+    _reset_caches()
+    client = TestClient(create_app())
+    payment_service = get_membership_payment_service()
+
+    def fake_wechat_request_json(method: str, uri: str, body: dict[str, object] | None = None) -> dict[str, object]:
+        if method == "POST" and uri == "/v3/pay/transactions/native":
+            return {"code_url": "weixin://wxpay/bizpayurl/up?pr=fake-wechat-native"}
+        raise AssertionError(f"unexpected wechat request: {method} {uri}")
+
+    monkeypatch.setattr(payment_service, "_wechat_request_json", fake_wechat_request_json)
+
+    register = client.post("/api/auth/register", json={"email": "member@example.com", "password": "password123"})
+    assert register.status_code == 200
+
+    created = client.post("/api/membership/orders", json={"provider": "wechat_native"})
+    assert created.status_code == 200
+    order_id = created.json()["data"]["order"]["orderId"]
+
+    confirmed = client.post(
+        "/api/payments/membership/callback/wechat_native",
+        json={"orderId": order_id, "providerTradeNo": "4200000000000000009999"},
+    )
+    assert confirmed.status_code == 400
+    assert confirmed.json()["error"]["code"] == "PRECONDITION"
+    assert confirmed.json()["error"]["message"] == "membership payment callback is only available for manual_test"
+
+    membership = client.get("/api/membership/me")
+    assert membership.status_code == 200
+    assert membership.json()["data"]["currentStatus"] == "never_purchased"
+
+    orders = client.get("/api/membership/orders")
+    assert orders.status_code == 200
+    assert orders.json()["data"][0]["orderId"] == order_id
+    assert orders.json()["data"][0]["status"] == "pending"
 
 
 def test_wechat_closed_payment_sync_marks_order_closed(auth_env: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

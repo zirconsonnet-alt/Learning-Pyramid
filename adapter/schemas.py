@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 from pydantic import conlist
 
 
@@ -21,12 +21,12 @@ class SetProjectMaterialSourceBindingRequest(BaseModel):
     sourceRootLabel: Optional[str] = None
 
 class AuthCredentialsRequest(BaseModel):
-    email: str = Field(min_length=3)
+    email: EmailStr
     password: str = Field(min_length=8)
 
 
 class RegisterAuthRequest(BaseModel):
-    email: str = Field(min_length=3)
+    email: EmailStr
     password: str = Field(min_length=8)
     inviteCode: Optional[str] = Field(default=None, min_length=1, max_length=32)
 
@@ -36,7 +36,7 @@ class PreviewMembershipOrderRequest(BaseModel):
 
 
 class CreateMembershipOrderRequest(BaseModel):
-    provider: str = Field(default="manual_test", min_length=1)
+    provider: str = Field(min_length=1)
     couponId: Optional[str] = Field(default=None, min_length=1)
 
 

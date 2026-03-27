@@ -54,6 +54,8 @@ def _normalize_limit(limit: int, *, default: int = 20, maximum: int = 100) -> in
 def _normalize_provider(provider: str) -> str:
     value = str(provider).strip().lower()
     supported_providers = set(list_supported_membership_payment_providers())
+    if not supported_providers:
+        raise PreconditionFailure("membership payments are unavailable in this deployment")
     if value not in supported_providers:
         supported_text = ", ".join(sorted(supported_providers))
         raise PreconditionFailure(f"membership payment provider must be one of: {supported_text}")

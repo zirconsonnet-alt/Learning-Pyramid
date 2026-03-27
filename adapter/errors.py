@@ -34,12 +34,15 @@ def _err(
     details: Optional[Any] = None,
     status_code: int = 400,
     request_id: str | None = None,
+    headers: Optional[dict[str, str]] = None,
 ) -> JSONResponse:
     payload: dict[str, Any] = {"ok": False, "error": {"code": code, "message": message}}
     if details is not None:
         payload["error"]["details"] = details
-    headers = {"X-Request-ID": request_id} if request_id else None
-    return JSONResponse(status_code=status_code, content=payload, headers=headers)
+    response_headers = dict(headers or {})
+    if request_id:
+        response_headers["X-Request-ID"] = request_id
+    return JSONResponse(status_code=status_code, content=payload, headers=response_headers or None)
 
 
 def _expose_internal_error_details() -> bool:
@@ -69,14 +72,28 @@ def register_exception_handlers(app: FastAPI) -> None:
         detail = exc.detail if isinstance(exc.detail, dict) else None
         message = exc.detail if isinstance(exc.detail, str) else "HTTP error"
         code = _http_error_code(int(exc.status_code))
-        return _err(code=code, message=str(message), details=detail, status_code=int(exc.status_code), request_id=_request_id(request))
+        return _err(
+            code=code,
+            message=str(message),
+            details=detail,
+            status_code=int(exc.status_code),
+            request_id=_request_id(request),
+            headers=dict(exc.headers or {}),
+        )
 
     @app.exception_handler(StarletteHTTPException)
     async def _handle_starlette_http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
         detail = exc.detail if isinstance(exc.detail, dict) else None
         message = exc.detail if isinstance(exc.detail, str) else "HTTP error"
         code = _http_error_code(int(exc.status_code))
-        return _err(code=code, message=str(message), details=detail, status_code=int(exc.status_code), request_id=_request_id(request))
+        return _err(
+            code=code,
+            message=str(message),
+            details=detail,
+            status_code=int(exc.status_code),
+            request_id=_request_id(request),
+            headers=dict(exc.headers or {}),
+        )
 
     @app.exception_handler(RequestValidationError)
     async def _handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:

@@ -197,13 +197,13 @@ export function previewMembershipOrder(params?: { couponId?: string | null }) {
   })
 }
 
-export function createMembershipOrder(params?: { provider?: string; couponId?: string | null }) {
+export function createMembershipOrder(params: { provider: string; couponId?: string | null }) {
   return apiRequest({
     path: "/membership/orders",
     method: "POST",
     body: {
-      provider: params?.provider ?? "manual_test",
-      couponId: params?.couponId?.trim() ? params.couponId.trim() : undefined,
+      provider: params.provider,
+      couponId: params.couponId?.trim() ? params.couponId.trim() : undefined,
     },
     responseSchema: MembershipCreateOrderResultSchema,
   })

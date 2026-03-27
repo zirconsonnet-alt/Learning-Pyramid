@@ -105,7 +105,7 @@ export function MembershipPurchaseDialog(props: {
               </div>
               <DialogTitle className="text-2xl tracking-tight text-[#17324d]">开通月会员</DialogTitle>
               <DialogDescription className="max-w-xl leading-7 text-[#60728a]">
-                这一轮开始把真实支付能力接到会员系统里。你可以先选支付方式，再确认生成待支付订单和对应的支付载荷。
+                先确认当前价格、支付方式和优惠券，再生成待支付订单。如果当前部署还没有开启在线支付，这里也会直接提示。
               </DialogDescription>
             </DialogHeader>
 
@@ -140,7 +140,7 @@ export function MembershipPurchaseDialog(props: {
                 <div className="text-[11px] uppercase tracking-[0.14em] text-[#7a8ca3]">订单说明</div>
                 <div className="mt-3 space-y-2 text-sm leading-6 text-[#62758d]">
                   <div>会员时长：30 天</div>
-                  <div>支付方式：{describeMembershipPaymentProvider(selectedProvider)}</div>
+                  <div>支付方式：{selectedProvider ? describeMembershipPaymentProvider(selectedProvider) : "当前部署暂未开放"}</div>
                   <div>当前价格：{formatMembershipPrice(summary?.currentPriceCent ?? 0)}</div>
                   {pendingOrder ? <div>当前已有一笔待支付订单，将按新的选券配置更新。</div> : <div>确认后会创建一笔新的待支付订单。</div>}
                 </div>
@@ -160,9 +160,18 @@ export function MembershipPurchaseDialog(props: {
               <Ticket className="h-4 w-4 text-primary" />
               <div className="text-sm font-semibold text-foreground">选择支付方式与优惠券</div>
             </div>
-            <div className="mt-1 text-sm leading-6 text-muted-foreground">切换支付方式或优惠券后会继续使用同一套价格预览。每笔订单最多使用一张券。</div>
+            <div className="mt-1 text-sm leading-6 text-muted-foreground">
+              {supportedProviders.length > 0
+                ? "切换支付方式或优惠券后会继续使用同一套价格预览。每笔订单最多使用一张券。"
+                : "当前部署尚未开放可用支付方式。完成微信支付配置后，这里会自动出现可选方案。"}
+            </div>
 
             <div className="mt-5 space-y-3">
+              {supportedProviders.length === 0 ? (
+                <div className="rounded-[1.3rem] border border-dashed border-[#d7e0ea] bg-[#fbfdff] px-4 py-8 text-center text-sm leading-6 text-[#697b92]">
+                  当前没有可用支付方式。请先完成支付渠道配置，再回来创建会员订单。
+                </div>
+              ) : null}
               {supportedProviders.map((provider) => (
                 <button
                   key={provider}
@@ -179,7 +188,7 @@ export function MembershipPurchaseDialog(props: {
                     <div>
                       <div className="text-sm font-semibold text-foreground">{describeMembershipPaymentProvider(provider)}</div>
                       <div className="mt-1 text-xs text-muted-foreground">
-                        {provider === "wechat_native" ? "生成微信二维码并支持同步支付状态。" : "保留测试支付入口，方便继续验证会员全链路。"}
+                        {provider === "wechat_native" ? "生成微信二维码并支持同步支付状态。" : "仅在本地或验收环境中用于模拟支付。"}
                       </div>
                     </div>
                     {selectedProvider === provider ? <StatusPill tone="accent">当前方案</StatusPill> : null}
@@ -228,7 +237,11 @@ export function MembershipPurchaseDialog(props: {
               <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={createPending || confirmPending}>
                 取消
               </Button>
-              <Button onClick={onConfirm} disabled={createPending || confirmPending || previewLoading || Boolean(previewError)} className="min-w-[10rem]">
+              <Button
+                onClick={onConfirm}
+                disabled={createPending || confirmPending || previewLoading || Boolean(previewError) || supportedProviders.length === 0 || !selectedProvider}
+                className="min-w-[10rem]"
+              >
                 <CreditCard className="h-4 w-4" />
                 {createPending ? "创建中..." : pendingOrder ? "更新待支付订单" : "确认创建订单"}
               </Button>

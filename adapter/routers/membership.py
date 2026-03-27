@@ -11,7 +11,7 @@ from adapter.schemas import (
     CreateMembershipOrderRequest,
     PreviewMembershipOrderRequest,
 )
-from backend.models.errors import NotFound
+from backend.models.errors import NotFound, PreconditionFailure
 from backend.system.auth_store import AuthStore
 from backend.system.http_runtime_config import current_http_runtime_config
 from backend.system.membership_marketing_store import (
@@ -21,7 +21,12 @@ from backend.system.membership_marketing_store import (
     InviteSummary,
     MembershipMarketingStore,
 )
-from backend.system.membership_payment_service import MembershipPaymentPayload, MembershipPaymentService, MembershipRemotePaymentStatus
+from backend.system.membership_payment_service import (
+    MembershipPaymentPayload,
+    MembershipPaymentService,
+    MembershipRemotePaymentStatus,
+    PAYMENT_PROVIDER_MANUAL_TEST,
+)
 from backend.system.membership_store import (
     MembershipOrderCloseResult,
     MembershipCreateOrderResult,
@@ -318,10 +323,13 @@ def confirm_membership_payment(
     request: Request,
     membership_store: MembershipStore = Depends(get_membership_store),
 ) -> dict:
+    normalized_provider = str(provider or "").strip().lower()
+    if normalized_provider != PAYMENT_PROVIDER_MANUAL_TEST:
+        raise PreconditionFailure("membership payment callback is only available for manual_test")
     user = require_request_auth_user(request)
     confirmed = membership_store.confirm_payment(
         user.user_id,
-        provider=provider,
+        provider=normalized_provider,
         order_id=req.orderId,
         provider_trade_no=req.providerTradeNo,
     )

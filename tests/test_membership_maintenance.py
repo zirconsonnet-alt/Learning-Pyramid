@@ -15,6 +15,7 @@ from backend.system.membership_store import MembershipStore
 def membership_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("PLM_APP_MODE", "hosted")
     monkeypatch.setenv("PLM_ENABLE_AUTH", "true")
+    monkeypatch.setenv("PLM_ENABLE_MANUAL_TEST_PAYMENT", "true")
     monkeypatch.setenv("PLM_MEMBERSHIP_DB_PATH", str(tmp_path / "plm_membership.sqlite3"))
     yield
 

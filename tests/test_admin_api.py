@@ -7,12 +7,20 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
-from adapter.deps import get_api, get_auth_store, get_membership_marketing_store, get_membership_payment_service, get_membership_store
+from adapter.deps import (
+    get_api,
+    get_auth_rate_limit_store,
+    get_auth_store,
+    get_membership_marketing_store,
+    get_membership_payment_service,
+    get_membership_store,
+)
 from adapter.main import create_app
 
 
 def _reset_caches() -> None:
     get_api.cache_clear()
+    get_auth_rate_limit_store.cache_clear()
     get_auth_store.cache_clear()
     get_membership_marketing_store.cache_clear()
     get_membership_payment_service.cache_clear()
@@ -24,6 +32,18 @@ def auth_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("PLM_APP_MODE", "hosted")
     monkeypatch.setenv("PLM_ENABLE_AUTH", "true")
     monkeypatch.setenv("PLM_ALLOW_SIGNUP", "true")
+    monkeypatch.setenv("PLM_ENABLE_MANUAL_TEST_PAYMENT", "true")
+    monkeypatch.setenv("PLM_ENABLE_COMMUNITY_GUARDRAILS", "true")
+    monkeypatch.setenv("PLM_STUDY_GROUP_CREATE_MIN_ACCOUNT_AGE_SECONDS", "0")
+    monkeypatch.setenv("PLM_STUDY_GROUP_JOIN_MIN_ACCOUNT_AGE_SECONDS", "0")
+    monkeypatch.setenv("PLM_STUDY_GROUP_JOIN_REQUEST_MIN_ACCOUNT_AGE_SECONDS", "0")
+    monkeypatch.setenv("PLM_STUDY_GROUP_POST_MIN_ACCOUNT_AGE_SECONDS", "0")
+    monkeypatch.setenv("PLM_STUDY_GROUP_COMMENT_MIN_ACCOUNT_AGE_SECONDS", "0")
+    monkeypatch.setenv("PLM_STUDY_GROUP_CREATE_MAX_ACTIONS_PER_WINDOW", "100")
+    monkeypatch.setenv("PLM_STUDY_GROUP_JOIN_MAX_ACTIONS_PER_WINDOW", "100")
+    monkeypatch.setenv("PLM_STUDY_GROUP_JOIN_REQUEST_MAX_ACTIONS_PER_WINDOW", "100")
+    monkeypatch.setenv("PLM_STUDY_GROUP_POST_MAX_ACTIONS_PER_WINDOW", "100")
+    monkeypatch.setenv("PLM_STUDY_GROUP_COMMENT_MAX_ACTIONS_PER_WINDOW", "200")
     monkeypatch.setenv("PLM_ENABLE_ASR", "false")
     monkeypatch.setenv("PLM_ENABLE_SERVER_MEDIA_STREAM", "false")
     monkeypatch.setenv("PLM_PROJECTS_ROOT", str(tmp_path / "projects"))

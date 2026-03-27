@@ -1,6 +1,7 @@
 fastapi==0.115.8
 uvicorn[standard]==0.34.0
 pydantic==1.10.26
+email-validator==2.2.0
 psycopg[binary]==3.2.10
 requests==2.32.3
 cryptography==44.0.0

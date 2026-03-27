@@ -19,6 +19,7 @@ from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from backend.models.errors import PreconditionFailure
+from backend.system.runtime_features import current_runtime_features
 
 PAYMENT_PROVIDER_MANUAL_TEST = "manual_test"
 PAYMENT_PROVIDER_WECHAT_NATIVE = "wechat_native"
@@ -28,10 +29,30 @@ def _env_text(name: str) -> str:
     return str(os.getenv(name) or "").strip()
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return bool(default)
+    value = str(raw).strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def manual_test_payment_enabled() -> bool:
+    features = current_runtime_features()
+    return _env_bool("PLM_ENABLE_MANUAL_TEST_PAYMENT", features.app_mode != "hosted")
+
+
 def _normalize_provider(provider: str) -> str:
     value = str(provider or "").strip().lower()
-    if value not in list_supported_membership_payment_providers():
-        supported = ", ".join(list_supported_membership_payment_providers())
+    supported_providers = list_supported_membership_payment_providers()
+    if not supported_providers:
+        raise PreconditionFailure("membership payments are unavailable in this deployment")
+    if value not in supported_providers:
+        supported = ", ".join(supported_providers)
         raise PreconditionFailure(f"membership payment provider must be one of: {supported}")
     return value
 
@@ -121,7 +142,9 @@ def current_wechat_native_payment_config() -> WeChatNativePaymentConfig:
 
 
 def list_supported_membership_payment_providers() -> tuple[str, ...]:
-    providers = {PAYMENT_PROVIDER_MANUAL_TEST}
+    providers: set[str] = set()
+    if manual_test_payment_enabled():
+        providers.add(PAYMENT_PROVIDER_MANUAL_TEST)
     if current_wechat_native_payment_config().enabled:
         providers.add(PAYMENT_PROVIDER_WECHAT_NATIVE)
     return tuple(sorted(providers))
@@ -205,7 +228,7 @@ class MembershipPaymentService:
                 mode=PAYMENT_PROVIDER_MANUAL_TEST,
                 provider=provider,
                 provider_label=_provider_label(provider),
-                instruction="通过 manual_test 回调可以继续模拟支付成功。",
+                instruction="仅在本地或验收环境中使用 manual_test 回调模拟支付成功。",
                 provider_trade_no_hint=f"manual_{order.order_id}",
                 expires_at=order.expired_at,
                 code_url=None,

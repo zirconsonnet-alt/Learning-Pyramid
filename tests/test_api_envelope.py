@@ -6,13 +6,21 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from adapter.deps import get_api, get_auth_store, get_membership_marketing_store, get_membership_payment_service, get_membership_store
+from adapter.deps import (
+    get_api,
+    get_auth_rate_limit_store,
+    get_auth_store,
+    get_membership_marketing_store,
+    get_membership_payment_service,
+    get_membership_store,
+)
 from adapter.errors import register_exception_handlers
 from adapter.main import create_app
 
 
 def _reset_caches() -> None:
     get_api.cache_clear()
+    get_auth_rate_limit_store.cache_clear()
     get_auth_store.cache_clear()
     get_membership_marketing_store.cache_clear()
     get_membership_payment_service.cache_clear()
@@ -80,6 +88,46 @@ def test_system_capabilities_reflect_hosted_env(monkeypatch, tmp_path: Path) -> 
             "sqlBackend": "sqlite",
         },
     }
+
+
+def test_hosted_mode_disables_api_docs_by_default(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PLM_APP_MODE", "hosted")
+    monkeypatch.setenv("PLM_ENABLE_ASR", "false")
+    monkeypatch.setenv("PLM_ENABLE_SERVER_MEDIA_STREAM", "false")
+    monkeypatch.setenv("PLM_STORE_PATH", "")
+    monkeypatch.setenv("PLM_LEGACY_STORE_PATH", "")
+    monkeypatch.setenv("PLM_STORE_DB_PATH", str(tmp_path / "plm_store.sqlite3"))
+    monkeypatch.setenv("PLM_AUTH_DB_PATH", str(tmp_path / "plm_auth.sqlite3"))
+    _reset_caches()
+
+    client = TestClient(create_app())
+    assert client.get("/api/openapi.json").status_code == 404
+    assert client.get("/api/docs").status_code == 404
+    assert client.get("/api/redoc").status_code == 404
+
+
+def test_hosted_mode_can_enable_api_docs_explicitly(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PLM_APP_MODE", "hosted")
+    monkeypatch.setenv("PLM_ENABLE_API_DOCS", "true")
+    monkeypatch.setenv("PLM_ENABLE_ASR", "false")
+    monkeypatch.setenv("PLM_ENABLE_SERVER_MEDIA_STREAM", "false")
+    monkeypatch.setenv("PLM_STORE_PATH", "")
+    monkeypatch.setenv("PLM_LEGACY_STORE_PATH", "")
+    monkeypatch.setenv("PLM_STORE_DB_PATH", str(tmp_path / "plm_store.sqlite3"))
+    monkeypatch.setenv("PLM_AUTH_DB_PATH", str(tmp_path / "plm_auth.sqlite3"))
+    _reset_caches()
+
+    client = TestClient(create_app())
+    openapi = client.get("/api/openapi.json")
+    docs = client.get("/api/docs")
+    redoc = client.get("/api/redoc")
+
+    assert openapi.status_code == 200
+    assert openapi.json()["openapi"].startswith("3.")
+    assert docs.status_code == 200
+    assert "Swagger UI" in docs.text
+    assert redoc.status_code == 200
+    assert "ReDoc" in redoc.text
 
 
 def test_health_endpoint_reports_runtime_readiness(monkeypatch, tmp_path: Path) -> None:

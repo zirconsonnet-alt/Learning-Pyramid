@@ -5,12 +5,20 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from adapter.deps import get_api, get_auth_store, get_membership_marketing_store, get_membership_payment_service, get_membership_store
+from adapter.deps import (
+    get_api,
+    get_auth_rate_limit_store,
+    get_auth_store,
+    get_membership_marketing_store,
+    get_membership_payment_service,
+    get_membership_store,
+)
 from adapter.main import create_app
 
 
 def _reset_caches() -> None:
     get_api.cache_clear()
+    get_auth_rate_limit_store.cache_clear()
     get_auth_store.cache_clear()
     get_membership_marketing_store.cache_clear()
     get_membership_payment_service.cache_clear()

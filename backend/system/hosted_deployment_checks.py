@@ -3,7 +3,11 @@ from __future__ import annotations
 import os
 from urllib.parse import urlsplit
 
+from backend.system.auth_rate_limit_store import current_auth_rate_limit_config
+from backend.system.community_guardrails import current_community_guardrail_config
+from backend.system.http_runtime_config import current_http_runtime_config
 from backend.system.membership_payment_service import current_wechat_native_payment_config
+from backend.system.membership_payment_service import manual_test_payment_enabled
 from backend.system.runtime_features import current_runtime_features
 from backend.system.sql_backend import current_sql_runtime_config
 
@@ -57,12 +61,20 @@ def hosted_runtime_warnings() -> tuple[str, ...]:
 
     if features.allow_signup:
         warnings.append("PLM_ALLOW_SIGNUP=true leaves the hosted deployment open for self-registration.")
+    if features.auth_enabled and not current_auth_rate_limit_config().enabled:
+        warnings.append("PLM_ENABLE_AUTH_RATE_LIMITS=false disables login and sign-up throttling in hosted mode.")
+    if features.auth_enabled and not current_community_guardrail_config().enabled:
+        warnings.append("PLM_ENABLE_COMMUNITY_GUARDRAILS=false disables new-account cooldowns and study-group abuse throttling in hosted mode.")
+    if manual_test_payment_enabled():
+        warnings.append("PLM_ENABLE_MANUAL_TEST_PAYMENT=true exposes the manual_test membership payment provider in hosted mode.")
     if _env_text("PLM_SECURE_COOKIES").lower() not in _TRUE_VALUES:
         warnings.append("PLM_SECURE_COOKIES is disabled. Use this only for temporary plain-HTTP localhost testing.")
     if not _env_text("PLM_PUBLIC_ORIGIN"):
         warnings.append("PLM_PUBLIC_ORIGIN is empty. Set it to the external HTTPS origin before public deployment.")
     if not _env_text("PLM_TRUSTED_HOSTS"):
         warnings.append("PLM_TRUSTED_HOSTS is empty. Set it to the externally reachable host list.")
+    if current_http_runtime_config().api_docs_enabled:
+        warnings.append("PLM_ENABLE_API_DOCS=true leaves Swagger/OpenAPI endpoints enabled in hosted mode.")
 
     try:
         sql_backend = current_sql_runtime_config().backend

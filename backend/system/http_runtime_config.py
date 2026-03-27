@@ -19,6 +19,18 @@ def _split_csv(value: str | None) -> tuple[str, ...]:
     return tuple(items)
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return bool(default)
+    value = str(raw).strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
 def _default_dev_origins() -> tuple[str, ...]:
     return ("http://localhost:5173", "http://localhost:3000")
 
@@ -51,6 +63,7 @@ class HttpRuntimeConfig:
     public_origin: str | None
     proxy_headers_enabled: bool
     forwarded_allow_ips: str
+    api_docs_enabled: bool
 
 
 def current_http_runtime_config() -> HttpRuntimeConfig:
@@ -78,6 +91,7 @@ def current_http_runtime_config() -> HttpRuntimeConfig:
 
     proxy_headers_enabled = str(os.getenv("PLM_PROXY_HEADERS", "true")).strip().lower() in {"1", "true", "yes", "on"}
     forwarded_allow_ips = (os.getenv("PLM_FORWARDED_ALLOW_IPS") or "127.0.0.1").strip() or "127.0.0.1"
+    api_docs_enabled = _env_bool("PLM_ENABLE_API_DOCS", features.app_mode == "local")
 
     return HttpRuntimeConfig(
         allowed_origins=_dedupe(allowed_origins),
@@ -85,4 +99,5 @@ def current_http_runtime_config() -> HttpRuntimeConfig:
         public_origin=public_origin,
         proxy_headers_enabled=proxy_headers_enabled,
         forwarded_allow_ips=forwarded_allow_ips,
+        api_docs_enabled=api_docs_enabled,
     )

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 
 from adapter.auth import require_request_auth_user, request_user_has_global_role
-from adapter.deps import get_auth_store
+from adapter.deps import get_auth_rate_limit_store, get_auth_store
 from adapter.schemas import (
     CreateStudyGroupJoinRequest,
     CreateStudyGroupPostCommentRequest,
@@ -17,8 +17,22 @@ from adapter.schemas import (
     UpdateStudyGroupMemberRoleRequest,
     UpdateStudyGroupRequest,
 )
+from backend.system.auth_rate_limit_store import AuthRateLimitStore
 from backend.system.app_paths import default_data_dir
 from backend.system.auth_store import AuthStore, StudyGroup, StudyGroupJoinRequest, StudyGroupMember, StudyGroupPost, StudyGroupPostComment
+from backend.system.community_guardrail_store import (
+    check_comment_allowed,
+    check_create_group_allowed,
+    check_join_group_allowed,
+    check_join_request_allowed,
+    check_post_allowed,
+    record_comment,
+    record_create_group,
+    record_join_group,
+    record_join_request,
+    record_post,
+)
+from backend.system.community_guardrails import current_community_guardrail_config
 
 router = APIRouter()
 
@@ -38,6 +52,160 @@ def _group_avatar_dir() -> Path:
 
 def _group_avatar_path_for_key(avatar_key: str) -> Path:
     return _group_avatar_dir() / avatar_key
+
+
+def _retry_after_headers(retry_after_seconds: int) -> dict[str, str]:
+    retry_after = max(1, int(retry_after_seconds))
+    return {"Retry-After": str(retry_after)}
+
+
+def _format_wait_duration(seconds: int) -> str:
+    retry_after = max(1, int(seconds))
+    if retry_after >= 3600 and retry_after % 3600 == 0:
+        hours = retry_after // 3600
+        return f"{hours} hour" if hours == 1 else f"{hours} hours"
+    if retry_after >= 60 and retry_after % 60 == 0:
+        minutes = retry_after // 60
+        return f"{minutes} minute" if minutes == 1 else f"{minutes} minutes"
+    return f"{retry_after} seconds"
+
+
+def _raise_min_account_age_error(*, action_message: str, retry_after_seconds: int) -> None:
+    wait_text = _format_wait_duration(retry_after_seconds)
+    raise HTTPException(
+        status_code=403,
+        detail=f"New accounts must wait about {wait_text} before they can {action_message}",
+        headers=_retry_after_headers(retry_after_seconds),
+    )
+
+
+def _raise_action_rate_limit_error(*, detail: str, retry_after_seconds: int) -> None:
+    raise HTTPException(status_code=429, detail=detail, headers=_retry_after_headers(retry_after_seconds))
+
+
+def _enforce_study_group_create_guardrails(
+    *,
+    user,
+    auth_rate_limit_store: AuthRateLimitStore,
+) -> None:
+    config = current_community_guardrail_config()
+    if not config.enabled:
+        return
+    age_decision, rate_decision = check_create_group_allowed(auth_rate_limit_store, config, user=user)
+    if not age_decision.allowed:
+        _raise_min_account_age_error(action_message="create study groups", retry_after_seconds=age_decision.retry_after_seconds)
+    if not rate_decision.allowed:
+        _raise_action_rate_limit_error(
+            detail="Too many study groups created in a short period. Try again later.",
+            retry_after_seconds=rate_decision.retry_after_seconds,
+        )
+
+
+def _record_study_group_create(user, auth_rate_limit_store: AuthRateLimitStore) -> None:
+    config = current_community_guardrail_config()
+    if not config.enabled:
+        return
+    record_create_group(auth_rate_limit_store, config, user=user)
+
+
+def _enforce_study_group_post_guardrails(
+    *,
+    user,
+    auth_rate_limit_store: AuthRateLimitStore,
+) -> None:
+    config = current_community_guardrail_config()
+    if not config.enabled:
+        return
+    age_decision, rate_decision = check_post_allowed(auth_rate_limit_store, config, user=user)
+    if not age_decision.allowed:
+        _raise_min_account_age_error(action_message="post in study groups", retry_after_seconds=age_decision.retry_after_seconds)
+    if not rate_decision.allowed:
+        _raise_action_rate_limit_error(
+            detail="Too many study group posts in a short period. Try again later.",
+            retry_after_seconds=rate_decision.retry_after_seconds,
+        )
+
+
+def _enforce_study_group_join_guardrails(
+    *,
+    user,
+    auth_rate_limit_store: AuthRateLimitStore,
+) -> None:
+    config = current_community_guardrail_config()
+    if not config.enabled:
+        return
+    age_decision, rate_decision = check_join_group_allowed(auth_rate_limit_store, config, user=user)
+    if not age_decision.allowed:
+        _raise_min_account_age_error(action_message="join study groups", retry_after_seconds=age_decision.retry_after_seconds)
+    if not rate_decision.allowed:
+        _raise_action_rate_limit_error(
+            detail="Too many study group join attempts in a short period. Try again later.",
+            retry_after_seconds=rate_decision.retry_after_seconds,
+        )
+
+
+def _record_study_group_join(user, auth_rate_limit_store: AuthRateLimitStore) -> None:
+    config = current_community_guardrail_config()
+    if not config.enabled:
+        return
+    record_join_group(auth_rate_limit_store, config, user=user)
+
+
+def _enforce_study_group_join_request_guardrails(
+    *,
+    user,
+    auth_rate_limit_store: AuthRateLimitStore,
+) -> None:
+    config = current_community_guardrail_config()
+    if not config.enabled:
+        return
+    age_decision, rate_decision = check_join_request_allowed(auth_rate_limit_store, config, user=user)
+    if not age_decision.allowed:
+        _raise_min_account_age_error(action_message="request to join study groups", retry_after_seconds=age_decision.retry_after_seconds)
+    if not rate_decision.allowed:
+        _raise_action_rate_limit_error(
+            detail="Too many study group join requests in a short period. Try again later.",
+            retry_after_seconds=rate_decision.retry_after_seconds,
+        )
+
+
+def _record_study_group_join_request(user, auth_rate_limit_store: AuthRateLimitStore) -> None:
+    config = current_community_guardrail_config()
+    if not config.enabled:
+        return
+    record_join_request(auth_rate_limit_store, config, user=user)
+
+
+def _record_study_group_post(user, auth_rate_limit_store: AuthRateLimitStore) -> None:
+    config = current_community_guardrail_config()
+    if not config.enabled:
+        return
+    record_post(auth_rate_limit_store, config, user=user)
+
+
+def _enforce_study_group_comment_guardrails(
+    *,
+    user,
+    auth_rate_limit_store: AuthRateLimitStore,
+) -> None:
+    config = current_community_guardrail_config()
+    if not config.enabled:
+        return
+    age_decision, rate_decision = check_comment_allowed(auth_rate_limit_store, config, user=user)
+    if not age_decision.allowed:
+        _raise_min_account_age_error(action_message="comment in study groups", retry_after_seconds=age_decision.retry_after_seconds)
+    if not rate_decision.allowed:
+        _raise_action_rate_limit_error(
+            detail="Too many study group comments in a short period. Try again later.",
+            retry_after_seconds=rate_decision.retry_after_seconds,
+        )
+
+
+def _record_study_group_comment(user, auth_rate_limit_store: AuthRateLimitStore) -> None:
+    config = current_community_guardrail_config()
+    if not config.enabled:
+        return
+    record_comment(auth_rate_limit_store, config, user=user)
 
 
 def _avatar_url_for_user(user_id: str, avatar_key: str | None) -> str | None:
@@ -172,8 +340,12 @@ def create_study_group(
     req: CreateStudyGroupRequest,
     request: Request,
     auth_store: AuthStore = Depends(get_auth_store),
+    auth_rate_limit_store: AuthRateLimitStore = Depends(get_auth_rate_limit_store),
 ) -> dict:
     user = require_request_auth_user(request)
+    is_admin = request_user_has_global_role(request, auth_store, ("super_admin", "admin"))
+    if not is_admin:
+        _enforce_study_group_create_guardrails(user=user, auth_rate_limit_store=auth_rate_limit_store)
     group = auth_store.create_study_group(
         owner_user_id=user.user_id,
         name=req.name,
@@ -181,6 +353,8 @@ def create_study_group(
         visibility=req.visibility,
         join_policy=req.joinPolicy,
     )
+    if not is_admin:
+        _record_study_group_create(user, auth_rate_limit_store)
     return {"ok": True, "data": _group_to_dto(group)}
 
 
@@ -250,13 +424,22 @@ async def upload_study_group_avatar(groupId: str, request: Request, auth_store: 
 
 
 @router.post("/study-groups/{groupId}/join")
-def join_study_group(groupId: str, request: Request, auth_store: AuthStore = Depends(get_auth_store)) -> dict:
+def join_study_group(
+    groupId: str,
+    request: Request,
+    auth_store: AuthStore = Depends(get_auth_store),
+    auth_rate_limit_store: AuthRateLimitStore = Depends(get_auth_rate_limit_store),
+) -> dict:
     user = require_request_auth_user(request)
     group = auth_store.get_study_group(groupId, viewer_user_id=user.user_id)
     is_admin = request_user_has_global_role(request, auth_store, ("super_admin", "admin"))
     if group.member_role is None and not is_admin and group.visibility != "public":
         raise HTTPException(status_code=403, detail="Private study groups do not allow direct join")
+    if not is_admin:
+        _enforce_study_group_join_guardrails(user=user, auth_rate_limit_store=auth_rate_limit_store)
     joined = auth_store.join_study_group(groupId, user_id=user.user_id)
+    if not is_admin:
+        _record_study_group_join(user, auth_rate_limit_store)
     return {"ok": True, "data": _group_to_dto(joined)}
 
 
@@ -335,10 +518,16 @@ def create_study_group_join_request(
     req: CreateStudyGroupJoinRequest,
     request: Request,
     auth_store: AuthStore = Depends(get_auth_store),
+    auth_rate_limit_store: AuthRateLimitStore = Depends(get_auth_rate_limit_store),
 ) -> dict:
     user = require_request_auth_user(request)
     _require_visible_group(request, auth_store, groupId)
+    is_admin = request_user_has_global_role(request, auth_store, ("super_admin", "admin"))
+    if not is_admin:
+        _enforce_study_group_join_request_guardrails(user=user, auth_rate_limit_store=auth_rate_limit_store)
     item = auth_store.create_study_group_join_request(groupId, requester_user_id=user.user_id, message=req.message)
+    if not is_admin:
+        _record_study_group_join_request(user, auth_rate_limit_store)
     return {"ok": True, "data": _join_request_to_dto(item)}
 
 
@@ -392,12 +581,18 @@ def create_study_group_post(
     req: CreateStudyGroupPostRequest,
     request: Request,
     auth_store: AuthStore = Depends(get_auth_store),
+    auth_rate_limit_store: AuthRateLimitStore = Depends(get_auth_rate_limit_store),
 ) -> dict:
     user = require_request_auth_user(request)
     group, _ = _require_visible_group(request, auth_store, groupId)
     if group.member_role is None:
         raise HTTPException(status_code=403, detail="Only study group members can post")
+    is_admin = request_user_has_global_role(request, auth_store, ("super_admin", "admin"))
+    if not is_admin:
+        _enforce_study_group_post_guardrails(user=user, auth_rate_limit_store=auth_rate_limit_store)
     post = auth_store.create_study_group_post(groupId, author_user_id=user.user_id, kind=req.kind, content=req.content)
+    if not is_admin:
+        _record_study_group_post(user, auth_rate_limit_store)
     return {"ok": True, "data": _post_to_dto(post)}
 
 
@@ -421,12 +616,18 @@ def create_study_group_post_comment(
     req: CreateStudyGroupPostCommentRequest,
     request: Request,
     auth_store: AuthStore = Depends(get_auth_store),
+    auth_rate_limit_store: AuthRateLimitStore = Depends(get_auth_rate_limit_store),
 ) -> dict:
     user = require_request_auth_user(request)
     group, _ = _require_visible_group(request, auth_store, groupId)
     if group.member_role is None:
         raise HTTPException(status_code=403, detail="Only study group members can comment")
+    is_admin = request_user_has_global_role(request, auth_store, ("super_admin", "admin"))
+    if not is_admin:
+        _enforce_study_group_comment_guardrails(user=user, auth_rate_limit_store=auth_rate_limit_store)
     comment = auth_store.create_study_group_post_comment(groupId, postId, author_user_id=user.user_id, content=req.content)
+    if not is_admin:
+        _record_study_group_comment(user, auth_rate_limit_store)
     return {"ok": True, "data": _post_comment_to_dto(comment)}
 
 

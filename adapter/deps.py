@@ -4,6 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from backend.system.api import SystemAPI
+from backend.system.auth_rate_limit_store import AuthRateLimitStore
 from backend.system.auth_store import AuthStore
 from backend.system.inmemory_system import InMemorySystem
 from backend.system.membership_marketing_store import MembershipMarketingStore
@@ -23,6 +24,11 @@ def get_api() -> SystemAPI:
 @lru_cache(maxsize=1)
 def get_auth_store() -> AuthStore:
     return AuthStore()
+
+
+@lru_cache(maxsize=1)
+def get_auth_rate_limit_store() -> AuthRateLimitStore:
+    return AuthRateLimitStore()
 
 
 @lru_cache(maxsize=1)

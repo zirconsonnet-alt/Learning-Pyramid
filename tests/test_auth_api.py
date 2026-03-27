@@ -5,12 +5,20 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from adapter.deps import get_api, get_auth_store, get_membership_marketing_store, get_membership_payment_service, get_membership_store
+from adapter.deps import (
+    get_api,
+    get_auth_rate_limit_store,
+    get_auth_store,
+    get_membership_marketing_store,
+    get_membership_payment_service,
+    get_membership_store,
+)
 from adapter.main import create_app
 
 
 def _reset_caches() -> None:
     get_api.cache_clear()
+    get_auth_rate_limit_store.cache_clear()
     get_auth_store.cache_clear()
     get_membership_marketing_store.cache_clear()
     get_membership_payment_service.cache_clear()
@@ -170,3 +178,95 @@ def test_project_can_be_renamed(auth_env: None) -> None:
     audit_events = client.get(f"/api/projects/{project_id}/audit-log-events")
     assert audit_events.status_code == 200
     assert audit_events.json()["data"][-1]["apiName"] == "edit_project"
+
+
+def test_register_rejects_invalid_email(auth_env: None) -> None:
+    client = TestClient(create_app())
+
+    resp = client.post("/api/auth/register", json={"email": "not-an-email", "password": "password123"})
+
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "INVALID_INPUT"
+    assert resp.json()["error"]["message"] == "Request validation failed"
+
+
+def test_login_rejects_invalid_email(auth_env: None) -> None:
+    client = TestClient(create_app())
+
+    resp = client.post("/api/auth/login", json={"email": "not-an-email", "password": "password123"})
+
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "INVALID_INPUT"
+    assert resp.json()["error"]["message"] == "Request validation failed"
+
+
+def test_hosted_mode_enables_auth_rate_limits_by_default(auth_env: None) -> None:
+    assert get_auth_rate_limit_store().config.enabled is True
+
+
+def test_signup_rate_limit_blocks_repeated_attempts(auth_env: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PLM_AUTH_SIGNUP_MAX_ATTEMPTS_PER_IP", "2")
+    monkeypatch.setenv("PLM_AUTH_SIGNUP_MAX_ATTEMPTS_PER_EMAIL", "5")
+    _reset_caches()
+
+    client = TestClient(create_app())
+    first = client.post("/api/auth/register", json={"email": "first@example.com", "password": "password123"})
+    second = client.post("/api/auth/register", json={"email": "second@example.com", "password": "password123"})
+    blocked = client.post("/api/auth/register", json={"email": "third@example.com", "password": "password123"})
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert blocked.status_code == 429
+    assert blocked.json()["error"]["code"] == "TOO_MANY_REQUESTS"
+    assert blocked.json()["error"]["message"] == "Too many sign-up attempts. Try again later."
+    assert int(blocked.headers["Retry-After"]) >= 1
+
+
+def test_login_rate_limit_blocks_repeated_failures(auth_env: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PLM_AUTH_LOGIN_MAX_FAILURES_PER_IP", "10")
+    monkeypatch.setenv("PLM_AUTH_LOGIN_MAX_FAILURES_PER_EMAIL", "2")
+    _reset_caches()
+
+    app = create_app()
+    register_client = TestClient(app)
+    login_client = TestClient(app)
+
+    register = register_client.post("/api/auth/register", json={"email": "member@example.com", "password": "password123"})
+    assert register.status_code == 200
+
+    first = login_client.post("/api/auth/login", json={"email": "member@example.com", "password": "wrong-password"})
+    second = login_client.post("/api/auth/login", json={"email": "member@example.com", "password": "wrong-password"})
+    blocked = login_client.post("/api/auth/login", json={"email": "member@example.com", "password": "wrong-password"})
+
+    assert first.status_code == 401
+    assert second.status_code == 401
+    assert blocked.status_code == 429
+    assert blocked.json()["error"]["code"] == "TOO_MANY_REQUESTS"
+    assert blocked.json()["error"]["message"] == "Too many login attempts. Try again later."
+    assert int(blocked.headers["Retry-After"]) >= 1
+
+
+def test_successful_login_resets_email_failure_counter(auth_env: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PLM_AUTH_LOGIN_MAX_FAILURES_PER_IP", "10")
+    monkeypatch.setenv("PLM_AUTH_LOGIN_MAX_FAILURES_PER_EMAIL", "2")
+    _reset_caches()
+
+    app = create_app()
+    register_client = TestClient(app)
+    login_client = TestClient(app)
+
+    register = register_client.post("/api/auth/register", json={"email": "member@example.com", "password": "password123"})
+    assert register.status_code == 200
+
+    wrong_before_reset = login_client.post("/api/auth/login", json={"email": "member@example.com", "password": "wrong-password"})
+    good_after_reset = login_client.post("/api/auth/login", json={"email": "member@example.com", "password": "password123"})
+    wrong_after_reset_one = login_client.post("/api/auth/login", json={"email": "member@example.com", "password": "wrong-password"})
+    wrong_after_reset_two = login_client.post("/api/auth/login", json={"email": "member@example.com", "password": "wrong-password"})
+    blocked = login_client.post("/api/auth/login", json={"email": "member@example.com", "password": "wrong-password"})
+
+    assert wrong_before_reset.status_code == 401
+    assert good_after_reset.status_code == 200
+    assert wrong_after_reset_one.status_code == 401
+    assert wrong_after_reset_two.status_code == 401
+    assert blocked.status_code == 429
+    assert blocked.json()["error"]["code"] == "TOO_MANY_REQUESTS"

@@ -59,7 +59,7 @@ function CouponSummaryCard(props: { coupon: CouponRecord }) {
 
 export function MembershipPage() {
   const [selectedCouponId, setSelectedCouponId] = useState("")
-  const [selectedProvider, setSelectedProvider] = useState("manual_test")
+  const [selectedProvider, setSelectedProvider] = useState("")
   const [inviteCodeInput, setInviteCodeInput] = useState("")
   const [purchaseOpen, setPurchaseOpen] = useState(false)
   const [latestCheckout, setLatestCheckout] = useState<MembershipCreateOrderResult | null>(null)
@@ -78,13 +78,13 @@ export function MembershipPage() {
   const availableCoupons = (couponsQ.data ?? []).filter((item) => item.status === "available")
   const couponHistory = (couponsQ.data ?? []).slice(0, 6)
   const pendingOrder = (ordersQ.data ?? []).find((item) => item.status === "pending")
-  const supportedProviders = summaryQ.data?.supportedPaymentProviders ?? ["manual_test"]
+  const supportedProviders = summaryQ.data?.supportedPaymentProviders ?? []
+  const effectiveSelectedProvider = supportedProviders.includes(selectedProvider)
+    ? selectedProvider
+    : supportedProviders.includes("wechat_native")
+      ? "wechat_native"
+      : supportedProviders[0] ?? ""
   const activeCheckout = latestCheckout?.order.orderId === pendingOrder?.orderId ? latestCheckout : null
-
-  useEffect(() => {
-    if (supportedProviders.includes(selectedProvider)) return
-    setSelectedProvider(supportedProviders.includes("wechat_native") ? "wechat_native" : supportedProviders[0] ?? "manual_test")
-  }, [selectedProvider, supportedProviders])
 
   useEffect(() => {
     if (!latestCheckout) return
@@ -95,9 +95,13 @@ export function MembershipPage() {
   }, [latestCheckout, ordersQ.data])
 
   async function onCreateOrder() {
+    if (!effectiveSelectedProvider) {
+      showErrorFeedback("创建会员订单失败", "当前部署还没有开启可用支付方式。请先完成微信支付配置。")
+      return
+    }
     try {
       const result = await createOrder.mutateAsync({
-        provider: selectedProvider,
+        provider: effectiveSelectedProvider,
         couponId: selectedCouponId || undefined,
       })
       setLatestCheckout(result)
@@ -107,7 +111,7 @@ export function MembershipPage() {
           ? `微信支付二维码已经生成，实付 ${formatMembershipPrice(result.order.payableAmountCent)}。`
           : result.order.couponDiscountCent > 0
             ? `本单已使用优惠券，实付 ${formatMembershipPrice(result.order.payableAmountCent)}。`
-            : "这笔订单已经生成，现在可以继续模拟支付完成会员开通。",
+            : "这笔订单已经生成，现在可以继续完成测试支付链路。",
       )
       setPurchaseOpen(false)
     } catch (err) {
@@ -228,27 +232,36 @@ export function MembershipPage() {
   const inviteSummary = inviteSummaryQ.data
   const preview = previewQ.data
   const recentInvites = inviteSummary?.recentInvites ?? []
+  const purchaseEntryDescription =
+    supportedProviders.length === 0
+      ? "当前部署还没有开启可用支付方式。完成微信支付配置后，这里会开放创建订单。"
+      : supportedProviders.includes("manual_test") && !supportedProviders.includes("wechat_native")
+        ? "当前部署保留测试支付链路，适合本地或验收环境继续验证会员流程。"
+        : "先通过弹窗确认价格和支付方式，再创建待支付订单。当前部署会直接生成微信扫码支付二维码。"
+  const ordersDescription = supportedProviders.includes("manual_test")
+    ? "待支付订单会根据渠道展示不同操作。微信扫码支付会显示二维码和状态同步入口；测试环境会额外显示模拟成功按钮。"
+    : "待支付订单会根据渠道展示不同操作。微信扫码支付会显示二维码和状态同步入口。"
 
   return (
     <>
-        <MembershipPurchaseDialog
-          open={purchaseOpen}
-          onOpenChange={setPurchaseOpen}
-          summary={summary}
-          preview={preview}
-          previewError={previewQ.error}
-          previewLoading={previewQ.isLoading}
-          selectedCouponId={selectedCouponId}
-          selectedProvider={selectedProvider}
-          supportedProviders={supportedProviders}
-          availableCoupons={availableCoupons}
-          pendingOrder={pendingOrder}
-          createPending={createOrder.isPending}
-          confirmPending={confirmPayment.isPending}
-          onSelectCoupon={setSelectedCouponId}
-          onSelectProvider={setSelectedProvider}
-          onConfirm={() => void onCreateOrder()}
-        />
+      <MembershipPurchaseDialog
+        open={purchaseOpen}
+        onOpenChange={setPurchaseOpen}
+        summary={summary}
+        preview={preview}
+        previewError={previewQ.error}
+        previewLoading={previewQ.isLoading}
+        selectedCouponId={selectedCouponId}
+        selectedProvider={effectiveSelectedProvider}
+        supportedProviders={supportedProviders}
+        availableCoupons={availableCoupons}
+        pendingOrder={pendingOrder}
+        createPending={createOrder.isPending}
+        confirmPending={confirmPayment.isPending}
+        onSelectCoupon={setSelectedCouponId}
+        onSelectProvider={setSelectedProvider}
+        onConfirm={() => void onCreateOrder()}
+      />
 
       <div className="space-y-6">
         <section className="rounded-[2rem] border border-[#d6e2ee] bg-[radial-gradient(circle_at_top_left,_rgba(226,239,255,0.9),_rgba(255,255,255,0.98)_46%),radial-gradient(circle_at_80%_20%,_rgba(255,226,176,0.28),_transparent_28%),linear-gradient(135deg,_#f7fbff_0%,_#edf5ff_100%)] p-6 shadow-[0_24px_50px_-38px_rgba(15,23,42,0.38)]">
@@ -262,13 +275,13 @@ export function MembershipPage() {
               <div className="space-y-2">
                 <h1 className="text-3xl font-semibold tracking-tight text-[#17324d]">会员中心</h1>
                 <p className="max-w-3xl text-sm leading-7 text-[#60728a]">
-                  会员状态、邀请码、优惠券和最近邀请记录都集中在这里。现在这页已经支持真实支付第一版，可以直接生成微信扫码支付二维码，也保留测试支付入口方便继续验收。
+                  会员状态、邀请码、优惠券和最近邀请记录都集中在这里。可用支付方式会跟随当前部署配置自动显示，不需要再手动区分环境。
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button
                   onClick={() => setPurchaseOpen(true)}
-                  disabled={createOrder.isPending || confirmPayment.isPending || syncPayment.isPending || closeOrder.isPending}
+                  disabled={createOrder.isPending || confirmPayment.isPending || syncPayment.isPending || closeOrder.isPending || (supportedProviders.length === 0 && !pendingOrder)}
                 >
                   {pendingOrder ? "继续待支付订单" : summary?.isActive ? "立即续费" : "立即开通"}
                 </Button>
@@ -330,13 +343,11 @@ export function MembershipPage() {
               </div>
               <div className="rounded-[1.4rem] border border-[#d9e6f2] bg-[#f8fbff] p-4">
                 <div className="text-[11px] uppercase tracking-[0.14em] text-[#7a8ca3]">购买入口</div>
-                <div className="mt-2 text-sm leading-6 text-[#62758d]">
-                  先通过弹窗确认价格和支付方式，再创建待支付订单。已配置微信 Native 时会直接生成扫码二维码，否则仍可使用 <code>manual_test</code> 继续走验收链路。
-                </div>
+                <div className="mt-2 text-sm leading-6 text-[#62758d]">{purchaseEntryDescription}</div>
                 <Button
                   onClick={() => setPurchaseOpen(true)}
                   className="mt-4 w-full"
-                  disabled={createOrder.isPending || confirmPayment.isPending || syncPayment.isPending || closeOrder.isPending}
+                  disabled={createOrder.isPending || confirmPayment.isPending || syncPayment.isPending || closeOrder.isPending || (supportedProviders.length === 0 && !pendingOrder)}
                 >
                   {pendingOrder ? "更新待支付订单" : "打开购买弹窗"}
                 </Button>
@@ -504,19 +515,19 @@ export function MembershipPage() {
         </Card>
 
         <Card className="border-[#d9e3ee] bg-white/86">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-xl">
-              <ReceiptText className="h-5 w-5 text-primary" />
-              最近订单
-            </CardTitle>
-            <CardDescription>待支付订单会根据渠道展示不同操作。微信扫码支付会显示二维码和状态同步入口，测试支付仍保留模拟成功按钮。</CardDescription>
-          </CardHeader>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-xl">
+                <ReceiptText className="h-5 w-5 text-primary" />
+                最近订单
+              </CardTitle>
+              <CardDescription>{ordersDescription}</CardDescription>
+            </CardHeader>
           <CardContent className="space-y-4">
             {ordersQ.error ? <ErrorNotice title="订单列表加载失败" message={formatMembershipApiError(ordersQ.error)} /> : null}
             {!ordersQ.error && ordersQ.isLoading ? <LoadingNotice title="正在加载订单列表" message="我们正在同步最近的会员订单状态。" /> : null}
             {!ordersQ.error && !ordersQ.isLoading && (ordersQ.data?.length ?? 0) === 0 ? (
               <div className="rounded-[1.4rem] border border-dashed border-[#d7e0ea] bg-[#fbfdff] px-5 py-10 text-center text-sm text-[#697b92]">
-                你还没有会员订单。可以先打开购买弹窗创建一笔测试订单，看看完整流程。
+                你还没有会员订单。可以先打开购买弹窗创建第一笔订单。
               </div>
             ) : null}
             {ordersQ.data?.map((order) => (
