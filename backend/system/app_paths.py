@@ -48,6 +48,10 @@ def default_auth_db_path() -> Path:
     return default_data_dir() / "plm_auth.sqlite3"
 
 
+def default_membership_db_path() -> Path:
+    return default_data_dir() / "plm_membership.sqlite3"
+
+
 def runtime_dir() -> Path:
     return default_data_dir() / "runtime"
 
@@ -90,6 +94,13 @@ def resolve_auth_db_path() -> Path:
     if raw:
         return Path(raw).expanduser()
     return default_auth_db_path()
+
+
+def resolve_membership_db_path() -> Path:
+    raw = os.getenv("PLM_MEMBERSHIP_DB_PATH", "").strip()
+    if raw:
+        return Path(raw).expanduser()
+    return default_membership_db_path()
 
 
 def resolve_store_db_path() -> Path:

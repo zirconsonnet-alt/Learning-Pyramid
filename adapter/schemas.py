@@ -25,6 +25,46 @@ class AuthCredentialsRequest(BaseModel):
     password: str = Field(min_length=8)
 
 
+class RegisterAuthRequest(BaseModel):
+    email: str = Field(min_length=3)
+    password: str = Field(min_length=8)
+    inviteCode: Optional[str] = Field(default=None, min_length=1, max_length=32)
+
+
+class PreviewMembershipOrderRequest(BaseModel):
+    couponId: Optional[str] = Field(default=None, min_length=1)
+
+
+class CreateMembershipOrderRequest(BaseModel):
+    provider: str = Field(default="manual_test", min_length=1)
+    couponId: Optional[str] = Field(default=None, min_length=1)
+
+
+class ConfirmMembershipPaymentRequest(BaseModel):
+    orderId: str = Field(min_length=1)
+    providerTradeNo: Optional[str] = Field(default=None, min_length=1)
+
+
+class BindInviteCodeRequest(BaseModel):
+    inviteCode: str = Field(min_length=1, max_length=32)
+
+
+class AdminGrantMembershipCouponRequest(BaseModel):
+    userId: str = Field(min_length=1)
+    amountCent: int = Field(ge=1)
+    title: str = Field(min_length=1, max_length=60)
+    expiresInDays: int = Field(ge=1, le=365)
+    minSpendCent: int = Field(default=0, ge=0)
+
+
+class AdminVoidMembershipCouponRequest(BaseModel):
+    reason: Optional[str] = Field(default="", max_length=200)
+
+
+class AdminRefundMembershipOrderRequest(BaseModel):
+    reason: Optional[str] = Field(default="", max_length=200)
+
+
 class UpdateProfileRequest(BaseModel):
     nickname: str = Field(min_length=1, max_length=40)
     bio: Optional[str] = Field(default="", max_length=500)

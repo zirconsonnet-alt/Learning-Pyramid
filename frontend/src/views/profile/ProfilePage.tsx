@@ -25,6 +25,7 @@ import { useChangeMyPassword, useMyProfile, useUpdateMyProfile, useUploadMyAvata
 import { getLocalDateKey, loadDailyPlaybackTotalsByDate } from "@/ui/store/workbenchDailyStats"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { cn } from "@/ui/utils"
+import { MembershipProfilePanel } from "@/views/membership/components/MembershipProfilePanel"
 
 import {
   buildCurveGeometry,
@@ -618,6 +619,8 @@ export function ProfilePage() {
                 </div>
               </div>
             </div>
+
+            <MembershipProfilePanel />
 
             <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-4">
               <StatTile icon={FolderKanban} label="学习项目" value={String(activeProjectCount)} hint="当前仍在运行中的项目数量。" />

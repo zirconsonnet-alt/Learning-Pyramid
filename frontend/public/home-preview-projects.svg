@@ -1,0 +1,41 @@
+<svg width="960" height="640" viewBox="0 0 960 640" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="960" height="640" rx="34" fill="#EEF4FA"/>
+  <rect x="20" y="20" width="920" height="600" rx="28" fill="#F9FCFF" stroke="#D6E3F0"/>
+  <rect x="44" y="42" width="872" height="70" rx="22" fill="#FFFFFF" stroke="#DEE8F2"/>
+  <circle cx="80" cy="77" r="7" fill="#F2A067"/>
+  <circle cx="105" cy="77" r="7" fill="#E6C55D"/>
+  <circle cx="130" cy="77" r="7" fill="#8AC889"/>
+  <text x="164" y="84" fill="#18344F" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="24" font-weight="700">所有项目</text>
+  <rect x="790" y="56" width="102" height="40" rx="20" fill="#E8F1FF"/>
+  <text x="823" y="81" fill="#23548D" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="17" font-weight="700">2 个项目</text>
+
+  <rect x="44" y="136" width="872" height="118" rx="24" fill="white" stroke="#DFE8F1"/>
+  <text x="76" y="175" fill="#17324E" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="28" font-weight="700">高数入门训练营</text>
+  <text x="76" y="210" fill="#667A91" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="18">最近使用 · 运行中 · 今天已学习</text>
+  <rect x="76" y="226" width="132" height="36" rx="18" fill="#EEF5FF"/>
+  <text x="112" y="249" fill="#1D4F8F" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="16" font-weight="700">运行中</text>
+  <rect x="724" y="166" width="160" height="44" rx="22" fill="#173554"/>
+  <text x="773" y="194" fill="white" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="700">进入工作台</text>
+  <rect x="546" y="166" width="156" height="44" rx="22" fill="#F4F8FC" stroke="#D8E4F0"/>
+  <text x="595" y="194" fill="#42566F" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="700">项目设置</text>
+
+  <rect x="44" y="274" width="424" height="150" rx="24" fill="white" stroke="#DFE8F1"/>
+  <text x="72" y="314" fill="#17324E" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="24" font-weight="700">英语听力打卡</text>
+  <text x="72" y="347" fill="#667A91" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="18">最近创建 · 已就绪 · 昨天学习过</text>
+  <rect x="72" y="364" width="118" height="34" rx="17" fill="#FFF4DF"/>
+  <text x="104" y="386" fill="#8B5A15" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="16" font-weight="700">已就绪</text>
+
+  <rect x="492" y="274" width="424" height="150" rx="24" fill="white" stroke="#DFE8F1"/>
+  <text x="520" y="314" fill="#17324E" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700">学习节奏一眼可见</text>
+  <text x="520" y="350" fill="#61758D" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="18">项目卡片里直接给出学习状态、最近使用与入口动作。</text>
+  <rect x="520" y="372" width="146" height="34" rx="17" fill="#F7FBFF" stroke="#DCE8F4"/>
+  <text x="556" y="394" fill="#5F738B" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="16" font-weight="700">对象树 / 任务树</text>
+  <rect x="678" y="372" width="148" height="34" rx="17" fill="#F7FBFF" stroke="#DCE8F4"/>
+  <text x="714" y="394" fill="#5F738B" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="16" font-weight="700">实例 / 回放链</text>
+
+  <rect x="44" y="446" width="872" height="142" rx="24" fill="#EDF5FF" stroke="#D6E4F3"/>
+  <text x="72" y="485" fill="#17324E" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700">这张图对应真实路由：/projects</text>
+  <text x="72" y="522" fill="#60748B" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="18">用户不是先看见一个空白登录框，而是先看到项目结构、状态感和下一步动作。</text>
+  <rect x="72" y="540" width="128" height="28" rx="14" fill="white"/>
+  <text x="104" y="559" fill="#23548D" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="14" font-weight="700">ProjectsPage</text>
+</svg>

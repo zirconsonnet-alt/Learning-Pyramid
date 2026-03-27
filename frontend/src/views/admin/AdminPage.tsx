@@ -168,7 +168,18 @@ export function AdminPage() {
         ))}
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-3">
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-lg">会员运营页</CardTitle>
+            <CardDescription>订单、邀请码和优惠券都收在一起，更适合处理会员转化和风控动作。</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button asChild variant="outline">
+              <Link to="/admin/membership">前往会员运营</Link>
+            </Button>
+          </CardContent>
+        </Card>
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-lg">用户管理页</CardTitle>

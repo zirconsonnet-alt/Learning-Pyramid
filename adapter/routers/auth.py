@@ -4,9 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from adapter.auth import SESSION_COOKIE_NAME, clear_auth_cookie, resolve_session_user, set_auth_cookie
-from adapter.deps import get_auth_store
-from adapter.schemas import AuthCredentialsRequest
-from backend.models.errors import PreconditionFailure
+from adapter.deps import get_auth_store, get_membership_marketing_store
+from adapter.schemas import AuthCredentialsRequest, RegisterAuthRequest
+from backend.models.errors import NotFound, PreconditionFailure
 from backend.system.auth_store import AuthStore, AuthUser
 from backend.system.runtime_features import current_runtime_features
 
@@ -30,13 +30,30 @@ def _user_to_dto(user: AuthUser, auth_store: AuthStore) -> dict[str, object]:
 
 
 @router.post("/auth/register")
-def register_auth_user(req: AuthCredentialsRequest, auth_store: AuthStore = Depends(get_auth_store)) -> JSONResponse:
+def register_auth_user(
+    req: RegisterAuthRequest,
+    auth_store: AuthStore = Depends(get_auth_store),
+) -> JSONResponse:
     features = current_runtime_features()
     if not features.auth_enabled:
         raise HTTPException(status_code=404, detail="Not found")
     if not features.allow_signup:
         raise HTTPException(status_code=403, detail="Sign-up is disabled in this deployment")
+    inviter = None
+    invite_code = str(req.inviteCode or "").strip()
+    if invite_code:
+        try:
+            inviter = auth_store.get_user_by_public_uid(invite_code)
+        except NotFound as exc:
+            raise PreconditionFailure("invite code does not exist") from exc
     user = auth_store.create_user(req.email, req.password)
+    if inviter is not None:
+        membership_marketing_store = get_membership_marketing_store()
+        membership_marketing_store.bind_invite_code(
+            user.user_id,
+            inviter_user_id=inviter.user_id,
+            invite_code_snapshot=inviter.public_uid,
+        )
     session_token = auth_store.create_session(user.user_id)
     resp = JSONResponse(content={"ok": True, "data": _user_to_dto(user, auth_store)})
     set_auth_cookie(resp, session_token)

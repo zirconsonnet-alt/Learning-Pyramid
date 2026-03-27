@@ -1,0 +1,44 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <circle cx="168" cy="122" r="156" fill="url(#orbA)" fill-opacity="0.55"/>
+  <circle cx="1018" cy="122" r="150" fill="url(#orbB)" fill-opacity="0.5"/>
+  <rect x="70" y="78" width="1060" height="474" rx="34" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.18)"/>
+  <rect x="98" y="104" width="76" height="76" rx="24" fill="url(#logo)"/>
+  <path d="M123 159V137.4L152 104H165L142.8 129.6H180V140H123V159Z" fill="white"/>
+  <path d="M133 98H163V108.4H142.5V159H133V98Z" fill="#D8ECFF"/>
+  <text x="203" y="142" fill="white" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="26" font-weight="700" letter-spacing="4">LEARNINGPYRAMID</text>
+  <text x="98" y="258" fill="#F8FBFF" font-family="'Iowan Old Style', Georgia, serif" font-size="66" font-weight="700">
+    把学习产品的结构、回放和增长
+  </text>
+  <text x="98" y="334" fill="#F8FBFF" font-family="'Iowan Old Style', Georgia, serif" font-size="66" font-weight="700">
+    收进同一个真正能跑起来的首页
+  </text>
+  <text x="98" y="414" fill="#D7E7FA" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="28">
+    知识工程、学习回放、会员订阅、邀请奖励、后台运营与支付补偿工作台
+  </text>
+  <rect x="98" y="466" width="168" height="50" rx="25" fill="rgba(255,255,255,0.14)" stroke="rgba(255,255,255,0.22)"/>
+  <text x="130" y="498" fill="white" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="21" font-weight="600">首页 + 会员 + 后台</text>
+  <rect x="284" y="466" width="114" height="50" rx="25" fill="rgba(255,255,255,0.14)" stroke="rgba(255,255,255,0.22)"/>
+  <text x="318" y="498" fill="white" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="21" font-weight="600">微信支付</text>
+  <rect x="416" y="466" width="152" height="50" rx="25" fill="rgba(255,255,255,0.14)" stroke="rgba(255,255,255,0.22)"/>
+  <text x="447" y="498" fill="white" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="21" font-weight="600">邀请返 5 元券</text>
+  <defs>
+    <linearGradient id="bg" x1="103" y1="42" x2="1085" y2="606" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#123E6B"/>
+      <stop offset="0.52" stop-color="#245891"/>
+      <stop offset="1" stop-color="#356F9F"/>
+    </linearGradient>
+    <linearGradient id="logo" x1="98" y1="104" x2="174" y2="180" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0E345B"/>
+      <stop offset="1" stop-color="#2F76C2"/>
+    </linearGradient>
+    <radialGradient id="orbA" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(168 122) rotate(90) scale(156)">
+      <stop stop-color="#F2C17A"/>
+      <stop offset="1" stop-color="#F2C17A" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="orbB" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(1018 122) rotate(90) scale(150)">
+      <stop stop-color="#8CC2FF"/>
+      <stop offset="1" stop-color="#8CC2FF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+</svg>

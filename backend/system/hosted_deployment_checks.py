@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from urllib.parse import urlsplit
 
+from backend.system.membership_payment_service import current_wechat_native_payment_config
 from backend.system.runtime_features import current_runtime_features
 from backend.system.sql_backend import current_sql_runtime_config
 
@@ -71,6 +72,25 @@ def hosted_runtime_warnings() -> tuple[str, ...]:
         pg_password = _postgres_password_candidate()
         if not pg_password or pg_password.strip().lower() == "learningpyramid" or _looks_like_placeholder(pg_password):
             warnings.append("PostgreSQL credentials still look like example values. Update PLM_POSTGRES_PASSWORD and PLM_POSTGRES_DSN before deployment.")
+
+    wechat_config = current_wechat_native_payment_config()
+    wechat_fields = (
+        _env_text("PLM_WECHAT_PAY_APP_ID"),
+        _env_text("PLM_WECHAT_PAY_MCH_ID"),
+        _env_text("PLM_WECHAT_PAY_CERT_SERIAL_NO"),
+        _env_text("PLM_WECHAT_PAY_API_V3_KEY"),
+        _env_text("PLM_WECHAT_PAY_PRIVATE_KEY_PEM_PATH"),
+        _env_text("PLM_WECHAT_PAY_PUBLIC_KEY_ID"),
+        _env_text("PLM_WECHAT_PAY_PUBLIC_KEY_PEM_PATH"),
+        _env_text("PLM_WECHAT_PAY_NOTIFY_URL"),
+        _env_text("PLM_WECHAT_PAY_REFUND_NOTIFY_URL"),
+    )
+    if any(wechat_fields) and not wechat_config.enabled:
+        warnings.append("WeChat Native payment configuration is only partially filled. Complete every required PLM_WECHAT_PAY_* value or clear them all.")
+    if wechat_config.enabled and not (_env_text("PLM_PUBLIC_ORIGIN") or wechat_config.notify_url):
+        warnings.append("WeChat Native payment is enabled but neither PLM_PUBLIC_ORIGIN nor PLM_WECHAT_PAY_NOTIFY_URL is configured.")
+    if wechat_config.enabled and not (_env_text("PLM_PUBLIC_ORIGIN") or wechat_config.refund_notify_url or wechat_config.notify_url):
+        warnings.append("WeChat Native refunds need PLM_PUBLIC_ORIGIN, PLM_WECHAT_PAY_REFUND_NOTIFY_URL, or a usable PLM_WECHAT_PAY_NOTIFY_URL before production use.")
 
     return tuple(warnings)
 

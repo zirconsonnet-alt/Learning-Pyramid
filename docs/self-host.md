@@ -46,6 +46,8 @@ Before first public deploy, update at least:
 - `PLM_PUBLIC_ORIGIN`
 - `PLM_TRUSTED_HOSTS`
 
+If you plan to enable paid membership, also read [membership-selfhost-launch-checklist.md](/i:/Projects/LearningPyramid/docs/membership-selfhost-launch-checklist.md) before public launch.
+
 ## Runtime shape
 
 - FastAPI serves the built frontend and the API from one container.
@@ -139,6 +141,23 @@ Use these endpoints in deployment:
 Readiness returns `503` when the configured store or auth backend is degraded. API responses include `X-Request-ID`, and request logs include request id, path, status, and latency.
 
 The default self-host compose now uses `/api/health` as the container healthcheck target.
+
+## Membership payment operations
+
+The current hosted build supports `wechat_native` membership payment, async notify, refund notify, admin payment sync, and pending-order reconciliation.
+
+Run a one-shot reconciliation sweep with:
+
+```bash
+python tools/reconcile_membership_payments.py
+```
+
+The script inspects stale pending `wechat_native` membership orders, confirms remotely paid orders, and closes remotely terminated orders. Default behavior can be tuned with:
+
+- `PLM_MEMBERSHIP_PENDING_PAYMENT_RECONCILE_MIN_AGE_MINUTES`
+- `PLM_MEMBERSHIP_PENDING_PAYMENT_RECONCILE_LIMIT`
+
+Recommended production setup is to schedule this script every 5 minutes with the same runtime `.env` used by the hosted server.
 
 ## Backup, restore, and rollback
 

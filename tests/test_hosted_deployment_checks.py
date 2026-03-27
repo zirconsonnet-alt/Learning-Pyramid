@@ -37,3 +37,41 @@ def test_hosted_mode_warns_about_signup_and_example_postgres_password(monkeypatc
     assert "PLM_PUBLIC_ORIGIN is empty. Set it to the external HTTPS origin before public deployment." in warnings
     assert "PLM_TRUSTED_HOSTS is empty. Set it to the externally reachable host list." in warnings
     assert "PostgreSQL credentials still look like example values. Update PLM_POSTGRES_PASSWORD and PLM_POSTGRES_DSN before deployment." in warnings
+
+
+def test_hosted_mode_warns_about_partial_wechat_payment_config(monkeypatch) -> None:
+    monkeypatch.setenv("PLM_APP_MODE", "hosted")
+    monkeypatch.setenv("PLM_MEDIA_ACCESS_TOKEN_SECRET", "real-secret")
+    monkeypatch.setenv("PLM_WECHAT_PAY_APP_ID", "wx-test-app")
+    monkeypatch.setenv("PLM_WECHAT_PAY_MCH_ID", "1900000109")
+    monkeypatch.delenv("PLM_WECHAT_PAY_PRIVATE_KEY_PEM_PATH", raising=False)
+    monkeypatch.delenv("PLM_WECHAT_PAY_PUBLIC_KEY_PEM_PATH", raising=False)
+
+    warnings = hosted_runtime_warnings()
+
+    assert "WeChat Native payment configuration is only partially filled. Complete every required PLM_WECHAT_PAY_* value or clear them all." in warnings
+
+
+def test_hosted_mode_warns_when_wechat_payment_has_no_public_notify_origin(monkeypatch, tmp_path) -> None:
+    private_key_path = tmp_path / "wechat-apiclient-key.pem"
+    public_key_path = tmp_path / "wechatpay-public.pem"
+    private_key_path.write_text("test-private-key")
+    public_key_path.write_text("test-public-key")
+
+    monkeypatch.setenv("PLM_APP_MODE", "hosted")
+    monkeypatch.setenv("PLM_MEDIA_ACCESS_TOKEN_SECRET", "real-secret")
+    monkeypatch.setenv("PLM_WECHAT_PAY_APP_ID", "wx-test-app")
+    monkeypatch.setenv("PLM_WECHAT_PAY_MCH_ID", "1900000109")
+    monkeypatch.setenv("PLM_WECHAT_PAY_CERT_SERIAL_NO", "SERIALNO1234567890")
+    monkeypatch.setenv("PLM_WECHAT_PAY_API_V3_KEY", "0123456789ABCDEF0123456789ABCDEF")
+    monkeypatch.setenv("PLM_WECHAT_PAY_PRIVATE_KEY_PEM_PATH", str(private_key_path))
+    monkeypatch.setenv("PLM_WECHAT_PAY_PUBLIC_KEY_ID", "PUB_KEY_ID_TEST")
+    monkeypatch.setenv("PLM_WECHAT_PAY_PUBLIC_KEY_PEM_PATH", str(public_key_path))
+    monkeypatch.delenv("PLM_PUBLIC_ORIGIN", raising=False)
+    monkeypatch.delenv("PLM_WECHAT_PAY_NOTIFY_URL", raising=False)
+    monkeypatch.delenv("PLM_WECHAT_PAY_REFUND_NOTIFY_URL", raising=False)
+
+    warnings = hosted_runtime_warnings()
+
+    assert "WeChat Native payment is enabled but neither PLM_PUBLIC_ORIGIN nor PLM_WECHAT_PAY_NOTIFY_URL is configured." in warnings
+    assert "WeChat Native refunds need PLM_PUBLIC_ORIGIN, PLM_WECHAT_PAY_REFUND_NOTIFY_URL, or a usable PLM_WECHAT_PAY_NOTIFY_URL before production use." in warnings

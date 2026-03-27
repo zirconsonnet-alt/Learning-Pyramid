@@ -6,7 +6,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from adapter.deps import get_api, get_auth_store
+from adapter.deps import get_api, get_auth_store, get_membership_marketing_store, get_membership_payment_service, get_membership_store
 from adapter.errors import register_exception_handlers
 from adapter.main import create_app
 
@@ -14,6 +14,9 @@ from adapter.main import create_app
 def _reset_caches() -> None:
     get_api.cache_clear()
     get_auth_store.cache_clear()
+    get_membership_marketing_store.cache_clear()
+    get_membership_payment_service.cache_clear()
+    get_membership_store.cache_clear()
 
 
 def test_unknown_api_path_returns_error_envelope() -> None:

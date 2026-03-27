@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react"
-import { BookOpenText, CircleUserRound, FolderKanban, PanelsTopLeft, Settings2, Shield, UsersRound, Waypoints, Workflow } from "lucide-react"
+import { BookOpenText, CircleUserRound, CreditCard, FolderKanban, PanelsTopLeft, Settings2, Shield, UsersRound, Waypoints, Workflow } from "lucide-react"
 import { NavLink } from "react-router-dom"
 
 import { cn } from "@/ui/utils"
@@ -13,12 +13,13 @@ export type NavItem = {
 const BASE_GLOBAL_NAV_ITEMS: NavItem[] = [
   { to: "/projects", label: "项目中心", icon: FolderKanban },
   { to: "/groups", label: "学习小组", icon: UsersRound },
+  { to: "/membership", label: "会员中心", icon: CreditCard },
   { to: "/profile", label: "个人资料", icon: CircleUserRound },
   { to: "/guide", label: "用户指南", icon: BookOpenText },
 ]
 
-export function getGlobalNavItems(options?: { includeAdmin?: boolean }): NavItem[] {
-  const items = [...BASE_GLOBAL_NAV_ITEMS]
+export function getGlobalNavItems(options?: { includeAdmin?: boolean; includeMembership?: boolean }): NavItem[] {
+  const items = options?.includeMembership ? [...BASE_GLOBAL_NAV_ITEMS] : BASE_GLOBAL_NAV_ITEMS.filter((item) => item.to !== "/membership")
   if (options?.includeAdmin) {
     items.push({ to: "/admin", label: "后台管理", icon: Shield })
   }

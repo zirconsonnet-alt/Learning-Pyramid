@@ -1,0 +1,655 @@
+from __future__ import annotations
+
+import base64
+import json
+import os
+import uuid
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from io import BytesIO
+from pathlib import Path
+from typing import Mapping, Protocol
+from urllib.parse import quote, urlsplit, urlunsplit
+
+import qrcode
+import qrcode.image.svg
+import requests
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+from backend.models.errors import PreconditionFailure
+
+PAYMENT_PROVIDER_MANUAL_TEST = "manual_test"
+PAYMENT_PROVIDER_WECHAT_NATIVE = "wechat_native"
+
+
+def _env_text(name: str) -> str:
+    return str(os.getenv(name) or "").strip()
+
+
+def _normalize_provider(provider: str) -> str:
+    value = str(provider or "").strip().lower()
+    if value not in list_supported_membership_payment_providers():
+        supported = ", ".join(list_supported_membership_payment_providers())
+        raise PreconditionFailure(f"membership payment provider must be one of: {supported}")
+    return value
+
+
+def _normalize_status(value: str) -> str:
+    return str(value or "").strip().lower() or "unknown"
+
+
+def _parse_iso_datetime(value: str | None) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    parsed = datetime.fromisoformat(text)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _provider_label(provider: str) -> str:
+    normalized = _normalize_status(provider)
+    if normalized == PAYMENT_PROVIDER_WECHAT_NATIVE:
+        return "微信扫码支付"
+    if normalized == PAYMENT_PROVIDER_MANUAL_TEST:
+        return "测试支付"
+    return normalized
+
+
+def _safe_path(raw_path: str) -> Path | None:
+    text = str(raw_path or "").strip()
+    if not text:
+        return None
+    return Path(text).expanduser().resolve()
+
+
+@dataclass(frozen=True, slots=True)
+class WeChatNativePaymentConfig:
+    app_id: str
+    mch_id: str
+    cert_serial_no: str
+    api_v3_key: str
+    private_key_pem_path: Path | None
+    wechatpay_public_key_id: str
+    wechatpay_public_key_pem_path: Path | None
+    api_base_url: str
+    notify_url: str | None
+    refund_notify_url: str | None
+    timeout_seconds: float
+    description_prefix: str
+
+    @property
+    def enabled(self) -> bool:
+        return all(
+            (
+                self.app_id,
+                self.mch_id,
+                self.cert_serial_no,
+                self.api_v3_key,
+                len(self.api_v3_key) == 32,
+                self.private_key_pem_path is not None and self.private_key_pem_path.exists(),
+                self.wechatpay_public_key_id,
+                self.wechatpay_public_key_pem_path is not None and self.wechatpay_public_key_pem_path.exists(),
+            )
+        )
+
+
+def current_wechat_native_payment_config() -> WeChatNativePaymentConfig:
+    api_base_url = _env_text("PLM_WECHAT_PAY_API_BASE_URL") or "https://api.mch.weixin.qq.com"
+    raw_timeout = _env_text("PLM_WECHAT_PAY_TIMEOUT_SECONDS") or "10"
+    try:
+        timeout_seconds = max(3.0, float(raw_timeout))
+    except Exception:
+        timeout_seconds = 10.0
+    return WeChatNativePaymentConfig(
+        app_id=_env_text("PLM_WECHAT_PAY_APP_ID"),
+        mch_id=_env_text("PLM_WECHAT_PAY_MCH_ID"),
+        cert_serial_no=_env_text("PLM_WECHAT_PAY_CERT_SERIAL_NO"),
+        api_v3_key=_env_text("PLM_WECHAT_PAY_API_V3_KEY"),
+        private_key_pem_path=_safe_path(_env_text("PLM_WECHAT_PAY_PRIVATE_KEY_PEM_PATH")),
+        wechatpay_public_key_id=_env_text("PLM_WECHAT_PAY_PUBLIC_KEY_ID"),
+        wechatpay_public_key_pem_path=_safe_path(_env_text("PLM_WECHAT_PAY_PUBLIC_KEY_PEM_PATH")),
+        api_base_url=api_base_url.rstrip("/"),
+        notify_url=_env_text("PLM_WECHAT_PAY_NOTIFY_URL") or None,
+        refund_notify_url=_env_text("PLM_WECHAT_PAY_REFUND_NOTIFY_URL") or None,
+        timeout_seconds=timeout_seconds,
+        description_prefix=_env_text("PLM_WECHAT_PAY_DESCRIPTION_PREFIX") or "LearningPyramid 月会员",
+    )
+
+
+def list_supported_membership_payment_providers() -> tuple[str, ...]:
+    providers = {PAYMENT_PROVIDER_MANUAL_TEST}
+    if current_wechat_native_payment_config().enabled:
+        providers.add(PAYMENT_PROVIDER_WECHAT_NATIVE)
+    return tuple(sorted(providers))
+
+
+class MembershipOrderLike(Protocol):
+    order_id: str
+    user_id: str
+    order_type: str
+    payable_amount_cent: int
+    provider: str
+    expired_at: str | None
+
+
+class MembershipPaymentRecordLike(Protocol):
+    order_id: str
+    provider: str
+    provider_trade_no: str
+    amount_cent: int
+    refund_out_refund_no: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class MembershipPaymentPayload:
+    mode: str
+    provider: str
+    provider_label: str
+    instruction: str
+    provider_trade_no_hint: str
+    expires_at: str | None
+    code_url: str | None
+    qr_image_data_url: str | None
+    open_url: str | None
+    poll_interval_seconds: int | None
+    status_check_supported: bool
+
+
+@dataclass(frozen=True, slots=True)
+class MembershipRemotePaymentStatus:
+    provider: str
+    order_id: str
+    provider_trade_no: str
+    remote_status: str
+    paid_at: str | None
+    amount_cent: int | None
+    payer_id: str | None
+    raw_payload_json: str
+
+
+@dataclass(frozen=True, slots=True)
+class MembershipRemoteRefundStatus:
+    provider: str
+    order_id: str
+    refund_out_trade_no: str
+    provider_refund_no: str | None
+    remote_status: str
+    refunded_at: str | None
+    refund_amount_cent: int | None
+    raw_payload_json: str
+
+
+class MembershipPaymentService:
+    def __init__(self) -> None:
+        self._session = requests.Session()
+        self._private_key = None
+        self._wechat_public_key = None
+
+    def supported_providers(self) -> tuple[str, ...]:
+        return list_supported_membership_payment_providers()
+
+    def create_payment_payload(
+        self,
+        order: MembershipOrderLike,
+        *,
+        client_ip: str = "",
+        public_origin: str | None = None,
+    ) -> MembershipPaymentPayload:
+        provider = _normalize_provider(order.provider)
+        if provider == PAYMENT_PROVIDER_MANUAL_TEST:
+            return MembershipPaymentPayload(
+                mode=PAYMENT_PROVIDER_MANUAL_TEST,
+                provider=provider,
+                provider_label=_provider_label(provider),
+                instruction="通过 manual_test 回调可以继续模拟支付成功。",
+                provider_trade_no_hint=f"manual_{order.order_id}",
+                expires_at=order.expired_at,
+                code_url=None,
+                qr_image_data_url=None,
+                open_url=None,
+                poll_interval_seconds=None,
+                status_check_supported=False,
+            )
+        if provider == PAYMENT_PROVIDER_WECHAT_NATIVE:
+            return self._create_wechat_native_payload(order, client_ip=client_ip, public_origin=public_origin)
+        raise PreconditionFailure("membership payment provider is unavailable")
+
+    def query_payment_status(self, order: MembershipOrderLike) -> MembershipRemotePaymentStatus:
+        provider = _normalize_provider(order.provider)
+        if provider != PAYMENT_PROVIDER_WECHAT_NATIVE:
+            raise PreconditionFailure("membership payment status sync is only available for wechat_native")
+        return self._query_wechat_native_payment(order)
+
+    def parse_payment_notification(
+        self,
+        provider: str,
+        *,
+        headers: Mapping[str, str],
+        body_text: str,
+    ) -> MembershipRemotePaymentStatus:
+        normalized_provider = _normalize_provider(provider)
+        if normalized_provider != PAYMENT_PROVIDER_WECHAT_NATIVE:
+            raise PreconditionFailure("membership payment notification is unsupported for this provider")
+        return self._parse_wechat_native_notification(headers=headers, body_text=body_text)
+
+    def request_refund(
+        self,
+        order: MembershipOrderLike,
+        payment: MembershipPaymentRecordLike,
+        *,
+        reason: str = "",
+        public_origin: str | None = None,
+    ) -> MembershipRemoteRefundStatus:
+        provider = _normalize_provider(order.provider)
+        if provider != PAYMENT_PROVIDER_WECHAT_NATIVE:
+            raise PreconditionFailure("membership refund requests are only available for wechat_native")
+        return self._request_wechat_refund(order, payment, reason=reason, public_origin=public_origin)
+
+    def query_refund_status(
+        self,
+        order: MembershipOrderLike,
+        payment: MembershipPaymentRecordLike,
+    ) -> MembershipRemoteRefundStatus:
+        provider = _normalize_provider(order.provider)
+        if provider != PAYMENT_PROVIDER_WECHAT_NATIVE:
+            raise PreconditionFailure("membership refund status sync is only available for wechat_native")
+        return self._query_wechat_refund(order, payment)
+
+    def parse_refund_notification(
+        self,
+        provider: str,
+        *,
+        headers: Mapping[str, str],
+        body_text: str,
+    ) -> MembershipRemoteRefundStatus:
+        normalized_provider = _normalize_provider(provider)
+        if normalized_provider != PAYMENT_PROVIDER_WECHAT_NATIVE:
+            raise PreconditionFailure("membership refund notification is unsupported for this provider")
+        return self._parse_wechat_refund_notification(headers=headers, body_text=body_text)
+
+    def _create_wechat_native_payload(
+        self,
+        order: MembershipOrderLike,
+        *,
+        client_ip: str,
+        public_origin: str | None,
+    ) -> MembershipPaymentPayload:
+        config = current_wechat_native_payment_config()
+        if not config.enabled:
+            raise PreconditionFailure("wechat_native payment is not configured in this deployment")
+        notify_url = config.notify_url or self._build_default_wechat_notify_url(public_origin)
+        description_suffix = "首单开通" if str(order.order_type) == "first_purchase" else "续费"
+        request_body: dict[str, object] = {
+            "appid": config.app_id,
+            "mchid": config.mch_id,
+            "description": f"{config.description_prefix} {description_suffix}".strip()[:127],
+            "out_trade_no": str(order.order_id),
+            "notify_url": notify_url,
+            "amount": {
+                "total": int(order.payable_amount_cent),
+                "currency": "CNY",
+            },
+            "attach": "membership_v2",
+        }
+        if order.expired_at:
+            request_body["time_expire"] = str(order.expired_at)
+        if str(client_ip or "").strip():
+            request_body["scene_info"] = {"payer_client_ip": str(client_ip).strip()}
+        response_body = self._wechat_request_json("POST", "/v3/pay/transactions/native", request_body)
+        code_url = str(response_body.get("code_url") or "").strip()
+        if not code_url:
+            raise PreconditionFailure("wechat_native payment did not return a code_url")
+        return MembershipPaymentPayload(
+            mode=PAYMENT_PROVIDER_WECHAT_NATIVE,
+            provider=PAYMENT_PROVIDER_WECHAT_NATIVE,
+            provider_label=_provider_label(PAYMENT_PROVIDER_WECHAT_NATIVE),
+            instruction="请使用微信扫描二维码完成支付。支付成功后页面会自动刷新，你也可以手动点击同步支付状态。",
+            provider_trade_no_hint=str(order.order_id),
+            expires_at=order.expired_at,
+            code_url=code_url,
+            qr_image_data_url=self._build_qr_image_data_url(code_url),
+            open_url=code_url,
+            poll_interval_seconds=5,
+            status_check_supported=True,
+        )
+
+    def _query_wechat_native_payment(self, order: MembershipOrderLike) -> MembershipRemotePaymentStatus:
+        config = current_wechat_native_payment_config()
+        if not config.enabled:
+            raise PreconditionFailure("wechat_native payment is not configured in this deployment")
+        uri = f"/v3/pay/transactions/out-trade-no/{quote(str(order.order_id), safe='')}?mchid={quote(config.mch_id, safe='')}"
+        response_body = self._wechat_request_json("GET", uri)
+        trade_state = str(response_body.get("trade_state") or "").strip().upper()
+        transaction_id = str(response_body.get("transaction_id") or order.order_id).strip()
+        amount = response_body.get("amount") if isinstance(response_body.get("amount"), dict) else {}
+        payer = response_body.get("payer") if isinstance(response_body.get("payer"), dict) else {}
+        return MembershipRemotePaymentStatus(
+            provider=PAYMENT_PROVIDER_WECHAT_NATIVE,
+            order_id=str(response_body.get("out_trade_no") or order.order_id),
+            provider_trade_no=transaction_id,
+            remote_status=self._map_wechat_trade_state(trade_state),
+            paid_at=_parse_iso_datetime(response_body.get("success_time")),
+            amount_cent=None if not isinstance(amount, dict) else int(amount.get("total") or 0),
+            payer_id=None if not isinstance(payer, dict) else str(payer.get("openid") or "").strip() or None,
+            raw_payload_json=json.dumps(response_body, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
+        )
+
+    def _parse_wechat_native_notification(
+        self,
+        *,
+        headers: Mapping[str, str],
+        body_text: str,
+    ) -> MembershipRemotePaymentStatus:
+        config = current_wechat_native_payment_config()
+        if not config.enabled:
+            raise PreconditionFailure("wechat_native payment is not configured in this deployment")
+        self._verify_wechat_signature(headers=headers, body_text=body_text)
+        try:
+            envelope = json.loads(body_text)
+        except Exception as exc:
+            raise PreconditionFailure("wechat payment notification body must be valid JSON") from exc
+        resource = envelope.get("resource")
+        if not isinstance(resource, dict):
+            raise PreconditionFailure("wechat payment notification is missing its encrypted resource")
+        decrypted = self._decrypt_wechat_resource(resource)
+        trade_state = str(decrypted.get("trade_state") or "").strip().upper()
+        amount = decrypted.get("amount") if isinstance(decrypted.get("amount"), dict) else {}
+        payer = decrypted.get("payer") if isinstance(decrypted.get("payer"), dict) else {}
+        raw_payload_json = json.dumps(
+            {"notification": envelope, "resource": decrypted},
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        return MembershipRemotePaymentStatus(
+            provider=PAYMENT_PROVIDER_WECHAT_NATIVE,
+            order_id=str(decrypted.get("out_trade_no") or "").strip(),
+            provider_trade_no=str(decrypted.get("transaction_id") or "").strip(),
+            remote_status=self._map_wechat_trade_state(trade_state),
+            paid_at=_parse_iso_datetime(decrypted.get("success_time")),
+            amount_cent=None if not isinstance(amount, dict) else int(amount.get("total") or 0),
+            payer_id=None if not isinstance(payer, dict) else str(payer.get("openid") or "").strip() or None,
+            raw_payload_json=raw_payload_json,
+        )
+
+    def _request_wechat_refund(
+        self,
+        order: MembershipOrderLike,
+        payment: MembershipPaymentRecordLike,
+        *,
+        reason: str,
+        public_origin: str | None,
+    ) -> MembershipRemoteRefundStatus:
+        config = current_wechat_native_payment_config()
+        if not config.enabled:
+            raise PreconditionFailure("wechat_native payment is not configured in this deployment")
+        refund_out_trade_no = str(payment.refund_out_refund_no or f"mrefund_{order.order_id}").strip()
+        if not refund_out_trade_no:
+            raise PreconditionFailure("membership refund out_refund_no must be non-empty")
+        notify_url = config.refund_notify_url or self._build_default_wechat_refund_notify_url(public_origin)
+        request_body: dict[str, object] = {
+            "out_refund_no": refund_out_trade_no,
+            "reason": str(reason or "").strip()[:80],
+            "notify_url": notify_url,
+            "amount": {
+                "refund": int(payment.amount_cent),
+                "total": int(payment.amount_cent),
+                "currency": "CNY",
+            },
+        }
+        transaction_id = str(payment.provider_trade_no or "").strip()
+        if transaction_id:
+            request_body["transaction_id"] = transaction_id
+        else:
+            request_body["out_trade_no"] = str(order.order_id)
+        response_body = self._wechat_request_json("POST", "/v3/refund/domestic/refunds", request_body)
+        return self._wechat_refund_status_from_payload(
+            order_id=str(response_body.get("out_trade_no") or order.order_id),
+            refund_out_trade_no=str(response_body.get("out_refund_no") or refund_out_trade_no),
+            payload=response_body,
+        )
+
+    def _query_wechat_refund(
+        self,
+        order: MembershipOrderLike,
+        payment: MembershipPaymentRecordLike,
+    ) -> MembershipRemoteRefundStatus:
+        config = current_wechat_native_payment_config()
+        if not config.enabled:
+            raise PreconditionFailure("wechat_native payment is not configured in this deployment")
+        refund_out_trade_no = str(payment.refund_out_refund_no or f"mrefund_{order.order_id}").strip()
+        if not refund_out_trade_no:
+            raise PreconditionFailure("membership refund out_refund_no must be non-empty")
+        uri = f"/v3/refund/domestic/refunds/{quote(refund_out_trade_no, safe='')}"
+        response_body = self._wechat_request_json("GET", uri)
+        return self._wechat_refund_status_from_payload(
+            order_id=str(response_body.get("out_trade_no") or order.order_id),
+            refund_out_trade_no=str(response_body.get("out_refund_no") or refund_out_trade_no),
+            payload=response_body,
+        )
+
+    def _parse_wechat_refund_notification(
+        self,
+        *,
+        headers: Mapping[str, str],
+        body_text: str,
+    ) -> MembershipRemoteRefundStatus:
+        config = current_wechat_native_payment_config()
+        if not config.enabled:
+            raise PreconditionFailure("wechat_native payment is not configured in this deployment")
+        self._verify_wechat_signature(headers=headers, body_text=body_text)
+        try:
+            envelope = json.loads(body_text)
+        except Exception as exc:
+            raise PreconditionFailure("wechat refund notification body must be valid JSON") from exc
+        resource = envelope.get("resource")
+        if not isinstance(resource, dict):
+            raise PreconditionFailure("wechat refund notification is missing its encrypted resource")
+        decrypted = self._decrypt_wechat_resource(resource)
+        raw_payload_json = json.dumps(
+            {"notification": envelope, "resource": decrypted},
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        payload = dict(decrypted)
+        payload["_raw_payload_json"] = raw_payload_json
+        return self._wechat_refund_status_from_payload(
+            order_id=str(decrypted.get("out_trade_no") or "").strip(),
+            refund_out_trade_no=str(decrypted.get("out_refund_no") or "").strip(),
+            payload=payload,
+        )
+
+    def _build_default_wechat_refund_notify_url(self, public_origin: str | None) -> str:
+        origin = str(public_origin or "").strip().rstrip("/")
+        if origin:
+            return f"{origin}/api/payments/wechat/refund-notify"
+        config = current_wechat_native_payment_config()
+        if config.notify_url:
+            parsed = urlsplit(config.notify_url)
+            if parsed.scheme and parsed.netloc:
+                return urlunsplit((parsed.scheme, parsed.netloc, "/api/payments/wechat/refund-notify", "", ""))
+        raise PreconditionFailure(
+            "PLM_PUBLIC_ORIGIN, PLM_WECHAT_PAY_REFUND_NOTIFY_URL, or a valid PLM_WECHAT_PAY_NOTIFY_URL must be set before using wechat_native refunds"
+        )
+
+    def _build_default_wechat_notify_url(self, public_origin: str | None) -> str:
+        origin = str(public_origin or "").strip().rstrip("/")
+        if not origin:
+            raise PreconditionFailure("PLM_PUBLIC_ORIGIN or PLM_WECHAT_PAY_NOTIFY_URL must be set before using wechat_native")
+        return f"{origin}/api/payments/wechat/notify"
+
+    def _wechat_request_json(self, method: str, uri: str, body: dict[str, object] | None = None) -> dict[str, object]:
+        config = current_wechat_native_payment_config()
+        if not config.enabled:
+            raise PreconditionFailure("wechat_native payment is not configured in this deployment")
+        resolved_method = str(method or "GET").strip().upper()
+        resolved_uri = str(uri or "").strip()
+        if not resolved_uri.startswith("/"):
+            raise PreconditionFailure("wechat payment request uri must start with /")
+        body_text = "" if body is None else json.dumps(body, ensure_ascii=False, separators=(",", ":"))
+        headers = {
+            "Accept": "application/json",
+            "Authorization": self._build_wechat_authorization(resolved_method, resolved_uri, body_text),
+        }
+        if body is not None:
+            headers["Content-Type"] = "application/json"
+        if config.wechatpay_public_key_id:
+            headers["Wechatpay-Serial"] = config.wechatpay_public_key_id
+        response = self._session.request(
+            resolved_method,
+            f"{config.api_base_url}{resolved_uri}",
+            data=None if body is None else body_text.encode("utf-8"),
+            headers=headers,
+            timeout=config.timeout_seconds,
+        )
+        response_text = response.text or ""
+        if not response.ok:
+            raise PreconditionFailure(
+                f"wechat_native request failed with HTTP {response.status_code}: {response_text[:400] or 'empty response'}"
+            )
+        if response.headers.get("Wechatpay-Signature"):
+            self._verify_wechat_signature(headers=response.headers, body_text=response_text)
+        try:
+            payload = response.json()
+        except Exception as exc:
+            raise PreconditionFailure("wechat_native returned a non-JSON response") from exc
+        if not isinstance(payload, dict):
+            raise PreconditionFailure("wechat_native returned an unexpected response payload")
+        return payload
+
+    def _build_wechat_authorization(self, method: str, uri: str, body_text: str) -> str:
+        config = current_wechat_native_payment_config()
+        nonce = uuid.uuid4().hex
+        timestamp = str(int(datetime.now(timezone.utc).timestamp()))
+        message = f"{method}\n{uri}\n{timestamp}\n{nonce}\n{body_text}\n".encode("utf-8")
+        signature = self._wechat_private_key().sign(message, padding.PKCS1v15(), hashes.SHA256())
+        signature_b64 = base64.b64encode(signature).decode("utf-8")
+        return (
+            "WECHATPAY2-SHA256-RSA2048 "
+            f'mchid="{config.mch_id}",'
+            f'nonce_str="{nonce}",'
+            f'timestamp="{timestamp}",'
+            f'serial_no="{config.cert_serial_no}",'
+            f'signature="{signature_b64}"'
+        )
+
+    def _verify_wechat_signature(self, *, headers: Mapping[str, str], body_text: str) -> None:
+        timestamp = str(headers.get("Wechatpay-Timestamp") or headers.get("wechatpay-timestamp") or "").strip()
+        nonce = str(headers.get("Wechatpay-Nonce") or headers.get("wechatpay-nonce") or "").strip()
+        signature_b64 = str(headers.get("Wechatpay-Signature") or headers.get("wechatpay-signature") or "").strip()
+        if not timestamp or not nonce or not signature_b64:
+            raise PreconditionFailure("wechat payment signature headers are incomplete")
+        message = f"{timestamp}\n{nonce}\n{body_text}\n".encode("utf-8")
+        signature = base64.b64decode(signature_b64)
+        try:
+            self._wechat_public_key().verify(signature, message, padding.PKCS1v15(), hashes.SHA256())
+        except Exception as exc:
+            raise PreconditionFailure("wechat payment signature verification failed") from exc
+
+    def _decrypt_wechat_resource(self, resource: Mapping[str, object]) -> dict[str, object]:
+        config = current_wechat_native_payment_config()
+        ciphertext = str(resource.get("ciphertext") or "").strip()
+        nonce = str(resource.get("nonce") or "").strip()
+        if not ciphertext or not nonce:
+            raise PreconditionFailure("wechat payment notification resource is incomplete")
+        associated_data = str(resource.get("associated_data") or "")
+        try:
+            plain_bytes = AESGCM(config.api_v3_key.encode("utf-8")).decrypt(
+                nonce.encode("utf-8"),
+                base64.b64decode(ciphertext),
+                associated_data.encode("utf-8"),
+            )
+        except Exception as exc:
+            raise PreconditionFailure("wechat payment notification decryption failed") from exc
+        try:
+            payload = json.loads(plain_bytes.decode("utf-8"))
+        except Exception as exc:
+            raise PreconditionFailure("wechat payment notification plaintext is not valid JSON") from exc
+        if not isinstance(payload, dict):
+            raise PreconditionFailure("wechat payment notification plaintext is malformed")
+        return payload
+
+    def _wechat_private_key(self):
+        if self._private_key is not None:
+            return self._private_key
+        config = current_wechat_native_payment_config()
+        if config.private_key_pem_path is None or not config.private_key_pem_path.exists():
+            raise PreconditionFailure("PLM_WECHAT_PAY_PRIVATE_KEY_PEM_PATH does not point to an existing PEM file")
+        self._private_key = serialization.load_pem_private_key(
+            config.private_key_pem_path.read_bytes(),
+            password=None,
+        )
+        return self._private_key
+
+    def _wechat_public_key(self):
+        if self._wechat_public_key is not None:
+            return self._wechat_public_key
+        config = current_wechat_native_payment_config()
+        if config.wechatpay_public_key_pem_path is None or not config.wechatpay_public_key_pem_path.exists():
+            raise PreconditionFailure("PLM_WECHAT_PAY_PUBLIC_KEY_PEM_PATH does not point to an existing PEM file")
+        self._wechat_public_key = serialization.load_pem_public_key(config.wechatpay_public_key_pem_path.read_bytes())
+        return self._wechat_public_key
+
+    @staticmethod
+    def _build_qr_image_data_url(code_url: str) -> str:
+        image = qrcode.make(code_url, image_factory=qrcode.image.svg.SvgPathImage, box_size=8, border=2)
+        buffer = BytesIO()
+        image.save(buffer)
+        svg_bytes = buffer.getvalue()
+        return f"data:image/svg+xml;base64,{base64.b64encode(svg_bytes).decode('ascii')}"
+
+    @staticmethod
+    def _wechat_refund_status_from_payload(
+        *,
+        order_id: str,
+        refund_out_trade_no: str,
+        payload: Mapping[str, object],
+    ) -> MembershipRemoteRefundStatus:
+        refund_amount = payload.get("amount")
+        if not isinstance(refund_amount, dict):
+            refund_amount = {}
+        raw_payload_json = str(payload.get("_raw_payload_json") or "")
+        if not raw_payload_json:
+            raw_payload_json = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+        status_value = str(payload.get("status") or payload.get("refund_status") or "").strip().upper()
+        return MembershipRemoteRefundStatus(
+            provider=PAYMENT_PROVIDER_WECHAT_NATIVE,
+            order_id=str(order_id),
+            refund_out_trade_no=str(refund_out_trade_no),
+            provider_refund_no=None if not str(payload.get("refund_id") or "").strip() else str(payload.get("refund_id")).strip(),
+            remote_status=MembershipPaymentService._map_wechat_refund_status(status_value),
+            refunded_at=_parse_iso_datetime(payload.get("success_time")),
+            refund_amount_cent=None if not isinstance(refund_amount, dict) else int(refund_amount.get("refund") or 0),
+            raw_payload_json=raw_payload_json,
+        )
+
+    @staticmethod
+    def _map_wechat_trade_state(trade_state: str) -> str:
+        normalized_state = str(trade_state or "").strip().upper()
+        if normalized_state == "SUCCESS":
+            return "paid"
+        if normalized_state in {"NOTPAY", "USERPAYING"}:
+            return "pending"
+        if normalized_state == "CLOSED":
+            return "closed"
+        if normalized_state in {"REFUND", "PARTIAL_REFUND"}:
+            return "refunded"
+        if normalized_state in {"PAYERROR", "REVOKED"}:
+            return "failed"
+        return "unknown"
+
+    @staticmethod
+    def _map_wechat_refund_status(status: str) -> str:
+        normalized_status = str(status or "").strip().upper()
+        if normalized_status == "SUCCESS":
+            return "refunded"
+        if normalized_status == "PROCESSING":
+            return "refund_pending"
+        if normalized_status in {"CLOSED", "ABNORMAL"}:
+            return "failed"
+        return "unknown"

@@ -6,6 +6,9 @@ from pathlib import Path
 from backend.system.api import SystemAPI
 from backend.system.auth_store import AuthStore
 from backend.system.inmemory_system import InMemorySystem
+from backend.system.membership_marketing_store import MembershipMarketingStore
+from backend.system.membership_payment_service import MembershipPaymentService
+from backend.system.membership_store import MembershipStore
 from backend.system.sql_backend import create_persist_store
 
 
@@ -20,3 +23,18 @@ def get_api() -> SystemAPI:
 @lru_cache(maxsize=1)
 def get_auth_store() -> AuthStore:
     return AuthStore()
+
+
+@lru_cache(maxsize=1)
+def get_membership_store() -> MembershipStore:
+    return MembershipStore()
+
+
+@lru_cache(maxsize=1)
+def get_membership_marketing_store() -> MembershipMarketingStore:
+    return MembershipMarketingStore()
+
+
+@lru_cache(maxsize=1)
+def get_membership_payment_service() -> MembershipPaymentService:
+    return MembershipPaymentService()

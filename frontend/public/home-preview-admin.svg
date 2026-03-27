@@ -1,0 +1,51 @@
+<svg width="960" height="640" viewBox="0 0 960 640" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="960" height="640" rx="34" fill="#EDF4FA"/>
+  <rect x="20" y="20" width="920" height="600" rx="28" fill="#F8FBFF" stroke="#D6E3F0"/>
+  <rect x="42" y="40" width="876" height="78" rx="24" fill="#173554"/>
+  <text x="72" y="88" fill="#FFFFFF" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="28" font-weight="700">后台管理 / 会员</text>
+  <rect x="682" y="58" width="208" height="42" rx="21" fill="rgba(255,255,255,0.1)"/>
+  <text x="728" y="85" fill="#FFFFFF" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="600">订单详情工作台</text>
+
+  <rect x="42" y="144" width="204" height="94" rx="22" fill="white" stroke="#DFE8F1"/>
+  <text x="66" y="178" fill="#61758D" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="17">成交订单</text>
+  <text x="66" y="216" fill="#17324E" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="34" font-weight="700">120</text>
+
+  <rect x="264" y="144" width="204" height="94" rx="22" fill="white" stroke="#DFE8F1"/>
+  <text x="288" y="178" fill="#61758D" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="17">有效会员</text>
+  <text x="288" y="216" fill="#17324E" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="34" font-weight="700">63</text>
+
+  <rect x="486" y="144" width="204" height="94" rx="22" fill="white" stroke="#DFE8F1"/>
+  <text x="510" y="178" fill="#61758D" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="17">今日 GMV</text>
+  <text x="510" y="216" fill="#17324E" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="34" font-weight="700">1283.0</text>
+
+  <rect x="708" y="144" width="210" height="94" rx="22" fill="#EEF5FF" stroke="#D6E4F3"/>
+  <text x="732" y="178" fill="#23548D" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="17">待支付巡检</text>
+  <text x="732" y="216" fill="#17324E" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="24" font-weight="700">Pending 自动收口</text>
+
+  <rect x="42" y="262" width="388" height="302" rx="24" fill="white" stroke="#DFE8F1"/>
+  <text x="70" y="300" fill="#17324E" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700">订单列表</text>
+  <rect x="70" y="322" width="332" height="74" rx="18" fill="#F8FBFF" stroke="#DCE8F4"/>
+  <text x="92" y="350" fill="#17324E" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="700">用户A · 首单 · 14.9</text>
+  <text x="92" y="376" fill="#61758D" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="16">已支付 · wechat_native · 03-26</text>
+  <rect x="70" y="410" width="332" height="74" rx="18" fill="#F8FBFF" stroke="#DCE8F4"/>
+  <text x="92" y="438" fill="#17324E" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="700">用户B · 续费 · 19.9</text>
+  <text x="92" y="464" fill="#61758D" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="16">待支付 · 可同步 / 可关单 · 03-26</text>
+  <rect x="70" y="498" width="332" height="38" rx="19" fill="#FFF4DF"/>
+  <text x="150" y="522" fill="#8B5A15" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="16" font-weight="700">支持退款回滚和异常处理</text>
+
+  <rect x="454" y="262" width="464" height="302" rx="24" fill="white" stroke="#DFE8F1"/>
+  <text x="482" y="300" fill="#17324E" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700">订单详情</text>
+  <text x="482" y="336" fill="#61758D" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="17">支付流水、用券、邀请链路、会员状态都在这里聚合。</text>
+  <rect x="482" y="356" width="194" height="52" rx="18" fill="#EEF5FF"/>
+  <text x="505" y="387" fill="#1D4F8F" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="17" font-weight="700">同步支付状态</text>
+  <rect x="694" y="356" width="194" height="52" rx="18" fill="#FFF4DF"/>
+  <text x="746" y="387" fill="#8B5A15" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="17" font-weight="700">关闭待支付单</text>
+  <rect x="482" y="426" width="406" height="110" rx="20" fill="#F8FBFF" stroke="#DCE8F4"/>
+  <text x="506" y="458" fill="#17324E" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="700">邀请人 A  →  被邀请人 B  →  已发 5 元券</text>
+  <text x="506" y="488" fill="#61758D" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="16">后台不仅能看见订单，还能看清奖励是不是由这笔单触发。</text>
+  <text x="506" y="514" fill="#61758D" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="16">如果退款，系统还能继续做回滚和奖励撤销。</text>
+
+  <rect x="42" y="584" width="876" height="16" rx="8" fill="#DDE8F3"/>
+  <defs>
+  </defs>
+</svg>

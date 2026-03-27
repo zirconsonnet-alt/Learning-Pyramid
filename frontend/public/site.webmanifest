@@ -1,0 +1,16 @@
+{
+  "name": "LearningPyramid",
+  "short_name": "LearningPyramid",
+  "description": "知识工程、学习回放与会员增长工作台",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#eef3fa",
+  "theme_color": "#1f5d98",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

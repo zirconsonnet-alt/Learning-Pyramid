@@ -36,11 +36,15 @@ export function login(params: { email: string; password: string }) {
   })
 }
 
-export function register(params: { email: string; password: string }) {
+export function register(params: { email: string; password: string; inviteCode?: string | null }) {
   return apiRequest({
     path: "/auth/register",
     method: "POST",
-    body: params,
+    body: {
+      email: params.email,
+      password: params.password,
+      inviteCode: params.inviteCode?.trim() ? params.inviteCode.trim() : undefined,
+    },
     responseSchema: AuthUserSchema,
   })
 }

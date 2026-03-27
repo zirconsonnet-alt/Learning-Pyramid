@@ -1,19 +1,29 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import {
+  closeAdminMembershipOrder,
   deleteAdminGroupComment,
   deleteAdminGroupPost,
+  getAdminMembershipOrderDetail,
+  getAdminMembershipOverview,
   getAdminGroupDetail,
   getAdminUserDetail,
   getAdminOverview,
+  grantAdminMembershipCoupon,
+  refundAdminMembershipOrder,
   listAdminActionLogs,
   listAdminGroupComments,
   listAdminGroupPosts,
   listAdminGroups,
+  listAdminMembershipCoupons,
+  listAdminMembershipInvites,
+  listAdminMembershipOrders,
   listAdminUsers,
+  syncAdminMembershipOrderPayment,
   updateAdminGroupStatus,
   updateAdminUserRole,
   updateAdminUserStatus,
+  voidAdminMembershipCoupon,
 } from "@/ui/api/admin"
 
 export function useAdminOverview(enabled = true) {
@@ -29,6 +39,59 @@ export function useAdminActionLogs(params?: { limit?: number }, enabled = true) 
   return useQuery({
     queryKey: ["admin", "activity", params?.limit ?? 50],
     queryFn: () => listAdminActionLogs(params),
+    enabled,
+  })
+}
+
+export function useAdminMembershipOverview(enabled = true) {
+  return useQuery({
+    queryKey: ["admin", "membership", "overview"],
+    queryFn: getAdminMembershipOverview,
+    enabled,
+    staleTime: 15_000,
+  })
+}
+
+export function useAdminMembershipOrders(
+  params?: { userSearch?: string; status?: string; orderType?: string; provider?: string; limit?: number },
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: [
+      "admin",
+      "membership",
+      "orders",
+      params?.userSearch ?? "",
+      params?.status ?? "",
+      params?.orderType ?? "",
+      params?.provider ?? "",
+      params?.limit ?? 100,
+    ],
+    queryFn: () => listAdminMembershipOrders(params),
+    enabled,
+  })
+}
+
+export function useAdminMembershipOrderDetail(orderId: string, enabled = true) {
+  return useQuery({
+    queryKey: ["admin", "membership", "order-detail", orderId],
+    queryFn: () => getAdminMembershipOrderDetail(orderId),
+    enabled: enabled && Boolean(orderId),
+  })
+}
+
+export function useAdminMembershipInvites(params?: { search?: string; status?: string; limit?: number }, enabled = true) {
+  return useQuery({
+    queryKey: ["admin", "membership", "invites", params?.search ?? "", params?.status ?? "", params?.limit ?? 100],
+    queryFn: () => listAdminMembershipInvites(params),
+    enabled,
+  })
+}
+
+export function useAdminMembershipCoupons(params?: { search?: string; status?: string; limit?: number }, enabled = true) {
+  return useQuery({
+    queryKey: ["admin", "membership", "coupons", params?.search ?? "", params?.status ?? "", params?.limit ?? 100],
+    queryFn: () => listAdminMembershipCoupons(params),
     enabled,
   })
 }
@@ -155,6 +218,74 @@ export function useDeleteAdminGroupComment() {
       await qc.invalidateQueries({ queryKey: ["study-groups", "comments", comment.groupId] })
       await qc.invalidateQueries({ queryKey: ["study-groups", "posts", comment.groupId] })
       await qc.invalidateQueries({ queryKey: ["study-groups", "list"] })
+    },
+  })
+}
+
+export function useGrantAdminMembershipCoupon() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: grantAdminMembershipCoupon,
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["admin", "membership", "overview"] })
+      await qc.invalidateQueries({ queryKey: ["admin", "membership", "coupons"] })
+      await qc.invalidateQueries({ queryKey: ["admin", "activity"] })
+    },
+  })
+}
+
+export function useVoidAdminMembershipCoupon() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: voidAdminMembershipCoupon,
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["admin", "membership", "overview"] })
+      await qc.invalidateQueries({ queryKey: ["admin", "membership", "coupons"] })
+      await qc.invalidateQueries({ queryKey: ["admin", "activity"] })
+    },
+  })
+}
+
+export function useSyncAdminMembershipOrderPayment() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: syncAdminMembershipOrderPayment,
+    onSuccess: async (_data, variables) => {
+      await qc.invalidateQueries({ queryKey: ["admin", "membership", "overview"] })
+      await qc.invalidateQueries({ queryKey: ["admin", "membership", "orders"] })
+      await qc.invalidateQueries({ queryKey: ["admin", "membership", "order-detail", variables.orderId] })
+      await qc.invalidateQueries({ queryKey: ["admin", "activity"] })
+      await qc.invalidateQueries({ queryKey: ["membership"] })
+    },
+  })
+}
+
+export function useCloseAdminMembershipOrder() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: closeAdminMembershipOrder,
+    onSuccess: async (_data, variables) => {
+      await qc.invalidateQueries({ queryKey: ["admin", "membership", "overview"] })
+      await qc.invalidateQueries({ queryKey: ["admin", "membership", "orders"] })
+      await qc.invalidateQueries({ queryKey: ["admin", "membership", "order-detail", variables.orderId] })
+      await qc.invalidateQueries({ queryKey: ["admin", "activity"] })
+      await qc.invalidateQueries({ queryKey: ["membership"] })
+    },
+  })
+}
+
+export function useRefundAdminMembershipOrder() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: refundAdminMembershipOrder,
+    onSuccess: async (_data, variables) => {
+      await qc.invalidateQueries({ queryKey: ["admin", "membership", "overview"] })
+      await qc.invalidateQueries({ queryKey: ["admin", "membership", "orders"] })
+      await qc.invalidateQueries({ queryKey: ["admin", "membership", "order-detail", variables.orderId] })
+      await qc.invalidateQueries({ queryKey: ["admin", "membership", "invites"] })
+      await qc.invalidateQueries({ queryKey: ["admin", "membership", "coupons"] })
+      await qc.invalidateQueries({ queryKey: ["admin", "activity"] })
+      await qc.invalidateQueries({ queryKey: ["membership"] })
     },
   })
 }

@@ -41,6 +41,8 @@ export function LearningTaskNodePage() {
     queryFn: () => listRecallPointsByLearningTaskNode(pid, nid),
     enabled: !!pid && !!nid,
   })
+  const learningTaskId = nodeQ.data?.kind === "leaf" ? nodeQ.data.boundLearningTaskId : ""
+  const learningTaskQ = useLearningTask(pid, learningTaskId)
 
   if (!pid || !nid) {
     return (
@@ -62,8 +64,6 @@ export function LearningTaskNodePage() {
   const isContainer = nodeQ.data?.kind === "container"
   const childCount = nodeQ.data?.kind === "container" ? nodeQ.data.children.length : null
   const instanceTitleById = Object.fromEntries((instancesQ.data ?? []).map((instance) => [instance.instanceId, instance.materialDisplayName])) as Record<string, string>
-  const learningTaskId = nodeQ.data?.kind === "leaf" ? nodeQ.data.boundLearningTaskId : ""
-  const learningTaskQ = useLearningTask(pid, learningTaskId)
   const pageDescription = isContainer ? "聚合节点详情。" : "学习任务详情。"
   const relatedInstanceLabel = (() => {
     const ids = Array.from(new Set((recallPointsQ.data ?? []).map((item) => item.anchor.instanceId)))

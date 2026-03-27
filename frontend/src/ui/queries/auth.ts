@@ -28,7 +28,7 @@ export function useLogin() {
 export function useRegister() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (params: { email: string; password: string }) => register(params),
+    mutationFn: (params: { email: string; password: string; inviteCode?: string | null }) => register(params),
     onSuccess: async () => {
       clearPersistedClientState()
       qc.clear()

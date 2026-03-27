@@ -7,10 +7,12 @@ import { RouteErrorPage } from "@/views/system/RouteErrorPage"
 import { RoutePendingPage } from "@/views/system/RoutePendingPage"
 
 const AuthPage = lazy(async () => ({ default: (await import("@/views/auth/AuthPage")).AuthPage }))
+const HomePage = lazy(async () => ({ default: (await import("@/views/home/HomePage")).HomePage }))
 const GuidePage = lazy(async () => ({ default: (await import("@/views/guide/GuidePage")).GuidePage }))
 const InstancePage = lazy(async () => ({ default: (await import("@/views/instances/InstancePage")).InstancePage }))
 const ConvergencePage = lazy(async () => ({ default: (await import("@/views/convergences/ConvergencePage")).ConvergencePage }))
 const AdminPage = lazy(async () => ({ default: (await import("@/views/admin/AdminPage")).AdminPage }))
+const AdminMembershipPage = lazy(async () => ({ default: (await import("@/views/admin/AdminMembershipPage")).AdminMembershipPage }))
 const AdminGroupsPage = lazy(async () => ({ default: (await import("@/views/admin/AdminGroupsPage")).AdminGroupsPage }))
 const AdminGroupDetailPage = lazy(async () => ({ default: (await import("@/views/admin/AdminGroupDetailPage")).AdminGroupDetailPage }))
 const AdminUserDetailPage = lazy(async () => ({ default: (await import("@/views/admin/AdminUserDetailPage")).AdminUserDetailPage }))
@@ -23,6 +25,7 @@ const LearningTaskNodePage = lazy(async () => ({
   default: (await import("@/views/learningTasks/LearningTaskNodePage")).LearningTaskNodePage,
 }))
 const GroupsPage = lazy(async () => ({ default: (await import("@/views/groups/GroupsPage")).GroupsPage }))
+const MembershipPage = lazy(async () => ({ default: (await import("@/views/membership/MembershipPage")).MembershipPage }))
 const ProjectsPage = lazy(async () => ({ default: (await import("@/views/projects/ProjectsPage")).ProjectsPage }))
 const ProfilePage = lazy(async () => ({ default: (await import("@/views/profile/ProfilePage")).ProfilePage }))
 const RecallPointPage = lazy(async () => ({ default: (await import("@/views/recallPoints/RecallPointPage")).RecallPointPage }))
@@ -39,6 +42,11 @@ function lazyElement(element: ReactNode) {
 
 export const router = createBrowserRouter([
   {
+    path: "/",
+    element: lazyElement(<HomePage />),
+    errorElement: <RouteErrorPage />,
+  },
+  {
     path: "/login",
     element: lazyElement(<AuthPage />),
     errorElement: <RouteErrorPage />,
@@ -47,14 +55,15 @@ export const router = createBrowserRouter([
     element: <AppShell />,
     errorElement: <RouteErrorPage />,
     children: [
-      { path: "/", element: <Navigate to="/projects" replace /> },
       { path: "/docs", element: <Navigate to="/guide" replace /> },
       { path: "/guide", element: lazyElement(<GuidePage />) },
       { path: "/projects", element: lazyElement(<ProjectsPage />) },
       { path: "/groups", element: lazyElement(<GroupsPage />) },
       { path: "/groups/:groupId", element: lazyElement(<GroupDetailPage />) },
+      { path: "/membership", element: lazyElement(<MembershipPage />) },
       { path: "/profile", element: lazyElement(<ProfilePage />) },
       { path: "/admin", element: lazyElement(<AdminPage />) },
+      { path: "/admin/membership", element: lazyElement(<AdminMembershipPage />) },
       { path: "/admin/users", element: lazyElement(<AdminUsersPage />) },
       { path: "/admin/groups", element: lazyElement(<AdminGroupsPage />) },
       { path: "/admin/groups/:groupId", element: lazyElement(<AdminGroupDetailPage />) },

@@ -1,0 +1,42 @@
+<svg width="960" height="640" viewBox="0 0 960 640" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="960" height="640" rx="34" fill="#EEF4FA"/>
+  <rect x="20" y="20" width="920" height="600" rx="28" fill="#F9FCFF" stroke="#D6E3F0"/>
+  <rect x="42" y="40" width="876" height="210" rx="28" fill="url(#hero)" stroke="#D5E2EE"/>
+  <rect x="72" y="72" width="114" height="34" rx="17" fill="#E8F1FF"/>
+  <text x="97" y="94" fill="#23548D" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="16" font-weight="700">月会员</text>
+  <rect x="198" y="72" width="116" height="34" rx="17" fill="#FFF4DF"/>
+  <text x="224" y="94" fill="#8B5A15" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="16" font-weight="700">首单 14.9</text>
+  <text x="72" y="146" fill="#17324E" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="36" font-weight="700">会员中心</text>
+  <text x="72" y="186" fill="#60748B" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="21">邀请码、优惠券、订单记录和支付状态都在一个页面里说清楚。</text>
+  <rect x="660" y="82" width="220" height="132" rx="24" fill="#173554"/>
+  <text x="690" y="117" fill="#FFFFFF" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="16" font-weight="600">首单会员价</text>
+  <text x="690" y="166" fill="#FFFFFF" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="38" font-weight="700">14.9 元</text>
+  <text x="690" y="196" fill="#D7E7FA" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="15">邀请成功返 5 元券，可用于首单或续费</text>
+
+  <rect x="42" y="274" width="420" height="148" rx="24" fill="white" stroke="#DFE8F1"/>
+  <text x="70" y="314" fill="#17324E" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700">邀请码与邀请记录</text>
+  <text x="70" y="350" fill="#61758D" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="18">我的邀请码：LPAB12CD34</text>
+  <text x="70" y="380" fill="#61758D" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="18">已邀请 8 人，成功转化 3 人</text>
+  <rect x="70" y="388" width="118" height="34" rx="17" fill="#EEF5FF"/>
+  <text x="108" y="410" fill="#1D4F8F" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="16" font-weight="700">复制邀请码</text>
+
+  <rect x="498" y="274" width="420" height="148" rx="24" fill="white" stroke="#DFE8F1"/>
+  <text x="526" y="314" fill="#17324E" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700">可用优惠券</text>
+  <rect x="526" y="334" width="364" height="58" rx="18" fill="#F8FBFF" stroke="#DCE8F4"/>
+  <text x="548" y="360" fill="#17324E" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="700">邀请奖励 5 元券</text>
+  <text x="548" y="384" fill="#61758D" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="16">满 0 元可用 · 30 天有效</text>
+  <text x="826" y="372" fill="#1D4F8F" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="700">-5.00</text>
+
+  <rect x="42" y="446" width="876" height="142" rx="24" fill="#EDF5FF" stroke="#D6E4F3"/>
+  <text x="70" y="486" fill="#17324E" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700">这张图对应真实路由：/membership</text>
+  <text x="70" y="522" fill="#60748B" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="18">不仅有价格和权益说明，还能看订单、同步支付、关闭待支付订单和使用优惠券。</text>
+  <rect x="70" y="540" width="154" height="28" rx="14" fill="white"/>
+  <text x="101" y="559" fill="#23548D" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="14" font-weight="700">MembershipPage</text>
+  <defs>
+    <linearGradient id="hero" x1="42" y1="40" x2="918" y2="250" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F7FBFF"/>
+      <stop offset="0.7" stop-color="#EDF5FF"/>
+      <stop offset="1" stop-color="#FFF3DE"/>
+    </linearGradient>
+  </defs>
+</svg>

@@ -41,6 +41,13 @@ function describeArea(pathname: string, projectTitle: string, hasProject: boolea
     }
   }
 
+  if (pathname.startsWith("/membership")) {
+    return {
+      title: "会员中心",
+      context: "查看会员状态、价格和订单",
+    }
+  }
+
   if (pathname.startsWith("/profile")) {
     return {
       title: "个人资料",
@@ -122,7 +129,7 @@ export function AppShell() {
   const projectNavItems = useMemo(() => getProjectNavItems(pid), [pid])
   const hasProjectContext = Boolean(pid)
   const isAdmin = Boolean(currentUserQ.data?.roles.some((role) => role === "super_admin" || role === "admin"))
-  const globalNavItems = useMemo(() => getGlobalNavItems({ includeAdmin: isAdmin }), [isAdmin])
+  const globalNavItems = useMemo(() => getGlobalNavItems({ includeAdmin: isAdmin, includeMembership: authEnabled }), [authEnabled, isAdmin])
   const inlineNavItems = globalNavItems
   const menuNavItems = hasProjectContext ? projectNavItems : globalNavItems
 

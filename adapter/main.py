@@ -16,7 +16,7 @@ from adapter.auth import auth_error_response, resolve_session_user
 from adapter.errors import register_exception_handlers
 from adapter.deps import get_auth_store
 from adapter.runtime_status import collect_runtime_status
-from adapter.routers import admin, asr, auth, layers, learning_tasks, materials, media, profile, projects, push, review, study_groups, system, validation
+from adapter.routers import admin, asr, auth, layers, learning_tasks, materials, media, membership, profile, projects, push, review, study_groups, system, validation
 from backend.system.hosted_deployment_checks import hosted_runtime_warnings, validate_hosted_runtime_or_raise
 from backend.system.http_runtime_config import current_http_runtime_config
 from backend.system.runtime_features import current_runtime_features
@@ -64,6 +64,10 @@ def _is_public_api_path(path: str) -> bool:
         "/api/system/capabilities",
     }
     if path in public_paths:
+        return True
+    if path == "/api/payments/wechat/notify":
+        return True
+    if path == "/api/payments/wechat/refund-notify":
         return True
     return path.startswith("/api/auth/")
 
@@ -192,6 +196,7 @@ def create_app() -> FastAPI:
 
     app.include_router(auth.router, prefix="/api", tags=["auth"])
     app.include_router(profile.router, prefix="/api", tags=["profile"])
+    app.include_router(membership.router, prefix="/api", tags=["membership"])
     app.include_router(study_groups.router, prefix="/api", tags=["study-groups"])
     app.include_router(admin.router, prefix="/api", tags=["admin"])
     app.include_router(projects.router, prefix="/api", tags=["projects"])
