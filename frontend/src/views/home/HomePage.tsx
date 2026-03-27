@@ -2,6 +2,10 @@ import { useEffect, useState } from "react"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import { Link } from "react-router-dom"
 
+import brandLogo from "@/assets/logo.png"
+import methodFocusCompression from "@/assets/method-focus-compression.png"
+import methodInterleavedReview from "@/assets/method-interleaved-review.png"
+import methodLayeredReview from "@/assets/method-layered-review.png"
 import { useCurrentUser } from "@/ui/queries/auth"
 import { useSystemCapabilities } from "@/ui/queries/system"
 import { usePageMeta } from "@/ui/seo/usePageMeta"
@@ -19,16 +23,19 @@ const mechanismCards = [
     icon: "A",
     title: "重点压缩",
     body: "先做一次当前层的全量筛选，把“现在讲不出来”的内容收成重点集合；下一轮不再回到全量，而是只复习这个重点集合，并继续递缩，直到这一层封顶。",
+    imageSrc: methodFocusCompression,
   },
   {
     icon: "B",
-    title: "分层校准",
+    title: "分层复习",
     body: "当材料范围扩大、时间间隔拉长，原来的重点会漂移。系统要求你回到更大范围重新筛选，用当前状态重定位重点，避免漏掉已经重新变生疏的内容。",
+    imageSrc: methodLayeredReview,
   },
   {
     icon: "C",
-    title: "可执行判定",
-    body: "不同材料的“会”标准不同。单词、概念、题型、论证都可以作为学习单元，只要你能给出明确的输出标准，系统就能围绕它组织筛选和复习。",
+    title: "穿插复习",
+    body: "系统不会把学习和复习拆成互不相干的两段，而是在学习任务之间及时插入复习任务。你刚学完，就会接上该复习的内容，避免一路只学不回头，最后把压力堆到后面。",
+    imageSrc: methodInterleavedReview,
   },
 ] as const
 
@@ -160,7 +167,6 @@ const graduateReasons = [
       {
         title: "记笔记",
         lines: [
-          { label: "常见建议", text: "记笔记，把重要内容整理出来。" },
           { label: "是否有用", text: "有用，但对大多数人来说，这件事很难长期稳定坚持。" },
           { label: "你需要什么", text: "你更需要一个随时能回看、并且和视频内容一一对应的知识仓库。" },
         ],
@@ -168,7 +174,6 @@ const graduateReasons = [
       {
         title: "艾宾浩斯式学习方法",
         lines: [
-          { label: "常见建议", text: "用艾宾浩斯式的间隔复习。" },
           { label: "是否有用", text: "理论上成立，但现实里很难坚持。复习量会越滚越大，一旦断一天，节奏就很容易崩掉。" },
           { label: "你需要什么", text: "你真正需要的是学完就能接上复习，并且清楚知道“现在该复习什么”的节律。" },
         ],
@@ -176,7 +181,6 @@ const graduateReasons = [
       {
         title: "挑重点",
         lines: [
-          { label: "常见建议", text: "挑重点。" },
           { label: "是否有用", text: "方向是对的，但太抽象了，很多人根本不知道重点到底该怎么挑。" },
           { label: "你需要什么", text: "你需要的是可执行的重点压缩机制，从重要内容里继续筛出更重要的部分。" },
         ],
@@ -184,7 +188,6 @@ const graduateReasons = [
       {
         title: "重新学一遍 A",
         lines: [
-          { label: "常见方法", text: "忘了就把 A 重新学一遍。" },
           { label: "是否有用", text: "通常不合理，因为重学整章的成本太高，也很难长期接受。" },
           { label: "你需要什么", text: "你需要的是固定学完 N 个章节后，对它们的全集做一次全量捕捞，不是重学，而是重新检查一遍所有知识点。" },
         ],
@@ -194,7 +197,7 @@ const graduateReasons = [
   {
     index: "03",
     tag: "系统",
-    title: "我的系统到底做了什么",
+    title: "我们的系统到底做了什么",
     intro: "LearningPyramid 不是一句“更高效复习”的口号，而是把记录、复习、筛选和回捞拆成了一条能每天执行的流程。",
     points: [
       {
@@ -275,8 +278,8 @@ export function HomePage() {
     path: "/",
   })
 
-  const loginHref = isLoggedIn || !authEnabled ? "/projects" : "/login"
-  const loginLabel = isLoggedIn || !authEnabled ? "进入项目" : "登录"
+  const navActionHref = isLoggedIn || !authEnabled ? "/projects" : allowSignup ? "/login?mode=register" : "/login"
+  const navActionLabel = isLoggedIn || !authEnabled ? "进入项目" : allowSignup ? "登录/注册" : "登录"
   const registerHref = isLoggedIn || !authEnabled ? "/projects" : allowSignup ? "/login?mode=register" : "/login"
   const registerLabel = isLoggedIn || !authEnabled ? "进入项目" : allowSignup ? "立即注册" : "去登录"
   const [activeReasonIndex, setActiveReasonIndex] = useState(0)
@@ -307,7 +310,7 @@ export function HomePage() {
       <header className="lp-showcase-site-header">
         <div className="lp-showcase-container lp-showcase-nav">
           <Link className="lp-showcase-brand" to="/">
-            <span className="lp-showcase-brand-mark">LP</span>
+            <img className="lp-showcase-brand-mark" src={brandLogo} alt="LearningPyramid logo" />
             <span>LearningPyramid</span>
           </Link>
 
@@ -320,11 +323,8 @@ export function HomePage() {
           </nav>
 
           <div className="lp-showcase-nav-actions">
-            <Link className="lp-showcase-btn lp-showcase-btn-secondary" to={loginHref}>
-              {loginLabel}
-            </Link>
-            <Link className="lp-showcase-btn lp-showcase-btn-primary" to="/projects">
-              开始使用
+            <Link className="lp-showcase-btn lp-showcase-btn-primary" to={navActionHref}>
+              {navActionLabel}
             </Link>
           </div>
         </div>
@@ -399,13 +399,19 @@ export function HomePage() {
           <div className="lp-showcase-container">
             <div className="lp-showcase-section-head">
               <h2>方法</h2>
-              <p>LearningPyramid 不是让你反复重学全部内容，而是先筛出当前讲不出来的部分，再把复习持续压到真正薄弱的位置上。</p>
             </div>
             <div className="lp-showcase-grid-3">
               {mechanismCards.map((item) => (
-                <article key={item.title} className="lp-showcase-feature">
-                  <div className="lp-showcase-feature-icon">{item.icon}</div>
-                  <h3>{item.title}</h3>
+                <article key={item.title} className="lp-showcase-feature lp-showcase-method-card">
+                  <div className="lp-showcase-method-card-head">
+                    <div className="lp-showcase-method-card-copy">
+                      <div className="lp-showcase-feature-icon">{item.icon}</div>
+                      <h3>{item.title}</h3>
+                    </div>
+                    <div className="lp-showcase-method-card-visual">
+                      <img src={item.imageSrc} alt={`${item.title}示意图`} loading="lazy" />
+                    </div>
+                  </div>
                   <p>{item.body}</p>
                 </article>
               ))}
@@ -417,7 +423,6 @@ export function HomePage() {
           <div className="lp-showcase-container">
             <div className="lp-showcase-section-head">
               <h2>功能</h2>
-              <p>从本地目录接入，到复述点录入、复习切换、任务树和时间线，整个学习闭环都在一个项目里完成。</p>
             </div>
             <div className="lp-showcase-grid-3">
               {featureCards.map((item) => (
@@ -435,7 +440,6 @@ export function HomePage() {
           <div className="lp-showcase-container">
             <div className="lp-showcase-section-head">
               <h2>上手路径</h2>
-              <p>第一次使用不用全懂。先拿一门最需要减负的科目，按下面四步跑通一轮，你就能判断它是否适合自己。</p>
             </div>
             <div className="lp-showcase-steps-grid">
               {onboardingSteps.map((item) => (
@@ -453,17 +457,14 @@ export function HomePage() {
           <div className="lp-showcase-container">
             <div className="lp-showcase-section-head">
               <h2>会员</h2>
-              <p>当你准备长期使用时，会员和邀请奖励会在这里统一承接，不需要额外理解复杂规则。</p>
             </div>
             <div className="lp-showcase-pricing-grid">
               <article className="lp-showcase-pricing-card">
-                <span className="lp-showcase-badge">会员计划</span>
                 <h3>月会员</h3>
                 <div className="lp-showcase-price">
                   <strong>¥19.9</strong>
                   <span>/ 月</span>
                 </div>
-                <p>新用户首单价为 ¥14.9；账户里已有 5 元券时，可与首单优惠叠加，最低到 ¥9.9。</p>
                 <div className="lp-showcase-price-note">首单价 ¥14.9，首单叠券最低可到 ¥9.9</div>
                 <div className="lp-showcase-hero-actions lp-showcase-membership-actions">
                   <Link className="lp-showcase-btn lp-showcase-btn-primary" to="/membership">
@@ -491,7 +492,6 @@ export function HomePage() {
           <div className="lp-showcase-container">
             <div className="lp-showcase-section-head">
               <h2>常见问题</h2>
-              <p>先把最常见的上手问题放在这里，避免你第一次进系统时卡在目录、视频或项目设置上。</p>
             </div>
             <div className="lp-showcase-faq-grid">
               {faqItems.map((item) => (
