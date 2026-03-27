@@ -985,7 +985,7 @@
 
   .lp-showcase-pricing-grid {
     grid-template-columns: minmax(320px, 0.78fr) minmax(0, 1.22fr);
-    align-items: start;
+    align-items: stretch;
   }
 
   .lp-showcase-faq-grid {
@@ -1003,6 +1003,12 @@
   .lp-showcase-panel {
     padding: 24px;
     border-radius: var(--lp-radius-lg);
+  }
+
+  .lp-showcase-pricing-card {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
   }
 
   .lp-showcase-feature-icon,
@@ -1328,13 +1334,15 @@
   }
 
   .lp-showcase-membership-actions {
-    margin-top: 20px;
+    margin-top: auto;
+    padding-top: 20px;
   }
 
   .lp-showcase-pricing-card-primary {
     width: 100%;
     max-width: 460px;
     justify-self: start;
+    align-self: stretch;
   }
 
   .lp-showcase-pricing-list {
