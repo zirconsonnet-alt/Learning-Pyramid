@@ -3,6 +3,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.selfhost
+      args:
+        PIP_INDEX_URL: ${PLM_PIP_INDEX_URL:-}
+        PIP_EXTRA_INDEX_URL: ${PLM_PIP_EXTRA_INDEX_URL:-}
+        PIP_TRUSTED_HOST: ${PLM_PIP_TRUSTED_HOST:-}
+        PIP_DEFAULT_TIMEOUT: ${PLM_PIP_DEFAULT_TIMEOUT:-120}
+        PIP_RETRIES: ${PLM_PIP_RETRIES:-10}
     ports:
       - "${PLM_PORT:-8001}:8001"
     environment:

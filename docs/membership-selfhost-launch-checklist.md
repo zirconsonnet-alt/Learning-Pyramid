@@ -18,6 +18,24 @@
 - `PLM_ALLOW_SIGNUP` 是否符合你的运营策略
 - `PLM_MEDIA_ACCESS_TOKEN_SECRET` 已替换为真实长随机值
 - PostgreSQL 凭据已替换示例值
+- 如果服务器访问 PyPI 不稳定，已提前配置 `PLM_PIP_INDEX_URL` / `PLM_PIP_TRUSTED_HOST`
+
+推荐的可选构建变量：
+
+- `PLM_PIP_INDEX_URL`
+- `PLM_PIP_EXTRA_INDEX_URL`
+- `PLM_PIP_TRUSTED_HOST`
+- `PLM_PIP_DEFAULT_TIMEOUT`
+- `PLM_PIP_RETRIES`
+
+示例：
+
+```env
+PLM_PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+PLM_PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn
+PLM_PIP_DEFAULT_TIMEOUT=120
+PLM_PIP_RETRIES=10
+```
 
 ## 2. 微信支付必须配置
 

@@ -4,10 +4,21 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PLM_DATA_DIR=/data
 
+ARG PIP_INDEX_URL=
+ARG PIP_EXTRA_INDEX_URL=
+ARG PIP_TRUSTED_HOST=
+ARG PIP_DEFAULT_TIMEOUT=120
+ARG PIP_RETRIES=10
+
 WORKDIR /app
 
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+RUN set -eux; \
+    install_args="--no-cache-dir --default-timeout=${PIP_DEFAULT_TIMEOUT} --retries ${PIP_RETRIES}"; \
+    if [ -n "${PIP_INDEX_URL}" ]; then install_args="${install_args} --index-url ${PIP_INDEX_URL}"; fi; \
+    if [ -n "${PIP_EXTRA_INDEX_URL}" ]; then install_args="${install_args} --extra-index-url ${PIP_EXTRA_INDEX_URL}"; fi; \
+    if [ -n "${PIP_TRUSTED_HOST}" ]; then install_args="${install_args} --trusted-host ${PIP_TRUSTED_HOST}"; fi; \
+    python -m pip install ${install_args} -r requirements.txt
 
 COPY adapter ./adapter
 COPY backend ./backend
