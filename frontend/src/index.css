@@ -984,7 +984,8 @@
   }
 
   .lp-showcase-pricing-grid {
-    grid-template-columns: 1.1fr 0.9fr;
+    grid-template-columns: minmax(320px, 0.78fr) minmax(0, 1.22fr);
+    align-items: start;
   }
 
   .lp-showcase-faq-grid {
@@ -1330,6 +1331,12 @@
     margin-top: 20px;
   }
 
+  .lp-showcase-pricing-card-primary {
+    width: 100%;
+    max-width: 460px;
+    justify-self: start;
+  }
+
   .lp-showcase-pricing-list {
     list-style: none;
     padding: 0;
@@ -1400,6 +1407,10 @@
 
     .lp-showcase-grid-2 {
       grid-template-columns: 1fr;
+    }
+
+    .lp-showcase-pricing-card-primary {
+      max-width: none;
     }
   }
 

@@ -449,7 +449,7 @@ export function HomePage() {
               <h2>会员</h2>
             </div>
             <div className="lp-showcase-pricing-grid">
-              <article className="lp-showcase-pricing-card">
+              <article className="lp-showcase-pricing-card lp-showcase-pricing-card-primary">
                 <h3>月会员</h3>
                 <div className="lp-showcase-price">
                   <strong>¥19.9</strong>
