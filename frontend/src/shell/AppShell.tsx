@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
-import { Menu, Sparkles, Workflow } from "lucide-react"
+import { House, Menu, Sparkles } from "lucide-react"
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate, useParams } from "react-router-dom"
 
 import { MainNav, getGlobalNavItems, getProjectNavItems } from "@/shell/MainNav"
@@ -246,11 +246,12 @@ export function AppShell() {
         <div className="container py-2.5">
           <div className="relative flex w-full items-center gap-3 sm:gap-4">
             <Link
-              to="/projects"
+              to="/"
               className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[1.05rem] bg-[linear-gradient(160deg,#294f79,#1b3556)] text-primary-foreground shadow-[0_16px_34px_-26px_rgba(15,23,42,0.42)] transition-all hover:-translate-y-px hover:shadow-[0_20px_40px_-26px_rgba(15,23,42,0.48)]"
-              aria-label="返回项目中心"
+              aria-label="查看公开首页"
+              title="查看公开首页"
             >
-              <Workflow className="h-4.5 w-4.5" />
+              <House className="h-4.5 w-4.5" />
             </Link>
 
             <div className="min-w-0 flex-1">

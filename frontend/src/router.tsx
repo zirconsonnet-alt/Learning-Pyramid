@@ -47,6 +47,11 @@ export const router = createBrowserRouter([
     errorElement: <RouteErrorPage />,
   },
   {
+    path: "/home",
+    element: <Navigate to="/" replace />,
+    errorElement: <RouteErrorPage />,
+  },
+  {
     path: "/login",
     element: lazyElement(<AuthPage />),
     errorElement: <RouteErrorPage />,
