@@ -47,8 +47,8 @@ const featureCards = [
   },
   {
     icon: "02",
-    title: "学习对象树",
-    body: "左侧学习对象树来自目录扫描结果。你可以把它理解为“材料结构本身”，用于确认视频是否已识别、目录结构是否符合预期。",
+    title: "学习结构化视图",
+    body: "左侧学习对象树来自目录扫描结果，学习任务树与时间线则帮助你回看项目运行过程。它们一起把材料结构、任务推进和层级位置展示清楚，而不是只给你一批零散卡片。",
   },
   {
     icon: "03",
@@ -59,16 +59,6 @@ const featureCards = [
     icon: "04",
     title: "学习任务与复习任务切换",
     body: "当系统已排出待做复习时，工作台中间区域会从“复述点录入”切到“复习”。你只需要先回忆，再显示答案，再诚实判断“会 / 不会”。",
-  },
-  {
-    icon: "05",
-    title: "学习任务树与时间线",
-    body: "学习任务树展示任务与分层上推结构，时间线用于回溯项目运行记录。它们帮助用户确认自己已经走到哪一层，而不是只盯着一批零散卡片。",
-  },
-  {
-    icon: "06",
-    title: "本地素材友好",
-    body: "你可以先从自己电脑里的本地视频材料开始用起；后续如果需要接更多来源，系统也预留了继续扩展的空间。",
   },
 ] as const
 
@@ -424,7 +414,7 @@ export function HomePage() {
             <div className="lp-showcase-section-head">
               <h2>功能</h2>
             </div>
-            <div className="lp-showcase-grid-3">
+            <div className="lp-showcase-grid-2">
               {featureCards.map((item) => (
                 <article key={item.title} className="lp-showcase-feature">
                   <div className="lp-showcase-feature-icon">{item.icon}</div>
