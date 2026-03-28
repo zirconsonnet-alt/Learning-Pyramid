@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useQueries } from "@tanstack/react-query"
-import { FolderTree, ListChecks, RadioTower, Sparkles } from "lucide-react"
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
+import { FolderTree, RadioTower } from "lucide-react"
+import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 
 import { getBaseUrl } from "@/ui/api/http"
 import { ApiError } from "@/ui/api/http"
 import { listRecallPointsByInstance } from "@/ui/api/instances"
-import type { Layer } from "@/ui/api/layers"
 import type { Instance } from "@/ui/api/instances"
 import type { LearningTaskNode } from "@/ui/api/learningTaskNodes"
 import { ContentNotice } from "@/ui/components/contentEmptyState"
@@ -17,7 +16,6 @@ import { useAuditLogEvents } from "@/ui/queries/auditLog"
 import { useLearningTaskNodes } from "@/ui/queries/learningTasks"
 import { useSystemCapabilities } from "@/ui/queries/system"
 import {
-  useAggregationQueue,
   useInstances,
   useLayers,
   useManualRollUp,
@@ -32,8 +30,8 @@ import { cn } from "@/ui/utils"
 import { ComposePane } from "@/views/workbench/components/ComposePane"
 import { LearningObjectTree } from "@/views/workbench/components/LearningObjectTree"
 import { ReviewPane } from "@/views/workbench/components/ReviewPane"
+import { RollupPane } from "@/views/workbench/components/RollupPane"
 import { VideoPane } from "@/views/workbench/components/VideoPane"
-import { formatLearningTaskNodeDisplayTitle } from "@/views/learningTasks/displayTitle"
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -145,99 +143,6 @@ function StatusMetricRow(props: { label: string; value: string; emphasize?: bool
       <div className={cn("text-[15px] font-semibold tracking-[-0.02em]", props.emphasize ? "text-[#1f3952]" : "text-[#33495f]")}>
         {value}
       </div>
-    </div>
-  )
-}
-
-function LearningTaskNodeListItem(props: { projectId: string; node: LearningTaskNode; index: number; sourceLayerIndex?: number }) {
-  const { projectId, node, index, sourceLayerIndex } = props
-  const to = `/p/${projectId}/learning-task-nodes/${node.nodeId}`
-  return (
-    <Link
-      to={to}
-      className="group flex items-start gap-3 rounded-[1.1rem] border border-[#e3e9f1] bg-white px-4 py-3 text-left transition-colors hover:border-primary/20 hover:bg-[#fbfdff]"
-    >
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[#f3f7fc] text-sm font-semibold text-[#2f5d93]">
-        {index}
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-[15px] font-medium text-[#21384d]">
-          {formatLearningTaskNodeDisplayTitle(node.title, { sourceLayerIndex })}
-        </span>
-        <span className="mt-1 block text-xs text-[#70839a]">
-          待推进 {sourceLayerIndex !== undefined ? `· 来源 L${sourceLayerIndex}` : ""}
-        </span>
-      </span>
-    </Link>
-  )
-}
-
-function LayerReviewChainCard(props: {
-  projectId: string
-  layer: Layer
-  learningTaskNodesById: Record<string, LearningTaskNode>
-  learningTaskNodesLoading: boolean
-  queueHasGate: boolean
-  isRollingUp: boolean
-  onRollUp: (layerIndex: number) => void
-}) {
-  const { projectId, layer, learningTaskNodesById, learningTaskNodesLoading, queueHasGate, isRollingUp, onRollUp } = props
-  const aggQ = useAggregationQueue(projectId, layer.layerIndex)
-  const candidateCount = aggQ.data?.currentNodeIds.length ?? 0
-  const currentNodeIds = aggQ.data?.currentNodeIds ?? []
-
-  return (
-    <div className="rounded-[1.2rem] border border-[#e2e8ef] bg-white p-4 sm:p-5">
-      <div className="flex flex-col gap-3 sm:grid sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center sm:gap-4">
-        <div className="flex min-w-0 items-center">
-          <div className="theme-meta shrink-0 px-4 py-1.5 text-sm font-semibold">
-            L{layer.layerIndex}
-          </div>
-        </div>
-        <div className="min-w-0">
-          <div className="theme-meta max-w-full px-4 py-1.5 text-sm">
-            <span className="truncate">
-              {aggQ.isLoading ? "正在加载节点..." : `${candidateCount} 个待推进节点`}
-            </span>
-          </div>
-        </div>
-        <Button
-          className="shrink-0"
-          onClick={() => onRollUp(layer.layerIndex)}
-          disabled={queueHasGate || isRollingUp || !aggQ.data || candidateCount === 0}
-        >
-          {isRollingUp ? "上推中..." : "上推"}
-        </Button>
-      </div>
-
-      <div className="mt-4 space-y-3">
-        {currentNodeIds.length > 0 ? (
-          currentNodeIds.map((nodeId, index) => {
-            const node = learningTaskNodesById[nodeId]
-            if (!node) {
-              return (
-                <div key={nodeId} className="rounded-[1.1rem] border border-[#e3e9f1] bg-[#fbfcfe] px-4 py-3 text-sm text-[#6f7f93]">
-                  {learningTaskNodesLoading ? "正在加载学习任务..." : "节点信息同步中..."}
-                </div>
-              )
-            }
-            return (
-              <LearningTaskNodeListItem
-                key={nodeId}
-                projectId={projectId}
-                node={node}
-                index={index + 1}
-                sourceLayerIndex={Math.max(0, layer.layerIndex - 1)}
-              />
-            )
-          })
-        ) : (
-          <div className="rounded-[1.1rem] border border-dashed border-[#dbe3ec] bg-[#fbfcfe] px-4 py-4">
-            <div className="text-sm font-medium text-[#21384d]">暂无待上推任务</div>
-          </div>
-        )}
-      </div>
-      {aggQ.error ? <div className="mt-2 text-xs text-destructive">{formatApiError(aggQ.error)}</div> : null}
     </div>
   )
 }
@@ -638,45 +543,18 @@ export function WorkbenchPage() {
               )}
             </div>
           ) : (
-            <Card className="theme-card-main shrink-0" id="workbench-rollup-pane">
-              <CardHeader className="theme-card-header">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#e2e8f0] bg-[#f5f7fa] text-primary">
-                    <ListChecks className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <CardTitle>层推进与学习任务</CardTitle>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4 pt-2 text-sm">
-                {layersQ.isLoading ? <div className="rounded-[1.15rem] bg-[#f6f8fb] px-4 py-4 text-sm text-[#647589]">正在加载层级任务...</div> : null}
-                {layersQ.error ? <p className="text-sm text-destructive">{formatApiError(layersQ.error)}</p> : null}
-                {!layersQ.isLoading && !layersQ.error && (layersQ.data?.length ?? 0) === 0 ? (
-                  <div className="flex items-start gap-3 rounded-[1.2rem] bg-[#f6f8fb] px-4 py-4">
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[#eef5ff] text-primary">
-                      <Sparkles className="h-4 w-4" />
-                    </div>
-                    <div className="text-sm font-medium text-foreground">当前还没有层配置</div>
-                  </div>
-                ) : null}
-                <div className="space-y-2">
-                  {(layersQ.data ?? []).map((l) => (
-                    <LayerReviewChainCard
-                      key={l.layerId}
-                      projectId={pid}
-                      layer={l}
-                      learningTaskNodesById={learningTaskNodesById}
-                      learningTaskNodesLoading={learningTaskNodesQ.isLoading}
-                      queueHasGate={queueHasGate}
-                      isRollingUp={rollUpM.isPending}
-                      onRollUp={(layerIndex) => void onManualRollUp(layerIndex)}
-                    />
-                  ))}
-                </div>
-                {rollUpM.error ? <p className="text-sm text-destructive">{formatApiError(rollUpM.error)}</p> : null}
-              </CardContent>
-            </Card>
+            <RollupPane
+              projectId={pid}
+              layers={layersQ.data ?? []}
+              layersLoading={layersQ.isLoading}
+              layersError={layersQ.error}
+              learningTaskNodesById={learningTaskNodesById}
+              learningTaskNodesLoading={learningTaskNodesQ.isLoading}
+              queueHasGate={queueHasGate}
+              isRollingUp={rollUpM.isPending}
+              onRollUp={(layerIndex) => void onManualRollUp(layerIndex)}
+              rollUpError={rollUpM.error}
+            />
           )}
         </section>
 

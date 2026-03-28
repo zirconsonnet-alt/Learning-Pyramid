@@ -29,25 +29,6 @@ function newLocalId() {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}_${Math.random().toString(16).slice(2)}`
 }
 
-function parseAnchorMs(position: string): number | null {
-  const m = position.match(/^t=(\d+)$/)
-  if (!m) return null
-  const n = Number(m[1])
-  return Number.isFinite(n) ? n : null
-}
-
-function msToClock(ms: number) {
-  const totalSec = Math.floor(ms / 1000)
-  const h = Math.floor(totalSec / 3600)
-  const m = Math.floor((totalSec % 3600) / 60)
-  const s = totalSec % 60
-  const msPart = ms % 1000
-  const hh = h > 0 ? `${h}:` : ""
-  const mm = h > 0 ? String(m).padStart(2, "0") : String(m)
-  const ss = String(s).padStart(2, "0")
-  return `${hh}${mm}:${ss}.${String(msPart).padStart(3, "0")}`
-}
-
 function isDraftComplete(draft: DraftRecallPoint) {
   return richContentHasMeaning(draft.question) && richContentHasMeaning(draft.answer)
 }
@@ -220,19 +201,19 @@ export function ComposePane({
 
   return (
     <Card className="theme-card-main">
-      <CardHeader className="theme-card-header flex-col gap-4 space-y-0 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex items-start gap-3">
+      <CardHeader className="theme-card-header flex-col gap-4 space-y-0 md:flex-row md:items-start md:justify-between">
+        <div className="flex min-w-0 flex-1 items-start gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#e2e8f0] bg-[#f5f7fa] text-primary">
             <BookPlus className="h-5 w-5" />
           </div>
-          <div>
+          <div className="min-w-0">
             <CardTitle>复述点录入</CardTitle>
-            {instance ? <div className="mt-1 text-xs text-[#6a7b90]">{instance.materialDisplayName}</div> : null}
+            {instance ? <div className="mt-1 truncate text-xs text-[#6a7b90]">{instance.materialDisplayName}</div> : null}
           </div>
         </div>
 
-        <div className="flex min-w-[220px] flex-col gap-3">
-          <div className="space-y-2">
+        <div className="grid w-full gap-3 md:w-[24rem] md:shrink-0 md:grid-cols-[minmax(0,1fr)_auto] md:items-center md:gap-4">
+          <div className="min-w-0 space-y-2">
             <div className="flex items-center justify-between gap-3 text-sm">
               <span className="theme-meta">{drafts.length} 个复述点</span>
               <span className="font-medium text-slate-700">
@@ -246,9 +227,20 @@ export function ComposePane({
               />
             </div>
           </div>
-          <Button onClick={onAdd} disabled={!selectedInstanceId} className="sm:self-end">
-            添加复述点
-          </Button>
+          <div className="flex w-full gap-2 md:w-auto md:self-center">
+            <Button onClick={onAdd} disabled={!selectedInstanceId} className="flex-1 whitespace-nowrap md:flex-none">
+              添加
+            </Button>
+            {activeDraft ? (
+              <Button
+                variant="ghost"
+                onClick={() => removeDraft(projectId, activeDraft.localId)}
+                className="flex-1 whitespace-nowrap text-muted-foreground md:flex-none"
+              >
+                删除
+              </Button>
+            ) : null}
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-4 pt-5">
@@ -301,155 +293,81 @@ export function ComposePane({
         ) : null}
 
         {activeDraft ? (
-          <div className="grid gap-3 md:grid-cols-[auto_minmax(0,1fr)_auto] md:items-stretch">
-            <div className="hidden md:flex">
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-full min-h-[360px] w-12 rounded-[1.15rem] border border-[#dbe4ee] bg-white/70 text-[#5e738b] hover:bg-white"
-                onClick={() => goToDraft(activeDraftIndex - 1)}
-                disabled={activeDraftIndex <= 0}
-                aria-label="上一张复述点卡片"
-                title="上一张"
-              >
-                <ChevronLeft className="h-5 w-5" />
-              </Button>
-            </div>
-
+          <div className="grid gap-3">
             <div
               key={activeDraft.localId}
               ref={(node) => {
                 cardRefs.current[activeDraft.localId] = node
               }}
-              className="theme-status-surface rounded-[1.15rem] border border-[#e2e8ef] px-4 py-3"
+              className="relative overflow-visible"
             >
-              <div className="flex items-center justify-between gap-3 md:hidden">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-10 w-10 rounded-full border border-[#dbe4ee] bg-white/80"
-                  onClick={() => goToDraft(activeDraftIndex - 1)}
-                  disabled={activeDraftIndex <= 0}
-                  aria-label="上一张复述点卡片"
-                  title="上一张"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <div className="theme-meta shrink-0">
-                  {activeDraftIndex >= 0 ? `第 ${activeDraftIndex + 1} 个 / 共 ${drafts.length} 个复述点` : `${drafts.length} 个复述点`}
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-10 w-10 rounded-full border border-[#dbe4ee] bg-white/80"
-                  onClick={() => goToDraft(activeDraftIndex + 1)}
-                  disabled={activeDraftIndex < 0 || activeDraftIndex >= drafts.length - 1}
-                  aria-label="下一张复述点卡片"
-                  title="下一张"
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
+              <div className="sr-only" aria-live="polite">
+                {activeDraftIndex >= 0 ? `第 ${activeDraftIndex + 1} 个 / 共 ${drafts.length} 个复述点` : `${drafts.length} 个复述点`}
               </div>
-
-              <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between md:mt-0">
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                    <span>第 {activeDraftIndex + 1} 个复述点</span>
-                    <span
-                      className={cn(
-                        "rounded-full px-2 py-0.5 tracking-[0.08em]",
-                        isDraftComplete(activeDraft) ? "bg-primary/10 text-primary" : "bg-slate-100 text-slate-600",
-                      )}
-                    >
-                      {isDraftComplete(activeDraft) ? "已填写完成" : "待填写"}
-                    </span>
-                  </div>
-
-                  <div className="mt-2 text-[15px] font-semibold leading-6 text-slate-900">
-                    {richContentHasMeaning(activeDraft.question) ? "继续完善这个复述点的提问与作答。" : "从当前视频锚点开始录入这个复述点。"}
-                  </div>
-
-                  <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <span className="rounded-full border border-[#dbe4ee] bg-white px-2.5 py-1 font-medium text-slate-600">
-                      锚点：
-                      {(() => {
-                        const ms = parseAnchorMs(activeDraft.position)
-                        return `${ms === null ? activeDraft.position : msToClock(ms)}（${activeDraft.position}）`
-                      })()}
-                    </span>
-                    {instance ? (
-                      <span className="rounded-full border border-[#dbe4ee] bg-white px-2.5 py-1 font-medium text-slate-600">
-                        {instance.materialDisplayName}
-                      </span>
-                    ) : null}
-                  </div>
-                </div>
-
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="rounded-full text-muted-foreground"
-                  onClick={() => removeDraft(projectId, activeDraft.localId)}
-                >
-                  删除
-                </Button>
-              </div>
-
-              <div className="mt-3 grid gap-3 xl:grid-cols-2">
-                <div className="rounded-2xl border border-[#e2e8ef] bg-white p-3">
-                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">问题</div>
-                  <RichContentEditor
-                    projectId={projectId}
-                    field="question"
-                    value={activeDraft.question}
-                    placeholder="请输入问题/提示语"
-                    onTextChange={(text) => updateDraftText(projectId, activeDraft.localId, "question", text)}
-                    onAppendImage={(assetId) => appendDraftImage(projectId, activeDraft.localId, "question", assetId)}
-                    onRemoveImage={(imageIndex) => removeDraftImage(projectId, activeDraft.localId, "question", imageIndex)}
-                    textareaRef={(node) => {
-                      questionRefs.current[activeDraft.localId] = node
-                    }}
-                    textareaClassName="min-h-[180px] resize-y rounded-2xl border-[#dbe4ee] bg-[#fbfdff] text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-primary focus:ring-2 focus:ring-primary/15"
-                    imageClassName="h-28 w-full max-w-[220px] rounded-2xl border border-[#dbe4ee] bg-[#fbfdff] object-cover"
-                  />
-                </div>
-
-                <div className="rounded-2xl border border-[#e2e8ef] bg-white p-3">
-                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">答案</div>
-                  <RichContentEditor
-                    projectId={projectId}
-                    field="answer"
-                    value={activeDraft.answer}
-                    placeholder="请输入答案/复述内容"
-                    onTextChange={(text) => updateDraftText(projectId, activeDraft.localId, "answer", text)}
-                    onAppendImage={(assetId) => appendDraftImage(projectId, activeDraft.localId, "answer", assetId)}
-                    onRemoveImage={(imageIndex) => removeDraftImage(projectId, activeDraft.localId, "answer", imageIndex)}
-                    textareaRef={(node) => {
-                      answerRefs.current[activeDraft.localId] = node
-                    }}
-                    textareaClassName="min-h-[180px] resize-y rounded-2xl border-[#dbe4ee] bg-[#fbfdff] text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-primary focus:ring-2 focus:ring-primary/15"
-                    imageClassName="h-28 w-full max-w-[220px] rounded-2xl border border-[#dbe4ee] bg-[#fbfdff] object-cover"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="hidden md:flex">
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="h-full min-h-[360px] w-12 rounded-[1.15rem] border border-[#dbe4ee] bg-white/70 text-[#5e738b] hover:bg-white"
+                className="absolute inset-y-0 -left-4 z-10 h-auto w-4 rounded-none border-0 bg-transparent p-0 text-[#5e738b] shadow-none outline-none hover:bg-transparent hover:text-slate-900 focus-visible:ring-0 focus-visible:ring-offset-0 sm:-left-5 sm:w-5"
+                onClick={() => goToDraft(activeDraftIndex - 1)}
+                disabled={activeDraftIndex <= 0}
+                aria-label="上一张复述点卡片"
+                title="上一张"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="absolute inset-y-0 -right-4 z-10 h-auto w-4 rounded-none border-0 bg-transparent p-0 text-[#5e738b] shadow-none outline-none hover:bg-transparent hover:text-slate-900 focus-visible:ring-0 focus-visible:ring-offset-0 sm:-right-5 sm:w-5"
                 onClick={() => goToDraft(activeDraftIndex + 1)}
                 disabled={activeDraftIndex < 0 || activeDraftIndex >= drafts.length - 1}
                 aria-label="下一张复述点卡片"
                 title="下一张"
               >
-                <ChevronRight className="h-5 w-5" />
+                <ChevronRight className="h-4 w-4" />
               </Button>
+
+              <div className="theme-status-surface rounded-[1.15rem] border border-[#e2e8ef] px-4 py-4 sm:px-5">
+                <div className="grid gap-3 xl:grid-cols-2">
+                  <div className="space-y-2">
+                    <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">问题</div>
+                    <RichContentEditor
+                      projectId={projectId}
+                      field="question"
+                      value={activeDraft.question}
+                      placeholder="请输入问题/提示语"
+                      onTextChange={(text) => updateDraftText(projectId, activeDraft.localId, "question", text)}
+                      onAppendImage={(assetId) => appendDraftImage(projectId, activeDraft.localId, "question", assetId)}
+                      onRemoveImage={(imageIndex) => removeDraftImage(projectId, activeDraft.localId, "question", imageIndex)}
+                      textareaRef={(node) => {
+                        questionRefs.current[activeDraft.localId] = node
+                      }}
+                      textareaClassName="min-h-[180px] resize-y rounded-2xl border-[#dbe4ee] bg-[#fbfdff] text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-primary focus:ring-2 focus:ring-primary/15"
+                      imageClassName="h-28 w-full max-w-[220px] rounded-2xl border border-[#dbe4ee] bg-[#fbfdff] object-cover"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">答案</div>
+                    <RichContentEditor
+                      projectId={projectId}
+                      field="answer"
+                      value={activeDraft.answer}
+                      placeholder="请输入答案/复述内容"
+                      onTextChange={(text) => updateDraftText(projectId, activeDraft.localId, "answer", text)}
+                      onAppendImage={(assetId) => appendDraftImage(projectId, activeDraft.localId, "answer", assetId)}
+                      onRemoveImage={(imageIndex) => removeDraftImage(projectId, activeDraft.localId, "answer", imageIndex)}
+                      textareaRef={(node) => {
+                        answerRefs.current[activeDraft.localId] = node
+                      }}
+                      textareaClassName="min-h-[180px] resize-y rounded-2xl border-[#dbe4ee] bg-[#fbfdff] text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-primary focus:ring-2 focus:ring-primary/15"
+                      imageClassName="h-28 w-full max-w-[220px] rounded-2xl border border-[#dbe4ee] bg-[#fbfdff] object-cover"
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         ) : null}

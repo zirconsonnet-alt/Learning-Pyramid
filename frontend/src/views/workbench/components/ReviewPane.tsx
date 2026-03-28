@@ -240,8 +240,8 @@ export function ReviewPane({
 
   return (
     <Card className="theme-card-main">
-      <CardHeader className="theme-card-header flex-col gap-4 space-y-0 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex items-start gap-3">
+      <CardHeader className="theme-card-header flex-col gap-4 space-y-0 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#e2e8f0] bg-[#f5f7fa] text-primary">
             <ClipboardCheck className="h-5 w-5" />
           </div>
@@ -273,21 +273,8 @@ export function ReviewPane({
         {rangeQ.data ? (
           <div className="space-y-3">
             <div className="space-y-4">
-              <div className="flex flex-col gap-4">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <div className="text-sm font-semibold text-foreground">作答进度</div>
-                    <div className="mt-1 text-xs text-[#6a7b90]">
-                      已作答 {answeredCount} / {totalCount}，当前是第 {Math.max(activeRecallPointIndex + 1, 0)} 题。
-                    </div>
-                  </div>
-                  <div className="theme-meta">
-                    {activeRecallPointIndex >= 0 ? `${activeRecallPointIndex + 1} / ${totalCount}` : `${totalCount} 题`}
-                  </div>
-                </div>
-                <div className="h-2 overflow-hidden rounded-full bg-[#e8edf4]">
-                  <div className="h-full rounded-full bg-primary transition-[width] duration-300" style={{ width: `${completionPercent}%` }} />
-                </div>
+              <div className="sr-only">
+                作答进度：已作答 {answeredCount} / {totalCount}，当前是第 {Math.max(activeRecallPointIndex + 1, 0)} 题。
               </div>
               <div className="flex flex-wrap gap-2">
                 {recallPointIds.map((rpId, index) => {
@@ -340,196 +327,168 @@ export function ReviewPane({
               )
 
               return (
-                <div className="grid gap-3 md:grid-cols-[auto_minmax(0,1fr)_auto] md:items-stretch">
-                  <div className="hidden md:flex">
+                <div className="grid gap-3">
+                  <div key={rpId} className="relative overflow-visible">
+                    <div className="sr-only" aria-live="polite">
+                      {activeRecallPointIndex >= 0 ? `第 ${activeRecallPointIndex + 1} 题 / 共 ${totalCount} 题` : `${totalCount} 题`}
+                    </div>
                     <Button
                       type="button"
                       variant="ghost"
                       size="icon"
-                      className="h-full min-h-[320px] w-12 rounded-[1.15rem] border border-[#dbe4ee] bg-white/70 text-[#5e738b] hover:bg-white"
+                      className="absolute inset-y-0 -left-4 z-10 h-auto w-4 rounded-none border-0 bg-transparent p-0 text-[#5e738b] shadow-none outline-none hover:bg-transparent hover:text-slate-900 focus-visible:ring-0 focus-visible:ring-offset-0 sm:-left-5 sm:w-5"
                       onClick={() => goToRecallPoint(activeRecallPointIndex - 1)}
                       disabled={activeRecallPointIndex <= 0}
                       aria-label="上一题"
                       title="上一题"
                     >
-                      <ChevronLeft className="h-5 w-5" />
+                      <ChevronLeft className="h-4 w-4" />
                     </Button>
-                  </div>
-
-                  <div key={rpId} className="theme-status-surface rounded-[1.15rem] border border-[#e2e8ef] px-4 py-3">
-                    <div className="flex items-center justify-between gap-3 md:hidden">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-10 w-10 rounded-full border border-[#dbe4ee] bg-white/80"
-                        onClick={() => goToRecallPoint(activeRecallPointIndex - 1)}
-                        disabled={activeRecallPointIndex <= 0}
-                        aria-label="上一题"
-                        title="上一题"
-                      >
-                        <ChevronLeft className="h-4 w-4" />
-                      </Button>
-                      <div className="theme-meta shrink-0">
-                        {activeRecallPointIndex >= 0 ? `第 ${activeRecallPointIndex + 1} 题 / 共 ${totalCount} 题` : `${totalCount} 题`}
-                      </div>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-10 w-10 rounded-full border border-[#dbe4ee] bg-white/80"
-                        onClick={() => goToRecallPoint(activeRecallPointIndex + 1)}
-                        disabled={activeRecallPointIndex < 0 || activeRecallPointIndex >= totalCount - 1}
-                        aria-label="下一题"
-                        title="下一题"
-                      >
-                        <ChevronRight className="h-4 w-4" />
-                      </Button>
-                    </div>
-
-                    <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between md:mt-0">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                          <span>第 {activeRecallPointIndex + 1} 题</span>
-                          {isRemembered ? (
-                            <span className="rounded-full bg-emerald-50 px-2 py-0.5 tracking-[0.08em] text-emerald-700">已标记为记得</span>
-                          ) : null}
-                          {isForgotten ? (
-                            <span className="rounded-full bg-amber-50 px-2 py-0.5 tracking-[0.08em] text-amber-700">已标记为不记得</span>
-                          ) : null}
-                        </div>
-
-                        <Link
-                          to={`/p/${projectId}/recall-points/${rpId}`}
-                          className="group mt-2 block rounded-2xl px-2 py-1 -mx-2 -my-1 transition hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                          title="打开复述点详情"
-                        >
-                          <div className="text-[15px] font-semibold leading-6 text-slate-900 transition group-hover:text-primary">
-                            <RichContentRenderer projectId={projectId} value={activeRecallPoint.question} />
-                          </div>
-                          <div className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary/85">
-                            查看复述点详情
-                            <ArrowUpRight className="h-3.5 w-3.5" />
-                          </div>
-                        </Link>
-
-                        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                          <span className="rounded-full border border-[#dbe4ee] bg-white px-2.5 py-1 font-medium text-slate-600">{anchorLabel}</span>
-                          {activeRecallPoint.insights.length > 0 ? (
-                            <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 font-medium text-amber-700">
-                              <Lightbulb className="h-3.5 w-3.5" />
-                              已有 {activeRecallPoint.insights.length} 条理解
-                            </span>
-                          ) : null}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {onOpenAnchor ? (
-                        <Button variant="outline" size="sm" className="rounded-full" onClick={() => onOpenAnchor(activeRecallPoint.anchor)}>
-                          <PlayCircle className="h-4 w-4" />
-                          回到视频
-                        </Button>
-                      ) : null}
-
-                      <Button variant="ghost" size="sm" className="rounded-full" onClick={() => toggleAnswerVisibility(rpId)}>
-                        {answerVisible ? (
-                          <>
-                            <EyeOff className="h-4 w-4" />
-                            收起答案
-                          </>
-                        ) : (
-                          <>
-                            <Eye className="h-4 w-4" />
-                            查看答案
-                          </>
-                        )}
-                      </Button>
-
-                      <Button variant="ghost" size="sm" className="rounded-full" onClick={() => toggleInsightEditor(rpId, hasDraftInsight)}>
-                        <Lightbulb className="h-4 w-4" />
-                        {insightEditorVisible ? "收起理解" : "追加理解"}
-                      </Button>
-                    </div>
-
-                    {answerVisible ? (
-                      <div className="theme-canvas mt-3 rounded-2xl border border-[#e2e8ef] p-3 text-sm">
-                        <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">答案</div>
-                        <RichContentRenderer projectId={projectId} value={activeRecallPoint.answer} />
-                      </div>
-                    ) : null}
-
-                    {insightEditorVisible ? (
-                      <div className="mt-3 rounded-2xl border border-[#e2e8ef] bg-white p-3">
-                        <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">追加理解</div>
-                        <textarea
-                          value={draftInsight}
-                          onChange={(event) => updateInsightDraft(rpId, event.target.value)}
-                          rows={3}
-                          placeholder="补充这道复习点的新理解、易错点、联想线索或自己的话解释。"
-                          className="w-full resize-y rounded-2xl border border-[#dbe4ee] bg-[#fbfdff] px-3 py-2 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-primary focus:ring-2 focus:ring-primary/15"
-                        />
-                        <div className="mt-2 text-xs text-muted-foreground">提交本轮复习时，这段内容会作为新的“理解”追加到对应复述点。</div>
-                      </div>
-                    ) : null}
-
-                    <div className="mt-4 flex flex-wrap items-center gap-2">
-                      <Button
-                        variant={isRemembered ? "default" : "outline"}
-                        size="sm"
-                        className={cn("min-w-[96px] rounded-full", isRemembered ? "bg-emerald-600 hover:bg-emerald-700" : "")}
-                        onClick={() => chooseAnswer(rpId, 1)}
-                      >
-                        记得
-                      </Button>
-                      <Button
-                        variant={isForgotten ? "secondary" : "outline"}
-                        size="sm"
-                        className={cn(
-                          "min-w-[96px] rounded-full",
-                          isForgotten ? "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100" : "",
-                        )}
-                        onClick={() => chooseAnswer(rpId, 0)}
-                      >
-                        不记得
-                      </Button>
-                      {chosen !== undefined ? (
-                        <Button variant="ghost" size="sm" className="rounded-full text-muted-foreground" onClick={() => clearAnswer(rpId)}>
-                          <Undo2 className="h-4 w-4" />
-                          撤销选择
-                        </Button>
-                      ) : null}
-                    </div>
-
-                    {chosen !== undefined ? (
-                      <div
-                        className={cn(
-                          "mt-3 flex items-center gap-2 rounded-2xl px-3 py-2 text-xs font-medium",
-                          isRemembered ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700",
-                        )}
-                      >
-                        <CheckCircle2 className="h-4 w-4" />
-                        {isRemembered
-                          ? "这题已标记为“记得”，可以继续下一题。"
-                          : "这题已标记为“不记得”，建议先核对答案，再补一句自己的理解。"}
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <div className="hidden md:flex">
                     <Button
                       type="button"
                       variant="ghost"
                       size="icon"
-                      className="h-full min-h-[320px] w-12 rounded-[1.15rem] border border-[#dbe4ee] bg-white/70 text-[#5e738b] hover:bg-white"
+                      className="absolute inset-y-0 -right-4 z-10 h-auto w-4 rounded-none border-0 bg-transparent p-0 text-[#5e738b] shadow-none outline-none hover:bg-transparent hover:text-slate-900 focus-visible:ring-0 focus-visible:ring-offset-0 sm:-right-5 sm:w-5"
                       onClick={() => goToRecallPoint(activeRecallPointIndex + 1)}
                       disabled={activeRecallPointIndex < 0 || activeRecallPointIndex >= totalCount - 1}
                       aria-label="下一题"
                       title="下一题"
                     >
-                      <ChevronRight className="h-5 w-5" />
+                      <ChevronRight className="h-4 w-4" />
                     </Button>
+
+                    <div className="theme-status-surface rounded-[1.15rem] border border-[#e2e8ef] px-4 py-4 sm:px-5">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                            <span>第 {activeRecallPointIndex + 1} 题</span>
+                            {isRemembered ? (
+                              <span className="rounded-full bg-emerald-50 px-2 py-0.5 tracking-[0.08em] text-emerald-700">已标记为记得</span>
+                            ) : null}
+                            {isForgotten ? (
+                              <span className="rounded-full bg-amber-50 px-2 py-0.5 tracking-[0.08em] text-amber-700">已标记为不记得</span>
+                            ) : null}
+                          </div>
+
+                          <Link
+                            to={`/p/${projectId}/recall-points/${rpId}`}
+                            className="group mt-2 block rounded-2xl px-2 py-1 -mx-2 -my-1 transition hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                            title="打开复述点详情"
+                          >
+                            <div className="text-[15px] font-semibold leading-6 text-slate-900 transition group-hover:text-primary">
+                              <RichContentRenderer projectId={projectId} value={activeRecallPoint.question} />
+                            </div>
+                            <div className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary/85">
+                              查看复述点详情
+                              <ArrowUpRight className="h-3.5 w-3.5" />
+                            </div>
+                          </Link>
+
+                          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                            <span className="rounded-full border border-[#dbe4ee] bg-white px-2.5 py-1 font-medium text-slate-600">
+                              {anchorLabel}
+                            </span>
+                            {activeRecallPoint.insights.length > 0 ? (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 font-medium text-amber-700">
+                                <Lightbulb className="h-3.5 w-3.5" />
+                                已有 {activeRecallPoint.insights.length} 条理解
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {onOpenAnchor ? (
+                          <Button variant="outline" size="sm" className="rounded-full" onClick={() => onOpenAnchor(activeRecallPoint.anchor)}>
+                            <PlayCircle className="h-4 w-4" />
+                            回到视频
+                          </Button>
+                        ) : null}
+
+                        <Button variant="ghost" size="sm" className="rounded-full" onClick={() => toggleAnswerVisibility(rpId)}>
+                          {answerVisible ? (
+                            <>
+                              <EyeOff className="h-4 w-4" />
+                              收起答案
+                            </>
+                          ) : (
+                            <>
+                              <Eye className="h-4 w-4" />
+                              查看答案
+                            </>
+                          )}
+                        </Button>
+
+                        <Button variant="ghost" size="sm" className="rounded-full" onClick={() => toggleInsightEditor(rpId, hasDraftInsight)}>
+                          <Lightbulb className="h-4 w-4" />
+                          {insightEditorVisible ? "收起理解" : "追加理解"}
+                        </Button>
+                      </div>
+
+                      {answerVisible ? (
+                        <div className="theme-canvas mt-3 rounded-2xl border border-[#e2e8ef] p-3 text-sm">
+                          <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">答案</div>
+                          <RichContentRenderer projectId={projectId} value={activeRecallPoint.answer} />
+                        </div>
+                      ) : null}
+
+                      {insightEditorVisible ? (
+                        <div className="mt-3 rounded-2xl border border-[#e2e8ef] bg-white p-3">
+                          <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">追加理解</div>
+                          <textarea
+                            value={draftInsight}
+                            onChange={(event) => updateInsightDraft(rpId, event.target.value)}
+                            rows={3}
+                            placeholder="补充这道复习点的新理解、易错点、联想线索或自己的话解释。"
+                            className="w-full resize-y rounded-2xl border border-[#dbe4ee] bg-[#fbfdff] px-3 py-2 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-primary focus:ring-2 focus:ring-primary/15"
+                          />
+                          <div className="mt-2 text-xs text-muted-foreground">提交本轮复习时，这段内容会作为新的“理解”追加到对应复述点。</div>
+                        </div>
+                      ) : null}
+
+                      <div className="mt-4 flex flex-wrap items-center gap-2">
+                        <Button
+                          variant={isRemembered ? "default" : "outline"}
+                          size="sm"
+                          className={cn("min-w-[96px] rounded-full", isRemembered ? "bg-emerald-600 hover:bg-emerald-700" : "")}
+                          onClick={() => chooseAnswer(rpId, 1)}
+                        >
+                          记得
+                        </Button>
+                        <Button
+                          variant={isForgotten ? "secondary" : "outline"}
+                          size="sm"
+                          className={cn(
+                            "min-w-[96px] rounded-full",
+                            isForgotten ? "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100" : "",
+                          )}
+                          onClick={() => chooseAnswer(rpId, 0)}
+                        >
+                          不记得
+                        </Button>
+                        {chosen !== undefined ? (
+                          <Button variant="ghost" size="sm" className="rounded-full text-muted-foreground" onClick={() => clearAnswer(rpId)}>
+                            <Undo2 className="h-4 w-4" />
+                            撤销选择
+                          </Button>
+                        ) : null}
+                      </div>
+
+                      {chosen !== undefined ? (
+                        <div
+                          className={cn(
+                            "mt-3 flex items-center gap-2 rounded-2xl px-3 py-2 text-xs font-medium",
+                            isRemembered ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700",
+                          )}
+                        >
+                          <CheckCircle2 className="h-4 w-4" />
+                          {isRemembered
+                            ? "这题已标记为“记得”，可以继续下一题。"
+                            : "这题已标记为“不记得”，建议先核对答案，再补一句自己的理解。"}
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
                 </div>
               )
