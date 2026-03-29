@@ -39,6 +39,12 @@ def _copy_frontend_tree(src: Path, dst: Path) -> None:
     )
 
 
+def _copy_optional_tree(src: Path, dst: Path) -> None:
+    if not src.exists() or not src.is_dir():
+        return
+    _copy_tree(src, dst)
+
+
 def _resolve_pnpm_command() -> list[str]:
     for candidate in ("pnpm.cmd", "pnpm"):
         path = shutil.which(candidate)
@@ -105,6 +111,7 @@ def main() -> int:
     for rel_dir in ("adapter", "backend", "docs", "tools"):
         _copy_tree(PROJECT_ROOT / rel_dir, bundle_dir / rel_dir)
     _copy_frontend_tree(PROJECT_ROOT / "frontend", bundle_dir / "frontend")
+    _copy_optional_tree(PROJECT_ROOT / "public-downloads", bundle_dir / "public-downloads")
 
     for rel_file in (
         ".dockerignore",
