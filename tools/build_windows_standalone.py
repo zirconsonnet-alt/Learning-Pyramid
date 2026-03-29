@@ -153,7 +153,6 @@ Stop:
 
 Notes:
 - No Python installation is required for this bundle.
-- Local Whisper is still external. Install it separately if you want ASR.
 - User data is stored in the normal {APP_NAME} app-data directory, not next to this bundle.
 """
     (dst / "START-HERE.txt").write_text(text, encoding="utf-8", newline="\n")
@@ -221,10 +220,7 @@ def main() -> int:
         build_root=build_root,
         pyinstaller_python=pyinstaller_python,
         excluded_modules=DEFAULT_EXCLUDED_MODULES,
-        add_data=[
-            (PROJECT_ROOT / "frontend" / "dist", "frontend/dist"),
-            (PROJECT_ROOT / "tools" / "local_whisper_service.py", "tools"),
-        ],
+        add_data=[(PROJECT_ROOT / "frontend" / "dist", "frontend/dist")],
     )
 
     shutil.copy2(PROJECT_ROOT / "README.md", bundle_dir / "README.md")

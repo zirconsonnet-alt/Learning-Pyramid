@@ -1,12 +1,20 @@
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
-import { getSystemCapabilities, getSystemRuntime } from "@/ui/api/system"
+import { getGlobalLlmSettings, getPublicDownloads, getSystemCapabilities, getSystemRuntime, updateGlobalLlmSettings } from "@/ui/api/system"
 
 export function useSystemCapabilities() {
   return useQuery({
     queryKey: ["systemCapabilities"],
     queryFn: ({ signal }) => getSystemCapabilities({ signal }),
     staleTime: Infinity,
+  })
+}
+
+export function usePublicDownloads() {
+  return useQuery({
+    queryKey: ["publicDownloads"],
+    queryFn: ({ signal }) => getPublicDownloads({ signal }),
+    staleTime: 60_000,
   })
 }
 
@@ -17,5 +25,29 @@ export function useSystemRuntime(enabled = true) {
     enabled,
     staleTime: 2_000,
     refetchInterval: enabled ? 5_000 : false,
+  })
+}
+
+export function useGlobalLlmSettings(enabled = true) {
+  return useQuery({
+    queryKey: ["globalLlmSettings"],
+    queryFn: ({ signal }) => getGlobalLlmSettings({ signal }),
+    enabled,
+    staleTime: 2_000,
+  })
+}
+
+export function useUpdateGlobalLlmSettings() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (params: { baseUrl?: string; modelName?: string; apiKey?: string; clearApiKey?: boolean }) =>
+      updateGlobalLlmSettings(params),
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["globalLlmSettings"] }),
+        qc.invalidateQueries({ queryKey: ["systemCapabilities"] }),
+        qc.invalidateQueries({ queryKey: ["systemRuntime"] }),
+      ])
+    },
   })
 }

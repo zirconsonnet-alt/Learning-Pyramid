@@ -174,6 +174,10 @@ class EditLearningTaskRequest(BaseModel):
     title: str = Field(min_length=1)
 
 
+class EditLearningTaskNodeRequest(BaseModel):
+    title: str = Field(min_length=1)
+
+
 class EditRecallPointRequest(BaseModel):
     question: conlist(ContentBlockDTO, min_items=1)
     answer: conlist(ContentBlockDTO, min_items=1)
@@ -210,9 +214,55 @@ class SetLayerConfigRequest(BaseModel):
     kPoint: Optional[int] = None
 
 
+class TransientServiceConfigRequest(BaseModel):
+    baseUrl: str = Field(min_length=1)
+    modelName: Optional[str] = None
+    apiKey: Optional[str] = None
+
+
 class RequestAsrRequest(BaseModel):
     recallPointId: str = Field(min_length=1)
     centerMs: int = Field(ge=0)
     preMs: int = Field(ge=0)
     postMs: int = Field(ge=0)
     provider: Optional[str] = None
+    serviceConfig: Optional[TransientServiceConfigRequest] = None
+
+
+class RequestInstanceAsrRequest(BaseModel):
+    startMs: int = Field(ge=0)
+    endMs: int = Field(gt=0)
+    provider: Optional[str] = None
+    serviceConfig: Optional[TransientServiceConfigRequest] = None
+
+
+class UpdateGlobalLlmSettingsRequest(BaseModel):
+    baseUrl: Optional[str] = None
+    modelName: Optional[str] = None
+    apiKey: Optional[str] = None
+    clearApiKey: bool = False
+
+
+class UpdateUserServiceSettingsRequest(BaseModel):
+    baseUrl: Optional[str] = None
+    modelName: Optional[str] = None
+    apiKey: Optional[str] = None
+    clearApiKey: bool = False
+
+
+class AskLlmRequest(BaseModel):
+    prompt: str = Field(min_length=1)
+    systemPrompt: Optional[str] = None
+    modelName: Optional[str] = None
+    temperature: Optional[float] = None
+
+
+class AskProjectLlmRequest(BaseModel):
+    prompt: str = Field(min_length=1)
+    systemPrompt: Optional[str] = None
+    supplementalContext: Optional[str] = None
+    modelName: Optional[str] = None
+    temperature: Optional[float] = None
+    recallPointId: Optional[str] = None
+    learningTaskNodeId: Optional[str] = None
+    learningObjectNodeId: Optional[str] = None

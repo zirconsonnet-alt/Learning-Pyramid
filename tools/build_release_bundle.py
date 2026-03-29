@@ -54,7 +54,6 @@ Prerequisites:
 
 - Python 3.12+
 - Installed backend dependencies from `requirements.txt`
-- Local Whisper install if you want ASR
 
 The full project README is included as `README.md`.
 """

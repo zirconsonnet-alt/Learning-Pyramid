@@ -521,43 +521,79 @@ class _SpecAlignmentBackendMixin:
         learning_task = api.get_learning_task(project_id, entry_node.bound_learning_task_id)  # type: ignore[attr-defined]
         recall_point_id = learning_task.recall_point_ids[0]
 
-        captured_payloads: list[dict[str, object]] = []
+        captured_calls: list[dict[str, object]] = []
 
-        def fake_post_json(*, url: str, payload: dict[str, object], api_key: str | None, timeout_sec: float) -> dict[str, object]:
-            self.assertEqual(url, "http://127.0.0.1:9001/asr/request")
-            self.assertIsNone(api_key)
-            self.assertEqual(timeout_sec, 60.0)
-            captured_payloads.append(payload)
+        def fake_extract_audio_clip(
+            *,
+            ffmpeg_bin: str,
+            source_path: Path,
+            start_ms: int,
+            duration_ms: int,
+            out_path: Path,
+            timeout_sec: float | None = None,
+        ) -> None:
+            self.assertEqual(ffmpeg_bin, "ffmpeg")
+            self.assertEqual(source_path, learning_root / "lesson.mp4")
+            self.assertEqual(start_ms, 700)
+            self.assertEqual(duration_ms, 600)
+            self.assertEqual(timeout_sec, 120.0)
+            out_path.write_bytes(b"wav")
+
+        def fake_post_multipart_json(
+            *,
+            url: str,
+            form_fields: dict[str, object],
+            file_field_name: str,
+            file_path: Path,
+            file_name: str,
+            file_content_type: str,
+            api_key: str | None,
+            timeout_sec: float,
+        ) -> dict[str, object]:
+            self.assertEqual(url, "https://api.openai.com/v1/audio/transcriptions")
+            self.assertEqual(file_field_name, "file")
+            self.assertEqual(file_name, "clip.wav")
+            self.assertEqual(file_content_type, "audio/wav")
+            self.assertEqual(api_key, "sk-user-12345678")
+            self.assertEqual(timeout_sec, 120.0)
+            self.assertTrue(file_path.exists())
+            captured_calls.append(form_fields)
             return {
                 "segments": [
                     {
-                        "startMs": 700,
-                        "endMs": 1100,
+                        "start": 0.0,
+                        "end": 0.4,
                         "text": "task transcript",
                     }
                 ]
             }
 
         with (
-            patch.dict(
-                os.environ,
-                {
-                    "PLM_NATIVE_ASR_BASE_URL": "http://127.0.0.1:9001",
-                    "PLM_NATIVE_ASR_MODEL": "small",
-                },
-                clear=False,
-            ),
-            patch.object(SystemAPI, "_http_post_json", side_effect=fake_post_json),
+            patch("backend.system.api.shutil.which", return_value="ffmpeg"),
+            patch.object(SystemAPI, "_extract_audio_clip", side_effect=fake_extract_audio_clip),
+            patch.object(SystemAPI, "_http_post_multipart_json", side_effect=fake_post_multipart_json),
         ):
-            artifact_id = api.request_asr(project_id, recall_point_id, center_ms=1000, pre_ms=300, post_ms=300)
+            result = api.request_asr(
+                project_id,
+                recall_point_id,
+                center_ms=1000,
+                pre_ms=300,
+                post_ms=300,
+                service_config={
+                    "base_url": "https://api.openai.com/v1",
+                    "model_name": "whisper-1",
+                    "api_key": "sk-user-12345678",
+                },
+            )
 
-        self.assertTrue(str(artifact_id))
-        self.assertEqual(len(captured_payloads), 1)
-        self.assertEqual(captured_payloads[0]["provider"], "WHISPER")
-        self.assertEqual(captured_payloads[0]["model"], "small")
-        self.assertEqual(api.get_asr_artifact(project_id, artifact_id).producer_runtime_kind, ClientRuntimeKind.DESKTOP_NATIVE)
+        self.assertEqual(len(captured_calls), 1)
+        self.assertEqual(captured_calls[0]["model"], "whisper-1")
+        self.assertEqual(result.provider, AsrProvider.WHISPER)
+        self.assertEqual(str(result.recall_point_id), str(recall_point_id))
+        self.assertEqual(len(result.segments), 1)
+        self.assertEqual(result.segments[0].text, "task transcript")
 
-    def test_request_asr_uses_local_whisper_when_config_is_missing(self) -> None:
+    def test_request_asr_uses_deployment_asr_service_when_request_config_missing(self) -> None:
         api, root = self._new_api()
         project_root, learning_root = self._make_project_dirs(root, "videos")
         (learning_root / "lesson.mp4").write_text("video", encoding="utf-8")
@@ -574,32 +610,61 @@ class _SpecAlignmentBackendMixin:
         learning_task = api.get_learning_task(project_id, entry_node.bound_learning_task_id)  # type: ignore[attr-defined]
         recall_point_id = learning_task.recall_point_ids[0]
 
-        captured_payloads: list[dict[str, object]] = []
+        captured_calls: list[dict[str, object]] = []
 
-        def fake_post_json(*, url: str, payload: dict[str, object], api_key: str | None, timeout_sec: float) -> dict[str, object]:
-            self.assertEqual(url, "http://127.0.0.1:9911/asr/request")
-            self.assertIsNone(api_key)
-            self.assertEqual(timeout_sec, 600.0)
-            captured_payloads.append(payload)
-            return {"segments": [{"startMs": 700, "endMs": 1100, "text": "auto transcript"}]}
+        def fake_extract_audio_clip(
+            *,
+            ffmpeg_bin: str,
+            source_path: Path,
+            start_ms: int,
+            duration_ms: int,
+            out_path: Path,
+            timeout_sec: float | None = None,
+        ) -> None:
+            self.assertEqual(ffmpeg_bin, "ffmpeg")
+            self.assertEqual(source_path, learning_root / "lesson.mp4")
+            self.assertEqual(start_ms, 700)
+            self.assertEqual(duration_ms, 600)
+            self.assertEqual(timeout_sec, 120.0)
+            out_path.write_bytes(b"wav")
+
+        def fake_post_multipart_json(
+            *,
+            url: str,
+            form_fields: dict[str, object],
+            file_field_name: str,
+            file_path: Path,
+            file_name: str,
+            file_content_type: str,
+            api_key: str | None,
+            timeout_sec: float,
+        ) -> dict[str, object]:
+            self.assertEqual(url, "https://api.openai.com/v1/audio/transcriptions")
+            self.assertEqual(api_key, "sk-env-12345678")
+            self.assertEqual(timeout_sec, 120.0)
+            self.assertTrue(file_path.exists())
+            captured_calls.append(form_fields)
+            return {"segments": [{"start": 0.0, "end": 0.4, "text": "env transcript"}]}
 
         with (
             patch.dict(
                 os.environ,
                 {
-                    "PLM_NATIVE_ASR_BASE_URL": "",
-                    "PLM_NATIVE_ASR_MODEL": "",
+                    "PLM_NATIVE_ASR_BASE_URL": "https://api.openai.com/v1",
+                    "PLM_NATIVE_ASR_MODEL": "whisper-1",
+                    "PLM_NATIVE_ASR_API_KEY": "sk-env-12345678",
                 },
                 clear=False,
             ),
-            patch("backend.system.api.ensure_local_whisper_runtime", return_value="http://127.0.0.1:9911"),
-            patch.object(SystemAPI, "_http_post_json", side_effect=fake_post_json),
+            patch("backend.system.api.shutil.which", return_value="ffmpeg"),
+            patch.object(SystemAPI, "_extract_audio_clip", side_effect=fake_extract_audio_clip),
+            patch.object(SystemAPI, "_http_post_multipart_json", side_effect=fake_post_multipart_json),
         ):
-            artifact_id = api.request_asr(project_id, recall_point_id, center_ms=1000, pre_ms=300, post_ms=300)
+            result = api.request_asr(project_id, recall_point_id, center_ms=1000, pre_ms=300, post_ms=300)
 
-        self.assertTrue(str(artifact_id))
-        self.assertEqual(len(captured_payloads), 1)
-        self.assertIsNone(captured_payloads[0]["model"])
+        self.assertEqual(len(captured_calls), 1)
+        self.assertEqual(captured_calls[0]["model"], "whisper-1")
+        self.assertEqual(result.segments[0].text, "env transcript")
 
     def test_request_asr_uses_builtin_whisper_config_without_http_base_url(self) -> None:
         api, root = self._new_api()
@@ -639,11 +704,11 @@ class _SpecAlignmentBackendMixin:
             patch("backend.system.api.ensure_local_whisper_runtime", return_value="http://127.0.0.1:9912"),
             patch.object(SystemAPI, "_http_post_json", side_effect=fake_post_json),
         ):
-            artifact_id = api.request_asr(project_id, recall_point_id, center_ms=1000, pre_ms=300, post_ms=300)
+            result = api.request_asr(project_id, recall_point_id, center_ms=1000, pre_ms=300, post_ms=300)
 
-        self.assertTrue(str(artifact_id))
         self.assertEqual(len(captured_payloads), 1)
         self.assertEqual(captured_payloads[0]["model"], "medium")
+        self.assertEqual(result.segments[0].text, "builtin transcript")
 
     def test_request_asr_resolves_manual_relative_material_under_project_root(self) -> None:
         api, root = self._new_api()
@@ -685,33 +750,450 @@ class _SpecAlignmentBackendMixin:
                 system.rollback(session)
             raise
 
-        captured_payloads: list[dict[str, object]] = []
+        captured_source_paths: list[Path] = []
 
-        def fake_post_json(*, url: str, payload: dict[str, object], api_key: str | None, timeout_sec: float) -> dict[str, object]:
-            self.assertEqual(url, "http://127.0.0.1:9001/asr/request")
-            self.assertIsNone(api_key)
-            self.assertEqual(timeout_sec, 60.0)
-            captured_payloads.append(payload)
-            return {"segments": [{"startMs": 700, "endMs": 1100, "text": "manual transcript"}]}
+        def fake_extract_audio_clip(
+            *,
+            ffmpeg_bin: str,
+            source_path: Path,
+            start_ms: int,
+            duration_ms: int,
+            out_path: Path,
+            timeout_sec: float | None = None,
+        ) -> None:
+            self.assertEqual(ffmpeg_bin, "ffmpeg")
+            self.assertEqual(start_ms, 700)
+            self.assertEqual(duration_ms, 600)
+            self.assertEqual(timeout_sec, 120.0)
+            captured_source_paths.append(source_path)
+            out_path.write_bytes(b"wav")
+
+        def fake_post_multipart_json(
+            *,
+            url: str,
+            form_fields: dict[str, object],
+            file_field_name: str,
+            file_path: Path,
+            file_name: str,
+            file_content_type: str,
+            api_key: str | None,
+            timeout_sec: float,
+        ) -> dict[str, object]:
+            self.assertEqual(url, "https://api.openai.com/v1/audio/transcriptions")
+            self.assertEqual(api_key, "sk-manual-12345678")
+            self.assertEqual(timeout_sec, 120.0)
+            self.assertTrue(file_path.exists())
+            return {"segments": [{"start": 0.0, "end": 0.4, "text": "manual transcript"}]}
 
         with (
-            patch.dict(
-                os.environ,
-                {
-                    "PLM_NATIVE_ASR_BASE_URL": "http://127.0.0.1:9001",
-                    "PLM_NATIVE_ASR_MODEL": "small",
-                },
-                clear=False,
-            ),
-            patch.object(SystemAPI, "_http_post_json", side_effect=fake_post_json),
+            patch("backend.system.api.shutil.which", return_value="ffmpeg"),
+            patch.object(SystemAPI, "_extract_audio_clip", side_effect=fake_extract_audio_clip),
+            patch.object(SystemAPI, "_http_post_multipart_json", side_effect=fake_post_multipart_json),
         ):
-            artifact_id = api.request_asr(project_id, RecallPointId("rp_manual_rel_1"), center_ms=1000, pre_ms=300, post_ms=300)
+            result = api.request_asr(
+                project_id,
+                RecallPointId("rp_manual_rel_1"),
+                center_ms=1000,
+                pre_ms=300,
+                post_ms=300,
+                service_config={
+                    "base_url": "https://api.openai.com/v1",
+                    "model_name": "whisper-1",
+                    "api_key": "sk-manual-12345678",
+                },
+            )
 
-        self.assertTrue(str(artifact_id))
-        self.assertEqual(len(captured_payloads), 1)
-        source = captured_payloads[0]["source"]
-        self.assertIsInstance(source, dict)
-        self.assertEqual(source["filePath"], str(media_file.resolve()))
+        self.assertEqual(result.segments[0].text, "manual transcript")
+        self.assertEqual(captured_source_paths, [media_file.resolve()])
+
+    def test_request_asr_from_audio_upload_uses_uploaded_clip_without_server_ffmpeg(self) -> None:
+        api, root = self._new_api()
+        project_root = root / "browser_local"
+        project_root.mkdir(parents=True)
+        project_id = api.create_project("browser-local", project_root.as_posix())
+        system = api.sys
+
+        session = system.begin_session(project_id, SessionMode.READ_WRITE)
+        try:
+            instance = Instance.create(project_id, InstanceId("inst_browser_local_1"), "lesson/clip.mp4")
+            system.instance_repo.add(session, instance)
+            recall_point = RecallPoint(
+                project_id=project_id,
+                recall_point_id=RecallPointId("rp_browser_local_1"),
+                created_at=now_utc_ms(),
+                question=rich_text("Q1"),
+                answer=rich_text("A1"),
+                anchor=Anchor(instance.instance_id, position="t=1000"),
+            )
+            system.recall_point_repo.add(session, recall_point)
+            system.commit(session)
+        except Exception:
+            if session.state == "OPEN":
+                system.rollback(session)
+            raise
+
+        captured_calls: list[dict[str, object]] = []
+
+        def fake_post_multipart_json(
+            *,
+            url: str,
+            form_fields: dict[str, object],
+            file_field_name: str,
+            file_path: Path,
+            file_name: str,
+            file_content_type: str,
+            api_key: str | None,
+            timeout_sec: float,
+        ) -> dict[str, object]:
+            self.assertEqual(url, "https://api.openai.com/v1/audio/transcriptions")
+            self.assertEqual(file_field_name, "file")
+            self.assertEqual(file_name, "browser-clip.wav")
+            self.assertEqual(file_content_type, "audio/wav")
+            self.assertEqual(api_key, "sk-browser-12345678")
+            self.assertEqual(timeout_sec, 120.0)
+            self.assertEqual(file_path.read_bytes(), b"wav")
+            captured_calls.append(form_fields)
+            return {"segments": [{"start": 0.0, "end": 0.5, "text": "browser transcript"}]}
+
+        with patch.object(SystemAPI, "_http_post_multipart_json", side_effect=fake_post_multipart_json):
+            result = api.request_asr_from_audio_upload(
+                project_id,
+                RecallPointId("rp_browser_local_1"),
+                center_ms=1000,
+                pre_ms=300,
+                post_ms=300,
+                audio_bytes=b"wav",
+                audio_filename="browser-clip.wav",
+                audio_content_type="audio/wav",
+                service_config={
+                    "base_url": "https://api.openai.com/v1",
+                    "model_name": "whisper-1",
+                    "api_key": "sk-browser-12345678",
+                },
+            )
+
+        self.assertEqual(len(captured_calls), 1)
+        self.assertEqual(captured_calls[0]["model"], "whisper-1")
+        self.assertEqual(result.provider, AsrProvider.WHISPER)
+        self.assertEqual(str(result.recall_point_id), "rp_browser_local_1")
+        self.assertEqual(result.segments[0].text, "browser transcript")
+
+    def test_request_asr_uses_dashscope_native_file_transcription_for_fun_asr_models(self) -> None:
+        api, root = self._new_api()
+        project_root, learning_root = self._make_project_dirs(root, "dashscope_videos")
+        (learning_root / "lesson.mp4").write_text("video", encoding="utf-8")
+
+        project_id = api.create_project("dashscope", project_root.as_posix())
+        api.sync_learning_objects_from_fs(project_id)
+        instance = api.list_instances(project_id)[0]
+        entry_node_id = api.submit_learning_task(
+            project_id,
+            items=[(rich_text("Q1"), rich_text("A1"), Anchor(instance.instance_id, position="t=1000"))],
+            title="Lesson 1",
+        )
+        entry_node = api.get_learning_task_node(project_id, entry_node_id)
+        learning_task = api.get_learning_task(project_id, entry_node.bound_learning_task_id)  # type: ignore[attr-defined]
+        recall_point_id = learning_task.recall_point_ids[0]
+
+        captured_submit_calls: list[tuple[str, dict[str, object], dict[str, str] | None]] = []
+        captured_get_urls: list[str] = []
+
+        def fake_extract_audio_clip(
+            *,
+            ffmpeg_bin: str,
+            source_path: Path,
+            start_ms: int,
+            duration_ms: int,
+            out_path: Path,
+            timeout_sec: float | None = None,
+        ) -> None:
+            self.assertEqual(ffmpeg_bin, "ffmpeg")
+            self.assertEqual(source_path, learning_root / "lesson.mp4")
+            self.assertEqual(start_ms, 700)
+            self.assertEqual(duration_ms, 600)
+            self.assertEqual(timeout_sec, 120.0)
+            out_path.write_bytes(b"wav")
+
+        def fake_post_json(
+            *,
+            url: str,
+            payload: dict[str, object] | None,
+            api_key: str | None,
+            timeout_sec: float,
+            extra_headers: dict[str, str] | None = None,
+        ) -> dict[str, object]:
+            captured_submit_calls.append((url, {} if payload is None else payload, extra_headers))
+            self.assertEqual(url, "https://dashscope.aliyuncs.com/api/v1/services/audio/asr/transcription")
+            self.assertEqual(api_key, "sk-dashscope-12345678")
+            self.assertEqual(timeout_sec, 120.0)
+            self.assertEqual(extra_headers, {"X-DashScope-Async": "enable"})
+            self.assertEqual(payload, {"model": "fun-asr-mtl", "input": {"file_urls": ["https://plm.xuebao.chat/api/public/asr-bridge/token-123/clip.wav"]}})
+            return {"output": {"task_id": "task-123"}}
+
+        def fake_get_json(
+            *,
+            url: str,
+            api_key: str | None,
+            timeout_sec: float,
+            extra_headers: dict[str, str] | None = None,
+        ) -> dict[str, object]:
+            captured_get_urls.append(url)
+            self.assertIsNone(extra_headers)
+            if url == "https://dashscope.aliyuncs.com/api/v1/tasks/task-123":
+                self.assertEqual(api_key, "sk-dashscope-12345678")
+                self.assertEqual(timeout_sec, 60.0)
+                return {
+                    "output": {
+                        "task_status": "SUCCEEDED",
+                        "results": [
+                            {
+                                "subtask_status": "SUCCEEDED",
+                                "transcription_url": "https://dashscope-result.example/result.json",
+                            }
+                        ],
+                    }
+                }
+            if url == "https://dashscope-result.example/result.json":
+                self.assertIsNone(api_key)
+                self.assertEqual(timeout_sec, 60.0)
+                return {
+                    "transcripts": [
+                        {
+                            "sentences": [
+                                {
+                                    "begin_time": 0,
+                                    "end_time": 400,
+                                    "text": "dashscope transcript",
+                                }
+                            ]
+                        }
+                    ]
+                }
+            raise AssertionError(f"Unexpected GET url: {url}")
+
+        with (
+            patch("backend.system.api.shutil.which", return_value="ffmpeg"),
+            patch.object(SystemAPI, "_extract_audio_clip", side_effect=fake_extract_audio_clip),
+            patch.object(SystemAPI, "_register_public_asr_temp_asset", return_value=("token-123", "https://plm.xuebao.chat/api/public/asr-bridge/token-123/clip.wav")),
+            patch.object(SystemAPI, "_unregister_public_asr_temp_asset") as unregister_mock,
+            patch.object(SystemAPI, "_http_post_json", side_effect=fake_post_json),
+            patch.object(SystemAPI, "_http_get_json", side_effect=fake_get_json),
+            patch.object(SystemAPI, "_http_post_multipart_json") as multipart_mock,
+        ):
+            result = api.request_asr(
+                project_id,
+                recall_point_id,
+                center_ms=1000,
+                pre_ms=300,
+                post_ms=300,
+                service_config={
+                    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    "model_name": "fun-asr-mtl",
+                    "api_key": "sk-dashscope-12345678",
+                },
+            )
+
+        self.assertEqual(len(captured_submit_calls), 1)
+        self.assertEqual(
+            captured_get_urls,
+            [
+                "https://dashscope.aliyuncs.com/api/v1/tasks/task-123",
+                "https://dashscope-result.example/result.json",
+            ],
+        )
+        multipart_mock.assert_not_called()
+        unregister_mock.assert_called_once_with("token-123")
+        self.assertEqual(result.segments[0].text, "dashscope transcript")
+        self.assertEqual(result.segments[0].start_ms, 700)
+        self.assertEqual(result.segments[0].end_ms, 1100)
+
+    def test_request_instance_asr_extracts_server_clip_without_recall_point_binding(self) -> None:
+        api, root = self._new_api()
+        project_root, learning_root = self._make_project_dirs(root, "subtitle_videos")
+        (learning_root / "lesson.mp4").write_text("video", encoding="utf-8")
+
+        project_id = api.create_project("subtitle-project", project_root.as_posix())
+        api.sync_learning_objects_from_fs(project_id)
+        instance = api.list_instances(project_id)[0]
+
+        captured_calls: list[dict[str, object]] = []
+
+        def fake_extract_audio_clip(
+            *,
+            ffmpeg_bin: str,
+            source_path: Path,
+            start_ms: int,
+            duration_ms: int,
+            out_path: Path,
+            timeout_sec: float | None = None,
+        ) -> None:
+            self.assertEqual(ffmpeg_bin, "ffmpeg")
+            self.assertEqual(source_path, learning_root / "lesson.mp4")
+            self.assertEqual(start_ms, 120000)
+            self.assertEqual(duration_ms, 90000)
+            self.assertEqual(timeout_sec, 120.0)
+            out_path.write_bytes(b"wav")
+
+        def fake_post_multipart_json(
+            *,
+            url: str,
+            form_fields: dict[str, object],
+            file_field_name: str,
+            file_path: Path,
+            file_name: str,
+            file_content_type: str,
+            api_key: str | None,
+            timeout_sec: float,
+        ) -> dict[str, object]:
+            self.assertEqual(url, "https://api.openai.com/v1/audio/transcriptions")
+            self.assertEqual(file_field_name, "file")
+            self.assertEqual(file_name, "clip.wav")
+            self.assertEqual(file_content_type, "audio/wav")
+            self.assertEqual(api_key, "sk-instance-12345678")
+            self.assertEqual(timeout_sec, 120.0)
+            self.assertTrue(file_path.exists())
+            captured_calls.append(form_fields)
+            return {"segments": [{"start": 0.0, "end": 0.5, "text": "subtitle chunk"}]}
+
+        with (
+            patch("backend.system.api.shutil.which", return_value="ffmpeg"),
+            patch.object(SystemAPI, "_extract_audio_clip", side_effect=fake_extract_audio_clip),
+            patch.object(SystemAPI, "_http_post_multipart_json", side_effect=fake_post_multipart_json),
+        ):
+            result = api.request_instance_asr(
+                project_id,
+                instance.instance_id,
+                start_ms=120000,
+                end_ms=210000,
+                service_config={
+                    "base_url": "https://api.openai.com/v1",
+                    "model_name": "whisper-1",
+                    "api_key": "sk-instance-12345678",
+                },
+            )
+
+        self.assertEqual(len(captured_calls), 1)
+        self.assertEqual(captured_calls[0]["model"], "whisper-1")
+        self.assertEqual(result.provider, AsrProvider.WHISPER)
+        self.assertEqual(str(result.source_instance_id), str(instance.instance_id))
+        self.assertEqual(result.start_ms, 120000)
+        self.assertEqual(result.end_ms, 210000)
+        self.assertEqual(result.segments[0].text, "subtitle chunk")
+
+    def test_request_instance_asr_from_audio_upload_uses_uploaded_chunk_without_server_ffmpeg(self) -> None:
+        api, root = self._new_api()
+        project_root = root / "browser_subtitles"
+        project_root.mkdir(parents=True)
+        project_id = api.create_project("browser-subtitles", project_root.as_posix())
+        system = api.sys
+        session = system.begin_session(project_id, SessionMode.READ_WRITE)
+        try:
+            instance_id = InstanceId("inst_browser_subtitle_1")
+            system.instance_repo.add(session, Instance.create(project_id, instance_id, "lesson/clip.mp4"))
+            system.commit(session)
+        except Exception:
+            if session.state == "OPEN":
+                system.rollback(session)
+            raise
+
+        captured_calls: list[dict[str, object]] = []
+
+        def fake_post_multipart_json(
+            *,
+            url: str,
+            form_fields: dict[str, object],
+            file_field_name: str,
+            file_path: Path,
+            file_name: str,
+            file_content_type: str,
+            api_key: str | None,
+            timeout_sec: float,
+        ) -> dict[str, object]:
+            self.assertEqual(url, "https://api.openai.com/v1/audio/transcriptions")
+            self.assertEqual(file_field_name, "file")
+            self.assertEqual(file_name, "subtitle.wav")
+            self.assertEqual(file_content_type, "audio/wav")
+            self.assertEqual(api_key, "sk-subtitle-12345678")
+            self.assertEqual(timeout_sec, 120.0)
+            self.assertEqual(file_path.read_bytes(), b"wav")
+            captured_calls.append(form_fields)
+            return {"segments": [{"start": 0.0, "end": 0.5, "text": "browser subtitle"}]}
+
+        with patch.object(SystemAPI, "_http_post_multipart_json", side_effect=fake_post_multipart_json):
+            result = api.request_instance_asr_from_audio_upload(
+                project_id,
+                instance_id,
+                start_ms=0,
+                end_ms=45000,
+                audio_bytes=b"wav",
+                audio_filename="subtitle.wav",
+                audio_content_type="audio/wav",
+                service_config={
+                    "base_url": "https://api.openai.com/v1",
+                    "model_name": "whisper-1",
+                    "api_key": "sk-subtitle-12345678",
+                },
+            )
+
+        self.assertEqual(len(captured_calls), 1)
+        self.assertEqual(captured_calls[0]["model"], "whisper-1")
+        self.assertEqual(result.provider, AsrProvider.WHISPER)
+        self.assertEqual(str(result.source_instance_id), str(instance_id))
+        self.assertEqual(result.start_ms, 0)
+        self.assertEqual(result.end_ms, 45000)
+        self.assertEqual(result.segments[0].text, "browser subtitle")
+
+    def test_get_instance_subtitle_file_reads_same_stem_subtitle(self) -> None:
+        api, root = self._new_api()
+        project_root, learning_root = self._make_project_dirs(root, "subtitle_files")
+        (learning_root / "lesson.mp4").write_text("video", encoding="utf-8")
+        (learning_root / "lesson.srt").write_text(
+            "1\n00:00:01,000 --> 00:00:02,500\n第一行字幕\n\n2\n00:00:03,000 --> 00:00:04,000\nSecond line\n",
+            encoding="utf-8",
+        )
+
+        project_id = api.create_project("subtitle-files", project_root.as_posix())
+        api.sync_learning_objects_from_fs(project_id)
+        instance = api.list_instances(project_id)[0]
+
+        result = api.get_instance_subtitle_file(project_id, instance.instance_id)
+
+        self.assertTrue(result["found"])
+        self.assertEqual(result["instanceId"], str(instance.instance_id))
+        self.assertEqual(result["fileName"], "lesson.srt")
+        self.assertEqual(result["format"], "srt")
+        segments = result["segments"]
+        self.assertEqual(len(segments), 2)
+        self.assertEqual(segments[0]["startMs"], 1000)
+        self.assertEqual(segments[0]["endMs"], 2500)
+        self.assertEqual(segments[0]["text"], "第一行字幕")
+        self.assertEqual(segments[1]["text"], "Second line")
+
+    def test_request_project_llm_text_appends_supplemental_context(self) -> None:
+        api, root = self._new_api()
+        project_root, _ = self._make_project_dirs(root, "llm_subtitle_context")
+        project_id = api.create_project("llm-subtitle-context", project_root.as_posix())
+
+        captured_messages: list[dict[str, str]] = []
+
+        def fake_request_llm_chat_completion(*args, **kwargs):
+            nonlocal captured_messages
+            captured_messages = kwargs["messages"]
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+        with patch.object(SystemAPI, "request_llm_chat_completion", side_effect=fake_request_llm_chat_completion):
+            content = api.request_project_llm_text(
+                project_id=project_id,
+                user_prompt="请总结一下",
+                supplemental_context="Supplemental subtitle context for test.",
+            )
+
+        self.assertEqual(content, "ok")
+        self.assertGreaterEqual(len(captured_messages), 3)
+        self.assertEqual(captured_messages[1]["role"], "system")
+        self.assertIn("Project Context", captured_messages[1]["content"])
+        self.assertEqual(captured_messages[2]["role"], "system")
+        self.assertEqual(captured_messages[2]["content"], "Supplemental subtitle context for test.")
 
     def test_deleted_recall_point_stays_historical_but_leaves_current_views(self) -> None:
         api, root = self._new_api()

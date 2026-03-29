@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { ChevronLeft, ChevronRight } from "lucide-react"
+import { ChevronLeft, ChevronRight, Download } from "lucide-react"
 import { Link } from "react-router-dom"
 
 import brandLogo from "@/assets/logo.png"
@@ -7,12 +7,13 @@ import methodFocusCompression from "@/assets/method-focus-compression.png"
 import methodInterleavedReview from "@/assets/method-interleaved-review.png"
 import methodLayeredReview from "@/assets/method-layered-review.png"
 import { useCurrentUser } from "@/ui/queries/auth"
-import { useSystemCapabilities } from "@/ui/queries/system"
+import { usePublicDownloads, useSystemCapabilities } from "@/ui/queries/system"
 import { usePageMeta } from "@/ui/seo/usePageMeta"
 
 const navItems = [
   { href: "#method", label: "方法" },
   { href: "#features", label: "功能" },
+  { href: "#subtitle-tool", label: "字幕工具" },
   { href: "#onboarding", label: "上手路径" },
   { href: "#membership", label: "会员" },
   { href: "#faq", label: "常见问题" },
@@ -60,6 +61,20 @@ const featureCards = [
     title: "学习任务与复习任务切换",
     body: "当系统已排出待做复习时，工作台中间区域会从“复述点录入”切到“复习”。你只需要先回忆，再显示答案，再诚实判断“会 / 不会”。",
   },
+] as const
+
+const subtitleToolHighlights = [
+  "下载后在本机离线运行，不依赖公网转写服务。",
+  "批量扫描你选中的视频目录，直接在同目录生成同名 `.srt`。",
+  "工具包内置 ffmpeg、whisper.cpp 和默认多语言模型，开箱可用。",
+  "生成好的字幕文件可以被 LearningPyramid 直接识别成播放器字幕和 AI 补充上下文。",
+] as const
+
+const subtitleToolSteps = [
+  "下载 Windows 工具包并解压到任意本地目录。",
+  "打开工具后选择视频根目录，可选递归处理子目录。",
+  "点击开始生成，工具会逐个视频产出同名 `.srt` 字幕。",
+  "回到项目目录重新打开视频，LearningPyramid 就会直接读取这些字幕文件。",
 ] as const
 
 const onboardingSteps = [
@@ -254,8 +269,33 @@ const graduateReasons = [
   },
 ] as const
 
+function formatDownloadSize(sizeBytes: number) {
+  if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) return "大小待发布"
+  const units = ["B", "KB", "MB", "GB"]
+  let value = sizeBytes
+  let unitIndex = 0
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024
+    unitIndex += 1
+  }
+  const digits = value >= 100 || unitIndex === 0 ? 0 : value >= 10 ? 1 : 2
+  return `${value.toFixed(digits)} ${units[unitIndex]}`
+}
+
+function formatPublishedAt(value: string | null | undefined) {
+  if (!value) return "发布时间待同步"
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  }).format(date)
+}
+
 export function HomePage() {
   const capabilitiesQ = useSystemCapabilities()
+  const publicDownloadsQ = usePublicDownloads()
   const authKnown = capabilitiesQ.data !== undefined
   const authEnabled = capabilitiesQ.data?.authEnabled ?? true
   const allowSignup = capabilitiesQ.data?.allowSignup ?? false
@@ -272,6 +312,7 @@ export function HomePage() {
   const navActionLabel = isLoggedIn || !authEnabled ? "进入项目" : allowSignup ? "登录/注册" : "登录"
   const registerHref = isLoggedIn || !authEnabled ? "/projects" : allowSignup ? "/login?mode=register" : "/login"
   const registerLabel = isLoggedIn || !authEnabled ? "进入项目" : allowSignup ? "立即注册" : "去登录"
+  const recommendedDownload = publicDownloadsQ.data?.items.find((item) => item.recommended) ?? publicDownloadsQ.data?.items[0] ?? null
   const [activeReasonIndex, setActiveReasonIndex] = useState(0)
   const [isReasonCarouselPaused, setIsReasonCarouselPaused] = useState(false)
 
@@ -420,6 +461,97 @@ export function HomePage() {
                   <div className="lp-showcase-feature-icon">{item.icon}</div>
                   <h3>{item.title}</h3>
                   <p>{item.body}</p>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section id="subtitle-tool" className="lp-showcase-section">
+          <div className="lp-showcase-container">
+            <div className="lp-showcase-section-head">
+              <h2>字幕工具</h2>
+              <p>如果你的视频目录还没有字幕，可以先下载离线字幕工具，在本机批量生成同目录同名 `.srt` 文件，再回到 LearningPyramid 直接使用。</p>
+            </div>
+
+            <div className="lp-showcase-pricing-grid">
+              <article className="lp-showcase-pricing-card lp-showcase-pricing-card-primary">
+                <h3>LearningPyramid 字幕生成工具</h3>
+                <p>这是一个独立的小工具，不占用你在站内的项目配额。它只负责扫描视频目录并生成字幕文件，主产品随后直接读取这些字幕文件。</p>
+                <ul className="lp-showcase-pricing-list">
+                  {subtitleToolHighlights.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </article>
+
+              <article className="lp-showcase-pricing-card lp-showcase-download-card">
+                <div className="lp-showcase-download-status">
+                  <span>公开下载</span>
+                  <strong>
+                    {publicDownloadsQ.isLoading
+                      ? "正在同步最新构建"
+                      : recommendedDownload
+                        ? "可以直接下载"
+                        : "当前还没有可下载构建"}
+                  </strong>
+                </div>
+
+                <h3>{recommendedDownload?.displayName ?? "LearningPyramid 字幕生成工具"}</h3>
+                <p>{recommendedDownload?.summary ?? "构建包发布后，这里会直接展示版本、体积和下载入口。服务端只要放入新 ZIP 并更新清单，页面会自动同步。"}</p>
+
+                <div className="lp-showcase-download-meta">
+                  <div>
+                    <span>版本</span>
+                    <strong>{recommendedDownload?.version ?? "待发布"}</strong>
+                  </div>
+                  <div>
+                    <span>平台</span>
+                    <strong>{recommendedDownload?.platform ?? "Windows x64"}</strong>
+                  </div>
+                  <div>
+                    <span>包体</span>
+                    <strong>{recommendedDownload ? formatDownloadSize(recommendedDownload.sizeBytes) : "待发布"}</strong>
+                  </div>
+                  <div>
+                    <span>更新</span>
+                    <strong>{formatPublishedAt(recommendedDownload?.publishedAt)}</strong>
+                  </div>
+                </div>
+
+                <div className="lp-showcase-hero-actions lp-showcase-download-actions">
+                  {recommendedDownload ? (
+                    <a className="lp-showcase-btn lp-showcase-btn-primary" href={recommendedDownload.downloadPath}>
+                      <Download className="h-4 w-4" />
+                      下载 Windows 版
+                    </a>
+                  ) : (
+                    <span className="lp-showcase-btn lp-showcase-btn-secondary">构建包待发布</span>
+                  )}
+                  <a className="lp-showcase-btn lp-showcase-btn-secondary" href="#onboarding">
+                    查看接入路径
+                  </a>
+                </div>
+
+                {recommendedDownload?.includedComponents.length ? (
+                  <>
+                    <div className="lp-showcase-download-list-title">内置组件</div>
+                    <ul className="lp-showcase-pricing-list">
+                      {recommendedDownload.includedComponents.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </>
+                ) : null}
+              </article>
+            </div>
+
+            <div className="lp-showcase-grid-2 lp-showcase-download-steps">
+              {subtitleToolSteps.map((item, index) => (
+                <article key={item} className="lp-showcase-step">
+                  <div className="lp-showcase-step-no">{index + 1}</div>
+                  <h3>步骤 {index + 1}</h3>
+                  <p>{item}</p>
                 </article>
               ))}
             </div>

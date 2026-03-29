@@ -12,8 +12,10 @@ import { formatMaterialReference, formatRecallPointReference } from "@/ui/displa
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
 import { scanProjectDirectoryMedia, useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
+import { useCurrentUser } from "@/ui/queries/auth"
+import { useMyLlmSettings, useUpdateMyLlmSettings } from "@/ui/queries/profile"
 import { useEditProject, useProject } from "@/ui/queries/projects"
-import { useSystemCapabilities } from "@/ui/queries/system"
+import { useGlobalLlmSettings, useSystemCapabilities, useUpdateGlobalLlmSettings } from "@/ui/queries/system"
 import {
   useBulkRemapRecallPointsInstance,
   useImportLearningObjectsFromBrowser,
@@ -23,6 +25,7 @@ import {
   useProjectStorageConfig,
   useSetLayerConfig,
 } from "@/ui/queries/workbench"
+import { SUPPORTED_SUBTITLE_EXTENSIONS_LABEL } from "@/ui/subtitles/subtitleSupport"
 import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 
 let nextTemplateItemId = 1
@@ -86,6 +89,20 @@ function describeDirectoryPermissionTone(permission: "unsupported" | "missing" |
   return "border-slate-200 bg-slate-50 text-slate-600"
 }
 
+function describeLlmSource(source: "user" | "global" | "env" | "none") {
+  if (source === "user") return "我的密钥"
+  if (source === "global") return "全局密钥"
+  if (source === "env") return "部署环境"
+  return "未配置"
+}
+
+function describeLlmSourceTone(source: "user" | "global" | "env" | "none") {
+  if (source === "user") return "border-emerald-200 bg-emerald-50 text-emerald-700"
+  if (source === "global") return "border-emerald-200 bg-emerald-50 text-emerald-700"
+  if (source === "env") return "border-sky-200 bg-sky-50 text-sky-700"
+  return "border-slate-200 bg-slate-50 text-slate-600"
+}
+
 function summarizeTemplateItems(items: ReviewChainTemplateItem[]) {
   return items
     .map((item) => {
@@ -106,6 +123,14 @@ export function ProjectSettingsPage() {
   const projectQ = useProject(pid, { enabled: !!pid })
   const editProjectM = useEditProject()
   const capabilitiesQ = useSystemCapabilities()
+  const authEnabled = capabilitiesQ.data?.authEnabled ?? false
+  const currentUserQ = useCurrentUser(authEnabled)
+  const currentUserRoles = currentUserQ.data?.roles ?? []
+  const canEditGlobalLlmFallback = authEnabled ? currentUserRoles.includes("super_admin") || currentUserRoles.includes("admin") : true
+  const globalLlmSettingsQ = useGlobalLlmSettings(!authEnabled || canEditGlobalLlmFallback)
+  const updateGlobalLlmSettingsM = useUpdateGlobalLlmSettings()
+  const myLlmSettingsQ = useMyLlmSettings(authEnabled)
+  const updateMyLlmSettingsM = useUpdateMyLlmSettings()
   const directoryBinding = useProjectDirectoryBinding(pid)
   const directoryPermission = directoryBinding.permission
   const browserLocalMediaEnabled = capabilitiesQ.data?.browserLocalMediaEnabled ?? false
@@ -478,27 +503,93 @@ export function ProjectSettingsPage() {
             </CardContent>
           </Card>
 
-          {capabilitiesQ.data?.asrEnabled === false ? (
-            <Card className="theme-card">
-              <CardHeader>
-                <CardTitle>语音转写</CardTitle>
-                <CardDescription>当前部署已禁用 ASR。</CardDescription>
-              </CardHeader>
-            </Card>
+          {authEnabled ? (
+            <>
+              <UserLlmSettingsCard
+                queryError={myLlmSettingsQ.error}
+                saveError={updateMyLlmSettingsM.error}
+                settings={myLlmSettingsQ.data}
+                isLoading={myLlmSettingsQ.isLoading}
+                isPending={updateMyLlmSettingsM.isPending}
+                onClearApiKey={async (baseUrl, modelName) => {
+                  try {
+                    await updateMyLlmSettingsM.mutateAsync({ baseUrl, modelName, clearApiKey: true })
+                    showSuccessFeedback("我的 LLM 密钥已清除", "当前账号会停止使用已保存密钥，并在可用时回退到部署级配置。")
+                  } catch (err) {
+                    showErrorFeedback("清除我的 LLM 密钥失败", formatApiError(err))
+                  }
+                }}
+                onSave={async ({ baseUrl, modelName, apiKey }) => {
+                  try {
+                    await updateMyLlmSettingsM.mutateAsync({ baseUrl, modelName, apiKey })
+                    showSuccessFeedback("我的 LLM 设置已保存", "当前账号之后在任意设备登录时都会复用这份 LLM 服务配置。")
+                  } catch (err) {
+                    showErrorFeedback("保存我的 LLM 设置失败", formatApiError(err))
+                  }
+                }}
+              />
+
+              <SubtitleUsageCard />
+
+              {canEditGlobalLlmFallback ? (
+                <GlobalLlmSettingsCard
+                  title="部署级 LLM 回退"
+                  description="这是管理员可维护的部署级默认配置。当前用户没有单独保存 LLM 配置时，系统会在可用时回退到这里。"
+                  saveLabel="保存部署级回退"
+                  queryError={globalLlmSettingsQ.error}
+                  saveError={updateGlobalLlmSettingsM.error}
+                  settings={globalLlmSettingsQ.data}
+                  isLoading={globalLlmSettingsQ.isLoading}
+                  isPending={updateGlobalLlmSettingsM.isPending}
+                  onClearApiKey={async (baseUrl, modelName) => {
+                    try {
+                      await updateGlobalLlmSettingsM.mutateAsync({ baseUrl, modelName, clearApiKey: true })
+                      showSuccessFeedback("部署级 LLM 密钥已清除", "系统会停止使用已保存的部署级密钥，并在可用时回退到环境变量。")
+                    } catch (err) {
+                      showErrorFeedback("清除部署级 LLM 密钥失败", formatApiError(err))
+                    }
+                  }}
+                  onSave={async ({ baseUrl, modelName, apiKey }) => {
+                    try {
+                      await updateGlobalLlmSettingsM.mutateAsync({ baseUrl, modelName, apiKey })
+                      showSuccessFeedback("部署级 LLM 回退已保存", "未单独配置 LLM 的用户会继续复用这份服务配置。")
+                    } catch (err) {
+                      showErrorFeedback("保存部署级 LLM 回退失败", formatApiError(err))
+                    }
+                  }}
+                />
+              ) : null}
+            </>
           ) : (
-            <Card className="theme-card">
-              <CardHeader>
-                <CardTitle>语音转写</CardTitle>
-                <CardDescription>ASR 现在属于 Native 运行时能力，不再存进项目配置。</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm">
-                <div className="rounded-[1.1rem] border border-border/70 bg-muted/20 px-4 py-3 text-muted-foreground">
-                  当前页面只展示项目事实。桌面 Native 的本地 Whisper、模型名和服务地址需要从运行时配置读取。
-                </div>
-                {projectConfigQ.isLoading ? <p className="text-sm text-muted-foreground">项目配置加载中...</p> : null}
-                {projectConfigQ.error ? <p className="text-sm text-destructive">{formatApiError(projectConfigQ.error)}</p> : null}
-              </CardContent>
-            </Card>
+            <>
+              <GlobalLlmSettingsCard
+                title="全局 LLM 设置"
+                description="填写一次部署级密钥后，后端即可统一代理后续大模型能力调用。"
+                saveLabel="保存全局设置"
+                queryError={globalLlmSettingsQ.error}
+                saveError={updateGlobalLlmSettingsM.error}
+                settings={globalLlmSettingsQ.data}
+                isLoading={globalLlmSettingsQ.isLoading}
+                isPending={updateGlobalLlmSettingsM.isPending}
+                onClearApiKey={async (baseUrl, modelName) => {
+                  try {
+                    await updateGlobalLlmSettingsM.mutateAsync({ baseUrl, modelName, clearApiKey: true })
+                    showSuccessFeedback("全局 LLM 密钥已清除", "系统会停止使用已保存的密钥，并在可用时回退到部署级配置。")
+                  } catch (err) {
+                    showErrorFeedback("清除全局 LLM 密钥失败", formatApiError(err))
+                  }
+                }}
+                onSave={async ({ baseUrl, modelName, apiKey }) => {
+                  try {
+                    await updateGlobalLlmSettingsM.mutateAsync({ baseUrl, modelName, apiKey })
+                    showSuccessFeedback("全局 LLM 设置已保存", "后端现在会通过已配置服务代理后续的大模型能力请求。")
+                  } catch (err) {
+                    showErrorFeedback("保存全局 LLM 设置失败", formatApiError(err))
+                  }
+                }}
+              />
+              <SubtitleUsageCard />
+            </>
           )}
         </div>
       </div>
@@ -655,6 +746,375 @@ function ProjectTitleCard({
 
         {queryError ? <p className="text-sm text-destructive">{formatApiError(queryError)}</p> : null}
         {saveError ? <p className="text-sm text-destructive">{formatApiError(saveError)}</p> : null}
+      </CardContent>
+    </Card>
+  )
+}
+
+const SAVED_API_KEY_MASK = "********"
+
+function SavedApiKeyInput({
+  id,
+  draftValue,
+  onDraftChange,
+  savedApiKeyConfigured,
+  disabled,
+  emptyPlaceholder,
+  savedPlaceholder,
+}: {
+  id: string
+  draftValue: string
+  onDraftChange: (value: string) => void
+  savedApiKeyConfigured: boolean
+  disabled: boolean
+  emptyPlaceholder: string
+  savedPlaceholder: string
+}) {
+  const [isEditingSavedKey, setIsEditingSavedKey] = useState(false)
+
+  useEffect(() => {
+    setIsEditingSavedKey(false)
+  }, [id, savedApiKeyConfigured])
+
+  const showSavedMask = savedApiKeyConfigured && !isEditingSavedKey && !draftValue.trim()
+
+  return (
+    <Input
+      id={id}
+      type="password"
+      value={showSavedMask ? SAVED_API_KEY_MASK : draftValue}
+      onFocus={() => {
+        if (showSavedMask && !disabled) {
+          setIsEditingSavedKey(true)
+          onDraftChange("")
+        }
+      }}
+      onBlur={() => {
+        if (!draftValue.trim()) {
+          setIsEditingSavedKey(false)
+        }
+      }}
+      onChange={(event) => onDraftChange(event.target.value)}
+      placeholder={savedApiKeyConfigured ? savedPlaceholder : emptyPlaceholder}
+      disabled={disabled}
+      autoComplete="off"
+    />
+  )
+}
+
+function GlobalLlmSettingsCard({
+  title,
+  description,
+  saveLabel,
+  settings,
+  isLoading,
+  isPending,
+  queryError,
+  saveError,
+  onSave,
+  onClearApiKey,
+}: {
+  title: string
+  description: string
+  saveLabel: string
+  settings:
+    | {
+        baseUrl: string
+        modelName: string
+        savedApiKeyConfigured: boolean
+        savedApiKeyPreview: string | null
+        llmConfigured: boolean
+        storyGenerationConfigured: boolean
+        llmSource: "user" | "global" | "env" | "none"
+      }
+    | undefined
+  isLoading: boolean
+  isPending: boolean
+  queryError: unknown
+  saveError: unknown
+  onSave: (payload: { baseUrl: string; modelName: string; apiKey?: string }) => Promise<void>
+  onClearApiKey: (baseUrl: string, modelName: string) => Promise<void>
+}) {
+  const [baseUrlDraft, setBaseUrlDraft] = useState("")
+  const [modelDraft, setModelDraft] = useState("")
+  const [apiKeyDraft, setApiKeyDraft] = useState("")
+
+  useEffect(() => {
+    setBaseUrlDraft(settings?.baseUrl ?? "")
+    setModelDraft(settings?.modelName ?? "")
+    setApiKeyDraft("")
+  }, [settings?.baseUrl, settings?.modelName])
+
+  const trimmedBaseUrl = baseUrlDraft.trim()
+  const trimmedModel = modelDraft.trim()
+  const trimmedApiKey = apiKeyDraft.trim()
+  const canSave =
+    !isLoading &&
+    !isPending &&
+    !!trimmedBaseUrl &&
+    !!trimmedModel &&
+    (trimmedBaseUrl !== (settings?.baseUrl ?? "") || trimmedModel !== (settings?.modelName ?? "") || !!trimmedApiKey)
+  const canClearApiKey = !isLoading && !isPending && !!settings?.savedApiKeyConfigured
+
+  return (
+    <Card className="theme-card">
+      <CardHeader>
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div className="space-y-1">
+            <CardTitle>{title}</CardTitle>
+            <CardDescription>{description}</CardDescription>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span
+              className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${describeLlmSourceTone(settings?.llmSource ?? "none")}`}
+            >
+              {describeLlmSource(settings?.llmSource ?? "none")}
+            </span>
+            <span className="theme-meta px-3 py-1.5 text-xs">
+              {settings?.llmConfigured ? "LLM 已可用" : "LLM 未可用"}
+            </span>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4 text-sm">
+        <div className="theme-status-surface space-y-3 rounded-[1.2rem] border border-border/70 p-4">
+          <div className="grid gap-3">
+            <div className="space-y-2">
+              <Label htmlFor="globalLlmBaseUrl">Base URL</Label>
+              <Input
+                id="globalLlmBaseUrl"
+                value={baseUrlDraft}
+                onChange={(event) => setBaseUrlDraft(event.target.value)}
+                placeholder="https://api.openai.com/v1"
+                disabled={isLoading || isPending}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="globalLlmModel">模型名</Label>
+              <Input
+                id="globalLlmModel"
+                value={modelDraft}
+                onChange={(event) => setModelDraft(event.target.value)}
+                placeholder="gpt-4o-mini"
+                disabled={isLoading || isPending}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="globalLlmApiKey">API 密钥</Label>
+              <SavedApiKeyInput
+                id="globalLlmApiKey"
+                draftValue={apiKeyDraft}
+                onDraftChange={setApiKeyDraft}
+                savedApiKeyConfigured={!!settings?.savedApiKeyConfigured}
+                emptyPlaceholder="输入新的 API Key"
+                savedPlaceholder="已保存密钥；如需更换，直接输入新值"
+                disabled={isLoading || isPending}
+              />
+              <p className="text-xs text-muted-foreground">
+                {settings?.savedApiKeyConfigured
+                  ? `当前已保存密钥：${settings.savedApiKeyPreview ?? "已配置"}。保持不改时无需重新填写。`
+                  : "当前还没有保存部署级 API Key。"}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid gap-3 rounded-[1rem] border border-border/60 bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
+            <p>这张卡片是全局设置，不跟单个项目绑定。项目设置页只是先把入口放在这里，方便你尽快把能力接通。</p>
+            <p>保存后不需要用户本地下载模型。后续真正的问答或生成接口会直接复用这份服务配置。</p>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              disabled={!canSave}
+              onClick={() => void onSave({ baseUrl: trimmedBaseUrl, modelName: trimmedModel, apiKey: trimmedApiKey || undefined })}
+            >
+              {isPending ? "保存中..." : saveLabel}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={!canClearApiKey}
+              onClick={() => void onClearApiKey(trimmedBaseUrl || settings?.baseUrl || "", trimmedModel || settings?.modelName || "")}
+            >
+              清除已保存密钥
+            </Button>
+          </div>
+        </div>
+
+        {isLoading ? <p className="text-sm text-muted-foreground">加载{title}中...</p> : null}
+        {queryError ? <p className="text-sm text-destructive">{formatApiError(queryError)}</p> : null}
+        {saveError ? <p className="text-sm text-destructive">{formatApiError(saveError)}</p> : null}
+      </CardContent>
+    </Card>
+  )
+}
+
+function UserLlmSettingsCard({
+  settings,
+  isLoading,
+  isPending,
+  queryError,
+  saveError,
+  onSave,
+  onClearApiKey,
+}: {
+  settings:
+    | {
+        baseUrl: string
+        modelName: string
+        savedApiKeyConfigured: boolean
+        savedApiKeyPreview: string | null
+        llmConfigured: boolean
+        storyGenerationConfigured: boolean
+        llmSource: "user" | "global" | "env" | "none"
+      }
+    | undefined
+  isLoading: boolean
+  isPending: boolean
+  queryError: unknown
+  saveError: unknown
+  onSave: (payload: { baseUrl: string; modelName: string; apiKey?: string }) => Promise<void>
+  onClearApiKey: (baseUrl: string, modelName: string) => Promise<void>
+}) {
+  const [baseUrlDraft, setBaseUrlDraft] = useState("")
+  const [modelDraft, setModelDraft] = useState("")
+  const [apiKeyDraft, setApiKeyDraft] = useState("")
+
+  useEffect(() => {
+    setBaseUrlDraft(settings?.baseUrl ?? "")
+    setModelDraft(settings?.modelName ?? "")
+    setApiKeyDraft("")
+  }, [settings?.baseUrl, settings?.modelName])
+
+  const trimmedBaseUrl = baseUrlDraft.trim()
+  const trimmedModel = modelDraft.trim()
+  const trimmedApiKey = apiKeyDraft.trim()
+  const canSave =
+    !isLoading &&
+    !isPending &&
+    !!trimmedBaseUrl &&
+    !!trimmedModel &&
+    (trimmedBaseUrl !== (settings?.baseUrl ?? "") || trimmedModel !== (settings?.modelName ?? "") || !!trimmedApiKey)
+  const canClearApiKey = !isLoading && !isPending && !!settings?.savedApiKeyConfigured
+
+  return (
+    <Card className="theme-card">
+      <CardHeader>
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div className="space-y-1">
+            <CardTitle>我的 LLM 设置</CardTitle>
+            <CardDescription>这份 LLM 服务配置会保存在你的账号里。之后换设备登录，同一账号仍然可以继续使用。</CardDescription>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span
+              className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${describeLlmSourceTone(settings?.llmSource ?? "none")}`}
+            >
+              {describeLlmSource(settings?.llmSource ?? "none")}
+            </span>
+            <span className="theme-meta px-3 py-1.5 text-xs">
+              {settings?.llmConfigured ? "当前账号已就绪" : "当前账号未配置"}
+            </span>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4 text-sm">
+        <div className="theme-status-surface space-y-3 rounded-[1.2rem] border border-border/70 p-4">
+          <div className="grid gap-3">
+            <div className="space-y-2">
+              <Label htmlFor="userLlmBaseUrl">Base URL</Label>
+              <Input
+                id="userLlmBaseUrl"
+                value={baseUrlDraft}
+                onChange={(event) => setBaseUrlDraft(event.target.value)}
+                placeholder="https://api.openai.com/v1"
+                disabled={isLoading || isPending}
+                autoComplete="off"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="userLlmModel">模型名</Label>
+              <Input
+                id="userLlmModel"
+                value={modelDraft}
+                onChange={(event) => setModelDraft(event.target.value)}
+                placeholder="gpt-4o-mini"
+                disabled={isLoading || isPending}
+                autoComplete="off"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="userLlmApiKey">API 密钥</Label>
+              <SavedApiKeyInput
+                id="userLlmApiKey"
+                draftValue={apiKeyDraft}
+                onDraftChange={setApiKeyDraft}
+                savedApiKeyConfigured={!!settings?.savedApiKeyConfigured}
+                emptyPlaceholder="输入你的 API Key"
+                savedPlaceholder="已保存密钥；如需更换，直接输入新值"
+                disabled={isLoading || isPending}
+              />
+              <p className="text-xs text-muted-foreground">
+                {settings?.savedApiKeyConfigured
+                  ? `当前账号已保存密钥：${settings.savedApiKeyPreview ?? "已配置"}。保持不改时无需重新填写。`
+                  : "当前账号还没有保存自己的 API Key。"}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid gap-3 rounded-[1rem] border border-border/60 bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
+            <p>保存后，AI 问答会优先使用你的账号配置；如果你没有单独保存，系统仍可在可用时回退到部署级配置或环境变量。</p>
+            <p>系统只返回是否已配置和密钥预览，不会把完整密钥重新回传到浏览器。</p>
+            <p>输入框里的星号只表示系统已保存密钥，并不是把真实密钥重新回显到浏览器。</p>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              disabled={!canSave}
+              onClick={() => void onSave({ baseUrl: trimmedBaseUrl, modelName: trimmedModel, apiKey: trimmedApiKey || undefined })}
+            >
+              {isPending ? "保存中..." : "保存到我的账号"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={!canClearApiKey}
+              onClick={() => void onClearApiKey(trimmedBaseUrl || settings?.baseUrl || "", trimmedModel || settings?.modelName || "")}
+            >
+              清除我的密钥
+            </Button>
+          </div>
+        </div>
+
+        {isLoading ? <p className="text-sm text-muted-foreground">加载我的 LLM 设置中...</p> : null}
+        {queryError ? <p className="text-sm text-destructive">{formatApiError(queryError)}</p> : null}
+        {saveError ? <p className="text-sm text-destructive">{formatApiError(saveError)}</p> : null}
+      </CardContent>
+    </Card>
+  )
+}
+
+function SubtitleUsageCard() {
+  return (
+    <Card className="theme-card">
+      <CardHeader>
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div className="space-y-1">
+            <CardTitle>字幕文件</CardTitle>
+            <CardDescription>产品现在不再使用后端 ffmpeg 或浏览器 ffmpeg.wasm 生成转写；播放器字幕和 AI 补充上下文都直接来自字幕文件。</CardDescription>
+          </div>
+          <span className="theme-meta px-3 py-1.5 text-xs">同目录同名</span>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4 text-sm">
+        <div className="theme-status-surface space-y-3 rounded-[1.2rem] border border-border/70 p-4">
+          <div className="grid gap-3 rounded-[1rem] border border-border/60 bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
+            <p>系统只会检查视频同目录下是否存在同名字幕文件，例如 `lesson.mp4` 会匹配 `lesson.srt`。</p>
+            <p>当前支持的字幕格式：{SUPPORTED_SUBTITLE_EXTENSIONS_LABEL}。</p>
+            <p>如果找到字幕文件，播放器会直接显示它，AI 问答也会把这份字幕作为补充上下文；如果没有找到，就不会再回退到 ASR 自动转写。</p>
+          </div>
+        </div>
       </CardContent>
     </Card>
   )

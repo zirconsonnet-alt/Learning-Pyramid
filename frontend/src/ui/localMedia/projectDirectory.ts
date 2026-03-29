@@ -170,6 +170,50 @@ export async function resolveProjectFile(projectId: string, materialId: string):
   return await fileHandle.getFile()
 }
 
+export async function resolveProjectSameStemSiblingFile(
+  projectId: string,
+  materialId: string,
+  extensions: readonly string[],
+): Promise<File | null> {
+  const record = await loadDirectoryRecord(projectId)
+  if (!record) return null
+  const permission = await queryHandlePermission(record.handle)
+  if (permission !== "granted") return null
+  const parts = normalizeRelativeMaterialPath(materialId)
+  if (!parts) return null
+
+  let current = record.handle
+  for (let index = 0; index < parts.length - 1; index += 1) {
+    current = await current.getDirectoryHandle(parts[index])
+  }
+
+  const materialName = parts[parts.length - 1]
+  const dotIndex = materialName.lastIndexOf(".")
+  const stem = (dotIndex >= 0 ? materialName.slice(0, dotIndex) : materialName).toLowerCase()
+  if (!stem) return null
+
+  const preferredOrder = new Map(
+    extensions.map((ext, index) => [ext.startsWith(".") ? ext.toLowerCase() : `.${ext.toLowerCase()}`, index]),
+  )
+  let bestHandle: FileSystemFileHandle | null = null
+  let bestRank = Number.POSITIVE_INFINITY
+
+  for await (const [name, handle] of current.entries()) {
+    if (handle.kind !== "file") continue
+    const candidateDotIndex = name.lastIndexOf(".")
+    const candidateStem = (candidateDotIndex >= 0 ? name.slice(0, candidateDotIndex) : name).toLowerCase()
+    const candidateExt = candidateDotIndex >= 0 ? name.slice(candidateDotIndex).toLowerCase() : ""
+    const rank = preferredOrder.get(candidateExt)
+    if (rank === undefined || candidateStem !== stem) continue
+    if (rank < bestRank) {
+      bestRank = rank
+      bestHandle = handle as FileSystemFileHandle
+    }
+  }
+
+  return bestHandle ? await bestHandle.getFile() : null
+}
+
 export async function scanProjectDirectoryMedia(projectId: string): Promise<ProjectDirectoryScanResult> {
   const record = await loadDirectoryRecord(projectId)
   if (!record) {

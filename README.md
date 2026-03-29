@@ -1,6 +1,6 @@
 # LearningPyramid v1beta
 
-LearningPyramid 是一个本地优先的学习系统，用于围绕你自己的视频或音频材料构建复述点、复习链，以及 ASR 转写产物。
+LearningPyramid 是一个本地优先的学习系统，用于围绕你自己的视频或音频材料构建复述点、复习链，并在存在时直接利用视频同目录同名字幕文件作为播放器字幕与 AI 补充上下文。
 
 ## Release mode
 
@@ -243,22 +243,36 @@ Recommended rollback flow:
 3. Start the app with `PLM_SQL_BACKEND=postgres` and verify `/api/health`, login, and project access.
 4. If verification fails, point the app back to the previous runtime or restore the backup bundle into a clean target runtime.
 
-## Whisper
+## Subtitle Files
 
-ASR service selection works like this:
+播放器字幕和 AI 补充上下文现在优先且仅使用视频同目录下的同名字幕文件，例如 `lesson.mp4` 会匹配 `lesson.srt`。
 
-1. If `ProjectConfig.external_services.asr` is configured, LearningPyramid uses that service first.
-2. If no ASR service is configured, LearningPyramid tries to auto-discover and launch a local Whisper runtime.
-3. If neither an explicit service nor a local Whisper runtime is available, ASR requests fail with a precondition error.
+当前建议至少准备以下格式之一：
 
-The current Windows default search path for local Whisper includes:
+- `.srt`
+- `.vtt`
+- `.ass`
+- `.ssa`
 
-- `H:\whisper\.venv\Scripts\python.exe`
+如果没有找到同目录同名字幕文件，产品不会再自动回退到后端 `ffmpeg` 或浏览器 `ffmpeg.wasm` 生成转写。
 
-You can override local Whisper detection with:
+## Public Subtitle Tool
+
+如果你想给公开视频目录批量补字幕，可以构建独立的 Windows 下载工具：
 
 ```powershell
-set PLM3_WHISPER_PYTHON=H:\whisper\.venv\Scripts\python.exe
+python tools/build_subtitle_tool_windows.py --bootstrap-packaging-venv
 ```
 
-`ffmpeg` must also be available in `PATH`.
+构建完成后会在仓库根目录的 `public-downloads/` 下生成：
+
+- `LearningPyramid-subtitle-tool-...-windows-x64.zip`
+- `catalog.json`
+
+公网版首页会通过 `GET /api/system/public-downloads` 读取这份清单，并把 ZIP 暴露到 `/downloads/...`。默认服务端会优先查找：
+
+- `PLM_PUBLIC_DOWNLOADS_DIR`
+- `public-downloads/`
+- `release/public-downloads/`
+
+这个小工具本身会内置 `ffmpeg`、`whisper.cpp` 和默认 `ggml-base.bin` 模型，离线扫描视频目录并在视频旁边生成同名 `.srt` 字幕文件。

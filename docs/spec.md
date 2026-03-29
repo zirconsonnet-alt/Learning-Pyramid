@@ -121,7 +121,7 @@
 * `FsSyncPolicy = {DISABLED, STARTUP_SYNC, MANUAL_SYNC}`（1.0.4 / 0b.1.5b / 4.5）
 * `MaterialSourceKind = {SERVER_FS, BROWSER_LOCAL, NATIVE_LOCAL, MANUAL}`（1.0.4a / 0b.1.5b / 4.5）
 * `ClientRuntimeKind = {MOBILE_WEB, DESKTOP_WEB, DESKTOP_NATIVE}`（0b.1.6 / 1.0.5 / 2 / 4.5）
-* `RuntimeCapability = {VIDEO_PLAYBACK, LIGHT_REVIEW, NATIVE_FS_BINDING, LOCAL_ASR, LOCAL_LLM_QA, LOCAL_RECOMMENDER, MEMORY_CANVAS_EDIT, STORY_GENERATION}`（0b.1.6 / 1.0.5 / 2 / 4.5）
+* `RuntimeCapability = {VIDEO_PLAYBACK, LIGHT_REVIEW, NATIVE_FS_BINDING, LOCAL_ASR, LOCAL_LLM_QA, LOCAL_RECOMMENDER, MEMORY_CANVAS_EDIT, STORY_GENERATION}`（0b.1.6 / 1.0.5 / 2 / 4.5；兼容说明：`LOCAL_LLM_QA` / `LOCAL_ASR` 保留旧名，其语义分别为“当前运行时可通过已配置 LLM 服务完成问答”与“当前运行时可通过已配置 ASR 服务完成转写”，二者都不要求模型部署在用户本机；但现行产品的播放器字幕与 LLM 补充上下文主路径不得再依赖 `LOCAL_ASR`，而应优先检查视频同目录同名字幕文件）
 * `CandidateRecallPointState = {PENDING, ACCEPTED, REJECTED}`（1.11c / 2.12 / 2.13 / 2.14）
 
 ---
@@ -593,7 +593,7 @@ READ_ONLY（只读会话；强约束）
 - [1.9 MediaAsset（项目富媒体资产）](#toc-1-9)
 - [1.11 AsrArtifact（ASR 转写产物）](#toc-1-11)
 - [1.11a TempContextFragment（临时上下文片段）](#toc-1-11a)
-- [1.11b QASession（本地问答会话）](#toc-1-11b)
+- [1.11b QASession（LLM 问答会话）](#toc-1-11b)
 - [1.11c CandidateRecallPoint（候选复述点）](#toc-1-11c)
 - [1.11d MemoryCanvas（记忆画布）](#toc-1-11d)
 - [1.11e MemoryCanvasVersion（记忆画布版本）](#toc-1-11e)
@@ -794,21 +794,21 @@ ReviewChainTemplateItem（值对象；最小）
   - `runtime_kind: ClientRuntimeKind`
   - `capabilities: FrozenSet[RuntimeCapability]`
   - `local_models: LocalModelConfig`
-  - 语义：由当前调用端运行时提供；可随设备与安装环境变化。它不是 `ProjectConfig` 字段，不参与 bootstrap，也不参与 `ProjectConfigRepository.set/get`。
+  - 语义：由当前调用端运行时提供；可随设备与安装环境变化。它不是 `ProjectConfig` 字段，不参与 bootstrap，也不参与 `ProjectConfigRepository.set/get`。`local_models` 为兼容旧命名，内部条目既可指向本机/局域网服务，也可指向远程 HTTPS 模型服务。
 - `LocalModelConfig`
   - `asr: Optional[LocalServiceConfig]`
   - `llm_qa: Optional[LocalServiceConfig]`
   - `recommender: Optional[LocalServiceConfig]`
   - `story_generator: Optional[LocalServiceConfig]`
-  - 语义：只在 `DESKTOP_NATIVE` 且对应 `RuntimeCapability` 存在时可被使用；其他端必须视为不可用。
+  - 语义：仅当对应 `RuntimeCapability` 存在时可被使用。兼容旧命名，这些条目允许指向本地或远程服务；`asr` / `llm_qa` / `story_generator` 都不要求模型部署在用户本机，只要求当前运行时存在可用服务配置与鉴权信息。在 Hosted / Web 形态下，服务配置既可来自部署级环境或管理员维护的回退配置，也可来自当前登录用户保存在服务端的账号级配置；系统只允许在受信任的服务端边界使用这些密钥，不得把它们写入项目事实。
 - `LocalServiceConfig`
   - `base_url: str`
-    - 语义：本地服务基址（例如 `http://127.0.0.1:12345`）。
+    - 语义：模型服务基址（例如 `http://127.0.0.1:12345`、局域网地址或公网 HTTPS 端点）。
     - 写前条件：必须为非空字符串；不得包含尾随空白。
   - `model_name: Optional[str]`
     - 语义：可选模型标识；仅用于运行时调用与日志摘要，不得进入项目级审计 payload 的敏感字段。
   - `api_key: Optional[str]`
-    - 语义：可选鉴权字段；由调用方提供；系统不得将其写入审计 payload（避免泄漏）。
+    - 语义：可选鉴权字段；可来自部署级配置或当前用户显式提供的密钥。系统必须仅在受信任的服务端边界使用该值；不得将其写入 `ProjectConfig`、项目级审计 payload、标准导出结果，也不得要求浏览器直接持有第三方模型服务的持久凭据。
 
 - `RecallPointPushConfig`
   - `min_recall_points_to_enable: int`
@@ -1575,33 +1575,32 @@ Queries
 ### 1.11 AsrArtifact（ASR 转写产物）
 
 用途  
-对某个 RecallPoint（或其来源材料中的视频段）执行自动语音识别（ASR）后生成的可追溯转写产物。该产物可作为节点详情页导出的组成部分，供用户独立交给外部工具继续处理。
+本节现行语义改为“legacy/兼容性的 ASR 临时转写结果”。ASR 结果仍可作为兼容接口返回给调用方，但现行产品的播放器字幕与 LLM 补充上下文主路径不得再依赖 ASR；实现必须优先且仅检查“视频同目录下是否存在同名字幕文件”，若存在则直接把该字幕文件用作播放器字幕或 LLM 的补充工具输入。推荐支持的字幕扩展名至少包括 `.srt / .vtt / .ass / .ssa`。
 
 重要声明（强约束）  
-- ASR 产物是派生事实（derived），其正确性不进入系统职责；系统仅存储与引用。  
-- 同一 (recall_point_id, window, provider) 允许复用缓存；复用语义写死见下文“索引与缓存键”。  
-- 产物不得在提交期强制校验中触发外部可达性探测（0b.7.2）。
+- 现行产品不得再使用服务端 `ffmpeg` 或浏览器 `ffmpeg.wasm` 为播放器字幕或 LLM 上下文临时切片/生成 ASR。  
+- 若找不到同目录同名字幕文件，则播放器字幕与 LLM 补充上下文路径应视为“无额外字幕输入”，而不是自动回退到 ASR。  
+- ASR 结果是派生信息（derived），其正确性不进入系统职责；系统只负责在一次请求内代理外部 ASR 调用并返回结果。  
+- 结果不得写入 `ProjectConfig`、项目仓库、SQLite/Postgres 持久层、标准导出存储或服务端长期磁盘。  
+- 浏览器允许以 `(project_id, recall_point_id, source_instance_id, window, provider)` 为键缓存复述点窗口结果，也允许以 `(project_id, source_instance_id, start_ms, end_ms, provider)` 为键缓存字幕时间块结果；典型实现可使用 `IndexedDB`。这些缓存均属于客户端实现细节，不构成项目事实。  
+- 服务端允许在单次请求生命周期内使用临时文件（例如 `SERVER_FS` 兼容路径上的音频片段），但请求完成后必须清理；浏览器本地切片产生的中间结果不构成项目事实。  
+- 结果不得在提交期强制校验中触发外部可达性探测（0b.7.2）。
 
 语义类型  
-- `AsrArtifactId`：ASR 产物唯一标识（项目内唯一）。
+- `AsrTranscriptResult`：一次 `request_asr(...)` 调用返回给客户端的临时结果；无项目内持久 ID。
+- `InstanceAsrTranscriptResult`：一次 `request_instance_asr(...)` 或 `request_instance_asr_from_audio_upload(...)` 调用返回给客户端的实例时间块结果；无项目内持久 ID。
 
 枚举  
 - `AsrProvider = {WHISPER}`
 
-存储字段（最小）
+返回字段（最小）
 - `project_id: ProjectId`
-- `asr_artifact_id: AsrArtifactId`
-- `created_at: Timestamp`
 - `provider: AsrProvider`
-- `producer_runtime_kind: ClientRuntimeKind`
-  - 语义：创建该 ASR 产物的运行时类型。
-  - 强约束：新建 `AsrArtifact` 时必须满足 `producer_runtime_kind == DESKTOP_NATIVE`；其他端只允许读取既有 `AsrArtifact`，不得创建新产物。
-
 - `recall_point_id: RecallPointId`
-  - 语义：本转写产物围绕的复述点；必须可解析，且在新建产物时其 `RecallPoint.state` 必须为 `ACTIVE`。
-  - 强约束：墓碑对象可为历史引用保留解析性，但不得作为新 `AsrArtifact` 的创建目标。
+  - 语义：本次临时转写围绕的复述点；必须可解析，且在新请求时其 `RecallPoint.state` 必须为 `ACTIVE`。
+  - 强约束：墓碑对象可为历史只读事实保留解析性，但不得作为当前临时转写请求的创建目标。
 - `source_instance_id: InstanceId`
-  - 语义：该复述点最终落在的材料实例（由 recall_point.anchor.instance_id 派生并在创建时固化）。
+  - 语义：该复述点最终落在的材料实例（由 `recall_point.anchor.instance_id` 派生并在返回值中带回）。
 - `center_ms: int`
 - `pre_ms: int`
 - `post_ms: int`
@@ -1612,40 +1611,34 @@ Queries
   - `AsrSegment = {start_ms: int, end_ms: int, text: str, confidence: Optional[float]}`
   - 约束：`segments` 允许为空（识别失败或静音）；空不视为错误。
 
-仓库接口  
-- 关联仓库：`AsrArtifactRepository`
-
-写接口（最小）
-- `add(session: MutationSession, artifact: AsrArtifact) -> None`
-  - 新增；若 `asr_artifact_id` 已存在，抛 `PreconditionFailure`。
-  - 写前条件（强约束；0b.5）：
-    - `artifact.project_id == session.project_id`；否则必须抛 `PreconditionFailure`。
-    - `RecallPointRepository.get(session, artifact.recall_point_id)` 必须可解析，且目标 `RecallPoint.state == ACTIVE`；若不可解析（`NotFound`）或目标为 `DELETED`，对外必须映射为 `PreconditionFailure`，且失败不得产生任何 staged 写入。
-    - `InstanceRepository.get(session, artifact.source_instance_id)` 必须可解析；若不可解析（`NotFound`），对外必须映射为 `PreconditionFailure`，且失败不得产生任何 staged 写入。
-- `upsert_by_cache_key(session: MutationSession, artifact: AsrArtifact) -> AsrArtifactId`
-  - 语义：按缓存键复用或写入。若命中同一缓存键，则返回既有 `asr_artifact_id` 且不得改写既有 segments（保持可追溯）。  
-  - 写前条件（强约束；0b.5）：与 `add(session, artifact)` 相同；实现不得绕过这些检查。
-  - 缓存键（强约束；写死）：`(recall_point_id, provider, center_ms, pre_ms, post_ms)`。
-
-读接口（最小）
-- `get(session: MutationSession, asr_artifact_id: AsrArtifactId) -> AsrArtifact`
-- `maybe_get_by_cache_key(session: MutationSession, recall_point_id: RecallPointId, provider: AsrProvider, center_ms: int, pre_ms: int, post_ms: int) -> Optional[AsrArtifact]`
+- `InstanceAsrTranscriptResult` 最小字段：
+  - `project_id: ProjectId`
+  - `provider: AsrProvider`
+  - `source_instance_id: InstanceId`
+  - `start_ms: int`
+  - `end_ms: int`
+  - `segments: Tuple[AsrSegment, ...]`
+  - 语义：表示素材实例上 `[start_ms, end_ms]` 时间块的一次临时转写结果，适合字幕块缓存与播放器复用；不得被误建模为新的 `RecallPoint` 事实。
 
 一致性与校验  
-- `asr_artifact_id` 项目内唯一。  
-- `recall_point_id` / `source_instance_id` 必须可解析（写前条件）；其中 `recall_point_id` 在新建产物时还必须满足其 `RecallPoint.state == ACTIVE`。  
-- 新建产物时 `producer_runtime_kind` 必须为 `DESKTOP_NATIVE`；该限制属于运行时门禁，不得通过修改 `ProjectConfig` 绕过。  
-- ASR 外部接口可达性不得进入提交期强制集合；失败必须以显式错误返回给调用方，并且不得留下部分 staged 写入（0b.5）。  
+- `recall_point_id` / `source_instance_id` 必须可解析（请求前条件）；其中 `recall_point_id` 在当前转写请求时还必须满足其 `RecallPoint.state == ACTIVE`。  
+- 新策略下，服务端不得为新 ASR 结果分配 `AsrArtifactId`，也不得创建新的持久化 `AsrArtifact`。  
+- ASR 外部接口可达性不得进入提交期强制集合；失败必须以显式错误返回给调用方，并且不得留下任何项目级持久化写入（0b.5）。  
+
+兼容说明（强约束）  
+- 历史版本中已持久化的 `AsrArtifact / AsrArtifactId` 允许继续被只读接口解析、导出或被辅助对象引用，以保证旧数据兼容。  
+- 现行 `request_asr(...)` 不再创建新的 `AsrArtifact`；新前端必须把返回值视为浏览器缓存对象，而不是项目事实。  
+- 即使保留 `request_asr(...) / request_instance_asr(...)` 等兼容接口，产品 UI 也不得再把它们当作字幕服务或 LLM 默认工具入口。  
 
 <a id="toc-1-11a"></a>
 
 ### 1.11a TempContextFragment（临时上下文片段）
 
 用途  
-把 ASR 片段、用户选中的局部文本或其等价局部证据固化为“临时上下文片段”，供 Native-only 的本地问答与候选点生成协议引用。该对象是辅助事实，不属于正式 `RecallPoint`，也不得直接进入导出主格式。
+把 ASR 片段、用户选中的局部文本或其等价局部证据固化为“临时上下文片段”，供 LLM 问答与候选点生成协议引用。该对象是辅助事实，不属于正式 `RecallPoint`，也不得直接进入导出主格式。
 
 重要声明（强约束）  
-- `TempContextFragment` 只服务于 `DESKTOP_NATIVE` 的本地交互能力；其创建不得生成 `ReviewTask`、不得写入 `can_recall`、不得推进主调度闭环。  
+- `TempContextFragment` 只服务于问答、候选点、故事化等辅助交互能力；其创建不得生成 `ReviewTask`、不得写入 `can_recall`、不得推进主调度闭环。  
 - 该对象允许长期保存以支撑历史回看，但仍属于临时/辅助层，不得被 4.8 的标准导出接口隐式混入。  
 
 存储字段（最小）
@@ -1653,9 +1646,10 @@ Queries
 - `temp_context_fragment_id: TempContextFragmentId`
 - `created_at: Timestamp`
 - `producer_runtime_kind: ClientRuntimeKind`
-  - 强约束：新建时必须为 `DESKTOP_NATIVE`。
+  - 强约束：新建时必须等于发起该创建的 `session.runtime_kind`。
 - `source_recall_point_id: RecallPointId`
 - `source_asr_artifact_id: Optional[AsrArtifactId]`
+  - 语义：仅用于引用历史版本中已持久化的 `AsrArtifact`；现行浏览器缓存 ASR 流程不要求也通常不会提供该字段。
 - `start_ms: Optional[int]`
 - `end_ms: Optional[int]`
 - `origin: Enum{ASR_SEGMENTS, USER_SELECTION}`
@@ -1669,15 +1663,15 @@ Queries
 
 一致性与校验  
 - `temp_context_fragment_id` 项目内唯一。  
-- `source_recall_point_id` 必须可解析。若 `source_asr_artifact_id` 非空，则其 `recall_point_id` 必须等于 `source_recall_point_id`。  
+- `source_recall_point_id` 必须可解析。若 `source_asr_artifact_id` 非空，则其 `recall_point_id` 必须等于 `source_recall_point_id`。现行浏览器缓存 ASR 路径下，调用方应优先直接提交 `text`，而不是依赖服务端持久化 ASR 引用。  
 - 创建 `TempContextFragment` 不得隐式修改任何 `RecallPoint / LearningTask / ReviewTask`。
 
 <a id="toc-1-11b"></a>
 
-### 1.11b QASession（本地问答会话）
+### 1.11b QASession（LLM 问答会话）
 
 用途  
-记录一次或多次本地问答交互的会话化上下文。它用于承载 Native-only 的 prompt / response 历史与上下文片段引用，但不构成正式学习事实。
+记录一次或多次 LLM 问答交互的会话化上下文。它用于承载 prompt / response 历史与上下文片段引用，但不构成正式学习事实。
 
 重要声明（强约束）  
 - `QASession` 的存在不得改变任何 `RecallPoint`、`LearningTask`、`ReviewTask`、`ReviewChain` 或 `Convergence` 的语义。  
@@ -1689,7 +1683,7 @@ Queries
 - `created_at: Timestamp`
 - `updated_at: Timestamp`
 - `producer_runtime_kind: ClientRuntimeKind`
-  - 强约束：新建与追加 turn 时必须为 `DESKTOP_NATIVE`。
+  - 强约束：新建与追加 turn 时必须等于发起写入的 `session.runtime_kind`。
 - `context_fragment_ids: Tuple[TempContextFragmentId, ...]`
 - `turns: Tuple[QATurn, ...]`
   - `QATurn = {question: str, answer: str, created_at: Timestamp}`
@@ -1711,10 +1705,10 @@ Queries
 ### 1.11c CandidateRecallPoint（候选复述点）
 
 用途  
-表示由本地问答会话或其上下文派生出的“候选复述点”。它与正式 `RecallPoint` 严格分离：在被用户显式接受之前，它不得进入学习/复习主闭环。
+表示由 LLM 问答会话或其上下文派生出的“候选复述点”。它与正式 `RecallPoint` 严格分离：在被用户显式接受之前，它不得进入学习/复习主闭环。
 
 重要声明（强约束）  
-- `CandidateRecallPoint` 不是正式 `RecallPoint`；任何推荐、弹幕、画布、故事或本地问答都不得把它当成已提交学习事实。  
+- `CandidateRecallPoint` 不是正式 `RecallPoint`；任何推荐、弹幕、画布、故事或 LLM 问答都不得把它当成已提交学习事实。  
 - 只有 2.13 `accept_candidate_recall_point(...)` 才允许把候选点转化为正式学习事实；拒绝或未处理状态都不得触发任务调度。  
 
 存储字段（最小）
@@ -1843,7 +1837,7 @@ Queries
 ### 1.11g StoryArtifact（故事化产物）
 
 用途  
-表示由本地模型基于正式事实、候选点、上下文片段或画布关系生成的故事化理解产物。它用于辅助理解与记忆，不用于替代正式 `RecallPoint`。
+表示由已配置 LLM 服务基于正式事实、候选点、上下文片段或画布关系生成的故事化理解产物。它用于辅助理解与记忆，不用于替代正式 `RecallPoint`。
 
 重要声明（强约束）  
 - `StoryArtifact` 是派生/辅助对象，不是正式学习事实。  
@@ -1854,7 +1848,7 @@ Queries
 - `story_artifact_id: StoryArtifactId`
 - `created_at: Timestamp`
 - `producer_runtime_kind: ClientRuntimeKind`
-  - 强约束：新建时必须为 `DESKTOP_NATIVE`。
+  - 强约束：新建时必须等于发起该创建的 `session.runtime_kind`。
 - `title: str`
 - `body: RichContent`
 - `source_refs: Tuple[CanvasObjectRef, ...]`
@@ -1996,16 +1990,16 @@ Queries
 
 ## 2. 事务协议（Transaction Protocols）
 
-本章定义“面向业务事实（business facts）与 Native-only 辅助对象”的写入协议：一次提交（mutation session + commit）只负责创建/更新第 1 章定义的核心对象与辅助对象（例如 `RecallPoint / LearningTask / LearningTaskNode / RangeSnapshot / AsrArtifact / TempContextFragment / QASession / CandidateRecallPoint / MemoryCanvas / MemoryCanvasVersion / CanvasEdge / StoryArtifact`），不直接创建运行时调度对象（`ReviewTask / Convergence / ReviewChain / Orchestrator / Queue`）。运行时调度对象的创建与推进由第 3/4 章的内部调度协议负责。
+本章定义“面向业务事实（business facts）与运行时辅助对象”的写入协议：一次提交（mutation session + commit）只负责创建/更新第 1 章定义的核心对象与辅助对象（例如 `RecallPoint / LearningTask / LearningTaskNode / RangeSnapshot / AsrArtifact / TempContextFragment / QASession / CandidateRecallPoint / MemoryCanvas / MemoryCanvasVersion / CanvasEdge / StoryArtifact`），不直接创建运行时调度对象（`ReviewTask / Convergence / ReviewChain / Orchestrator / Queue`）。运行时调度对象的创建与推进由第 3/4 章的内部调度协议负责。
 
 通用事务语义继承第 0b.1：会话内可暂时违背跨对象结构约束；`commit()` 对最终态一次性校验，失败则整组变更回滚；本章协议的读视图语义完全继承 0b.2：READ_ONLY 为 baseline read，READ_WRITE 为 in-session overlay read（read-your-writes）；不触发隐式修复。
 
 本章目录：
 - [2.1 协议：学习任务提交（LearningTask Submit）](#toc-2-1)
 - [2.2 协议：复习提交（Review Submit）](#toc-2-2)
-- [2.9 协议：Native-only ASR 转写（Request ASR）](#toc-2-9)
+- [2.9 协议：服务端代理 ASR 转写（Request ASR）](#toc-2-9)
 - [2.10 协议：提取临时上下文片段（Extract Temp Context Fragment）](#toc-2-10)
-- [2.11 协议：本地问答（Ask Local LLM）](#toc-2-11)
+- [2.11 协议：LLM 问答（Ask LLM）](#toc-2-11)
 - [2.12 协议：从问答生成候选复述点（Generate Candidate Recall Points）](#toc-2-12)
 - [2.13 协议：接受候选复述点（Accept Candidate Recall Point）](#toc-2-13)
 - [2.14 协议：拒绝候选复述点（Reject Candidate Recall Point）](#toc-2-14)
@@ -2161,38 +2155,46 @@ Failure 语义
 
 <a id="toc-2-9"></a>
 
-### 2.9 协议：Native-only ASR 转写（Request ASR）
+### 2.9 协议：服务端代理 ASR 转写（Request ASR，legacy compatibility）
 
 目的  
-对某个 `RecallPoint` 的来源材料（通常为视频/音频）在其附近窗口执行本地 ASR 转写，生成 `AsrArtifact`（1.11），供节点详情页导出与用户后续独立使用。
+对某个 `RecallPoint` 的来源材料（通常为视频/音频）在其附近窗口执行一次 ASR 转写，返回临时 `AsrTranscriptResult`（1.11）给当前调用方。该协议保留仅为兼容旧接口或调试链路；现行产品不得再把它用于播放器字幕服务或 LLM 补充上下文。
 
 SCHEDULING_EFFECT = NONE（强约束）  
 - 本协议不得创建/入队任何 ReviewTask，不得推进 ReviewChain，不得触发 Orchestrator Tick。  
-- 允许写入：仅允许写入 `AsrArtifact`（1.11）。  
+- 允许写入：不得写入任何新的项目事实；仅允许写入必要的审计事件。  
 
 对外入口（并且必须纳入 4.5 系统对外入口白名单）  
-- `request_asr(session: MutationSession, recall_point_id: RecallPointId, center_ms: int, pre_ms: int, post_ms: int, provider: AsrProvider=WHISPER) -> AsrArtifactId`
+- `request_asr(session: MutationSession, recall_point_id: RecallPointId, center_ms: int, pre_ms: int, post_ms: int, provider: AsrProvider=WHISPER, service_config: Optional[LocalServiceConfig]=None) -> AsrTranscriptResult`
+- `request_instance_asr(session: MutationSession, instance_id: InstanceId, start_ms: int, end_ms: int, provider: AsrProvider=WHISPER, service_config: Optional[LocalServiceConfig]=None) -> InstanceAsrTranscriptResult`
+- `request_instance_asr_from_audio_upload(session: MutationSession, instance_id: InstanceId, start_ms: int, end_ms: int, audio_bytes: bytes, audio_filename: Optional[str]=None, audio_content_type: Optional[str]=None, provider: AsrProvider=WHISPER, service_config: Optional[LocalServiceConfig]=None) -> InstanceAsrTranscriptResult`
   - 会话要求：`session.mode == READ_WRITE`。  
-  - 运行时要求：`session.runtime_kind == DESKTOP_NATIVE` 且 `LOCAL_ASR ∈ session.runtime_capabilities`；其他端只允许读取既有 `AsrArtifact`，不得调用本协议。  
+  - 运行时要求：不再有 Native-only 门禁；只要当前部署启用了 ASR 功能，`MOBILE_WEB / DESKTOP_WEB / DESKTOP_NATIVE` 都可调用本协议。  
   - 写前条件：  
     - `RecallPointRepository.get(session, recall_point_id)` 可解析，且其 `RecallPoint.state == ACTIVE`；若不可解析则 `NotFound`，若目标为 `DELETED` 则必须返回 `PreconditionFailure`。  
     - 必须能从该 RecallPoint 的 anchor 推导出 `source_instance_id`（材料实例）；否则 `PreconditionFailure`。  
     - `pre_ms >= 0` 且 `post_ms >= 0`，窗口长度不超过上限；否则 `PreconditionFailure`。  
-    - `NativeRuntimeConfig.local_models.asr` 必须可用；若本地 ASR 模型未配置或 Native 运行时不可用，则必须返回 `PreconditionFailure`。  
+    - 对实例时间块协议：`InstanceRepository.get(session, instance_id)` 必须可解析；`start_ms >= 0`、`end_ms > start_ms`，且块长不超过上限；否则 `PreconditionFailure`。  
+    - 系统必须能够解析出可用的 `LocalServiceConfig`：优先使用本次请求显式给定的 `service_config`，若缺失则允许回退到当前登录用户已保存在服务端的账号级配置；若账号级配置缺失，再允许回退到部署级环境配置；若三者都不可用，则必须返回 `PreconditionFailure`。  
   - 缓存语义（强约束；写死）：  
-    - 若 `AsrArtifactRepository.maybe_get_by_cache_key(...)` 命中，则必须直接返回既有 `asr_artifact_id`，且不得再次调用 ASR 服务。  
+    - 服务端不得依赖项目级持久化缓存。若前端希望避免重复调用，必须在浏览器侧自行缓存 `AsrTranscriptResult`。  
+    - 播放器字幕实现不得按 `timeupdate` 或每次 seek 的细粒度事件直接重复请求；应按稳定时间块复用 `InstanceAsrTranscriptResult`，并优先命中浏览器缓存。  
   - 外部调用：  
-    - 实现必须以“材料实例 + 时间窗口”提取音频片段并调用 Native 本地 ASR 服务；其配置来源只能是 `NativeRuntimeConfig.local_models.asr`。音频提取与外部调用均不得在提交期强制校验中发生（0b.7.2）。  
-    - 新建 `AsrArtifact` 时，系统必须写入 `producer_runtime_kind = session.runtime_kind`。  
+    - 现行产品前端不得再使用 `ffmpeg.wasm` 对 `BROWSER_LOCAL` 素材做时间窗口裁剪，也不得把裁剪后音频上传为播放器字幕或 LLM 默认输入。  
+    - 现行产品服务端不得再为了播放器字幕或 LLM 工具入口启用 `ffmpeg` 兼容切片路径。若实现为了旧接口兼容仍保留该能力，则必须明确视为非默认、非产品主路径。  
+    - 若兼容接口仍被保留，其外部 ASR 端点既可以是 OpenAI 兼容 HTTPS ASR 服务，也可以是需要服务端适配的 provider-native ASR 服务（例如 DashScope 原生异步文件转写），但这不改变其 legacy/非主路径定位。  
+    - `service_config.api_key` 可来自用户本次请求显式给定的临时配置、当前登录用户保存在服务端的账号级配置，也可来自部署级环境配置；系统必须仅在受信任的服务端边界使用该值，并且不得把它写入 `ProjectConfig`、项目仓库、标准导出或审计 payload。  
+    - 音频提取与外部调用均不得在提交期强制校验中发生（0b.7.2）。  
   - 失败语义：  
-    - 若本地 ASR 模型配置缺失或进程不可用，必须返回 `PreconditionFailure`。  
+    - 若缺少可用 `service_config`、材料文件不存在、材料类型不支持、本机缺少音频提取能力（例如 `ffmpeg`）、浏览器本地素材未获授权读取，或服务端兼容切片队列当前不可接受更多任务，必须返回 `PreconditionFailure`。  
     - ASR 服务不可达、超时或返回无效响应时，必须返回显式错误 `ExternalServiceError`（实现可复用更细分类名，但对外语义必须稳定），且不得留下部分 staged 写入（0b.5）。  
     - 允许返回空 segments 作为成功（例如静音或识别空）；空不视为错误。  
 
 说明（强约束）  
-- 本协议不定义“视频容器解析/解码”细节；其属于实现内部能力。对外可观察语义仅限于：成功则产生 `AsrArtifact(segments)`，失败则不产生任何写入。  
-- 本协议是 Native-only 写入口；`MOBILE_WEB` / `DESKTOP_WEB` 不得承担 ASR 生成职责。  
-- 墓碑边界（强约束）：`DELETED` 的 RecallPoint 仍可作为历史事实被读取或被既有 `AsrArtifact` 引用，但不得再通过本协议生成新的 ASR 产物。  
+- 本协议不定义“视频容器解析/解码”细节；其属于实现内部能力。对外可观察语义仅限于：成功则返回 `AsrTranscriptResult(segments)`，失败则不产生任何项目级写入。  
+- 浏览器侧导出或复用必须基于本协议返回值自行缓存；服务端不得承诺跨请求复用新结果。  
+- 现行产品若需要字幕或 LLM 补充上下文，必须优先走“同目录同名字幕文件”策略，而不是本协议。  
+- 墓碑边界（强约束）：`DELETED` 的 RecallPoint 仍可作为历史事实被读取或被既有 legacy `AsrArtifact` 引用，但不得再通过本协议生成新的临时转写结果。  
 - 若材料非音视频或无法提取音频，则必须 `PreconditionFailure`，并给出可解释错误摘要（例如“不支持的材料类型”）。  
 
 ---
@@ -2202,7 +2204,7 @@ SCHEDULING_EFFECT = NONE（强约束）
 ### 2.10 协议：提取临时上下文片段（Extract Temp Context Fragment）
 
 目的  
-把围绕某个复述点的局部证据提取为 `TempContextFragment`（1.11a），供本地问答与候选点生成使用。
+把围绕某个复述点的局部证据提取为 `TempContextFragment`（1.11a），供 LLM 问答与候选点生成使用。
 
 SCHEDULING_EFFECT = NONE（强约束）  
 - 本协议不得创建/入队任何 `ReviewTask`，不得推进 ReviewChain，不得触发 Orchestrator Tick。  
@@ -2211,13 +2213,13 @@ SCHEDULING_EFFECT = NONE（强约束）
 对外入口  
 - `extract_temp_context_fragment(session: MutationSession, recall_point_id: RecallPointId, source_asr_artifact_id: Optional[AsrArtifactId], start_ms: Optional[int], end_ms: Optional[int], text: Optional[str]) -> TempContextFragmentId`
   - 会话要求：`session.mode == READ_WRITE`。  
-  - 运行时要求：`session.runtime_kind == DESKTOP_NATIVE`。  
+  - 运行时要求：无 Native-only 门禁；任一可写运行时都可执行。  
   - 写前条件：  
     - `RecallPointRepository.get(session, recall_point_id)` 可解析。  
-    - `source_asr_artifact_id` 若非空，则必须可解析，且其 `recall_point_id == recall_point_id`。  
-    - `text` 与 `(source_asr_artifact_id, start_ms, end_ms)` 至少要提供一类有效来源；两者均缺失时必须返回 `PreconditionFailure`。  
+    - `source_asr_artifact_id` 若非空，则必须可解析，且其 `recall_point_id == recall_point_id`；该路径仅用于 legacy 持久化 `AsrArtifact`。  
+    - `text` 与 `(source_asr_artifact_id, start_ms, end_ms)` 至少要提供一类有效来源；两者均缺失时必须返回 `PreconditionFailure`。现行浏览器缓存 ASR 路径下，调用方通常应直接提供 `text`。  
   - 写入语义：  
-    - 若提供 `source_asr_artifact_id`，系统可从目标 `AsrArtifact.segments` 中裁剪或拼接局部文本；若同时提供 `text`，则以调用方显式给定文本为权威保存值。  
+    - 若提供 `source_asr_artifact_id`，系统可从目标 legacy `AsrArtifact.segments` 中裁剪或拼接局部文本；若同时提供 `text`，则以调用方显式给定文本为权威保存值。  
     - 新建 `TempContextFragment(producer_runtime_kind = session.runtime_kind, source_recall_point_id = recall_point_id, ...)`。  
   - 失败语义：任何输入校验失败或片段抽取失败都不得留下部分 staged 写入。  
 
@@ -2225,10 +2227,13 @@ SCHEDULING_EFFECT = NONE（强约束）
 
 <a id="toc-2-11"></a>
 
-### 2.11 协议：本地问答（Ask Local LLM）
+### 2.11 协议：LLM 问答（Ask LLM）
 
 目的  
-基于一个或多个 `TempContextFragment` 进行本地问答，并把问答 turn 持久化到 `QASession`（1.11b）。
+基于一个或多个 `TempContextFragment` 进行 LLM 问答，并把问答 turn 持久化到 `QASession`（1.11b）。
+
+兼容说明  
+为避免破坏既有接口名与审计事件名，本文仍沿用 `ask_local_llm(...)` 与 `REQUEST_LOCAL_LLM` 作为标识；其语义统一指“调用当前可用的 LLM 服务完成问答”，该服务可以是远程提供商 API，也可以是本机或局域网进程，不要求模型部署在用户本机。
 
 SCHEDULING_EFFECT = NONE（强约束）  
 - 本协议不得创建/入队任何 `ReviewTask`，不得推进 ReviewChain，不得触发 Orchestrator Tick。  
@@ -2237,17 +2242,19 @@ SCHEDULING_EFFECT = NONE（强约束）
 对外入口  
 - `ask_local_llm(session: MutationSession, prompt: str, context_fragment_ids: Sequence[TempContextFragmentId], qa_session_id: Optional[QASessionId] = None) -> QASession`
   - 会话要求：`session.mode == READ_WRITE`。  
-  - 运行时要求：`session.runtime_kind == DESKTOP_NATIVE` 且 `LOCAL_LLM_QA ∈ session.runtime_capabilities`。  
+  - 运行时要求：`LOCAL_LLM_QA ∈ session.runtime_capabilities`。  
   - 写前条件：  
     - `prompt` 必须为非空字符串。  
     - `context_fragment_ids` 中每个 `TempContextFragmentId` 必须可解析。  
     - `NativeRuntimeConfig.local_models.llm_qa` 必须可用；否则 `PreconditionFailure`。  
+    - 若 `llm_qa.api_key` 缺失，则系统必须能够从当前用户提供的凭据或部署级密钥中解析出可用鉴权信息；若仍不可用，则必须返回 `PreconditionFailure`。  
     - `qa_session_id` 若非空，则必须可解析。  
   - 写入语义：  
     - 当 `qa_session_id` 为空时，系统必须新建一个 `QASession`，并把本次问答写成其首个 `QATurn`。  
     - 当 `qa_session_id` 非空时，系统必须在既有 `QASession` 尾部追加一个新的 `QATurn`，并更新 `updated_at`。  
-    - 本地模型响应必须仅写入 `QASession.turns.answer`；不得直接改写任何正式 `RecallPoint`。  
-  - 失败语义：模型服务不可达、超时、返回无效响应时，必须返回显式错误且不得留下部分 staged 写入。  
+    - 系统必须通过受信任的服务端通道调用目标 LLM 服务；浏览器 / Web 客户端不得直接持有第三方模型服务的持久 API Key。  
+    - 模型响应必须仅写入 `QASession.turns.answer`；不得直接改写任何正式 `RecallPoint`。  
+  - 失败语义：模型服务不可达、超时、鉴权失败或返回无效响应时，必须返回显式错误且不得留下部分 staged 写入。  
 
 ---
 
@@ -2264,10 +2271,11 @@ SCHEDULING_EFFECT = NONE（强约束）
 对外入口  
 - `generate_candidate_recall_points_from_qa(session: MutationSession, qa_session_id: QASessionId, max_items: int = 5) -> Sequence[CandidateRecallPointId]`
   - 会话要求：`session.mode == READ_WRITE`。  
-  - 运行时要求：`session.runtime_kind == DESKTOP_NATIVE` 且 `LOCAL_LLM_QA ∈ session.runtime_capabilities`。  
+  - 运行时要求：`LOCAL_LLM_QA ∈ session.runtime_capabilities`。  
   - 写前条件：  
     - `qa_session_id` 必须可解析。  
     - `max_items >= 1`。  
+    - `NativeRuntimeConfig.local_models.llm_qa` 必须可用，且系统必须可解析出用于候选点生成的可用鉴权信息；否则 `PreconditionFailure`。  
   - 写入语义：  
     - 系统必须基于 `QASession.turns` 与 `context_fragment_ids` 生成至多 `max_items` 个 `CandidateRecallPoint`。  
     - 所有新候选项必须写入 `state = PENDING`，并与来源 `qa_session_id` 建立显式关联。  
@@ -2290,7 +2298,7 @@ SCHEDULING_EFFECT = NONE（子协议层面；强约束）
 对外入口  
 - `accept_candidate_recall_point(session: MutationSession, candidate_recall_point_id: CandidateRecallPointId, anchor: Anchor, title: Optional[str] = None) -> (learning_task_node_id: LearningTaskNodeId, recall_point_id: RecallPointId)`
   - 会话要求：`session.mode == READ_WRITE`。  
-  - 运行时要求：`session.runtime_kind == DESKTOP_NATIVE`。  
+  - 运行时要求：无 LLM / Native 专属门禁；任一可写运行时都可执行。  
   - 写前条件：  
     - `CandidateRecallPointRepository.get(session, candidate_recall_point_id)` 必须可解析，且 `state == PENDING`。  
     - `anchor.instance_id` 必须可解析。  
@@ -2313,7 +2321,7 @@ SCHEDULING_EFFECT = NONE（强约束）
 对外入口  
 - `reject_candidate_recall_point(session: MutationSession, candidate_recall_point_id: CandidateRecallPointId) -> None`
   - 会话要求：`session.mode == READ_WRITE`。  
-  - 运行时要求：`session.runtime_kind == DESKTOP_NATIVE`。  
+  - 运行时要求：无 LLM / Native 专属门禁；任一可写运行时都可执行。  
   - 写前条件：  
     - 目标候选项必须可解析，且 `state == PENDING`。  
   - 写入语义：  
@@ -2394,7 +2402,7 @@ SCHEDULING_EFFECT = NONE（强约束）
 ### 2.18 协议：生成故事化产物（Generate Story Artifact）
 
 目的  
-基于本地模型为正式与辅助对象生成一个独立的 `StoryArtifact`（1.11g），用于帮助理解与记忆。
+基于已配置 LLM 服务为正式与辅助对象生成一个独立的 `StoryArtifact`（1.11g），用于帮助理解与记忆。
 
 SCHEDULING_EFFECT = NONE（强约束）  
 - 本协议只允许写入 `StoryArtifact`，不得隐式改写正式学习事实。  
@@ -2402,13 +2410,15 @@ SCHEDULING_EFFECT = NONE（强约束）
 对外入口  
 - `generate_story_artifact(session: MutationSession, title: str, source_refs: Sequence[CanvasObjectRef], qa_session_id: Optional[QASessionId] = None, memory_canvas_id: Optional[MemoryCanvasId] = None) -> StoryArtifactId`
   - 会话要求：`session.mode == READ_WRITE`。  
-  - 运行时要求：`session.runtime_kind == DESKTOP_NATIVE` 且 `STORY_GENERATION ∈ session.runtime_capabilities`。  
+  - 运行时要求：`STORY_GENERATION ∈ session.runtime_capabilities`。  
   - 写前条件：  
     - `title` 必须非空。  
     - `source_refs` 必须非空，且每个引用都必须可解析。  
     - `NativeRuntimeConfig.local_models.story_generator` 必须可用；否则 `PreconditionFailure`。  
+    - 若 `story_generator.api_key` 缺失，则系统必须能够从当前用户提供的凭据或部署级密钥中解析出可用鉴权信息；若仍不可用，则必须返回 `PreconditionFailure`。  
     - `qa_session_id / memory_canvas_id` 若非空，则必须可解析。  
   - 写入语义：  
+    - 系统必须通过受信任的服务端通道调用目标故事生成服务；浏览器 / Web 客户端不得直接持有第三方模型服务的持久 API Key。  
     - 系统必须把模型响应固化为新的 `StoryArtifact(producer_runtime_kind = session.runtime_kind, ...)`。  
   - 强约束：`StoryArtifact` 的写入不得覆盖任何 `RecallPoint.question/answer/insights`，也不得创建新的 `CandidateRecallPoint`，除非调用方后续显式触发相应协议。  
 
@@ -3585,37 +3595,49 @@ Failure 语义
   - 语义：返回该学习任务节点覆盖到的全部**当前内容**复述点数据；纯读取；其集合必须严格等于 `LearningTaskNodeRepository.covered_rp_ids(...)` 所返回的 ACTIVE RecallPoint 集合；返回顺序必须按该节点覆盖顺序稳定返回。
   - `SCHEDULING_EFFECT = NONE`
 - `export_asr_by_learning_object_node(project_id: ProjectId, node_id: LearningObjectNodeId) -> Sequence[AsrArtifactData]`
-  - 语义：返回该学习对象节点覆盖范围内、当前已提交的全部 ASR 转写产物；纯读取；不得隐式触发新的 ASR 请求。
+  - 语义：兼容性只读接口；若实现保留它，则只返回历史版本中已提交的 `AsrArtifact`。现行 `request_asr(...)` 生成的新浏览器缓存结果不得隐式进入该接口。
   - `SCHEDULING_EFFECT = NONE`
 - `export_asr_by_learning_task_node(project_id: ProjectId, node_id: LearningTaskNodeId) -> Sequence[AsrArtifactData]`
-  - 语义：返回该学习任务节点覆盖范围内、当前已提交的全部 ASR 转写产物；纯读取；不得隐式触发新的 ASR 请求。
+  - 语义：兼容性只读接口；若实现保留它，则只返回历史版本中已提交的 `AsrArtifact`。现行 `request_asr(...)` 生成的新浏览器缓存结果不得隐式进入该接口。
   - `SCHEDULING_EFFECT = NONE`
 
-10) Native-only 写入口
-- `request_asr(project_id: ProjectId, recall_point_id: RecallPointId, center_ms: int, pre_ms: int, post_ms: int, provider: AsrProvider=WHISPER) -> AsrArtifactId`
-  - 语义：按 2.9 生成或复用 `AsrArtifact`；目标 `recall_point_id` 必须对应 `state == ACTIVE` 的 RecallPoint。
-  - 额外门禁：当前会话必须来自 `DESKTOP_NATIVE` 且具备 `LOCAL_ASR` 能力。
+10) 运行时辅助写入口
+- `request_asr(project_id: ProjectId, recall_point_id: RecallPointId, center_ms: int, pre_ms: int, post_ms: int, provider: AsrProvider=WHISPER, service_config: Optional[LocalServiceConfig]=None) -> AsrTranscriptResult`
+  - 语义：按 2.9 返回一次临时 `AsrTranscriptResult`；目标 `recall_point_id` 必须对应 `state == ACTIVE` 的 RecallPoint。
+  - 额外门禁：当前部署必须启用 ASR 功能，且系统必须能解析出可用的服务配置与鉴权信息；不再要求 `DESKTOP_NATIVE`。
+  - `SCHEDULING_EFFECT = NONE`
+- `request_asr_from_audio_upload(project_id: ProjectId, recall_point_id: RecallPointId, center_ms: int, pre_ms: int, post_ms: int, audio_bytes: bytes, audio_filename: Optional[str]=None, audio_content_type: Optional[str]=None, provider: AsrProvider=WHISPER, service_config: Optional[LocalServiceConfig]=None) -> AsrTranscriptResult`
+  - 语义：与 `request_asr(...)` 返回值一致，但输入音频片段由浏览器或其他客户端先行裁剪并显式上传；该入口是 `BROWSER_LOCAL` 主路径的推荐实现方式。
+  - 额外门禁：当前部署必须启用 ASR 功能，且系统必须能解析出可用的服务配置与鉴权信息；上传的 `audio_bytes` 只允许在当前请求生命周期内暂存。
+  - `SCHEDULING_EFFECT = NONE`
+- `request_instance_asr(project_id: ProjectId, instance_id: InstanceId, start_ms: int, end_ms: int, provider: AsrProvider=WHISPER, service_config: Optional[LocalServiceConfig]=None) -> InstanceAsrTranscriptResult`
+  - 语义：按 2.9 返回一次素材实例时间块的临时转写结果，适合播放器字幕与浏览器时间块缓存；不得隐式创建新的 RecallPoint。
+  - 额外门禁：当前部署必须启用 ASR 功能，且系统必须能解析出可用的服务配置与鉴权信息；`SERVER_FS` 兼容路径仍受服务端 `ffmpeg` 并发与超时治理约束。
+  - `SCHEDULING_EFFECT = NONE`
+- `request_instance_asr_from_audio_upload(project_id: ProjectId, instance_id: InstanceId, start_ms: int, end_ms: int, audio_bytes: bytes, audio_filename: Optional[str]=None, audio_content_type: Optional[str]=None, provider: AsrProvider=WHISPER, service_config: Optional[LocalServiceConfig]=None) -> InstanceAsrTranscriptResult`
+  - 语义：与 `request_instance_asr(...)` 返回值一致，但输入音频片段由浏览器或其他客户端先行裁剪并显式上传；该入口是 `BROWSER_LOCAL` 字幕路径的推荐实现方式。
+  - 额外门禁：当前部署必须启用 ASR 功能，且系统必须能解析出可用的服务配置与鉴权信息；上传的 `audio_bytes` 只允许在当前请求生命周期内暂存。
   - `SCHEDULING_EFFECT = NONE`
 - `extract_temp_context_fragment(project_id: ProjectId, recall_point_id: RecallPointId, source_asr_artifact_id: Optional[AsrArtifactId], start_ms: Optional[int], end_ms: Optional[int], text: Optional[str]) -> TempContextFragmentId`
   - 语义：按 2.10 生成 `TempContextFragment`。
-  - 额外门禁：当前会话必须来自 `DESKTOP_NATIVE`。
+  - 额外门禁：无 Native-only 门禁；任一可写运行时都可执行。
   - `SCHEDULING_EFFECT = NONE`
 - `ask_local_llm(project_id: ProjectId, prompt: str, context_fragment_ids: Sequence[TempContextFragmentId], qa_session_id: Optional[QASessionId] = None) -> QASession`
   - 语义：按 2.11 创建或追加 `QASession`。
-  - 额外门禁：当前会话必须来自 `DESKTOP_NATIVE` 且具备 `LOCAL_LLM_QA` 能力。
+  - 额外门禁：当前会话必须具备 `LOCAL_LLM_QA` 能力，且系统必须能够解析出可用的 LLM 服务配置与鉴权信息。
   - `SCHEDULING_EFFECT = NONE`
 - `generate_candidate_recall_points_from_qa(project_id: ProjectId, qa_session_id: QASessionId, max_items: int = 5) -> Sequence[CandidateRecallPointId]`
   - 语义：按 2.12 生成 `CandidateRecallPoint`。
-  - 额外门禁：当前会话必须来自 `DESKTOP_NATIVE` 且具备 `LOCAL_LLM_QA` 能力。
+  - 额外门禁：当前会话必须具备 `LOCAL_LLM_QA` 能力，且系统必须能够解析出可用的 LLM 服务配置与鉴权信息。
   - `SCHEDULING_EFFECT = NONE`
 - `accept_candidate_recall_point(project_id: ProjectId, candidate_recall_point_id: CandidateRecallPointId, anchor: Anchor, title: Optional[str] = None) -> (learning_task_node_id: LearningTaskNodeId, recall_point_id: RecallPointId)`
   - 语义：在一次系统事务内执行 2.13，并在同一事务内完成该入口节点的登记（4.3.2）；是否触发 Tick 由 Layer 的 `layer_mode` 决定（4.2.4）。
-  - 额外门禁：当前会话必须来自 `DESKTOP_NATIVE`。
+  - 额外门禁：无 LLM / Native 专属门禁；任一可写运行时都可执行。
   - `SCHEDULING_EFFECT = ORCHESTRATION_MUTATING`
   - 门禁：受 4.1.3(a) 约束（项目内全局 ReviewTaskQueue 非空时必须拒绝）。
 - `reject_candidate_recall_point(project_id: ProjectId, candidate_recall_point_id: CandidateRecallPointId) -> None`
   - 语义：按 2.14 将候选点标记为 `REJECTED`。
-  - 额外门禁：当前会话必须来自 `DESKTOP_NATIVE`。
+  - 额外门禁：无 LLM / Native 专属门禁；任一可写运行时都可执行。
   - `SCHEDULING_EFFECT = NONE`
 - `create_memory_canvas(project_id: ProjectId, title: str, object_refs: Sequence[CanvasObjectRef]) -> MemoryCanvasId`
   - 语义：按 2.15 创建 `MemoryCanvas`。
@@ -3631,7 +3653,7 @@ Failure 语义
   - `SCHEDULING_EFFECT = NONE`
 - `generate_story_artifact(project_id: ProjectId, title: str, source_refs: Sequence[CanvasObjectRef], qa_session_id: Optional[QASessionId] = None, memory_canvas_id: Optional[MemoryCanvasId] = None) -> StoryArtifactId`
   - 语义：按 2.18 生成 `StoryArtifact`。
-  - 额外门禁：当前会话必须来自 `DESKTOP_NATIVE` 且具备 `STORY_GENERATION` 能力。
+  - 额外门禁：当前会话必须具备 `STORY_GENERATION` 能力，且系统必须能够解析出可用的故事生成服务配置与鉴权信息。
   - `SCHEDULING_EFFECT = NONE`
 
 11) 只读 projection / 推荐 / 压缩 / 漂移 / 画布视图
@@ -3728,7 +3750,7 @@ Payload 最小摘要建议（非强制；推荐）
 - 学习提交：`items_count`、`entry_node_id`（若可得）
 - 复习提交落库：`review_task_id`、`can_recall_len`、`result_range_id`（可空）
 - 导入/建树：相关 ID、`source_kind` 与计数摘要
-- 本地问答：`qa_session_id`、`context_fragment_count`、`turn_count_delta`
+- LLM 问答：`qa_session_id`、`context_fragment_count`、`turn_count_delta`
 - 候选点确认：`candidate_recall_point_id`、`decision`
 - 画布/故事：`memory_canvas_id`、`version_no`、`source_ref_count`
 
@@ -3795,24 +3817,25 @@ Payload 最小摘要建议（非强制；推荐）
 
 <a id="toc-4-8"></a>
 
-### 4.8 节点作用域数据导出（RecallPoint / ASR Export）
+### 4.8 节点作用域数据导出（RecallPoint / Legacy Browser-Cached ASR）
 
 目的  
-服务端 / Web 端不提供内建 LLM 陪伴学习能力；系统职责仍以“学习对象与数据管理工具”为主。`DESKTOP_NATIVE` 可在本地运行时使用用户自配模型、本地 ASR 与本地推荐模型，但这些能力不改变导出边界。用户应能够在学习对象节点或学习任务节点详情页中导出该节点覆盖范围内的复述点数据与 ASR 转写结果，再自行交给外部工具处理。
+系统可以在 Hosted / Web / Native 形态下，通过服务端代理方式使用部署级或用户自有 API Key 调用外部 LLM 服务。Hosted / Web 形态下，允许把当前登录用户自己的 LLM 三元组（`base_url` / `model_name` / `api_key`）长期保存在服务端的账号级配置里，以支持跨设备复用；这些配置不得进入项目事实、标准导出或审计正文。播放器字幕与 LLM 补充上下文的现行产品路径应直接读取视频同目录同名字幕文件；节点详情页的标准服务端导出仍以 `RecallPoint` 为主。若用户需要读取历史 ASR 结果，则仅限 legacy 浏览器缓存或历史持久化 `AsrArtifact` 场景。
 
 强约束（写死）  
 - 导出能力必须是纯读取：不得创建/入队任何 ReviewTask，不得推进 ReviewChain，不得触发 Convergence，不得触发 Orchestrator Tick。  
-- 导出能力不得隐式触发新的 ASR 请求；若需要生成缺失的 ASR，必须通过 2.9 `request_asr(...)` 显式执行。  
-- 导出结果必须只包含已提交事实或已提交派生事实（`RecallPoint` / `AsrArtifact`）；不得把临时上下文、提示词、模型响应、`QASession`、`TempContextFragment` 或 `StoryArtifact` 混入现有导出格式。  
+- 标准导出能力不得隐式触发新的 ASR 请求；现行产品也不得为了导出字幕或 LLM 上下文自动回退到 ASR。  
+- 浏览器 / Web 客户端不得绕过系统后端直接以持久 API Key 访问第三方 LLM 服务；若允许用户自带 key，密钥处理也必须被限制在受信任的服务端边界。允许将用户自带 key 以账号级配置形式长期保存在服务端，但服务端对外只可返回“是否已配置 / 掩码预览”，不得把完整密钥重新回传到浏览器。  
+- 标准服务端导出结果必须只包含已提交事实；不得把临时上下文、提示词、模型响应、`QASession`、`TempContextFragment`、浏览器缓存 ASR 结果或 `StoryArtifact` 隐式混入。浏览器侧如需导出 ASR，必须明确标记其来源为当前浏览器缓存。  
 
 4.8.1 导出数据形态（强约束）
 
 - `RecallPointData`
   - 最小字段：`recall_point_id`、`question`、`answer`、`anchor`、`insights`
   - 语义：字段语义与 1.4 `RecallPoint` 保持一致；导出时不得重写内容、不得丢失顺序。
-- `AsrArtifactData`
-  - 最小字段：`asr_artifact_id`、`provider`、`producer_runtime_kind`、`recall_point_id`、`source_instance_id`、`center_ms`、`pre_ms`、`post_ms`、`segments`
-  - 语义：字段语义与 1.11 `AsrArtifact` 保持一致；`segments` 顺序必须与持久化事实一致。
+- `BrowserCachedAsrData`
+  - 最小字段：`provider`、`recall_point_id`、`source_instance_id`、`center_ms`、`pre_ms`、`post_ms`、`segments`
+  - 语义：字段语义与 1.11 `AsrTranscriptResult` 保持一致；其生成、缓存与导出由前端在当前浏览器内负责，不构成项目事实。
 
 4.8.2 导出接口语义（强约束）
 
@@ -3828,40 +3851,40 @@ Payload 最小摘要建议（非强制；推荐）
   - 返回集合：该节点覆盖的全部 ACTIVE `RecallPoint`。
   - 返回顺序：必须与 `covered_rp_ids(...)` 的顺序一致。
 - `export_asr_by_learning_object_node(...)`
-  - 输入作用域：与 `export_recall_points_by_learning_object_node(...)` 相同。
-  - 返回集合：所有 `recall_point_id` 落在该节点导出复述点集合中的 `AsrArtifact`。
-  - 返回顺序：先按 `recall_point_id` 升序，再按 `(provider, center_ms, pre_ms, post_ms, asr_artifact_id)` 升序。
+  - 兼容说明：该接口仅服务于历史版本中已持久化的 `AsrArtifact` 只读导出；在现行浏览器缓存策略下，新生成的 ASR 结果不会进入该接口。
+  - 返回顺序：若实现保留该兼容接口，则先按 `recall_point_id` 升序，再按 `(provider, center_ms, pre_ms, post_ms, asr_artifact_id)` 升序。
 - `export_asr_by_learning_task_node(...)`
-  - 输入作用域：与 `export_recall_points_by_learning_task_node(...)` 相同。
-  - 返回集合：所有 `recall_point_id` 落在该节点导出复述点集合中的 `AsrArtifact`。
-  - 返回顺序：先按该节点覆盖的 `recall_point_id` 顺序，再按 `(provider, center_ms, pre_ms, post_ms, asr_artifact_id)` 升序。
+  - 兼容说明：该接口仅服务于历史版本中已持久化的 `AsrArtifact` 只读导出；在现行浏览器缓存策略下，新生成的 ASR 结果不会进入该接口。
+  - 返回顺序：若实现保留该兼容接口，则先按该节点覆盖的 `recall_point_id` 顺序，再按 `(provider, center_ms, pre_ms, post_ms, asr_artifact_id)` 升序。
 
 4.8.3 失败与空结果语义（强约束）
 
 - 若目标节点不可解析，必须返回 `NotFound`。  
 - 若目标节点覆盖范围内当前没有任何复述点，则复述点导出必须返回空序列，不得报错。  
-- 若目标节点覆盖范围内当前没有任何 ASR 产物，则 ASR 导出必须返回空序列，不得报错。  
+- 若目标节点覆盖范围内当前没有任何历史 ASR 产物，则兼容性 ASR 导出必须返回空序列，不得报错。  
 - 导出接口不得因为某个外部服务未配置而失败；导出只读取既有已提交数据。  
 
 
 <a id="toc-4-9"></a>
 
-### 4.9 ASR（Whisper）集成：Native-only 复述点附近范围转写
+### 4.9 ASR（Whisper）集成：legacy 服务端代理、浏览器缓存的复述点附近范围转写
 
 目的  
-将 ASR（Whisper）转写能力纳入 `DESKTOP_NATIVE` 运行时，以“围绕复述点的附近窗口”为单位生成可引用的转写片段，用于节点详情页导出与用户复习理解。ASR 配置只能来自 Native 运行时，不再属于项目级共享能力。
+将 ASR（Whisper）转写能力保留在当前系统的兼容层，以“围绕复述点的附近窗口”为单位生成临时可引用的转写片段，用于旧接口、调试或历史兼容场景。现行产品的播放器字幕与 LLM 补充上下文不得再依赖本节能力，而应直接读取视频同目录同名字幕文件。ASR 结果不进入项目级持久化存储；ASR 配置可来自部署级环境变量、当前登录用户保存在服务端的账号级配置，或用户在浏览器里显式输入并随请求提交的临时服务配置。
 
 强约束（写死）
 - ASR 只对“可提取音频”的材料有效；材料类型判定与音频提取属于实现内部，但失败必须明确返回且不产生写入（0b.5）。  
-- ASR 产物为派生事实，不得进入系统级提交期强制集合（0b.7.2）。  
-- 同一缓存键命中必须复用既有结果，不得重复调用 ASR 服务（1.11）。  
-- ASR 运行时配置只能来自 `NativeRuntimeConfig.local_models.asr`；不得再从 `ProjectConfig` 读取或推断。  
-- 服务端 / Web 端只能读取已存在 `AsrArtifact`；不得承担新 ASR 产物的生成职责。  
+- ASR 结果为派生信息，不得进入系统级提交期强制集合（0b.7.2）。  
+- 系统不得把新 ASR 结果写入项目仓库、SQLite/Postgres 或标准导出持久层。  
+- ASR 服务配置不得从 `ProjectConfig` 读取或推断；只能来自部署级环境变量、当前登录用户保存在服务端的账号级配置，或当前用户本次请求显式给定的临时配置。  
+- 浏览器缓存是当前策略下唯一允许的新结果复用层；服务端 / Web 端不得把新 ASR 结果沉淀为新的 `AsrArtifact`。  
+- 现行产品前端不得再使用 `ffmpeg.wasm` 为字幕或 LLM 默认路径裁剪媒体。  
+- 现行产品服务端不得再使用 `ffmpeg` 作为字幕或 LLM 默认路径的媒体切片能力；若为了兼容接口仍保留，则必须明确视为 legacy 分支。  
 
 窗口定义（强约束；写死）  
 - 默认窗口：`pre_ms = 30_000`，`post_ms = 30_000`（±30s）；实现可允许配置，但必须对外可预测且稳定。  
 - 若 `RecallPoint.anchor` 无时间语义（无法获得 `center_ms`），则必须拒绝自动窗口 ASR（`PreconditionFailure`），并要求用户手动提供或先补齐 anchor。  
 
 与节点导出的结合方式（强约束）  
-- 节点详情页若需要把 ASR 结果交给用户，必须只导出已提交的 `AsrArtifact` 内容；不得把外部模型响应或临时摘要写回系统。  
-- 若用户希望导出更完整的语音证据，系统应先通过 `request_asr` 显式生成所需 `AsrArtifact`，再通过 4.8 的导出接口返回。  
+- 节点详情页若需要把 ASR 结果交给用户，必须由前端基于当前浏览器缓存显式导出；不得把外部模型响应或临时摘要写回系统。  
+- 现行产品若需要字幕或问答补充证据，应优先读取同目录同名字幕文件，而不是先调用本节 ASR。  

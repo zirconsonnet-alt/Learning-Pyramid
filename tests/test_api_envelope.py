@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from fastapi import FastAPI
@@ -16,6 +18,10 @@ from adapter.deps import (
 )
 from adapter.errors import register_exception_handlers
 from adapter.main import create_app
+from backend.models.enums import MaterialSourceKind, SessionMode
+from backend.models.learning_task_node import LearningTaskContainer
+from backend.models.recall_point import Anchor
+from backend.models.rich_content import rich_text
 
 
 def _reset_caches() -> None:
@@ -84,10 +90,432 @@ def test_system_capabilities_reflect_hosted_env(monkeypatch, tmp_path: Path) -> 
             "browserLocalMediaEnabled": True,
             "authEnabled": True,
             "allowSignup": True,
+            "llmConfigured": False,
+            "storyGenerationConfigured": False,
+            "llmSource": "none",
             "ready": True,
             "sqlBackend": "sqlite",
         },
     }
+
+
+def test_public_download_catalog_and_assets_are_public(monkeypatch, tmp_path: Path) -> None:
+    download_root = tmp_path / "public-downloads"
+    download_root.mkdir(parents=True)
+    asset_path = download_root / "LearningPyramid-subtitle-tool-0.1.0-beta.2-windows-x64.zip"
+    asset_path.write_bytes(b"zip-bytes")
+    (download_root / "catalog.json").write_text(
+        json.dumps(
+            {
+                "generatedAt": "2026-03-29T08:00:00Z",
+                "items": [
+                    {
+                        "id": "subtitle-generator-windows-x64",
+                        "displayName": "LearningPyramid 字幕生成工具",
+                        "version": "0.1.0-beta.2",
+                        "platform": "windows-x64",
+                        "summary": "离线字幕生成工具",
+                        "assetPath": asset_path.name,
+                        "publishedAt": "2026-03-29T08:00:00Z",
+                        "sha256": "abc123",
+                        "recommended": True,
+                        "includedComponents": ["ffmpeg", "whisper.cpp", "ggml-base.bin"],
+                        "requirements": ["Windows 10/11 x64"],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("PLM_APP_MODE", "hosted")
+    monkeypatch.setenv("PLM_ENABLE_AUTH", "true")
+    monkeypatch.setenv("PLM_ENABLE_ASR", "false")
+    monkeypatch.setenv("PLM_ENABLE_SERVER_MEDIA_STREAM", "false")
+    monkeypatch.setenv("PLM_STORE_PATH", "")
+    monkeypatch.setenv("PLM_LEGACY_STORE_PATH", "")
+    monkeypatch.setenv("PLM_STORE_DB_PATH", str(tmp_path / "plm_store.sqlite3"))
+    monkeypatch.setenv("PLM_AUTH_DB_PATH", str(tmp_path / "plm_auth.sqlite3"))
+    monkeypatch.setenv("PLM_PUBLIC_DOWNLOADS_DIR", str(download_root))
+    _reset_caches()
+
+    client = TestClient(create_app())
+    catalog_resp = client.get("/api/system/public-downloads")
+
+    assert catalog_resp.status_code == 200
+    assert catalog_resp.json() == {
+        "ok": True,
+        "data": {
+            "generatedAt": "2026-03-29T08:00:00Z",
+            "items": [
+                {
+                    "id": "subtitle-generator-windows-x64",
+                    "displayName": "LearningPyramid 字幕生成工具",
+                    "version": "0.1.0-beta.2",
+                    "platform": "windows-x64",
+                    "summary": "离线字幕生成工具",
+                    "fileName": asset_path.name,
+                    "assetPath": asset_path.name,
+                    "downloadPath": f"/downloads/{asset_path.name}",
+                    "publishedAt": "2026-03-29T08:00:00Z",
+                    "sha256": "abc123",
+                    "sizeBytes": len(b"zip-bytes"),
+                    "recommended": True,
+                    "includedComponents": ["ffmpeg", "whisper.cpp", "ggml-base.bin"],
+                    "requirements": ["Windows 10/11 x64"],
+                }
+            ],
+        },
+    }
+
+    file_resp = client.get(f"/downloads/{asset_path.name}")
+    assert file_resp.status_code == 200
+    assert file_resp.content == b"zip-bytes"
+
+    blocked_resp = client.get("/downloads/../secret.txt")
+    assert blocked_resp.status_code == 404
+    _reset_caches()
+
+
+def test_global_llm_settings_endpoint_updates_runtime_capabilities(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PLM_APP_MODE", "local")
+    monkeypatch.setenv("PLM_ENABLE_AUTH", "false")
+    monkeypatch.setenv("PLM_STORE_PATH", "")
+    monkeypatch.setenv("PLM_LEGACY_STORE_PATH", "")
+    monkeypatch.setenv("PLM_STORE_DB_PATH", str(tmp_path / "plm_store.sqlite3"))
+    monkeypatch.setenv("PLM_AUTH_DB_PATH", str(tmp_path / "plm_auth.sqlite3"))
+    _reset_caches()
+
+    client = TestClient(create_app())
+
+    before = client.get("/api/system/capabilities")
+    assert before.status_code == 200
+    assert before.json()["data"]["llmConfigured"] is False
+
+    updated = client.put(
+        "/api/system/global-llm-settings",
+        json={
+            "baseUrl": "https://api.openai.com/v1",
+            "modelName": "gpt-4o-mini",
+            "apiKey": "sk-local-12345678",
+        },
+    )
+    assert updated.status_code == 200
+    assert updated.json()["data"]["llmConfigured"] is True
+    assert updated.json()["data"]["llmSource"] == "global"
+    assert updated.json()["data"]["savedApiKeyPreview"] == "sk-l...5678"
+
+    listed = client.get("/api/system/global-llm-settings")
+    assert listed.status_code == 200
+    assert listed.json()["data"]["savedApiKeyConfigured"] is True
+
+    after = client.get("/api/system/capabilities")
+    assert after.status_code == 200
+    assert after.json()["data"]["llmConfigured"] is True
+    assert after.json()["data"]["llmSource"] == "global"
+    _reset_caches()
+
+
+def test_system_llm_ask_endpoint_uses_saved_global_settings(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PLM_APP_MODE", "local")
+    monkeypatch.setenv("PLM_ENABLE_AUTH", "false")
+    monkeypatch.setenv("PLM_STORE_PATH", "")
+    monkeypatch.setenv("PLM_LEGACY_STORE_PATH", "")
+    monkeypatch.setenv("PLM_STORE_DB_PATH", str(tmp_path / "plm_store.sqlite3"))
+    monkeypatch.setenv("PLM_AUTH_DB_PATH", str(tmp_path / "plm_auth.sqlite3"))
+    _reset_caches()
+
+    client = TestClient(create_app())
+    saved = client.put(
+        "/api/system/global-llm-settings",
+        json={
+            "baseUrl": "https://api.openai.com/v1",
+            "modelName": "gpt-4o-mini",
+            "apiKey": "sk-local-12345678",
+        },
+    )
+    assert saved.status_code == 200
+
+    captured: dict[str, object] = {}
+
+    def fake_post_json(*, url: str, payload: dict[str, object], api_key: str | None, timeout_sec: float) -> dict[str, object]:
+        captured["url"] = url
+        captured["payload"] = payload
+        captured["api_key"] = api_key
+        captured["timeout_sec"] = timeout_sec
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "你好，我已经准备好了。",
+                    }
+                }
+            ]
+        }
+
+    with patch("backend.system.api.SystemAPI._http_post_json", side_effect=fake_post_json):
+        resp = client.post(
+            "/api/system/llm/ask",
+            json={
+                "prompt": "简单介绍一下你自己",
+                "systemPrompt": "你是一个简洁的助手",
+                "temperature": 0.2,
+            },
+        )
+
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True, "data": {"content": "你好，我已经准备好了。"}}
+    assert captured["url"] == "https://api.openai.com/v1/chat/completions"
+    assert captured["api_key"] == "sk-local-12345678"
+    assert captured["timeout_sec"] == 60.0
+    assert captured["payload"] == {
+        "model": "gpt-4o-mini",
+        "messages": [
+            {"role": "system", "content": "你是一个简洁的助手"},
+            {"role": "user", "content": "简单介绍一下你自己"},
+        ],
+        "temperature": 0.2,
+    }
+    _reset_caches()
+
+
+def test_system_llm_ask_endpoint_requires_configured_service(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PLM_APP_MODE", "local")
+    monkeypatch.setenv("PLM_ENABLE_AUTH", "false")
+    monkeypatch.delenv("PLM_NATIVE_LLM_QA_BASE_URL", raising=False)
+    monkeypatch.delenv("PLM_NATIVE_LLM_QA_MODEL", raising=False)
+    monkeypatch.delenv("PLM_NATIVE_LLM_QA_API_KEY", raising=False)
+    monkeypatch.setenv("PLM_STORE_PATH", "")
+    monkeypatch.setenv("PLM_LEGACY_STORE_PATH", "")
+    monkeypatch.setenv("PLM_STORE_DB_PATH", str(tmp_path / "plm_store.sqlite3"))
+    monkeypatch.setenv("PLM_AUTH_DB_PATH", str(tmp_path / "plm_auth.sqlite3"))
+    _reset_caches()
+
+    client = TestClient(create_app())
+    resp = client.post("/api/system/llm/ask", json={"prompt": "hello"})
+
+    assert resp.status_code == 400
+    assert resp.json() == {
+        "ok": False,
+        "error": {
+            "code": "PRECONDITION",
+            "message": "LLM service is not configured",
+        },
+    }
+    _reset_caches()
+
+
+def test_project_llm_ask_endpoint_includes_recall_point_context(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PLM_APP_MODE", "local")
+    monkeypatch.setenv("PLM_ENABLE_AUTH", "false")
+    monkeypatch.setenv("PLM_STORE_PATH", "")
+    monkeypatch.setenv("PLM_LEGACY_STORE_PATH", "")
+    monkeypatch.setenv("PLM_STORE_DB_PATH", str(tmp_path / "plm_store.sqlite3"))
+    monkeypatch.setenv("PLM_AUTH_DB_PATH", str(tmp_path / "plm_auth.sqlite3"))
+    _reset_caches()
+
+    client = TestClient(create_app())
+    api = get_api()
+    project_id = api.create_project(
+        "LLM Context Project",
+        project_root=str(tmp_path / "project-context"),
+        initial_source_kind=MaterialSourceKind.MANUAL,
+    )
+    instance_id = api.add_instance(project_id, "manual/clip-1")
+    api.add_learning_object_leaf(project_id, parent_id=None, instance_id=instance_id, title="Clip 1")
+    entry_node_id = api.submit_learning_task(
+        project_id,
+        items=[
+            (
+                rich_text("What is spaced repetition?"),
+                rich_text("It is reviewing information over time."),
+                Anchor(instance_id=instance_id, position="t=1200"),
+            )
+        ],
+        title="Lesson 1",
+    )
+    recall_point = api.list_recall_points_by_learning_task_node(project_id, entry_node_id)[0]
+
+    client.put(
+        "/api/system/global-llm-settings",
+        json={
+            "baseUrl": "https://api.openai.com/v1",
+            "modelName": "gpt-4o-mini",
+            "apiKey": "sk-local-12345678",
+        },
+    )
+
+    captured: dict[str, object] = {}
+
+    def fake_post_json(*, url: str, payload: dict[str, object], api_key: str | None, timeout_sec: float) -> dict[str, object]:
+        captured["url"] = url
+        captured["payload"] = payload
+        captured["api_key"] = api_key
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "根据当前复述点内容，这是一个关于间隔复习的问题。",
+                    }
+                }
+            ]
+        }
+
+    with patch("backend.system.api.SystemAPI._http_post_json", side_effect=fake_post_json):
+        resp = client.post(
+            f"/api/projects/{project_id}/llm/ask",
+            json={
+                "prompt": "请用一句话总结这条复述点",
+                "recallPointId": str(recall_point.recall_point_id),
+            },
+        )
+
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True, "data": {"content": "根据当前复述点内容，这是一个关于间隔复习的问题。"}}
+    assert captured["url"] == "https://api.openai.com/v1/chat/completions"
+    assert captured["api_key"] == "sk-local-12345678"
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    messages = payload["messages"]
+    assert isinstance(messages, list)
+    joined = "\n".join(str(item.get("content", "")) for item in messages if isinstance(item, dict))
+    assert "Project title: LLM Context Project" in joined
+    assert "Context target: recall point" in joined
+    assert "What is spaced repetition?" in joined
+    assert "It is reviewing information over time." in joined
+    assert "请用一句话总结这条复述点" in joined
+    _reset_caches()
+
+
+def test_project_llm_ask_endpoint_rejects_multiple_context_targets(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PLM_APP_MODE", "local")
+    monkeypatch.setenv("PLM_ENABLE_AUTH", "false")
+    monkeypatch.setenv("PLM_STORE_PATH", "")
+    monkeypatch.setenv("PLM_LEGACY_STORE_PATH", "")
+    monkeypatch.setenv("PLM_STORE_DB_PATH", str(tmp_path / "plm_store.sqlite3"))
+    monkeypatch.setenv("PLM_AUTH_DB_PATH", str(tmp_path / "plm_auth.sqlite3"))
+    _reset_caches()
+
+    client = TestClient(create_app())
+    project_id = get_api().create_project(
+        "Context Validation Project",
+        project_root=str(tmp_path / "project-context-2"),
+        initial_source_kind=MaterialSourceKind.MANUAL,
+    )
+
+    client.put(
+        "/api/system/global-llm-settings",
+        json={
+            "baseUrl": "https://api.openai.com/v1",
+            "modelName": "gpt-4o-mini",
+            "apiKey": "sk-local-12345678",
+        },
+    )
+
+    resp = client.post(
+        f"/api/projects/{project_id}/llm/ask",
+        json={
+            "prompt": "hello",
+            "recallPointId": "rp1",
+            "learningTaskNodeId": "ltn1",
+        },
+    )
+
+    assert resp.status_code == 400
+    assert resp.json() == {
+        "ok": False,
+        "error": {
+            "code": "PRECONDITION",
+            "message": "Only one of recallPointId, learningTaskNodeId, learningObjectNodeId may be provided",
+        },
+    }
+    _reset_caches()
+
+
+def test_project_llm_stream_endpoint_returns_sse_events(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PLM_APP_MODE", "local")
+    monkeypatch.setenv("PLM_ENABLE_AUTH", "false")
+    monkeypatch.setenv("PLM_STORE_PATH", "")
+    monkeypatch.setenv("PLM_LEGACY_STORE_PATH", "")
+    monkeypatch.setenv("PLM_STORE_DB_PATH", str(tmp_path / "plm_store.sqlite3"))
+    monkeypatch.setenv("PLM_AUTH_DB_PATH", str(tmp_path / "plm_auth.sqlite3"))
+    _reset_caches()
+
+    client = TestClient(create_app())
+    project_id = get_api().create_project(
+        "Stream Project",
+        project_root=str(tmp_path / "project-stream"),
+        initial_source_kind=MaterialSourceKind.MANUAL,
+    )
+
+    with patch("backend.system.api.SystemAPI.request_project_llm_text_stream", return_value=iter(["你好", "，世界"])) as mocked_stream:
+        resp = client.post(
+            f"/api/projects/{project_id}/llm/ask/stream",
+            json={
+                "prompt": "打个招呼",
+                "learningTaskNodeId": "ltn_stream_1",
+            },
+        )
+
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/event-stream")
+    assert "event: start" in resp.text
+    assert 'event: delta\ndata: {"content": "你好"}' in resp.text
+    assert 'event: delta\ndata: {"content": "，世界"}' in resp.text
+    assert "event: done" in resp.text
+    mocked_stream.assert_called_once()
+    _reset_caches()
+
+
+def test_learning_task_node_patch_endpoint_updates_container_title(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PLM_APP_MODE", "local")
+    monkeypatch.setenv("PLM_ENABLE_AUTH", "false")
+    monkeypatch.setenv("PLM_STORE_PATH", "")
+    monkeypatch.setenv("PLM_LEGACY_STORE_PATH", "")
+    monkeypatch.setenv("PLM_STORE_DB_PATH", str(tmp_path / "plm_store.sqlite3"))
+    monkeypatch.setenv("PLM_AUTH_DB_PATH", str(tmp_path / "plm_auth.sqlite3"))
+    _reset_caches()
+
+    client = TestClient(create_app())
+    api = get_api()
+    project_id = api.create_project(
+        "Node Rename Project",
+        project_root=str(tmp_path / "project-node-rename"),
+        initial_source_kind=MaterialSourceKind.MANUAL,
+    )
+
+    session = api.sys.begin_session(project_id, SessionMode.READ_WRITE)
+    try:
+        api.sys.learning_task_node_repo.add(
+            session,
+            LearningTaskContainer(
+                project_id=project_id,
+                node_id="agg_node_1",
+                parent_id=None,
+                children=tuple(),
+                title="聚合节点@L1",
+            ),
+        )
+        api.sys.commit(session)
+    except Exception:
+        if session.state == "OPEN":
+            api.sys.rollback(session)
+        raise
+
+    resp = client.patch(
+        f"/api/projects/{project_id}/learning-task-nodes/agg_node_1",
+        json={"title": "第一章总览"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True, "data": None}
+    detail = client.get(f"/api/projects/{project_id}/learning-task-nodes/agg_node_1")
+    assert detail.status_code == 200
+    assert detail.json()["data"]["title"] == "第一章总览"
+    _reset_caches()
 
 
 def test_hosted_mode_disables_api_docs_by_default(monkeypatch, tmp_path: Path) -> None:
@@ -206,10 +634,41 @@ def test_hosted_mode_blocks_asr_and_server_media_routes(monkeypatch, tmp_path: P
             "postMs": 30000,
         },
     )
+    instance_asr_resp = client.post(
+        f"/api/projects/{project_id}/instances/i1/asr",
+        json={
+            "startMs": 0,
+            "endMs": 60000,
+        },
+    )
+    instance_asr_audio_resp = client.post(
+        f"/api/projects/{project_id}/instances/i1/asr/audio",
+        data={
+            "startMs": "0",
+            "endMs": "60000",
+        },
+        files={"file": ("clip.wav", b"wav", "audio/wav")},
+    )
     media_resp = client.get(f"/api/projects/{project_id}/media/instances/i1")
 
     assert asr_resp.status_code == 400
     assert asr_resp.json() == {
+        "ok": False,
+        "error": {
+            "code": "PRECONDITION",
+            "message": "ASR is disabled in this deployment",
+        },
+    }
+    assert instance_asr_resp.status_code == 400
+    assert instance_asr_resp.json() == {
+        "ok": False,
+        "error": {
+            "code": "PRECONDITION",
+            "message": "ASR is disabled in this deployment",
+        },
+    }
+    assert instance_asr_audio_resp.status_code == 400
+    assert instance_asr_audio_resp.json() == {
         "ok": False,
         "error": {
             "code": "PRECONDITION",

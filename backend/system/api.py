@@ -1,21 +1,33 @@
 import json
 import hashlib
 import os
+import shutil
+import subprocess
 import tempfile
+import threading
+import time
 import urllib.error
 import urllib.request
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from dataclasses import replace
 from enum import Enum
 from pathlib import Path, PurePosixPath
-from typing import Any, Optional, Sequence, Tuple
-from urllib.parse import urlparse, urlunparse
+from typing import Any, Iterator, Optional, Sequence, Tuple
+from urllib.parse import quote, urlparse, urlunparse
+
+import requests
 
 from backend.models.aggregation_event import AggregationEvent
 from backend.models.aggregation_queue import AggregationQueue
-from backend.models.asr_artifact import AsrArtifact, AsrSegment
+from backend.models.asr_artifact import AsrArtifact, AsrSegment, AsrTranscriptResult, InstanceAsrTranscriptResult
 from backend.models.audit_log_event import AuditLogEvent
 from backend.models.convergence import Convergence
+from backend.models.global_settings import (
+    DEFAULT_GLOBAL_LLM_BASE_URL,
+    DEFAULT_GLOBAL_LLM_MODEL_NAME,
+    GlobalLlmSettings,
+)
 from backend.models.enums import (
     AggregationCycleState,
     AggregationEventReason,
@@ -90,10 +102,19 @@ from backend.protocols.review_submit_binary import review_submit_binary
 from backend.repositories.persistence_interfaces import SystemStateRecord
 from backend.system.local_whisper import ensure_local_whisper_runtime, is_builtin_whisper_base_url
 from backend.system.material_paths import resolve_material_file_path
+from backend.system.auth_store import AuthStore
+from backend.system.http_runtime_config import current_http_runtime_config
 from backend.system.persistence_json import SCHEMA_VERSION, encode_project_payload_record, encode_project_shell_payload
 from backend.system.persistence_store import SqlStore
 from backend.system.project_paths import allocate_project_root
-from backend.system.runtime_features import current_native_runtime_config, current_runtime_features
+from backend.system.subtitle_files import find_sibling_subtitle_file, parse_subtitle_file
+from backend.system.runtime_features import (
+    current_env_asr_service_config,
+    current_env_llm_qa_service_config,
+    current_env_story_generator_service_config,
+    current_native_runtime_config,
+    current_runtime_features,
+)
 from backend.system.inmemory_system import (
     DEFAULT_AGGREGATION_K_NODE,
     DEFAULT_AGGREGATION_K_POINT,
@@ -110,6 +131,37 @@ class TickAttemptResult(str, Enum):
 
 MAX_ASR_WINDOW_MS: int = 5 * 60 * 1000
 
+
+def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return max(int(default), minimum)
+    try:
+        return max(int(str(raw).strip()), minimum)
+    except Exception:
+        return max(int(default), minimum)
+
+
+MAX_ASR_UPLOAD_BYTES: int = _env_int("PLM_ASR_UPLOAD_MAX_BYTES", 25 * 1024 * 1024)
+ASR_SERVER_FFMPEG_MAX_CONCURRENCY: int = _env_int("PLM_ASR_SERVER_FFMPEG_MAX_CONCURRENCY", 2)
+ASR_SERVER_FFMPEG_ACQUIRE_TIMEOUT_SEC: int = _env_int("PLM_ASR_SERVER_FFMPEG_ACQUIRE_TIMEOUT_SEC", 15)
+ASR_SERVER_FFMPEG_EXEC_TIMEOUT_SEC: int = _env_int("PLM_ASR_SERVER_FFMPEG_EXEC_TIMEOUT_SEC", 120)
+ASR_PUBLIC_BRIDGE_TTL_SEC: int = _env_int("PLM_ASR_PUBLIC_BRIDGE_TTL_SEC", 15 * 60)
+DASHSCOPE_ASR_TASK_TIMEOUT_SEC: int = _env_int("PLM_DASHSCOPE_ASR_TASK_TIMEOUT_SEC", 10 * 60)
+DASHSCOPE_ASR_TASK_POLL_INTERVAL_SEC: int = _env_int("PLM_DASHSCOPE_ASR_TASK_POLL_INTERVAL_SEC", 2)
+_ASR_SERVER_FFMPEG_SEMAPHORE = threading.BoundedSemaphore(ASR_SERVER_FFMPEG_MAX_CONCURRENCY)
+
+
+@contextmanager
+def _asr_server_ffmpeg_slot(api_name: str = "request_asr") -> Iterator[None]:
+    acquired = _ASR_SERVER_FFMPEG_SEMAPHORE.acquire(timeout=float(ASR_SERVER_FFMPEG_ACQUIRE_TIMEOUT_SEC))
+    if not acquired:
+        raise PreconditionFailure(f"{api_name} server-side media extraction is busy; please retry later")
+    try:
+        yield
+    finally:
+        _ASR_SERVER_FFMPEG_SEMAPHORE.release()
+
 class SystemAPI:
     """
     4.5 对外入口白名单（最小可运行内存实现）
@@ -119,6 +171,8 @@ class SystemAPI:
         self.sys = sys
         self.idgen = sys.g.idgen
         self._startup_fs_sync_done: set[str] = set()
+        self._public_asr_temp_assets_lock = threading.Lock()
+        self._public_asr_temp_assets: dict[str, dict[str, object]] = {}
 
     def _sql_store(self) -> SqlStore | None:
         store = getattr(self.sys, "_persist_store", None)
@@ -348,11 +402,103 @@ class SystemAPI:
         u = urlparse(base)
         if not u.scheme or not u.netloc:
             raise PreconditionFailure("LocalServiceConfig.base_url must be an absolute http(s) URL")
-        if u.path and u.path not in ("", "/"):
-            return base
         if not default_path.startswith("/"):
             raise ValueError("default_path must start with '/'")
-        return urlunparse((u.scheme, u.netloc, default_path, "", "", ""))
+        normalized_default_path = default_path.rstrip("/") or "/"
+        normalized_path = (u.path or "").rstrip("/") or "/"
+        if normalized_path == "/":
+            return urlunparse((u.scheme, u.netloc, normalized_default_path, "", "", ""))
+        if normalized_path.endswith(normalized_default_path):
+            return base
+        return urlunparse((u.scheme, u.netloc, normalized_path + normalized_default_path, "", "", ""))
+
+    @staticmethod
+    def _is_dashscope_host(hostname: str | None) -> bool:
+        host = str(hostname or "").strip().lower()
+        return bool(host) and host.startswith("dashscope") and host.endswith(".aliyuncs.com")
+
+    @classmethod
+    def _looks_like_dashscope_native_asr_service(cls, cfg: LocalServiceConfig) -> bool:
+        parsed = urlparse(str(cfg.base_url or "").strip())
+        model_name = str(cfg.model or "").strip().lower()
+        if not cls._is_dashscope_host(parsed.hostname):
+            return False
+        return (
+            model_name.startswith("fun-asr")
+            or model_name.startswith("paraformer")
+            or model_name.startswith("sensevoice")
+            or model_name.startswith("qwen3-asr-flash-filetrans")
+        )
+
+    @classmethod
+    def _resolve_dashscope_api_base_url(cls, cfg: LocalServiceConfig) -> str:
+        parsed = urlparse(str(cfg.base_url or "").strip())
+        if not parsed.scheme or not parsed.netloc or not cls._is_dashscope_host(parsed.hostname):
+            raise PreconditionFailure("DashScope ASR requires a valid dashscope.aliyuncs.com base URL")
+        return urlunparse((parsed.scheme, parsed.netloc, "/api/v1", "", "", ""))
+
+    @staticmethod
+    def _dashscope_asr_uses_single_file_input(model_name: str) -> bool:
+        text = str(model_name or "").strip().lower()
+        return text.startswith("qwen3-asr-flash-filetrans")
+
+    def _prune_public_asr_temp_assets(self) -> None:
+        now_ts = time.time()
+        with self._public_asr_temp_assets_lock:
+            expired_tokens = [
+                token
+                for token, item in self._public_asr_temp_assets.items()
+                if float(item.get("expires_at", 0.0)) <= now_ts or not Path(str(item.get("path", ""))).exists()
+            ]
+            for token in expired_tokens:
+                self._public_asr_temp_assets.pop(token, None)
+
+    def _register_public_asr_temp_asset(
+        self,
+        *,
+        file_path: Path,
+        content_type: str,
+        file_name: str,
+    ) -> tuple[str, str]:
+        self._prune_public_asr_temp_assets()
+        http_cfg = current_http_runtime_config()
+        public_origin = str(http_cfg.public_origin or "").strip().rstrip("/")
+        if not public_origin:
+            raise PreconditionFailure("DashScope native ASR requires PLM_PUBLIC_ORIGIN to point to the external site origin")
+        if not file_path.exists() or not file_path.is_file():
+            raise PreconditionFailure("DashScope native ASR bridge file is unavailable")
+
+        safe_name = Path(str(file_name or "clip.bin")).name or "clip.bin"
+        token_seed = f"{time.time_ns()}:{file_path.resolve()}:{os.urandom(16).hex()}".encode("utf-8", errors="ignore")
+        token = hashlib.sha256(token_seed).hexdigest()
+        with self._public_asr_temp_assets_lock:
+            self._public_asr_temp_assets[token] = {
+                "path": str(file_path.resolve()),
+                "content_type": str(content_type or "application/octet-stream").strip() or "application/octet-stream",
+                "file_name": safe_name,
+                "expires_at": time.time() + float(ASR_PUBLIC_BRIDGE_TTL_SEC),
+            }
+        return token, f"{public_origin}/api/public/asr-bridge/{token}/{quote(safe_name)}"
+
+    def _unregister_public_asr_temp_asset(self, token: str) -> None:
+        with self._public_asr_temp_assets_lock:
+            self._public_asr_temp_assets.pop(str(token), None)
+
+    def get_public_asr_temp_asset(self, token: str) -> tuple[Path, str, str] | None:
+        self._prune_public_asr_temp_assets()
+        with self._public_asr_temp_assets_lock:
+            item = self._public_asr_temp_assets.get(str(token))
+            if item is None:
+                return None
+            path = Path(str(item.get("path", "")))
+            if not path.exists() or not path.is_file():
+                self._public_asr_temp_assets.pop(str(token), None)
+                return None
+            return (
+                path,
+                str(item.get("content_type", "application/octet-stream")),
+                str(item.get("file_name", path.name or "clip.bin")),
+            )
 
     @staticmethod
     def _stable_json_dumps(payload: object) -> bytes:
@@ -363,16 +509,21 @@ class SystemAPI:
         cls,
         *,
         url: str,
-        payload: dict[str, object],
+        payload: dict[str, object] | None,
         api_key: Optional[str],
         timeout_sec: float,
+        extra_headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        body = cls._stable_json_dumps(payload)
+        body = None if payload is None else cls._stable_json_dumps(payload)
         req = urllib.request.Request(url, data=body, method="POST")
-        req.add_header("Content-Type", "application/json")
+        if payload is not None:
+            req.add_header("Content-Type", "application/json")
         req.add_header("Accept", "application/json")
         if api_key is not None and str(api_key).strip():
             req.add_header("Authorization", f"Bearer {api_key}")
+        for key, value in (extra_headers or {}).items():
+            if str(key).strip() and value is not None:
+                req.add_header(str(key), str(value))
 
         try:
             with urllib.request.urlopen(req, timeout=float(timeout_sec)) as resp:
@@ -395,6 +546,690 @@ class SystemAPI:
         if not isinstance(decoded, dict):
             raise ExternalServiceError("External service returned non-object JSON")
         return decoded
+
+    @classmethod
+    def _http_get_json(
+        cls,
+        *,
+        url: str,
+        api_key: Optional[str],
+        timeout_sec: float,
+        extra_headers: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        req = urllib.request.Request(url, method="GET")
+        req.add_header("Accept", "application/json")
+        if api_key is not None and str(api_key).strip():
+            req.add_header("Authorization", f"Bearer {api_key}")
+        for key, value in (extra_headers or {}).items():
+            if str(key).strip() and value is not None:
+                req.add_header(str(key), str(value))
+
+        try:
+            with urllib.request.urlopen(req, timeout=float(timeout_sec)) as resp:
+                raw = resp.read()
+        except urllib.error.HTTPError as e:
+            detail = ""
+            try:
+                body = e.read().decode("utf-8", errors="replace").strip()
+                if body:
+                    detail = f" body={body[:400]}"
+            except Exception:
+                detail = ""
+            raise ExternalServiceError(f"External service unavailable: HTTP {e.code} {e.reason}{detail}") from e
+        except (urllib.error.URLError, TimeoutError) as e:
+            raise ExternalServiceError(f"External service unavailable: {e}") from e
+        try:
+            decoded: Any = json.loads(raw.decode("utf-8"))
+        except Exception as e:
+            raise ExternalServiceError(f"External service returned invalid JSON: {e}") from e
+        if not isinstance(decoded, dict):
+            raise ExternalServiceError("External service returned non-object JSON")
+        return decoded
+
+    @classmethod
+    def _http_post_multipart_json(
+        cls,
+        *,
+        url: str,
+        form_fields: dict[str, object],
+        file_field_name: str,
+        file_path: Path,
+        file_name: str,
+        file_content_type: str,
+        api_key: Optional[str],
+        timeout_sec: float,
+    ) -> dict[str, Any]:
+        headers = {"Accept": "application/json"}
+        if api_key is not None and str(api_key).strip():
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        try:
+            with file_path.open("rb") as stream:
+                resp = requests.post(
+                    url,
+                    data={key: str(value) for key, value in form_fields.items() if value is not None},
+                    files={file_field_name: (file_name, stream, file_content_type)},
+                    headers=headers,
+                    timeout=float(timeout_sec),
+                )
+                body_text = resp.text
+        except requests.RequestException as e:
+            raise ExternalServiceError(f"External service unavailable: {e}") from e
+
+        if resp.status_code >= 400:
+            detail = f" body={body_text[:400]}" if body_text.strip() else ""
+            raise ExternalServiceError(f"External service unavailable: HTTP {resp.status_code} {resp.reason}{detail}")
+
+        try:
+            decoded: Any = resp.json()
+        except Exception as e:
+            raise ExternalServiceError(f"External service returned invalid JSON: {e}") from e
+        if not isinstance(decoded, dict):
+            raise ExternalServiceError("External service returned non-object JSON")
+        return decoded
+
+    @staticmethod
+    def _extract_audio_clip(
+        *,
+        ffmpeg_bin: str,
+        source_path: Path,
+        start_ms: int,
+        duration_ms: int,
+        out_path: Path,
+        timeout_sec: float | None = None,
+    ) -> None:
+        cmd = [
+            ffmpeg_bin,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(source_path),
+            "-ss",
+            f"{start_ms / 1000:.3f}",
+            "-t",
+            f"{duration_ms / 1000:.3f}",
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "-acodec",
+            "pcm_s16le",
+            str(out_path),
+        ]
+        subprocess.run(
+            cmd,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=None if timeout_sec is None else float(timeout_sec),
+        )
+
+    @staticmethod
+    def _coerce_service_config(service_config: LocalServiceConfig | dict[str, object] | None) -> LocalServiceConfig | None:
+        if service_config is None:
+            return None
+        if isinstance(service_config, LocalServiceConfig):
+            service_config.validate_write_time()
+            return service_config
+        if isinstance(service_config, dict):
+            cfg = LocalServiceConfig(
+                base_url=str(service_config.get("base_url") or service_config.get("baseUrl") or "").strip(),
+                model_name=None
+                if service_config.get("model_name", service_config.get("modelName")) is None
+                else str(service_config.get("model_name", service_config.get("modelName"))).strip() or None,
+                api_key=None
+                if service_config.get("api_key", service_config.get("apiKey")) is None
+                else str(service_config.get("api_key", service_config.get("apiKey"))).strip() or None,
+            )
+            cfg.validate_write_time()
+            return cfg
+        raise PreconditionFailure("request_asr service_config must be LocalServiceConfig or dict")
+
+    def _resolve_effective_asr_service_config(
+        self,
+        *,
+        service_config: LocalServiceConfig | dict[str, object] | None,
+        auth_store: AuthStore | None = None,
+        user_id: str | None = None,
+    ) -> tuple[LocalServiceConfig | None, str]:
+        request_cfg = self._coerce_service_config(service_config)
+        if self._service_config_is_available(request_cfg):
+            return request_cfg, "request"
+        user_cfg = self._get_saved_user_service_config(auth_store=auth_store, user_id=user_id, service_kind="asr")
+        if self._service_config_is_available(user_cfg):
+            return user_cfg, "user"
+        env_cfg = current_env_asr_service_config()
+        if self._service_config_is_available(env_cfg):
+            return env_cfg, "env"
+        return None, "none"
+
+    @staticmethod
+    def _parse_asr_response_segments(
+        response: dict[str, Any],
+        *,
+        clip_start_ms: int,
+        clip_duration_ms: int,
+    ) -> tuple[AsrSegment, ...]:
+        segs_raw = response.get("segments")
+        segments: list[AsrSegment] = []
+
+        if isinstance(segs_raw, list):
+            for item in segs_raw:
+                if not isinstance(item, dict):
+                    raise ExternalServiceError("ASR output invalid: segment must be an object")
+
+                if item.get("startMs") is not None or item.get("start_ms") is not None:
+                    start_ms = int(round(float(item.get("startMs", item.get("start_ms", 0)))))
+                else:
+                    start_ms = clip_start_ms + int(round(float(item.get("start", 0.0)) * 1000))
+
+                if item.get("endMs") is not None or item.get("end_ms") is not None:
+                    end_ms = int(round(float(item.get("endMs", item.get("end_ms", start_ms)))))
+                else:
+                    end_ms = clip_start_ms + int(round(float(item.get("end", item.get("start", 0.0))) * 1000))
+
+                seg = AsrSegment(
+                    start_ms=start_ms,
+                    end_ms=max(end_ms, start_ms),
+                    text=str(item.get("text", "")),
+                    confidence=None if item.get("confidence") is None else float(item.get("confidence")),
+                )
+                try:
+                    seg.validate_write_time()
+                except PreconditionFailure as e:
+                    raise ExternalServiceError(f"ASR output invalid: {e}") from e
+                segments.append(seg)
+            return tuple(segments)
+
+        if segs_raw is not None:
+            raise ExternalServiceError("ASR output invalid: segments must be a list")
+
+        text = str(response.get("text", "") or "").strip()
+        if not text:
+            return tuple()
+
+        seg = AsrSegment(
+            start_ms=clip_start_ms,
+            end_ms=clip_start_ms + max(int(clip_duration_ms), 0),
+            text=text,
+            confidence=None,
+        )
+        seg.validate_write_time()
+        return (seg,)
+
+    @staticmethod
+    def _parse_dashscope_transcription_segments(
+        response: dict[str, Any],
+        *,
+        clip_start_ms: int,
+        clip_duration_ms: int,
+    ) -> tuple[AsrSegment, ...]:
+        transcripts = response.get("transcripts")
+        if not isinstance(transcripts, list):
+            raise ExternalServiceError("ASR output invalid: DashScope transcripts must be a list")
+
+        clip_end_ms = clip_start_ms + max(int(clip_duration_ms), 0)
+        segments: list[AsrSegment] = []
+        for transcript in transcripts:
+            if not isinstance(transcript, dict):
+                continue
+            sentences = transcript.get("sentences")
+            if not isinstance(sentences, list):
+                continue
+            for item in sentences:
+                if not isinstance(item, dict):
+                    continue
+                text = str(item.get("text", "") or "").strip()
+                if not text:
+                    continue
+                start_ms = clip_start_ms + int(item.get("begin_time", 0))
+                end_ms = clip_start_ms + int(item.get("end_time", max(int(item.get("begin_time", 0)), 0)))
+                start_ms = max(clip_start_ms, start_ms)
+                end_ms = min(clip_end_ms, end_ms)
+                if end_ms <= start_ms:
+                    continue
+                seg = AsrSegment(
+                    start_ms=start_ms,
+                    end_ms=end_ms,
+                    text=text,
+                    confidence=None,
+                )
+                try:
+                    seg.validate_write_time()
+                except PreconditionFailure as e:
+                    raise ExternalServiceError(f"ASR output invalid: {e}") from e
+                segments.append(seg)
+
+        if segments:
+            return tuple(segments)
+
+        text_fragments = [str(item.get("text", "") or "").strip() for item in transcripts if isinstance(item, dict)]
+        merged_text = " ".join(fragment for fragment in text_fragments if fragment).strip()
+        if not merged_text:
+            return tuple()
+        seg = AsrSegment(
+            start_ms=clip_start_ms,
+            end_ms=clip_end_ms,
+            text=merged_text,
+            confidence=None,
+        )
+        seg.validate_write_time()
+        return (seg,)
+
+    def _request_dashscope_native_asr_segments_from_audio_file(
+        self,
+        *,
+        audio_path: Path,
+        audio_file_name: str,
+        audio_content_type: str,
+        clip_start_ms: int,
+        clip_duration_ms: int,
+        service_config: LocalServiceConfig,
+    ) -> tuple[AsrSegment, ...]:
+        model_name = str(service_config.model or "").strip()
+        if not model_name:
+            raise PreconditionFailure("DashScope ASR requires model_name to be configured")
+        api_base_url = self._resolve_dashscope_api_base_url(service_config)
+        token, public_audio_url = self._register_public_asr_temp_asset(
+            file_path=audio_path,
+            content_type=audio_content_type,
+            file_name=audio_file_name,
+        )
+        try:
+            input_payload: dict[str, object]
+            if self._dashscope_asr_uses_single_file_input(model_name):
+                input_payload = {"file_url": public_audio_url}
+            else:
+                input_payload = {"file_urls": [public_audio_url]}
+
+            submit_resp = self._http_post_json(
+                url=f"{api_base_url}/services/audio/asr/transcription",
+                payload={
+                    "model": model_name,
+                    "input": input_payload,
+                },
+                api_key=service_config.api_key,
+                timeout_sec=120.0,
+                extra_headers={"X-DashScope-Async": "enable"},
+            )
+            output = submit_resp.get("output")
+            if not isinstance(output, dict) or not str(output.get("task_id", "")).strip():
+                raise ExternalServiceError("ASR service error: DashScope task_id is missing")
+            task_id = str(output.get("task_id")).strip()
+
+            deadline = time.monotonic() + float(DASHSCOPE_ASR_TASK_TIMEOUT_SEC)
+            task_output: dict[str, Any] | None = None
+            while time.monotonic() < deadline:
+                task_resp = self._http_get_json(
+                    url=f"{api_base_url}/tasks/{task_id}",
+                    api_key=service_config.api_key,
+                    timeout_sec=60.0,
+                )
+                current_output = task_resp.get("output")
+                if not isinstance(current_output, dict):
+                    raise ExternalServiceError("ASR service error: DashScope task output is invalid")
+                task_status = str(current_output.get("task_status", "")).strip().upper()
+                if task_status == "SUCCEEDED":
+                    task_output = current_output
+                    break
+                if task_status in {"FAILED", "CANCELED", "CANCELLED"}:
+                    message = str(current_output.get("message", "") or task_resp.get("message", "")).strip()
+                    raise ExternalServiceError(
+                        f"ASR service error: DashScope task {task_status.lower()}{f' - {message}' if message else ''}"
+                    )
+                time.sleep(float(DASHSCOPE_ASR_TASK_POLL_INTERVAL_SEC))
+
+            if task_output is None:
+                raise ExternalServiceError("ASR service error: DashScope task timed out")
+
+            results = task_output.get("results")
+            if not isinstance(results, list) or not results:
+                raise ExternalServiceError("ASR service error: DashScope task results are missing")
+
+            transcription_url: str | None = None
+            for item in results:
+                if not isinstance(item, dict):
+                    continue
+                subtask_status = str(item.get("subtask_status", "")).strip().upper()
+                if subtask_status == "SUCCEEDED" and str(item.get("transcription_url", "")).strip():
+                    transcription_url = str(item.get("transcription_url")).strip()
+                    break
+                if subtask_status in {"FAILED", "CANCELED", "CANCELLED"}:
+                    message = str(item.get("message", "")).strip()
+                    raise ExternalServiceError(
+                        f"ASR service error: DashScope subtask {subtask_status.lower()}{f' - {message}' if message else ''}"
+                    )
+
+            if not transcription_url:
+                raise ExternalServiceError("ASR service error: DashScope transcription_url is missing")
+
+            transcription_payload = self._http_get_json(
+                url=transcription_url,
+                api_key=None,
+                timeout_sec=60.0,
+            )
+            return self._parse_dashscope_transcription_segments(
+                transcription_payload,
+                clip_start_ms=clip_start_ms,
+                clip_duration_ms=clip_duration_ms,
+            )
+        finally:
+            self._unregister_public_asr_temp_asset(token)
+
+    def _resolve_request_asr_context(
+        self,
+        s: MutationSession,
+        *,
+        recall_point_id: RecallPointId,
+    ) -> tuple[RecallPoint, Instance]:
+        rp = self.sys.recall_point_repo.get(s, recall_point_id)  # may raise NotFound
+        if rp.state != RecallPointState.ACTIVE:
+            raise PreconditionFailure("request_asr precondition failed: recall_point_id must resolve to ACTIVE RecallPoint")
+        source_instance_id = rp.anchor.instance_id
+        if not str(source_instance_id):
+            raise PreconditionFailure("request_asr precondition failed: source_instance_id missing")
+
+        try:
+            inst = self.sys.instance_repo.get(s, source_instance_id)
+        except NotFound:
+            raise PreconditionFailure("request_asr precondition failed: source_instance_id not resolvable")
+        return rp, inst
+
+    def _resolve_instance_asr_context(
+        self,
+        s: MutationSession,
+        *,
+        instance_id: InstanceId,
+    ) -> Instance:
+        return self.sys.instance_repo.get(s, instance_id)
+
+    @staticmethod
+    def _validate_instance_asr_window(*, api_name: str, start_ms: int, end_ms: int) -> tuple[int, int]:
+        if int(start_ms) < 0 or int(end_ms) < 0:
+            raise PreconditionFailure(f"{api_name} precondition failed: start_ms/end_ms must be >= 0")
+        if int(end_ms) <= int(start_ms):
+            raise PreconditionFailure(f"{api_name} precondition failed: end_ms must be > start_ms")
+        if int(end_ms) - int(start_ms) > MAX_ASR_WINDOW_MS:
+            raise PreconditionFailure(f"{api_name} window too large (max {MAX_ASR_WINDOW_MS}ms)")
+        return int(start_ms), int(end_ms)
+
+    def _request_asr_segments_from_audio_file(
+        self,
+        *,
+        audio_path: Path,
+        audio_file_name: str,
+        audio_content_type: str,
+        clip_start_ms: int,
+        clip_duration_ms: int,
+        center_ms: int,
+        pre_ms: int,
+        post_ms: int,
+        provider: AsrProvider,
+        service_config: LocalServiceConfig,
+        builtin_source: dict[str, object] | None = None,
+    ) -> tuple[AsrSegment, ...]:
+        if clip_duration_ms <= 0:
+            return tuple()
+
+        if self._looks_like_dashscope_native_asr_service(service_config):
+            try:
+                return self._request_dashscope_native_asr_segments_from_audio_file(
+                    audio_path=audio_path,
+                    audio_file_name=audio_file_name,
+                    audio_content_type=audio_content_type,
+                    clip_start_ms=clip_start_ms,
+                    clip_duration_ms=clip_duration_ms,
+                    service_config=service_config,
+                )
+            except ExternalServiceError as e:
+                raise ExternalServiceError(f"ASR service error: {e}") from e
+
+        if is_builtin_whisper_base_url(service_config.base_url):
+            if builtin_source is None:
+                raise PreconditionFailure(
+                    "request_asr uploaded audio clips do not support builtin://whisper; configure an HTTP ASR base URL instead"
+                )
+            try:
+                resp = self._http_post_json(
+                    url=f"{ensure_local_whisper_runtime()}/asr/request",
+                    payload={
+                        "provider": provider.value,
+                        "source": builtin_source,
+                        "window": {"centerMs": int(center_ms), "preMs": int(pre_ms), "postMs": int(post_ms)},
+                        "model": service_config.model,
+                    },
+                    api_key=None,
+                    timeout_sec=600.0,
+                )
+            except ExternalServiceError as e:
+                raise ExternalServiceError(f"ASR service error: {e}") from e
+            return self._parse_asr_response_segments(resp, clip_start_ms=clip_start_ms, clip_duration_ms=clip_duration_ms)
+
+        try:
+            resp = self._http_post_multipart_json(
+                url=self._resolve_local_service_url(service_config, default_path="/audio/transcriptions"),
+                form_fields={
+                    "model": service_config.model or "whisper-1",
+                    "response_format": "verbose_json",
+                    "timestamp_granularities[]": "segment",
+                },
+                file_field_name="file",
+                file_path=audio_path,
+                file_name=audio_file_name,
+                file_content_type=audio_content_type,
+                api_key=service_config.api_key,
+                timeout_sec=120.0,
+            )
+        except ExternalServiceError as e:
+            raise ExternalServiceError(f"ASR service error: {e}") from e
+        return self._parse_asr_response_segments(resp, clip_start_ms=clip_start_ms, clip_duration_ms=clip_duration_ms)
+
+    @staticmethod
+    def _build_asr_result(
+        *,
+        project_id: ProjectId,
+        provider: AsrProvider,
+        recall_point_id: RecallPointId,
+        source_instance_id: InstanceId,
+        center_ms: int,
+        pre_ms: int,
+        post_ms: int,
+        segments: tuple[AsrSegment, ...],
+    ) -> AsrTranscriptResult:
+        return AsrTranscriptResult(
+            project_id=project_id,
+            provider=provider,
+            recall_point_id=recall_point_id,
+            source_instance_id=source_instance_id,
+            center_ms=int(center_ms),
+            pre_ms=int(pre_ms),
+            post_ms=int(post_ms),
+            segments=segments,
+        )
+
+    @staticmethod
+    def _build_instance_asr_result(
+        *,
+        project_id: ProjectId,
+        provider: AsrProvider,
+        source_instance_id: InstanceId,
+        start_ms: int,
+        end_ms: int,
+        segments: tuple[AsrSegment, ...],
+    ) -> InstanceAsrTranscriptResult:
+        return InstanceAsrTranscriptResult(
+            project_id=project_id,
+            provider=provider,
+            source_instance_id=source_instance_id,
+            start_ms=int(start_ms),
+            end_ms=int(end_ms),
+            segments=segments,
+        )
+
+    @staticmethod
+    def _extract_llm_content_fragments(content: Any) -> list[str]:
+        if isinstance(content, str):
+            return [content]
+        if not isinstance(content, list):
+            return []
+
+        fragments: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                fragments.append(item)
+                continue
+            if not isinstance(item, dict):
+                continue
+            text = item.get("text")
+            if isinstance(text, str):
+                fragments.append(text)
+                continue
+            value = item.get("value")
+            if isinstance(value, str) and str(item.get("type", "")).strip().lower() == "text":
+                fragments.append(value)
+        return fragments
+
+    @classmethod
+    def _extract_chat_choice_text(cls, choice: dict[str, Any], *, prefer_delta: bool = False) -> str:
+        candidate_keys = ("delta", "message") if prefer_delta else ("message", "delta")
+        for key in candidate_keys:
+            payload = choice.get(key)
+            if not isinstance(payload, dict):
+                continue
+            fragments = cls._extract_llm_content_fragments(payload.get("content"))
+            if fragments:
+                return "".join(fragments)
+            text = payload.get("text")
+            if isinstance(text, str):
+                return text
+
+        text = choice.get("text")
+        if isinstance(text, str):
+            return text
+        return ""
+
+    @classmethod
+    def _extract_chat_completion_text(cls, response: dict[str, Any]) -> str:
+        choices = response.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise ExternalServiceError("LLM service returned no choices")
+        first = choices[0]
+        if not isinstance(first, dict):
+            raise ExternalServiceError("LLM service returned an invalid choice payload")
+        content = cls._extract_chat_choice_text(first)
+        normalized = str(content or "").strip()
+        if not normalized:
+            raise ExternalServiceError("LLM service returned empty content")
+        return normalized
+
+    @staticmethod
+    def _iter_sse_data_payloads(resp) -> Iterator[str]:
+        data_lines: list[str] = []
+        while True:
+            raw_line = resp.readline()
+            if not raw_line:
+                break
+            line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
+            if not line:
+                if data_lines:
+                    yield "\n".join(data_lines)
+                    data_lines.clear()
+                continue
+            if line.startswith(":"):
+                continue
+            if line.startswith("data:"):
+                data_lines.append(line[5:].lstrip())
+        if data_lines:
+            yield "\n".join(data_lines)
+
+    @classmethod
+    def _http_post_json_stream_text_chunks(
+        cls,
+        *,
+        url: str,
+        payload: dict[str, object],
+        api_key: Optional[str],
+        timeout_sec: float,
+    ) -> Iterator[str]:
+        body = cls._stable_json_dumps(payload)
+        req = urllib.request.Request(url, data=body, method="POST")
+        req.add_header("Content-Type", "application/json")
+        req.add_header("Accept", "text/event-stream, application/json")
+        if api_key is not None and str(api_key).strip():
+            req.add_header("Authorization", f"Bearer {api_key}")
+
+        try:
+            with urllib.request.urlopen(req, timeout=float(timeout_sec)) as resp:
+                content_type = str(resp.headers.get_content_type() or "").strip().lower()
+                if content_type != "text/event-stream":
+                    raw = resp.read()
+                    try:
+                        decoded: Any = json.loads(raw.decode("utf-8"))
+                    except Exception as e:
+                        raise ExternalServiceError(f"External service returned invalid JSON: {e}") from e
+                    if not isinstance(decoded, dict):
+                        raise ExternalServiceError("External service returned non-object JSON")
+                    text = cls._extract_chat_completion_text(decoded)
+                    if text:
+                        yield text
+                    return
+
+                for payload_text in cls._iter_sse_data_payloads(resp):
+                    if not payload_text or payload_text == "[DONE]":
+                        if payload_text == "[DONE]":
+                            break
+                        continue
+                    try:
+                        decoded = json.loads(payload_text)
+                    except Exception as e:
+                        raise ExternalServiceError(f"External service returned invalid stream JSON: {e}") from e
+                    if not isinstance(decoded, dict):
+                        raise ExternalServiceError("External service returned non-object stream JSON")
+                    error_payload = decoded.get("error")
+                    if isinstance(error_payload, dict):
+                        message = str(error_payload.get("message") or "LLM service returned an error").strip()
+                        raise ExternalServiceError(message or "LLM service returned an error")
+                    choices = decoded.get("choices")
+                    if not isinstance(choices, list):
+                        continue
+                    for choice in choices:
+                        if not isinstance(choice, dict):
+                            continue
+                        text = cls._extract_chat_choice_text(choice, prefer_delta=True)
+                        if text:
+                            yield text
+        except urllib.error.HTTPError as e:
+            detail = ""
+            try:
+                raw_body = e.read().decode("utf-8", errors="replace").strip()
+                if raw_body:
+                    detail = f" body={raw_body[:400]}"
+            except Exception:
+                detail = ""
+            raise ExternalServiceError(f"External service unavailable: HTTP {e.code} {e.reason}{detail}") from e
+        except (urllib.error.URLError, TimeoutError) as e:
+            raise ExternalServiceError(f"External service unavailable: {e}") from e
+
+    @staticmethod
+    def _normalize_llm_messages(messages: Sequence[dict[str, str]]) -> list[dict[str, str]]:
+        if not messages:
+            raise PreconditionFailure("LLM request must include at least one message")
+
+        normalized_messages: list[dict[str, str]] = []
+        for message in messages:
+            if not isinstance(message, dict):
+                raise PreconditionFailure("LLM message must be an object")
+            role = str(message.get("role", "")).strip()
+            content = str(message.get("content", "")).strip()
+            if role not in {"system", "user", "assistant"}:
+                raise PreconditionFailure("LLM message.role must be one of system/user/assistant")
+            if not content:
+                raise PreconditionFailure("LLM message.content must be non-empty")
+            normalized_messages.append({"role": role, "content": content})
+        return normalized_messages
 
     def _ensure_startup_fs_sync_done(self, project_id: ProjectId) -> None:
         """
@@ -425,6 +1260,663 @@ class SystemAPI:
 
         self._run_sync_learning_objects_from_fs(project_id)
         self._startup_fs_sync_done.add(pid_k)
+
+    @staticmethod
+    def _default_global_llm_base_url() -> str:
+        value = str(os.getenv("PLM_DEFAULT_LLM_BASE_URL") or DEFAULT_GLOBAL_LLM_BASE_URL).strip()
+        return value or DEFAULT_GLOBAL_LLM_BASE_URL
+
+    @staticmethod
+    def _default_global_llm_model_name() -> str:
+        value = str(os.getenv("PLM_DEFAULT_LLM_MODEL") or DEFAULT_GLOBAL_LLM_MODEL_NAME).strip()
+        return value or DEFAULT_GLOBAL_LLM_MODEL_NAME
+
+    @staticmethod
+    def _mask_api_key(value: str | None) -> str | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        if len(text) <= 8:
+            return "*" * len(text)
+        return f"{text[:4]}...{text[-4:]}"
+
+    @staticmethod
+    def _service_config_is_available(cfg: LocalServiceConfig | None) -> bool:
+        return cfg is not None and bool(str(cfg.base_url or "").strip())
+
+    @staticmethod
+    def _saved_service_config(
+        *,
+        base_url: str | None,
+        model_name: str | None,
+        api_key: str | None,
+    ) -> LocalServiceConfig | None:
+        text = str(base_url or "").strip()
+        if not text:
+            return None
+        cfg = LocalServiceConfig(
+            base_url=text,
+            api_key=None if api_key is None else str(api_key).strip() or None,
+            model_name=None if model_name is None else str(model_name).strip() or None,
+        )
+        cfg.validate_write_time()
+        return cfg
+
+    def _get_saved_user_service_config(
+        self,
+        *,
+        auth_store: AuthStore | None,
+        user_id: str | None,
+        service_kind: str,
+    ) -> LocalServiceConfig | None:
+        if auth_store is None or not str(user_id or "").strip():
+            return None
+        saved = auth_store.get_user_service_config(str(user_id), service_kind=service_kind)
+        if saved is None:
+            return None
+        return self._saved_service_config(base_url=saved.base_url, model_name=saved.model_name, api_key=saved.api_key)
+
+    def get_effective_llm_service_config(
+        self,
+        *,
+        auth_store: AuthStore | None = None,
+        user_id: str | None = None,
+    ) -> LocalServiceConfig | None:
+        user_cfg = self._get_saved_user_service_config(auth_store=auth_store, user_id=user_id, service_kind="llm")
+        if self._service_config_is_available(user_cfg):
+            return user_cfg
+        saved = self.sys.g.global_llm_settings
+        global_cfg = None if saved is None else self._saved_service_config(base_url=saved.base_url, model_name=saved.model_name, api_key=saved.api_key)
+        if self._service_config_is_available(global_cfg):
+            return global_cfg
+        return current_env_llm_qa_service_config()
+
+    def get_effective_story_generator_service_config(
+        self,
+        *,
+        auth_store: AuthStore | None = None,
+        user_id: str | None = None,
+    ) -> LocalServiceConfig | None:
+        user_cfg = self._get_saved_user_service_config(auth_store=auth_store, user_id=user_id, service_kind="llm")
+        if self._service_config_is_available(user_cfg):
+            return user_cfg
+        saved = self.sys.g.global_llm_settings
+        global_cfg = None if saved is None else self._saved_service_config(base_url=saved.base_url, model_name=saved.model_name, api_key=saved.api_key)
+        if self._service_config_is_available(global_cfg):
+            return global_cfg
+        return current_env_story_generator_service_config() or current_env_llm_qa_service_config()
+
+    def request_llm_chat_completion(
+        self,
+        *,
+        messages: Sequence[dict[str, str]],
+        model_name: str | None = None,
+        temperature: float | None = None,
+        timeout_sec: float = 60.0,
+        auth_store: AuthStore | None = None,
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
+        cfg = self.get_effective_llm_service_config(auth_store=auth_store, user_id=user_id)
+        if cfg is None:
+            raise PreconditionFailure("LLM service is not configured")
+        normalized_messages = self._normalize_llm_messages(messages)
+
+        url = self._resolve_local_service_url(cfg, default_path="/chat/completions")
+        payload: dict[str, object] = {
+            "model": str(model_name or cfg.model or self._default_global_llm_model_name()).strip(),
+            "messages": normalized_messages,
+        }
+        if temperature is not None:
+            payload["temperature"] = float(temperature)
+        return self._http_post_json(
+            url=url,
+            payload=payload,
+            api_key=cfg.api_key,
+            timeout_sec=float(timeout_sec),
+        )
+
+    def request_llm_chat_completion_stream_text(
+        self,
+        *,
+        messages: Sequence[dict[str, str]],
+        model_name: str | None = None,
+        temperature: float | None = None,
+        timeout_sec: float = 60.0,
+        auth_store: AuthStore | None = None,
+        user_id: str | None = None,
+    ) -> Iterator[str]:
+        cfg = self.get_effective_llm_service_config(auth_store=auth_store, user_id=user_id)
+        if cfg is None:
+            raise PreconditionFailure("LLM service is not configured")
+
+        normalized_messages = self._normalize_llm_messages(messages)
+        url = self._resolve_local_service_url(cfg, default_path="/chat/completions")
+        payload: dict[str, object] = {
+            "model": str(model_name or cfg.model or self._default_global_llm_model_name()).strip(),
+            "messages": normalized_messages,
+            "stream": True,
+        }
+        if temperature is not None:
+            payload["temperature"] = float(temperature)
+        yield from self._http_post_json_stream_text_chunks(
+            url=url,
+            payload=payload,
+            api_key=cfg.api_key,
+            timeout_sec=float(timeout_sec),
+        )
+
+    def request_llm_text(
+        self,
+        *,
+        user_prompt: str,
+        system_prompt: str | None = None,
+        model_name: str | None = None,
+        temperature: float | None = None,
+        timeout_sec: float = 60.0,
+        auth_store: AuthStore | None = None,
+        user_id: str | None = None,
+    ) -> str:
+        messages: list[dict[str, str]] = []
+        if str(system_prompt or "").strip():
+            messages.append({"role": "system", "content": str(system_prompt).strip()})
+        prompt = str(user_prompt or "").strip()
+        if not prompt:
+            raise PreconditionFailure("LLM user_prompt must be non-empty")
+        messages.append({"role": "user", "content": prompt})
+        response = self.request_llm_chat_completion(
+            messages=messages,
+            model_name=model_name,
+            temperature=temperature,
+            timeout_sec=timeout_sec,
+            auth_store=auth_store,
+            user_id=user_id,
+        )
+        return self._extract_chat_completion_text(response)
+
+    @staticmethod
+    def _rich_content_to_plain_text(content: RichContent) -> str:
+        parts: list[str] = []
+        for block in content:
+            if getattr(block, "text", None):
+                parts.append(str(block.text).strip())
+                continue
+            asset_id = getattr(block, "asset_id", None)
+            if asset_id is not None:
+                parts.append(f"[image:{asset_id}]")
+        return "\n".join(part for part in parts if part).strip()
+
+    @staticmethod
+    def _truncate_for_llm_context(text: str, *, max_chars: int = 800) -> str:
+        normalized = str(text or "").strip()
+        if len(normalized) <= max_chars:
+            return normalized
+        return normalized[: max_chars - 1].rstrip() + "…"
+
+    def _get_project_title(self, project_id: ProjectId) -> str:
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            for project in sql_store.list_projects_metadata(active_only=False):
+                if id_canonical_text(project.project_id) == id_canonical_text(project_id):
+                    return str(project.title)
+            raise NotFound(project_id)
+        s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
+        try:
+            return str(self.sys.project_repo.get(s, project_id).title)
+        finally:
+            self.sys.rollback(s)
+
+    def _format_recall_point_for_llm_context(self, recall_point: RecallPoint, *, index: int | None = None) -> str:
+        header = f"Recall Point {index}" if index is not None else "Recall Point"
+        lines = [
+            f"{header}: {recall_point.recall_point_id}",
+            f"Question: {self._truncate_for_llm_context(self._rich_content_to_plain_text(recall_point.question))}",
+            f"Answer: {self._truncate_for_llm_context(self._rich_content_to_plain_text(recall_point.answer))}",
+            f"Anchor: instance={recall_point.anchor.instance_id}, position={recall_point.anchor.position}",
+        ]
+        if recall_point.insights:
+            for insight_index, insight in enumerate(recall_point.insights, start=1):
+                insight_text = self._truncate_for_llm_context(self._rich_content_to_plain_text(insight), max_chars=400)
+                if insight_text:
+                    lines.append(f"Insight {insight_index}: {insight_text}")
+        return "\n".join(lines)
+
+    def _build_project_llm_context_text(
+        self,
+        *,
+        project_id: ProjectId,
+        recall_point_id: RecallPointId | None = None,
+        learning_task_node_id: LearningTaskNodeId | None = None,
+        learning_object_node_id: LearningObjectNodeId | None = None,
+        max_recall_points: int = 8,
+    ) -> str:
+        supplied_targets = [
+            recall_point_id is not None,
+            learning_task_node_id is not None,
+            learning_object_node_id is not None,
+        ]
+        if sum(1 for item in supplied_targets if item) > 1:
+            raise PreconditionFailure("Only one of recallPointId, learningTaskNodeId, learningObjectNodeId may be provided")
+
+        project_title = self._get_project_title(project_id)
+        lines = [
+            "Project Context",
+            f"Project title: {project_title}",
+        ]
+
+        if recall_point_id is not None:
+            recall_point = self.get_recall_point(project_id, recall_point_id)
+            lines.append("Context target: recall point")
+            lines.append(self._format_recall_point_for_llm_context(recall_point))
+            return "\n".join(lines)
+
+        if learning_task_node_id is not None:
+            node = self.get_learning_task_node(project_id, learning_task_node_id)
+            recall_points = [
+                item for item in self.list_recall_points_by_learning_task_node(project_id, learning_task_node_id) if item.state == RecallPointState.ACTIVE
+            ]
+            limited = recall_points[: max_recall_points]
+            lines.append("Context target: learning task node")
+            lines.append(f"Node title: {getattr(node, 'title', '')}")
+            lines.append(f"Node id: {learning_task_node_id}")
+            lines.append(f"Active recall points included: {len(limited)} / {len(recall_points)}")
+            for index, recall_point in enumerate(limited, start=1):
+                lines.append(self._format_recall_point_for_llm_context(recall_point, index=index))
+            return "\n".join(lines)
+
+        if learning_object_node_id is not None:
+            node = self.get_learning_object_node(project_id, learning_object_node_id)
+            recall_points = [
+                item for item in self.list_recall_points_by_learning_object_node(project_id, learning_object_node_id) if item.state == RecallPointState.ACTIVE
+            ]
+            limited = recall_points[: max_recall_points]
+            lines.append("Context target: learning object node")
+            lines.append(f"Node title: {getattr(node, 'title', '')}")
+            lines.append(f"Node id: {learning_object_node_id}")
+            relative_path = getattr(node, "relative_path", None)
+            if relative_path is not None:
+                lines.append(f"Relative path: {relative_path}")
+            lines.append(f"Active recall points included: {len(limited)} / {len(recall_points)}")
+            for index, recall_point in enumerate(limited, start=1):
+                lines.append(self._format_recall_point_for_llm_context(recall_point, index=index))
+            return "\n".join(lines)
+
+        lines.append("Context target: project only")
+        return "\n".join(lines)
+
+    def request_project_llm_text(
+        self,
+        *,
+        project_id: ProjectId,
+        user_prompt: str,
+        system_prompt: str | None = None,
+        supplemental_context: str | None = None,
+        model_name: str | None = None,
+        temperature: float | None = None,
+        recall_point_id: RecallPointId | None = None,
+        learning_task_node_id: LearningTaskNodeId | None = None,
+        learning_object_node_id: LearningObjectNodeId | None = None,
+        timeout_sec: float = 60.0,
+        auth_store: AuthStore | None = None,
+        user_id: str | None = None,
+    ) -> str:
+        prompt = str(user_prompt or "").strip()
+        if not prompt:
+            raise PreconditionFailure("LLM user_prompt must be non-empty")
+
+        context_text = self._build_project_llm_context_text(
+            project_id=project_id,
+            recall_point_id=recall_point_id,
+            learning_task_node_id=learning_task_node_id,
+            learning_object_node_id=learning_object_node_id,
+        )
+        messages: list[dict[str, str]] = [
+            {
+                "role": "system",
+                "content": (
+                    "You are assisting inside a LearningPyramid study project. "
+                    "Use the supplied project context first. If the context is insufficient, say so explicitly. "
+                    "Do not invent project-specific facts."
+                ),
+            },
+            {"role": "system", "content": context_text},
+        ]
+        if str(supplemental_context or "").strip():
+            messages.append({"role": "system", "content": str(supplemental_context).strip()})
+        if str(system_prompt or "").strip():
+            messages.append({"role": "system", "content": str(system_prompt).strip()})
+        messages.append({"role": "user", "content": prompt})
+
+        response = self.request_llm_chat_completion(
+            messages=messages,
+            model_name=model_name,
+            temperature=temperature,
+            timeout_sec=timeout_sec,
+            auth_store=auth_store,
+            user_id=user_id,
+        )
+        return self._extract_chat_completion_text(response)
+
+    def request_project_llm_text_stream(
+        self,
+        *,
+        project_id: ProjectId,
+        user_prompt: str,
+        system_prompt: str | None = None,
+        supplemental_context: str | None = None,
+        model_name: str | None = None,
+        temperature: float | None = None,
+        recall_point_id: RecallPointId | None = None,
+        learning_task_node_id: LearningTaskNodeId | None = None,
+        learning_object_node_id: LearningObjectNodeId | None = None,
+        timeout_sec: float = 60.0,
+        auth_store: AuthStore | None = None,
+        user_id: str | None = None,
+    ) -> Iterator[str]:
+        prompt = str(user_prompt or "").strip()
+        if not prompt:
+            raise PreconditionFailure("LLM user_prompt must be non-empty")
+
+        context_text = self._build_project_llm_context_text(
+            project_id=project_id,
+            recall_point_id=recall_point_id,
+            learning_task_node_id=learning_task_node_id,
+            learning_object_node_id=learning_object_node_id,
+        )
+        messages: list[dict[str, str]] = [
+            {
+                "role": "system",
+                "content": (
+                    "You are assisting inside a LearningPyramid study project. "
+                    "Use the supplied project context first. If the context is insufficient, say so explicitly. "
+                    "Do not invent project-specific facts."
+                ),
+            },
+            {"role": "system", "content": context_text},
+        ]
+        if str(supplemental_context or "").strip():
+            messages.append({"role": "system", "content": str(supplemental_context).strip()})
+        if str(system_prompt or "").strip():
+            messages.append({"role": "system", "content": str(system_prompt).strip()})
+        messages.append({"role": "user", "content": prompt})
+
+        yield from self.request_llm_chat_completion_stream_text(
+            messages=messages,
+            model_name=model_name,
+            temperature=temperature,
+            timeout_sec=timeout_sec,
+            auth_store=auth_store,
+            user_id=user_id,
+        )
+
+    def get_global_llm_status(self) -> dict[str, Any]:
+        saved = self.sys.g.global_llm_settings
+        env_llm_cfg = current_env_llm_qa_service_config()
+        effective_llm_cfg = self.get_effective_llm_service_config()
+        effective_story_cfg = self.get_effective_story_generator_service_config()
+
+        if saved is not None:
+            base_url = saved.base_url
+            model_name = saved.model_name
+        elif env_llm_cfg is not None:
+            base_url = env_llm_cfg.base_url
+            model_name = env_llm_cfg.model_name or self._default_global_llm_model_name()
+        else:
+            base_url = self._default_global_llm_base_url()
+            model_name = self._default_global_llm_model_name()
+
+        llm_source = "none"
+        if saved is not None and self._service_config_is_available(
+            self._saved_service_config(base_url=saved.base_url, model_name=saved.model_name, api_key=saved.api_key)
+        ):
+            llm_source = "global"
+        elif self._service_config_is_available(env_llm_cfg):
+            llm_source = "env"
+
+        return {
+            "baseUrl": base_url,
+            "modelName": model_name,
+            "savedApiKeyConfigured": bool(saved is not None and str(saved.api_key or "").strip()),
+            "savedApiKeyPreview": self._mask_api_key(None if saved is None else saved.api_key),
+            "llmConfigured": self._service_config_is_available(effective_llm_cfg),
+            "storyGenerationConfigured": self._service_config_is_available(effective_story_cfg),
+            "llmSource": llm_source,
+        }
+
+    def get_user_llm_status(
+        self,
+        *,
+        auth_store: AuthStore | None,
+        user_id: str | None,
+    ) -> dict[str, Any]:
+        if auth_store is None or not str(user_id or "").strip():
+            return self.get_global_llm_status()
+
+        saved = auth_store.get_user_service_config(str(user_id), service_kind="llm")
+        saved_cfg = None if saved is None else self._saved_service_config(base_url=saved.base_url, model_name=saved.model_name, api_key=saved.api_key)
+        global_saved = self.sys.g.global_llm_settings
+        global_cfg = (
+            None
+            if global_saved is None
+            else self._saved_service_config(base_url=global_saved.base_url, model_name=global_saved.model_name, api_key=global_saved.api_key)
+        )
+        env_llm_cfg = current_env_llm_qa_service_config()
+
+        if saved is not None:
+            base_url = saved.base_url
+            model_name = saved.model_name
+        elif self._service_config_is_available(global_cfg):
+            assert global_saved is not None
+            base_url = global_saved.base_url
+            model_name = global_saved.model_name
+        elif env_llm_cfg is not None:
+            base_url = env_llm_cfg.base_url
+            model_name = env_llm_cfg.model_name or self._default_global_llm_model_name()
+        else:
+            base_url = self._default_global_llm_base_url()
+            model_name = self._default_global_llm_model_name()
+
+        llm_source = "none"
+        if self._service_config_is_available(saved_cfg):
+            llm_source = "user"
+        elif self._service_config_is_available(global_cfg):
+            llm_source = "global"
+        elif self._service_config_is_available(env_llm_cfg):
+            llm_source = "env"
+
+        return {
+            "baseUrl": base_url,
+            "modelName": model_name,
+            "savedApiKeyConfigured": bool(saved is not None and str(saved.api_key or "").strip()),
+            "savedApiKeyPreview": self._mask_api_key(None if saved is None else saved.api_key),
+            "llmConfigured": self._service_config_is_available(
+                self.get_effective_llm_service_config(auth_store=auth_store, user_id=user_id)
+            ),
+            "storyGenerationConfigured": self._service_config_is_available(
+                self.get_effective_story_generator_service_config(auth_store=auth_store, user_id=user_id)
+            ),
+            "llmSource": llm_source,
+        }
+
+    def get_user_asr_status(
+        self,
+        *,
+        auth_store: AuthStore | None,
+        user_id: str | None,
+    ) -> dict[str, Any]:
+        saved = None if auth_store is None or not str(user_id or "").strip() else auth_store.get_user_service_config(str(user_id), service_kind="asr")
+        saved_cfg = None if saved is None else self._saved_service_config(base_url=saved.base_url, model_name=saved.model_name, api_key=saved.api_key)
+        env_cfg = current_env_asr_service_config()
+
+        if saved is not None:
+            base_url = saved.base_url
+            model_name = saved.model_name
+        elif env_cfg is not None:
+            base_url = env_cfg.base_url
+            model_name = env_cfg.model_name or ""
+        else:
+            base_url = ""
+            model_name = ""
+
+        asr_source = "none"
+        if self._service_config_is_available(saved_cfg):
+            asr_source = "user"
+        elif self._service_config_is_available(env_cfg):
+            asr_source = "env"
+
+        return {
+            "baseUrl": base_url,
+            "modelName": model_name,
+            "savedApiKeyConfigured": bool(saved is not None and str(saved.api_key or "").strip()),
+            "savedApiKeyPreview": self._mask_api_key(None if saved is None else saved.api_key),
+            "asrConfigured": self._service_config_is_available(
+                saved_cfg if self._service_config_is_available(saved_cfg) else env_cfg
+            ),
+            "asrSource": asr_source,
+        }
+
+    def update_global_llm_settings(
+        self,
+        *,
+        base_url: str | None = None,
+        model_name: str | None = None,
+        api_key: str | None = None,
+        clear_api_key: bool = False,
+    ) -> dict[str, Any]:
+        if self.sys.g._write_lock_held:
+            raise PreconditionFailure("Cannot update global LLM settings while another READ_WRITE session is open")
+
+        self.sys.g._write_lock_held = True
+        try:
+            current = self.sys.g.global_llm_settings
+            env_llm_cfg = current_env_llm_qa_service_config()
+
+            resolved_base_url = str(base_url or "").strip()
+            if not resolved_base_url:
+                if current is not None:
+                    resolved_base_url = current.base_url
+                elif env_llm_cfg is not None:
+                    resolved_base_url = env_llm_cfg.base_url
+                else:
+                    resolved_base_url = self._default_global_llm_base_url()
+
+            resolved_model_name = str(model_name or "").strip()
+            if not resolved_model_name:
+                if current is not None:
+                    resolved_model_name = current.model_name
+                elif env_llm_cfg is not None and str(env_llm_cfg.model_name or "").strip():
+                    resolved_model_name = str(env_llm_cfg.model_name).strip()
+                else:
+                    resolved_model_name = self._default_global_llm_model_name()
+
+            incoming_api_key = str(api_key or "").strip()
+            if clear_api_key:
+                resolved_api_key: str | None = None
+            elif incoming_api_key:
+                resolved_api_key = incoming_api_key
+            elif current is not None:
+                resolved_api_key = current.api_key
+            else:
+                resolved_api_key = None
+
+            settings = GlobalLlmSettings(
+                base_url=resolved_base_url,
+                model_name=resolved_model_name,
+                api_key=resolved_api_key,
+                updated_at=now_utc_ms(),
+            )
+            settings.validate_write_time()
+            self.sys.g.global_llm_settings = settings
+            self.sys._persist_to_disk()
+            return self.get_global_llm_status()
+        finally:
+            self.sys.g._write_lock_held = False
+
+    def update_user_llm_settings(
+        self,
+        *,
+        auth_store: AuthStore,
+        user_id: str,
+        base_url: str | None = None,
+        model_name: str | None = None,
+        api_key: str | None = None,
+        clear_api_key: bool = False,
+    ) -> dict[str, Any]:
+        current = auth_store.get_user_service_config(user_id, service_kind="llm")
+        global_saved = self.sys.g.global_llm_settings
+        env_llm_cfg = current_env_llm_qa_service_config()
+
+        resolved_base_url = str(base_url or "").strip()
+        if not resolved_base_url:
+            if current is not None:
+                resolved_base_url = current.base_url
+            elif global_saved is not None:
+                resolved_base_url = global_saved.base_url
+            elif env_llm_cfg is not None:
+                resolved_base_url = env_llm_cfg.base_url
+            else:
+                resolved_base_url = self._default_global_llm_base_url()
+
+        resolved_model_name = str(model_name or "").strip()
+        if not resolved_model_name:
+            if current is not None and str(current.model_name or "").strip():
+                resolved_model_name = current.model_name
+            elif global_saved is not None and str(global_saved.model_name or "").strip():
+                resolved_model_name = global_saved.model_name
+            elif env_llm_cfg is not None and str(env_llm_cfg.model_name or "").strip():
+                resolved_model_name = str(env_llm_cfg.model_name).strip()
+            else:
+                resolved_model_name = self._default_global_llm_model_name()
+
+        auth_store.upsert_user_service_config(
+            user_id,
+            service_kind="llm",
+            base_url=resolved_base_url,
+            model_name=resolved_model_name,
+            api_key=api_key,
+            clear_api_key=clear_api_key,
+        )
+        return self.get_user_llm_status(auth_store=auth_store, user_id=user_id)
+
+    def update_user_asr_settings(
+        self,
+        *,
+        auth_store: AuthStore,
+        user_id: str,
+        base_url: str | None = None,
+        model_name: str | None = None,
+        api_key: str | None = None,
+        clear_api_key: bool = False,
+    ) -> dict[str, Any]:
+        current = auth_store.get_user_service_config(user_id, service_kind="asr")
+        env_cfg = current_env_asr_service_config()
+
+        resolved_base_url = str(base_url or "").strip()
+        if not resolved_base_url:
+            if current is not None:
+                resolved_base_url = current.base_url
+            elif env_cfg is not None:
+                resolved_base_url = env_cfg.base_url
+            else:
+                raise PreconditionFailure("ASR base_url must be provided")
+
+        resolved_model_name = str(model_name or "").strip()
+        if not resolved_model_name:
+            if current is not None and str(current.model_name or "").strip():
+                resolved_model_name = current.model_name
+            elif env_cfg is not None and str(env_cfg.model_name or "").strip():
+                resolved_model_name = str(env_cfg.model_name).strip()
+            else:
+                resolved_model_name = ""
+
+        auth_store.upsert_user_service_config(
+            user_id,
+            service_kind="asr",
+            base_url=resolved_base_url,
+            model_name=resolved_model_name,
+            api_key=api_key,
+            clear_api_key=clear_api_key,
+        )
+        return self.get_user_asr_status(auth_store=auth_store, user_id=user_id)
 
     def _run_sync_learning_objects_from_fs(self, project_id: ProjectId) -> dict[str, object]:
         s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
@@ -1217,6 +2709,53 @@ class SystemAPI:
             return self.sys.instance_repo.get(s, instance_id)
         finally:
             self.sys.rollback(s)
+
+    def get_instance_subtitle_file(self, project_id: ProjectId, instance_id: InstanceId) -> dict[str, object]:
+        self._ensure_startup_fs_sync_done(project_id)
+        s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
+        try:
+            instance = self.sys.instance_repo.get(s, instance_id)
+            if instance.presence == InstancePresence.MISSING:
+                raise PreconditionFailure("material is MISSING")
+            binding = self.sys.project_material_source_binding_repo.get(s)
+            if binding.source_kind == MaterialSourceKind.BROWSER_LOCAL:
+                raise PreconditionFailure("server-side subtitle lookup is unavailable for BROWSER_LOCAL materials")
+            storage_cfg = self.sys.project_storage_config_repo.get(s)
+        finally:
+            self.sys.rollback(s)
+
+        material_path = resolve_material_file_path(storage_cfg, instance.material_id, source_kind=binding.source_kind)
+        if not material_path.exists():
+            raise PreconditionFailure(f"material file not found: {material_path}")
+        if not material_path.is_file():
+            raise PreconditionFailure(f"material is not a file: {material_path}")
+
+        subtitle_path = find_sibling_subtitle_file(material_path)
+        if subtitle_path is None:
+            return {
+                "found": False,
+                "instanceId": str(instance_id),
+            }
+
+        try:
+            document = parse_subtitle_file(subtitle_path)
+        except Exception as exc:
+            raise PreconditionFailure(f"failed to parse subtitle file: {subtitle_path.name}") from exc
+
+        return {
+            "found": True,
+            "instanceId": str(instance_id),
+            "fileName": subtitle_path.name,
+            "format": document.format,
+            "segments": [
+                {
+                    "startMs": int(segment.start_ms),
+                    "endMs": int(segment.end_ms),
+                    "text": segment.text,
+                }
+                for segment in document.segments
+            ],
+        }
 
     # 4.5.3
     def add_instance(self, project_id: ProjectId, material_id: str) -> InstanceId:
@@ -2581,6 +4120,40 @@ class SystemAPI:
                 self.sys.rollback(s)
             raise
 
+    def edit_learning_task_node_title(self, project_id: ProjectId, node_id: LearningTaskNodeId, title: str) -> None:
+        self._ensure_startup_fs_sync_done(project_id)
+        s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
+        try:
+            if title is None or not str(title).strip():
+                raise PreconditionFailure("edit_learning_task_node_title.title must be non-empty")
+
+            node = self.sys.learning_task_node_repo.get(s, node_id)
+            if isinstance(node, LearningTaskLeaf):
+                raise PreconditionFailure("Leaf learning task nodes must be renamed through edit_learning_task")
+
+            updated_node = LearningTaskContainer(
+                project_id=node.project_id,
+                node_id=node.node_id,
+                parent_id=node.parent_id,
+                children=tuple(node.children),
+                title=str(title).strip(),
+            )
+            updated_node.validate_write_time()
+
+            self.sys.learning_task_node_repo.update(s, updated_node)
+
+            self._append_audit_event(
+                s,
+                kind=AuditEventKind.EDIT_LEARNING_TASK_NODE,
+                api_name="edit_learning_task_node_title",
+                payload={"nodeId": str(node_id)},
+            )
+            self.sys.commit(s)
+        except Exception:
+            if s.state == SessionState.OPEN:
+                self.sys.rollback(s)
+            raise
+
     def set_layer_config(
         self,
         project_id: ProjectId,
@@ -2962,7 +4535,10 @@ class SystemAPI:
         pre_ms: int,
         post_ms: int,
         provider: AsrProvider,
-    ) -> AsrArtifactId:
+        service_config: LocalServiceConfig | dict[str, object] | None = None,
+        auth_store: AuthStore | None = None,
+        user_id: str | None = None,
+    ) -> AsrTranscriptResult:
         s.assert_open()
         if s.mode != SessionMode.READ_WRITE:
             raise PreconditionFailure("request_asr requires READ_WRITE session")
@@ -2972,38 +4548,11 @@ class SystemAPI:
         if int(pre_ms) + int(post_ms) > MAX_ASR_WINDOW_MS:
             raise PreconditionFailure(f"request_asr window too large (max {MAX_ASR_WINDOW_MS}ms)")
 
-        self._require_runtime_capability(
-            s,
-            capability=RuntimeCapability.LOCAL_ASR,
-            api_name="request_asr",
-        )
-
-        rp = self.sys.recall_point_repo.get(s, recall_point_id)  # may raise NotFound
-        if rp.state != RecallPointState.ACTIVE:
-            raise PreconditionFailure("request_asr precondition failed: recall_point_id must resolve to ACTIVE RecallPoint")
-        source_instance_id = rp.anchor.instance_id
-        if not str(source_instance_id):
-            raise PreconditionFailure("request_asr precondition failed: source_instance_id missing")
-
-        runtime_cfg = current_native_runtime_config(
-            runtime_kind=s.runtime_kind,
-            runtime_capabilities=s.runtime_capabilities,
-        )
-        asr_cfg = runtime_cfg.local_models.asr
-        if asr_cfg is None:
-            raise PreconditionFailure("request_asr runtime is unavailable")
-
-        hit = self.sys.asr_artifact_repo.maybe_get_by_cache_key(s, recall_point_id, provider, int(center_ms), int(pre_ms), int(post_ms))
-        if hit is not None:
-            return hit.asr_artifact_id
-
-        try:
-            inst = self.sys.instance_repo.get(s, source_instance_id)
-        except NotFound:
-            raise PreconditionFailure("request_asr precondition failed: source_instance_id not resolvable")
-
+        rp, inst = self._resolve_request_asr_context(s, recall_point_id=recall_point_id)
         storage = self.sys.project_storage_config_repo.get(s)
         binding = self.sys.project_material_source_binding_repo.get(s)
+        if binding.source_kind == MaterialSourceKind.BROWSER_LOCAL:
+            raise PreconditionFailure("request_asr server extraction is unavailable for BROWSER_LOCAL materials; upload an audio clip instead")
         try:
             file_path = resolve_material_file_path(storage, inst.material_id, source_kind=binding.source_kind)
         except PreconditionFailure as exc:
@@ -3017,72 +4566,402 @@ class SystemAPI:
         if ext not in allowed:
             raise PreconditionFailure(f"request_asr precondition failed: unsupported material type: {ext or '(no ext)'}")
 
-        use_local_whisper = False
-        if is_builtin_whisper_base_url(asr_cfg.base_url):
-            url = f"{ensure_local_whisper_runtime()}/asr/request"
-            api_key = None
-            model_name = asr_cfg.model
-            use_local_whisper = True
-        else:
-            url = self._resolve_local_service_url(asr_cfg, default_path="/asr/request")
-            api_key = asr_cfg.api_key
-            model_name = asr_cfg.model
+        resolved_service_config, _ = self._resolve_effective_asr_service_config(
+            service_config=service_config,
+            auth_store=auth_store,
+            user_id=user_id,
+        )
+        if resolved_service_config is None:
+            raise PreconditionFailure("request_asr service_config is unavailable")
 
-        try:
-            resp = self._http_post_json(
-                url=url,
-                payload={
-                    "provider": provider.value,
-                    "source": {"filePath": str(file_path), "instanceId": str(source_instance_id), "materialId": inst.material_id.as_posix()},
-                    "window": {"centerMs": int(center_ms), "preMs": int(pre_ms), "postMs": int(post_ms)},
-                    "model": model_name,
+        clip_start_ms = max(int(center_ms) - int(pre_ms), 0)
+        clip_duration_ms = int(pre_ms) + int(post_ms)
+        if is_builtin_whisper_base_url(resolved_service_config.base_url):
+            segments = self._request_asr_segments_from_audio_file(
+                audio_path=file_path,
+                audio_file_name=file_path.name,
+                audio_content_type="application/octet-stream",
+                clip_start_ms=clip_start_ms,
+                clip_duration_ms=clip_duration_ms,
+                center_ms=int(center_ms),
+                pre_ms=int(pre_ms),
+                post_ms=int(post_ms),
+                provider=provider,
+                service_config=resolved_service_config,
+                builtin_source={
+                    "filePath": str(file_path),
+                    "instanceId": str(inst.instance_id),
+                    "materialId": inst.material_id.as_posix(),
                 },
-                api_key=api_key,
-                timeout_sec=600.0 if use_local_whisper else 60.0,
             )
-        except ExternalServiceError as e:
-            raise ExternalServiceError(f"ASR service error: {e}") from e
-
-        segs_raw = resp.get("segments", [])
-        if segs_raw is None:
-            segs_raw = []
-        if not isinstance(segs_raw, list):
-            raise ExternalServiceError("ASR output invalid: segments must be a list")
-
-        segments: list[AsrSegment] = []
-        for it in segs_raw:
-            if not isinstance(it, dict):
-                raise ExternalServiceError("ASR output invalid: segment must be an object")
-            seg = AsrSegment(
-                start_ms=int(it.get("startMs", it.get("start_ms", 0))),
-                end_ms=int(it.get("endMs", it.get("end_ms", 0))),
-                text=str(it.get("text", "")),
-                confidence=None if it.get("confidence") is None else float(it.get("confidence")),
+            result = self._build_asr_result(
+                project_id=s.project_id,
+                provider=provider,
+                recall_point_id=recall_point_id,
+                source_instance_id=rp.anchor.instance_id,
+                center_ms=int(center_ms),
+                pre_ms=int(pre_ms),
+                post_ms=int(post_ms),
+                segments=segments,
             )
             try:
-                seg.validate_write_time()
+                result.validate_write_time()
             except PreconditionFailure as e:
                 raise ExternalServiceError(f"ASR output invalid: {e}") from e
-            segments.append(seg)
+            return result
 
-        artifact = AsrArtifact(
+        ffmpeg_bin = shutil.which("ffmpeg")
+        if not ffmpeg_bin:
+            raise PreconditionFailure("request_asr precondition failed: ffmpeg not found in PATH")
+
+        with _asr_server_ffmpeg_slot():
+            with tempfile.TemporaryDirectory(prefix="plm-asr-") as tmpdir:
+                audio_path = Path(tmpdir) / "clip.wav"
+                try:
+                    self._extract_audio_clip(
+                        ffmpeg_bin=ffmpeg_bin,
+                        source_path=file_path,
+                        start_ms=clip_start_ms,
+                        duration_ms=clip_duration_ms,
+                        out_path=audio_path,
+                        timeout_sec=float(ASR_SERVER_FFMPEG_EXEC_TIMEOUT_SEC),
+                    )
+                except subprocess.TimeoutExpired as exc:
+                    raise PreconditionFailure("request_asr precondition failed: server-side ffmpeg timed out") from exc
+                except subprocess.CalledProcessError as exc:
+                    detail = (exc.stderr or exc.stdout or "ffmpeg failed").strip()
+                    raise PreconditionFailure(f"request_asr precondition failed: failed to extract audio clip: {detail[:400]}") from exc
+
+                segments = self._request_asr_segments_from_audio_file(
+                    audio_path=audio_path,
+                    audio_file_name="clip.wav",
+                    audio_content_type="audio/wav",
+                    clip_start_ms=clip_start_ms,
+                    clip_duration_ms=clip_duration_ms,
+                    center_ms=int(center_ms),
+                    pre_ms=int(pre_ms),
+                    post_ms=int(post_ms),
+                    provider=provider,
+                    service_config=resolved_service_config,
+                    builtin_source={
+                        "filePath": str(file_path),
+                        "instanceId": str(inst.instance_id),
+                        "materialId": inst.material_id.as_posix(),
+                    },
+                )
+
+        result = self._build_asr_result(
             project_id=s.project_id,
-            asr_artifact_id=self.idgen.new_asr_artifact_id(s.project_id),
-            created_at=now_utc_ms(),
             provider=provider,
-            producer_runtime_kind=s.runtime_kind,
             recall_point_id=recall_point_id,
-            source_instance_id=source_instance_id,
+            source_instance_id=rp.anchor.instance_id,
             center_ms=int(center_ms),
             pre_ms=int(pre_ms),
             post_ms=int(post_ms),
-            segments=tuple(segments),
+            segments=segments,
         )
         try:
-            artifact.validate_write_time()
+            result.validate_write_time()
         except PreconditionFailure as e:
             raise ExternalServiceError(f"ASR output invalid: {e}") from e
-        return self.sys.asr_artifact_repo.upsert_by_cache_key(s, artifact)
+        return result
+
+    def _request_asr_from_audio_upload_in_session(
+        self,
+        s: MutationSession,
+        *,
+        recall_point_id: RecallPointId,
+        center_ms: int,
+        pre_ms: int,
+        post_ms: int,
+        provider: AsrProvider,
+        audio_bytes: bytes,
+        audio_filename: str | None = None,
+        audio_content_type: str | None = None,
+        service_config: LocalServiceConfig | dict[str, object] | None = None,
+        auth_store: AuthStore | None = None,
+        user_id: str | None = None,
+    ) -> AsrTranscriptResult:
+        s.assert_open()
+        if s.mode != SessionMode.READ_WRITE:
+            raise PreconditionFailure("request_asr requires READ_WRITE session")
+        if int(pre_ms) < 0 or int(post_ms) < 0:
+            raise PreconditionFailure("request_asr precondition failed: pre_ms/post_ms must be >= 0")
+        if int(pre_ms) + int(post_ms) > MAX_ASR_WINDOW_MS:
+            raise PreconditionFailure(f"request_asr window too large (max {MAX_ASR_WINDOW_MS}ms)")
+
+        payload = bytes(audio_bytes or b"")
+        if not payload:
+            raise PreconditionFailure("request_asr audio clip must be non-empty")
+        if len(payload) > MAX_ASR_UPLOAD_BYTES:
+            raise PreconditionFailure(f"request_asr audio clip is too large (max {MAX_ASR_UPLOAD_BYTES} bytes)")
+
+        rp, _ = self._resolve_request_asr_context(s, recall_point_id=recall_point_id)
+        resolved_service_config, _ = self._resolve_effective_asr_service_config(
+            service_config=service_config,
+            auth_store=auth_store,
+            user_id=user_id,
+        )
+        if resolved_service_config is None:
+            raise PreconditionFailure("request_asr service_config is unavailable")
+
+        clip_start_ms = max(int(center_ms) - int(pre_ms), 0)
+        clip_duration_ms = int(pre_ms) + int(post_ms)
+        safe_name = Path(str(audio_filename or "clip.wav")).name or "clip.wav"
+        content_type = str(audio_content_type or "application/octet-stream").strip() or "application/octet-stream"
+        suffix = Path(safe_name).suffix or ".bin"
+
+        with tempfile.TemporaryDirectory(prefix="plm-asr-upload-") as tmpdir:
+            audio_path = Path(tmpdir) / f"upload{suffix}"
+            audio_path.write_bytes(payload)
+            segments = self._request_asr_segments_from_audio_file(
+                audio_path=audio_path,
+                audio_file_name=safe_name,
+                audio_content_type=content_type,
+                clip_start_ms=clip_start_ms,
+                clip_duration_ms=clip_duration_ms,
+                center_ms=int(center_ms),
+                pre_ms=int(pre_ms),
+                post_ms=int(post_ms),
+                provider=provider,
+                service_config=resolved_service_config,
+                builtin_source=None,
+            )
+
+        result = self._build_asr_result(
+            project_id=s.project_id,
+            provider=provider,
+            recall_point_id=recall_point_id,
+            source_instance_id=rp.anchor.instance_id,
+            center_ms=int(center_ms),
+            pre_ms=int(pre_ms),
+            post_ms=int(post_ms),
+            segments=segments,
+        )
+        try:
+            result.validate_write_time()
+        except PreconditionFailure as e:
+            raise ExternalServiceError(f"ASR output invalid: {e}") from e
+        return result
+
+    def _request_instance_asr_in_session(
+        self,
+        s: MutationSession,
+        *,
+        instance_id: InstanceId,
+        start_ms: int,
+        end_ms: int,
+        provider: AsrProvider,
+        service_config: LocalServiceConfig | dict[str, object] | None = None,
+        auth_store: AuthStore | None = None,
+        user_id: str | None = None,
+    ) -> InstanceAsrTranscriptResult:
+        s.assert_open()
+        if s.mode != SessionMode.READ_WRITE:
+            raise PreconditionFailure("request_instance_asr requires READ_WRITE session")
+
+        start_ms, end_ms = self._validate_instance_asr_window(
+            api_name="request_instance_asr",
+            start_ms=int(start_ms),
+            end_ms=int(end_ms),
+        )
+
+        inst = self._resolve_instance_asr_context(s, instance_id=instance_id)
+        storage = self.sys.project_storage_config_repo.get(s)
+        binding = self.sys.project_material_source_binding_repo.get(s)
+        if binding.source_kind == MaterialSourceKind.BROWSER_LOCAL:
+            raise PreconditionFailure(
+                "request_instance_asr server extraction is unavailable for BROWSER_LOCAL materials; upload an audio clip instead"
+            )
+        try:
+            file_path = resolve_material_file_path(storage, inst.material_id, source_kind=binding.source_kind)
+        except PreconditionFailure as exc:
+            raise PreconditionFailure(f"request_instance_asr precondition failed: {exc}") from exc
+
+        if not file_path.exists() or not file_path.is_file():
+            raise PreconditionFailure("request_instance_asr precondition failed: material file not found")
+
+        ext = file_path.suffix.lower()
+        allowed = {".mp4", ".mov", ".mkv", ".webm", ".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus"}
+        if ext not in allowed:
+            raise PreconditionFailure(
+                f"request_instance_asr precondition failed: unsupported material type: {ext or '(no ext)'}"
+            )
+
+        resolved_service_config, _ = self._resolve_effective_asr_service_config(
+            service_config=service_config,
+            auth_store=auth_store,
+            user_id=user_id,
+        )
+        if resolved_service_config is None:
+            raise PreconditionFailure("request_instance_asr service_config is unavailable")
+
+        clip_start_ms = int(start_ms)
+        clip_duration_ms = int(end_ms) - int(start_ms)
+        if is_builtin_whisper_base_url(resolved_service_config.base_url):
+            segments = self._request_asr_segments_from_audio_file(
+                audio_path=file_path,
+                audio_file_name=file_path.name,
+                audio_content_type="application/octet-stream",
+                clip_start_ms=clip_start_ms,
+                clip_duration_ms=clip_duration_ms,
+                center_ms=clip_start_ms,
+                pre_ms=0,
+                post_ms=clip_duration_ms,
+                provider=provider,
+                service_config=resolved_service_config,
+                builtin_source={
+                    "filePath": str(file_path),
+                    "instanceId": str(inst.instance_id),
+                    "materialId": inst.material_id.as_posix(),
+                },
+            )
+            result = self._build_instance_asr_result(
+                project_id=s.project_id,
+                provider=provider,
+                source_instance_id=inst.instance_id,
+                start_ms=start_ms,
+                end_ms=end_ms,
+                segments=segments,
+            )
+            try:
+                result.validate_write_time()
+            except PreconditionFailure as e:
+                raise ExternalServiceError(f"ASR output invalid: {e}") from e
+            return result
+
+        ffmpeg_bin = shutil.which("ffmpeg")
+        if not ffmpeg_bin:
+            raise PreconditionFailure("request_instance_asr precondition failed: ffmpeg not found in PATH")
+
+        with _asr_server_ffmpeg_slot("request_instance_asr"):
+            with tempfile.TemporaryDirectory(prefix="plm-instance-asr-") as tmpdir:
+                audio_path = Path(tmpdir) / "clip.wav"
+                try:
+                    self._extract_audio_clip(
+                        ffmpeg_bin=ffmpeg_bin,
+                        source_path=file_path,
+                        start_ms=clip_start_ms,
+                        duration_ms=clip_duration_ms,
+                        out_path=audio_path,
+                        timeout_sec=float(ASR_SERVER_FFMPEG_EXEC_TIMEOUT_SEC),
+                    )
+                except subprocess.TimeoutExpired as exc:
+                    raise PreconditionFailure("request_instance_asr precondition failed: server-side ffmpeg timed out") from exc
+                except subprocess.CalledProcessError as exc:
+                    detail = (exc.stderr or exc.stdout or "ffmpeg failed").strip()
+                    raise PreconditionFailure(
+                        f"request_instance_asr precondition failed: failed to extract audio clip: {detail[:400]}"
+                    ) from exc
+
+                segments = self._request_asr_segments_from_audio_file(
+                    audio_path=audio_path,
+                    audio_file_name="clip.wav",
+                    audio_content_type="audio/wav",
+                    clip_start_ms=clip_start_ms,
+                    clip_duration_ms=clip_duration_ms,
+                    center_ms=clip_start_ms,
+                    pre_ms=0,
+                    post_ms=clip_duration_ms,
+                    provider=provider,
+                    service_config=resolved_service_config,
+                    builtin_source={
+                        "filePath": str(file_path),
+                        "instanceId": str(inst.instance_id),
+                        "materialId": inst.material_id.as_posix(),
+                    },
+                )
+
+        result = self._build_instance_asr_result(
+            project_id=s.project_id,
+            provider=provider,
+            source_instance_id=inst.instance_id,
+            start_ms=start_ms,
+            end_ms=end_ms,
+            segments=segments,
+        )
+        try:
+            result.validate_write_time()
+        except PreconditionFailure as e:
+            raise ExternalServiceError(f"ASR output invalid: {e}") from e
+        return result
+
+    def _request_instance_asr_from_audio_upload_in_session(
+        self,
+        s: MutationSession,
+        *,
+        instance_id: InstanceId,
+        start_ms: int,
+        end_ms: int,
+        provider: AsrProvider,
+        audio_bytes: bytes,
+        audio_filename: str | None = None,
+        audio_content_type: str | None = None,
+        service_config: LocalServiceConfig | dict[str, object] | None = None,
+        auth_store: AuthStore | None = None,
+        user_id: str | None = None,
+    ) -> InstanceAsrTranscriptResult:
+        s.assert_open()
+        if s.mode != SessionMode.READ_WRITE:
+            raise PreconditionFailure("request_instance_asr requires READ_WRITE session")
+
+        start_ms, end_ms = self._validate_instance_asr_window(
+            api_name="request_instance_asr",
+            start_ms=int(start_ms),
+            end_ms=int(end_ms),
+        )
+
+        payload = bytes(audio_bytes or b"")
+        if not payload:
+            raise PreconditionFailure("request_instance_asr audio clip must be non-empty")
+        if len(payload) > MAX_ASR_UPLOAD_BYTES:
+            raise PreconditionFailure(f"request_instance_asr audio clip is too large (max {MAX_ASR_UPLOAD_BYTES} bytes)")
+
+        inst = self._resolve_instance_asr_context(s, instance_id=instance_id)
+        resolved_service_config, _ = self._resolve_effective_asr_service_config(
+            service_config=service_config,
+            auth_store=auth_store,
+            user_id=user_id,
+        )
+        if resolved_service_config is None:
+            raise PreconditionFailure("request_instance_asr service_config is unavailable")
+
+        clip_start_ms = int(start_ms)
+        clip_duration_ms = int(end_ms) - int(start_ms)
+        safe_name = Path(str(audio_filename or "chunk.wav")).name or "chunk.wav"
+        content_type = str(audio_content_type or "application/octet-stream").strip() or "application/octet-stream"
+        suffix = Path(safe_name).suffix or ".bin"
+
+        with tempfile.TemporaryDirectory(prefix="plm-instance-asr-upload-") as tmpdir:
+            audio_path = Path(tmpdir) / f"upload{suffix}"
+            audio_path.write_bytes(payload)
+            segments = self._request_asr_segments_from_audio_file(
+                audio_path=audio_path,
+                audio_file_name=safe_name,
+                audio_content_type=content_type,
+                clip_start_ms=clip_start_ms,
+                clip_duration_ms=clip_duration_ms,
+                center_ms=clip_start_ms,
+                pre_ms=0,
+                post_ms=clip_duration_ms,
+                provider=provider,
+                service_config=resolved_service_config,
+                builtin_source=None,
+            )
+
+        result = self._build_instance_asr_result(
+            project_id=s.project_id,
+            provider=provider,
+            source_instance_id=inst.instance_id,
+            start_ms=start_ms,
+            end_ms=end_ms,
+            segments=segments,
+        )
+        try:
+            result.validate_write_time()
+        except PreconditionFailure as e:
+            raise ExternalServiceError(f"ASR output invalid: {e}") from e
+        return result
 
     def request_asr(
         self,
@@ -3092,35 +4971,227 @@ class SystemAPI:
         pre_ms: int,
         post_ms: int,
         provider: AsrProvider = AsrProvider.WHISPER,
-    ) -> AsrArtifactId:
+        service_config: LocalServiceConfig | dict[str, object] | None = None,
+        auth_store: AuthStore | None = None,
+        user_id: str | None = None,
+    ) -> AsrTranscriptResult:
         self._ensure_startup_fs_sync_done(project_id)
         s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
         try:
             prov = provider if isinstance(provider, AsrProvider) else AsrProvider(str(provider))
-            aid = self._request_asr_in_session(
+            _, service_config_source = self._resolve_effective_asr_service_config(
+                service_config=service_config,
+                auth_store=auth_store,
+                user_id=user_id,
+            )
+            result = self._request_asr_in_session(
                 s,
                 recall_point_id=RecallPointId(str(recall_point_id)),
                 center_ms=int(center_ms),
                 pre_ms=int(pre_ms),
                 post_ms=int(post_ms),
                 provider=prov,
+                service_config=service_config,
+                auth_store=auth_store,
+                user_id=user_id,
             )
             self._append_audit_event(
                 s,
                 kind=AuditEventKind.REQUEST_ASR,
                 api_name="request_asr",
                 payload={
-                    "asrArtifactId": str(aid),
                     "recallPointId": str(recall_point_id),
                     "provider": prov.value,
                     "producerRuntimeKind": s.runtime_kind.value,
+                    "sourceInstanceId": str(result.source_instance_id),
                     "centerMs": int(center_ms),
                     "preMs": int(pre_ms),
                     "postMs": int(post_ms),
+                    "segmentCount": len(result.segments),
+                    "clipSource": "server_extract",
+                    "serviceConfigSource": service_config_source,
                 },
             )
             self.sys.commit(s)
-            return aid
+            return result
+        except Exception:
+            if s.state == SessionState.OPEN:
+                self.sys.rollback(s)
+            raise
+
+    def request_asr_from_audio_upload(
+        self,
+        project_id: ProjectId,
+        recall_point_id: RecallPointId,
+        center_ms: int,
+        pre_ms: int,
+        post_ms: int,
+        audio_bytes: bytes,
+        *,
+        audio_filename: str | None = None,
+        audio_content_type: str | None = None,
+        provider: AsrProvider = AsrProvider.WHISPER,
+        service_config: LocalServiceConfig | dict[str, object] | None = None,
+        auth_store: AuthStore | None = None,
+        user_id: str | None = None,
+    ) -> AsrTranscriptResult:
+        s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
+        try:
+            prov = provider if isinstance(provider, AsrProvider) else AsrProvider(str(provider))
+            payload = bytes(audio_bytes or b"")
+            _, service_config_source = self._resolve_effective_asr_service_config(
+                service_config=service_config,
+                auth_store=auth_store,
+                user_id=user_id,
+            )
+            result = self._request_asr_from_audio_upload_in_session(
+                s,
+                recall_point_id=RecallPointId(str(recall_point_id)),
+                center_ms=int(center_ms),
+                pre_ms=int(pre_ms),
+                post_ms=int(post_ms),
+                provider=prov,
+                audio_bytes=payload,
+                audio_filename=audio_filename,
+                audio_content_type=audio_content_type,
+                service_config=service_config,
+                auth_store=auth_store,
+                user_id=user_id,
+            )
+            self._append_audit_event(
+                s,
+                kind=AuditEventKind.REQUEST_ASR,
+                api_name="request_asr_from_audio_upload",
+                payload={
+                    "recallPointId": str(recall_point_id),
+                    "provider": prov.value,
+                    "producerRuntimeKind": s.runtime_kind.value,
+                    "sourceInstanceId": str(result.source_instance_id),
+                    "centerMs": int(center_ms),
+                    "preMs": int(pre_ms),
+                    "postMs": int(post_ms),
+                    "segmentCount": len(result.segments),
+                    "clipSource": "browser_upload",
+                    "uploadedBytes": len(payload),
+                    "serviceConfigSource": service_config_source,
+                },
+            )
+            self.sys.commit(s)
+            return result
+        except Exception:
+            if s.state == SessionState.OPEN:
+                self.sys.rollback(s)
+            raise
+
+    def request_instance_asr(
+        self,
+        project_id: ProjectId,
+        instance_id: InstanceId,
+        start_ms: int,
+        end_ms: int,
+        provider: AsrProvider = AsrProvider.WHISPER,
+        service_config: LocalServiceConfig | dict[str, object] | None = None,
+        auth_store: AuthStore | None = None,
+        user_id: str | None = None,
+    ) -> InstanceAsrTranscriptResult:
+        self._ensure_startup_fs_sync_done(project_id)
+        s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
+        try:
+            prov = provider if isinstance(provider, AsrProvider) else AsrProvider(str(provider))
+            _, service_config_source = self._resolve_effective_asr_service_config(
+                service_config=service_config,
+                auth_store=auth_store,
+                user_id=user_id,
+            )
+            result = self._request_instance_asr_in_session(
+                s,
+                instance_id=InstanceId(str(instance_id)),
+                start_ms=int(start_ms),
+                end_ms=int(end_ms),
+                provider=prov,
+                service_config=service_config,
+                auth_store=auth_store,
+                user_id=user_id,
+            )
+            self._append_audit_event(
+                s,
+                kind=AuditEventKind.REQUEST_ASR,
+                api_name="request_instance_asr",
+                payload={
+                    "instanceId": str(instance_id),
+                    "provider": prov.value,
+                    "producerRuntimeKind": s.runtime_kind.value,
+                    "sourceInstanceId": str(result.source_instance_id),
+                    "startMs": int(start_ms),
+                    "endMs": int(end_ms),
+                    "segmentCount": len(result.segments),
+                    "clipSource": "server_extract",
+                    "serviceConfigSource": service_config_source,
+                },
+            )
+            self.sys.commit(s)
+            return result
+        except Exception:
+            if s.state == SessionState.OPEN:
+                self.sys.rollback(s)
+            raise
+
+    def request_instance_asr_from_audio_upload(
+        self,
+        project_id: ProjectId,
+        instance_id: InstanceId,
+        start_ms: int,
+        end_ms: int,
+        audio_bytes: bytes,
+        *,
+        audio_filename: str | None = None,
+        audio_content_type: str | None = None,
+        provider: AsrProvider = AsrProvider.WHISPER,
+        service_config: LocalServiceConfig | dict[str, object] | None = None,
+        auth_store: AuthStore | None = None,
+        user_id: str | None = None,
+    ) -> InstanceAsrTranscriptResult:
+        s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
+        try:
+            prov = provider if isinstance(provider, AsrProvider) else AsrProvider(str(provider))
+            payload = bytes(audio_bytes or b"")
+            _, service_config_source = self._resolve_effective_asr_service_config(
+                service_config=service_config,
+                auth_store=auth_store,
+                user_id=user_id,
+            )
+            result = self._request_instance_asr_from_audio_upload_in_session(
+                s,
+                instance_id=InstanceId(str(instance_id)),
+                start_ms=int(start_ms),
+                end_ms=int(end_ms),
+                provider=prov,
+                audio_bytes=payload,
+                audio_filename=audio_filename,
+                audio_content_type=audio_content_type,
+                service_config=service_config,
+                auth_store=auth_store,
+                user_id=user_id,
+            )
+            self._append_audit_event(
+                s,
+                kind=AuditEventKind.REQUEST_ASR,
+                api_name="request_instance_asr_from_audio_upload",
+                payload={
+                    "instanceId": str(instance_id),
+                    "provider": prov.value,
+                    "producerRuntimeKind": s.runtime_kind.value,
+                    "sourceInstanceId": str(result.source_instance_id),
+                    "startMs": int(start_ms),
+                    "endMs": int(end_ms),
+                    "segmentCount": len(result.segments),
+                    "clipSource": "browser_upload",
+                    "uploadedBytes": len(payload),
+                    "serviceConfigSource": service_config_source,
+                },
+            )
+            self.sys.commit(s)
+            return result
         except Exception:
             if s.state == SessionState.OPEN:
                 self.sys.rollback(s)
@@ -3575,6 +5646,9 @@ API_WHITELIST: dict[str, SchedulingEffect] = {
     "export_asr_by_learning_object_node": SchedulingEffect.NONE,
     "export_asr_by_learning_task_node": SchedulingEffect.NONE,
     "request_asr": SchedulingEffect.NONE,
+    "request_asr_from_audio_upload": SchedulingEffect.NONE,
+    "request_instance_asr": SchedulingEffect.NONE,
+    "request_instance_asr_from_audio_upload": SchedulingEffect.NONE,
     "list_review_recommendations": SchedulingEffect.NONE,
     "get_push_candidates": SchedulingEffect.NONE,
     "validate_material_reachable": SchedulingEffect.NONE,

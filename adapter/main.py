@@ -10,6 +10,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from adapter.auth import auth_error_response, resolve_session_user
@@ -21,6 +22,7 @@ from backend.system.hosted_deployment_checks import hosted_runtime_warnings, val
 from backend.system.http_runtime_config import current_http_runtime_config
 from backend.system.runtime_features import current_runtime_features
 from backend.system.sql_backend import current_sql_runtime_config
+from backend.system.public_downloads import resolve_public_download_asset
 from backend.system.runtime_env import resource_root
 from backend.system.version import APP_NAME, APP_VERSION
 
@@ -62,6 +64,7 @@ def _is_public_api_path(path: str) -> bool:
         "/api/docs",
         "/api/redoc",
         "/api/system/capabilities",
+        "/api/system/public-downloads",
     }
     if path in public_paths:
         return True
@@ -69,7 +72,13 @@ def _is_public_api_path(path: str) -> bool:
         return True
     if path == "/api/payments/wechat/refund-notify":
         return True
+    if path.startswith("/api/public/asr-bridge/"):
+        return True
     return path.startswith("/api/auth/")
+
+
+def _public_api_path_supports_optional_auth(path: str) -> bool:
+    return path == "/api/system/capabilities"
 
 
 def _extract_project_id(path: str) -> str | None:
@@ -169,11 +178,16 @@ def create_app() -> FastAPI:
 
         if request.method.upper() == "OPTIONS" or not path.startswith("/api"):
             return await call_next(request)
-        if not features.auth_enabled or _is_public_api_path(path):
+        if not features.auth_enabled:
             return await call_next(request)
 
         auth_store = get_auth_store()
-        user = resolve_session_user(request, auth_store)
+        if _is_public_api_path(path):
+            if _public_api_path_supports_optional_auth(path):
+                request.state.auth_user = await run_in_threadpool(resolve_session_user, request, auth_store)
+            return await call_next(request)
+
+        user = await run_in_threadpool(resolve_session_user, request, auth_store)
         if user is None:
             return auth_error_response(
                 status_code=401,
@@ -184,7 +198,10 @@ def create_app() -> FastAPI:
 
         request.state.auth_user = user
         project_id = _extract_project_id(path)
-        if project_id is not None and not auth_store.user_has_project_access(user.user_id, project_id):
+        has_project_access = True
+        if project_id is not None:
+            has_project_access = await run_in_threadpool(auth_store.user_has_project_access, user.user_id, project_id)
+        if project_id is not None and not has_project_access:
             return auth_error_response(
                 status_code=403,
                 code="FORBIDDEN",
@@ -237,6 +254,13 @@ def create_app() -> FastAPI:
         if index_file.exists():
             return FileResponse(str(index_file))
         return PlainTextResponse(f"{APP_NAME} frontend build is missing. Build frontend/dist before starting release mode.", status_code=503)
+
+    @app.get("/downloads/{full_path:path}", include_in_schema=False)
+    def serve_public_download(full_path: str):
+        asset = resolve_public_download_asset(full_path)
+        if asset is None:
+            return PlainTextResponse("Not found", status_code=404)
+        return FileResponse(str(asset), filename=asset.name)
 
     @app.get("/{full_path:path}", include_in_schema=False)
     def serve_frontend(full_path: str):

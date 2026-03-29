@@ -73,3 +73,11 @@ def stream_instance_media(projectId: str, instanceId: str, api: SystemAPI = Depe
 
     media_type, _ = mimetypes.guess_type(str(file_path))
     return FileResponse(path=str(file_path), media_type=media_type or "application/octet-stream", filename=file_path.name)
+
+
+@router.get("/projects/{projectId}/instances/{instanceId}/subtitle-file")
+def get_instance_subtitle_file(projectId: str, instanceId: str, api: SystemAPI = Depends(get_api)) -> dict:
+    return {
+        "ok": True,
+        "data": api.get_instance_subtitle_file(projectId, instanceId),  # type: ignore[arg-type]
+    }

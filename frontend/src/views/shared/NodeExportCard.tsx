@@ -1,32 +1,24 @@
 import { useState } from "react"
+import { Download, FileJson } from "lucide-react"
 
-import { requestAsr, type AsrArtifact } from "@/ui/api/asr"
 import { ApiError } from "@/ui/api/http"
 import { type RecallPoint } from "@/ui/api/review"
 import { Button } from "@/ui/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
-import { useSystemCapabilities } from "@/ui/queries/system"
-import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/ui/components/ui/dialog"
+import { SUPPORTED_SUBTITLE_EXTENSIONS_LABEL } from "@/ui/subtitles/subtitleSupport"
+import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 
 type NodeExportCardProps = {
   projectId: string
   nodeTitle: string
   recallPoints: RecallPoint[]
   exportRecallPoints: () => Promise<RecallPoint[]>
-  exportAsr: () => Promise<AsrArtifact[]>
 }
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
   if (err instanceof Error) return err.message
   return "未知错误"
-}
-
-function parseAnchorCenterMs(position: string) {
-  const match = String(position).trim().match(/^t=(\d+)$/)
-  if (!match) return null
-  const value = Number(match[1])
-  return Number.isFinite(value) ? value : null
 }
 
 function sanitizeFilenamePart(value: string) {
@@ -48,13 +40,12 @@ function downloadJson(filename: string, payload: unknown) {
 }
 
 export function NodeExportCard(props: NodeExportCardProps) {
-  const { projectId, nodeTitle, recallPoints, exportRecallPoints, exportAsr } = props
-  const capabilitiesQ = useSystemCapabilities()
+  const { nodeTitle, recallPoints, exportRecallPoints } = props
+  const [open, setOpen] = useState(false)
   const [statusText, setStatusText] = useState<string | null>(null)
   const [errorText, setErrorText] = useState<string | null>(null)
   const [isExportingRecall, setIsExportingRecall] = useState(false)
-  const [isExportingAsr, setIsExportingAsr] = useState(false)
-  const asrEnabled = capabilitiesQ.data?.asrEnabled ?? true
+  const canExport = recallPoints.length > 0 && !isExportingRecall
 
   async function onExportRecallPoints() {
     setErrorText(null)
@@ -70,6 +61,7 @@ export function NodeExportCard(props: NodeExportCardProps) {
       })
       const message = items.length > 0 ? `已导出 ${items.length} 条复述点。` : "当前节点还没有复述点，已导出空结果。"
       setStatusText(message)
+      setOpen(false)
       showSuccessFeedback("复述点 JSON 已导出", message)
     } catch (err) {
       const message = formatApiError(err)
@@ -80,105 +72,48 @@ export function NodeExportCard(props: NodeExportCardProps) {
     }
   }
 
-  async function onExportAsr() {
-    setErrorText(null)
-    setStatusText(null)
-    setIsExportingAsr(true)
-    try {
-      showInfoFeedback("开始生成 ASR", `正在为“${nodeTitle}”下的 ${recallPoints.length} 条复述点准备转写结果。`)
-      const missingAnchorIds = recallPoints
-        .filter((item) => parseAnchorCenterMs(item.anchor.position) === null)
-        .map((item) => item.recallPointId)
-      if (missingAnchorIds.length > 0) {
-        throw new Error(`以下复述点缺少 t=<ms> 锚点，无法自动请求 ASR：${missingAnchorIds.join(", ")}`)
-      }
-
-      for (let index = 0; index < recallPoints.length; index += 1) {
-        const item = recallPoints[index]
-        const centerMs = parseAnchorCenterMs(item.anchor.position)
-        if (centerMs === null) continue
-        setStatusText(`正在生成 ASR ${index + 1}/${recallPoints.length}...`)
-        await requestAsr(projectId, {
-          recallPointId: item.recallPointId,
-          centerMs,
-          preMs: 30_000,
-          postMs: 30_000,
-          provider: "WHISPER",
-        })
-      }
-
-      const items = await exportAsr()
-      const fileStem = sanitizeFilenamePart(nodeTitle)
-      downloadJson(`${fileStem}-asr.json`, {
-        exportedAt: new Date().toISOString(),
-        nodeTitle,
-        asrArtifacts: items,
-      })
-      const message = `已导出 ${items.length} 条 ASR 转写结果。`
-      setStatusText(message)
-      showSuccessFeedback("ASR JSON 已导出", message)
-    } catch (err) {
-      const message = formatApiError(err)
-      setErrorText(message)
-      showErrorFeedback("导出 ASR 失败", message)
-    } finally {
-      setIsExportingAsr(false)
-    }
-  }
-
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{asrEnabled ? "导出与 ASR" : "导出"}</CardTitle>
-        <CardDescription>
-          {asrEnabled
-            ? "导出当前节点覆盖的复述点数据，并按复述点锚点批量生成或复用 ASR 转写结果。"
-            : "导出当前节点覆盖的复述点数据。当前部署已禁用 ASR。"}
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className={`grid gap-3 ${asrEnabled ? "md:grid-cols-2" : ""}`}>
-          <div className="rounded-md border bg-muted/30 p-3">
-            <div className="text-xs text-muted-foreground">覆盖复述点</div>
-            <div className="mt-1 font-medium text-foreground">{recallPoints.length}</div>
-          </div>
-          {asrEnabled ? (
-            <div className="rounded-md border bg-muted/30 p-3">
-              <div className="text-xs text-muted-foreground">ASR 窗口</div>
-              <div className="mt-1 font-medium text-foreground">center ± 30s</div>
+    <>
+      <Button type="button" variant="outline" size="sm" className="rounded-full" onClick={() => setOpen(true)} disabled={!canExport}>
+        <Download className="h-4 w-4" />
+        导出
+      </Button>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-xl rounded-[1.6rem] border-[#dbe4ee] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(246,249,253,0.96))] p-0">
+          <div className="space-y-5 p-6">
+            <DialogHeader className="space-y-2 text-left">
+              <DialogTitle>导出复述点</DialogTitle>
+              <DialogDescription>导出当前节点覆盖的复述点数据。视频字幕不再由 ASR 生成，而是直接读取视频同目录下的同名字幕文件。</DialogDescription>
+            </DialogHeader>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-[1.1rem] border border-[#dbe4ee] bg-white/90 p-4">
+                <div className="text-xs uppercase tracking-[0.14em] text-[#8a9ab0]">覆盖复述点</div>
+                <div className="mt-2 text-2xl font-semibold tracking-tight text-[#17314b]">{recallPoints.length}</div>
+              </div>
+              <div className="rounded-[1.1rem] border border-[#dbe4ee] bg-white/90 p-4">
+                <div className="text-xs uppercase tracking-[0.14em] text-[#8a9ab0]">字幕来源</div>
+                <div className="mt-2 text-sm font-semibold tracking-tight text-[#17314b]">同目录同名字幕文件</div>
+              </div>
             </div>
-          ) : null}
-        </div>
 
-        {recallPoints.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-border/80 bg-muted/15 px-4 py-4 text-sm text-muted-foreground">
-            当前节点还没有可导出的复述点。先完成节点绑定、生成复述点后，再导出 JSON 或发起 ASR。
+            {statusText ? <div className="rounded-[1rem] border border-[#dbe4ee] bg-white/80 px-4 py-3 text-sm text-[#5c6f86]">{statusText}</div> : null}
+            {errorText ? <div className="rounded-[1rem] border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">{errorText}</div> : null}
+
+            <div className="rounded-[1rem] border border-dashed border-[#dbe4ee] bg-[#fbfdff] px-4 py-3 text-xs leading-6 text-[#6a7b90]">
+              系统现在只会识别视频同目录下的同名字幕文件（{SUPPORTED_SUBTITLE_EXTENSIONS_LABEL}），并把它用于播放器字幕或 AI 上下文；不会再用后端 ffmpeg 或浏览器 ffmpeg.wasm 生成转写结果。
+            </div>
           </div>
-        ) : null}
 
-        <div className="flex flex-wrap gap-3">
-          <Button onClick={() => void onExportRecallPoints()} disabled={isExportingRecall || recallPoints.length === 0}>
-            {isExportingRecall ? "导出中..." : "导出复述点 JSON"}
-          </Button>
-          {asrEnabled ? (
-            <Button
-              variant="outline"
-              onClick={() => void onExportAsr()}
-              disabled={isExportingAsr || recallPoints.length === 0}
-            >
-              {isExportingAsr ? "处理中..." : "生成并导出 ASR JSON"}
+          <DialogFooter className="border-t border-[#e2e8ef] bg-white/70 px-6 py-4">
+            <Button type="button" onClick={() => void onExportRecallPoints()} disabled={isExportingRecall || recallPoints.length === 0}>
+              <FileJson className="h-4 w-4" />
+              {isExportingRecall ? "导出中..." : "导出复述点 JSON"}
             </Button>
-          ) : null}
-        </div>
-
-        {asrEnabled ? (
-          <p className="text-xs text-muted-foreground">
-            ASR 导出会对当前节点下每个复述点调用一次 `request_asr`；已存在的缓存结果会被直接复用。
-          </p>
-        ) : null}
-        {statusText ? <div className="rounded-md border bg-muted/20 px-3 py-2 text-sm text-muted-foreground">{statusText}</div> : null}
-        {errorText ? <div className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">{errorText}</div> : null}
-      </CardContent>
-    </Card>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
