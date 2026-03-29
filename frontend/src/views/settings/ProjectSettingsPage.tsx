@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useQueries } from "@tanstack/react-query"
+import { Settings2, Sparkles, TriangleAlert } from "lucide-react"
 import { useNavigate, useParams } from "react-router-dom"
 
 import { listRecallPointsByInstance, type Instance } from "@/ui/api/instances"
@@ -7,12 +8,11 @@ import { ApiError } from "@/ui/api/http"
 import type { ReviewChainTemplateItem } from "@/ui/api/projectConfig"
 import { ContentNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import { formatMaterialReference, formatRecallPointReference } from "@/ui/displayIdentifiers"
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
 import { scanProjectDirectoryMedia, useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
-import { useCurrentUser } from "@/ui/queries/auth"
 import { useMyLlmSettings, useUpdateMyLlmSettings } from "@/ui/queries/profile"
 import { useEditProject, useProject } from "@/ui/queries/projects"
 import { useGlobalLlmSettings, useSystemCapabilities, useUpdateGlobalLlmSettings } from "@/ui/queries/system"
@@ -22,11 +22,10 @@ import {
   useInstances,
   useLayers,
   useProjectConfig,
-  useProjectStorageConfig,
   useSetLayerConfig,
 } from "@/ui/queries/workbench"
-import { SUPPORTED_SUBTITLE_EXTENSIONS_LABEL } from "@/ui/subtitles/subtitleSupport"
 import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
+import { cn } from "@/ui/utils"
 
 let nextTemplateItemId = 1
 
@@ -35,6 +34,9 @@ type TemplateEditorItem = {
   kind: "CONVERGENCE" | "REVIEW_TASK"
   count: string
 }
+
+type SettingsPanelKey = "basic" | "ai" | "missing"
+type LlmPromptAssemblyMode = "system" | "user_concat"
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -52,12 +54,6 @@ function createTemplateEditorItem(kind: "CONVERGENCE" | "REVIEW_TASK", count = 1
 
 function toTemplateEditorItems(items: ReviewChainTemplateItem[]): TemplateEditorItem[] {
   return items.map((item) => createTemplateEditorItem(item.kind, item.count ?? 1))
-}
-
-function describeFsSyncPolicy(policy: "DISABLED" | "STARTUP_SYNC" | "MANUAL_SYNC") {
-  if (policy === "DISABLED") return "已关闭"
-  if (policy === "STARTUP_SYNC") return "启动时同步"
-  return "手动同步"
 }
 
 function formatLastSeenAt(value: string | null | undefined) {
@@ -103,6 +99,69 @@ function describeLlmSourceTone(source: "user" | "global" | "env" | "none") {
   return "border-slate-200 bg-slate-50 text-slate-600"
 }
 
+function PromptAssemblyModeSelector({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: LlmPromptAssemblyMode
+  onChange: (value: LlmPromptAssemblyMode) => void
+  disabled: boolean
+}) {
+  const options: Array<{
+    value: LlmPromptAssemblyMode
+    title: string
+    description: string
+  }> = [
+    {
+      value: "system",
+      title: "系统信息",
+      description: "优先让兼容 OpenAI 的主流 chat 模型按 system/context 角色理解规则与上下文。",
+    },
+    {
+      value: "user_concat",
+      title: "拼接到用户信息",
+      description: "把系统规则和节点上下文一并拼进用户消息，适合 qvq 这类对 system 遵循较弱的模型。",
+    },
+  ]
+
+  return (
+    <div className="grid gap-2 md:grid-cols-2">
+      {options.map((option) => {
+        const active = option.value === value
+        return (
+          <button
+            key={option.value}
+            type="button"
+            disabled={disabled}
+            onClick={() => onChange(option.value)}
+            className={cn(
+              "rounded-[1rem] border px-4 py-3 text-left transition",
+              active
+                ? "border-sky-400 bg-sky-50/80 shadow-[0_10px_30px_rgba(14,116,144,0.12)]"
+                : "border-border/70 bg-background hover:border-sky-200 hover:bg-sky-50/40",
+              disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer",
+            )}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm font-semibold text-foreground">{option.title}</span>
+              <span
+                className={cn(
+                  "inline-flex h-5 min-w-5 items-center justify-center rounded-full border px-1.5 text-[11px] font-semibold",
+                  active ? "border-sky-400 bg-sky-500 text-white" : "border-border/60 text-muted-foreground",
+                )}
+              >
+                {active ? "当前" : "可选"}
+              </span>
+            </div>
+            <p className="mt-2 text-xs leading-5 text-muted-foreground">{option.description}</p>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 function summarizeTemplateItems(items: ReviewChainTemplateItem[]) {
   return items
     .map((item) => {
@@ -116,6 +175,44 @@ function isDirectoryPickerAbort(err: unknown) {
   return err instanceof DOMException && err.name === "AbortError"
 }
 
+function SettingsPanelSwitchCard(props: {
+  title: string
+  status: string
+  icon: typeof Settings2
+  active: boolean
+  tone?: "default" | "success" | "warning"
+  onClick: () => void
+}) {
+  const { title, status, icon: Icon, active, tone = "default", onClick } = props
+  const toneClass =
+    tone === "success"
+      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+      : tone === "warning"
+        ? "border-amber-200 bg-amber-50 text-amber-700"
+        : "border-slate-200 bg-slate-50 text-slate-600"
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "group rounded-[1.55rem] border px-4 py-4 text-left transition-all",
+        active
+          ? "border-primary/30 bg-[linear-gradient(180deg,hsl(var(--primary)/0.11),hsl(var(--background)))] shadow-[0_26px_60px_-40px_hsl(var(--primary)/0.45)]"
+          : "border-border/70 bg-card hover:border-primary/18 hover:bg-[hsl(var(--primary)/0.05)]",
+      )}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[color:var(--theme-soft-bg)] text-primary">
+          <Icon className="h-5 w-5" />
+        </div>
+        <span className={cn("inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold", toneClass)}>{status}</span>
+      </div>
+      <div className="mt-4 text-base font-semibold tracking-tight text-foreground">{title}</div>
+    </button>
+  )
+}
+
 export function ProjectSettingsPage() {
   const { projectId } = useParams()
   const navigate = useNavigate()
@@ -124,10 +221,7 @@ export function ProjectSettingsPage() {
   const editProjectM = useEditProject()
   const capabilitiesQ = useSystemCapabilities()
   const authEnabled = capabilitiesQ.data?.authEnabled ?? false
-  const currentUserQ = useCurrentUser(authEnabled)
-  const currentUserRoles = currentUserQ.data?.roles ?? []
-  const canEditGlobalLlmFallback = authEnabled ? currentUserRoles.includes("super_admin") || currentUserRoles.includes("admin") : true
-  const globalLlmSettingsQ = useGlobalLlmSettings(!authEnabled || canEditGlobalLlmFallback)
+  const globalLlmSettingsQ = useGlobalLlmSettings(capabilitiesQ.data !== undefined && !authEnabled)
   const updateGlobalLlmSettingsM = useUpdateGlobalLlmSettings()
   const myLlmSettingsQ = useMyLlmSettings(authEnabled)
   const updateMyLlmSettingsM = useUpdateMyLlmSettings()
@@ -137,7 +231,6 @@ export function ProjectSettingsPage() {
 
   const layersQ = useLayers(pid)
   const projectConfigQ = useProjectConfig(pid)
-  const storageConfigQ = useProjectStorageConfig(pid)
   const instancesQ = useInstances(pid)
   const importLearningObjectsM = useImportLearningObjectsFromBrowser(pid)
   const setLayerConfigM = useSetLayerConfig(pid)
@@ -189,15 +282,42 @@ export function ProjectSettingsPage() {
     })
     return out
   }, [missingInstances, missingRecallPointQs])
+  const actionableMissingInstances = useMemo(
+    () =>
+      missingInstances.filter((_, index) => {
+        const query = missingRecallPointQs[index]
+        if (!query || query.isLoading || query.error) return true
+        return (query.data?.recallPointIds ?? []).length > 0
+      }),
+    [missingInstances, missingRecallPointQs],
+  )
+  const missingRepairCountsLoading = missingInstances.length > 0 && missingRecallPointQs.some((query) => query.isLoading)
 
   const canChooseDirectory = !!pid && !directoryBinding.loading && directoryBinding.supported
   const canRequestDirectoryPermission =
     !!pid && !directoryBinding.loading && (directoryPermission === "prompt" || directoryPermission === "denied")
   const canClearDirectory = !!pid && !directoryBinding.loading && directoryPermission !== "missing"
   const directoryBusy = directoryAction !== null
+  const [activePanel, setActivePanel] = useState<SettingsPanelKey>("basic")
+
+  const directoryStatusText = browserLocalMediaEnabled
+    ? directoryPermission === "granted"
+      ? "目录已接通"
+      : directoryPermission === "denied"
+        ? "等待重授权"
+        : directoryPermission === "prompt"
+          ? "等待授权"
+          : "待配置"
+    : "基础配置"
+  const aiStatusText = capabilitiesQ.data?.llmConfigured ? "LLM 已可用" : "LLM 未接通"
+  const missingStatusText = missingRepairCountsLoading
+    ? "整理中..."
+    : actionableMissingInstances.length > 0
+      ? `${actionableMissingInstances.length} 个待修复`
+      : "当前无缺失实例"
 
   async function onRemapMissingInstance(fromInstanceId: string) {
-    const sourceInstance = missingInstances.find((item) => item.instanceId === fromInstanceId)
+    const sourceInstance = actionableMissingInstances.find((item) => item.instanceId === fromInstanceId) ?? missingInstances.find((item) => item.instanceId === fromInstanceId)
     const toInstanceId = remapTargets[fromInstanceId] ?? (sourceInstance ? suggestTargetInstance(sourceInstance, presentInstances) : "")
     if (!toInstanceId) return
     const targetInstance = presentInstances.find((item) => item.instanceId === toInstanceId)
@@ -309,12 +429,59 @@ export function ProjectSettingsPage() {
 
   return (
     <div className="space-y-5">
-      <ProjectTitleCard
+      <Card className="theme-card">
+        <CardHeader className="pb-4">
+          <CardTitle>设置分区</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-3 md:grid-cols-3">
+          <SettingsPanelSwitchCard
+            title="基本设置"
+            status={directoryStatusText}
+            icon={Settings2}
+            active={activePanel === "basic"}
+            tone={directoryPermission === "granted" ? "success" : "default"}
+            onClick={() => setActivePanel("basic")}
+          />
+          <SettingsPanelSwitchCard
+            title="AI 设置"
+            status={aiStatusText}
+            icon={Sparkles}
+            active={activePanel === "ai"}
+            tone={capabilitiesQ.data?.llmConfigured ? "success" : "default"}
+            onClick={() => setActivePanel("ai")}
+          />
+          <SettingsPanelSwitchCard
+            title="缺失实例设置"
+            status={missingStatusText}
+            icon={TriangleAlert}
+            active={activePanel === "missing"}
+            tone={missingRepairCountsLoading || actionableMissingInstances.length > 0 ? "warning" : "default"}
+            onClick={() => setActivePanel("missing")}
+          />
+        </CardContent>
+      </Card>
+
+      {activePanel === "basic" ? (
+        <>
+      <BasicInfoCard
+        browserLocalMediaEnabled={browserLocalMediaEnabled}
+        canChooseDirectory={canChooseDirectory}
+        canClearDirectory={canClearDirectory}
+        canRequestDirectoryPermission={canRequestDirectoryPermission}
+        directoryAction={directoryAction}
+        directoryBinding={directoryBinding}
+        directoryBusy={directoryBusy}
+        directoryPermission={directoryPermission}
+        importError={importLearningObjectsM.error}
         isLoading={projectQ.isLoading}
         isPending={editProjectM.isPending}
         projectTitle={projectQ.project?.title ?? ""}
         queryError={projectQ.error}
         saveError={editProjectM.error}
+        onAuthorizeDirectory={onAuthorizeDirectory}
+        onClearDirectoryBinding={onClearDirectoryBinding}
+        onImportAuthorizedDirectory={onImportAuthorizedDirectory}
+        onRequestDirectoryPermission={onRequestDirectoryPermission}
         onSave={async (title) => {
           try {
             await editProjectM.mutateAsync({ projectId: pid, title })
@@ -325,184 +492,39 @@ export function ProjectSettingsPage() {
         }}
       />
 
-      {browserLocalMediaEnabled ? (
-        <Card className="theme-card">
-          <CardHeader>
-            <CardTitle>素材接入</CardTitle>
-            <CardDescription>先确认当前目录状态，再在需要时同步目录内容。</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4 text-sm">
-            <div className="theme-status-surface rounded-[1.35rem] border border-border/70 p-4">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                <div className="space-y-2">
-                  <div className="flex flex-wrap items-center gap-3">
-                    <span className="theme-meta-strong">本地素材目录</span>
-                    <span
-                      className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${describeDirectoryPermissionTone(directoryPermission)}`}
-                    >
-                      {describeDirectoryPermission(directoryPermission)}
-                    </span>
-                  </div>
-                  <div className="text-sm text-foreground">
-                    {directoryBinding.handleName ? directoryBinding.handleName : "当前项目还没有绑定浏览器目录。"}
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    {directoryBinding.handleName
-                      ? "目录记录已和当前项目关联。"
-                      : "绑定后才可以把媒体文件导入成学习对象树。"}
-                  </div>
-                </div>
+      <LayerConfigEditor
+        key={layerConfigVersion}
+        canSave={!!pid}
+        initialConfig={effectiveLayerConfig}
+        layerIndexes={layerIndexes}
+        layersError={layersQ.error}
+        mutationError={setLayerConfigM.error}
+        projectConfigError={projectConfigQ.error}
+        selectedLayerIndex={effectiveConfigLayerIndex}
+        saving={setLayerConfigM.isPending}
+        onSave={async ({ kNode, kPoint, reviewChainTemplate }) => {
+          try {
+            await setLayerConfigM.mutateAsync({
+              layerIndex: effectiveConfigLayerIndex,
+              kNode,
+              kPoint,
+              reviewChainTemplate,
+            })
+            showSuccessFeedback(
+              "层配置已保存",
+              `第 ${effectiveConfigLayerIndex} 层现在使用 ${reviewChainTemplate.length} 个模板步骤，节点阈值 ${kNode}，复述点阈值 ${kPoint}。`,
+            )
+          } catch (err) {
+            showErrorFeedback("保存层配置失败", formatApiError(err))
+          }
+        }}
+        onSelectedLayerIndexChange={setConfigLayerIndex}
+      />
+        </>
+      ) : null}
 
-                <div className="flex flex-wrap gap-2 lg:justify-end">
-                  {directoryPermission === "granted" ? (
-                    <>
-                      <Button type="button" onClick={() => void onImportAuthorizedDirectory()} disabled={directoryBusy}>
-                        {directoryAction === "import" ? "同步中..." : "同步目录内容"}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => void onAuthorizeDirectory()}
-                        disabled={!canChooseDirectory || directoryBusy}
-                      >
-                        {directoryAction === "authorize" ? "打开目录选择器..." : "更换目录"}
-                      </Button>
-                    </>
-                  ) : null}
-
-                  {(directoryPermission === "missing" || directoryPermission === "unsupported") ? (
-                    <Button type="button" onClick={() => void onAuthorizeDirectory()} disabled={!canChooseDirectory || directoryBusy}>
-                      {directoryAction === "authorize" ? "打开目录选择器..." : "选择目录"}
-                    </Button>
-                  ) : null}
-
-                  {(directoryPermission === "prompt" || directoryPermission === "denied") ? (
-                    <>
-                      <Button
-                        type="button"
-                        onClick={() => void onRequestDirectoryPermission()}
-                        disabled={!canRequestDirectoryPermission || directoryBusy}
-                      >
-                        {directoryAction === "request" ? "请求中..." : "继续授权"}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => void onAuthorizeDirectory()}
-                        disabled={!canChooseDirectory || directoryBusy}
-                      >
-                        {directoryAction === "authorize" ? "打开目录选择器..." : "更换目录"}
-                      </Button>
-                    </>
-                  ) : null}
-                </div>
-              </div>
-
-              {(directoryPermission === "granted" || directoryPermission === "prompt" || directoryPermission === "denied") && canClearDirectory ? (
-                <div className="mt-4 border-t border-border/60 pt-3">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="px-0 text-muted-foreground"
-                    onClick={() => void onClearDirectoryBinding()}
-                    disabled={!canClearDirectory || directoryBusy}
-                  >
-                    {directoryAction === "clear" ? "清除中..." : "清除本地绑定"}
-                  </Button>
-                </div>
-              ) : null}
-            </div>
-
-            <details className="rounded-[1.1rem] border border-border/70 bg-muted/20 px-4 py-3">
-              <summary className="cursor-pointer list-none text-sm font-medium text-foreground">了解目录导入机制</summary>
-              <div className="mt-3 space-y-2 text-xs leading-6 text-muted-foreground">
-                <p>浏览器目录授权和项目绑定是分开的。目录本身保存在当前浏览器里，项目只记录你绑定了哪一个目录句柄。</p>
-                <p>重新同步时只会更新媒体文件和学习对象树，不会推进复习调度，也不会自动改动复述链。</p>
-              </div>
-            </details>
-
-            {directoryBinding.error ? <p className="text-sm text-destructive">{directoryBinding.error}</p> : null}
-            {!directoryBinding.supported ? (
-              <p className="text-sm text-muted-foreground">当前浏览器不支持目录授权。首版建议使用桌面 Chrome 或 Edge。</p>
-            ) : null}
-            {importLearningObjectsM.error ? <p className="text-sm text-destructive">{formatApiError(importLearningObjectsM.error)}</p> : null}
-          </CardContent>
-        </Card>
-      ) : (
-        <Card className="theme-card">
-          <CardHeader>
-            <CardTitle>素材接入</CardTitle>
-            <CardDescription>当前部署没有开启浏览器本地目录模式。</CardDescription>
-          </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            这个项目暂时不会显示目录选择器，你仍然可以在下面查看服务端路径和同步策略。
-          </CardContent>
-        </Card>
-      )}
-
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_360px]">
-        <LayerConfigEditor
-          key={layerConfigVersion}
-          canSave={!!pid}
-          initialConfig={effectiveLayerConfig}
-          layerIndexes={layerIndexes}
-          layersError={layersQ.error}
-          mutationError={setLayerConfigM.error}
-          projectConfigError={projectConfigQ.error}
-          selectedLayerIndex={effectiveConfigLayerIndex}
-          saving={setLayerConfigM.isPending}
-          onSave={async ({ kNode, kPoint, reviewChainTemplate }) => {
-            try {
-              await setLayerConfigM.mutateAsync({
-                layerIndex: effectiveConfigLayerIndex,
-                kNode,
-                kPoint,
-                reviewChainTemplate,
-              })
-              showSuccessFeedback(
-                "层配置已保存",
-                `第 ${effectiveConfigLayerIndex} 层现在使用 ${reviewChainTemplate.length} 个模板步骤，节点阈值 ${kNode}，复述点阈值 ${kPoint}。`,
-              )
-            } catch (err) {
-              showErrorFeedback("保存层配置失败", formatApiError(err))
-            }
-          }}
-          onSelectedLayerIndexChange={setConfigLayerIndex}
-        />
-
-        <div className="space-y-4">
-          <Card className="theme-card">
-            <CardHeader>
-              <CardTitle>服务端路径</CardTitle>
-              <CardDescription>只读查看当前项目的目录绑定。</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4 text-sm">
-              {storageConfigQ.isLoading ? <p className="text-sm text-muted-foreground">加载中...</p> : null}
-              {storageConfigQ.error ? <p className="text-sm text-destructive">{formatApiError(storageConfigQ.error)}</p> : null}
-              {storageConfigQ.data ? (
-                <div className="space-y-3">
-                  <div className="rounded-[1.1rem] border border-border/70 bg-background/85 px-4 py-3">
-                    <div className="text-xs text-muted-foreground">项目根路径</div>
-                    <div className="mt-2 break-all font-mono text-xs text-foreground">{storageConfigQ.data.projectRoot}</div>
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="rounded-[1.1rem] border border-border/70 bg-muted/20 px-4 py-3">
-                      <div className="text-xs text-muted-foreground">同步策略</div>
-                      <div className="mt-1 font-medium text-foreground">{describeFsSyncPolicy(storageConfigQ.data.fsSyncPolicy)}</div>
-                    </div>
-                    <div className="rounded-[1.1rem] border border-border/70 bg-muted/20 px-4 py-3">
-                      <div className="text-xs text-muted-foreground">学习对象目录</div>
-                      <div className="mt-1 break-all font-mono text-xs text-foreground">{storageConfigQ.data.learningObjectRoot}</div>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-              {!storageConfigQ.isLoading && !storageConfigQ.error && !storageConfigQ.data ? (
-                <p className="text-sm text-muted-foreground">暂时还没有项目路径信息。</p>
-              ) : null}
-            </CardContent>
-          </Card>
-
+      {activePanel === "ai" ? (
+        <div className="space-y-5">
           {authEnabled ? (
             <>
               <UserLlmSettingsCard
@@ -511,103 +533,79 @@ export function ProjectSettingsPage() {
                 settings={myLlmSettingsQ.data}
                 isLoading={myLlmSettingsQ.isLoading}
                 isPending={updateMyLlmSettingsM.isPending}
-                onClearApiKey={async (baseUrl, modelName) => {
+                onClearApiKey={async ({ baseUrl, modelName, promptAssemblyMode }) => {
                   try {
-                    await updateMyLlmSettingsM.mutateAsync({ baseUrl, modelName, clearApiKey: true })
-                    showSuccessFeedback("我的 LLM 密钥已清除", "当前账号会停止使用已保存密钥，并在可用时回退到部署级配置。")
+                    await updateMyLlmSettingsM.mutateAsync({ baseUrl, modelName, promptAssemblyMode, clearApiKey: true })
+                    showSuccessFeedback("我的 LLM 密钥已清除", "当前账号会停止使用已保存密钥；未重新保存前，这个账号的 LLM 能力视为未接通。")
                   } catch (err) {
                     showErrorFeedback("清除我的 LLM 密钥失败", formatApiError(err))
                   }
                 }}
-                onSave={async ({ baseUrl, modelName, apiKey }) => {
+                onSave={async ({ baseUrl, modelName, promptAssemblyMode, apiKey }) => {
                   try {
-                    await updateMyLlmSettingsM.mutateAsync({ baseUrl, modelName, apiKey })
+                    await updateMyLlmSettingsM.mutateAsync({ baseUrl, modelName, promptAssemblyMode, apiKey })
                     showSuccessFeedback("我的 LLM 设置已保存", "当前账号之后在任意设备登录时都会复用这份 LLM 服务配置。")
                   } catch (err) {
                     showErrorFeedback("保存我的 LLM 设置失败", formatApiError(err))
                   }
                 }}
               />
-
-              <SubtitleUsageCard />
-
-              {canEditGlobalLlmFallback ? (
-                <GlobalLlmSettingsCard
-                  title="部署级 LLM 回退"
-                  description="这是管理员可维护的部署级默认配置。当前用户没有单独保存 LLM 配置时，系统会在可用时回退到这里。"
-                  saveLabel="保存部署级回退"
-                  queryError={globalLlmSettingsQ.error}
-                  saveError={updateGlobalLlmSettingsM.error}
-                  settings={globalLlmSettingsQ.data}
-                  isLoading={globalLlmSettingsQ.isLoading}
-                  isPending={updateGlobalLlmSettingsM.isPending}
-                  onClearApiKey={async (baseUrl, modelName) => {
-                    try {
-                      await updateGlobalLlmSettingsM.mutateAsync({ baseUrl, modelName, clearApiKey: true })
-                      showSuccessFeedback("部署级 LLM 密钥已清除", "系统会停止使用已保存的部署级密钥，并在可用时回退到环境变量。")
-                    } catch (err) {
-                      showErrorFeedback("清除部署级 LLM 密钥失败", formatApiError(err))
-                    }
-                  }}
-                  onSave={async ({ baseUrl, modelName, apiKey }) => {
-                    try {
-                      await updateGlobalLlmSettingsM.mutateAsync({ baseUrl, modelName, apiKey })
-                      showSuccessFeedback("部署级 LLM 回退已保存", "未单独配置 LLM 的用户会继续复用这份服务配置。")
-                    } catch (err) {
-                      showErrorFeedback("保存部署级 LLM 回退失败", formatApiError(err))
-                    }
-                  }}
-                />
-              ) : null}
             </>
           ) : (
             <>
               <GlobalLlmSettingsCard
                 title="全局 LLM 设置"
-                description="填写一次部署级密钥后，后端即可统一代理后续大模型能力调用。"
                 saveLabel="保存全局设置"
                 queryError={globalLlmSettingsQ.error}
                 saveError={updateGlobalLlmSettingsM.error}
                 settings={globalLlmSettingsQ.data}
                 isLoading={globalLlmSettingsQ.isLoading}
                 isPending={updateGlobalLlmSettingsM.isPending}
-                onClearApiKey={async (baseUrl, modelName) => {
+                onClearApiKey={async ({ baseUrl, modelName, promptAssemblyMode }) => {
                   try {
-                    await updateGlobalLlmSettingsM.mutateAsync({ baseUrl, modelName, clearApiKey: true })
-                    showSuccessFeedback("全局 LLM 密钥已清除", "系统会停止使用已保存的密钥，并在可用时回退到部署级配置。")
+                    await updateGlobalLlmSettingsM.mutateAsync({ baseUrl, modelName, promptAssemblyMode, clearApiKey: true })
+                    showSuccessFeedback("全局 LLM 密钥已清除", "系统会停止使用已保存的全局密钥。")
                   } catch (err) {
                     showErrorFeedback("清除全局 LLM 密钥失败", formatApiError(err))
                   }
                 }}
-                onSave={async ({ baseUrl, modelName, apiKey }) => {
+                onSave={async ({ baseUrl, modelName, promptAssemblyMode, apiKey }) => {
                   try {
-                    await updateGlobalLlmSettingsM.mutateAsync({ baseUrl, modelName, apiKey })
+                    await updateGlobalLlmSettingsM.mutateAsync({ baseUrl, modelName, promptAssemblyMode, apiKey })
                     showSuccessFeedback("全局 LLM 设置已保存", "后端现在会通过已配置服务代理后续的大模型能力请求。")
                   } catch (err) {
                     showErrorFeedback("保存全局 LLM 设置失败", formatApiError(err))
                   }
                 }}
               />
-              <SubtitleUsageCard />
             </>
           )}
         </div>
-      </div>
+      ) : null}
 
+      {activePanel === "missing" ? (
       <Card className="theme-card">
         <CardHeader>
           <CardTitle>缺失材料修复</CardTitle>
-          <CardDescription>旧实例会被标记为缺失，相关复述点仍需要在这里手动迁移。</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4 text-sm">
           {instancesQ.isLoading ? <p className="text-sm text-muted-foreground">加载实例中...</p> : null}
           {instancesQ.error ? <p className="text-sm text-destructive">{formatApiError(instancesQ.error)}</p> : null}
-          {!instancesQ.isLoading && !instancesQ.error && missingInstances.length === 0 ? (
-            <div className="rounded-xl border bg-muted/30 p-4 text-sm text-muted-foreground">当前没有缺失材料实例。</div>
+          {!instancesQ.isLoading && !instancesQ.error && !missingRepairCountsLoading && actionableMissingInstances.length > 0 ? (
+            <div className="rounded-xl border bg-muted/30 p-4 text-sm text-muted-foreground">
+              这里只显示仍有活跃复述点需要迁移的缺失实例；已经没有迁移价值的旧实例会自动从列表里消失。
+            </div>
+          ) : null}
+          {!instancesQ.isLoading && !instancesQ.error && missingRepairCountsLoading ? (
+            <div className="rounded-xl border bg-muted/30 p-4 text-sm text-muted-foreground">正在整理仍需迁移的缺失实例...</div>
+          ) : null}
+          {!instancesQ.isLoading && !instancesQ.error && !missingRepairCountsLoading && actionableMissingInstances.length === 0 ? (
+            <div className="rounded-xl border bg-muted/30 p-4 text-sm text-muted-foreground">当前没有需要迁移的缺失材料实例。</div>
           ) : null}
 
           <div className="space-y-3">
-            {missingInstances.map((instance, index) => {
+            {actionableMissingInstances.map((instance) => {
+              const index = missingInstances.findIndex((item) => item.instanceId === instance.instanceId)
               const recallPointIds = recallPointIdsByInstanceId[instance.instanceId] ?? []
               const countQuery = missingRecallPointQs[index]
               const targetInstanceId = remapTargets[instance.instanceId] ?? suggestTargetInstance(instance, presentInstances)
@@ -677,23 +675,50 @@ export function ProjectSettingsPage() {
           {bulkRemapM.error ? <p className="text-sm text-destructive">{formatApiError(bulkRemapM.error)}</p> : null}
         </CardContent>
       </Card>
+      ) : null}
     </div>
   )
 }
 
-function ProjectTitleCard({
+function BasicInfoCard({
+  browserLocalMediaEnabled,
+  canChooseDirectory,
+  canClearDirectory,
+  canRequestDirectoryPermission,
+  directoryAction,
+  directoryBinding,
+  directoryBusy,
+  directoryPermission,
+  importError,
   isLoading,
   isPending,
   projectTitle,
   queryError,
   saveError,
+  onAuthorizeDirectory,
+  onClearDirectoryBinding,
+  onImportAuthorizedDirectory,
+  onRequestDirectoryPermission,
   onSave,
 }: {
+  browserLocalMediaEnabled: boolean
+  canChooseDirectory: boolean
+  canClearDirectory: boolean
+  canRequestDirectoryPermission: boolean
+  directoryAction: "authorize" | "request" | "clear" | "import" | null
+  directoryBinding: ReturnType<typeof useProjectDirectoryBinding>
+  directoryBusy: boolean
+  directoryPermission: "unsupported" | "missing" | "prompt" | "granted" | "denied"
+  importError: unknown
   isLoading: boolean
   isPending: boolean
   projectTitle: string
   queryError: unknown
   saveError: unknown
+  onAuthorizeDirectory: () => Promise<void>
+  onClearDirectoryBinding: () => Promise<void>
+  onImportAuthorizedDirectory: (silentSuccess?: boolean) => Promise<void>
+  onRequestDirectoryPermission: () => Promise<void>
   onSave: (title: string) => Promise<void>
 }) {
   const [titleDraft, setTitleDraft] = useState(projectTitle)
@@ -707,45 +732,143 @@ function ProjectTitleCard({
 
   return (
     <Card className="theme-card">
-      <CardHeader className="pb-4">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <CardTitle>项目名称</CardTitle>
-          <div className="theme-meta max-w-full px-3 py-1.5 text-sm">
-            <span className="mr-2 text-muted-foreground">当前</span>
-            <span className="truncate font-semibold text-foreground">{projectTitle || (isLoading ? "加载中..." : "未找到项目")}</span>
-          </div>
-        </div>
+      <CardHeader>
+        <CardTitle>基本信息</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-3 pt-0 text-sm">
-        <form
-          className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center"
-          onSubmit={(event) => {
-            event.preventDefault()
-            if (!canSave) return
-            void onSave(trimmedTitle)
-          }}
-        >
-          <div>
-            <Label htmlFor="projectTitle" className="sr-only">
-              新名称
-            </Label>
-            <Input
-              id="projectTitle"
-              value={titleDraft}
-              onChange={(event) => setTitleDraft(event.target.value)}
-              placeholder="输入新的项目名称"
-              disabled={isLoading || isPending}
-            />
+      <CardContent className="space-y-5 pt-0 text-sm">
+        <section className="space-y-3">
+          <div className="space-y-1">
+            <div className="text-sm font-semibold text-foreground">项目名称</div>
           </div>
-          <div className="flex items-center justify-end">
-            <Button type="submit" disabled={!canSave} className="w-full md:w-auto">
-              {isPending ? "保存中..." : "保存项目名称"}
-            </Button>
-          </div>
-        </form>
+          <form
+            className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center"
+            onSubmit={(event) => {
+              event.preventDefault()
+              if (!canSave) return
+              void onSave(trimmedTitle)
+            }}
+          >
+            <div>
+              <Label htmlFor="projectTitle" className="sr-only">
+                新名称
+              </Label>
+              <Input
+                id="projectTitle"
+                value={titleDraft}
+                onChange={(event) => setTitleDraft(event.target.value)}
+                placeholder="输入新的项目名称"
+                disabled={isLoading || isPending}
+              />
+            </div>
+            <div className="flex items-center justify-end">
+              <Button type="submit" disabled={!canSave} className="w-full md:w-auto">
+                {isPending ? "保存中..." : "保存项目名称"}
+              </Button>
+            </div>
+          </form>
+          {queryError ? <p className="text-sm text-destructive">{formatApiError(queryError)}</p> : null}
+          {saveError ? <p className="text-sm text-destructive">{formatApiError(saveError)}</p> : null}
+        </section>
 
-        {queryError ? <p className="text-sm text-destructive">{formatApiError(queryError)}</p> : null}
-        {saveError ? <p className="text-sm text-destructive">{formatApiError(saveError)}</p> : null}
+        <div className="border-t border-border/60" />
+
+        <section className="space-y-3">
+          <div className="space-y-1">
+            <div className="text-sm font-semibold text-foreground">素材接入</div>
+          </div>
+
+          {browserLocalMediaEnabled ? (
+            <div className="theme-status-surface rounded-[1.35rem] border border-border/70 p-4">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="theme-meta-strong">本地素材目录</span>
+                    <span
+                      className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${describeDirectoryPermissionTone(directoryPermission)}`}
+                    >
+                      {describeDirectoryPermission(directoryPermission)}
+                    </span>
+                  </div>
+                  <div className="text-sm text-foreground">
+                    {directoryBinding.handleName ? directoryBinding.handleName : "当前项目还没有绑定浏览器目录。"}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {directoryBinding.handleName
+                      ? "目录记录已和当前项目关联。"
+                      : "绑定后才可以把媒体文件导入成学习对象树。"}
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2 lg:justify-end">
+                  {directoryPermission === "granted" ? (
+                    <>
+                      <Button type="button" onClick={() => void onImportAuthorizedDirectory()} disabled={directoryBusy}>
+                        {directoryAction === "import" ? "同步中..." : "同步目录内容"}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => void onAuthorizeDirectory()}
+                        disabled={!canChooseDirectory || directoryBusy}
+                      >
+                        {directoryAction === "authorize" ? "打开目录选择器..." : "更换目录"}
+                      </Button>
+                    </>
+                  ) : null}
+
+                  {(directoryPermission === "missing" || directoryPermission === "unsupported") ? (
+                    <Button type="button" onClick={() => void onAuthorizeDirectory()} disabled={!canChooseDirectory || directoryBusy}>
+                      {directoryAction === "authorize" ? "打开目录选择器..." : "选择目录"}
+                    </Button>
+                  ) : null}
+
+                  {(directoryPermission === "prompt" || directoryPermission === "denied") ? (
+                    <>
+                      <Button
+                        type="button"
+                        onClick={() => void onRequestDirectoryPermission()}
+                        disabled={!canRequestDirectoryPermission || directoryBusy}
+                      >
+                        {directoryAction === "request" ? "请求中..." : "继续授权"}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => void onAuthorizeDirectory()}
+                        disabled={!canChooseDirectory || directoryBusy}
+                      >
+                        {directoryAction === "authorize" ? "打开目录选择器..." : "更换目录"}
+                      </Button>
+                    </>
+                  ) : null}
+
+                  {(directoryPermission === "granted" || directoryPermission === "prompt" || directoryPermission === "denied") &&
+                  canClearDirectory ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="text-muted-foreground"
+                      onClick={() => void onClearDirectoryBinding()}
+                      disabled={!canClearDirectory || directoryBusy}
+                    >
+                      {directoryAction === "clear" ? "清除中..." : "清除本地绑定"}
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-[1.2rem] border border-border/70 bg-muted/15 px-4 py-4 text-sm text-muted-foreground">
+              当前部署没有开启浏览器本地目录模式。
+            </div>
+          )}
+
+          {directoryBinding.error ? <p className="text-sm text-destructive">{directoryBinding.error}</p> : null}
+          {!directoryBinding.supported ? (
+            <p className="text-sm text-muted-foreground">当前浏览器不支持目录授权。首版建议使用桌面 Chrome 或 Edge。</p>
+          ) : null}
+          {importError ? <p className="text-sm text-destructive">{formatApiError(importError)}</p> : null}
+        </section>
       </CardContent>
     </Card>
   )
@@ -804,7 +927,6 @@ function SavedApiKeyInput({
 
 function GlobalLlmSettingsCard({
   title,
-  description,
   saveLabel,
   settings,
   isLoading,
@@ -815,12 +937,12 @@ function GlobalLlmSettingsCard({
   onClearApiKey,
 }: {
   title: string
-  description: string
   saveLabel: string
   settings:
     | {
         baseUrl: string
         modelName: string
+        promptAssemblyMode: LlmPromptAssemblyMode
         savedApiKeyConfigured: boolean
         savedApiKeyPreview: string | null
         llmConfigured: boolean
@@ -832,18 +954,20 @@ function GlobalLlmSettingsCard({
   isPending: boolean
   queryError: unknown
   saveError: unknown
-  onSave: (payload: { baseUrl: string; modelName: string; apiKey?: string }) => Promise<void>
-  onClearApiKey: (baseUrl: string, modelName: string) => Promise<void>
+  onSave: (payload: { baseUrl: string; modelName: string; promptAssemblyMode: LlmPromptAssemblyMode; apiKey?: string }) => Promise<void>
+  onClearApiKey: (payload: { baseUrl: string; modelName: string; promptAssemblyMode: LlmPromptAssemblyMode }) => Promise<void>
 }) {
   const [baseUrlDraft, setBaseUrlDraft] = useState("")
   const [modelDraft, setModelDraft] = useState("")
   const [apiKeyDraft, setApiKeyDraft] = useState("")
+  const [promptAssemblyModeDraft, setPromptAssemblyModeDraft] = useState<LlmPromptAssemblyMode>("system")
 
   useEffect(() => {
     setBaseUrlDraft(settings?.baseUrl ?? "")
     setModelDraft(settings?.modelName ?? "")
     setApiKeyDraft("")
-  }, [settings?.baseUrl, settings?.modelName])
+    setPromptAssemblyModeDraft(settings?.promptAssemblyMode ?? "system")
+  }, [settings?.baseUrl, settings?.modelName, settings?.promptAssemblyMode])
 
   const trimmedBaseUrl = baseUrlDraft.trim()
   const trimmedModel = modelDraft.trim()
@@ -853,7 +977,12 @@ function GlobalLlmSettingsCard({
     !isPending &&
     !!trimmedBaseUrl &&
     !!trimmedModel &&
-    (trimmedBaseUrl !== (settings?.baseUrl ?? "") || trimmedModel !== (settings?.modelName ?? "") || !!trimmedApiKey)
+    (
+      trimmedBaseUrl !== (settings?.baseUrl ?? "") ||
+      trimmedModel !== (settings?.modelName ?? "") ||
+      promptAssemblyModeDraft !== (settings?.promptAssemblyMode ?? "system") ||
+      !!trimmedApiKey
+    )
   const canClearApiKey = !isLoading && !isPending && !!settings?.savedApiKeyConfigured
 
   return (
@@ -862,7 +991,6 @@ function GlobalLlmSettingsCard({
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div className="space-y-1">
             <CardTitle>{title}</CardTitle>
-            <CardDescription>{description}</CardDescription>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <span
@@ -907,27 +1035,32 @@ function GlobalLlmSettingsCard({
                 onDraftChange={setApiKeyDraft}
                 savedApiKeyConfigured={!!settings?.savedApiKeyConfigured}
                 emptyPlaceholder="输入新的 API Key"
-                savedPlaceholder="已保存密钥；如需更换，直接输入新值"
+                savedPlaceholder="输入新的 API Key"
                 disabled={isLoading || isPending}
               />
-              <p className="text-xs text-muted-foreground">
-                {settings?.savedApiKeyConfigured
-                  ? `当前已保存密钥：${settings.savedApiKeyPreview ?? "已配置"}。保持不改时无需重新填写。`
-                  : "当前还没有保存部署级 API Key。"}
-              </p>
             </div>
-          </div>
-
-          <div className="grid gap-3 rounded-[1rem] border border-border/60 bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
-            <p>这张卡片是全局设置，不跟单个项目绑定。项目设置页只是先把入口放在这里，方便你尽快把能力接通。</p>
-            <p>保存后不需要用户本地下载模型。后续真正的问答或生成接口会直接复用这份服务配置。</p>
+            <div className="space-y-2">
+              <Label>提示拼接模式</Label>
+              <PromptAssemblyModeSelector
+                value={promptAssemblyModeDraft}
+                onChange={setPromptAssemblyModeDraft}
+                disabled={isLoading || isPending}
+              />
+            </div>
           </div>
 
           <div className="flex flex-wrap gap-2">
             <Button
               type="button"
               disabled={!canSave}
-              onClick={() => void onSave({ baseUrl: trimmedBaseUrl, modelName: trimmedModel, apiKey: trimmedApiKey || undefined })}
+              onClick={() =>
+                void onSave({
+                  baseUrl: trimmedBaseUrl,
+                  modelName: trimmedModel,
+                  promptAssemblyMode: promptAssemblyModeDraft,
+                  apiKey: trimmedApiKey || undefined,
+                })
+              }
             >
               {isPending ? "保存中..." : saveLabel}
             </Button>
@@ -935,7 +1068,13 @@ function GlobalLlmSettingsCard({
               type="button"
               variant="outline"
               disabled={!canClearApiKey}
-              onClick={() => void onClearApiKey(trimmedBaseUrl || settings?.baseUrl || "", trimmedModel || settings?.modelName || "")}
+              onClick={() =>
+                void onClearApiKey({
+                  baseUrl: trimmedBaseUrl || settings?.baseUrl || "",
+                  modelName: trimmedModel || settings?.modelName || "",
+                  promptAssemblyMode: promptAssemblyModeDraft,
+                })
+              }
             >
               清除已保存密钥
             </Button>
@@ -963,6 +1102,7 @@ function UserLlmSettingsCard({
     | {
         baseUrl: string
         modelName: string
+        promptAssemblyMode: LlmPromptAssemblyMode
         savedApiKeyConfigured: boolean
         savedApiKeyPreview: string | null
         llmConfigured: boolean
@@ -974,18 +1114,20 @@ function UserLlmSettingsCard({
   isPending: boolean
   queryError: unknown
   saveError: unknown
-  onSave: (payload: { baseUrl: string; modelName: string; apiKey?: string }) => Promise<void>
-  onClearApiKey: (baseUrl: string, modelName: string) => Promise<void>
+  onSave: (payload: { baseUrl: string; modelName: string; promptAssemblyMode: LlmPromptAssemblyMode; apiKey?: string }) => Promise<void>
+  onClearApiKey: (payload: { baseUrl: string; modelName: string; promptAssemblyMode: LlmPromptAssemblyMode }) => Promise<void>
 }) {
   const [baseUrlDraft, setBaseUrlDraft] = useState("")
   const [modelDraft, setModelDraft] = useState("")
   const [apiKeyDraft, setApiKeyDraft] = useState("")
+  const [promptAssemblyModeDraft, setPromptAssemblyModeDraft] = useState<LlmPromptAssemblyMode>("system")
 
   useEffect(() => {
     setBaseUrlDraft(settings?.baseUrl ?? "")
     setModelDraft(settings?.modelName ?? "")
     setApiKeyDraft("")
-  }, [settings?.baseUrl, settings?.modelName])
+    setPromptAssemblyModeDraft(settings?.promptAssemblyMode ?? "system")
+  }, [settings?.baseUrl, settings?.modelName, settings?.promptAssemblyMode])
 
   const trimmedBaseUrl = baseUrlDraft.trim()
   const trimmedModel = modelDraft.trim()
@@ -995,7 +1137,12 @@ function UserLlmSettingsCard({
     !isPending &&
     !!trimmedBaseUrl &&
     !!trimmedModel &&
-    (trimmedBaseUrl !== (settings?.baseUrl ?? "") || trimmedModel !== (settings?.modelName ?? "") || !!trimmedApiKey)
+    (
+      trimmedBaseUrl !== (settings?.baseUrl ?? "") ||
+      trimmedModel !== (settings?.modelName ?? "") ||
+      promptAssemblyModeDraft !== (settings?.promptAssemblyMode ?? "system") ||
+      !!trimmedApiKey
+    )
   const canClearApiKey = !isLoading && !isPending && !!settings?.savedApiKeyConfigured
 
   return (
@@ -1004,7 +1151,6 @@ function UserLlmSettingsCard({
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div className="space-y-1">
             <CardTitle>我的 LLM 设置</CardTitle>
-            <CardDescription>这份 LLM 服务配置会保存在你的账号里。之后换设备登录，同一账号仍然可以继续使用。</CardDescription>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <span
@@ -1051,28 +1197,36 @@ function UserLlmSettingsCard({
                 onDraftChange={setApiKeyDraft}
                 savedApiKeyConfigured={!!settings?.savedApiKeyConfigured}
                 emptyPlaceholder="输入你的 API Key"
-                savedPlaceholder="已保存密钥；如需更换，直接输入新值"
+                savedPlaceholder="输入你的 API Key"
                 disabled={isLoading || isPending}
               />
-              <p className="text-xs text-muted-foreground">
-                {settings?.savedApiKeyConfigured
-                  ? `当前账号已保存密钥：${settings.savedApiKeyPreview ?? "已配置"}。保持不改时无需重新填写。`
-                  : "当前账号还没有保存自己的 API Key。"}
-              </p>
+            </div>
+            <div className="space-y-2">
+              <Label>提示拼接模式</Label>
+              <PromptAssemblyModeSelector
+                value={promptAssemblyModeDraft}
+                onChange={setPromptAssemblyModeDraft}
+                disabled={isLoading || isPending}
+              />
             </div>
           </div>
 
           <div className="grid gap-3 rounded-[1rem] border border-border/60 bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
-            <p>保存后，AI 问答会优先使用你的账号配置；如果你没有单独保存，系统仍可在可用时回退到部署级配置或环境变量。</p>
-            <p>系统只返回是否已配置和密钥预览，不会把完整密钥重新回传到浏览器。</p>
-            <p>输入框里的星号只表示系统已保存密钥，并不是把真实密钥重新回显到浏览器。</p>
+            <p>保存后，AI 问答会直接使用你的账号配置；如果当前账号没有保存配置，就会被视为未接通，不再回退到部署级默认配置。</p>
           </div>
 
           <div className="flex flex-wrap gap-2">
             <Button
               type="button"
               disabled={!canSave}
-              onClick={() => void onSave({ baseUrl: trimmedBaseUrl, modelName: trimmedModel, apiKey: trimmedApiKey || undefined })}
+              onClick={() =>
+                void onSave({
+                  baseUrl: trimmedBaseUrl,
+                  modelName: trimmedModel,
+                  promptAssemblyMode: promptAssemblyModeDraft,
+                  apiKey: trimmedApiKey || undefined,
+                })
+              }
             >
               {isPending ? "保存中..." : "保存到我的账号"}
             </Button>
@@ -1080,7 +1234,13 @@ function UserLlmSettingsCard({
               type="button"
               variant="outline"
               disabled={!canClearApiKey}
-              onClick={() => void onClearApiKey(trimmedBaseUrl || settings?.baseUrl || "", trimmedModel || settings?.modelName || "")}
+              onClick={() =>
+                void onClearApiKey({
+                  baseUrl: trimmedBaseUrl || settings?.baseUrl || "",
+                  modelName: trimmedModel || settings?.modelName || "",
+                  promptAssemblyMode: promptAssemblyModeDraft,
+                })
+              }
             >
               清除我的密钥
             </Button>
@@ -1090,31 +1250,6 @@ function UserLlmSettingsCard({
         {isLoading ? <p className="text-sm text-muted-foreground">加载我的 LLM 设置中...</p> : null}
         {queryError ? <p className="text-sm text-destructive">{formatApiError(queryError)}</p> : null}
         {saveError ? <p className="text-sm text-destructive">{formatApiError(saveError)}</p> : null}
-      </CardContent>
-    </Card>
-  )
-}
-
-function SubtitleUsageCard() {
-  return (
-    <Card className="theme-card">
-      <CardHeader>
-        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-          <div className="space-y-1">
-            <CardTitle>字幕文件</CardTitle>
-            <CardDescription>产品现在不再使用后端 ffmpeg 或浏览器 ffmpeg.wasm 生成转写；播放器字幕和 AI 补充上下文都直接来自字幕文件。</CardDescription>
-          </div>
-          <span className="theme-meta px-3 py-1.5 text-xs">同目录同名</span>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4 text-sm">
-        <div className="theme-status-surface space-y-3 rounded-[1.2rem] border border-border/70 p-4">
-          <div className="grid gap-3 rounded-[1rem] border border-border/60 bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
-            <p>系统只会检查视频同目录下是否存在同名字幕文件，例如 `lesson.mp4` 会匹配 `lesson.srt`。</p>
-            <p>当前支持的字幕格式：{SUPPORTED_SUBTITLE_EXTENSIONS_LABEL}。</p>
-            <p>如果找到字幕文件，播放器会直接显示它，AI 问答也会把这份字幕作为补充上下文；如果没有找到，就不会再回退到 ASR 自动转写。</p>
-          </div>
-        </div>
       </CardContent>
     </Card>
   )
@@ -1147,6 +1282,7 @@ function LayerConfigEditor({
   const [cfgKPoint, setCfgKPoint] = useState(() => String(initialConfig.aggregationKPoint))
   const [cfgTemplateItems, setCfgTemplateItems] = useState<TemplateEditorItem[]>(() => toTemplateEditorItems(initialConfig.reviewChainTemplate))
   const [cfgErr, setCfgErr] = useState<string | null>(null)
+  const [pendingTemplateKind, setPendingTemplateKind] = useState<"" | "CONVERGENCE" | "REVIEW_TASK">("")
   const templateSummary = summarizeTemplateItems(cfgTemplateItems.map((item) =>
     item.kind === "CONVERGENCE"
       ? { kind: "CONVERGENCE" as const }
@@ -1154,6 +1290,12 @@ function LayerConfigEditor({
         ? { kind: "REVIEW_TASK" as const, count: Number(item.count) }
         : { kind: "REVIEW_TASK" as const },
   ))
+
+  function onAppendTemplateItem() {
+    if (!pendingTemplateKind) return
+    setCfgTemplateItems((prev) => [...prev, createTemplateEditorItem(pendingTemplateKind)])
+    setPendingTemplateKind("")
+  }
 
   async function onSaveLayerConfig() {
     setCfgErr(null)
@@ -1201,53 +1343,45 @@ function LayerConfigEditor({
 
   return (
     <Card className="theme-card">
-      <CardHeader>
+      <CardHeader className="flex-row items-center justify-between gap-4 space-y-0">
         <CardTitle>层配置</CardTitle>
-        <CardDescription>先看当前层摘要，再只调整本次要改的参数。</CardDescription>
+        <div className="w-full max-w-[220px] shrink-0">
+          <Label htmlFor="configLayer" className="sr-only">
+            选择层
+          </Label>
+          <select
+            id="configLayer"
+            aria-label="选择层"
+            className="h-11 w-full rounded-xl border bg-background px-4 text-sm"
+            value={String(selectedLayerIndex)}
+            onChange={(e) => onSelectedLayerIndexChange(Number(e.target.value))}
+            disabled={layerIndexes.length === 0 || saving}
+          >
+            {layerIndexes.map((idx) => (
+              <option key={idx} value={idx}>
+                第 {idx} 层
+              </option>
+            ))}
+          </select>
+        </div>
       </CardHeader>
       <CardContent className="space-y-4 text-sm">
-        <div className="theme-status-surface space-y-4 rounded-[1.35rem] border border-border/70 p-4">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-            <div className="space-y-1">
-              <div className="theme-meta-strong">第 {selectedLayerIndex} 层</div>
-              <div className="text-sm text-muted-foreground">当前层的模板和聚合阈值会影响后续新登记的任务。</div>
-            </div>
-            <div className="w-full max-w-[220px] space-y-2">
-              <Label htmlFor="configLayer">切换层</Label>
-              <select
-                id="configLayer"
-                className="h-11 w-full rounded-xl border bg-background px-4 text-sm"
-                value={String(selectedLayerIndex)}
-                onChange={(e) => onSelectedLayerIndexChange(Number(e.target.value))}
-                disabled={layerIndexes.length === 0 || saving}
-              >
-                {layerIndexes.map((idx) => (
-                  <option key={idx} value={idx}>
-                    第 {idx} 层
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_160px_160px]">
-            <div className="rounded-[1.1rem] border border-border/70 bg-background/85 px-4 py-3">
-              <div className="text-xs text-muted-foreground">当前模板</div>
-              <div className="mt-1 text-sm font-medium text-foreground">{templateSummary}</div>
-            </div>
-            <div className="rounded-[1.1rem] border border-border/70 bg-background/85 px-4 py-3">
-              <div className="text-xs text-muted-foreground">节点阈值</div>
-              <div className="mt-1 text-lg font-semibold text-foreground">{initialConfig.aggregationKNode}</div>
-            </div>
-            <div className="rounded-[1.1rem] border border-border/70 bg-background/85 px-4 py-3">
-              <div className="text-xs text-muted-foreground">复述点阈值</div>
-              <div className="mt-1 text-lg font-semibold text-foreground">{initialConfig.aggregationKPoint}</div>
-            </div>
+        <div className="theme-status-surface rounded-[1.35rem] border border-border/70 p-4">
+          <div className="flex flex-wrap gap-2">
+            <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-medium text-sky-800">
+              当前模板：{templateSummary}
+            </span>
+            <span className="inline-flex items-center rounded-full border border-border/70 bg-background/85 px-3 py-1.5 text-xs font-medium text-foreground">
+              节点阈值：{initialConfig.aggregationKNode}
+            </span>
+            <span className="inline-flex items-center rounded-full border border-border/70 bg-background/85 px-3 py-1.5 text-xs font-medium text-foreground">
+              复述点阈值：{initialConfig.aggregationKPoint}
+            </span>
           </div>
         </div>
 
         <div className="grid gap-4">
-          <div className="grid gap-4 rounded-[1.35rem] border border-border/70 bg-muted/20 p-4 md:grid-cols-2">
+          <div className="grid gap-4 rounded-[1.2rem] border border-border/70 bg-muted/15 p-4 md:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="kNode">节点阈值</Label>
               <Input id="kNode" value={cfgKNode} onChange={(e) => setCfgKNode(e.target.value)} disabled={saving} />
@@ -1258,37 +1392,13 @@ function LayerConfigEditor({
             </div>
           </div>
 
-          <div className="space-y-3 rounded-[1.35rem] border border-border/70 bg-muted/20 p-4">
-            <div className="space-y-1">
-              <Label>复习链模板</Label>
-              <p className="text-xs text-muted-foreground">这里只编辑初始化顺序，机制说明收进下方折叠区。</p>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setCfgTemplateItems((prev) => [...prev, createTemplateEditorItem("CONVERGENCE")])}
-                disabled={saving}
-              >
-                追加收敛
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setCfgTemplateItems((prev) => [...prev, createTemplateEditorItem("REVIEW_TASK")])}
-                disabled={saving}
-              >
-                追加复习任务
-              </Button>
-            </div>
+          <div className="space-y-3 rounded-[1.2rem] border border-border/70 bg-muted/15 p-4">
+            <Label>复习链模板</Label>
 
             <div className="overflow-hidden rounded-[1.1rem] border border-border/70 bg-background/90">
               {cfgTemplateItems.length === 0 ? (
                 <div className="px-4 py-6 text-sm text-muted-foreground">
-                  还没有模板步骤，请先追加收敛或复习任务。
+                  还没有模板步骤，请在下方选择步骤类型后点击加号。
                 </div>
               ) : null}
 
@@ -1336,9 +1446,7 @@ function LayerConfigEditor({
                           />
                         </div>
                       ) : (
-                        <div className="text-xs text-muted-foreground">
-                          这个步骤没有额外参数。
-                        </div>
+                        <div className="rounded-full border border-border/60 bg-muted/20 px-3 py-1.5 text-xs text-muted-foreground">这个步骤没有额外参数</div>
                       )}
 
                       <Button
@@ -1356,13 +1464,37 @@ function LayerConfigEditor({
               ))}
             </div>
 
-            <details className="rounded-[1.1rem] border border-border/70 bg-background/70 px-4 py-3">
-              <summary className="cursor-pointer list-none text-sm font-medium text-foreground">了解模板机制</summary>
-              <div className="mt-3 space-y-2 text-xs leading-6 text-muted-foreground">
-                <p>步骤顺序就是系统创建新复习链时的初始化顺序，越靠前越先执行。</p>
-                <p>模板里至少需要一个“收敛”步骤，否则系统无法继续推进后续轮次。</p>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="shrink-0"
+                onClick={onAppendTemplateItem}
+                disabled={saving || !pendingTemplateKind}
+                aria-label="追加模板步骤"
+              >
+                <span className="text-lg leading-none">+</span>
+              </Button>
+              <div className="w-full sm:max-w-[220px]">
+                <Label htmlFor="pendingTemplateKind" className="sr-only">
+                  选择步骤类型
+                </Label>
+                <select
+                  id="pendingTemplateKind"
+                  aria-label="选择步骤类型"
+                  className="h-10 w-full rounded-xl border bg-background px-4 text-sm"
+                  value={pendingTemplateKind}
+                  onChange={(e) => setPendingTemplateKind(e.target.value as "" | "CONVERGENCE" | "REVIEW_TASK")}
+                  disabled={saving}
+                >
+                  <option value="">选择类型</option>
+                  <option value="CONVERGENCE">收敛</option>
+                  <option value="REVIEW_TASK">复习任务</option>
+                </select>
               </div>
-            </details>
+            </div>
+
           </div>
 
           <div className="flex justify-end">

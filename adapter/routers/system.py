@@ -5,7 +5,7 @@ import json
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from adapter.auth import get_request_auth_user, require_admin_user
+from adapter.auth import get_request_auth_user
 from adapter.deps import get_api, get_auth_store
 from adapter.schemas import AskLlmRequest, AskProjectLlmRequest, UpdateGlobalLlmSettingsRequest
 from adapter.runtime_status import collect_runtime_status
@@ -88,7 +88,7 @@ def get_global_llm_settings(
     auth_store: AuthStore = Depends(get_auth_store),
 ) -> dict:
     if current_runtime_features().auth_enabled:
-        require_admin_user(request, auth_store)
+        raise PreconditionFailure("Global LLM settings are disabled when auth is enabled")
     return {"ok": True, "data": api.get_global_llm_status()}
 
 
@@ -100,13 +100,14 @@ def update_global_llm_settings(
     auth_store: AuthStore = Depends(get_auth_store),
 ) -> dict:
     if current_runtime_features().auth_enabled:
-        require_admin_user(request, auth_store)
+        raise PreconditionFailure("Global LLM settings are disabled when auth is enabled")
     return {
         "ok": True,
         "data": api.update_global_llm_settings(
             base_url=req.baseUrl,
             model_name=req.modelName,
             api_key=req.apiKey,
+            prompt_assembly_mode=req.promptAssemblyMode,
             clear_api_key=bool(req.clearApiKey),
         ),
     }
@@ -154,6 +155,14 @@ def ask_project_llm(
         user_id=None if current_user is None else current_user.user_id,
     )
     return {"ok": True, "data": {"content": content}}
+
+
+@router.get("/projects/{projectId}/llm/debug/latest")
+def get_latest_project_llm_debug(
+    projectId: str,
+    api: SystemAPI = Depends(get_api),
+) -> dict:
+    return {"ok": True, "data": api.get_latest_project_llm_debug(projectId)}  # type: ignore[arg-type]
 
 
 @router.post("/projects/{projectId}/llm/ask/stream")

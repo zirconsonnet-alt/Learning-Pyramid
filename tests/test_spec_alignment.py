@@ -14,7 +14,7 @@ from backend.models.enums import (
     ReviewChainTemplateItemKind,
     SessionMode,
 )
-from backend.models.errors import PreconditionFailure
+from backend.models.errors import NotFound, PreconditionFailure
 from backend.models.instance import Instance
 from backend.models.learning_task_node import LearningTaskContainer, LearningTaskLeaf
 from backend.models.project_config import (
@@ -377,6 +377,40 @@ class _SpecAlignmentBackendMixin:
         project_id = api.create_project("ml", missing_root.as_posix())
         with self.assertRaises(PreconditionFailure):
             api.begin_session(project_id, SessionMode.READ_WRITE)
+
+    def test_bulk_remap_recall_points_instance_prunes_missing_source_instance_when_no_active_refs_remain(self) -> None:
+        api, root = self._new_api()
+        project_root, learning_root = self._make_project_dirs(root, "videos")
+        lesson_path = learning_root / "lesson.mp4"
+        lesson_path.write_text("video-bytes", encoding="utf-8")
+
+        project_id = api.create_project("ml", project_root.as_posix())
+        api.sync_learning_objects_from_fs(project_id)
+        original_instance = next(item for item in api.list_instances(project_id) if item.material_id.as_posix() == "lesson.mp4")
+
+        api.submit_learning_task(
+            project_id,
+            items=[(rich_text("Q1"), rich_text("A1"), Anchor(original_instance.instance_id, position="t=0"))],
+            title="Lesson 1",
+        )
+
+        renamed_path = learning_root / "lesson-renamed.mp4"
+        lesson_path.rename(renamed_path)
+        api.sync_learning_objects_from_fs(project_id)
+
+        instances_after_sync = api.list_instances(project_id)
+        missing_source = next(item for item in instances_after_sync if item.material_id.as_posix() == "lesson.mp4")
+        present_target = next(item for item in instances_after_sync if item.material_id.as_posix() == "lesson-renamed.mp4")
+        self.assertEqual(missing_source.presence, InstancePresence.MISSING)
+        self.assertEqual(present_target.presence, InstancePresence.PRESENT)
+
+        moved = api.bulk_remap_recall_points_instance(project_id, missing_source.instance_id, present_target.instance_id)
+        self.assertEqual(moved, 1)
+        self.assertEqual(len(api.list_recall_points_by_instance(project_id, present_target.instance_id)), 1)
+        self.assertEqual(api.list_missing_instances(project_id), tuple())
+        self.assertNotIn(str(missing_source.instance_id), {str(item.instance_id) for item in api.list_instances(project_id)})
+        with self.assertRaises(NotFound):
+            api.get_instance(project_id, missing_source.instance_id)
 
     def test_begin_session_read_write_skips_server_startup_sync_for_browser_local_projects(self) -> None:
         api, root = self._new_api()

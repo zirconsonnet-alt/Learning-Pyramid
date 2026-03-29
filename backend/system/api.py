@@ -26,7 +26,9 @@ from backend.models.convergence import Convergence
 from backend.models.global_settings import (
     DEFAULT_GLOBAL_LLM_BASE_URL,
     DEFAULT_GLOBAL_LLM_MODEL_NAME,
+    DEFAULT_LLM_PROMPT_ASSEMBLY_MODE,
     GlobalLlmSettings,
+    normalize_llm_prompt_assembly_mode,
 )
 from backend.models.enums import (
     AggregationCycleState,
@@ -173,6 +175,8 @@ class SystemAPI:
         self._startup_fs_sync_done: set[str] = set()
         self._public_asr_temp_assets_lock = threading.Lock()
         self._public_asr_temp_assets: dict[str, dict[str, object]] = {}
+        self._project_llm_debug_lock = threading.Lock()
+        self._latest_project_llm_debug_by_project: dict[str, dict[str, Any]] = {}
 
     def _sql_store(self) -> SqlStore | None:
         store = getattr(self.sys, "_persist_store", None)
@@ -1316,6 +1320,29 @@ class SystemAPI:
             return None
         return self._saved_service_config(base_url=saved.base_url, model_name=saved.model_name, api_key=saved.api_key)
 
+    @staticmethod
+    def _llm_status_payload(
+        *,
+        base_url: str,
+        model_name: str,
+        prompt_assembly_mode: str,
+        saved_api_key_configured: bool,
+        saved_api_key_preview: str | None,
+        llm_configured: bool,
+        story_generation_configured: bool,
+        llm_source: str,
+    ) -> dict[str, Any]:
+        return {
+            "baseUrl": base_url,
+            "modelName": model_name,
+            "promptAssemblyMode": normalize_llm_prompt_assembly_mode(prompt_assembly_mode),
+            "savedApiKeyConfigured": bool(saved_api_key_configured),
+            "savedApiKeyPreview": saved_api_key_preview,
+            "llmConfigured": bool(llm_configured),
+            "storyGenerationConfigured": bool(story_generation_configured),
+            "llmSource": llm_source,
+        }
+
     def get_effective_llm_service_config(
         self,
         *,
@@ -1325,6 +1352,8 @@ class SystemAPI:
         user_cfg = self._get_saved_user_service_config(auth_store=auth_store, user_id=user_id, service_kind="llm")
         if self._service_config_is_available(user_cfg):
             return user_cfg
+        if current_runtime_features().auth_enabled:
+            return None
         saved = self.sys.g.global_llm_settings
         global_cfg = None if saved is None else self._saved_service_config(base_url=saved.base_url, model_name=saved.model_name, api_key=saved.api_key)
         if self._service_config_is_available(global_cfg):
@@ -1340,11 +1369,225 @@ class SystemAPI:
         user_cfg = self._get_saved_user_service_config(auth_store=auth_store, user_id=user_id, service_kind="llm")
         if self._service_config_is_available(user_cfg):
             return user_cfg
+        if current_runtime_features().auth_enabled:
+            return None
         saved = self.sys.g.global_llm_settings
         global_cfg = None if saved is None else self._saved_service_config(base_url=saved.base_url, model_name=saved.model_name, api_key=saved.api_key)
         if self._service_config_is_available(global_cfg):
             return global_cfg
         return current_env_story_generator_service_config() or current_env_llm_qa_service_config()
+
+    def get_effective_llm_prompt_assembly_mode(
+        self,
+        *,
+        auth_store: AuthStore | None = None,
+        user_id: str | None = None,
+    ) -> str:
+        if auth_store is not None and str(user_id or "").strip():
+            saved = auth_store.get_user_service_config(str(user_id), service_kind="llm")
+            if saved is not None:
+                return normalize_llm_prompt_assembly_mode(saved.prompt_assembly_mode)
+        if current_runtime_features().auth_enabled:
+            return DEFAULT_LLM_PROMPT_ASSEMBLY_MODE
+        saved = self.sys.g.global_llm_settings
+        if saved is not None:
+            return normalize_llm_prompt_assembly_mode(saved.prompt_assembly_mode)
+        return DEFAULT_LLM_PROMPT_ASSEMBLY_MODE
+
+    @staticmethod
+    def _build_user_concat_message(
+        *,
+        prompt: str,
+        sections: Sequence[tuple[str, str | None]],
+    ) -> str:
+        normalized_sections = [
+            (str(title).strip(), str(content).strip())
+            for title, content in sections
+            if str(title).strip() and str(content or "").strip()
+        ]
+        if not normalized_sections:
+            return str(prompt).strip()
+
+        parts = [
+            "以下内容是系统规则与上下文，请把它们和用户问题一起视为本次输入，严格依据这些信息回答。",
+        ]
+        for title, content in normalized_sections:
+            parts.append(f"[{title}]")
+            parts.append(content)
+        parts.append("[用户问题]")
+        parts.append(str(prompt).strip())
+        return "\n".join(parts).strip()
+
+    def _build_single_turn_llm_messages(
+        self,
+        *,
+        user_prompt: str,
+        system_prompt: str | None = None,
+        prompt_assembly_mode: str,
+    ) -> list[dict[str, str]]:
+        prompt = str(user_prompt or "").strip()
+        if not prompt:
+            raise PreconditionFailure("LLM user_prompt must be non-empty")
+
+        resolved_mode = normalize_llm_prompt_assembly_mode(prompt_assembly_mode)
+        if resolved_mode == "user_concat":
+            return [
+                {
+                    "role": "user",
+                    "content": self._build_user_concat_message(
+                        prompt=prompt,
+                        sections=[("系统信息", system_prompt)],
+                    ),
+                }
+            ]
+
+        messages: list[dict[str, str]] = []
+        if str(system_prompt or "").strip():
+            messages.append({"role": "system", "content": str(system_prompt).strip()})
+        messages.append({"role": "user", "content": prompt})
+        return messages
+
+    def _build_project_llm_messages(
+        self,
+        *,
+        user_prompt: str,
+        context_text: str,
+        system_prompt: str | None = None,
+        supplemental_context: str | None = None,
+        prompt_assembly_mode: str,
+    ) -> list[dict[str, str]]:
+        prompt = str(user_prompt or "").strip()
+        if not prompt:
+            raise PreconditionFailure("LLM user_prompt must be non-empty")
+
+        resolved_mode = normalize_llm_prompt_assembly_mode(prompt_assembly_mode)
+        if resolved_mode == "user_concat":
+            return [
+                {
+                    "role": "user",
+                    "content": self._build_user_concat_message(
+                        prompt=prompt,
+                        sections=[
+                            ("系统信息", self._project_llm_system_instruction()),
+                            ("项目上下文", context_text),
+                            ("补充上下文", supplemental_context),
+                            ("页面附加规则", system_prompt),
+                        ],
+                    ),
+                }
+            ]
+
+        messages: list[dict[str, str]] = [
+            {
+                "role": "system",
+                "content": self._project_llm_system_instruction(),
+            },
+            {"role": "system", "content": context_text},
+        ]
+        if str(supplemental_context or "").strip():
+            messages.append({"role": "system", "content": str(supplemental_context).strip()})
+        if str(system_prompt or "").strip():
+            messages.append({"role": "system", "content": str(system_prompt).strip()})
+        messages.append({"role": "user", "content": prompt})
+        return messages
+
+    def _build_llm_chat_completion_transport(
+        self,
+        *,
+        messages: Sequence[dict[str, str]],
+        model_name: str | None = None,
+        temperature: float | None = None,
+        stream: bool = False,
+        auth_store: AuthStore | None = None,
+        user_id: str | None = None,
+    ) -> tuple[str, dict[str, object], str | None]:
+        cfg = self.get_effective_llm_service_config(auth_store=auth_store, user_id=user_id)
+        if cfg is None:
+            raise PreconditionFailure("LLM service is not configured")
+
+        normalized_messages = self._normalize_llm_messages(messages)
+        url = self._resolve_local_service_url(cfg, default_path="/chat/completions")
+        payload: dict[str, object] = {
+            "model": str(model_name or cfg.model or self._default_global_llm_model_name()).strip(),
+            "messages": normalized_messages,
+        }
+        if stream:
+            payload["stream"] = True
+        if temperature is not None:
+            payload["temperature"] = float(temperature)
+        return url, payload, cfg.api_key
+
+    @staticmethod
+    def _project_llm_debug_target(
+        *,
+        recall_point_id: RecallPointId | None,
+        learning_task_node_id: LearningTaskNodeId | None,
+        learning_object_node_id: LearningObjectNodeId | None,
+    ) -> tuple[str, str | None]:
+        if recall_point_id is not None:
+            return "recall", str(recall_point_id)
+        if learning_task_node_id is not None:
+            return "task", str(learning_task_node_id)
+        if learning_object_node_id is not None:
+            return "object", str(learning_object_node_id)
+        return "project", None
+
+    def _record_project_llm_debug(
+        self,
+        *,
+        project_id: ProjectId,
+        request_model_name: str | None,
+        url: str,
+        payload: dict[str, object],
+        response_content: str,
+        error_message: str | None,
+        recall_point_id: RecallPointId | None,
+        learning_task_node_id: LearningTaskNodeId | None,
+        learning_object_node_id: LearningObjectNodeId | None,
+    ) -> None:
+        target_kind, target_id = self._project_llm_debug_target(
+            recall_point_id=recall_point_id,
+            learning_task_node_id=learning_task_node_id,
+            learning_object_node_id=learning_object_node_id,
+        )
+        raw_messages = payload.get("messages")
+        messages: list[dict[str, str]] = []
+        if isinstance(raw_messages, list):
+            for item in raw_messages:
+                if not isinstance(item, dict):
+                    continue
+                role = str(item.get("role") or "").strip()
+                if not role:
+                    continue
+                messages.append(
+                    {
+                        "role": role,
+                        "content": str(item.get("content") or ""),
+                    }
+                )
+
+        entry = {
+            "recordedAt": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+            "projectId": str(project_id),
+            "requestModelName": None if request_model_name is None else str(request_model_name).strip() or None,
+            "resolvedModelName": str(payload.get("model") or "").strip(),
+            "temperature": None if payload.get("temperature") is None else float(payload["temperature"]),
+            "stream": bool(payload.get("stream", False)),
+            "serviceUrl": str(url),
+            "contextTargetKind": target_kind,
+            "contextTargetId": target_id,
+            "messages": messages,
+            "responseContent": str(response_content or ""),
+            "errorMessage": None if error_message is None else str(error_message),
+        }
+        with self._project_llm_debug_lock:
+            self._latest_project_llm_debug_by_project[id_canonical_text(project_id)] = entry
+
+    def get_latest_project_llm_debug(self, project_id: ProjectId) -> dict[str, Any] | None:
+        self._get_project_title(project_id)
+        with self._project_llm_debug_lock:
+            entry = self._latest_project_llm_debug_by_project.get(id_canonical_text(project_id))
+            return None if entry is None else dict(entry)
 
     def request_llm_chat_completion(
         self,
@@ -1356,22 +1599,18 @@ class SystemAPI:
         auth_store: AuthStore | None = None,
         user_id: str | None = None,
     ) -> dict[str, Any]:
-        cfg = self.get_effective_llm_service_config(auth_store=auth_store, user_id=user_id)
-        if cfg is None:
-            raise PreconditionFailure("LLM service is not configured")
-        normalized_messages = self._normalize_llm_messages(messages)
-
-        url = self._resolve_local_service_url(cfg, default_path="/chat/completions")
-        payload: dict[str, object] = {
-            "model": str(model_name or cfg.model or self._default_global_llm_model_name()).strip(),
-            "messages": normalized_messages,
-        }
-        if temperature is not None:
-            payload["temperature"] = float(temperature)
+        url, payload, api_key = self._build_llm_chat_completion_transport(
+            messages=messages,
+            model_name=model_name,
+            temperature=temperature,
+            stream=False,
+            auth_store=auth_store,
+            user_id=user_id,
+        )
         return self._http_post_json(
             url=url,
             payload=payload,
-            api_key=cfg.api_key,
+            api_key=api_key,
             timeout_sec=float(timeout_sec),
         )
 
@@ -1385,23 +1624,18 @@ class SystemAPI:
         auth_store: AuthStore | None = None,
         user_id: str | None = None,
     ) -> Iterator[str]:
-        cfg = self.get_effective_llm_service_config(auth_store=auth_store, user_id=user_id)
-        if cfg is None:
-            raise PreconditionFailure("LLM service is not configured")
-
-        normalized_messages = self._normalize_llm_messages(messages)
-        url = self._resolve_local_service_url(cfg, default_path="/chat/completions")
-        payload: dict[str, object] = {
-            "model": str(model_name or cfg.model or self._default_global_llm_model_name()).strip(),
-            "messages": normalized_messages,
-            "stream": True,
-        }
-        if temperature is not None:
-            payload["temperature"] = float(temperature)
+        url, payload, api_key = self._build_llm_chat_completion_transport(
+            messages=messages,
+            model_name=model_name,
+            temperature=temperature,
+            stream=False,
+            auth_store=auth_store,
+            user_id=user_id,
+        )
         yield from self._http_post_json_stream_text_chunks(
             url=url,
             payload=payload,
-            api_key=cfg.api_key,
+            api_key=api_key,
             timeout_sec=float(timeout_sec),
         )
 
@@ -1416,13 +1650,14 @@ class SystemAPI:
         auth_store: AuthStore | None = None,
         user_id: str | None = None,
     ) -> str:
-        messages: list[dict[str, str]] = []
-        if str(system_prompt or "").strip():
-            messages.append({"role": "system", "content": str(system_prompt).strip()})
-        prompt = str(user_prompt or "").strip()
-        if not prompt:
-            raise PreconditionFailure("LLM user_prompt must be non-empty")
-        messages.append({"role": "user", "content": prompt})
+        messages = self._build_single_turn_llm_messages(
+            user_prompt=user_prompt,
+            system_prompt=system_prompt,
+            prompt_assembly_mode=self.get_effective_llm_prompt_assembly_mode(
+                auth_store=auth_store,
+                user_id=user_id,
+            ),
+        )
         response = self.request_llm_chat_completion(
             messages=messages,
             model_name=model_name,
@@ -1519,6 +1754,19 @@ class SystemAPI:
             lines.append(f"Node title: {getattr(node, 'title', '')}")
             lines.append(f"Node id: {learning_task_node_id}")
             lines.append(f"Active recall points included: {len(limited)} / {len(recall_points)}")
+            if limited:
+                lines.append(
+                    "Context availability: current node content is available through the included recall points. "
+                    "Answer from these recall points first and do not claim the current node content is missing."
+                )
+                lines.append(
+                    "Important instruction: treat the included recall points as the current node's concrete content. "
+                    "Do not ask the user to provide the topic, keywords, or summary again."
+                )
+            else:
+                lines.append(
+                    "Context availability: no active recall points are currently attached to this learning task node."
+                )
             for index, recall_point in enumerate(limited, start=1):
                 lines.append(self._format_recall_point_for_llm_context(recall_point, index=index))
             return "\n".join(lines)
@@ -1536,12 +1784,37 @@ class SystemAPI:
             if relative_path is not None:
                 lines.append(f"Relative path: {relative_path}")
             lines.append(f"Active recall points included: {len(limited)} / {len(recall_points)}")
+            if limited:
+                lines.append(
+                    "Context availability: current node content is available through the included recall points. "
+                    "Answer from these recall points first and do not claim the current node content is missing."
+                )
+                lines.append(
+                    "Important instruction: treat the included recall points as the current node's concrete content. "
+                    "Do not ask the user to provide the topic, keywords, or summary again."
+                )
+            else:
+                lines.append(
+                    "Context availability: no active recall points are currently attached to this learning object node."
+                )
             for index, recall_point in enumerate(limited, start=1):
                 lines.append(self._format_recall_point_for_llm_context(recall_point, index=index))
             return "\n".join(lines)
 
         lines.append("Context target: project only")
         return "\n".join(lines)
+
+    @staticmethod
+    def _project_llm_system_instruction() -> str:
+        return (
+            "你是 LearningPyramid 项目里的 AI 学习助手。"
+            "请优先使用系统消息中提供的项目上下文、当前节点标题、复述点问答、理解记录和字幕片段作答。"
+            "只要系统消息里已经给出了当前节点标题、复述点或字幕内容，就视为用户已经提供了当前节点内容；"
+            "不要回答“未提供当前节点内容/主题/关键词”，也不要要求用户重复粘贴这些信息。"
+            "只有当系统明确说明当前节点没有任何复述点或其他上下文时，才可以向用户索取补充信息。"
+            "如果当前节点已有复述点，那么这些复述点就是当前节点的具体内容，应直接据此完成总结、出题、助记等请求。"
+            "不要编造项目内不存在的事实。请优先使用简体中文回答。"
+        )
 
     def request_project_llm_text(
         self,
@@ -1569,32 +1842,51 @@ class SystemAPI:
             learning_task_node_id=learning_task_node_id,
             learning_object_node_id=learning_object_node_id,
         )
-        messages: list[dict[str, str]] = [
-            {
-                "role": "system",
-                "content": (
-                    "You are assisting inside a LearningPyramid study project. "
-                    "Use the supplied project context first. If the context is insufficient, say so explicitly. "
-                    "Do not invent project-specific facts."
-                ),
-            },
-            {"role": "system", "content": context_text},
-        ]
-        if str(supplemental_context or "").strip():
-            messages.append({"role": "system", "content": str(supplemental_context).strip()})
-        if str(system_prompt or "").strip():
-            messages.append({"role": "system", "content": str(system_prompt).strip()})
-        messages.append({"role": "user", "content": prompt})
+        messages = self._build_project_llm_messages(
+            user_prompt=prompt,
+            context_text=context_text,
+            system_prompt=system_prompt,
+            supplemental_context=supplemental_context,
+            prompt_assembly_mode=self.get_effective_llm_prompt_assembly_mode(
+                auth_store=auth_store,
+                user_id=user_id,
+            ),
+        )
 
-        response = self.request_llm_chat_completion(
+        url, payload, api_key = self._build_llm_chat_completion_transport(
             messages=messages,
             model_name=model_name,
             temperature=temperature,
-            timeout_sec=timeout_sec,
+            stream=False,
             auth_store=auth_store,
             user_id=user_id,
         )
-        return self._extract_chat_completion_text(response)
+        response_content = ""
+        error_message: str | None = None
+        try:
+            response = self._http_post_json(
+                url=url,
+                payload=payload,
+                api_key=api_key,
+                timeout_sec=float(timeout_sec),
+            )
+            response_content = self._extract_chat_completion_text(response)
+            return response_content
+        except BaseException as exc:
+            error_message = str(exc)
+            raise
+        finally:
+            self._record_project_llm_debug(
+                project_id=project_id,
+                request_model_name=model_name,
+                url=url,
+                payload=payload,
+                response_content=response_content,
+                error_message=error_message,
+                recall_point_id=recall_point_id,
+                learning_task_node_id=learning_task_node_id,
+                learning_object_node_id=learning_object_node_id,
+            )
 
     def request_project_llm_text_stream(
         self,
@@ -1622,31 +1914,52 @@ class SystemAPI:
             learning_task_node_id=learning_task_node_id,
             learning_object_node_id=learning_object_node_id,
         )
-        messages: list[dict[str, str]] = [
-            {
-                "role": "system",
-                "content": (
-                    "You are assisting inside a LearningPyramid study project. "
-                    "Use the supplied project context first. If the context is insufficient, say so explicitly. "
-                    "Do not invent project-specific facts."
-                ),
-            },
-            {"role": "system", "content": context_text},
-        ]
-        if str(supplemental_context or "").strip():
-            messages.append({"role": "system", "content": str(supplemental_context).strip()})
-        if str(system_prompt or "").strip():
-            messages.append({"role": "system", "content": str(system_prompt).strip()})
-        messages.append({"role": "user", "content": prompt})
+        messages = self._build_project_llm_messages(
+            user_prompt=prompt,
+            context_text=context_text,
+            system_prompt=system_prompt,
+            supplemental_context=supplemental_context,
+            prompt_assembly_mode=self.get_effective_llm_prompt_assembly_mode(
+                auth_store=auth_store,
+                user_id=user_id,
+            ),
+        )
 
-        yield from self.request_llm_chat_completion_stream_text(
+        url, payload, api_key = self._build_llm_chat_completion_transport(
             messages=messages,
             model_name=model_name,
             temperature=temperature,
-            timeout_sec=timeout_sec,
+            stream=True,
             auth_store=auth_store,
             user_id=user_id,
         )
+        chunks: list[str] = []
+        error_message: str | None = None
+        try:
+            for chunk in self._http_post_json_stream_text_chunks(
+                url=url,
+                payload=payload,
+                api_key=api_key,
+                timeout_sec=float(timeout_sec),
+            ):
+                if chunk:
+                    chunks.append(chunk)
+                    yield chunk
+        except BaseException as exc:
+            error_message = str(exc)
+            raise
+        finally:
+            self._record_project_llm_debug(
+                project_id=project_id,
+                request_model_name=model_name,
+                url=url,
+                payload=payload,
+                response_content="".join(chunks),
+                error_message=error_message,
+                recall_point_id=recall_point_id,
+                learning_task_node_id=learning_task_node_id,
+                learning_object_node_id=learning_object_node_id,
+            )
 
     def get_global_llm_status(self) -> dict[str, Any]:
         saved = self.sys.g.global_llm_settings
@@ -1675,6 +1988,11 @@ class SystemAPI:
         return {
             "baseUrl": base_url,
             "modelName": model_name,
+            "promptAssemblyMode": (
+                normalize_llm_prompt_assembly_mode(saved.prompt_assembly_mode)
+                if saved is not None
+                else DEFAULT_LLM_PROMPT_ASSEMBLY_MODE
+            ),
             "savedApiKeyConfigured": bool(saved is not None and str(saved.api_key or "").strip()),
             "savedApiKeyPreview": self._mask_api_key(None if saved is None else saved.api_key),
             "llmConfigured": self._service_config_is_available(effective_llm_cfg),
@@ -1688,11 +2006,35 @@ class SystemAPI:
         auth_store: AuthStore | None,
         user_id: str | None,
     ) -> dict[str, Any]:
+        auth_enabled = current_runtime_features().auth_enabled
+        if auth_enabled and (auth_store is None or not str(user_id or "").strip()):
+            return self._llm_status_payload(
+                base_url="",
+                model_name="",
+                prompt_assembly_mode=DEFAULT_LLM_PROMPT_ASSEMBLY_MODE,
+                saved_api_key_configured=False,
+                saved_api_key_preview=None,
+                llm_configured=False,
+                story_generation_configured=False,
+                llm_source="none",
+            )
         if auth_store is None or not str(user_id or "").strip():
             return self.get_global_llm_status()
 
         saved = auth_store.get_user_service_config(str(user_id), service_kind="llm")
         saved_cfg = None if saved is None else self._saved_service_config(base_url=saved.base_url, model_name=saved.model_name, api_key=saved.api_key)
+        if auth_enabled:
+            return self._llm_status_payload(
+                base_url="" if saved is None else saved.base_url,
+                model_name="" if saved is None else saved.model_name,
+                prompt_assembly_mode=DEFAULT_LLM_PROMPT_ASSEMBLY_MODE if saved is None else saved.prompt_assembly_mode,
+                saved_api_key_configured=bool(saved is not None and str(saved.api_key or "").strip()),
+                saved_api_key_preview=self._mask_api_key(None if saved is None else saved.api_key),
+                llm_configured=self._service_config_is_available(saved_cfg),
+                story_generation_configured=self._service_config_is_available(saved_cfg),
+                llm_source="user" if self._service_config_is_available(saved_cfg) else "none",
+            )
+
         global_saved = self.sys.g.global_llm_settings
         global_cfg = (
             None
@@ -1723,19 +2065,28 @@ class SystemAPI:
         elif self._service_config_is_available(env_llm_cfg):
             llm_source = "env"
 
-        return {
-            "baseUrl": base_url,
-            "modelName": model_name,
-            "savedApiKeyConfigured": bool(saved is not None and str(saved.api_key or "").strip()),
-            "savedApiKeyPreview": self._mask_api_key(None if saved is None else saved.api_key),
-            "llmConfigured": self._service_config_is_available(
+        return self._llm_status_payload(
+            base_url=base_url,
+            model_name=model_name,
+            prompt_assembly_mode=(
+                normalize_llm_prompt_assembly_mode(saved.prompt_assembly_mode)
+                if saved is not None
+                else (
+                    normalize_llm_prompt_assembly_mode(global_saved.prompt_assembly_mode)
+                    if global_saved is not None
+                    else DEFAULT_LLM_PROMPT_ASSEMBLY_MODE
+                )
+            ),
+            saved_api_key_configured=bool(saved is not None and str(saved.api_key or "").strip()),
+            saved_api_key_preview=self._mask_api_key(None if saved is None else saved.api_key),
+            llm_configured=self._service_config_is_available(
                 self.get_effective_llm_service_config(auth_store=auth_store, user_id=user_id)
             ),
-            "storyGenerationConfigured": self._service_config_is_available(
+            story_generation_configured=self._service_config_is_available(
                 self.get_effective_story_generator_service_config(auth_store=auth_store, user_id=user_id)
             ),
-            "llmSource": llm_source,
-        }
+            llm_source=llm_source,
+        )
 
     def get_user_asr_status(
         self,
@@ -1780,6 +2131,7 @@ class SystemAPI:
         base_url: str | None = None,
         model_name: str | None = None,
         api_key: str | None = None,
+        prompt_assembly_mode: str | None = None,
         clear_api_key: bool = False,
     ) -> dict[str, Any]:
         if self.sys.g._write_lock_held:
@@ -1818,10 +2170,16 @@ class SystemAPI:
             else:
                 resolved_api_key = None
 
+            current_prompt_assembly_mode = None if current is None else current.prompt_assembly_mode
+            resolved_prompt_assembly_mode = normalize_llm_prompt_assembly_mode(
+                current_prompt_assembly_mode if prompt_assembly_mode is None else prompt_assembly_mode
+            )
+
             settings = GlobalLlmSettings(
                 base_url=resolved_base_url,
                 model_name=resolved_model_name,
                 api_key=resolved_api_key,
+                prompt_assembly_mode=resolved_prompt_assembly_mode,
                 updated_at=now_utc_ms(),
             )
             settings.validate_write_time()
@@ -1839,11 +2197,13 @@ class SystemAPI:
         base_url: str | None = None,
         model_name: str | None = None,
         api_key: str | None = None,
+        prompt_assembly_mode: str | None = None,
         clear_api_key: bool = False,
     ) -> dict[str, Any]:
         current = auth_store.get_user_service_config(user_id, service_kind="llm")
-        global_saved = self.sys.g.global_llm_settings
-        env_llm_cfg = current_env_llm_qa_service_config()
+        auth_enabled = current_runtime_features().auth_enabled
+        global_saved = None if auth_enabled else self.sys.g.global_llm_settings
+        env_llm_cfg = None if auth_enabled else current_env_llm_qa_service_config()
 
         resolved_base_url = str(base_url or "").strip()
         if not resolved_base_url:
@@ -1854,7 +2214,7 @@ class SystemAPI:
             elif env_llm_cfg is not None:
                 resolved_base_url = env_llm_cfg.base_url
             else:
-                resolved_base_url = self._default_global_llm_base_url()
+                raise PreconditionFailure("LLM base_url must be provided")
 
         resolved_model_name = str(model_name or "").strip()
         if not resolved_model_name:
@@ -1865,7 +2225,19 @@ class SystemAPI:
             elif env_llm_cfg is not None and str(env_llm_cfg.model_name or "").strip():
                 resolved_model_name = str(env_llm_cfg.model_name).strip()
             else:
-                resolved_model_name = self._default_global_llm_model_name()
+                raise PreconditionFailure("LLM model_name must be provided")
+
+        resolved_prompt_assembly_mode = normalize_llm_prompt_assembly_mode(
+            prompt_assembly_mode
+            if prompt_assembly_mode is not None
+            else (
+                current.prompt_assembly_mode
+                if current is not None
+                else (
+                    global_saved.prompt_assembly_mode if global_saved is not None else DEFAULT_LLM_PROMPT_ASSEMBLY_MODE
+                )
+            )
+        )
 
         auth_store.upsert_user_service_config(
             user_id,
@@ -1873,6 +2245,7 @@ class SystemAPI:
             base_url=resolved_base_url,
             model_name=resolved_model_name,
             api_key=api_key,
+            prompt_assembly_mode=resolved_prompt_assembly_mode,
             clear_api_key=clear_api_key,
         )
         return self.get_user_llm_status(auth_store=auth_store, user_id=user_id)
@@ -3063,7 +3436,7 @@ class SystemAPI:
         try:
             # ---- Precondition checks (no staged writes on failure) ----
             try:
-                self.sys.instance_repo.get(s, from_instance_id)
+                from_inst = self.sys.instance_repo.get(s, from_instance_id)
             except NotFound:
                 raise PreconditionFailure("bulk_remap_recall_points_instance.from_instance_id not resolvable")
             try:
@@ -3109,6 +3482,23 @@ class SystemAPI:
                 self.sys.recall_point_repo.update(s, updated)
                 changed += 1
 
+            pruned_missing_source_instance = False
+            if from_inst.presence == InstancePresence.MISSING:
+                has_active_source_refs = any(
+                    rp.state == RecallPointState.ACTIVE and id_canonical_text(rp.anchor.instance_id) == want_from
+                    for rp in self.sys.recall_point_repo.all(s)
+                )
+                if not has_active_source_refs:
+                    try:
+                        self.sys.instance_repo.delete(s, from_instance_id)
+                    except PreconditionFailure:
+                        # Tombstoned or historical references can still retain the old anchor.
+                        # In that case we keep the instance record, but the UI can stop treating it
+                        # as actionable once no ACTIVE recall points remain.
+                        pass
+                    else:
+                        pruned_missing_source_instance = True
+
             scope = "ALL_BY_FROM_INSTANCE" if recall_point_ids is None else "EXPLICIT_IDS"
             self._append_audit_event(
                 s,
@@ -3120,6 +3510,7 @@ class SystemAPI:
                     "movedCount": int(changed),
                     "scope": scope,
                     "explicitIdsCount": None if recall_point_ids is None else len(tuple(recall_point_ids)),
+                    "prunedMissingSourceInstance": pruned_missing_source_instance,
                 },
             )
 
