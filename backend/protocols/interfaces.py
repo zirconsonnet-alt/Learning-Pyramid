@@ -71,6 +71,8 @@ class LearningTaskRepository(Protocol):
 class LearningTaskNodeRepository(Protocol):
     def add(self, session: MutationSession, node: LearningTaskNode) -> None: ...
 
+    def update(self, session: MutationSession, node: LearningTaskNode) -> None: ...
+
     def covered_rp_ids(self, session: MutationSession, node_id: LearningTaskNodeId) -> Tuple[RecallPointId, ...]: ...
 
     def find_leaf_by_learning_task_id(
@@ -92,7 +94,7 @@ class ReviewTaskRepository(Protocol):
 class LearningItem:
     question: RichContent
     answer: RichContent
-    anchor: Anchor
+    anchor: Optional[Anchor] = None
 
 
 @dataclass(frozen=True, slots=True)

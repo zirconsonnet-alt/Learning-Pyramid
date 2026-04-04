@@ -63,6 +63,25 @@ export function buildRecentDateKeys(days: number) {
   return keys
 }
 
+export function buildDateKeySpan(startDateKey: string, endDateKey = getLocalDateKey()) {
+  const start = new Date(`${startDateKey}T00:00:00`)
+  const end = new Date(`${endDateKey}T00:00:00`)
+
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
+    return [endDateKey]
+  }
+
+  const keys: string[] = []
+  const cursor = new Date(start)
+
+  while (cursor <= end) {
+    keys.push(getLocalDateKey(cursor))
+    cursor.setDate(cursor.getDate() + 1)
+  }
+
+  return keys
+}
+
 export function isSuccessfulStudyEvent(event: AuditLogEvent) {
   if (event.result !== "OK" && event.result !== "SUCCESS") return false
   return event.kind === "SUBMIT_LEARNING_TASK" || event.kind === "EXECUTOR_COMMIT_REVIEW_TASK"
@@ -91,7 +110,7 @@ export function formatLastStudyText(occurredAt: string | null) {
   if (!occurredAt) {
     return {
       text: "还没有学习记录",
-      className: "text-[#7b8797]",
+      className: "text-muted-foreground",
     }
   }
 
@@ -99,7 +118,7 @@ export function formatLastStudyText(occurredAt: string | null) {
   if (Number.isNaN(dt.getTime())) {
     return {
       text: "学习时间未知",
-      className: "text-[#7b8797]",
+      className: "text-muted-foreground",
     }
   }
 
@@ -118,37 +137,44 @@ export function formatLastStudyText(occurredAt: string | null) {
   if (dayDiff === 1) {
     return {
       text: "昨天学习过",
-      className: "text-[#5e6d80]",
+      className: "text-[color:var(--theme-subtle-text)]",
     }
   }
 
   if (dayDiff <= 7) {
     return {
       text: `上次学习 ${dayDiff} 天前`,
-      className: "text-[#67788d]",
+      className: "text-[color:var(--theme-subtle-text)]",
     }
   }
 
   return {
     text: `已 ${dayDiff} 天未推进`,
-    className: "text-[#b7791f]",
+    className: "text-[color:var(--theme-warm-text)]",
   }
 }
 
-export function buildCurveGeometry(points: DailyStatPoint[], width: number, height: number) {
-  const paddingX = 16
+export function buildCurveGeometry<T extends { dateKey: string }>(
+  points: T[],
+  width: number,
+  height: number,
+  getValue: (point: T) => number,
+) {
+  const paddingX = 44
   const paddingTop = 16
-  const paddingBottom = 18
+  const paddingBottom = 34
   const innerWidth = width - paddingX * 2
   const innerHeight = height - paddingTop - paddingBottom
-  const maxPlaybackMs = Math.max(...points.map((point) => point.playbackMs), 1)
+  const maxValue = Math.max(...points.map((point) => Math.max(0, getValue(point))), 1)
 
   const nodes = points.map((point, index) => {
+    const metricValue = Math.max(0, getValue(point))
     const x = points.length === 1 ? width / 2 : paddingX + (innerWidth * index) / (points.length - 1)
-    const ratio = maxPlaybackMs <= 0 ? 0 : point.playbackMs / maxPlaybackMs
+    const ratio = maxValue <= 0 ? 0 : metricValue / maxValue
     const y = paddingTop + innerHeight - ratio * innerHeight
     return {
       ...point,
+      metricValue,
       x,
       y,
       columnHeight: Math.max(10, ratio * innerHeight),

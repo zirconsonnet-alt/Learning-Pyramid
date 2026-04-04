@@ -21,7 +21,7 @@ export type LearningTask = z.infer<typeof LearningTaskSchema>
 export type SubmitLearningTaskItem = {
   question: RichContent
   answer: RichContent
-  anchor: { instanceId: string; position: string }
+  anchor: { instanceId: string; position: string } | null
 }
 
 export function submitLearningTask(params: {

@@ -6,7 +6,6 @@ const items = [
   { to: "/admin", label: "总览" },
   { to: "/admin/membership", label: "会员" },
   { to: "/admin/users", label: "用户" },
-  { to: "/admin/groups", label: "小组" },
 ]
 
 export function AdminNav() {

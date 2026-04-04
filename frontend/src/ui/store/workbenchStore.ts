@@ -5,12 +5,18 @@ import { appendImageBlock, removeImageBlockAt, richText, setRichContentText, typ
 
 export type DraftRecallPoint = {
   localId: string
-  instanceId: string
-  position: string
+  instanceId: string | null
+  position: string | null
   question: RichContent
   answer: RichContent
   createdAt: number
   updatedAt: number
+}
+
+export const WORKBENCH_GLOBAL_SCOPE_KEY = "__project__"
+
+export function getWorkbenchTaskScopeKey(instanceId: string | null) {
+  return instanceId ?? WORKBENCH_GLOBAL_SCOPE_KEY
 }
 
 type ProjectWorkbenchState = {
@@ -28,13 +34,13 @@ type WorkbenchState = {
   setRoots: (projectId: string, roots: string[]) => void
   setSelectedInstanceId: (projectId: string, instanceId: string | null) => void
   addDraft: (projectId: string, draft: DraftRecallPoint) => void
-  updateDraftPosition: (projectId: string, localId: string, position: string) => void
+  updateDraftPosition: (projectId: string, localId: string, position: string | null) => void
   updateDraftText: (projectId: string, localId: string, field: "question" | "answer", text: string) => void
   appendDraftImage: (projectId: string, localId: string, field: "question" | "answer", assetId: string) => void
   removeDraftImage: (projectId: string, localId: string, field: "question" | "answer", imageIndex: number) => void
   removeDraft: (projectId: string, localId: string) => void
-  clearDraftsForInstance: (projectId: string, instanceId: string) => void
-  setTaskTitle: (projectId: string, instanceId: string, title: string) => void
+  clearDraftsForInstance: (projectId: string, instanceId: string | null) => void
+  setTaskTitle: (projectId: string, instanceId: string | null, title: string) => void
 }
 
 function emptyProjectState(): ProjectWorkbenchState {
@@ -118,22 +124,30 @@ export const useWorkbenchStore = create<WorkbenchState>()(
       clearDraftsForInstance: (projectId, instanceId) =>
         set((s) => {
           const ps = s.byProjectId[projectId] ?? emptyProjectState()
+          const scopeKey = getWorkbenchTaskScopeKey(instanceId)
+          const nextTaskTitlesByInstanceId = { ...ps.taskTitlesByInstanceId }
+          delete nextTaskTitlesByInstanceId[scopeKey]
           return {
             byProjectId: {
               ...s.byProjectId,
-              [projectId]: { ...ps, drafts: ps.drafts.filter((d) => d.instanceId !== instanceId) },
+              [projectId]: {
+                ...ps,
+                drafts: ps.drafts.filter((d) => d.instanceId !== instanceId),
+                taskTitlesByInstanceId: nextTaskTitlesByInstanceId,
+              },
             },
           }
         }),
       setTaskTitle: (projectId, instanceId, taskTitle) =>
         set((s) => {
           const ps = s.byProjectId[projectId] ?? emptyProjectState()
+          const scopeKey = getWorkbenchTaskScopeKey(instanceId)
           return {
             byProjectId: {
               ...s.byProjectId,
               [projectId]: {
                 ...ps,
-                taskTitlesByInstanceId: { ...ps.taskTitlesByInstanceId, [instanceId]: taskTitle },
+                taskTitlesByInstanceId: { ...ps.taskTitlesByInstanceId, [scopeKey]: taskTitle },
               },
             },
           }
@@ -141,9 +155,9 @@ export const useWorkbenchStore = create<WorkbenchState>()(
     }),
     {
       name: "plm-workbench",
-      version: 3,
+      version: 4,
       migrate: (persistedState: unknown, version) => {
-        if (!persistedState || typeof persistedState !== "object" || version >= 3) return persistedState as WorkbenchState
+        if (!persistedState || typeof persistedState !== "object" || version >= 4) return persistedState as WorkbenchState
         const raw = persistedState as {
           byProjectId?: Record<
             string,
@@ -194,6 +208,16 @@ export const useWorkbenchStore = create<WorkbenchState>()(
                 }))
               : [],
           }
+        }
+        for (const projectState of Object.values(byProjectId)) {
+          projectState.taskTitlesByInstanceId = Object.fromEntries(
+            Object.entries(projectState.taskTitlesByInstanceId).map(([key, value]) => [key || WORKBENCH_GLOBAL_SCOPE_KEY, value]),
+          )
+          projectState.drafts = projectState.drafts.map((draft) => ({
+            ...draft,
+            instanceId: draft.instanceId || null,
+            position: draft.position || null,
+          }))
         }
         return { byProjectId } as WorkbenchState
       },

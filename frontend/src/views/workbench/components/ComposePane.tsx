@@ -5,6 +5,7 @@ import { BookPlus, ChevronLeft, ChevronRight } from "lucide-react"
 import { ApiError } from "@/ui/api/http"
 import { listRecallPointsByLearningTaskNode } from "@/ui/api/learningTaskNodes"
 import type { Instance } from "@/ui/api/instances"
+import type { ProjectType } from "@/ui/api/projects"
 import { richContentHasMeaning, richText } from "@/ui/api/richContent"
 import { RichContentEditor } from "@/ui/components/RichContentEditor"
 import { ContentEmptyState } from "@/ui/components/contentEmptyState"
@@ -13,10 +14,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/car
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
 import { formatInstanceReference, simplifyMaterialDisplayName } from "@/ui/displayIdentifiers"
+import {
+  projectTypeRequiresAnchor,
+  projectTypeRequiresLearningObjectTree,
+  projectTypeUsesResolvableCourseAnchor,
+} from "@/ui/projectTypes"
 import { useLearningTaskNodes } from "@/ui/queries/learningTasks"
 import { useSubmitLearningTask } from "@/ui/queries/workbench"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
-import { useWorkbenchStore, type DraftRecallPoint } from "@/ui/store/workbenchStore"
+import { getWorkbenchTaskScopeKey, useWorkbenchStore, type DraftRecallPoint } from "@/ui/store/workbenchStore"
 import { cn } from "@/ui/utils"
 
 function formatApiError(err: unknown) {
@@ -37,8 +43,8 @@ function buildRecommendedTaskTitle(instanceDisplayName: string, previousLearning
   return previousLearningCount <= 0 ? instanceDisplayName : `${instanceDisplayName}（${previousLearningCount + 1}）`
 }
 
-function createDraft(instanceId: string, ms: number): DraftRecallPoint {
-  const position = `t=${ms}`
+function createDraft(projectType: ProjectType, instanceId: string | null, ms: number): DraftRecallPoint {
+  const position = projectType === "COURSE" ? `t=${ms}` : projectType === "BOOK" ? "" : null
   const now = Date.now()
   return {
     localId: newLocalId(),
@@ -53,12 +59,14 @@ function createDraft(instanceId: string, ms: number): DraftRecallPoint {
 
 export function ComposePane({
   projectId,
+  projectType,
   selectedInstanceId,
   instance,
   currentMs,
   queueHasGate,
 }: {
   projectId: string
+  projectType: ProjectType
   selectedInstanceId: string | null
   instance: Instance | null
   currentMs: number
@@ -66,6 +74,7 @@ export function ComposePane({
 }) {
   const ps = useWorkbenchStore((s) => s.byProjectId[projectId])
   const addDraft = useWorkbenchStore((s) => s.addDraft)
+  const updateDraftPosition = useWorkbenchStore((s) => s.updateDraftPosition)
   const updateDraftText = useWorkbenchStore((s) => s.updateDraftText)
   const appendDraftImage = useWorkbenchStore((s) => s.appendDraftImage)
   const removeDraftImage = useWorkbenchStore((s) => s.removeDraftImage)
@@ -80,9 +89,14 @@ export function ComposePane({
 
   const submit = useSubmitLearningTask(projectId)
   const learningTaskNodesQ = useLearningTaskNodes(projectId)
+  const requiresLearningObjectTree = projectTypeRequiresLearningObjectTree(projectType)
+  const requiresAnchor = projectTypeRequiresAnchor(projectType)
+  const usesResolvableCourseAnchor = projectTypeUsesResolvableCourseAnchor(projectType)
+  const activeScopeInstanceId = requiresLearningObjectTree ? selectedInstanceId : null
+  const taskScopeKey = getWorkbenchTaskScopeKey(activeScopeInstanceId)
 
-  const drafts = (ps?.drafts ?? []).filter((d) => (selectedInstanceId ? d.instanceId === selectedInstanceId : true))
-  const taskTitle = selectedInstanceId ? ps?.taskTitlesByInstanceId?.[selectedInstanceId] ?? "" : ""
+  const drafts = (ps?.drafts ?? []).filter((d) => d.instanceId === activeScopeInstanceId)
+  const taskTitle = ps?.taskTitlesByInstanceId?.[taskScopeKey] ?? ""
   const leafNodeIds = useMemo(
     () =>
       (learningTaskNodesQ.data ?? [])
@@ -94,45 +108,49 @@ export function ComposePane({
     queries: leafNodeIds.map((nodeId) => ({
       queryKey: ["recallPointsByTaskNode", projectId, nodeId],
       queryFn: () => listRecallPointsByLearningTaskNode(projectId, nodeId),
-      enabled: !!projectId && !!selectedInstanceId,
+      enabled: !!projectId && requiresLearningObjectTree && !!selectedInstanceId,
     })),
   })
   const previousLearningCountForInstance = useMemo(() => {
+    if (projectType === "LOOSE_POINTS") return leafNodeIds.length
     if (!selectedInstanceId) return 0
     let count = 0
     for (const query of learningTaskRecallPointQs) {
       const recallPoints = query.data ?? []
       if (recallPoints.length === 0) continue
-      if (recallPoints.every((rp) => rp.anchor.instanceId === selectedInstanceId)) count += 1
+      if (recallPoints.every((rp) => rp.anchor?.instanceId === selectedInstanceId)) count += 1
     }
     return count
-  }, [learningTaskRecallPointQs, selectedInstanceId])
+  }, [leafNodeIds.length, learningTaskRecallPointQs, projectType, selectedInstanceId])
   const recommendedTaskTitle = useMemo(() => {
+    if (projectType === "LOOSE_POINTS") {
+      return buildRecommendedTaskTitle("零散知识点", previousLearningCountForInstance)
+    }
     if (!instance) return ""
     const instanceTitle = simplifyMaterialDisplayName(
       formatInstanceReference(instance.instanceId, instance.materialDisplayName),
       "未命名材料",
     )
     return buildRecommendedTaskTitle(instanceTitle, previousLearningCountForInstance)
-  }, [instance, previousLearningCountForInstance])
+  }, [instance, previousLearningCountForInstance, projectType])
 
   useEffect(() => {
     const previousRecommendedTitle = lastRecommendedTitleRef.current
     const trimmedTitle = taskTitle.trim()
     const shouldAdoptRecommended = !trimmedTitle || taskTitle === previousRecommendedTitle
-    if (!selectedInstanceId) {
+    if (requiresLearningObjectTree && !selectedInstanceId) {
       lastRecommendedTitleRef.current = ""
       return
     }
     if (recommendedTaskTitle && shouldAdoptRecommended && taskTitle !== recommendedTaskTitle) {
-      setTaskTitle(projectId, selectedInstanceId, recommendedTaskTitle)
+      setTaskTitle(projectId, activeScopeInstanceId, recommendedTaskTitle)
     }
     lastRecommendedTitleRef.current = recommendedTaskTitle
-  }, [projectId, recommendedTaskTitle, selectedInstanceId, setTaskTitle, taskTitle])
+  }, [activeScopeInstanceId, projectId, recommendedTaskTitle, requiresLearningObjectTree, selectedInstanceId, setTaskTitle, taskTitle])
 
   function onAdd() {
-    if (!selectedInstanceId) return
-    const draft = createDraft(selectedInstanceId, currentMs)
+    if (requiresLearningObjectTree && !selectedInstanceId) return
+    const draft = createDraft(projectType, activeScopeInstanceId, currentMs)
     addDraft(projectId, draft)
     setActiveDraftId(draft.localId)
     window.setTimeout(() => focusDraftFields(draft), 80)
@@ -142,28 +160,39 @@ export function ComposePane({
     if (queueHasGate) return
     const title = taskTitle.trim()
     if (!title) return
-    if (drafts.some((d) => !richContentHasMeaning(d.question) || !richContentHasMeaning(d.answer))) return
+    if (
+      drafts.some(
+        (d) =>
+          !richContentHasMeaning(d.question) ||
+          !richContentHasMeaning(d.answer) ||
+          (requiresAnchor && (!d.instanceId || !(d.position ?? "").trim())),
+      )
+    ) {
+      return
+    }
     const items = drafts.map((d) => ({
       question: d.question,
       answer: d.answer,
-      anchor: { instanceId: d.instanceId, position: d.position },
+      anchor: requiresAnchor && d.instanceId && d.position ? { instanceId: d.instanceId, position: d.position } : null,
     }))
     if (items.length === 0) return
     try {
       await submit.mutateAsync({ title, items })
-      if (selectedInstanceId) clearDraftsForInstance(projectId, selectedInstanceId)
+      clearDraftsForInstance(projectId, activeScopeInstanceId)
       showSuccessFeedback("学习任务已提交", `“${title}” 已提交，共包含 ${items.length} 个复述点。`)
     } catch (err) {
       showErrorFeedback("提交学习任务失败", formatApiError(err))
     }
   }
 
+  const hasIncompleteAnchor = requiresAnchor && drafts.some((d) => !d.instanceId || !(d.position ?? "").trim())
   const canSubmit =
     !queueHasGate &&
     !submit.isPending &&
     !!taskTitle.trim() &&
     drafts.length > 0 &&
-    !drafts.some((d) => !richContentHasMeaning(d.question) || !richContentHasMeaning(d.answer))
+    !drafts.some((d) => !richContentHasMeaning(d.question) || !richContentHasMeaning(d.answer)) &&
+    !hasIncompleteAnchor
 
   const completedDraftCount = drafts.filter((draft) => isDraftComplete(draft)).length
   const completionPercent = drafts.length > 0 ? Math.round((completedDraftCount / drafts.length) * 100) : 0
@@ -203,12 +232,20 @@ export function ComposePane({
     <Card className="theme-card-main">
       <CardHeader className="theme-card-header flex-col gap-4 space-y-0 md:flex-row md:items-start md:justify-between">
         <div className="flex min-w-0 flex-1 items-start gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#e2e8f0] bg-[#f5f7fa] text-primary">
+          <div className="theme-icon-surface h-10 w-10">
             <BookPlus className="h-5 w-5" />
           </div>
           <div className="min-w-0">
             <CardTitle>复述点录入</CardTitle>
-            {instance ? <div className="mt-1 truncate text-xs text-[#6a7b90]">{instance.materialDisplayName}</div> : null}
+            {projectType === "LOOSE_POINTS" ? (
+              <div className="mt-1 text-xs text-muted-foreground">当前项目按零散知识点模式录入，不需要选择材料实例或绑定锚点。</div>
+            ) : instance ? (
+              <div className="mt-1 truncate text-xs text-muted-foreground">{instance.materialDisplayName}</div>
+            ) : (
+              <div className="mt-1 text-xs text-muted-foreground">
+                {projectType === "BOOK" ? "请先从左侧目录中选择一个章节、小节或条目。" : "请先从左侧目录中选择一个视频实例。"}
+              </div>
+            )}
           </div>
         </div>
 
@@ -216,19 +253,19 @@ export function ComposePane({
           <div className="min-w-0 space-y-2">
             <div className="flex items-center justify-between gap-3 text-sm">
               <span className="theme-meta">{drafts.length} 个复述点</span>
-              <span className="font-medium text-slate-700">
+              <span className="font-medium text-[color:var(--theme-subtle-text)]">
                 已完成 {completedDraftCount} / {drafts.length}
               </span>
             </div>
-            <div className="h-2 overflow-hidden rounded-full bg-[#e8edf4]">
+            <div className="theme-progress-track h-2 overflow-hidden rounded-full">
               <div
-                className="h-full rounded-full bg-primary transition-[width] duration-300"
+                className="theme-progress-fill h-full rounded-full transition-[width] duration-300"
                 style={{ width: `${completionPercent}%` }}
               />
             </div>
           </div>
           <div className="flex w-full gap-2 md:w-auto md:self-center">
-            <Button onClick={onAdd} disabled={!selectedInstanceId} className="flex-1 whitespace-nowrap md:flex-none">
+            <Button onClick={onAdd} disabled={requiresLearningObjectTree && !selectedInstanceId} className="flex-1 whitespace-nowrap md:flex-none">
               添加
             </Button>
             {activeDraft ? (
@@ -264,8 +301,8 @@ export function ComposePane({
                   className={cn(
                     "flex size-10 items-center justify-center rounded-xl border text-sm font-semibold transition-all",
                     completed
-                      ? "border-primary/20 bg-primary text-primary-foreground shadow-[0_12px_24px_-20px_rgba(30,58,95,0.55)]"
-                      : "border-[#d9e2eb] bg-white text-[#5e738b] hover:border-primary/25 hover:text-primary",
+                      ? "border-primary/20 bg-primary text-primary-foreground shadow-[0_12px_24px_-20px_hsl(var(--primary)/0.55)]"
+                      : "[border-color:var(--theme-soft-border)] [background:var(--theme-soft-bg)] text-[color:var(--theme-subtle-text)] hover:border-primary/25 hover:text-primary",
                     isActive && "ring-2 ring-primary/25 ring-offset-2 ring-offset-background",
                   )}
                   title={completed ? `第 ${index + 1} 个复述点，已填写` : `第 ${index + 1} 个复述点，尚未填写完成`}
@@ -279,17 +316,28 @@ export function ComposePane({
         ) : null}
 
         {drafts.length === 0 && selectedInstanceId ? (
-          <div className="rounded-[1.2rem] border border-dashed border-[#dbe3ec] bg-[#fbfcfe] px-4 py-5 text-[15px] font-medium text-[#52657b]">
+          <div className="theme-subtle-surface border-dashed px-4 py-5 text-[15px] font-medium">
             暂无复述点
           </div>
         ) : null}
 
         {drafts.length === 0 && !selectedInstanceId ? (
-          <ContentEmptyState
-            icon={BookPlus}
-            title="先选择一个视频再开始录入"
-            message="请先从左侧内容目录里选择一个视频，随后就能开始录入复述点。"
-          />
+          requiresLearningObjectTree ? (
+            <ContentEmptyState
+              icon={BookPlus}
+              title={projectType === "BOOK" ? "先选择一个书本目录节点" : "先选择一个视频再开始录入"}
+              message={
+                projectType === "BOOK"
+                  ? "请先从左侧内容目录里选择一个章节、小节或条目，随后就能录入带文本锚点的复述点。"
+                  : "请先从左侧内容目录里选择一个视频，随后就能开始录入复述点。"
+              }
+            />
+          ) : null
+        ) : null}
+        {drafts.length === 0 && !requiresLearningObjectTree ? (
+          <div className="theme-subtle-surface border-dashed px-4 py-5 text-[15px] font-medium">
+            当前还没有零散知识点，点击“添加”即可开始录入。
+          </div>
         ) : null}
 
         {activeDraft ? (
@@ -308,7 +356,7 @@ export function ComposePane({
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="absolute inset-y-0 -left-4 z-10 h-auto w-4 rounded-none border-0 bg-transparent p-0 text-[#5e738b] shadow-none outline-none hover:bg-transparent hover:text-slate-900 focus-visible:ring-0 focus-visible:ring-offset-0 sm:-left-5 sm:w-5"
+                className="absolute inset-y-0 -left-4 z-10 h-auto w-4 rounded-none border-0 bg-transparent p-0 text-[color:var(--theme-subtle-text)] shadow-none outline-none hover:bg-transparent hover:text-foreground focus-visible:ring-0 focus-visible:ring-offset-0 sm:-left-5 sm:w-5"
                 onClick={() => goToDraft(activeDraftIndex - 1)}
                 disabled={activeDraftIndex <= 0}
                 aria-label="上一张复述点卡片"
@@ -320,7 +368,7 @@ export function ComposePane({
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="absolute inset-y-0 -right-4 z-10 h-auto w-4 rounded-none border-0 bg-transparent p-0 text-[#5e738b] shadow-none outline-none hover:bg-transparent hover:text-slate-900 focus-visible:ring-0 focus-visible:ring-offset-0 sm:-right-5 sm:w-5"
+                className="absolute inset-y-0 -right-4 z-10 h-auto w-4 rounded-none border-0 bg-transparent p-0 text-[color:var(--theme-subtle-text)] shadow-none outline-none hover:bg-transparent hover:text-foreground focus-visible:ring-0 focus-visible:ring-offset-0 sm:-right-5 sm:w-5"
                 onClick={() => goToDraft(activeDraftIndex + 1)}
                 disabled={activeDraftIndex < 0 || activeDraftIndex >= drafts.length - 1}
                 aria-label="下一张复述点卡片"
@@ -329,7 +377,33 @@ export function ComposePane({
                 <ChevronRight className="h-4 w-4" />
               </Button>
 
-              <div className="theme-status-surface rounded-[1.15rem] border border-[#e2e8ef] px-4 py-4 sm:px-5">
+              <div className="theme-status-surface rounded-[1.15rem] border border-[color:var(--theme-status-border)] px-4 py-4 sm:px-5">
+                {requiresAnchor ? (
+                  <div className="mb-4 space-y-2 border-b border-[color:var(--theme-soft-border)] pb-4">
+                    <Label
+                      htmlFor={`draft-anchor-${activeDraft.localId}`}
+                      className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground"
+                    >
+                      锚点位置
+                    </Label>
+                    <Input
+                      id={`draft-anchor-${activeDraft.localId}`}
+                      value={activeDraft.position ?? ""}
+                      onChange={(event) => updateDraftPosition(projectId, activeDraft.localId, event.target.value)}
+                      disabled={usesResolvableCourseAnchor}
+                      placeholder={
+                        usesResolvableCourseAnchor ? "添加时会自动记录当前视频时间" : "例如：第 45 页 例 2 / 第 3 章 1.2 节 / 习题 7"
+                      }
+                      className="h-11 rounded-xl border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)]"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      {usesResolvableCourseAnchor
+                        ? "网课项目会把复述点绑定到添加时的视频时间点。"
+                        : "书本项目必须填写文本锚点，例如页码、章节、小节、题号或段落说明。"}
+                    </p>
+                  </div>
+                ) : null}
+
                 <div className="grid gap-3 xl:grid-cols-2">
                   <div className="space-y-2">
                     <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">问题</div>
@@ -344,8 +418,8 @@ export function ComposePane({
                       textareaRef={(node) => {
                         questionRefs.current[activeDraft.localId] = node
                       }}
-                      textareaClassName="min-h-[180px] resize-y rounded-2xl border-[#dbe4ee] bg-[#fbfdff] text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-primary focus:ring-2 focus:ring-primary/15"
-                      imageClassName="h-28 w-full max-w-[220px] rounded-2xl border border-[#dbe4ee] bg-[#fbfdff] object-cover"
+                      textareaClassName="min-h-[180px] resize-y rounded-2xl [border-color:var(--theme-subtle-border)] [background:var(--theme-subtle-bg)] text-foreground outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15"
+                      imageClassName="h-28 w-full max-w-[220px] rounded-2xl border [border-color:var(--theme-subtle-border)] [background:var(--theme-subtle-bg)] object-cover"
                     />
                   </div>
 
@@ -362,8 +436,8 @@ export function ComposePane({
                       textareaRef={(node) => {
                         answerRefs.current[activeDraft.localId] = node
                       }}
-                      textareaClassName="min-h-[180px] resize-y rounded-2xl border-[#dbe4ee] bg-[#fbfdff] text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-primary focus:ring-2 focus:ring-primary/15"
-                      imageClassName="h-28 w-full max-w-[220px] rounded-2xl border border-[#dbe4ee] bg-[#fbfdff] object-cover"
+                      textareaClassName="min-h-[180px] resize-y rounded-2xl [border-color:var(--theme-subtle-border)] [background:var(--theme-subtle-bg)] text-foreground outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15"
+                      imageClassName="h-28 w-full max-w-[220px] rounded-2xl border [border-color:var(--theme-subtle-border)] [background:var(--theme-subtle-bg)] object-cover"
                     />
                   </div>
                 </div>
@@ -372,29 +446,29 @@ export function ComposePane({
           </div>
         ) : null}
 
-        <div className="border-t border-[#e2e8ef] pt-4">
+        <div className="border-t border-[color:var(--theme-soft-border)] pt-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-center">
-            <Label htmlFor="taskTitle" className="shrink-0 text-sm font-medium text-[#475569] md:w-[6.5rem]">
+            <Label htmlFor="taskTitle" className="shrink-0 text-sm font-medium text-[color:var(--theme-subtle-text)] md:w-[6.5rem]">
               任务标题
             </Label>
             <Input
               id="taskTitle"
               value={taskTitle}
               onChange={(e) => {
-                if (!selectedInstanceId) return
-                setTaskTitle(projectId, selectedInstanceId, e.target.value)
+                if (requiresLearningObjectTree && !selectedInstanceId) return
+                setTaskTitle(projectId, activeScopeInstanceId, e.target.value)
               }}
               onKeyDown={(e) => {
                 if (e.key !== "Enter" || e.nativeEvent.isComposing) return
                 e.preventDefault()
                 if (canSubmit) {
                   void onSubmit()
-                } else if (!taskTitle.trim() && recommendedTaskTitle && selectedInstanceId) {
-                  setTaskTitle(projectId, selectedInstanceId, recommendedTaskTitle)
+                } else if (!taskTitle.trim() && recommendedTaskTitle) {
+                  setTaskTitle(projectId, activeScopeInstanceId, recommendedTaskTitle)
                 }
               }}
-              className="h-11 flex-1 bg-white"
-              placeholder={instance ? recommendedTaskTitle : "例如：第一节"}
+              className="h-11 flex-1"
+              placeholder={projectType === "LOOSE_POINTS" ? recommendedTaskTitle || "例如：离散数学零散练习" : instance ? recommendedTaskTitle : "例如：第一节"}
             />
             <Button
               className="h-11 shrink-0 rounded-xl px-5 md:min-w-[7rem]"
@@ -405,11 +479,15 @@ export function ComposePane({
             </Button>
           </div>
           {submit.error ? <p className="mt-2 text-sm text-destructive">{formatApiError(submit.error)}</p> : null}
+          {!submit.isPending && !submit.error && hasIncompleteAnchor ? (
+            <p className="mt-2 text-xs text-muted-foreground">提交前还需要把每条复述点的锚点位置补完整。</p>
+          ) : null}
           {!submit.isPending &&
           !submit.error &&
           drafts.length > 0 &&
-          !drafts.some((d) => !richContentHasMeaning(d.question) || !richContentHasMeaning(d.answer)) ? (
-            <p className="mt-2 text-xs text-[#64748b]">已准备好提交，共 {drafts.length} 个复述点，已完成 {completedDraftCount} 个。</p>
+          !drafts.some((d) => !richContentHasMeaning(d.question) || !richContentHasMeaning(d.answer)) &&
+          !hasIncompleteAnchor ? (
+            <p className="mt-2 text-xs text-muted-foreground">已准备好提交，共 {drafts.length} 个复述点，已完成 {completedDraftCount} 个。</p>
           ) : null}
         </div>
       </CardContent>

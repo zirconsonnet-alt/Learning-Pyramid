@@ -14,9 +14,10 @@ from adapter.mappers import (
 from adapter.schemas import (
     CreateProjectRequest,
     EditProjectRequest,
+    SetReviewRecommendationConfigRequest,
     SetProjectMaterialSourceBindingRequest,
 )
-from backend.models.enums import MaterialSourceKind
+from backend.models.enums import MaterialSourceKind, ProjectType
 from backend.models.errors import PreconditionFailure
 from backend.system.api import SystemAPI
 from backend.system.auth_store import AuthStore
@@ -32,6 +33,14 @@ def _parse_material_source_kind(raw: str | None) -> MaterialSourceKind:
         return MaterialSourceKind(value)
     except ValueError as exc:
         raise PreconditionFailure("sourceKind must be one of SERVER_FS, BROWSER_LOCAL, NATIVE_LOCAL, MANUAL") from exc
+
+
+def _parse_project_type(raw: str | None) -> ProjectType:
+    value = str(raw or ProjectType.COURSE.value).strip()
+    try:
+        return ProjectType(value)
+    except ValueError as exc:
+        raise PreconditionFailure("projectType must be one of COURSE, BOOK, LOOSE_POINTS") from exc
 
 
 @router.get("/projects")
@@ -56,6 +65,7 @@ def create_project(
         req.title,
         project_root=req.projectRoot,
         initial_source_kind=_parse_material_source_kind(req.initialSourceKind),
+        initial_project_type=_parse_project_type(req.initialProjectType),
     )
     if current_runtime_features().auth_enabled:
         user = require_request_auth_user(request)
@@ -81,6 +91,22 @@ def edit_project(projectId: str, req: EditProjectRequest, api: SystemAPI = Depen
 def get_project_config(projectId: str, api: SystemAPI = Depends(get_api)) -> dict:
     cfg = api.get_project_config(projectId)  # type: ignore[arg-type]
     return {"ok": True, "data": project_config_to_dto(cfg)}
+
+
+@router.post("/projects/{projectId}/review-recommendation-config")
+def set_review_recommendation_config(
+    projectId: str,
+    req: SetReviewRecommendationConfigRequest,
+    api: SystemAPI = Depends(get_api),
+) -> dict:
+    api.set_review_recommendation_config(  # type: ignore[arg-type]
+        projectId,
+        min_recall_points_to_enable=req.minRecallPointsToEnable,
+        max_history_len=req.maxHistoryLen,
+        recommended_batch_size=req.recommendedBatchSize,
+        forgetting_curve_decay_per_day=req.forgettingCurveDecayPerDay,
+    )
+    return {"ok": True, "data": None}
 
 
 @router.get("/projects/{projectId}/project-storage-config")

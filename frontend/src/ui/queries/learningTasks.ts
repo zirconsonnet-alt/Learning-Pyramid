@@ -2,7 +2,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { ApiError } from "@/ui/api/http"
 import { editLearningTask, getLearningTask } from "@/ui/api/learningTasks"
-import { getLearningTaskNode, getLearningTaskNodeBinding, listLearningTaskNodes } from "@/ui/api/learningTaskNodes"
+import { editLearningTaskNode, getLearningTaskNode, getLearningTaskNodeBinding, listLearningTaskNodes } from "@/ui/api/learningTaskNodes"
+
+const LEARNING_TASK_QUERY_TIMEOUT_MS = 90_000
 
 export function useLearningTask(projectId: string, learningTaskId: string) {
   return useQuery({
@@ -23,7 +25,7 @@ export function useLearningTaskNode(projectId: string, nodeId: string) {
 export function useLearningTaskNodes(projectId: string) {
   return useQuery({
     queryKey: ["learningTaskNodes", projectId],
-    queryFn: () => listLearningTaskNodes(projectId),
+    queryFn: ({ signal }) => listLearningTaskNodes(projectId, { signal, timeoutMs: LEARNING_TASK_QUERY_TIMEOUT_MS }),
     enabled: !!projectId,
   })
 }
@@ -51,6 +53,21 @@ export function useEditLearningTask(projectId: string, learningTaskId: string) {
     onSuccess: async () => {
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["learningTask", projectId, learningTaskId] }),
+        qc.invalidateQueries({ queryKey: ["learningTaskNodes", projectId] }),
+        qc.invalidateQueries({ queryKey: ["learningTaskNode", projectId] }),
+        qc.invalidateQueries({ queryKey: ["learningTaskNodeBinding", projectId] }),
+        qc.invalidateQueries({ queryKey: ["reviewChainBinding", projectId] }),
+      ])
+    },
+  })
+}
+
+export function useEditLearningTaskNode(projectId: string, nodeId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (title: string) => editLearningTaskNode(projectId, nodeId, title),
+    onSuccess: async () => {
+      await Promise.all([
         qc.invalidateQueries({ queryKey: ["learningTaskNodes", projectId] }),
         qc.invalidateQueries({ queryKey: ["learningTaskNode", projectId] }),
         qc.invalidateQueries({ queryKey: ["learningTaskNodeBinding", projectId] }),

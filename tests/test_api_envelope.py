@@ -88,6 +88,7 @@ def test_system_capabilities_reflect_hosted_env(monkeypatch, tmp_path: Path) -> 
             "asrEnabled": False,
             "serverMediaStreamEnabled": False,
             "browserLocalMediaEnabled": True,
+            "baiduNetdiskEnabled": False,
             "authEnabled": True,
             "allowSignup": True,
             "llmConfigured": False,
@@ -102,7 +103,7 @@ def test_system_capabilities_reflect_hosted_env(monkeypatch, tmp_path: Path) -> 
 def test_public_download_catalog_and_assets_are_public(monkeypatch, tmp_path: Path) -> None:
     download_root = tmp_path / "public-downloads"
     download_root.mkdir(parents=True)
-    asset_path = download_root / "LearningPyramid-subtitle-tool-0.1.0-beta.2-windows-x64.zip"
+    asset_path = download_root / "LearningPyramid-subtitle-tool-0.1.0-beta.3-windows-x64.zip"
     asset_path.write_bytes(b"zip-bytes")
     (download_root / "catalog.json").write_text(
         json.dumps(
@@ -112,7 +113,7 @@ def test_public_download_catalog_and_assets_are_public(monkeypatch, tmp_path: Pa
                     {
                         "id": "subtitle-generator-windows-x64",
                         "displayName": "LearningPyramid 字幕生成工具",
-                        "version": "0.1.0-beta.2",
+                        "version": "0.1.0-beta.3",
                         "platform": "windows-x64",
                         "summary": "离线字幕生成工具",
                         "assetPath": asset_path.name,
@@ -152,7 +153,7 @@ def test_public_download_catalog_and_assets_are_public(monkeypatch, tmp_path: Pa
                 {
                     "id": "subtitle-generator-windows-x64",
                     "displayName": "LearningPyramid 字幕生成工具",
-                    "version": "0.1.0-beta.2",
+                    "version": "0.1.0-beta.3",
                     "platform": "windows-x64",
                     "summary": "离线字幕生成工具",
                     "fileName": asset_path.name,
@@ -175,6 +176,26 @@ def test_public_download_catalog_and_assets_are_public(monkeypatch, tmp_path: Pa
 
     blocked_resp = client.get("/downloads/../secret.txt")
     assert blocked_resp.status_code == 404
+    _reset_caches()
+
+
+def test_public_health_endpoint_does_not_require_auth_store(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PLM_APP_MODE", "hosted")
+    monkeypatch.setenv("PLM_ENABLE_AUTH", "true")
+    monkeypatch.setenv("PLM_MEDIA_ACCESS_TOKEN_SECRET", "real-secret")
+    monkeypatch.setenv("PLM_STORE_PATH", "")
+    monkeypatch.setenv("PLM_LEGACY_STORE_PATH", "")
+    monkeypatch.setenv("PLM_STORE_DB_PATH", str(tmp_path / "plm_store.sqlite3"))
+    monkeypatch.setenv("PLM_AUTH_DB_PATH", str(tmp_path / "plm_auth.sqlite3"))
+    _reset_caches()
+
+    with patch("adapter.main.get_auth_store", side_effect=AssertionError("auth store should not be used for /api/health/live")):
+        client = TestClient(create_app(), raise_server_exceptions=False)
+        resp = client.get("/api/health/live")
+
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    assert resp.json()["data"]["status"] == "ok"
     _reset_caches()
 
 
@@ -204,11 +225,13 @@ def test_global_llm_settings_endpoint_updates_runtime_capabilities(monkeypatch, 
     assert updated.status_code == 200
     assert updated.json()["data"]["llmConfigured"] is True
     assert updated.json()["data"]["llmSource"] == "global"
+    assert updated.json()["data"]["promptAssemblyMode"] == "system"
     assert updated.json()["data"]["savedApiKeyPreview"] == "sk-l...5678"
 
     listed = client.get("/api/system/global-llm-settings")
     assert listed.status_code == 200
     assert listed.json()["data"]["savedApiKeyConfigured"] is True
+    assert listed.json()["data"]["promptAssemblyMode"] == "system"
 
     after = client.get("/api/system/capabilities")
     assert after.status_code == 200
@@ -278,6 +301,62 @@ def test_system_llm_ask_endpoint_uses_saved_global_settings(monkeypatch, tmp_pat
         ],
         "temperature": 0.2,
     }
+    _reset_caches()
+
+
+def test_system_llm_ask_endpoint_can_concat_system_prompt_into_user_message(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PLM_APP_MODE", "local")
+    monkeypatch.setenv("PLM_ENABLE_AUTH", "false")
+    monkeypatch.setenv("PLM_STORE_PATH", "")
+    monkeypatch.setenv("PLM_LEGACY_STORE_PATH", "")
+    monkeypatch.setenv("PLM_STORE_DB_PATH", str(tmp_path / "plm_store.sqlite3"))
+    monkeypatch.setenv("PLM_AUTH_DB_PATH", str(tmp_path / "plm_auth.sqlite3"))
+    _reset_caches()
+
+    client = TestClient(create_app())
+    saved = client.put(
+        "/api/system/global-llm-settings",
+        json={
+            "baseUrl": "https://api.openai.com/v1",
+            "modelName": "gpt-4o-mini",
+            "apiKey": "sk-local-12345678",
+            "promptAssemblyMode": "user_concat",
+        },
+    )
+    assert saved.status_code == 200
+    assert saved.json()["data"]["promptAssemblyMode"] == "user_concat"
+
+    captured: dict[str, object] = {}
+
+    def fake_post_json(*, url: str, payload: dict[str, object], api_key: str | None, timeout_sec: float) -> dict[str, object]:
+        captured["payload"] = payload
+        return {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}
+
+    with patch("backend.system.api.SystemAPI._http_post_json", side_effect=fake_post_json):
+        resp = client.post(
+            "/api/system/llm/ask",
+            json={
+                "prompt": "简单介绍一下你自己",
+                "systemPrompt": "你是一个简洁的助手",
+            },
+        )
+
+    assert resp.status_code == 200
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    messages = payload["messages"]
+    assert messages == [
+        {
+            "role": "user",
+            "content": (
+                "以下内容是系统规则与上下文，请把它们和用户问题一起视为本次输入，严格依据这些信息回答。\n"
+                "[系统信息]\n"
+                "你是一个简洁的助手\n"
+                "[用户问题]\n"
+                "简单介绍一下你自己"
+            ),
+        }
+    ]
     _reset_caches()
 
 
@@ -386,7 +465,166 @@ def test_project_llm_ask_endpoint_includes_recall_point_context(monkeypatch, tmp
     assert "Context target: recall point" in joined
     assert "What is spaced repetition?" in joined
     assert "It is reviewing information over time." in joined
+    assert "不要回答“未提供当前节点内容/主题/关键词”" in joined
     assert "请用一句话总结这条复述点" in joined
+    _reset_caches()
+
+
+def test_project_llm_ask_endpoint_can_concat_context_into_user_message(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PLM_APP_MODE", "local")
+    monkeypatch.setenv("PLM_ENABLE_AUTH", "false")
+    monkeypatch.setenv("PLM_STORE_PATH", "")
+    monkeypatch.setenv("PLM_LEGACY_STORE_PATH", "")
+    monkeypatch.setenv("PLM_STORE_DB_PATH", str(tmp_path / "plm_store.sqlite3"))
+    monkeypatch.setenv("PLM_AUTH_DB_PATH", str(tmp_path / "plm_auth.sqlite3"))
+    _reset_caches()
+
+    client = TestClient(create_app())
+    api = get_api()
+    project_id = api.create_project(
+        "LLM Concat Project",
+        project_root=str(tmp_path / "project-context-user-concat"),
+        initial_source_kind=MaterialSourceKind.MANUAL,
+    )
+    instance_id = api.add_instance(project_id, "manual/clip-2")
+    api.add_learning_object_leaf(project_id, parent_id=None, instance_id=instance_id, title="Clip 2")
+    entry_node_id = api.submit_learning_task(
+        project_id,
+        items=[
+            (
+                rich_text("事件的和含义"),
+                rich_text("A和B至少发生一个"),
+                Anchor(instance_id=instance_id, position="t=2200"),
+            )
+        ],
+        title="1.2事件关系运算",
+    )
+
+    client.put(
+        "/api/system/global-llm-settings",
+        json={
+            "baseUrl": "https://api.openai.com/v1",
+            "modelName": "gpt-4o-mini",
+            "apiKey": "sk-local-12345678",
+            "promptAssemblyMode": "user_concat",
+        },
+    )
+
+    captured: dict[str, object] = {}
+
+    def fake_post_json(*, url: str, payload: dict[str, object], api_key: str | None, timeout_sec: float) -> dict[str, object]:
+        captured["payload"] = payload
+        return {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}
+
+    with patch("backend.system.api.SystemAPI._http_post_json", side_effect=fake_post_json):
+        resp = client.post(
+            f"/api/projects/{project_id}/llm/ask",
+            json={
+                "prompt": "请基于当前节点内容出 3 道题",
+                "learningTaskNodeId": str(entry_node_id),
+            },
+        )
+
+    assert resp.status_code == 200
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    messages = payload["messages"]
+    assert isinstance(messages, list)
+    assert len(messages) == 1
+    assert messages[0]["role"] == "user"
+    joined = str(messages[0]["content"])
+    assert "以下内容是系统规则与上下文" in joined
+    assert "[系统信息]" in joined
+    assert "[项目上下文]" in joined
+    assert "Project Context" in joined
+    assert "Context target: learning task node" in joined
+    assert "事件的和含义" in joined
+    assert "A和B至少发生一个" in joined
+    assert "请基于当前节点内容出 3 道题" in joined
+    _reset_caches()
+
+
+def test_project_llm_task_context_includes_recall_points_and_availability_note(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PLM_APP_MODE", "local")
+    monkeypatch.setenv("PLM_ENABLE_AUTH", "false")
+    monkeypatch.setenv("PLM_STORE_PATH", "")
+    monkeypatch.setenv("PLM_LEGACY_STORE_PATH", "")
+    monkeypatch.setenv("PLM_STORE_DB_PATH", str(tmp_path / "plm_store.sqlite3"))
+    monkeypatch.setenv("PLM_AUTH_DB_PATH", str(tmp_path / "plm_auth.sqlite3"))
+    _reset_caches()
+
+    client = TestClient(create_app())
+    api = get_api()
+    project_id = api.create_project(
+        "Task Context Project",
+        project_root=str(tmp_path / "project-task-context"),
+        initial_source_kind=MaterialSourceKind.MANUAL,
+    )
+    instance_id = api.add_instance(project_id, "manual/clip-1")
+    api.add_learning_object_leaf(project_id, parent_id=None, instance_id=instance_id, title="Clip 1")
+    entry_node_id = api.submit_learning_task(
+        project_id,
+        items=[
+            (
+                rich_text("概率论是研究什么的学科"),
+                rich_text("随机现象的统计规律"),
+                Anchor(instance_id=instance_id, position="t=1000"),
+            ),
+            (
+                rich_text("随机试验的3个特点"),
+                rich_text("可重复性，可预知性，不确定性"),
+                Anchor(instance_id=instance_id, position="t=2000"),
+            ),
+        ],
+        title="1.1随机事件",
+    )
+
+    client.put(
+        "/api/system/global-llm-settings",
+        json={
+            "baseUrl": "https://api.openai.com/v1",
+            "modelName": "gpt-4o-mini",
+            "apiKey": "sk-local-12345678",
+        },
+    )
+
+    captured: dict[str, object] = {}
+
+    def fake_post_json(*, url: str, payload: dict[str, object], api_key: str | None, timeout_sec: float) -> dict[str, object]:
+        captured["payload"] = payload
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "ok",
+                    }
+                }
+            ]
+        }
+
+    with patch("backend.system.api.SystemAPI._http_post_json", side_effect=fake_post_json):
+        resp = client.post(
+            f"/api/projects/{project_id}/llm/ask",
+            json={
+                "prompt": "请总结当前任务节点的内容",
+                "learningTaskNodeId": str(entry_node_id),
+            },
+        )
+
+    assert resp.status_code == 200
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    messages = payload["messages"]
+    assert isinstance(messages, list)
+    joined = "\n".join(str(item.get("content", "")) for item in messages if isinstance(item, dict))
+    assert "Context target: learning task node" in joined
+    assert "Active recall points included: 2 / 2" in joined
+    assert "do not claim the current node content is missing" in joined
+    assert "Do not ask the user to provide the topic, keywords, or summary again." in joined
+    assert "不要回答“未提供当前节点内容/主题/关键词”" in joined
+    assert "概率论是研究什么的学科" in joined
+    assert "随机试验的3个特点" in joined
     _reset_caches()
 
 
@@ -435,6 +673,133 @@ def test_project_llm_ask_endpoint_rejects_multiple_context_targets(monkeypatch, 
     _reset_caches()
 
 
+def test_project_llm_chat_completions_endpoint_enforces_non_empty_messages(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PLM_APP_MODE", "local")
+    monkeypatch.setenv("PLM_ENABLE_AUTH", "false")
+    monkeypatch.setenv("PLM_STORE_PATH", "")
+    monkeypatch.setenv("PLM_LEGACY_STORE_PATH", "")
+    monkeypatch.setenv("PLM_STORE_DB_PATH", str(tmp_path / "plm_store.sqlite3"))
+    monkeypatch.setenv("PLM_AUTH_DB_PATH", str(tmp_path / "plm_auth.sqlite3"))
+    _reset_caches()
+
+    client = TestClient(create_app())
+    project_id = get_api().create_project(
+        "Raw Chat Project",
+        project_root=str(tmp_path / "project-raw-chat"),
+        initial_source_kind=MaterialSourceKind.MANUAL,
+    )
+
+    client.put(
+        "/api/system/global-llm-settings",
+        json={
+            "baseUrl": "https://api.openai.com/v1",
+            "modelName": "gpt-4o-mini",
+            "apiKey": "sk-local-12345678",
+        },
+    )
+
+    empty_resp = client.post(
+        f"/api/projects/{project_id}/llm/chat-completions",
+        json={"messages": []},
+    )
+    assert empty_resp.status_code == 400
+    assert empty_resp.json()["error"]["code"] == "INVALID_INPUT"
+    assert any(error["loc"][-1] == "messages" for error in empty_resp.json()["error"]["details"])
+
+    captured: dict[str, object] = {}
+
+    def fake_post_json(*, url: str, payload: dict[str, object], api_key: str | None, timeout_sec: float) -> dict[str, object]:
+        captured["url"] = url
+        captured["payload"] = payload
+        captured["api_key"] = api_key
+        captured["timeout_sec"] = timeout_sec
+        return {"id": "chatcmpl_local", "choices": []}
+
+    with patch("backend.system.api.SystemAPI._http_post_json", side_effect=fake_post_json):
+        ok_resp = client.post(
+            f"/api/projects/{project_id}/llm/chat-completions",
+            json={
+                "messages": [{"role": "user", "content": "hello"}],
+                "parallelToolCalls": False,
+            },
+        )
+
+    assert ok_resp.status_code == 200
+    assert ok_resp.json() == {"ok": True, "data": {"id": "chatcmpl_local", "choices": []}}
+    assert captured["url"] == "https://api.openai.com/v1/chat/completions"
+    assert captured["api_key"] == "sk-local-12345678"
+    assert captured["timeout_sec"] == 90.0
+    assert captured["payload"] == {
+        "model": "gpt-4o-mini",
+        "messages": [{"role": "user", "content": "hello"}],
+        "parallel_tool_calls": False,
+    }
+    _reset_caches()
+
+
+def test_project_llm_debug_endpoint_returns_latest_non_stream_record(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PLM_APP_MODE", "local")
+    monkeypatch.setenv("PLM_ENABLE_AUTH", "false")
+    monkeypatch.setenv("PLM_STORE_PATH", "")
+    monkeypatch.setenv("PLM_LEGACY_STORE_PATH", "")
+    monkeypatch.setenv("PLM_STORE_DB_PATH", str(tmp_path / "plm_store.sqlite3"))
+    monkeypatch.setenv("PLM_AUTH_DB_PATH", str(tmp_path / "plm_auth.sqlite3"))
+    _reset_caches()
+
+    client = TestClient(create_app())
+    api = get_api()
+    project_id = api.create_project(
+        "Debug Project",
+        project_root=str(tmp_path / "project-debug"),
+        initial_source_kind=MaterialSourceKind.MANUAL,
+    )
+    instance_id = api.add_instance(project_id, "manual/clip-1")
+    api.add_learning_object_leaf(project_id, parent_id=None, instance_id=instance_id, title="Clip 1")
+    entry_node_id = api.submit_learning_task(
+        project_id,
+        items=[(rich_text("事件的和含义"), rich_text("A和B至少发生一个"), Anchor(instance_id=instance_id, position="t=1000"))],
+        title="1.2事件关系运算",
+    )
+
+    client.put(
+        "/api/system/global-llm-settings",
+        json={
+            "baseUrl": "https://api.openai.com/v1",
+            "modelName": "gpt-4o-mini",
+            "apiKey": "sk-local-12345678",
+        },
+    )
+
+    with patch(
+        "backend.system.api.SystemAPI._http_post_json",
+        return_value={"choices": [{"message": {"role": "assistant", "content": "这是一次测试回答。"}}]},
+    ):
+        ask_resp = client.post(
+            f"/api/projects/{project_id}/llm/ask",
+            json={
+                "prompt": "请总结当前节点",
+                "learningTaskNodeId": str(entry_node_id),
+            },
+        )
+
+    assert ask_resp.status_code == 200
+    debug_resp = client.get(f"/api/projects/{project_id}/llm/debug/latest")
+    assert debug_resp.status_code == 200
+    payload = debug_resp.json()["data"]
+    assert payload["projectId"] == str(project_id)
+    assert payload["contextTargetKind"] == "task"
+    assert payload["contextTargetId"] == str(entry_node_id)
+    assert payload["stream"] is False
+    assert payload["resolvedModelName"] == "gpt-4o-mini"
+    assert payload["responseContent"] == "这是一次测试回答。"
+    assert payload["errorMessage"] is None
+    joined = "\n".join(item["content"] for item in payload["messages"])
+    assert "Project Context" in joined
+    assert "1.2事件关系运算" in joined
+    assert "请总结当前节点" in joined
+    _reset_caches()
+
+
 def test_project_llm_stream_endpoint_returns_sse_events(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("PLM_APP_MODE", "local")
     monkeypatch.setenv("PLM_ENABLE_AUTH", "false")
@@ -467,6 +832,61 @@ def test_project_llm_stream_endpoint_returns_sse_events(monkeypatch, tmp_path: P
     assert 'event: delta\ndata: {"content": "，世界"}' in resp.text
     assert "event: done" in resp.text
     mocked_stream.assert_called_once()
+    kwargs = mocked_stream.call_args.kwargs
+    assert str(kwargs["project_id"]) == str(project_id)
+    assert str(kwargs["learning_task_node_id"]) == "ltn_stream_1"
+    assert kwargs["user_prompt"] == "打个招呼"
+    _reset_caches()
+
+
+def test_project_llm_debug_endpoint_returns_latest_stream_record(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PLM_APP_MODE", "local")
+    monkeypatch.setenv("PLM_ENABLE_AUTH", "false")
+    monkeypatch.setenv("PLM_STORE_PATH", "")
+    monkeypatch.setenv("PLM_LEGACY_STORE_PATH", "")
+    monkeypatch.setenv("PLM_STORE_DB_PATH", str(tmp_path / "plm_store.sqlite3"))
+    monkeypatch.setenv("PLM_AUTH_DB_PATH", str(tmp_path / "plm_auth.sqlite3"))
+    _reset_caches()
+
+    client = TestClient(create_app())
+    api = get_api()
+    project_id = api.create_project(
+        "Stream Debug Project",
+        project_root=str(tmp_path / "project-stream-debug"),
+        initial_source_kind=MaterialSourceKind.MANUAL,
+    )
+    instance_id = api.add_instance(project_id, "manual/clip-1")
+    object_node_id = api.add_learning_object_leaf(project_id, parent_id=None, instance_id=instance_id, title="1.2事件关系运算.mp4")
+
+    client.put(
+        "/api/system/global-llm-settings",
+        json={
+            "baseUrl": "https://api.openai.com/v1",
+            "modelName": "gpt-4o-mini",
+            "apiKey": "sk-local-12345678",
+        },
+    )
+
+    with patch("backend.system.api.SystemAPI._http_post_json_stream_text_chunks", return_value=iter(["你好", "，世界"])):
+        stream_resp = client.post(
+            f"/api/projects/{project_id}/llm/ask/stream",
+            json={
+                "prompt": "打个招呼",
+                "learningObjectNodeId": str(object_node_id),
+            },
+        )
+
+    assert stream_resp.status_code == 200
+    debug_resp = client.get(f"/api/projects/{project_id}/llm/debug/latest")
+    assert debug_resp.status_code == 200
+    payload = debug_resp.json()["data"]
+    assert payload["contextTargetKind"] == "object"
+    assert payload["contextTargetId"] == str(object_node_id)
+    assert payload["stream"] is True
+    assert payload["responseContent"] == "你好，世界"
+    assert payload["errorMessage"] is None
+    joined = "\n".join(item["content"] for item in payload["messages"])
+    assert "打个招呼" in joined
     _reset_caches()
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,7 @@ from adapter.deps import (
     get_membership_store,
 )
 from adapter.main import create_app
+from backend.system.auth_store import SQLiteAuthStore
 
 
 def _reset_caches() -> None:
@@ -78,6 +80,71 @@ def test_auth_required_and_project_owner_sees_created_project(auth_env: None) ->
     assert items[0]["title"] == "Hosted Project"
     assert items[0]["state"] == "ACTIVE"
     assert items[0]["deletedAt"] is None
+
+
+def test_sqlite_auth_store_drops_legacy_study_group_tables(tmp_path: Path) -> None:
+    db_path = tmp_path / "plm_auth.sqlite3"
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE study_groups (group_id TEXT PRIMARY KEY);
+            CREATE TABLE study_group_members (group_id TEXT, user_id TEXT);
+            CREATE TABLE study_group_posts (post_id TEXT PRIMARY KEY, group_id TEXT);
+            CREATE TABLE study_group_post_comments (comment_id TEXT PRIMARY KEY, post_id TEXT);
+            CREATE TABLE study_group_join_requests (request_id TEXT PRIMARY KEY, group_id TEXT);
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    SQLiteAuthStore(db_path)
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        table_rows = conn.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table'
+              AND name IN (
+                'study_groups',
+                'study_group_members',
+                'study_group_posts',
+                'study_group_post_comments',
+                'study_group_join_requests',
+                'friend_requests',
+                'friendships'
+              )
+            ORDER BY name ASC
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+
+    table_names = [str(row[0]) for row in table_rows]
+    assert table_names == ["friend_requests", "friendships"]
+
+
+def test_sqlite_auth_snapshot_excludes_legacy_study_group_sections(tmp_path: Path) -> None:
+    db_path = tmp_path / "plm_auth.sqlite3"
+
+    auth = SQLiteAuthStore(db_path)
+    user = auth.create_user("snapshot@example.com", "password-123")
+    auth.create_session(user.user_id)
+
+    snapshot = auth.export_snapshot()
+
+    assert snapshot["users"][0]["email"] == "snapshot@example.com"
+    assert "friendRequests" in snapshot
+    assert "friendships" in snapshot
+    assert "studyGroups" not in snapshot
+    assert "studyGroupMembers" not in snapshot
+    assert "studyGroupPosts" not in snapshot
+    assert "studyGroupPostComments" not in snapshot
+    assert "studyGroupJoinRequests" not in snapshot
 
 
 def test_project_access_is_isolated_between_users(auth_env: None) -> None:

@@ -275,4 +275,6 @@ python tools/build_subtitle_tool_windows.py --bootstrap-packaging-venv
 - `public-downloads/`
 - `release/public-downloads/`
 
+自托管同步脚本默认不会重复上传 `public-downloads/`，但会保留服务器上已经存在的这份目录；当你想首次发布或刷新字幕工具下载包时，再使用 `Sync-Selfhost-Server.bat -IncludePublicDownloads`。
+
 这个小工具本身会内置 `ffmpeg`、`whisper.cpp` 和默认 `ggml-base.bin` 模型，离线扫描视频目录并在视频旁边生成同名 `.srt` 字幕文件。

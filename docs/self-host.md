@@ -213,9 +213,22 @@ That backs up the old key files locally, creates a fresh project key without a p
 - prefer `~/.ssh/learningpyramid_selfhost_ed25519` when present
 - auto-create, rotate, or reinstall that project key during sync when needed
 - open and reuse one SSH session before upload so password auth happens once up front instead of again after a long transfer
+- upload the self-host bundle zip directly instead of wrapping it in an extra payload archive first
 - prompt before deploying a dirty git worktree from `Sync-Selfhost-Server.bat`, while `tools/sync_selfhost_server.ps1` still supports `-AllowDirtyWorktree` for non-interactive runs
 - verify the remote `.env` still has non-placeholder PostgreSQL and media token secrets
 - run readiness plus a public `/api/system/capabilities` smoke check after deploy
+
+To keep repeated syncs smaller, the self-host bundle now skips re-uploading `public-downloads/` by default. Existing server-side downloads are preserved across normal deploys, and if you do want to publish or refresh those files too, run:
+
+```powershell
+Sync-Selfhost-Server.bat -IncludePublicDownloads
+```
+
+If your local `frontend/dist` is already up to date and you are only redeploying backend or config changes, you can also skip the local frontend rebuild step:
+
+```powershell
+Sync-Selfhost-Server.bat -SkipBuild
+```
 
 ## With Caddy reverse proxy
 

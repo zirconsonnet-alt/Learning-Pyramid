@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 import { AsrArtifactSchema } from "@/ui/api/asr"
-import { apiRequest } from "@/ui/api/http"
+import { apiRequest, type ApiRequestExecutionOptions } from "@/ui/api/http"
 import { RecallPointSchema } from "@/ui/api/review"
 
 export const LearningObjectLeafSchema = z.object({
@@ -36,12 +36,32 @@ export type LearningObjectNode = z.infer<typeof LearningObjectNodeSchema>
 export const LearningObjectRootsSchema = z.object({ rootLearningObjectNodeIds: z.array(z.string()) })
 
 const AddLearningObjectResultSchema = z.object({ nodeId: z.string() })
+const InitializeBookLearningObjectsResultSchema = z.object({
+  created_instances_count: z.number().int(),
+  created_learning_object_nodes_count: z.number().int(),
+  root_count: z.number().int(),
+})
 const ImportLearningObjectsFromBrowserResultSchema = z.object({
   unchanged: z.boolean(),
   created_instances_count: z.number().int(),
   marked_missing_count: z.number().int(),
   replaced_learning_object_nodes_count: z.number().int(),
   warnings: z.array(z.unknown()),
+})
+const BaiduNetdiskImportItemSchema = z.object({
+  fileId: z.string(),
+  path: z.string(),
+  name: z.string().optional(),
+  isDir: z.boolean().optional(),
+  sizeBytes: z.number().int().nonnegative().optional(),
+  mimeType: z.string().nullable().optional(),
+  durationMs: z.number().int().nonnegative().nullable().optional(),
+})
+const ImportLearningObjectsFromBaiduNetdiskResultSchema = z.object({
+  created_instances_count: z.number().int(),
+  reused_instances_count: z.number().int(),
+  created_learning_object_nodes_count: z.number().int(),
+  imported_count: z.number().int(),
 })
 
 export function addLearningObjectLeaf(
@@ -68,6 +88,15 @@ export function addLearningObjectContainer(
   })
 }
 
+export function initializeBookLearningObjects(projectId: string, params: { items: { depth: number; title: string }[] }) {
+  return apiRequest({
+    path: `/projects/${projectId}/initialize-book-learning-objects`,
+    method: "POST",
+    body: { items: params.items },
+    responseSchema: InitializeBookLearningObjectsResultSchema,
+  })
+}
+
 export function getLearningObjectNode(projectId: string, nodeId: string) {
   return apiRequest({
     path: `/projects/${projectId}/learning-objects/${nodeId}`,
@@ -82,10 +111,12 @@ export function listLearningObjectRoots(projectId: string) {
   })
 }
 
-export function listLearningObjectNodes(projectId: string) {
+export function listLearningObjectNodes(projectId: string, options?: ApiRequestExecutionOptions) {
   return apiRequest({
     path: `/projects/${projectId}/learning-object-nodes`,
     responseSchema: z.array(LearningObjectNodeSchema),
+    signal: options?.signal,
+    timeoutMs: options?.timeoutMs,
   })
 }
 
@@ -101,6 +132,24 @@ export function importLearningObjectsFromBrowser(
       relativeFilePaths: params.relativeFilePaths,
     },
     responseSchema: ImportLearningObjectsFromBrowserResultSchema,
+  })
+}
+
+export function importLearningObjectsFromBaiduNetdisk(
+  projectId: string,
+  params: {
+    accountId: string
+    items: Array<z.input<typeof BaiduNetdiskImportItemSchema>>
+  },
+) {
+  return apiRequest({
+    path: `/projects/${projectId}/import-learning-objects-from-baidu-netdisk`,
+    method: "POST",
+    body: {
+      accountId: params.accountId,
+      items: params.items,
+    },
+    responseSchema: ImportLearningObjectsFromBaiduNetdiskResultSchema,
   })
 }
 

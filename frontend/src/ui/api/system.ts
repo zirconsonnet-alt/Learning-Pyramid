@@ -7,6 +7,7 @@ export const SystemCapabilitiesSchema = z.object({
   asrEnabled: z.boolean(),
   serverMediaStreamEnabled: z.boolean(),
   browserLocalMediaEnabled: z.boolean(),
+  baiduNetdiskEnabled: z.boolean(),
   authEnabled: z.boolean(),
   allowSignup: z.boolean(),
   llmConfigured: z.boolean(),
@@ -66,6 +67,7 @@ export const SystemRuntimeSchema = z
     asrEnabled: z.boolean(),
     serverMediaStreamEnabled: z.boolean(),
     browserLocalMediaEnabled: z.boolean(),
+    baiduNetdiskEnabled: z.boolean(),
     sqlBackend: z.string(),
   })
   .passthrough()
@@ -169,6 +171,7 @@ export async function getSystemRuntime(options?: ApiRequestExecutionOptions): Pr
 export const GlobalLlmSettingsSchema = z.object({
   baseUrl: z.string(),
   modelName: z.string(),
+  promptAssemblyMode: z.enum(["system", "user_concat"]),
   savedApiKeyConfigured: z.boolean(),
   savedApiKeyPreview: z.string().nullable(),
   llmConfigured: z.boolean(),
@@ -191,6 +194,7 @@ export function updateGlobalLlmSettings(
     baseUrl?: string
     modelName?: string
     apiKey?: string
+    promptAssemblyMode?: "system" | "user_concat"
     clearApiKey?: boolean
   },
   options?: ApiRequestExecutionOptions,
@@ -209,6 +213,40 @@ export const AskSystemLlmResultSchema = z.object({
   content: z.string(),
 })
 export type AskSystemLlmResult = z.infer<typeof AskSystemLlmResultSchema>
+
+export const RawChatCompletionResponseSchema = z.object({}).passthrough()
+export type RawChatCompletionResponse = z.infer<typeof RawChatCompletionResponseSchema>
+
+export const ProjectLlmDebugMessageSchema = z.object({
+  role: z.string(),
+  content: z.string(),
+})
+export type ProjectLlmDebugMessage = z.infer<typeof ProjectLlmDebugMessageSchema>
+
+export const ProjectLlmDebugRecordSchema = z.object({
+  recordedAt: z.string(),
+  projectId: z.string(),
+  requestModelName: z.string().nullable(),
+  resolvedModelName: z.string(),
+  temperature: z.number().nullable(),
+  stream: z.boolean(),
+  serviceUrl: z.string(),
+  contextTargetKind: z.enum(["project", "task", "object", "recall"]),
+  contextTargetId: z.string().nullable(),
+  messages: z.array(ProjectLlmDebugMessageSchema),
+  responseContent: z.string(),
+  errorMessage: z.string().nullable(),
+})
+export type ProjectLlmDebugRecord = z.infer<typeof ProjectLlmDebugRecordSchema>
+
+export function getLatestProjectLlmDebug(projectId: string, options?: ApiRequestExecutionOptions) {
+  return apiRequest({
+    path: `/projects/${projectId}/llm/debug/latest`,
+    responseSchema: ProjectLlmDebugRecordSchema.nullable(),
+    signal: options?.signal,
+    timeoutMs: options?.timeoutMs,
+  })
+}
 
 export function askSystemLlm(
   body: {
@@ -248,6 +286,29 @@ export function askProjectLlm(
     method: "POST",
     body,
     responseSchema: AskSystemLlmResultSchema,
+    signal: options?.signal,
+    timeoutMs: options?.timeoutMs,
+  })
+}
+
+export function askProjectLlmChatCompletion(
+  projectId: string,
+  body: {
+    messages: Array<Record<string, unknown>>
+    tools?: Array<Record<string, unknown>>
+    toolChoice?: unknown
+    parallelToolCalls?: boolean
+    responseFormat?: Record<string, unknown>
+    modelName?: string
+    temperature?: number
+  },
+  options?: ApiRequestExecutionOptions,
+) {
+  return apiRequest({
+    path: `/projects/${projectId}/llm/chat-completions`,
+    method: "POST",
+    body,
+    responseSchema: RawChatCompletionResponseSchema,
     signal: options?.signal,
     timeoutMs: options?.timeoutMs,
   })

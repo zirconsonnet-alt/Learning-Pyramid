@@ -49,6 +49,14 @@ PLM_PIP_RETRIES=10
 - `PLM_WECHAT_PAY_PUBLIC_KEY_ID`
 - `PLM_WECHAT_PAY_PUBLIC_KEY_PEM_PATH`
 
+如果你使用仓库自带的 `docker-compose.selfhost.yml`：
+
+- 把商户私钥和微信支付平台公钥放到仓库根目录 `./certs/`
+- compose 会把宿主机 `./certs/` 挂进容器的 `/app/certs/`
+- 因此 `.env` 里推荐直接填写：
+  - `PLM_WECHAT_PAY_PRIVATE_KEY_PEM_PATH=/app/certs/apiclient_key.pem`
+  - `PLM_WECHAT_PAY_PUBLIC_KEY_PEM_PATH=/app/certs/wechatpay_public_key.pem`
+
 通知地址至少满足下面之一：
 
 - 配 `PLM_PUBLIC_ORIGIN`

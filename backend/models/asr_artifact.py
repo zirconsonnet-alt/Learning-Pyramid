@@ -64,3 +64,53 @@ class AsrArtifact:
             raise PreconditionFailure("AsrArtifact.pre_ms/post_ms must be >= 0")
         for seg in self.segments:
             seg.validate_write_time()
+
+
+@dataclass(frozen=True, slots=True)
+class AsrTranscriptResult:
+    project_id: ProjectId
+    provider: AsrProvider
+    recall_point_id: RecallPointId
+    source_instance_id: InstanceId
+    center_ms: int
+    pre_ms: int
+    post_ms: int
+    segments: Tuple[AsrSegment, ...] = field(default_factory=tuple)
+
+    def validate_write_time(self) -> None:
+        if not str(self.project_id):
+            raise PreconditionFailure("AsrTranscriptResult.project_id must be non-empty")
+        if not isinstance(self.provider, AsrProvider):
+            raise PreconditionFailure("AsrTranscriptResult.provider must be AsrProvider")
+        if not str(self.recall_point_id):
+            raise PreconditionFailure("AsrTranscriptResult.recall_point_id must be non-empty")
+        if not str(self.source_instance_id):
+            raise PreconditionFailure("AsrTranscriptResult.source_instance_id must be non-empty")
+        if int(self.pre_ms) < 0 or int(self.post_ms) < 0:
+            raise PreconditionFailure("AsrTranscriptResult.pre_ms/post_ms must be >= 0")
+        for seg in self.segments:
+            seg.validate_write_time()
+
+
+@dataclass(frozen=True, slots=True)
+class InstanceAsrTranscriptResult:
+    project_id: ProjectId
+    provider: AsrProvider
+    source_instance_id: InstanceId
+    start_ms: int
+    end_ms: int
+    segments: Tuple[AsrSegment, ...] = field(default_factory=tuple)
+
+    def validate_write_time(self) -> None:
+        if not str(self.project_id):
+            raise PreconditionFailure("InstanceAsrTranscriptResult.project_id must be non-empty")
+        if not isinstance(self.provider, AsrProvider):
+            raise PreconditionFailure("InstanceAsrTranscriptResult.provider must be AsrProvider")
+        if not str(self.source_instance_id):
+            raise PreconditionFailure("InstanceAsrTranscriptResult.source_instance_id must be non-empty")
+        if int(self.start_ms) < 0 or int(self.end_ms) < 0:
+            raise PreconditionFailure("InstanceAsrTranscriptResult.start_ms/end_ms must be >= 0")
+        if int(self.end_ms) <= int(self.start_ms):
+            raise PreconditionFailure("InstanceAsrTranscriptResult.end_ms must be > start_ms")
+        for seg in self.segments:
+            seg.validate_write_time()

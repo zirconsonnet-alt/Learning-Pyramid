@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends
 from adapter.deps import get_api
 from adapter.mappers import (
     convergence_to_dto,
+    recall_point_review_projection_to_dto,
     range_snapshot_to_dto,
     recall_point_to_dto,
     review_chain_binding_to_dto,
@@ -90,11 +91,17 @@ def get_recall_point(projectId: str, recallPointId: str, api: SystemAPI = Depend
     rp = api.get_recall_point(projectId, recallPointId)  # type: ignore[arg-type]
     return {"ok": True, "data": recall_point_to_dto(rp)}
 
+
+@router.get("/projects/{projectId}/recall-points/{recallPointId}/review-projection")
+def get_recall_point_review_projection(projectId: str, recallPointId: str, api: SystemAPI = Depends(get_api)) -> dict:
+    item = api.get_recall_point_review_projection(projectId, RecallPointId(recallPointId))  # type: ignore[arg-type]
+    return {"ok": True, "data": recall_point_review_projection_to_dto(item)}
+
 @router.put("/projects/{projectId}/recall-points/{recallPointId}")
 def edit_recall_point(
     projectId: str, recallPointId: str, req: EditRecallPointRequest, api: SystemAPI = Depends(get_api)
 ) -> dict:
-    anc = Anchor(instance_id=InstanceId(req.anchor.instanceId), position=req.anchor.position)
+    anc = None if req.anchor is None else Anchor(instance_id=InstanceId(req.anchor.instanceId), position=req.anchor.position)
     api.edit_recall_point(  # type: ignore[arg-type]
         projectId, recallPointId, _to_rich_content(req.question), _to_rich_content(req.answer), anc
     )

@@ -1,0 +1,28 @@
+{
+  "generatedAt": "2026-03-30T06:16:23Z",
+  "items": [
+    {
+      "id": "subtitle-generator-windows-x64",
+      "displayName": "LearningPyramid 字幕生成工具",
+      "version": "0.1.0-beta.3",
+      "platform": "windows-x64",
+      "summary": "离线扫描视频目录，用内置 ffmpeg + whisper.cpp 生成同目录同名 .srt 字幕，支持可选 NVIDIA CUDA GPU 加速。",
+      "assetPath": "LearningPyramid-subtitle-tool-0.1.0-beta.3-windows-x64.zip",
+      "publishedAt": "2026-03-30T06:16:23Z",
+      "sha256": "152b152be61ae8b6d312af5f803a9a9336617f41b984a57767c0b8ee396c25f9",
+      "sizeBytes": 276504737,
+      "recommended": true,
+      "includedComponents": [
+        "ffmpeg release essentials for Windows",
+        "whisper.cpp v1.8.4",
+        "ggml-base multilingual model",
+        "official whisper.cpp CUDA 11.8.0 Windows x64 runtime"
+      ],
+      "requirements": [
+        "Windows 10/11 x64",
+        "首次转写时请为模型推理预留约 400 MB 内存",
+        "启用 GPU 模式时需要已安装驱动的 NVIDIA CUDA 显卡"
+      ]
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 import { AsrArtifactSchema } from "@/ui/api/asr"
-import { apiRequest } from "@/ui/api/http"
+import { apiRequest, type ApiRequestExecutionOptions } from "@/ui/api/http"
 import { RecallPointSchema } from "@/ui/api/review"
 
 export const LearningTaskLeafSchema = z.object({
@@ -48,10 +48,12 @@ export function getLearningTaskNode(projectId: string, nodeId: string) {
   })
 }
 
-export function listLearningTaskNodes(projectId: string) {
+export function listLearningTaskNodes(projectId: string, options?: ApiRequestExecutionOptions) {
   return apiRequest({
     path: `/projects/${projectId}/learning-task-nodes`,
     responseSchema: z.array(LearningTaskNodeSchema),
+    signal: options?.signal,
+    timeoutMs: options?.timeoutMs,
   })
 }
 
@@ -59,6 +61,15 @@ export function getLearningTaskNodeBinding(projectId: string, nodeId: string) {
   return apiRequest({
     path: `/projects/${projectId}/learning-task-nodes/${nodeId}/binding`,
     responseSchema: LearningTaskNodeBindingSchema,
+  })
+}
+
+export function editLearningTaskNode(projectId: string, nodeId: string, title: string) {
+  return apiRequest({
+    path: `/projects/${projectId}/learning-task-nodes/${nodeId}`,
+    method: "PATCH",
+    body: { title },
+    responseSchema: z.null(),
   })
 }
 

@@ -32,16 +32,16 @@ function RollupTaskListItem({
   return (
     <Link
       to={`/p/${projectId}/learning-task-nodes/${node.nodeId}`}
-      className="group flex items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-[#fbfdff]"
+      className="group flex items-start gap-3 px-4 py-3 text-left transition-colors hover:[background:var(--theme-subtle-bg)]"
     >
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[#f3f7fc] text-sm font-semibold text-[#2f5d93]">
+      <span className="theme-icon-surface h-10 w-10 shrink-0 text-sm font-semibold">
         {index}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[15px] font-medium text-[#21384d]">
+        <span className="block truncate text-[15px] font-medium text-foreground">
           {formatLearningTaskNodeDisplayTitle(node.title, { sourceLayerIndex })}
         </span>
-        <span className="mt-1 block text-xs text-[#70839a]">待推进 · 来源 L{sourceLayerIndex}</span>
+        <span className="mt-1 block text-xs text-muted-foreground">待推进 · 来源 L{sourceLayerIndex}</span>
       </span>
     </Link>
   )
@@ -56,8 +56,11 @@ export function RollupPane({
   learningTaskNodesLoading,
   queueHasGate,
   isRollingUp,
+  isThresholdRollUpUpdating,
   onRollUp,
+  onToggleThresholdRollUp,
   rollUpError,
+  thresholdRollUpEnabledByLayerIndex,
 }: {
   projectId: string
   layers: Layer[]
@@ -67,8 +70,11 @@ export function RollupPane({
   learningTaskNodesLoading: boolean
   queueHasGate: boolean
   isRollingUp: boolean
+  isThresholdRollUpUpdating: boolean
   onRollUp: (layerIndex: number) => void
+  onToggleThresholdRollUp: (layerIndex: number, enabled: boolean) => void
   rollUpError: unknown
+  thresholdRollUpEnabledByLayerIndex: Record<number, boolean>
 }) {
   const [selectedLayerIndex, setSelectedLayerIndex] = useState<number | null>(null)
 
@@ -105,6 +111,7 @@ export function RollupPane({
   const selectedNodeIds = selectedAggregationQueueQ?.data?.currentNodeIds ?? []
   const selectedCandidateCount = selectedNodeIds.length
   const selectedSourceLayerIndex = selectedLayer ? Math.max(0, selectedLayer.layerIndex - 1) : 0
+  const selectedThresholdRollUpEnabled = selectedLayer ? (thresholdRollUpEnabledByLayerIndex[selectedLayer.layerIndex] ?? true) : true
 
   function goToLayer(position: number) {
     const nextLayer = layers[position]
@@ -116,7 +123,7 @@ export function RollupPane({
     <Card className="theme-card-main shrink-0" id="workbench-rollup-pane">
       <CardHeader className="theme-card-header flex-col gap-4 space-y-0 md:flex-row md:items-start md:justify-between">
         <div className="flex min-w-0 flex-1 items-start gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#e2e8f0] bg-[#f5f7fa] text-primary">
+          <div className="theme-icon-surface h-10 w-10">
             <ListChecks className="h-5 w-5" />
           </div>
           <div className="min-w-0">
@@ -124,25 +131,51 @@ export function RollupPane({
           </div>
         </div>
 
-        <Button
-          onClick={() => {
-            if (selectedLayer) onRollUp(selectedLayer.layerIndex)
-          }}
-          disabled={queueHasGate || isRollingUp || !selectedLayer || selectedAggregationQueueQ?.isLoading || selectedCandidateCount === 0}
-          className="w-full whitespace-nowrap md:w-auto"
-        >
-          {isRollingUp ? "上推中..." : "上推"}
-        </Button>
+        <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              if (selectedLayer) onToggleThresholdRollUp(selectedLayer.layerIndex, !selectedThresholdRollUpEnabled)
+            }}
+            disabled={isThresholdRollUpUpdating || !selectedLayer}
+            className="w-full whitespace-nowrap md:w-auto"
+          >
+            {isThresholdRollUpUpdating ? "保存中..." : selectedThresholdRollUpEnabled ? "禁止阈值上推" : "恢复阈值上推"}
+          </Button>
+          <Button
+            onClick={() => {
+              if (selectedLayer) onRollUp(selectedLayer.layerIndex)
+            }}
+            disabled={queueHasGate || isRollingUp || !selectedLayer || selectedAggregationQueueQ?.isLoading || selectedCandidateCount === 0}
+            className="w-full whitespace-nowrap md:w-auto"
+          >
+            {isRollingUp ? "上推中..." : "上推"}
+          </Button>
+        </div>
       </CardHeader>
 
       <CardContent className="space-y-4 pt-5">
+        {selectedLayer ? (
+          <div
+            className={cn(
+              "rounded-2xl border p-4 text-sm",
+              selectedThresholdRollUpEnabled ? "border-emerald-200 bg-emerald-50/70 text-emerald-800" : "border-amber-200 bg-amber-50/80 text-amber-900",
+            )}
+          >
+            {selectedThresholdRollUpEnabled
+              ? `L${selectedLayer.layerIndex} 当前已开启阈值自动上推。达到节点数或复述点阈值后，系统会自动进入聚合周期。`
+              : `L${selectedLayer.layerIndex} 当前已关闭阈值自动上推。达到阈值后不会自动上推，你仍然可以手动点击“上推”。`}
+          </div>
+        ) : null}
+
         {queueHasGate ? (
           <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4 text-sm">
             门禁：队列非空时暂不能上推。请先完成当前复习任务，再继续层级推进。
           </div>
         ) : null}
 
-        {layersLoading ? <div className="rounded-[1.15rem] bg-[#f6f8fb] px-4 py-4 text-sm text-[#647589]">正在加载层级任务...</div> : null}
+        {layersLoading ? <div className="theme-subtle-surface px-4 py-4 text-sm">正在加载层级任务...</div> : null}
         {layersError ? <p className="text-sm text-destructive">{formatApiError(layersError)}</p> : null}
 
         {!layersLoading && !layersError && layers.length === 0 ? (
@@ -162,7 +195,7 @@ export function RollupPane({
                   aria-current={isActive ? "true" : undefined}
                   className={cn(
                     "flex h-10 min-w-[3.25rem] items-center justify-center rounded-xl border px-3 text-sm font-semibold transition-all",
-                    "border-[#d9e2eb] bg-white text-[#5e738b] hover:border-primary/25 hover:text-primary",
+                    "[border-color:var(--theme-soft-border)] [background:var(--theme-soft-bg)] text-[color:var(--theme-subtle-text)] hover:border-primary/25 hover:text-primary",
                     isActive && "border-primary/20 text-primary ring-2 ring-primary/25 ring-offset-2 ring-offset-background",
                   )}
                   title={`L${layer.layerIndex}${candidateCount > 0 ? `，${candidateCount} 项待推进` : "，当前无待推进任务"}`}
@@ -187,7 +220,7 @@ export function RollupPane({
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="absolute inset-y-0 -left-4 z-10 h-auto w-4 rounded-none border-0 bg-transparent p-0 text-[#5e738b] shadow-none outline-none hover:bg-transparent hover:text-slate-900 focus-visible:ring-0 focus-visible:ring-offset-0 sm:-left-5 sm:w-5"
+                className="absolute inset-y-0 -left-4 z-10 h-auto w-4 rounded-none border-0 bg-transparent p-0 text-[color:var(--theme-subtle-text)] shadow-none outline-none hover:bg-transparent hover:text-foreground focus-visible:ring-0 focus-visible:ring-offset-0 sm:-left-5 sm:w-5"
                 onClick={() => goToLayer(selectedLayerPosition - 1)}
                 disabled={selectedLayerPosition <= 0}
                 aria-label="上一层"
@@ -199,7 +232,7 @@ export function RollupPane({
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="absolute inset-y-0 -right-4 z-10 h-auto w-4 rounded-none border-0 bg-transparent p-0 text-[#5e738b] shadow-none outline-none hover:bg-transparent hover:text-slate-900 focus-visible:ring-0 focus-visible:ring-offset-0 sm:-right-5 sm:w-5"
+                className="absolute inset-y-0 -right-4 z-10 h-auto w-4 rounded-none border-0 bg-transparent p-0 text-[color:var(--theme-subtle-text)] shadow-none outline-none hover:bg-transparent hover:text-foreground focus-visible:ring-0 focus-visible:ring-offset-0 sm:-right-5 sm:w-5"
                 onClick={() => goToLayer(selectedLayerPosition + 1)}
                 disabled={selectedLayerPosition < 0 || selectedLayerPosition >= layers.length - 1}
                 aria-label="下一层"
@@ -208,18 +241,18 @@ export function RollupPane({
                 <ChevronRight className="h-4 w-4" />
               </Button>
 
-              <div className="theme-status-surface rounded-[1.15rem] border border-[#e2e8ef] px-4 py-4 sm:px-5">
+              <div className="theme-status-surface rounded-[1.15rem] border border-[color:var(--theme-status-border)] px-4 py-4 sm:px-5">
                 {selectedAggregationQueueQ?.isLoading ? (
-                  <div className="rounded-[1.1rem] border border-[#e3e9f1] bg-[#fbfcfe] px-4 py-3 text-sm text-[#6f7f93]">
+                  <div className="theme-subtle-surface px-4 py-3 text-sm">
                     正在读取这一层的待推进学习任务。
                   </div>
                 ) : selectedCandidateCount > 0 ? (
-                  <div className="overflow-hidden rounded-[1.1rem] border border-[#e3e9f1] bg-white/80 divide-y divide-[#e3e9f1]">
+                  <div className="overflow-hidden rounded-[1.1rem] border [border-color:var(--theme-soft-border)] [background:var(--theme-soft-bg)] divide-y [divide-color:var(--theme-soft-border)]">
                     {selectedNodeIds.map((nodeId, index) => {
                       const node = learningTaskNodesById[nodeId]
                       if (!node) {
                         return (
-                          <div key={nodeId} className="px-4 py-3 text-sm text-[#6f7f93]">
+                          <div key={nodeId} className="px-4 py-3 text-sm text-muted-foreground">
                             {learningTaskNodesLoading ? "正在加载学习任务..." : "节点信息同步中..."}
                           </div>
                         )

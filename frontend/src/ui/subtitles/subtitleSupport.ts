@@ -57,15 +57,25 @@ export function clearSubtitleDocumentCache() {
 
 export function findSubtitleTextAtMs(segments: SubtitleSegment[], playbackMs: number, graceMs = 120): string | null {
   if (segments.length === 0) return null
-  const active: string[] = []
-  const left = Math.max(0, Math.floor(playbackMs - graceMs))
-  const right = Math.floor(playbackMs + graceMs)
+  const cursorMs = Math.max(0, Math.floor(playbackMs))
+  const activeNow = findSubtitleSegmentsAtMs(segments, cursorMs)
+  const activeText = joinSubtitleTexts(activeNow)
+  if (activeText) return activeText
 
+  if (graceMs <= 0) return null
+
+  const previousCue = findMostRecentEndedSubtitleSegments(segments, cursorMs, Math.max(0, Math.floor(graceMs)))
+  return joinSubtitleTexts(previousCue)
+}
+
+function findSubtitleSegmentsAtMs(segments: SubtitleSegment[], playbackMs: number): SubtitleSegment[] {
+  const active: SubtitleSegment[] = []
   let low = 0
   let high = segments.length
+
   while (low < high) {
     const mid = Math.floor((low + high) / 2)
-    if (segments[mid]!.endMs < left) {
+    if (segments[mid]!.endMs <= playbackMs) {
       low = mid + 1
     } else {
       high = mid
@@ -74,13 +84,45 @@ export function findSubtitleTextAtMs(segments: SubtitleSegment[], playbackMs: nu
 
   for (let index = low; index < segments.length; index += 1) {
     const segment = segments[index]!
-    if (segment.startMs > right) break
-    if (segment.endMs >= left && segment.startMs <= right) {
-      const trimmed = segment.text.trim()
-      if (trimmed) active.push(trimmed)
+    if (segment.startMs > playbackMs) break
+    if (segment.startMs <= playbackMs && playbackMs < segment.endMs) {
+      active.push(segment)
     }
   }
 
+  return active
+}
+
+function findMostRecentEndedSubtitleSegments(
+  segments: SubtitleSegment[],
+  playbackMs: number,
+  graceMs: number,
+): SubtitleSegment[] {
+  let preferred: SubtitleSegment | null = null
+
+  for (const segment of segments) {
+    if (segment.endMs > playbackMs) break
+    const gapMs = playbackMs - segment.endMs
+    if (gapMs < 0 || gapMs > graceMs) continue
+    if (
+      preferred === null ||
+      segment.endMs > preferred.endMs ||
+      (segment.endMs === preferred.endMs && segment.startMs > preferred.startMs)
+    ) {
+      preferred = segment
+    }
+  }
+
+  if (!preferred) return []
+  return segments.filter(
+    (segment) => segment.startMs === preferred.startMs && segment.endMs === preferred.endMs,
+  )
+}
+
+function joinSubtitleTexts(segments: SubtitleSegment[]): string | null {
+  const active = segments
+    .map((segment) => segment.text.trim())
+    .filter(Boolean)
   if (active.length === 0) return null
   return active.join(" ").replace(/\s+/g, " ").trim()
 }

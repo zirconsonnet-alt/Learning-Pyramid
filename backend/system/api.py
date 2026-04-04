@@ -1,6 +1,8 @@
 import json
 import hashlib
+import math
 import os
+import secrets
 import shutil
 import subprocess
 import tempfile
@@ -44,6 +46,7 @@ from backend.models.enums import (
     MediaAssetKind,
     MaterialSourceKind,
     ProjectState,
+    ProjectType,
     RecallPointState,
     RecallPointReviewResult,
     ReviewChainTemplateItemKind,
@@ -54,6 +57,7 @@ from backend.models.enums import (
 )
 from backend.models.errors import DirectoryStructureCorruptedError, ExternalServiceError, NotFound, PreconditionFailure
 from backend.models.instance import Instance
+from backend.models.instance_media_binding import InstanceMediaBinding
 from backend.models.layer import Layer
 from backend.models.learning_object_node import LearningObjectContainer, LearningObjectLeaf
 from backend.models.learning_task import LearningTask
@@ -71,6 +75,12 @@ from backend.models.project_config import (
 from backend.models.project_material_source_binding import ProjectMaterialSourceBinding
 from backend.models.project_storage_config import ProjectStorageConfig
 from backend.models.recall_point import Anchor, RecallPoint
+from backend.models.review_recommendation import (
+    RecallPointReviewHistoryItem,
+    RecallPointReviewProjection,
+    RecallPointReviewRecommendation,
+    RecallPointReviewRecommendationPage,
+)
 from backend.models.recall_point_review_record import RecallPointReviewRecord
 from backend.models.rich_content import RichContent, validate_rich_content_write_time
 from backend.models.review_chain import ReviewChain, ReviewChainItem, ReviewChainItemKind
@@ -104,8 +114,10 @@ from backend.protocols.review_submit_binary import review_submit_binary
 from backend.repositories.persistence_interfaces import SystemStateRecord
 from backend.system.local_whisper import ensure_local_whisper_runtime, is_builtin_whisper_base_url
 from backend.system.material_paths import resolve_material_file_path
-from backend.system.auth_store import AuthStore
+from backend.system.auth_store import AuthStore, encrypt_secret_value
+from backend.system.baidu_netdisk_client import BAIDU_NETDISK_PROVIDER, BaiduNetdiskApiError, BaiduNetdiskClient
 from backend.system.http_runtime_config import current_http_runtime_config
+from backend.system.instance_media import InstanceMediaService
 from backend.system.persistence_json import SCHEMA_VERSION, encode_project_payload_record, encode_project_shell_payload
 from backend.system.persistence_store import SqlStore
 from backend.system.project_paths import allocate_project_root
@@ -114,7 +126,6 @@ from backend.system.runtime_features import (
     current_env_asr_service_config,
     current_env_llm_qa_service_config,
     current_env_story_generator_service_config,
-    current_native_runtime_config,
     current_runtime_features,
 )
 from backend.system.inmemory_system import (
@@ -154,6 +165,16 @@ DASHSCOPE_ASR_TASK_POLL_INTERVAL_SEC: int = _env_int("PLM_DASHSCOPE_ASR_TASK_POL
 _ASR_SERVER_FFMPEG_SEMAPHORE = threading.BoundedSemaphore(ASR_SERVER_FFMPEG_MAX_CONCURRENCY)
 
 
+def _is_resolvable_course_anchor_position(position: str) -> bool:
+    raw = str(position or "").strip()
+    return raw.startswith("t=") and raw[2:].isdigit()
+
+
+def _sanitize_manual_outline_segment(title: str) -> str:
+    normalized = " ".join(str(title or "").replace("\\", "-").replace("/", "-").split()).strip()
+    return normalized or "未命名"
+
+
 @contextmanager
 def _asr_server_ffmpeg_slot(api_name: str = "request_asr") -> Iterator[None]:
     acquired = _ASR_SERVER_FFMPEG_SEMAPHORE.acquire(timeout=float(ASR_SERVER_FFMPEG_ACQUIRE_TIMEOUT_SEC))
@@ -177,10 +198,20 @@ class SystemAPI:
         self._public_asr_temp_assets: dict[str, dict[str, object]] = {}
         self._project_llm_debug_lock = threading.Lock()
         self._latest_project_llm_debug_by_project: dict[str, dict[str, Any]] = {}
+        self._baidu_netdisk_client = BaiduNetdiskClient()
+        self._cloud_oauth_state_lock = threading.Lock()
+        self._cloud_oauth_states: dict[str, dict[str, str]] = {}
 
     def _sql_store(self) -> SqlStore | None:
         store = getattr(self.sys, "_persist_store", None)
         return store if isinstance(store, SqlStore) else None
+
+    def _instance_media_service(self) -> InstanceMediaService:
+        return InstanceMediaService(
+            sys=self.sys,
+            sql_store=self._sql_store(),
+            baidu_client=self._baidu_netdisk_client,
+        )
 
     def _reload_sql_state(self) -> None:
         self.sys.g.projects.clear()
@@ -190,6 +221,84 @@ class SystemAPI:
     @staticmethod
     def _sql_updated_at_text() -> str:
         return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+    def _new_cloud_oauth_state(self, *, user_id: str, provider: str) -> str:
+        token = secrets.token_urlsafe(24)
+        with self._cloud_oauth_state_lock:
+            self._cloud_oauth_states[token] = {
+                "user_id": str(user_id),
+                "provider": str(provider),
+                "created_at": str(time.time()),
+            }
+        return token
+
+    def _consume_cloud_oauth_state(self, state: str) -> dict[str, str]:
+        token = str(state or "").strip()
+        if not token:
+            raise PreconditionFailure("缺少云账号授权状态")
+        with self._cloud_oauth_state_lock:
+            payload = self._cloud_oauth_states.pop(token, None)
+        if payload is None:
+            raise PreconditionFailure("云账号授权状态无效或已过期")
+        return payload
+
+    def _raise_baidu_netdisk_error(self, exc: BaiduNetdiskApiError) -> None:
+        if exc.kind == "unauthorized":
+            raise PreconditionFailure("百度网盘授权已过期，请重新连接") from exc
+        if exc.kind == "not_found":
+            raise PreconditionFailure("百度网盘中的视频已不存在或无权限访问") from exc
+        if exc.kind == "transcode_failed":
+            raise PreconditionFailure("百度网盘视频转码失败，请稍后重试") from exc
+        raise PreconditionFailure(str(exc) or "百度网盘服务暂时不可用") from exc
+
+    @staticmethod
+    def _normalize_anchor_failure_prefix(api_name: str, field_name: str) -> str:
+        return f"{api_name}.{field_name}"
+
+    def _project_type_in_session(self, session: MutationSession) -> ProjectType:
+        return self.sys.project_config_repo.get(session).project_type
+
+    def _validate_anchor_for_project_type(
+        self,
+        session: MutationSession,
+        *,
+        anchor: Anchor | None,
+        api_name: str,
+        field_name: str = "anchor",
+    ) -> ProjectType:
+        project_type = self._project_type_in_session(session)
+        prefix = self._normalize_anchor_failure_prefix(api_name, field_name)
+
+        if project_type == ProjectType.COURSE:
+            if anchor is None:
+                raise PreconditionFailure(f"{prefix} must be provided for COURSE projects")
+            anchor.validate_write_time()
+            if not _is_resolvable_course_anchor_position(anchor.position):
+                raise PreconditionFailure(f"{prefix}.position must be a resolvable course anchor like t=<ms>")
+            try:
+                self.sys.instance_repo.get(session, anchor.instance_id)
+            except NotFound:
+                raise PreconditionFailure(f"{prefix}.instance_id not resolvable")
+            return project_type
+
+        if project_type == ProjectType.BOOK:
+            if anchor is None:
+                raise PreconditionFailure(f"{prefix} must be provided for BOOK projects")
+            anchor.validate_write_time()
+            if _is_resolvable_course_anchor_position(anchor.position):
+                raise PreconditionFailure(f"{prefix}.position must be a non-resolvable text anchor for BOOK projects")
+            try:
+                self.sys.instance_repo.get(session, anchor.instance_id)
+            except NotFound:
+                raise PreconditionFailure(f"{prefix}.instance_id not resolvable")
+            return project_type
+
+        if project_type == ProjectType.LOOSE_POINTS:
+            if anchor is not None:
+                raise PreconditionFailure(f"{prefix} must be omitted for LOOSE_POINTS projects")
+            return project_type
+
+        raise PreconditionFailure(f"{api_name} project_type is unsupported")
 
     @staticmethod
     def _image_extension_for_upload(mime_type: str, filename: str | None) -> str:
@@ -217,9 +326,14 @@ class SystemAPI:
         project_root: str | None,
         *,
         initial_source_kind: MaterialSourceKind,
+        initial_project_type: ProjectType,
     ) -> ProjectId:
         if not isinstance(initial_source_kind, MaterialSourceKind):
             raise PreconditionFailure("create_project.initial_source_kind must be MaterialSourceKind")
+        if not isinstance(initial_project_type, ProjectType):
+            raise PreconditionFailure("create_project.initial_project_type must be ProjectType")
+        if initial_project_type in {ProjectType.BOOK, ProjectType.LOOSE_POINTS} and initial_source_kind != MaterialSourceKind.MANUAL:
+            raise PreconditionFailure("create_project for BOOK/LOOSE_POINTS must use MANUAL source kind")
         pid = self.idgen.new_project_id()
         resolved_project_root = project_root
         if resolved_project_root is None:
@@ -255,7 +369,7 @@ class SystemAPI:
             source_kind=initial_source_kind,
             updated_at=now_utc_ms(),
         )
-        project_config = default_project_config(project_id=pid, updated_at=now_utc_ms())
+        project_config = default_project_config(project_id=pid, updated_at=now_utc_ms(), project_type=initial_project_type)
 
         layer0 = Layer(
             project_id=pid,
@@ -283,7 +397,7 @@ class SystemAPI:
             kind=AuditEventKind.PROJECT_CREATED,
             api_name="create_project",
             result=AuditResultCode.OK,
-            payload=json.dumps({"projectId": str(pid)}, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
+            payload=json.dumps({"projectId": str(pid), "projectType": initial_project_type.value}, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
         )
         audit_event.validate_write_time()
 
@@ -932,6 +1046,8 @@ class SystemAPI:
         rp = self.sys.recall_point_repo.get(s, recall_point_id)  # may raise NotFound
         if rp.state != RecallPointState.ACTIVE:
             raise PreconditionFailure("request_asr precondition failed: recall_point_id must resolve to ACTIVE RecallPoint")
+        if rp.anchor is None:
+            raise PreconditionFailure("request_asr precondition failed: recall_point must have an anchor")
         source_instance_id = rp.anchor.instance_id
         if not str(source_instance_id):
             raise PreconditionFailure("request_asr precondition failed: source_instance_id missing")
@@ -1614,6 +1730,59 @@ class SystemAPI:
             timeout_sec=float(timeout_sec),
         )
 
+    def request_llm_chat_completion_raw(
+        self,
+        *,
+        messages: Sequence[dict[str, Any]],
+        tools: Sequence[dict[str, Any]] | None = None,
+        tool_choice: object | None = None,
+        parallel_tool_calls: bool | None = None,
+        response_format: dict[str, Any] | None = None,
+        model_name: str | None = None,
+        temperature: float | None = None,
+        timeout_sec: float = 60.0,
+        auth_store: AuthStore | None = None,
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
+        cfg = self.get_effective_llm_service_config(auth_store=auth_store, user_id=user_id)
+        if cfg is None:
+            raise PreconditionFailure("LLM service is not configured")
+
+        if not messages:
+            raise PreconditionFailure("LLM request must include at least one message")
+
+        normalized_messages: list[dict[str, Any]] = []
+        for message in messages:
+            if not isinstance(message, dict):
+                raise PreconditionFailure("LLM message must be an object")
+            role = str(message.get("role", "")).strip()
+            if role not in {"system", "user", "assistant", "tool"}:
+                raise PreconditionFailure("LLM message.role must be one of system/user/assistant/tool")
+            normalized_messages.append(dict(message))
+
+        url = self._resolve_local_service_url(cfg, default_path="/chat/completions")
+        payload: dict[str, object] = {
+            "model": str(model_name or cfg.model or self._default_global_llm_model_name()).strip(),
+            "messages": normalized_messages,
+        }
+        if tools is not None:
+            payload["tools"] = list(tools)
+        if tool_choice is not None:
+            payload["tool_choice"] = tool_choice
+        if parallel_tool_calls is not None:
+            payload["parallel_tool_calls"] = bool(parallel_tool_calls)
+        if response_format is not None:
+            payload["response_format"] = dict(response_format)
+        if temperature is not None:
+            payload["temperature"] = float(temperature)
+
+        return self._http_post_json(
+            url=url,
+            payload=payload,
+            api_key=cfg.api_key,
+            timeout_sec=float(timeout_sec),
+        )
+
     def request_llm_chat_completion_stream_text(
         self,
         *,
@@ -1702,11 +1871,16 @@ class SystemAPI:
 
     def _format_recall_point_for_llm_context(self, recall_point: RecallPoint, *, index: int | None = None) -> str:
         header = f"Recall Point {index}" if index is not None else "Recall Point"
+        anchor_line = (
+            "Anchor: none"
+            if recall_point.anchor is None
+            else f"Anchor: instance={recall_point.anchor.instance_id}, position={recall_point.anchor.position}"
+        )
         lines = [
             f"{header}: {recall_point.recall_point_id}",
             f"Question: {self._truncate_for_llm_context(self._rich_content_to_plain_text(recall_point.question))}",
             f"Answer: {self._truncate_for_llm_context(self._rich_content_to_plain_text(recall_point.answer))}",
-            f"Anchor: instance={recall_point.anchor.instance_id}, position={recall_point.anchor.position}",
+            anchor_line,
         ]
         if recall_point.insights:
             for insight_index, insight in enumerate(recall_point.insights, start=1):
@@ -2291,9 +2465,368 @@ class SystemAPI:
         )
         return self.get_user_asr_status(auth_store=auth_store, user_id=user_id)
 
+    @staticmethod
+    def _cloud_account_to_dto(account) -> dict[str, Any]:
+        return {
+            "accountId": account.account_id,
+            "provider": account.provider,
+            "providerUserId": account.provider_user_id,
+            "displayName": account.display_name,
+            "avatarUrl": account.avatar_url,
+            "expiresAt": account.expires_at,
+            "scope": account.scope,
+            "meta": dict(account.meta),
+            "createdAt": account.created_at,
+            "updatedAt": account.updated_at,
+            "disabledAt": account.disabled_at,
+        }
+
+    def list_user_cloud_accounts(
+        self,
+        *,
+        auth_store: AuthStore,
+        user_id: str,
+        provider: str = BAIDU_NETDISK_PROVIDER,
+    ) -> list[dict[str, Any]]:
+        return [
+            self._cloud_account_to_dto(item)
+            for item in auth_store.list_user_cloud_accounts(user_id, provider=provider, include_disabled=False)
+        ]
+
+    def begin_baidu_netdisk_connect(self, *, user_id: str) -> dict[str, str]:
+        self._baidu_netdisk_client.require_enabled()
+        state = self._new_cloud_oauth_state(user_id=str(user_id), provider=BAIDU_NETDISK_PROVIDER)
+        return {
+            "provider": BAIDU_NETDISK_PROVIDER,
+            "authorizeUrl": self._baidu_netdisk_client.build_authorize_url(state=state),
+            "state": state,
+        }
+
+    def complete_baidu_netdisk_connect(
+        self,
+        *,
+        auth_store: AuthStore,
+        user_id: str,
+        code: str,
+        state: str,
+    ) -> dict[str, Any]:
+        payload = self._consume_cloud_oauth_state(state)
+        if payload.get("provider") != BAIDU_NETDISK_PROVIDER or payload.get("user_id") != str(user_id):
+            raise PreconditionFailure("云账号授权状态与当前用户不匹配")
+        try:
+            token_bundle = self._baidu_netdisk_client.exchange_code(code)
+            profile = self._baidu_netdisk_client.get_account_profile(token_bundle.access_token)
+        except BaiduNetdiskApiError as exc:
+            self._raise_baidu_netdisk_error(exc)
+        account = auth_store.upsert_user_cloud_account(
+            user_id=str(user_id),
+            provider=BAIDU_NETDISK_PROVIDER,
+            provider_user_id=profile.provider_user_id,
+            display_name=profile.display_name,
+            avatar_url=profile.avatar_url,
+            access_token_ciphertext=encrypt_secret_value(token_bundle.access_token),
+            refresh_token_ciphertext=encrypt_secret_value(token_bundle.refresh_token),
+            expires_at=token_bundle.expires_at,
+            scope=token_bundle.scope,
+            meta=profile.meta,
+        )
+        return self._cloud_account_to_dto(account)
+
+    def disable_baidu_netdisk_account(
+        self,
+        *,
+        auth_store: AuthStore,
+        user_id: str,
+        account_id: str,
+    ) -> None:
+        auth_store.disable_user_cloud_account(user_id, account_id=account_id, provider=BAIDU_NETDISK_PROVIDER)
+
+    def list_baidu_netdisk_files(
+        self,
+        *,
+        auth_store: AuthStore,
+        user_id: str,
+        account_id: str,
+        dir_path: str = "/",
+        page: int = 1,
+        limit: int = 200,
+    ) -> dict[str, Any]:
+        auth_store.get_user_cloud_account(user_id, account_id=account_id, provider=BAIDU_NETDISK_PROVIDER)
+        try:
+            items, has_more = self._instance_media_service().list_baidu_files(
+                auth_store=auth_store,
+                account_id=account_id,
+                dir_path=dir_path,
+                page=page,
+                limit=limit,
+            )
+        except BaiduNetdiskApiError as exc:
+            self._raise_baidu_netdisk_error(exc)
+        return {
+            "accountId": account_id,
+            "dirPath": dir_path,
+            "page": int(page),
+            "limit": int(limit),
+            "hasMore": bool(has_more),
+            "items": [
+                {
+                    "fileId": item.file_id,
+                    "path": item.path,
+                    "name": item.name,
+                    "isDir": item.is_dir,
+                    "sizeBytes": item.size_bytes,
+                    "mimeType": item.mime_type,
+                    "durationMs": item.duration_ms,
+                    "category": item.category,
+                }
+                for item in items
+            ],
+        }
+
+    def import_learning_objects_from_baidu_netdisk(
+        self,
+        project_id: ProjectId,
+        *,
+        auth_store: AuthStore,
+        user_id: str,
+        account_id: str,
+        items: Sequence[dict[str, Any]],
+    ) -> dict[str, object]:
+        account = auth_store.get_user_cloud_account(user_id, account_id=account_id, provider=BAIDU_NETDISK_PROVIDER)
+        normalized_items: list[dict[str, Any]] = []
+        for raw_item in items:
+            row = dict(raw_item)
+            remote_path = str(row.get("path") or "").strip()
+            if not remote_path or not remote_path.startswith("/"):
+                raise PreconditionFailure("百度网盘导入项缺少合法 path")
+            if bool(row.get("isDir")):
+                raise PreconditionFailure("一期仅支持导入百度网盘视频文件，不支持直接导入文件夹")
+            file_id = str(row.get("fileId") or "").strip()
+            if not file_id:
+                raise PreconditionFailure("百度网盘导入项缺少 fileId")
+            normalized_items.append(
+                {
+                    "fileId": file_id,
+                    "path": remote_path,
+                    "name": str(row.get("name") or PurePosixPath(remote_path).name).strip() or file_id,
+                    "mimeType": None if row.get("mimeType") is None else str(row.get("mimeType")),
+                    "sizeBytes": None if row.get("sizeBytes") is None else int(row.get("sizeBytes")),
+                    "durationMs": None if row.get("durationMs") is None else int(row.get("durationMs")),
+                }
+            )
+        if not normalized_items:
+            raise PreconditionFailure("请选择至少一个百度网盘视频文件")
+
+        s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
+        try:
+            if self._project_type_in_session(s) != ProjectType.COURSE:
+                raise PreconditionFailure("import_learning_objects_from_baidu_netdisk is only available for COURSE projects")
+
+            existing_instances = list(self.sys.instance_repo.all(s))
+            existing_bindings = list(self.sys.instance_media_binding_repo.all(s))
+            existing_instance_by_remote_path = {
+                str(binding.remote_path): binding.instance_id
+                for binding in existing_bindings
+                if binding.source_kind == MaterialSourceKind.BAIDU_NETDISK and binding.remote_path
+            }
+            leaf_by_instance_id = {
+                id_canonical_text(node.instance_id): node
+                for node in self.sys.learning_object_repo.all(s)
+                if isinstance(node, LearningObjectLeaf)
+            }
+            instances_by_id = {id_canonical_text(item.instance_id): item for item in existing_instances}
+
+            parent_paths = [PurePosixPath(item["path"]).parent.as_posix() for item in normalized_items]
+            common_parent = PurePosixPath(os.path.commonpath(parent_paths) if parent_paths else "/")
+            root_title = common_parent.name or account.display_name or "百度网盘导入"
+
+            container_id_by_rel_dir: dict[str, LearningObjectNodeId] = {}
+            new_nodes: list[LearningObjectContainer | LearningObjectLeaf] = []
+            created_instances = 0
+            created_leaf_nodes = 0
+            reused_instances = 0
+
+            root_id = self.idgen.new_learning_object_node_id(project_id)
+            container_id_by_rel_dir["."] = root_id
+            child_ids_by_container: dict[str, list[LearningObjectNodeId]] = {"." : []}
+
+            def ensure_container(rel_dir: PurePosixPath) -> LearningObjectNodeId:
+                rel_key = rel_dir.as_posix() or "."
+                existing = container_id_by_rel_dir.get(rel_key)
+                if existing is not None:
+                    return existing
+                parent_rel = rel_dir.parent if rel_dir.parent != rel_dir else PurePosixPath(".")
+                parent_id = ensure_container(parent_rel)
+                current_id = self.idgen.new_learning_object_node_id(project_id)
+                container_id_by_rel_dir[rel_key] = current_id
+                child_ids_by_container.setdefault(rel_key, [])
+                child_ids_by_container.setdefault(parent_rel.as_posix() or ".", []).append(current_id)
+                return current_id
+
+            imported_instance_ids: list[InstanceId] = []
+            binding_by_instance_id: dict[str, InstanceMediaBinding] = {}
+
+            for item in normalized_items:
+                remote_path = PurePosixPath(item["path"])
+                existing_iid = existing_instance_by_remote_path.get(remote_path.as_posix())
+                if existing_iid is None:
+                    iid = self.idgen.new_instance_id(project_id)
+                    created_instances += 1
+                else:
+                    iid = existing_iid
+                    reused_instances += 1
+                imported_instance_ids.append(iid)
+                desired_instance = Instance.create(
+                    project_id,
+                    iid,
+                    remote_path.as_posix(),
+                    presence=InstancePresence.PRESENT,
+                    last_seen_at=now_utc_ms(),
+                )
+                if id_canonical_text(iid) in instances_by_id:
+                    self.sys.instance_repo.update(s, desired_instance)
+                else:
+                    self.sys.instance_repo.add(s, desired_instance)
+                binding_by_instance_id[id_canonical_text(iid)] = InstanceMediaBinding.create(
+                    project_id,
+                    iid,
+                    source_kind=MaterialSourceKind.BAIDU_NETDISK,
+                    playback_kind="HLS",
+                    account_id=account_id,
+                    remote_file_id=item["fileId"],
+                    remote_path=remote_path.as_posix(),
+                    mime_type=item["mimeType"],
+                    size_bytes=item["sizeBytes"],
+                    duration_ms=item["durationMs"],
+                    source_payload={"provider": BAIDU_NETDISK_PROVIDER},
+                )
+
+                if id_canonical_text(iid) in leaf_by_instance_id:
+                    continue
+                rel_dir = PurePosixPath(".")
+                try:
+                    rel_dir = remote_path.parent.relative_to(common_parent)
+                except Exception:
+                    rel_dir = PurePosixPath(".")
+                parent_id = ensure_container(rel_dir)
+                leaf_id = self.idgen.new_learning_object_node_id(project_id)
+                child_ids_by_container.setdefault(rel_dir.as_posix() or ".", []).append(leaf_id)
+                new_nodes.append(
+                    LearningObjectLeaf(
+                        source="BAIDU_NETDISK",
+                        project_id=project_id,
+                        node_id=leaf_id,
+                        relative_path=remote_path,
+                        parent_id=parent_id,
+                        instance_id=iid,
+                        title=item["name"],
+                    )
+                )
+                created_leaf_nodes += 1
+
+            if created_leaf_nodes > 0:
+                for rel_key, node_id in list(container_id_by_rel_dir.items()):
+                    if rel_key == ".":
+                        parent_id = None
+                        title = root_title
+                        relative_path = common_parent
+                    else:
+                        rel_dir = PurePosixPath(rel_key)
+                        parent_rel = rel_dir.parent if rel_dir.parent != rel_dir else PurePosixPath(".")
+                        parent_id = container_id_by_rel_dir[parent_rel.as_posix() or "."]
+                        title = rel_dir.name
+                        relative_path = common_parent / rel_dir
+                    children = tuple(child_ids_by_container.get(rel_key, []))
+                    new_nodes.insert(
+                        0,
+                        LearningObjectContainer(
+                            source="BAIDU_NETDISK",
+                            project_id=project_id,
+                            node_id=node_id,
+                            relative_path=relative_path,
+                            parent_id=parent_id,
+                            children=children,
+                            title=title,
+                        ),
+                    )
+            created_nodes = len(new_nodes)
+
+            for binding in binding_by_instance_id.values():
+                self.sys.instance_media_binding_repo.set(s, binding)
+            for node in new_nodes:
+                self.sys.learning_object_repo.add(s, node)
+
+            self._append_audit_event(
+                s,
+                kind=AuditEventKind.ADD_INSTANCE,
+                api_name="import_learning_objects_from_baidu_netdisk",
+                payload={
+                    "provider": BAIDU_NETDISK_PROVIDER,
+                    "accountId": account_id,
+                    "itemsCount": len(normalized_items),
+                    "createdInstancesCount": int(created_instances),
+                    "reusedInstancesCount": int(reused_instances),
+                    "createdLearningObjectNodesCount": int(created_nodes),
+                },
+            )
+            self.sys.commit(s)
+            return {
+                "created_instances_count": int(created_instances),
+                "reused_instances_count": int(reused_instances),
+                "created_learning_object_nodes_count": int(created_nodes),
+                "imported_count": int(len(normalized_items)),
+            }
+        except Exception:
+            if s.state == SessionState.OPEN:
+                self.sys.rollback(s)
+            raise
+
+    def get_instance_playback_descriptor(self, project_id: ProjectId, instance_id: InstanceId) -> dict[str, Any]:
+        return self._instance_media_service().build_playback_descriptor(str(project_id), str(instance_id)).to_dict()
+
+    def get_instance_hls_playlist(
+        self,
+        project_id: ProjectId,
+        instance_id: InstanceId,
+        *,
+        auth_store: AuthStore,
+    ) -> str:
+        try:
+            return self._instance_media_service().build_baidu_hls_playlist(
+                str(project_id),
+                str(instance_id),
+                auth_store=auth_store,
+            )
+        except BaiduNetdiskApiError as exc:
+            self._raise_baidu_netdisk_error(exc)
+        return ""
+
+    def stream_instance_hls_segment(
+        self,
+        project_id: ProjectId,
+        instance_id: InstanceId,
+        *,
+        auth_store: AuthStore,
+        upstream_url: str,
+    ) -> requests.Response:
+        if not str(upstream_url or "").strip():
+            raise PreconditionFailure("缺少百度网盘媒体片段地址")
+        try:
+            return self._instance_media_service().stream_baidu_segment(
+                str(project_id),
+                str(instance_id),
+                auth_store=auth_store,
+                upstream_url=upstream_url,
+            )
+        except BaiduNetdiskApiError as exc:
+            self._raise_baidu_netdisk_error(exc)
+        raise PreconditionFailure("百度网盘媒体片段读取失败")
+
     def _run_sync_learning_objects_from_fs(self, project_id: ProjectId) -> dict[str, object]:
         s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
         try:
+            if self._project_type_in_session(s) != ProjectType.COURSE:
+                raise PreconditionFailure("sync_learning_objects_from_fs is only available for COURSE projects")
             cfg = self.sys.project_storage_config_repo.get(s)
             binding = self.sys.project_material_source_binding_repo.get(s)
             if binding.source_kind not in {MaterialSourceKind.SERVER_FS, MaterialSourceKind.NATIVE_LOCAL}:
@@ -2331,15 +2864,10 @@ class SystemAPI:
                 Spec 0b.1.5b strong constraints:
                 - Ignore entries whose name starts with '.'.
                 - Reject symlinks/shortcuts and non-file/non-dir entries.
-                - Enforce directory homogeneity (direct children all dirs or all files).
                 """
                 stack: list[Path] = [d_os]
                 while stack:
                     cur = stack.pop()
-                    has_dir = False
-                    has_file = False
-                    dir_names: list[str] = []
-                    file_names: list[str] = []
                     try:
                         with os.scandir(cur) as it:
                             for ent in it:
@@ -2356,15 +2884,11 @@ class SystemAPI:
                                         f"UnsupportedFilesystemEntry: symlink not supported: {Path(ent.path)}"
                                     )
                                 if ent.is_dir(follow_symlinks=False):
-                                    has_dir = True
-                                    dir_names.append(name)
                                     child = Path(ent.path)
                                     rel = PurePosixPath(child.relative_to(abs_root).as_posix())
                                     dir_rel_set.add(rel)
                                     stack.append(child)
                                 elif ent.is_file(follow_symlinks=False):
-                                    has_file = True
-                                    file_names.append(name)
                                     child = Path(ent.path)
                                     rel = PurePosixPath(child.relative_to(abs_root).as_posix())
                                     file_rel_raw.append(rel)
@@ -2376,14 +2900,6 @@ class SystemAPI:
                         raise
                     except Exception as e:
                         raise PreconditionFailure(f"sync_learning_objects_from_fs: scan failed: {e}")
-
-                    if has_dir and has_file:
-                        dir_names.sort()
-                        file_names.sort()
-                        raise DirectoryStructureCorruptedError(
-                            "DirectoryStructureCorrupted: mixed files/dirs under "
-                            f"{cur}; dirs={dir_names[:10]} files={file_names[:10]}"
-                        )
 
             _scan_dir(abs_root)
 
@@ -2617,6 +3133,8 @@ class SystemAPI:
 
         s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
         try:
+            if self._project_type_in_session(s) != ProjectType.COURSE:
+                raise PreconditionFailure("import_learning_objects_from_browser_scan is only available for COURSE projects")
             cur_instances = self.sys.instance_repo.all(s)
             cur_instances_by_key = {id_canonical_text(i.instance_id): i for i in cur_instances}
 
@@ -2688,17 +3206,15 @@ class SystemAPI:
                     instances_to_update.append(desired)
                     updated_instances += 1
 
-            child_dirs_by_dir: dict[PurePosixPath, list[PurePosixPath]] = {rel: [] for rel in dir_rel}
-            file_children_by_dir: dict[PurePosixPath, list[PurePosixPath]] = {rel: [] for rel in dir_rel}
+            children_by_dir: dict[PurePosixPath, list[tuple[str, LearningObjectNodeId]]] = {rel: [] for rel in dir_rel}
             for rel in dir_rel:
                 if rel == PurePosixPath("."):
                     continue
-                child_dirs_by_dir[rel.parent].append(rel)
+                children_by_dir[rel.parent].append((rel.as_posix(), dir_id_by_dir[rel]))
             for rel in file_rel:
-                file_children_by_dir[rel.parent].append(rel)
+                children_by_dir[rel.parent].append((rel.as_posix(), leaf_id_by_file[rel]))
             for rel in dir_rel:
-                child_dirs_by_dir[rel].sort(key=lambda p: p.as_posix())
-                file_children_by_dir[rel].sort(key=lambda p: p.as_posix())
+                children_by_dir[rel].sort(key=lambda item: item[0])
 
             display_root_title = (root_title or "").strip() or "已授权目录"
             current_binding = self.sys.project_material_source_binding_repo.get(s)
@@ -2712,9 +3228,7 @@ class SystemAPI:
             nodes_out: list[LearningObjectLeaf | LearningObjectContainer] = []
 
             for rel in dir_rel:
-                sub_dir_ids = tuple(dir_id_by_dir[path] for path in child_dirs_by_dir.get(rel, []))
-                leaf_ids = tuple(leaf_id_by_file[path] for path in file_children_by_dir.get(rel, []))
-                children = tuple(list(sub_dir_ids) + list(leaf_ids))
+                child_ids = tuple(item[1] for item in children_by_dir.get(rel, []))
                 if rel == PurePosixPath("."):
                     parent_id = None
                     title = display_root_title
@@ -2729,7 +3243,7 @@ class SystemAPI:
                         node_id=dir_id_by_dir[rel],
                         relative_path=rel,
                         parent_id=parent_id,
-                        children=children,
+                        children=child_ids,
                         title=title,
                     )
                 )
@@ -2875,11 +3389,18 @@ class SystemAPI:
             suffix += 1
         return f"{base_title}-{suffix}"
 
+    def _threshold_roll_up_enabled(self, s: MutationSession, layer_index: int) -> bool:
+        cfg = self.sys.project_config_repo.get(s)
+        layer_cfg = cfg.layer_configs.get(int(layer_index), default_layer_config())
+        return bool(layer_cfg.threshold_roll_up_enabled)
+
     def _enter_clearing_if_threshold_met(self, s: MutationSession, layer_index: int) -> bool:
         """
         Spec 4.4.2 T1: if thresholds are met, enter/keep CLEARING.
         """
         if not self.sys.queue_repo.is_empty(s):
+            return False
+        if not self._threshold_roll_up_enabled(s, layer_index):
             return False
         cur = self._get_aggregation_cycle_state(s, layer_index)
         if cur != AggregationCycleState.DONE:
@@ -2939,6 +3460,7 @@ class SystemAPI:
         project_root: str | None = None,
         *,
         initial_source_kind: MaterialSourceKind = MaterialSourceKind.SERVER_FS,
+        initial_project_type: ProjectType = ProjectType.COURSE,
     ) -> ProjectId:
         sql_store = self._sql_store()
         if sql_store is not None:
@@ -2947,8 +3469,14 @@ class SystemAPI:
                 title,
                 project_root,
                 initial_source_kind=initial_source_kind,
+                initial_project_type=initial_project_type,
             )
-        return self.sys.create_project(title, project_root, initial_source_kind=initial_source_kind)
+        return self.sys.create_project(
+            title,
+            project_root,
+            initial_source_kind=initial_source_kind,
+            initial_project_type=initial_project_type,
+        )
 
     def list_projects(self) -> Tuple:
         sql_store = self._sql_store()
@@ -3084,57 +3612,29 @@ class SystemAPI:
             self.sys.rollback(s)
 
     def get_instance_subtitle_file(self, project_id: ProjectId, instance_id: InstanceId) -> dict[str, object]:
+        return self.get_instance_subtitle_file_for_user(project_id, instance_id, auth_store=None)
+
+    def get_instance_subtitle_file_for_user(
+        self,
+        project_id: ProjectId,
+        instance_id: InstanceId,
+        *,
+        auth_store: AuthStore | None = None,
+    ) -> dict[str, object]:
         self._ensure_startup_fs_sync_done(project_id)
-        s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
-        try:
-            instance = self.sys.instance_repo.get(s, instance_id)
-            if instance.presence == InstancePresence.MISSING:
-                raise PreconditionFailure("material is MISSING")
-            binding = self.sys.project_material_source_binding_repo.get(s)
-            if binding.source_kind == MaterialSourceKind.BROWSER_LOCAL:
-                raise PreconditionFailure("server-side subtitle lookup is unavailable for BROWSER_LOCAL materials")
-            storage_cfg = self.sys.project_storage_config_repo.get(s)
-        finally:
-            self.sys.rollback(s)
-
-        material_path = resolve_material_file_path(storage_cfg, instance.material_id, source_kind=binding.source_kind)
-        if not material_path.exists():
-            raise PreconditionFailure(f"material file not found: {material_path}")
-        if not material_path.is_file():
-            raise PreconditionFailure(f"material is not a file: {material_path}")
-
-        subtitle_path = find_sibling_subtitle_file(material_path)
-        if subtitle_path is None:
-            return {
-                "found": False,
-                "instanceId": str(instance_id),
-            }
-
-        try:
-            document = parse_subtitle_file(subtitle_path)
-        except Exception as exc:
-            raise PreconditionFailure(f"failed to parse subtitle file: {subtitle_path.name}") from exc
-
-        return {
-            "found": True,
-            "instanceId": str(instance_id),
-            "fileName": subtitle_path.name,
-            "format": document.format,
-            "segments": [
-                {
-                    "startMs": int(segment.start_ms),
-                    "endMs": int(segment.end_ms),
-                    "text": segment.text,
-                }
-                for segment in document.segments
-            ],
-        }
+        return self._instance_media_service().get_instance_subtitle_file(
+            str(project_id),
+            str(instance_id),
+            auth_store=auth_store,
+        )
 
     # 4.5.3
     def add_instance(self, project_id: ProjectId, material_id: str) -> InstanceId:
         self._ensure_startup_fs_sync_done(project_id)
         s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
         try:
+            if self._project_type_in_session(s) == ProjectType.LOOSE_POINTS:
+                raise PreconditionFailure("add_instance is disabled for LOOSE_POINTS projects")
             cfg = self.sys.project_storage_config_repo.get(s)
             binding = self.sys.project_material_source_binding_repo.get(s)
             manual_materials_allowed = binding.source_kind == MaterialSourceKind.MANUAL or (
@@ -3159,6 +3659,164 @@ class SystemAPI:
                 self.sys.rollback(s)
             raise
 
+    def initialize_book_learning_objects(
+        self,
+        project_id: ProjectId,
+        *,
+        outline_items: Sequence[tuple[int, str]],
+    ) -> dict[str, object]:
+        self._ensure_startup_fs_sync_done(project_id)
+        s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
+        try:
+            if self._project_type_in_session(s) != ProjectType.BOOK:
+                raise PreconditionFailure("initialize_book_learning_objects is only available for BOOK projects")
+            binding = self.sys.project_material_source_binding_repo.get(s)
+            if binding.source_kind != MaterialSourceKind.MANUAL:
+                raise PreconditionFailure("initialize_book_learning_objects requires MANUAL source kind")
+            if self.sys.instance_repo.all(s) or self.sys.learning_object_repo.all(s):
+                raise PreconditionFailure("initialize_book_learning_objects requires an empty manual tree")
+            if not outline_items:
+                raise PreconditionFailure("initialize_book_learning_objects.outline_items must be non-empty")
+
+            normalized: list[tuple[int, str]] = []
+            for index, item in enumerate(outline_items):
+                depth_raw, title_raw = item
+                depth = int(depth_raw)
+                title = str(title_raw or "").strip()
+                if depth < 0:
+                    raise PreconditionFailure(f"initialize_book_learning_objects.outline_items[{index}].depth must be >= 0")
+                if not title:
+                    raise PreconditionFailure(f"initialize_book_learning_objects.outline_items[{index}].title must be non-empty")
+                normalized.append((depth, title))
+
+            if normalized[0][0] != 0:
+                raise PreconditionFailure("initialize_book_learning_objects first outline item must start at depth 0")
+
+            normalized_nodes: list[tuple[int, str, bool]] = []
+            for index, (depth, title) in enumerate(normalized):
+                if index > 0:
+                    prev_depth = normalized[index - 1][0]
+                    if depth > prev_depth + 1:
+                        raise PreconditionFailure("initialize_book_learning_objects outline depth may increase by at most 1")
+                next_depth = normalized[index + 1][0] if index + 1 < len(normalized) else -1
+                if next_depth > depth + 1:
+                    raise PreconditionFailure("initialize_book_learning_objects outline depth may increase by at most 1")
+                normalized_nodes.append((depth, title, next_depth > depth))
+
+            sibling_counts_by_parent_path: dict[tuple[str, ...], dict[str, int]] = {}
+            node_id_by_depth: dict[int, LearningObjectNodeId] = {}
+            path_by_depth: dict[int, tuple[str, ...]] = {}
+            created_instances = 0
+            created_nodes = 0
+            root_count = 0
+
+            def append_child(parent_id: LearningObjectNodeId, child_id: LearningObjectNodeId) -> None:
+                parent = self.sys.learning_object_repo.get(s, parent_id)
+                if not isinstance(parent, LearningObjectContainer):
+                    raise PreconditionFailure("initialize_book_learning_objects parent must be container")
+                updated_parent = LearningObjectContainer(
+                    source=parent.source,
+                    project_id=parent.project_id,
+                    node_id=parent.node_id,
+                    relative_path=parent.relative_path,
+                    parent_id=parent.parent_id,
+                    children=tuple(parent.children) + (child_id,),
+                    title=parent.title,
+                )
+                updated_parent.validate_write_time()
+                s._staged.learning_object_nodes[id_canonical_text(updated_parent.node_id)] = updated_parent
+
+            for depth, title, has_children in normalized_nodes:
+                parent_id = None if depth == 0 else node_id_by_depth.get(depth - 1)
+                if depth > 0 and parent_id is None:
+                    raise PreconditionFailure("initialize_book_learning_objects outline parent missing")
+                parent_path = tuple() if depth == 0 else path_by_depth.get(depth - 1, tuple())
+                counts = sibling_counts_by_parent_path.setdefault(parent_path, {})
+                base_segment = _sanitize_manual_outline_segment(title)
+                next_count = counts.get(base_segment, 0) + 1
+                counts[base_segment] = next_count
+                segment = base_segment if next_count == 1 else f"{base_segment} ({next_count})"
+                node_path = parent_path + (segment,)
+                relative_path = PurePosixPath("/".join(node_path))
+
+                for stale_depth in list(node_id_by_depth.keys()):
+                    if stale_depth >= depth + 1:
+                        node_id_by_depth.pop(stale_depth, None)
+                        path_by_depth.pop(stale_depth, None)
+
+                if has_children:
+                    node_id = self.idgen.new_learning_object_node_id(project_id)
+                    container = LearningObjectContainer(
+                        source="MANUAL",
+                        project_id=project_id,
+                        node_id=node_id,
+                        relative_path=relative_path,
+                        parent_id=parent_id,
+                        children=tuple(),
+                        title=title,
+                    )
+                    container.validate_write_time()
+                    self.sys.learning_object_repo.add(s, container)
+                    if parent_id is not None:
+                        append_child(parent_id, node_id)
+                    else:
+                        root_count += 1
+                    node_id_by_depth[depth] = node_id
+                    path_by_depth[depth] = node_path
+                    created_nodes += 1
+                    continue
+
+                instance_id = self.idgen.new_instance_id(project_id)
+                instance = Instance.create(
+                    project_id,
+                    instance_id,
+                    relative_path,
+                    presence=InstancePresence.PRESENT,
+                    last_seen_at=None,
+                )
+                self.sys.instance_repo.add(s, instance)
+                leaf_id = self.idgen.new_learning_object_node_id(project_id)
+                leaf = LearningObjectLeaf(
+                    source="MANUAL",
+                    project_id=project_id,
+                    node_id=leaf_id,
+                    relative_path=instance.material_id,
+                    parent_id=parent_id,
+                    instance_id=instance_id,
+                    title=title,
+                )
+                leaf.validate_write_time()
+                self.sys.learning_object_repo.add(s, leaf)
+                if parent_id is not None:
+                    append_child(parent_id, leaf_id)
+                else:
+                    root_count += 1
+                node_id_by_depth[depth] = leaf_id
+                path_by_depth[depth] = node_path
+                created_instances += 1
+                created_nodes += 1
+
+            self._append_audit_event(
+                s,
+                kind=AuditEventKind.ADD_LEARNING_OBJECT_CONTAINER,
+                api_name="initialize_book_learning_objects",
+                payload={
+                    "createdInstancesCount": created_instances,
+                    "createdLearningObjectNodesCount": created_nodes,
+                    "rootCount": root_count,
+                },
+            )
+            self.sys.commit(s)
+            return {
+                "created_instances_count": int(created_instances),
+                "created_learning_object_nodes_count": int(created_nodes),
+                "root_count": int(root_count),
+            }
+        except Exception:
+            if s.state == SessionState.OPEN:
+                self.sys.rollback(s)
+            raise
+
     def add_learning_object_leaf(
         self,
         project_id: ProjectId,
@@ -3169,6 +3827,8 @@ class SystemAPI:
         self._ensure_startup_fs_sync_done(project_id)
         s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
         try:
+            if self._project_type_in_session(s) == ProjectType.LOOSE_POINTS:
+                raise PreconditionFailure("add_learning_object_leaf is disabled for LOOSE_POINTS projects")
             storage_cfg = self.sys.project_storage_config_repo.get(s)
             binding = self.sys.project_material_source_binding_repo.get(s)
             manual_materials_allowed = binding.source_kind == MaterialSourceKind.MANUAL or (
@@ -3247,6 +3907,8 @@ class SystemAPI:
         self._ensure_startup_fs_sync_done(project_id)
         s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
         try:
+            if self._project_type_in_session(s) == ProjectType.LOOSE_POINTS:
+                raise PreconditionFailure("add_learning_object_container is disabled for LOOSE_POINTS projects")
             storage_cfg = self.sys.project_storage_config_repo.get(s)
             binding = self.sys.project_material_source_binding_repo.get(s)
             manual_materials_allowed = binding.source_kind == MaterialSourceKind.MANUAL or (
@@ -3416,7 +4078,9 @@ class SystemAPI:
             out = [
                 rp.recall_point_id
                 for rp in self.sys.recall_point_repo.all(s)
-                if rp.state == RecallPointState.ACTIVE and id_canonical_text(rp.anchor.instance_id) == want
+                if rp.state == RecallPointState.ACTIVE
+                and rp.anchor is not None
+                and id_canonical_text(rp.anchor.instance_id) == want
             ]
             out.sort(key=lambda x: id_canonical_text(x))
             return tuple(out)
@@ -3451,6 +4115,7 @@ class SystemAPI:
                 for rp in self.sys.recall_point_repo.all(s):
                     if (
                         rp.state == RecallPointState.ACTIVE
+                        and rp.anchor is not None
                         and id_canonical_text(rp.anchor.instance_id) == want_from
                     ):
                         targets.append(rp)
@@ -3462,6 +4127,8 @@ class SystemAPI:
                         raise PreconditionFailure("bulk_remap_recall_points_instance.recall_point_ids contains non-resolvable id")
                     if rp.state != RecallPointState.ACTIVE:
                         raise PreconditionFailure("bulk_remap_recall_points_instance.recall_point_ids must all be ACTIVE")
+                    if rp.anchor is None:
+                        raise PreconditionFailure("bulk_remap_recall_points_instance.recall_point_ids must all have anchors")
                     if id_canonical_text(rp.anchor.instance_id) != want_from:
                         raise PreconditionFailure("bulk_remap_recall_points_instance.recall_point_ids must all belong to from_instance_id")
                     targets.append(rp)
@@ -3485,7 +4152,9 @@ class SystemAPI:
             pruned_missing_source_instance = False
             if from_inst.presence == InstancePresence.MISSING:
                 has_active_source_refs = any(
-                    rp.state == RecallPointState.ACTIVE and id_canonical_text(rp.anchor.instance_id) == want_from
+                    rp.state == RecallPointState.ACTIVE
+                    and rp.anchor is not None
+                    and id_canonical_text(rp.anchor.instance_id) == want_from
                     for rp in self.sys.recall_point_repo.all(s)
                 )
                 if not has_active_source_refs:
@@ -3661,6 +4330,8 @@ class SystemAPI:
         blocked_keys: set[str] = set()
         affected_rp_ids: set[str] = set()
         for rp in cur_recall_points:
+            if rp.anchor is None:
+                continue
             ik = id_canonical_text(rp.anchor.instance_id)
             if ik in to_remove_keys:
                 blocked_keys.add(ik)
@@ -3718,7 +4389,7 @@ class SystemAPI:
             # (2) Migrate RecallPoints (user mapping)
             if remap_dict:
                 for rp in self.sys.recall_point_repo.all(s):
-                    if rp.state != RecallPointState.ACTIVE:
+                    if rp.state != RecallPointState.ACTIVE or rp.anchor is None:
                         continue
                     old_key = id_canonical_text(rp.anchor.instance_id)
                     new_key = remap_dict.get(old_key)
@@ -4294,7 +4965,7 @@ class SystemAPI:
     def submit_learning_task(
         self,
         project_id: ProjectId,
-        items: Sequence[tuple[RichContent, RichContent, Anchor]],
+        items: Sequence[tuple[RichContent, RichContent, Anchor | None]],
         title: str,
     ) -> LearningTaskNodeId:
         self._ensure_startup_fs_sync_done(project_id)
@@ -4303,6 +4974,14 @@ class SystemAPI:
             if not self.sys.queue_repo.is_empty(s):
                 raise PreconditionFailure("Gate: queue not empty; submit_learning_task forbidden")
             target_layer_index = 0
+
+            for index, (_, _, anchor) in enumerate(items):
+                self._validate_anchor_for_project_type(
+                    s,
+                    anchor=anchor,
+                    api_name="submit_learning_task",
+                    field_name=f"items[{index}].anchor",
+                )
 
             li = [LearningItem(question=q, answer=a, anchor=anc) for (q, a, anc) in items]
             res = learning_task_submit(
@@ -4408,12 +5087,13 @@ class SystemAPI:
         recall_point_id: RecallPointId,
         question: RichContent,
         answer: RichContent,
-        anchor: Anchor,
+        anchor: Anchor | None,
     ) -> None:
         self._ensure_startup_fs_sync_done(project_id)
         s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
         try:
             cur = self.sys.recall_point_repo.get(s, recall_point_id)
+            self._validate_anchor_for_project_type(s, anchor=anchor, api_name="edit_recall_point")
             rp = RecallPoint(
                 project_id=project_id,
                 recall_point_id=recall_point_id,
@@ -4552,6 +5232,7 @@ class SystemAPI:
         review_chain_template: Optional[ReviewChainTemplate],
         K_node: Optional[int],
         K_point: Optional[int],
+        threshold_roll_up_enabled: Optional[bool] = None,
     ) -> None:
         """
         Spec 4.5: update ProjectConfig + (if exists) Layer thresholds.
@@ -4572,6 +5253,11 @@ class SystemAPI:
                 else cur_layer_cfg.review_chain_template,
                 aggregation_k_node=int(K_node) if K_node is not None else int(cur_layer_cfg.aggregation_k_node),
                 aggregation_k_point=int(K_point) if K_point is not None else int(cur_layer_cfg.aggregation_k_point),
+                threshold_roll_up_enabled=(
+                    threshold_roll_up_enabled
+                    if threshold_roll_up_enabled is not None
+                    else bool(cur_layer_cfg.threshold_roll_up_enabled)
+                ),
             )
             next_layer_cfg.validate_write_time()
 
@@ -4579,6 +5265,7 @@ class SystemAPI:
             layer_configs[int(layer_index)] = next_layer_cfg
             next_cfg = ProjectConfig(
                 project_id=cfg.project_id,
+                project_type=cfg.project_type,
                 layer_configs=layer_configs,
                 push_config=cfg.push_config,
                 updated_at=now_utc_ms(),
@@ -4601,6 +5288,67 @@ class SystemAPI:
                 payload={"layerIndex": int(layer_index)},
             )
 
+            self.sys.commit(s)
+        except Exception:
+            if s.state == SessionState.OPEN:
+                self.sys.rollback(s)
+            raise
+
+    def set_review_recommendation_config(
+        self,
+        project_id: ProjectId,
+        *,
+        min_recall_points_to_enable: Optional[int] = None,
+        max_history_len: Optional[int] = None,
+        recommended_batch_size: Optional[int] = None,
+        forgetting_curve_decay_per_day: Optional[float] = None,
+    ) -> None:
+        self._ensure_startup_fs_sync_done(project_id)
+        s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
+        try:
+            cfg = self.sys.project_config_repo.get(s)
+            cur_push_cfg = cfg.push_config
+            next_push_cfg = type(cur_push_cfg)(
+                min_recall_points_to_enable=(
+                    int(min_recall_points_to_enable)
+                    if min_recall_points_to_enable is not None
+                    else int(cur_push_cfg.min_recall_points_to_enable)
+                ),
+                max_history_len=int(max_history_len) if max_history_len is not None else int(cur_push_cfg.max_history_len),
+                recommended_batch_size=(
+                    int(recommended_batch_size)
+                    if recommended_batch_size is not None
+                    else int(cur_push_cfg.recommended_batch_size)
+                ),
+                forgetting_curve_decay_per_day=(
+                    float(forgetting_curve_decay_per_day)
+                    if forgetting_curve_decay_per_day is not None
+                    else float(cur_push_cfg.forgetting_curve_decay_per_day)
+                ),
+            )
+            next_push_cfg.validate_write_time()
+
+            next_cfg = ProjectConfig(
+                project_id=cfg.project_id,
+                project_type=cfg.project_type,
+                layer_configs=dict(cfg.layer_configs),
+                push_config=next_push_cfg,
+                updated_at=now_utc_ms(),
+            )
+            next_cfg.validate_write_time()
+
+            self.sys.project_config_repo.set(s, next_cfg)
+            self._append_audit_event(
+                s,
+                kind=AuditEventKind.EDIT_PROJECT_CONFIG,
+                api_name="set_review_recommendation_config",
+                payload={
+                    "minRecallPointsToEnable": int(next_push_cfg.min_recall_points_to_enable),
+                    "maxHistoryLen": int(next_push_cfg.max_history_len),
+                    "recommendedBatchSize": int(next_push_cfg.recommended_batch_size),
+                    "forgettingCurveDecayPerDay": float(next_push_cfg.forgetting_curve_decay_per_day),
+                },
+            )
             self.sys.commit(s)
         except Exception:
             if s.state == SessionState.OPEN:
@@ -4809,108 +5557,198 @@ class SystemAPI:
                 self.sys.rollback(s)
             raise
 
+    @staticmethod
+    def _truncate_review_history(
+        records: Sequence[RecallPointReviewRecord], max_history_len: int
+    ) -> Tuple[RecallPointReviewRecord, ...]:
+        if int(max_history_len) <= 0:
+            return tuple()
+        if len(records) <= int(max_history_len):
+            return tuple(records)
+        return tuple(records[-int(max_history_len) :])
+
+    @staticmethod
+    def _age_days(from_ts: datetime, to_ts: datetime) -> float:
+        seconds = (to_ts - from_ts).total_seconds()
+        if seconds <= 0:
+            return 0.0
+        return float(seconds) / 86400.0
+
+    def _compute_recall_point_review_metrics(
+        self,
+        s: MutationSession,
+        *,
+        rp: RecallPoint,
+        cfg: ProjectConfig,
+        calculated_at: datetime,
+    ) -> tuple[
+        float,
+        float,
+        Optional[datetime],
+        Optional[RecallPointReviewResult],
+        int,
+        Tuple[RecallPointReviewRecord, ...],
+    ]:
+        all_records = self.sys.recall_point_review_record_repo.all_by_recall_point(s, rp.recall_point_id)
+        history_window_size = int(cfg.push_config.max_history_len)
+        records = self._truncate_review_history(all_records, history_window_size)
+        total_review_count = len(all_records)
+        if not records:
+            return 0.0, 0.0, None, None, total_review_count, tuple()
+
+        decay_per_day = float(cfg.push_config.forgetting_curve_decay_per_day)
+        success_weight = 0.0
+        total_weight = 0.0
+        for record in records:
+            age_days = self._age_days(record.occurred_at, calculated_at)
+            weight = math.exp(-decay_per_day * age_days)
+            total_weight += weight
+            if record.result == RecallPointReviewResult.CAN_RECALL:
+                success_weight += weight
+
+        weighted_success_ratio = 0.0 if total_weight <= 0 else success_weight / total_weight
+        last_record = records[-1]
+        freshness = math.exp(-decay_per_day * self._age_days(last_record.occurred_at, calculated_at))
+        estimated_memory_strength = max(0.0, min(1.0, weighted_success_ratio * freshness))
+        return (
+            float(weighted_success_ratio),
+            float(estimated_memory_strength),
+            last_record.occurred_at,
+            last_record.result,
+            total_review_count,
+            tuple(records),
+        )
+
+    @staticmethod
+    def _recommendation_sort_key(item: RecallPointReviewRecommendation) -> tuple[float, datetime, str]:
+        last_reviewed_at = item.last_reviewed_at
+        if last_reviewed_at is None:
+            last_reviewed_at = datetime.min.replace(tzinfo=timezone.utc)
+        return (
+            -float(item.review_recommendation_index),
+            last_reviewed_at,
+            id_canonical_text(item.recall_point.recall_point_id),
+        )
+
+    def _build_recall_point_review_recommendation(
+        self,
+        s: MutationSession,
+        *,
+        rp: RecallPoint,
+        cfg: ProjectConfig,
+        calculated_at: datetime,
+    ) -> RecallPointReviewRecommendation:
+        (
+            weighted_success_ratio,
+            estimated_memory_strength,
+            last_reviewed_at,
+            last_review_result,
+            total_review_count,
+            _,
+        ) = self._compute_recall_point_review_metrics(s, rp=rp, cfg=cfg, calculated_at=calculated_at)
+        review_recommendation_index = 100.0 * (1.0 - estimated_memory_strength)
+        return RecallPointReviewRecommendation(
+            recall_point=rp,
+            review_recommendation_index=float(review_recommendation_index),
+            estimated_memory_strength=float(estimated_memory_strength),
+            weighted_success_ratio=float(weighted_success_ratio),
+            last_reviewed_at=last_reviewed_at,
+            last_review_result=last_review_result,
+            review_count=int(total_review_count),
+        )
+
     # 4.5.8
     def get_push_candidates(self, project_id: ProjectId, max_results: int) -> Tuple[RecallPointId, ...]:
-        """
-        Spec 4.7: read-only push candidates view.
-
-        Strong constraints:
-        - Pure read (READ_ONLY); must not write any persistent state.
-        - Threshold gate: if N < T, must return empty and must not call local model service.
-        - If recommender config is None, model calling is disabled; return deterministic fallback.
-        """
         if int(max_results) <= 0:
             raise PreconditionFailure("get_push_candidates.max_results must be >= 1")
+        page = self.list_review_recommendations(project_id, offset=0, limit=int(max_results))
+        return tuple(item.recall_point.recall_point_id for item in page.items)
+
+    def list_review_recommendations(
+        self,
+        project_id: ProjectId,
+        offset: int = 0,
+        limit: Optional[int] = None,
+    ) -> RecallPointReviewRecommendationPage:
+        if int(offset) < 0:
+            raise PreconditionFailure("list_review_recommendations.offset must be >= 0")
 
         s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
         try:
             cfg = self.sys.project_config_repo.get(s)
+            page_limit = int(cfg.push_config.recommended_batch_size) if limit is None else int(limit)
+            if page_limit <= 0:
+                raise PreconditionFailure("list_review_recommendations.limit must be >= 1")
 
             rps = tuple(rp for rp in self.sys.recall_point_repo.all(s) if rp.state == RecallPointState.ACTIVE)
-            N = len(rps)
-            T = int(cfg.push_config.min_recall_points_to_enable)
-            if N < T:
-                return tuple()
-
-            max_history_len = int(cfg.push_config.max_history_len)
-
-            rec_cfg = current_native_runtime_config(
-                runtime_kind=s.runtime_kind,
-                runtime_capabilities=s.runtime_capabilities,
-            ).local_models.recommender
-
-            # Deterministic fallback (spec allows as fallback / disabled-model behavior).
-            scored: list[tuple[tuple[int, object, str], RecallPointId]] = []
-            feature_rows: list[dict[str, object]] = []
-            known: set[str] = set()
-            for rp in rps:
-                rp_id = rp.recall_point_id
-                known.add(id_canonical_text(rp_id))
-                recs = self.sys.recall_point_review_record_repo.all_by_recall_point(s, rp_id)
-                if max_history_len == 0:
-                    recs = tuple()
-                elif max_history_len > 0 and len(recs) > max_history_len:
-                    recs = recs[-max_history_len:]
-
-                # 4.7.2 features encoding (internal; deterministic).
-                features: list[dict[str, int]] = []
-                if recs:
-                    t0 = rp.created_at
-                    dt0 = int((recs[0].occurred_at - t0).total_seconds() * 1000)
-                    y0 = 1 if recs[0].result.value == "CAN_RECALL" else 0
-                    features.append({"dt_ms": dt0, "y": y0})
-                    for i in range(1, len(recs)):
-                        dti = int((recs[i].occurred_at - recs[i - 1].occurred_at).total_seconds() * 1000)
-                        yi = 1 if recs[i].result.value == "CAN_RECALL" else 0
-                        features.append({"dt_ms": dti, "y": yi})
-
-                feature_rows.append({"recallPointId": str(rp_id), "features": features})
-
-                if not recs:
-                    group = 0
-                    last_time = rp.created_at
-                else:
-                    last = recs[-1]
-                    group = 1 if last.result.value == "CANNOT_RECALL" else 2
-                    last_time = last.occurred_at
-
-                key = (group, last_time, id_canonical_text(rp_id))
-                scored.append((key, rp_id))
-
-            scored.sort(key=lambda x: x[0])
-            fallback_ids = [rp_id for _, rp_id in scored][: int(max_results)]
-
-            if rec_cfg is None:
-                return tuple(fallback_ids)
-
-            # Best-effort external recommender call (4.7.3); on any failure fall back deterministically.
-            try:
-                url = self._resolve_local_service_url(rec_cfg, default_path="/recommender/push-candidates")
-                resp = self._http_post_json(
-                    url=url,
-                    payload={"maxResults": int(max_results), "items": feature_rows},
-                    api_key=rec_cfg.api_key,
-                    timeout_sec=3.0,
+            if len(rps) < int(cfg.push_config.min_recall_points_to_enable):
+                return RecallPointReviewRecommendationPage(
+                    items=tuple(),
+                    total_count=0,
+                    offset=int(offset),
+                    limit=page_limit,
+                    next_offset=None,
                 )
-                ids_raw = resp.get("recallPointIds")
-                if not isinstance(ids_raw, list):
-                    return tuple(fallback_ids)
 
-                out: list[RecallPointId] = []
-                seen: set[str] = set()
-                for x in ids_raw:
-                    sid = str(x).strip()
-                    if not sid or sid not in known:
-                        continue
-                    if sid in seen:
-                        continue
-                    seen.add(sid)
-                    out.append(RecallPointId(sid))
-                    if len(out) >= int(max_results):
-                        break
-                return tuple(out) if out else tuple(fallback_ids)
-            except Exception:
-                return tuple(fallback_ids)
+            calculated_at = now_utc_ms()
+            items = tuple(
+                self._build_recall_point_review_recommendation(s, rp=rp, cfg=cfg, calculated_at=calculated_at)
+                for rp in rps
+            )
+            sorted_items = tuple(sorted(items, key=self._recommendation_sort_key))
+            total_count = len(sorted_items)
+            start = min(int(offset), total_count)
+            end = min(start + page_limit, total_count)
+            next_offset = end if end < total_count else None
+            return RecallPointReviewRecommendationPage(
+                items=sorted_items[start:end],
+                total_count=total_count,
+                offset=start,
+                limit=page_limit,
+                next_offset=next_offset,
+            )
+        finally:
+            self.sys.rollback(s)
+
+    def get_recall_point_review_projection(
+        self,
+        project_id: ProjectId,
+        recall_point_id: RecallPointId,
+    ) -> RecallPointReviewProjection:
+        s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
+        try:
+            cfg = self.sys.project_config_repo.get(s)
+            rp = self.sys.recall_point_repo.get(s, recall_point_id)
+            calculated_at = now_utc_ms()
+            (
+                weighted_success_ratio,
+                estimated_memory_strength,
+                last_reviewed_at,
+                last_review_result,
+                total_review_count,
+                records,
+            ) = self._compute_recall_point_review_metrics(s, rp=rp, cfg=cfg, calculated_at=calculated_at)
+            history = tuple(
+                RecallPointReviewHistoryItem(
+                    review_task_id=record.review_task_id,
+                    occurred_at=record.occurred_at,
+                    result=record.result,
+                )
+                for record in records
+            )
+            return RecallPointReviewProjection(
+                recall_point_id=rp.recall_point_id,
+                calculated_at=calculated_at,
+                review_recommendation_index=float(100.0 * (1.0 - estimated_memory_strength)),
+                estimated_memory_strength=float(estimated_memory_strength),
+                weighted_success_ratio=float(weighted_success_ratio),
+                forgetting_curve_decay_per_day=float(cfg.push_config.forgetting_curve_decay_per_day),
+                history_window_size=int(cfg.push_config.max_history_len),
+                last_reviewed_at=last_reviewed_at,
+                last_review_result=last_review_result,
+                review_count=int(total_review_count),
+                history=history,
+            )
         finally:
             self.sys.rollback(s)
 
@@ -5604,9 +6442,6 @@ class SystemAPI:
         finally:
             self.sys.rollback(s)
 
-    def list_review_recommendations(self, project_id: ProjectId, max_results: int) -> Tuple[RecallPointId, ...]:
-        return self.get_push_candidates(project_id, max_results)
-
     def export_recall_points_by_learning_object_node(
         self, project_id: ProjectId, node_id: LearningObjectNodeId
     ) -> Tuple[RecallPoint, ...]:
@@ -5629,7 +6464,7 @@ class SystemAPI:
             recall_point_key_set = {
                 id_canonical_text(rp.recall_point_id)
                 for rp in self.sys.recall_point_repo.all(s)
-                if rp.state == RecallPointState.ACTIVE and id_canonical_text(rp.anchor.instance_id) in inst_set
+                if rp.state == RecallPointState.ACTIVE and rp.anchor is not None and id_canonical_text(rp.anchor.instance_id) in inst_set
             }
             items = [
                 art
@@ -5828,7 +6663,7 @@ class SystemAPI:
             inst_set = {id_canonical_text(x) for x in inst_ids}
             items: list[RecallPoint] = []
             for rp in self.sys.recall_point_repo.all(s):
-                if rp.state == RecallPointState.ACTIVE and id_canonical_text(rp.anchor.instance_id) in inst_set:
+                if rp.state == RecallPointState.ACTIVE and rp.anchor is not None and id_canonical_text(rp.anchor.instance_id) in inst_set:
                     items.append(rp)
             items.sort(key=lambda r: id_canonical_text(r.recall_point_id))
             return tuple(items)
@@ -6012,12 +6847,23 @@ API_WHITELIST: dict[str, SchedulingEffect] = {
     "list_audit_log_events": SchedulingEffect.NONE,
     "delete_project": SchedulingEffect.NONE,
     "add_instance": SchedulingEffect.NONE,
+    "initialize_book_learning_objects": SchedulingEffect.NONE,
     "add_learning_object_leaf": SchedulingEffect.NONE,
     "add_learning_object_container": SchedulingEffect.NONE,
     "sync_learning_objects_from_fs": SchedulingEffect.NONE,
+    "list_user_cloud_accounts": SchedulingEffect.NONE,
+    "begin_baidu_netdisk_connect": SchedulingEffect.NONE,
+    "complete_baidu_netdisk_connect": SchedulingEffect.NONE,
+    "disable_baidu_netdisk_account": SchedulingEffect.NONE,
+    "list_baidu_netdisk_files": SchedulingEffect.NONE,
+    "import_learning_objects_from_baidu_netdisk": SchedulingEffect.NONE,
     "set_project_material_source_binding": SchedulingEffect.NONE,
     "list_missing_instances": SchedulingEffect.NONE,
     "list_recall_points_by_instance": SchedulingEffect.NONE,
+    "get_instance_playback_descriptor": SchedulingEffect.NONE,
+    "get_instance_hls_playlist": SchedulingEffect.NONE,
+    "stream_instance_hls_segment": SchedulingEffect.NONE,
+    "get_instance_subtitle_file_for_user": SchedulingEffect.NONE,
     "bulk_remap_recall_points_instance": SchedulingEffect.NONE,
     "submit_learning_task": SchedulingEffect.ORCHESTRATION_MUTATING,
     "get_learning_task": SchedulingEffect.NONE,
@@ -6030,6 +6876,7 @@ API_WHITELIST: dict[str, SchedulingEffect] = {
     "delete_recall_point": SchedulingEffect.NONE,
     "edit_learning_task": SchedulingEffect.NONE,
     "set_layer_config": SchedulingEffect.NONE,
+    "set_review_recommendation_config": SchedulingEffect.NONE,
     "executor_commit_review_task": SchedulingEffect.ORCHESTRATION_MUTATING,
     "manual_roll_up": SchedulingEffect.ORCHESTRATION_MUTATING,
     "export_recall_points_by_learning_object_node": SchedulingEffect.NONE,
@@ -6041,6 +6888,7 @@ API_WHITELIST: dict[str, SchedulingEffect] = {
     "request_instance_asr": SchedulingEffect.NONE,
     "request_instance_asr_from_audio_upload": SchedulingEffect.NONE,
     "list_review_recommendations": SchedulingEffect.NONE,
+    "get_recall_point_review_projection": SchedulingEffect.NONE,
     "get_push_candidates": SchedulingEffect.NONE,
     "validate_material_reachable": SchedulingEffect.NONE,
     "validate_recall_point_ids_resolvable": SchedulingEffect.NONE,

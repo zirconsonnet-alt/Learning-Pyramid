@@ -1,21 +1,10 @@
 import { z } from "zod"
 
 import { apiRequest } from "@/ui/api/http"
-import {
-  StudyGroupJoinRequestSchema,
-  StudyGroupMemberSchema,
-  StudyGroupPostCommentSchema,
-  StudyGroupPostSchema,
-  StudyGroupSchema,
-} from "@/ui/api/studyGroups"
 
 export const AdminOverviewSchema = z.object({
   users: z.number(),
   activeUsers: z.number(),
-  groups: z.number(),
-  activeGroups: z.number(),
-  posts: z.number(),
-  comments: z.number(),
 })
 
 export type AdminOverview = z.infer<typeof AdminOverviewSchema>
@@ -35,75 +24,9 @@ export const AdminUserSchema = z.object({
 
 export type AdminUser = z.infer<typeof AdminUserSchema>
 
-export const AdminUserStudyGroupSchema = z.object({
-  groupId: z.string(),
-  name: z.string(),
-  description: z.string(),
-  visibility: z.string(),
-  joinPolicy: z.string(),
-  status: z.string(),
-  ownerUserId: z.string(),
-  ownerPublicUid: z.string(),
-  ownerNickname: z.string(),
-  avatarUrl: z.string().nullable(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-  memberCount: z.number(),
-  memberRole: z.string(),
-  joinedAt: z.string(),
-})
-
-export type AdminUserStudyGroup = z.infer<typeof AdminUserStudyGroupSchema>
-
-export const AdminUserDetailSchema = AdminUserSchema.extend({
-  groups: z.array(AdminUserStudyGroupSchema),
-})
+export const AdminUserDetailSchema = AdminUserSchema
 
 export type AdminUserDetail = z.infer<typeof AdminUserDetailSchema>
-
-export const AdminGroupDetailSchema = StudyGroupSchema.extend({
-  members: z.array(StudyGroupMemberSchema),
-  joinRequests: z.array(StudyGroupJoinRequestSchema),
-  posts: z.array(StudyGroupPostSchema),
-  comments: z.array(StudyGroupPostCommentSchema),
-})
-
-export type AdminGroupDetail = z.infer<typeof AdminGroupDetailSchema>
-
-export const AdminGroupPostSchema = z.object({
-  postId: z.string(),
-  groupId: z.string(),
-  groupName: z.string(),
-  authorUserId: z.string(),
-  authorPublicUid: z.string(),
-  authorNickname: z.string(),
-  authorAvatarUrl: z.string().nullable(),
-  kind: z.string(),
-  content: z.string(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-  commentCount: z.number(),
-})
-
-export type AdminGroupPost = z.infer<typeof AdminGroupPostSchema>
-
-export const AdminGroupCommentSchema = z.object({
-  commentId: z.string(),
-  groupId: z.string(),
-  groupName: z.string(),
-  postId: z.string(),
-  postKind: z.string(),
-  postExcerpt: z.string(),
-  authorUserId: z.string(),
-  authorPublicUid: z.string(),
-  authorNickname: z.string(),
-  authorAvatarUrl: z.string().nullable(),
-  content: z.string(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-})
-
-export type AdminGroupComment = z.infer<typeof AdminGroupCommentSchema>
 
 export const AdminActionLogSchema = z.object({
   logId: z.string(),
@@ -320,9 +243,6 @@ export const AdminMembershipCloseOrderSchema = z.object({
 export type AdminMembershipCloseOrder = z.infer<typeof AdminMembershipCloseOrderSchema>
 
 const AdminUserListSchema = z.array(AdminUserSchema)
-const AdminGroupListSchema = z.array(StudyGroupSchema)
-const AdminGroupPostListSchema = z.array(AdminGroupPostSchema)
-const AdminGroupCommentListSchema = z.array(AdminGroupCommentSchema)
 const AdminActionLogListSchema = z.array(AdminActionLogSchema)
 const AdminMembershipOrderListSchema = z.array(AdminMembershipOrderSchema)
 const AdminMembershipInviteListSchema = z.array(AdminMembershipInviteSchema)
@@ -384,59 +304,6 @@ export function updateAdminUserRole(params: { userId: string; role: string; enab
       enabled: params.enabled,
     },
     responseSchema: AdminUserSchema,
-  })
-}
-
-export function listAdminGroups(params?: { search?: string; status?: string; limit?: number }) {
-  return apiRequest({
-    path: buildAdminListPath("/admin/groups", params),
-    responseSchema: AdminGroupListSchema,
-  })
-}
-
-export function getAdminGroupDetail(groupId: string) {
-  return apiRequest({
-    path: `/admin/groups/${encodeURIComponent(groupId)}`,
-    responseSchema: AdminGroupDetailSchema,
-  })
-}
-
-export function updateAdminGroupStatus(params: { groupId: string; status: string }) {
-  return apiRequest({
-    path: `/admin/groups/${encodeURIComponent(params.groupId)}/status`,
-    method: "PATCH",
-    body: { status: params.status },
-    responseSchema: StudyGroupSchema,
-  })
-}
-
-export function listAdminGroupPosts(params?: { search?: string; limit?: number }) {
-  return apiRequest({
-    path: buildAdminListPath("/admin/content/posts", params),
-    responseSchema: AdminGroupPostListSchema,
-  })
-}
-
-export function listAdminGroupComments(params?: { search?: string; limit?: number }) {
-  return apiRequest({
-    path: buildAdminListPath("/admin/content/comments", params),
-    responseSchema: AdminGroupCommentListSchema,
-  })
-}
-
-export function deleteAdminGroupPost(postId: string) {
-  return apiRequest({
-    path: `/admin/content/posts/${encodeURIComponent(postId)}`,
-    method: "DELETE",
-    responseSchema: AdminGroupPostSchema,
-  })
-}
-
-export function deleteAdminGroupComment(commentId: string) {
-  return apiRequest({
-    path: `/admin/content/comments/${encodeURIComponent(commentId)}`,
-    method: "DELETE",
-    responseSchema: AdminGroupCommentSchema,
   })
 }
 

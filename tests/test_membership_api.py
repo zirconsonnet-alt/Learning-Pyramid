@@ -556,9 +556,11 @@ def test_wechat_native_order_can_be_created_and_synced(auth_env: None, monkeypat
         if method == "POST" and uri == "/v3/pay/transactions/native":
             assert body is not None
             assert body["notify_url"] == "https://learningpyramid.test/api/payments/wechat/notify"
+            assert len(str(body["out_trade_no"])) <= 32
             return {"code_url": "weixin://wxpay/bizpayurl/up?pr=fake-wechat-native"}
         if method == "GET" and "/v3/pay/transactions/out-trade-no/" in uri:
             order_id = uri.split("/out-trade-no/", 1)[1].split("?", 1)[0]
+            assert len(order_id) <= 32
             return {
                 "out_trade_no": order_id,
                 "trade_state": "SUCCESS",
@@ -594,6 +596,7 @@ def test_wechat_native_order_can_be_created_and_synced(auth_env: None, monkeypat
     synced_data = synced.json()["data"]
     assert synced_data["confirmed"] is True
     assert synced_data["order"]["status"] == "paid"
+    assert synced_data["order"]["orderId"] == order_id
     assert synced_data["remote"]["remoteStatus"] == "paid"
     assert synced_data["remote"]["providerTradeNo"] == "4200000000000000000001"
     assert synced_data["membership"]["currentStatus"] == "active"

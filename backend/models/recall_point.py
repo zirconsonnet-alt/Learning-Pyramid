@@ -31,7 +31,7 @@ class RecallPoint:
     created_at: Timestamp
     question: RichContent
     answer: RichContent
-    anchor: Anchor
+    anchor: Optional[Anchor] = None
     insights: tuple[RichContent, ...] = tuple()
     state: RecallPointState = RecallPointState.ACTIVE
     deleted_at: Optional[Timestamp] = None
@@ -48,9 +48,8 @@ class RecallPoint:
             raise PreconditionFailure("RecallPoint.deleted_at must be None on write")
         validate_rich_content_write_time(self.question)
         validate_rich_content_write_time(self.answer)
-        if self.anchor is None:
-            raise PreconditionFailure("RecallPoint.anchor must be provided")
-        self.anchor.validate_write_time()
+        if self.anchor is not None:
+            self.anchor.validate_write_time()
         for ins in self.insights:
             validate_rich_content_write_time(ins)
 

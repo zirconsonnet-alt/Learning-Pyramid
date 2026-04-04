@@ -55,7 +55,7 @@ export function describeMembershipCouponSource(value: string) {
 }
 
 export function describeMembershipPaymentProvider(value: string) {
-  if (value === "manual_test") return "测试支付"
+  if (value === "manual_test") return "快捷确认"
   if (value === "wechat_native") return "微信扫码支付"
   return value
 }
@@ -96,10 +96,10 @@ export function StatusPill(props: { children: ReactNode; tone?: "default" | "acc
       className={cn(
         "inline-flex items-center rounded-full border px-2.5 py-1 text-xs",
         props.tone === "accent"
-          ? "border-primary/20 bg-[#eef5ff] text-[#1d4f8f]"
+          ? "theme-pill-accent"
           : props.tone === "warm"
-            ? "border-[#f2d4a7] bg-[#fff4df] text-[#8b5a15]"
-            : "border-[#dde5ee] bg-[#f8fafc] text-[#5b6b82]",
+            ? "theme-pill-warm"
+            : "theme-pill-default",
       )}
     >
       {props.children}

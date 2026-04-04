@@ -24,22 +24,26 @@ import {
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
-import { listLearningObjectNodes, type LearningObjectNode } from "@/ui/api/learningObjects"
-import { listLearningTaskNodes, type LearningTaskNode } from "@/ui/api/learningTaskNodes"
+import type { Instance } from "@/ui/api/instances"
+import { listLearningObjectNodes, listRecallPointsByLearningObjectNode, type LearningObjectNode } from "@/ui/api/learningObjects"
+import { listLearningTaskNodes, listRecallPointsByLearningTaskNode, type LearningTaskNode } from "@/ui/api/learningTaskNodes"
 import { richContentToPlainText } from "@/ui/api/richContent"
 import { getRecallPoint, type RecallPoint } from "@/ui/api/review"
+import type { MaterialSourceKind } from "@/ui/api/projects"
 import { askProjectLlmStream } from "@/ui/api/system"
 import { ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { MarkdownRichText } from "@/ui/components/MarkdownRichText"
 import { Button } from "@/ui/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/ui/components/ui/dialog"
 import { Input } from "@/ui/components/ui/input"
-import { formatInstanceReference, formatRecallPointReference } from "@/ui/displayIdentifiers"
+import { formatRecallPointReference } from "@/ui/displayIdentifiers"
+import { askCourseAgent } from "@/ui/llm/courseAgent"
+import { useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
 import { useProjectMaterialSourceBinding } from "@/ui/queries/projects"
 import { useSystemCapabilities } from "@/ui/queries/system"
 import { useInstances } from "@/ui/queries/workbench"
 import { isSyntheticFilesContainer, sortLearningObjectNodeIdsForDisplay } from "@/ui/learningObjectDisplayOrder"
-import { type AiChatConversation, type AiChatMessage, useAiChatStore } from "@/ui/store/aiChatStore"
+import { type AiChatConversation, type AiChatCourseEvidence, type AiChatMessage, useAiChatStore } from "@/ui/store/aiChatStore"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { buildSubtitleContextText, loadSubtitleDocumentForInstance } from "@/ui/subtitles/subtitleSupport"
 import { cn } from "@/ui/utils"
@@ -94,12 +98,18 @@ async function copyText(text: string) {
   throw new Error("当前环境不支持剪贴板写入")
 }
 
-function createMessage(role: AiChatMessage["role"], content: string): AiChatMessage {
+function createMessage(
+  role: AiChatMessage["role"],
+  content: string,
+  options?: { modelReliabilityIssue?: boolean; courseEvidence?: AiChatCourseEvidence[] },
+): AiChatMessage {
   return {
     id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
     role,
     content,
     createdAt: Date.now(),
+    modelReliabilityIssue: options?.modelReliabilityIssue,
+    courseEvidence: options?.courseEvidence,
   }
 }
 
@@ -139,12 +149,16 @@ function groupConversationsByTime(conversations: AiChatConversation[]): HistoryS
   return sections.filter((section) => section.items.length > 0)
 }
 
-function buildConversationPrompt(messages: AiChatMessage[], latestUserInput: string) {
+function buildConversationPrompt(
+  messages: AiChatMessage[],
+  latestUserInput: string,
+) {
   const recentBlocks: string[] = []
   let charBudget = 5_000
 
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]
+    if (message.role === "system") continue
     const block = `${message.role === "user" ? "用户" : "助手"}：\n${message.content.trim()}`
     if (!block.trim()) continue
     if (recentBlocks.length > 0 && block.length > charBudget) break
@@ -154,13 +168,11 @@ function buildConversationPrompt(messages: AiChatMessage[], latestUserInput: str
 
   const sections = recentBlocks.length > 0 ? ["以下是同一学习节点下的最近对话，请延续上下文回答最后一个用户问题。", ...recentBlocks] : []
   sections.push(`用户：\n${latestUserInput.trim()}`)
-  sections.push("请优先依据当前节点上下文回答；如果上下文不足，请明确说明当前节点还缺少哪些信息。")
   return sections.join("\n\n")
 }
 
 function buildChatSystemPrompt(contextKind: AiChatContextKind, nodeLabel: string) {
   return [
-    "你是 LearningPyramid 项目里的 AI 学习助手。",
     "请使用简体中文回答。",
     `当前问答围绕${describeAiChatContextKind(contextKind)}“${nodeLabel}”展开。`,
     "优先使用当前节点及项目上下文，不要编造项目内不存在的事实。",
@@ -174,6 +186,140 @@ function describeRecallPointTitle(recallPoint: RecallPoint | null, recallPointId
   const questionPreview = richContentToPlainText(recallPoint.question).trim()
   if (!questionPreview) return reference
   return `${reference} · ${questionPreview.length > 24 ? `${questionPreview.slice(0, 23).trimEnd()}…` : questionPreview}`
+}
+
+function normalizePreviewText(text: string, maxChars = 140) {
+  const normalized = text.replace(/\s+/g, " ").trim()
+  if (!normalized) return ""
+  if (normalized.length <= maxChars) return normalized
+  return `${normalized.slice(0, Math.max(1, maxChars - 1)).trimEnd()}…`
+}
+
+function getRecallPointQuestionPreview(recallPoint: RecallPoint, maxChars = 120) {
+  return normalizePreviewText(richContentToPlainText(recallPoint.question), maxChars)
+}
+
+function getRecallPointAnswerPreview(recallPoint: RecallPoint, maxChars = 140) {
+  return normalizePreviewText(richContentToPlainText(recallPoint.answer), maxChars)
+}
+
+function responseLooksLikeMissingContext(content: string) {
+  const normalized = content.replace(/\s+/g, "")
+  if (!normalized) return false
+  return (
+    normalized.includes("当前节点内容缺失") ||
+    normalized.includes("未提供当前节点的具体内容") ||
+    normalized.includes("未提供当前节点内容") ||
+    normalized.includes("请提供以下信息") ||
+    normalized.includes("请补充以下信息") ||
+    (normalized.includes("核心知识点") && normalized.includes("关键词列表"))
+  )
+}
+
+function extractChineseNgrams(text: string, minLen = 2, maxLen = 4) {
+  const normalized = text.replace(/\s+/g, "")
+  const grams: string[] = []
+  for (let size = minLen; size <= maxLen; size += 1) {
+    if (normalized.length < size) continue
+    for (let index = 0; index <= normalized.length - size; index += 1) {
+      grams.push(normalized.slice(index, index + size))
+    }
+  }
+  return grams
+}
+
+function extractContextKeywords(nodeLabel: string, recallPoints: RecallPoint[]) {
+  const stopwords = new Set([
+    "当前",
+    "节点",
+    "复述",
+    "内容",
+    "问题",
+    "答案",
+    "如何",
+    "什么",
+    "就是",
+    "可以",
+    "是否",
+    "还有",
+    "以及",
+    "一个",
+    "多个",
+    "发生",
+    "表示",
+    "性质",
+  ])
+  const candidates = new Map<string, number>()
+  const sourceTexts = [
+    { text: nodeLabel, weight: 6 },
+    ...recallPoints.slice(0, 8).flatMap((recallPoint) => [
+      { text: getRecallPointQuestionPreview(recallPoint, 80), weight: 3 },
+      { text: getRecallPointAnswerPreview(recallPoint, 120), weight: 2 },
+    ]),
+  ]
+
+  for (const source of sourceTexts) {
+    const chineseParts = source.text
+      .replace(/\.mp4/gi, " ")
+      .replace(/[0-9]+(?:\.[0-9]+)*/g, " ")
+      .match(/[\u4e00-\u9fff]+/g)
+    if (!chineseParts) continue
+    for (const part of chineseParts) {
+      if (part.length < 2) continue
+      const grams = part.length <= 4 ? [part] : extractChineseNgrams(part, 2, Math.min(4, part.length))
+      for (const gram of grams) {
+        const keyword = gram.trim()
+        if (keyword.length < 2 || stopwords.has(keyword)) continue
+        candidates.set(keyword, (candidates.get(keyword) ?? 0) + source.weight)
+      }
+    }
+  }
+
+  return [...candidates.entries()]
+    .sort((left, right) => right[1] - left[1] || right[0].length - left[0].length)
+    .map(([keyword]) => keyword)
+    .filter((keyword, index, items) => items.indexOf(keyword) === index)
+    .slice(0, 24)
+}
+
+function responseLooksOffTopic(content: string, params: { nodeLabel: string; recallPoints: RecallPoint[] }) {
+  const normalizedContent = content.replace(/\s+/g, "")
+  if (!normalizedContent) return false
+
+  const labelKeywords = extractContextKeywords(params.nodeLabel, [])
+  const contextKeywords = extractContextKeywords(params.nodeLabel, params.recallPoints)
+  if (contextKeywords.length === 0) return false
+
+  const labelMatches = labelKeywords.filter((keyword) => normalizedContent.includes(keyword)).length
+  const contextMatches = contextKeywords.filter((keyword) => normalizedContent.includes(keyword)).length
+
+  return labelMatches === 0 && contextMatches < 2
+}
+
+function buildModelReliabilityGateMessage() {
+  return "系统提示：已检测到当前模型连续两次未能可靠遵循当前节点内容，当前模型可能不适合这个任务。建议更换模型后再试。"
+}
+
+function countTrailingModelReliabilityIssues(messages: AiChatMessage[]) {
+  let count = 0
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (message.role !== "assistant") continue
+    if (!message.modelReliabilityIssue) break
+    count += 1
+  }
+  return count
+}
+
+function formatEvidenceTimestamp(ms: number) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000))
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+  }
+  return `${minutes}:${String(seconds).padStart(2, "0")}`
 }
 
 function parseAnchorPositionMs(position: string | null | undefined) {
@@ -629,51 +775,10 @@ function SidebarManagementBar(props: {
   )
 }
 
-function RecallPointContextSection(props: {
-  recallPoint: RecallPoint | null
-  recallPointId: string | null
-  embedded?: boolean
-}) {
-  const { recallPoint, recallPointId, embedded } = props
-  const questionPreview = recallPoint ? richContentToPlainText(recallPoint.question).trim() : ""
-
-  return (
-    <section
-      className={cn(
-        embedded ? "" : "rounded-[1.5rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] p-4 shadow-[var(--theme-soft-shadow)]",
-      )}
-    >
-      <div className="mb-3 flex items-center gap-2">
-        <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-[color:var(--theme-soft-bg)] text-primary">
-          <Sparkles className="h-4 w-4" />
-        </div>
-        <div>
-          <div className="text-sm font-semibold text-foreground">复述点上下文</div>
-        </div>
-      </div>
-
-      <div className="space-y-3 rounded-[1.2rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-4 py-4">
-        <div>
-          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">当前复述点</div>
-          <div className="mt-1 text-sm font-semibold text-foreground">{describeRecallPointTitle(recallPoint, recallPointId)}</div>
-        </div>
-        <div>
-          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">关联材料</div>
-          <div className="mt-1 text-sm text-foreground">
-            {recallPoint ? formatInstanceReference(recallPoint.anchor.instanceId, undefined, "材料实例待确认") : "正在加载..."}
-          </div>
-        </div>
-        {questionPreview ? <p className="text-sm leading-6 text-muted-foreground">{questionPreview}</p> : null}
-      </div>
-    </section>
-  )
-}
-
 function SidebarPanel(props: {
   activeKind: AiChatContextKind
   activeTree: SidebarTreeData | null
   activeNodeId: string | null
-  activeRecallPoint: RecallPoint | null
   expandedNodeIds: string[]
   isStreaming: boolean
   conversations: AiChatConversation[]
@@ -694,7 +799,6 @@ function SidebarPanel(props: {
     activeKind,
     activeTree,
     activeNodeId,
-    activeRecallPoint,
     expandedNodeIds,
     isStreaming,
     conversations,
@@ -724,12 +828,10 @@ function SidebarPanel(props: {
       </div>
 
       <div className="border-t border-[color:var(--theme-soft-border)] px-4 py-4">
-        {activeKind === "recall" ? (
-          <RecallPointContextSection recallPoint={activeRecallPoint} recallPointId={activeNodeId} embedded />
-        ) : activeTree ? (
+        {activeTree ? (
           <SidebarTreeSection
             title={activeKind === "task" ? "学习任务节点" : "学习对象节点"}
-            icon={activeKind}
+            icon={activeKind === "task" ? "task" : "object"}
             tree={activeTree}
             selectedNodeId={activeNodeId}
             expandedNodeIds={expandedNodeIds}
@@ -765,13 +867,25 @@ function ChatMessageRow(props: {
   showActions?: boolean
   onCopy?: (content: string) => void
   onRegenerate?: () => void
+  onJumpEvidence?: (evidence: AiChatCourseEvidence) => void
 }) {
-  const { message, pendingAssistant, showActions, onCopy, onRegenerate } = props
+  const { message, pendingAssistant, showActions, onCopy, onRegenerate, onJumpEvidence } = props
 
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
         <div className="max-w-[min(100%,46rem)] rounded-[1.75rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-5 py-4 text-[15px] leading-7 text-foreground shadow-[var(--theme-soft-shadow)]">
+          <div className="whitespace-pre-wrap break-words">{message.content}</div>
+        </div>
+      </div>
+    )
+  }
+
+  if (message.role === "system") {
+    return (
+      <div className="flex justify-center">
+        <div className="max-w-[min(100%,46rem)] rounded-[1.5rem] border border-amber-200 bg-amber-50 px-5 py-4 text-[14px] leading-7 text-amber-900 shadow-[var(--theme-soft-shadow)]">
+          <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-700">系统提示</div>
           <div className="whitespace-pre-wrap break-words">{message.content}</div>
         </div>
       </div>
@@ -785,6 +899,32 @@ function ChatMessageRow(props: {
       </div>
       <div className="min-w-0 flex-1 pt-1">
         <ChatRichText text={message.content} pendingAssistant={pendingAssistant} />
+        {message.courseEvidence && message.courseEvidence.length > 0 ? (
+          <div className="mt-4 space-y-2">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">依据片段</div>
+            <div className="grid gap-2">
+              {message.courseEvidence.map((evidence, index) => (
+                <button
+                  key={`${evidence.kind}:${evidence.instanceId}:${evidence.startMs}:${evidence.endMs}:${index}`}
+                  type="button"
+                  className="rounded-[1.1rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-4 py-3 text-left transition hover:border-primary/25 hover:bg-[hsl(var(--primary)/0.08)]"
+                  onClick={() => onJumpEvidence?.(evidence)}
+                  disabled={!onJumpEvidence}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0 text-sm font-medium text-foreground">{evidence.title}</div>
+                    <div className="shrink-0 text-xs text-[color:var(--theme-subtle-text)]">
+                      {evidence.startMs === evidence.endMs
+                        ? formatEvidenceTimestamp(evidence.startMs)
+                        : `${formatEvidenceTimestamp(evidence.startMs)}-${formatEvidenceTimestamp(evidence.endMs)}`}
+                    </div>
+                  </div>
+                  {evidence.preview ? <div className="mt-1 break-words text-sm leading-6 text-muted-foreground">{evidence.preview}</div> : null}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
         {showActions && message.content.trim() ? (
           <div className="mt-3 flex flex-wrap items-center gap-2">
             {onCopy ? (
@@ -841,6 +981,7 @@ export function AiChatPage() {
 
   const capabilitiesQ = useSystemCapabilities()
   const materialSourceBindingQ = useProjectMaterialSourceBinding(pid)
+  const directoryBinding = useProjectDirectoryBinding(pid)
   const instancesQ = useInstances(pid)
   const taskNodesQ = useQuery({
     queryKey: ["learningTaskNodes", pid],
@@ -881,12 +1022,30 @@ export function AiChatPage() {
     enabled: !!pid && activeKind === "recall" && !!activeNodeId,
   })
   const activeRecallPoint = activeKind === "recall" ? selectedRecallPointQ.data ?? (selectedConversation ? null : recallPointQ.data ?? null) : null
+  const activeTaskRecallPointsQ = useQuery({
+    queryKey: ["aiChatTaskRecallPoints", pid, activeNodeId],
+    queryFn: () => listRecallPointsByLearningTaskNode(pid, activeNodeId ?? ""),
+    enabled: !!pid && activeKind === "task" && !!activeNodeId,
+  })
+  const activeObjectRecallPointsQ = useQuery({
+    queryKey: ["aiChatObjectRecallPoints", pid, activeNodeId],
+    queryFn: () => listRecallPointsByLearningObjectNode(pid, activeNodeId ?? ""),
+    enabled: !!pid && activeKind === "object" && !!activeNodeId,
+  })
   const activeNodeLabel =
     activeKind === "task"
       ? getNodeLabel(taskTree, activeNodeId)
       : activeKind === "object"
         ? getNodeLabel(objectTree, activeNodeId)
         : describeRecallPointTitle(activeRecallPoint, activeNodeId)
+  const activeNodeRecallPoints =
+    activeKind === "recall"
+      ? activeRecallPoint
+        ? [activeRecallPoint]
+        : []
+      : activeKind === "task"
+        ? activeTaskRecallPointsQ.data ?? []
+        : activeObjectRecallPointsQ.data ?? []
   const llmConfigured = capabilitiesQ.data?.llmConfigured ?? false
   const interactionDisabled = !pid || !activeNodeId || !llmConfigured
   const persistedMessages = selectedConversation?.messages ?? []
@@ -954,9 +1113,14 @@ export function AiChatPage() {
     return persistedMessages
   }, [pendingUserMessage, persistedMessages, replaceBaseMessages, streamingAssistantMessage, streamingMode])
 
-  async function loadActiveSubtitleSupplementalContext(): Promise<string | null> {
-    const sourceKind = materialSourceBindingQ.data?.sourceKind
-    if (!pid || !activeNodeId || !sourceKind) return null
+  function resolveActiveCourseAgentContext():
+    | {
+        instance: Instance
+        anchorMs: number | null
+        sourceKind: MaterialSourceKind
+      }
+    | null {
+    if (!pid || !activeNodeId) return null
 
     let instanceId: string | null = null
     let anchorMs: number | null = null
@@ -966,7 +1130,7 @@ export function AiChatPage() {
       if (!activeObjectNode || activeObjectNode.kind !== "leaf") return null
       instanceId = activeObjectNode.instanceId
     } else if (activeKind === "recall") {
-      if (!activeRecallPoint) return null
+      if (!activeRecallPoint?.anchor) return null
       instanceId = activeRecallPoint.anchor.instanceId
       anchorMs = parseAnchorPositionMs(activeRecallPoint.anchor.position)
     } else {
@@ -976,28 +1140,155 @@ export function AiChatPage() {
     if (!instanceId) return null
     const instance = instanceById.get(instanceId)
     if (!instance) return null
+    const sourceKind = instance.mediaSourceKind ?? materialSourceBindingQ.data?.sourceKind
+    if (!sourceKind) return null
+
+    return {
+      instance,
+      anchorMs,
+      sourceKind,
+    }
+  }
+
+  async function loadActiveSubtitleSupplementalContext(): Promise<string | null> {
+    const courseContext = resolveActiveCourseAgentContext()
+    if (!courseContext) return null
 
     try {
       const document = await loadSubtitleDocumentForInstance({
         projectId: pid,
-        instance,
-        sourceKind,
+        instance: courseContext.instance,
+        sourceKind: courseContext.sourceKind,
       })
       if (!document) return null
       return buildSubtitleContextText({
         nodeLabel: activeNodeLabel,
         fileName: document.fileName,
         segments: document.segments,
-        anchorMs,
+        anchorMs: courseContext.anchorMs,
       })
     } catch {
       return null
     }
   }
 
+  async function loadActiveSupplementalContext(): Promise<string | null> {
+    return await loadActiveSubtitleSupplementalContext()
+  }
+
+  async function requestChatCompletionWithContext(params: {
+    baseMessages: AiChatMessage[]
+    latestUserInput: string
+    controller: AbortController
+    systemPrompt: string
+    supplementalContext?: string | null
+    assistantDraft: AiChatMessage
+  }): Promise<{ content: string; modelReliabilityIssue: boolean; courseEvidence?: AiChatCourseEvidence[] }> {
+    const { baseMessages, latestUserInput, controller, systemPrompt, supplementalContext, assistantDraft } = params
+
+    streamingContentRef.current = ""
+    setStreamingAssistantMessage((current) => (current ? { ...current, content: "" } : { ...assistantDraft, content: "" }))
+
+    const courseContext = resolveActiveCourseAgentContext()
+    if (courseContext) {
+      try {
+        const result = await askCourseAgent({
+          projectId: pid,
+          instance: courseContext.instance,
+          sourceKind: courseContext.sourceKind,
+          nodeLabel: activeNodeLabel,
+          userPrompt: latestUserInput,
+          systemPrompt,
+          anchorMs: courseContext.anchorMs,
+          canCaptureVideoFrame:
+            courseContext.sourceKind !== "BAIDU_NETDISK" &&
+            (capabilitiesQ.data?.serverMediaStreamEnabled === true ||
+              (courseContext.sourceKind === "BROWSER_LOCAL" && directoryBinding.permission === "granted")),
+          historyMessages: baseMessages
+            .filter((message): message is AiChatMessage & { role: "user" | "assistant" } => message.role === "user" || message.role === "assistant")
+            .map((message) => ({
+              role: message.role,
+              content: message.content,
+            })),
+          temperature: 0.2,
+          signal: controller.signal,
+          timeoutMs: 90_000,
+          onStatus: (status) => {
+            setStreamingAssistantMessage((current) => (current ? { ...current, content: status } : { ...assistantDraft, content: status }))
+          },
+        })
+
+        streamingContentRef.current = result.content
+        setStreamingAssistantMessage((current) => (current ? { ...current, content: result.content } : { ...assistantDraft, content: result.content }))
+
+        const hasNodeContentContext = activeNodeRecallPoints.some((item) => item.state === "ACTIVE")
+        const missingContext = hasNodeContentContext ? responseLooksLikeMissingContext(result.content) : false
+        const offTopic = hasNodeContentContext
+          ? responseLooksOffTopic(result.content, {
+              nodeLabel: activeNodeLabel,
+              recallPoints: activeNodeRecallPoints,
+            })
+          : false
+
+        return {
+          content: result.content,
+          modelReliabilityIssue: missingContext || offTopic,
+          courseEvidence: result.evidence,
+        }
+      } catch (error) {
+        if (controller.signal.aborted) throw error
+      }
+    }
+
+    const resolvedSupplementalContext = supplementalContext === undefined ? await loadActiveSupplementalContext() : supplementalContext
+    const result = await askProjectLlmStream(
+      pid,
+      {
+        prompt: buildConversationPrompt(baseMessages, latestUserInput),
+        systemPrompt,
+        supplementalContext: resolvedSupplementalContext ?? undefined,
+        recallPointId: activeKind === "recall" ? (activeNodeId ?? undefined) : undefined,
+        learningTaskNodeId: activeKind === "task" ? (activeNodeId ?? undefined) : undefined,
+        learningObjectNodeId: activeKind === "object" ? (activeNodeId ?? undefined) : undefined,
+        temperature: 0.2,
+      },
+      {
+        timeoutMs: 90_000,
+        signal: controller.signal,
+        onDelta: (_chunk, accumulated) => {
+          streamingContentRef.current = accumulated
+          setStreamingAssistantMessage((current) => (current ? { ...current, content: accumulated } : { ...assistantDraft, content: accumulated }))
+        },
+      },
+    )
+
+    const hasNodeContentContext = activeNodeRecallPoints.some((item) => item.state === "ACTIVE")
+    const missingContext = hasNodeContentContext ? responseLooksLikeMissingContext(result.content) : false
+    const offTopic = hasNodeContentContext
+      ? responseLooksOffTopic(result.content, {
+          nodeLabel: activeNodeLabel,
+          recallPoints: activeNodeRecallPoints,
+        })
+      : false
+
+    return {
+      content: result.content,
+      modelReliabilityIssue: missingContext || offTopic,
+      courseEvidence: [],
+    }
+  }
+
   function navigateToContext(params: { kind: AiChatContextKind; nodeId: string; conversationId?: string | null }) {
     if (!pid) return
     navigate(buildAiChatPath(pid, params))
+  }
+
+  function handleJumpToEvidence(evidence: AiChatCourseEvidence) {
+    if (!pid) return
+    const search = new URLSearchParams()
+    search.set("instanceId", evidence.instanceId)
+    search.set("position", `t=${Math.max(0, Math.floor((evidence.startMs + evidence.endMs) / 2))}`)
+    navigate(`/p/${pid}/workbench?${search.toString()}`)
   }
 
   function resetStreamingState() {
@@ -1038,22 +1329,28 @@ export function AiChatPage() {
     navigateToContext({ kind: activeKind, nodeId: activeNodeId })
   }
 
-  function persistConversationTurn(userMessage: AiChatMessage, assistantMessage: AiChatMessage) {
+  function persistConversationTurn(userMessage: AiChatMessage, followUpMessages: AiChatMessage[]) {
     if (selectedConversation) {
-      appendMessages(selectedConversation.id, [userMessage, assistantMessage])
+      appendMessages(selectedConversation.id, [userMessage, ...followUpMessages])
       return
     }
     const createdConversationId = createConversation({
       projectId: pid,
       contextKind: activeKind,
       nodeId: activeNodeId ?? "",
-      messages: [userMessage, assistantMessage],
+      messages: [userMessage, ...followUpMessages],
     })
     navigateToContext({
       kind: activeKind,
       nodeId: activeNodeId ?? "",
       conversationId: createdConversationId,
     })
+  }
+
+  function shouldTriggerModelReliabilityGate(messagesBeforeCurrentTurn: AiChatMessage[], currentTurnHasReliabilityIssue: boolean) {
+    if (!currentTurnHasReliabilityIssue) return false
+    const previousIssueCount = countTrailingModelReliabilityIssues(messagesBeforeCurrentTurn)
+    return previousIssueCount < 2 && previousIssueCount + 1 >= 2
   }
 
   function toggleNodeExpanded(nodeId: string) {
@@ -1141,40 +1438,32 @@ export function AiChatPage() {
     streamingContentRef.current = ""
 
     try {
-      const supplementalContext = await loadActiveSubtitleSupplementalContext()
-      const result = await askProjectLlmStream(
-        pid,
-        {
-          prompt: buildConversationPrompt(persistedMessages, trimmed),
-          systemPrompt: buildChatSystemPrompt(activeKind, activeNodeLabel),
-          supplementalContext: supplementalContext ?? undefined,
-          recallPointId: activeKind === "recall" ? activeNodeId : undefined,
-          learningTaskNodeId: activeKind === "task" ? activeNodeId : undefined,
-          learningObjectNodeId: activeKind === "object" ? activeNodeId : undefined,
-          temperature: 0.3,
-        },
-        {
-          timeoutMs: 90_000,
-          signal: controller.signal,
-          onDelta: (_chunk, accumulated) => {
-            streamingContentRef.current = accumulated
-            setStreamingAssistantMessage((current) => (current ? { ...current, content: accumulated } : { ...assistantDraft, content: accumulated }))
-          },
-        },
-      )
-      const finalAssistantMessage = {
-        ...assistantDraft,
-        content: result.content,
+      const result = await requestChatCompletionWithContext({
+        baseMessages: persistedMessages,
+        latestUserInput: trimmed,
+        controller,
+        systemPrompt: buildChatSystemPrompt(activeKind, activeNodeLabel),
+        assistantDraft,
+      })
+      const finalAssistantMessage = createMessage("assistant", result.content, {
+        modelReliabilityIssue: result.modelReliabilityIssue,
+        courseEvidence: result.courseEvidence,
+      })
+      const followUpMessages: AiChatMessage[] = [finalAssistantMessage]
+      if (shouldTriggerModelReliabilityGate(persistedMessages, result.modelReliabilityIssue)) {
+        followUpMessages.push(createMessage("system", buildModelReliabilityGateMessage()))
       }
-      persistConversationTurn(userMessage, finalAssistantMessage)
+      persistConversationTurn(userMessage, followUpMessages)
     } catch (err) {
       const partialContent = streamingContentRef.current
       if (controller.signal.aborted) {
         if (partialContent.trim()) {
-          persistConversationTurn(userMessage, {
-            ...assistantDraft,
-            content: partialContent,
-          })
+          persistConversationTurn(userMessage, [
+            {
+              ...assistantDraft,
+              content: partialContent,
+            },
+          ])
         } else {
           setComposerValue(trimmed)
         }
@@ -1212,28 +1501,24 @@ export function AiChatPage() {
     streamingContentRef.current = ""
 
     try {
-      const supplementalContext = await loadActiveSubtitleSupplementalContext()
-      const result = await askProjectLlmStream(
-        pid,
-        {
-          prompt: buildConversationPrompt(messagesBeforeLatestTurn, latestUserMessage.content),
-          systemPrompt: buildChatSystemPrompt(activeKind, activeNodeLabel),
-          supplementalContext: supplementalContext ?? undefined,
-          recallPointId: activeKind === "recall" ? activeNodeId : undefined,
-          learningTaskNodeId: activeKind === "task" ? activeNodeId : undefined,
-          learningObjectNodeId: activeKind === "object" ? activeNodeId : undefined,
-          temperature: 0.3,
-        },
-        {
-          timeoutMs: 90_000,
-          signal: controller.signal,
-          onDelta: (_chunk, accumulated) => {
-            streamingContentRef.current = accumulated
-            setStreamingAssistantMessage((current) => (current ? { ...current, content: accumulated } : { ...assistantDraft, content: accumulated }))
-          },
-        },
-      )
-      replaceMessages(selectedConversation.id, [...baseMessagesForReplace, { ...assistantDraft, content: result.content }])
+      const result = await requestChatCompletionWithContext({
+        baseMessages: messagesBeforeLatestTurn,
+        latestUserInput: latestUserMessage.content,
+        controller,
+        systemPrompt: buildChatSystemPrompt(activeKind, activeNodeLabel),
+        assistantDraft,
+      })
+      const replacementMessages: AiChatMessage[] = [
+        ...baseMessagesForReplace,
+        createMessage("assistant", result.content, {
+          modelReliabilityIssue: result.modelReliabilityIssue,
+          courseEvidence: result.courseEvidence,
+        }),
+      ]
+      if (shouldTriggerModelReliabilityGate(messagesBeforeLatestTurn, result.modelReliabilityIssue)) {
+        replacementMessages.push(createMessage("system", buildModelReliabilityGateMessage()))
+      }
+      replaceMessages(selectedConversation.id, replacementMessages)
     } catch (err) {
       const partialContent = streamingContentRef.current
       if (controller.signal.aborted) {
@@ -1279,7 +1564,6 @@ export function AiChatPage() {
               activeKind={activeKind}
               activeTree={activeTree}
               activeNodeId={activeNodeId}
-              activeRecallPoint={activeRecallPoint}
               expandedNodeIds={expandedNodeIds}
               isStreaming={isStreaming}
               conversations={projectConversations}
@@ -1320,7 +1604,6 @@ export function AiChatPage() {
                 activeKind={activeKind}
                 activeTree={activeTree}
                 activeNodeId={activeNodeId}
-                activeRecallPoint={activeRecallPoint}
                 expandedNodeIds={expandedNodeIds}
                 isStreaming={isStreaming}
                 conversations={projectConversations}
@@ -1377,7 +1660,6 @@ export function AiChatPage() {
             {capabilitiesQ.error && !capabilitiesQ.data ? <ErrorNotice title="AI 能力状态加载失败" message={formatApiError(capabilitiesQ.error)} /> : null}
             {taskNodesQ.error && activeKind === "task" ? <ErrorNotice title="任务节点目录加载失败" message={formatApiError(taskNodesQ.error)} /> : null}
             {objectNodesQ.error && activeKind === "object" ? <ErrorNotice title="对象节点目录加载失败" message={formatApiError(objectNodesQ.error)} /> : null}
-            {selectedRecallPointQ.error && activeKind === "recall" ? <ErrorNotice title="复述点上下文加载失败" message={formatApiError(selectedRecallPointQ.error)} /> : null}
 
             {!llmConfigured && !capabilitiesQ.isLoading ? (
               <ContentNotice
@@ -1433,6 +1715,7 @@ export function AiChatPage() {
                       message={message}
                       pendingAssistant={isStreaming && isLatestAssistant}
                       showActions={isLatestAssistant && !isStreaming}
+                      onJumpEvidence={message.courseEvidence && message.courseEvidence.length > 0 ? handleJumpToEvidence : undefined}
                       onCopy={isLatestAssistant ? (content) => void handleCopyResponse(content) : undefined}
                       onRegenerate={isLatestAssistant && canRegenerate ? () => void handleRegenerateLastAnswer() : undefined}
                     />

@@ -10,6 +10,7 @@ from backend.models.asr_artifact import AsrArtifact, AsrSegment
 from backend.models.audit_log_event import AuditLogEvent
 from backend.models.convergence import Convergence
 from backend.models.entry_registration import EntryRegistration
+from backend.models.global_settings import GlobalLlmSettings
 from backend.models.enums import (
     AggregationCycleState,
     AggregationEventReason,
@@ -25,12 +26,14 @@ from backend.models.enums import (
     MaterialSourceKind,
     MediaAssetKind,
     ProjectState,
+    ProjectType,
     RecallPointState,
     RecallPointReviewResult,
     ReviewChainTemplateItemKind,
     ReviewChainState,
     ReviewTaskState,
 )
+from backend.models.instance_media_binding import InstanceMediaBinding
 from backend.models.instance import Instance
 from backend.models.layer import Layer
 from backend.models.learning_object_node import LearningObjectContainer, LearningObjectLeaf, LearningObjectNode
@@ -167,6 +170,7 @@ def _encode_layer_config(c: LayerConfig) -> dict[str, Any]:
         "reviewChainTemplate": [_encode_review_chain_template_item(it) for it in c.review_chain_template],
         "aggregationKNode": int(c.aggregation_k_node),
         "aggregationKPoint": int(c.aggregation_k_point),
+        "thresholdRollUpEnabled": bool(c.threshold_roll_up_enabled),
     }
 
 
@@ -177,10 +181,16 @@ def _decode_layer_config(d: dict[str, Any]) -> LayerConfig:
         tmpl = base.review_chain_template
     else:
         tmpl = tuple(_decode_review_chain_template_item(dict(it)) for it in list(raw_template))
+    raw_threshold_roll_up_enabled = d.get("thresholdRollUpEnabled", base.threshold_roll_up_enabled)
     return LayerConfig(
         review_chain_template=tmpl,
         aggregation_k_node=int(d.get("aggregationKNode", base.aggregation_k_node)),
         aggregation_k_point=int(d.get("aggregationKPoint", base.aggregation_k_point)),
+        threshold_roll_up_enabled=(
+            raw_threshold_roll_up_enabled
+            if isinstance(raw_threshold_roll_up_enabled, bool)
+            else base.threshold_roll_up_enabled
+        ),
     )
 
 
@@ -188,6 +198,8 @@ def _encode_push_config(c: RecallPointPushConfig) -> dict[str, Any]:
     return {
         "minRecallPointsToEnable": int(c.min_recall_points_to_enable),
         "maxHistoryLen": int(c.max_history_len),
+        "recommendedBatchSize": int(c.recommended_batch_size),
+        "forgettingCurveDecayPerDay": float(c.forgetting_curve_decay_per_day),
     }
 
 
@@ -198,12 +210,17 @@ def _decode_push_config(d: dict[str, Any]) -> RecallPointPushConfig:
     return RecallPointPushConfig(
         min_recall_points_to_enable=int(d.get("minRecallPointsToEnable", default.min_recall_points_to_enable)),
         max_history_len=int(d.get("maxHistoryLen", default.max_history_len)),
+        recommended_batch_size=int(d.get("recommendedBatchSize", default.recommended_batch_size)),
+        forgetting_curve_decay_per_day=float(
+            d.get("forgettingCurveDecayPerDay", default.forgetting_curve_decay_per_day)
+        ),
     )
 
 
 def _encode_project_config(c: ProjectConfig) -> dict[str, Any]:
     return {
         "projectId": str(c.project_id),
+        "projectType": c.project_type.value,
         "layerConfigs": {str(int(k)): _encode_layer_config(v) for k, v in c.layer_configs.items()},
         "pushConfig": _encode_push_config(c.push_config),
         "updatedAtMs": _ts_to_ms(c.updated_at),
@@ -217,6 +234,7 @@ def _decode_project_config(d: dict[str, Any]) -> ProjectConfig:
         layer_cfgs[int(k)] = _decode_layer_config(dict(v))
     return ProjectConfig(
         project_id=ProjectId(d["projectId"]),
+        project_type=ProjectType(str(d.get("projectType") or ProjectType.COURSE.value)),
         layer_configs=layer_cfgs,
         push_config=_decode_push_config(dict(d.get("pushConfig", {}))),
         updated_at=_ms_to_ts(int(d["updatedAtMs"])),
@@ -229,6 +247,36 @@ def encode_project_config_payload(config: ProjectConfig) -> dict[str, Any]:
 
 def decode_project_config_payload(payload: dict[str, Any]) -> ProjectConfig:
     return _decode_project_config(dict(payload))
+
+
+def _encode_global_llm_settings(settings: GlobalLlmSettings) -> dict[str, Any]:
+    return {
+        "baseUrl": settings.base_url,
+        "modelName": settings.model_name,
+        "apiKey": settings.api_key,
+        "promptAssemblyMode": settings.prompt_assembly_mode,
+        "updatedAtMs": _ts_to_ms(settings.updated_at),
+    }
+
+
+def _decode_global_llm_settings(d: dict[str, Any]) -> GlobalLlmSettings:
+    settings = GlobalLlmSettings(
+        base_url=str(d["baseUrl"]),
+        model_name=str(d["modelName"]),
+        api_key=None if d.get("apiKey") is None else str(d.get("apiKey")),
+        prompt_assembly_mode=str(d.get("promptAssemblyMode") or "system"),
+        updated_at=_ms_to_ts(int(d["updatedAtMs"])),
+    )
+    settings.validate_write_time()
+    return settings
+
+
+def encode_global_llm_settings_payload(settings: GlobalLlmSettings) -> dict[str, Any]:
+    return _encode_global_llm_settings(settings)
+
+
+def decode_global_llm_settings_payload(payload: dict[str, Any]) -> GlobalLlmSettings:
+    return _decode_global_llm_settings(dict(payload))
 
 
 def _encode_instance(i: Instance) -> dict[str, Any]:
@@ -248,6 +296,40 @@ def _decode_instance(d: dict[str, Any]) -> Instance:
         material_id=PurePosixPath(d["materialId"]),
         presence=InstancePresence(str(d.get("presence") or "PRESENT")),
         last_seen_at=None if d.get("lastSeenAtMs") is None else _ms_to_ts(int(d["lastSeenAtMs"])),
+    )
+
+
+def _encode_instance_media_binding(binding: InstanceMediaBinding) -> dict[str, Any]:
+    return {
+        "projectId": str(binding.project_id),
+        "instanceId": str(binding.instance_id),
+        "sourceKind": binding.source_kind.value,
+        "playbackKind": binding.playback_kind,
+        "accountId": binding.account_id,
+        "remoteFileId": binding.remote_file_id,
+        "remotePath": binding.remote_path,
+        "mimeType": binding.mime_type,
+        "sizeBytes": binding.size_bytes,
+        "durationMs": binding.duration_ms,
+        "sourcePayload": dict(binding.source_payload),
+        "updatedAtMs": _ts_to_ms(binding.updated_at),
+    }
+
+
+def _decode_instance_media_binding(d: dict[str, Any]) -> InstanceMediaBinding:
+    return InstanceMediaBinding.create(
+        ProjectId(d["projectId"]),
+        InstanceId(d["instanceId"]),
+        source_kind=MaterialSourceKind(str(d.get("sourceKind") or MaterialSourceKind.SERVER_FS.value)),
+        playback_kind=str(d.get("playbackKind") or "FILE"),
+        account_id=None if d.get("accountId") is None else str(d.get("accountId")),
+        remote_file_id=None if d.get("remoteFileId") is None else str(d.get("remoteFileId")),
+        remote_path=None if d.get("remotePath") is None else str(d.get("remotePath")),
+        mime_type=None if d.get("mimeType") is None else str(d.get("mimeType")),
+        size_bytes=None if d.get("sizeBytes") is None else int(d.get("sizeBytes")),
+        duration_ms=None if d.get("durationMs") is None else int(d.get("durationMs")),
+        source_payload=dict(d.get("sourcePayload", {})),
+        updated_at=_ms_to_ts(int(d["updatedAtMs"])),
     )
 
 
@@ -427,11 +509,15 @@ def _decode_learning_object_node(d: dict[str, Any]) -> LearningObjectNode:
     raise ValueError(f"Unknown LearningObjectNode kind: {kind}")
 
 
-def _encode_anchor(a: Anchor) -> dict[str, Any]:
+def _encode_anchor(a: Anchor | None) -> dict[str, Any] | None:
+    if a is None:
+        return None
     return {"instanceId": str(a.instance_id), "position": a.position}
 
 
-def _decode_anchor(d: dict[str, Any]) -> Anchor:
+def _decode_anchor(d: dict[str, Any] | None) -> Anchor | None:
+    if d is None:
+        return None
     return Anchor(instance_id=InstanceId(d["instanceId"]), position=d["position"])
 
 
@@ -497,7 +583,7 @@ def _decode_recall_point(d: dict[str, Any]) -> RecallPoint:
         created_at=_ms_to_ts(int(d.get("createdAtMs", 0))),
         question=question,
         answer=answer,
-        anchor=_decode_anchor(d["anchor"]),
+        anchor=_decode_anchor(None if d.get("anchor") is None else dict(d["anchor"])),
         insights=tuple(_decode_rich_content(x) for x in d.get("insights", [])),
         state=RecallPointState(str(d.get("state", RecallPointState.ACTIVE.value))),
         deleted_at=None if d.get("deletedAtMs") is None else _ms_to_ts(int(d["deletedAtMs"])),
@@ -877,6 +963,9 @@ def encode_project_payload(project_store: Any) -> dict[str, Any]:
             k: _encode_audit_log_event(v) for k, v in getattr(project_store, "audit_log_events", {}).items()
         },
         "instances": {k: _encode_instance(v) for k, v in getattr(project_store, "instances", {}).items()},
+        "instanceMediaBindings": {
+            k: _encode_instance_media_binding(v) for k, v in getattr(project_store, "instance_media_bindings", {}).items()
+        },
         "learningObjectNodes": {
             k: _encode_learning_object_node(v) for k, v in getattr(project_store, "learning_object_nodes", {}).items()
         },
@@ -932,6 +1021,9 @@ def decode_project_payload(project_id: str, raw: dict[str, Any]) -> dict[str, An
         else _decode_material_allowlist(dict(d["materialAllowlist"])),
         "audit_log_events": {k: _decode_audit_log_event(v) for k, v in dict(d.get("auditLogEvents", {})).items()},
         "instances": {k: _decode_instance(v) for k, v in dict(d.get("instances", {})).items()},
+        "instance_media_bindings": {
+            k: _decode_instance_media_binding(v) for k, v in dict(d.get("instanceMediaBindings", {})).items()
+        },
         "learning_object_nodes": {
             k: _decode_learning_object_node(v) for k, v in dict(d.get("learningObjectNodes", {})).items()
         },
@@ -972,8 +1064,18 @@ def decode_project_payload(project_id: str, raw: dict[str, Any]) -> dict[str, An
     }
 
 
-def encode_snapshot(*, projects: Dict[str, Any], idgen_counters: Dict[str, int]) -> dict[str, Any]:
-    out: dict[str, Any] = {"schemaVersion": SCHEMA_VERSION, "idgenCounters": dict(idgen_counters), "projects": {}}
+def encode_snapshot(
+    *,
+    projects: Dict[str, Any],
+    idgen_counters: Dict[str, int],
+    global_llm_settings: GlobalLlmSettings | None = None,
+) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "schemaVersion": SCHEMA_VERSION,
+        "idgenCounters": dict(idgen_counters),
+        "globalLlmSettings": None if global_llm_settings is None else _encode_global_llm_settings(global_llm_settings),
+        "projects": {},
+    }
     for pid, ps in projects.items():
         if getattr(ps, "project", None) is None:
             continue
@@ -981,14 +1083,20 @@ def encode_snapshot(*, projects: Dict[str, Any], idgen_counters: Dict[str, int])
     return out
 
 
-def decode_snapshot(data: dict[str, Any]) -> Tuple[Dict[str, dict[str, Any]], Dict[str, int]]:
+def decode_snapshot(
+    data: dict[str, Any],
+) -> Tuple[Dict[str, dict[str, Any]], Dict[str, int], GlobalLlmSettings | None]:
     if int(data.get("schemaVersion", 0)) != SCHEMA_VERSION:
         raise ValueError(f"Unsupported schemaVersion: {data.get('schemaVersion')}")
     idgen_counters = {str(k): int(v) for k, v in dict(data.get("idgenCounters", {})).items()}
+    global_llm_settings = None
+    raw_global_llm_settings = data.get("globalLlmSettings")
+    if isinstance(raw_global_llm_settings, dict):
+        global_llm_settings = _decode_global_llm_settings(dict(raw_global_llm_settings))
 
     projects_out: Dict[str, dict[str, Any]] = {}
     projects = dict(data.get("projects", {}))
     for pid, raw in projects.items():
         projects_out[str(pid)] = decode_project_payload(str(pid), dict(raw))
 
-    return projects_out, idgen_counters
+    return projects_out, idgen_counters, global_llm_settings

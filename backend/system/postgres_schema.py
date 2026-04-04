@@ -12,10 +12,12 @@ MigrationTarget = Literal["store", "auth", "all"]
 
 STORE_TABLE_ORDER: tuple[str, ...] = (
     "system_state",
+    "global_settings_index",
     "project_snapshots",
     "project_storage_config_index",
     "project_config_index",
     "instance_index",
+    "instance_media_binding_index",
     "learning_object_node_index",
     "recall_point_index",
     "learning_task_index",
@@ -40,14 +42,13 @@ STORE_TABLE_ORDER: tuple[str, ...] = (
 AUTH_TABLE_ORDER: tuple[str, ...] = (
     "users",
     "user_profiles",
+    "user_service_configs",
+    "user_cloud_accounts",
     "user_global_roles",
     "sessions",
     "project_memberships",
-    "study_groups",
-    "study_group_members",
-    "study_group_posts",
-    "study_group_post_comments",
-    "study_group_join_requests",
+    "friend_requests",
+    "friendships",
     "admin_action_logs",
 )
 
@@ -314,6 +315,46 @@ def _store_entry_registration_seq_sql() -> str:
     )
 
 
+def _store_global_settings_sql() -> str:
+    return "\n".join(
+        (
+            "-- Add global settings table for deployment-wide runtime settings",
+            "CREATE TABLE IF NOT EXISTS global_settings_index (",
+            "    settings_key TEXT PRIMARY KEY,",
+            "    payload_json TEXT NOT NULL,",
+            "    updated_at TEXT NOT NULL",
+            ");",
+        )
+    )
+
+
+def _store_instance_media_binding_index_sql() -> str:
+    return "\n".join(
+        (
+            "-- Add instance-level media binding index for mixed media sources",
+            "CREATE TABLE IF NOT EXISTS instance_media_binding_index (",
+            "    project_id TEXT NOT NULL,",
+            "    instance_id TEXT NOT NULL,",
+            "    source_kind TEXT NOT NULL,",
+            "    playback_kind TEXT NOT NULL DEFAULT 'FILE',",
+            "    account_id TEXT,",
+            "    remote_file_id TEXT,",
+            "    remote_path TEXT,",
+            "    mime_type TEXT,",
+            "    size_bytes BIGINT,",
+            "    duration_ms BIGINT,",
+            "    source_payload_json TEXT NOT NULL DEFAULT '{}',",
+            "    updated_at_ms BIGINT NOT NULL,",
+            "    PRIMARY KEY(project_id, instance_id),",
+            "    FOREIGN KEY(project_id) REFERENCES project_snapshots(project_id) ON DELETE CASCADE,",
+            "    FOREIGN KEY(project_id, instance_id) REFERENCES instance_index(project_id, instance_id) ON DELETE CASCADE",
+            ");",
+            "CREATE INDEX IF NOT EXISTS idx_instance_media_binding_index_project",
+            "ON instance_media_binding_index (project_id, source_kind, updated_at_ms DESC);",
+        )
+    )
+
+
 def _auth_user_profiles_sql() -> str:
     return "\n".join(
         (
@@ -346,6 +387,12 @@ def _auth_user_profiles_sql() -> str:
     )
 
 
+#
+# Historical note:
+# Auth migrations 3-5 introduced the study-group tables in deployed databases.
+# We keep those migration definitions intact so existing schema histories remain valid,
+# then remove the deprecated tables in auth migration 11 below.
+#
 def _auth_roles_and_study_groups_sql() -> str:
     return "\n".join(
         (
@@ -474,6 +521,59 @@ def _auth_admin_action_logs_sql() -> str:
     )
 
 
+def _auth_friendships_sql() -> str:
+    return "\n".join(
+        (
+            "-- Add friend request workflow and friendship graph",
+            "CREATE TABLE IF NOT EXISTS friend_requests (",
+            "    request_id TEXT PRIMARY KEY,",
+            "    requester_user_id TEXT NOT NULL,",
+            "    receiver_user_id TEXT NOT NULL,",
+            "    message TEXT NOT NULL DEFAULT '',",
+            "    status TEXT NOT NULL,",
+            "    created_at TEXT NOT NULL,",
+            "    handled_at TEXT,",
+            "    handled_by_user_id TEXT,",
+            "    FOREIGN KEY(requester_user_id) REFERENCES users(user_id) ON DELETE CASCADE,",
+            "    FOREIGN KEY(receiver_user_id) REFERENCES users(user_id) ON DELETE CASCADE,",
+            "    FOREIGN KEY(handled_by_user_id) REFERENCES users(user_id) ON DELETE SET NULL",
+            ");",
+            "CREATE TABLE IF NOT EXISTS friendships (",
+            "    user_low_id TEXT NOT NULL,",
+            "    user_high_id TEXT NOT NULL,",
+            "    created_at TEXT NOT NULL,",
+            "    source_request_id TEXT,",
+            "    PRIMARY KEY(user_low_id, user_high_id),",
+            "    FOREIGN KEY(user_low_id) REFERENCES users(user_id) ON DELETE CASCADE,",
+            "    FOREIGN KEY(user_high_id) REFERENCES users(user_id) ON DELETE CASCADE",
+            ");",
+            "CREATE INDEX IF NOT EXISTS idx_friend_requests_receiver_status",
+            "ON friend_requests (receiver_user_id, status, created_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_friend_requests_requester_status",
+            "ON friend_requests (requester_user_id, status, created_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_friend_requests_pair_status",
+            "ON friend_requests (requester_user_id, receiver_user_id, status, created_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_friendships_user_low_created",
+            "ON friendships (user_low_id, created_at DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_friendships_user_high_created",
+            "ON friendships (user_high_id, created_at DESC);",
+        )
+    )
+
+
+def _auth_remove_study_group_tables_sql() -> str:
+    return "\n".join(
+        (
+            "-- Remove deprecated study group tables after the friend-based rollout",
+            "DROP TABLE IF EXISTS study_group_post_comments;",
+            "DROP TABLE IF EXISTS study_group_join_requests;",
+            "DROP TABLE IF EXISTS study_group_posts;",
+            "DROP TABLE IF EXISTS study_group_members;",
+            "DROP TABLE IF EXISTS study_groups;",
+        )
+    )
+
+
 def _auth_identity_uniques_sql() -> str:
     return "\n".join(
         (
@@ -487,10 +587,82 @@ def _auth_identity_uniques_sql() -> str:
     )
 
 
+def _auth_user_service_configs_sql() -> str:
+    return "\n".join(
+        (
+            "-- Add per-user saved service configuration table",
+            "CREATE TABLE IF NOT EXISTS user_service_configs (",
+            "    user_id TEXT NOT NULL,",
+            "    service_kind TEXT NOT NULL,",
+            "    base_url TEXT NOT NULL,",
+            "    model_name TEXT NOT NULL DEFAULT '',",
+            "    api_key TEXT,",
+            "    updated_at TEXT NOT NULL,",
+            "    PRIMARY KEY(user_id, service_kind),",
+            "    FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE",
+            ");",
+            "CREATE INDEX IF NOT EXISTS idx_user_service_configs_kind",
+            "ON user_service_configs (service_kind, updated_at DESC);",
+        )
+    )
+
+
+def _auth_user_service_prompt_mode_sql() -> str:
+    return "\n".join(
+        (
+            "-- Add prompt assembly mode for user service configs",
+            "ALTER TABLE user_service_configs",
+            "ADD COLUMN IF NOT EXISTS prompt_assembly_mode TEXT;",
+            "UPDATE user_service_configs",
+            "SET prompt_assembly_mode = 'system'",
+            "WHERE prompt_assembly_mode IS NULL OR BTRIM(prompt_assembly_mode) = '';",
+            "ALTER TABLE user_service_configs",
+            "ALTER COLUMN prompt_assembly_mode SET DEFAULT 'system';",
+            "ALTER TABLE user_service_configs",
+            "ALTER COLUMN prompt_assembly_mode SET NOT NULL;",
+        )
+    )
+
+
+def _auth_user_cloud_accounts_sql() -> str:
+    return "\n".join(
+        (
+            "-- Add cloud account bindings for user-owned media providers",
+            "CREATE TABLE IF NOT EXISTS user_cloud_accounts (",
+            "    account_id TEXT PRIMARY KEY,",
+            "    user_id TEXT NOT NULL,",
+            "    provider TEXT NOT NULL,",
+            "    provider_user_id TEXT NOT NULL,",
+            "    display_name TEXT NOT NULL,",
+            "    avatar_url TEXT,",
+            "    access_token_ciphertext TEXT NOT NULL,",
+            "    refresh_token_ciphertext TEXT NOT NULL,",
+            "    expires_at TEXT,",
+            "    scope TEXT NOT NULL DEFAULT '',",
+            "    meta_json TEXT NOT NULL DEFAULT '{}',",
+            "    created_at TEXT NOT NULL,",
+            "    updated_at TEXT NOT NULL,",
+            "    disabled_at TEXT,",
+            "    FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE,",
+            "    UNIQUE(user_id, provider, provider_user_id)",
+            ");",
+            "CREATE INDEX IF NOT EXISTS idx_user_cloud_accounts_user_provider",
+            "ON user_cloud_accounts (user_id, provider, updated_at DESC);",
+        )
+    )
+
+
 POSTGRES_MIGRATIONS: tuple[PostgresMigration, ...] = (
     PostgresMigration(scope="store", version=1, name="initial_store_schema", sql_factory=_bootstrap_store_schema_sql),
     PostgresMigration(scope="store", version=2, name="store_hot_indexes", sql_factory=_store_hot_index_sql),
     PostgresMigration(scope="store", version=3, name="entry_registration_seq", sql_factory=_store_entry_registration_seq_sql),
+    PostgresMigration(scope="store", version=4, name="global_settings_index", sql_factory=_store_global_settings_sql),
+    PostgresMigration(
+        scope="store",
+        version=5,
+        name="instance_media_binding_index",
+        sql_factory=_store_instance_media_binding_index_sql,
+    ),
     PostgresMigration(scope="auth", version=1, name="initial_auth_schema", sql_factory=_bootstrap_auth_schema_sql),
     PostgresMigration(scope="auth", version=2, name="auth_user_profiles", sql_factory=_auth_user_profiles_sql),
     PostgresMigration(scope="auth", version=3, name="auth_roles_and_study_groups", sql_factory=_auth_roles_and_study_groups_sql),
@@ -498,6 +670,11 @@ POSTGRES_MIGRATIONS: tuple[PostgresMigration, ...] = (
     PostgresMigration(scope="auth", version=5, name="auth_group_post_comments", sql_factory=_auth_group_post_comments_sql),
     PostgresMigration(scope="auth", version=6, name="auth_admin_action_logs", sql_factory=_auth_admin_action_logs_sql),
     PostgresMigration(scope="auth", version=7, name="auth_identity_uniques", sql_factory=_auth_identity_uniques_sql),
+    PostgresMigration(scope="auth", version=8, name="auth_user_service_configs", sql_factory=_auth_user_service_configs_sql),
+    PostgresMigration(scope="auth", version=9, name="auth_user_service_prompt_mode", sql_factory=_auth_user_service_prompt_mode_sql),
+    PostgresMigration(scope="auth", version=10, name="auth_friendships", sql_factory=_auth_friendships_sql),
+    PostgresMigration(scope="auth", version=11, name="auth_remove_study_group_tables", sql_factory=_auth_remove_study_group_tables_sql),
+    PostgresMigration(scope="auth", version=12, name="auth_user_cloud_accounts", sql_factory=_auth_user_cloud_accounts_sql),
 )
 
 

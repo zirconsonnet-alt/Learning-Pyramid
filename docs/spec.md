@@ -95,7 +95,7 @@
 本规格出现的常用语义类型（非穷尽，但应覆盖全文使用）：
 
 * ID 类（`xxxId` 或同类标识符）：`ProjectId`、`InstanceId`、`LearningObjectNodeId`、`RecallPointId`、`LearningTaskId`、`LearningTaskNodeId`、`RangeId`（实现可复用旧 `FocusSetId` 的底层类型）、`ReviewTaskId`、`ConvergenceId`、`ConvergenceRuleId`、`ReviewChainId`、`ReviewTaskQueueId`、`LayerId`、`DimensionId`、`JudgementOptionId`、`AggregationEventId`（4.4.5）、`MediaAssetId`、`AsrArtifactId`、`TempContextFragmentId`、`QASessionId`、`CandidateRecallPointId`、`MemoryCanvasId`、`MemoryCanvasVersionId`、`CanvasEdgeId`、`StoryArtifactId`。
-* 枚举类（`Enum`）：`ProjectState`、`RecallPointState`、`LayerMode`、`ContentBlockKind`、`ReviewChainTemplateItemKind`。
+* 枚举类（`Enum`）：`ProjectState`、`ProjectType`、`RecallPointState`、`LayerMode`、`ContentBlockKind`、`ReviewChainTemplateItemKind`。
   * 增补：`InstancePresence`、`FsSyncPolicy`、`MaterialSourceKind`、`ClientRuntimeKind`、`RuntimeCapability`、`CandidateRecallPointState`。
 * 标量/值域类（`Scalar`）：`PurePath`、`Timestamp`、`LabelVector = {0,1}^{|D|}`（判别映射的值域；等价表示为长度为 `|D|` 的 0/1 向量）、`RichContent`、`ContentBlock`、`ReviewChainTemplate`、`ReviewChainTemplateItem`、`LayerConfig`。
 * 校验结果类（`Result`）：`ValidationResult`、`ValidationCode`（0b.7.2/0b.7.3）。
@@ -103,6 +103,7 @@
 枚举/常量取值清单：
 
 * `ProjectState = {ACTIVE, DELETED}`
+* `ProjectType = {COURSE, BOOK, LOOSE_POINTS}`
 * `RecallPointState = {ACTIVE, DELETED}`
 * `ReviewTaskState = {PENDING, DONE}`（3.1）
 * `ConvergenceState = {IN_PROGRESS, TERMINATED}`（3.2）
@@ -215,9 +216,13 @@
   * 在 `project_id` 作用域内持久化且仅持久化一条 `ProjectStorageConfig` 记录，且 `project_root` 非空、`learning_object_root` 非空（见 1.0.4）。
   * 在 `project_id` 作用域内持久化且仅持久化一条 `ProjectMaterialSourceBinding` 记录；其默认值必须写死为 `source_kind == SERVER_FS`，但若 `create_project(...)` 显式指定初始材料源类型，则必须写入该显式值（见 1.0.4a / 4.5）。
 * 在 `project_id` 作用域内持久化且仅持久化一条 `ProjectConfig` 记录（见 1.0.5）；其默认值必须写死为：  
+  - `project_type == COURSE`，但若 `create_project(...)` 显式指定 `initial_project_type`，则必须写入该显式值；并且：
+    - 当 `project_type == BOOK` 时，`ProjectMaterialSourceBinding.source_kind` 必须为 `MANUAL`；
+    - 当 `project_type == LOOSE_POINTS` 时，`ProjectMaterialSourceBinding.source_kind` 必须为 `MANUAL`。
   - `layer_index = 0` 的 `review_chain_template == [CONVERGENCE]`（等价于 4.3.2 的默认行为）；  
   - `layer_index = 0` 的 `aggregation_threshold == (K_node=10, K_point=200)`（用于初始化 Layer 的控制字段；聚合时读取 Layer 当前值，见 4.4.2）。  
-  - `push_config.min_recall_points_to_enable == 30` 且 `push_config.max_history_len == 20`（见 1.0.5）。  
+  - `layer_index = 0` 的 `threshold_roll_up_enabled == true`（达到阈值时默认允许自动上推，见 4.4.2）。  
+  - `push_config.min_recall_points_to_enable == 0`、`push_config.max_history_len == 20`、`push_config.recommended_batch_size == 20`、`push_config.forgetting_curve_decay_per_day == 0.20`（见 1.0.5）。  
 * `NativeRuntimeConfig / LocalModelConfig` 不属于项目 bootstrap 最小产物；其属于调用端运行时配置，不得持久化进 `ProjectConfig`，也不得作为 `create_project(...)` 成功提交的前置条件。
   * 在 `project_id` 下初始化且仅初始化 `layer_index = 0` 的 `Layer`（4.2.5）；其默认值必须写死为：  
     - `layer_mode = AUTO_TICK_ON_ENTRY`  
@@ -278,7 +283,6 @@
 - 符号链接/快捷方式（强约束）：扫描若遇到符号链接条目（无论指向文件或目录），必须拒绝同步并返回错误，且不得产生任何 staged 写入（0b.5）。建议错误名：`UnsupportedFilesystemEntryError`（实现可复用 `DirectoryStructureCorruptedError`，但必须在错误摘要中指明“符号链接不受支持”与具体路径）。  
 - 非普通文件/目录（设备文件、管道等）：必须拒绝同步并返回错误，且不得产生任何 staged 写入（0b.5），并在错误摘要中列出条目路径与类型。  
 - 目录树与 `LearningObjectNode` 树必须严格同构：每个目录对应一个 `LearningObjectContainer(relative_path=dir_rel_path)`；每个文件对应一个 `LearningObjectLeaf(relative_path=file_rel_path)`；层级关系与直接孩子集合必须严格对应“文件系统直接子条目”。  
-- 同质约束门禁（写前条件失败；0b.5）：对任一目录 `d`，其直接孩子集合不得同时包含“目录”与“文件”；否则必须拒绝同步并返回“目录结构损坏”（建议错误名：`DirectoryStructureCorruptedError`，见 0b.6 增补），且失败不得产生任何 staged 写入。  
 
 `BROWSER_LOCAL` 输入语义（强约束）  
 - 4.5 的显式导入入口必须接收：  
@@ -293,14 +297,12 @@
 - 规范化后的 `relative_file_paths` 必须按集合语义去重；完全重复的相对路径不得生成重复节点或重复 `Instance`。  
 - `relative_file_paths` 为空时，导入入口必须拒绝执行并返回明确的 `PreconditionFailure`；最小实现不得把“空导入”解释为清空项目材料树。  
 - `BROWSER_LOCAL` 的目录集合定义为：所有文件路径的父目录闭包再加根目录 `.`；最小实现中，未被任何文件覆盖到的空目录不属于权威结构源。  
-- 为满足 1.2 的同质约束，`BROWSER_LOCAL` 的权威 `LearningObjectNode` 树必须按以下“派生树”口径构造：  
-  - 每个目录 `dir_rel_path` 仍生成一个主容器 `LearningObjectContainer(relative_path=dir_rel_path)`；  
-  - 每个目录必须再生成一个固定的“文件桶”子容器，用于承载该目录的直接文件；其 `relative_path` 写死为：根目录对应 `PurePosixPath("__files__")`，非根目录对应 `dir_rel_path / "__files__"`；其 `title` 写死为 `"Files"`；  
-  - 目录的直接子目录挂在主容器之下；目录的直接文件必须全部挂在该目录对应的“文件桶”子容器之下；  
-  - 根主容器的 `title` 必须取 `root_title.strip()`，若为空则回退为 `"已授权目录"`；非根目录主容器的 `title` 必须等于目录名。  
+- `BROWSER_LOCAL` 的权威 `LearningObjectNode` 树按直接目录结构构造：  
+  - 每个目录 `dir_rel_path` 生成一个 `LearningObjectContainer(relative_path=dir_rel_path)`；  
+  - 目录的直接子目录与直接文件都直接挂在该目录容器之下；  
+  - 根容器的 `title` 必须取 `root_title.strip()`，若为空则回退为 `"已授权目录"`；非根目录容器的 `title` 必须等于目录名。  
 - 顺序口径（强约束；按最小实现写死）：  
-  - 对任一“文件桶”子容器，其 `children` 必须按 `child.relative_path.as_posix()` 的 Unicode code point 字典序升序排列；  
-  - 对任一目录主容器，其 `children` 必须按“全部直接子目录（按 `relative_path.as_posix()` 升序）+ 末尾一个文件桶子容器”的顺序写入。  
+  - 对任一目录容器，其 `children` 必须按直接孩子 `relative_path.as_posix()` 的 Unicode code point 字典序升序排列。  
 
 `NATIVE_LOCAL` 输入语义（强约束）  
 - 4.5 的 Native 同步入口必须接收：  
@@ -308,7 +310,7 @@
   - `relative_file_paths: Sequence[PurePath | str]`：相对该 Native 目录根的文件路径集合。  
 - `relative_file_paths` 的规范化、去重、扩展名限制、路径文本规则、大小写冲突处理、ID 生成与 `BROWSER_LOCAL` 完全一致；实现不得对 `NATIVE_LOCAL` 另起一套路径语义。  
 - `NATIVE_LOCAL` 不要求用户在每次会话中重新授权同一稳定目录；但“稳定目录绑定”本身只属于 `DESKTOP_NATIVE` 运行时配置，不得被写入 `ProjectConfig`。  
-- `NATIVE_LOCAL` 的权威 `LearningObjectNode` 树采用与 `BROWSER_LOCAL` 相同的“目录主容器 + 文件桶子容器”派生树口径；实现不得在同一项目中对这两类本地目录快照采用不同的树形派生规则。  
+- `NATIVE_LOCAL` 的权威 `LearningObjectNode` 树采用与 `BROWSER_LOCAL` 相同的“目录容器 + 直接孩子”口径；实现不得在同一项目中对这两类本地目录快照采用不同的树形派生规则。  
 
 路径文本与跨平台一致性（强约束；写死）  
 - 对任意材料源输入得到的 `rel_path`，其权威路径文本均定义为 `rel_path.as_posix()`；系统不得对路径做 Unicode `NFC/NFD` 归一化或 locale 相关变换（按 Unicode code point 原样处理）。  
@@ -323,10 +325,8 @@ ID 生成（强约束；用于稳定引用）
 - `node_id_from_rel_path(rel_path, kind)`：  
     - 若 `kind == LEAF`：`LearningObjectNodeId('lonfs_leaf_' + fs_hash32(rel_path))`；  
     - 若 `kind == DIR`：`LearningObjectNodeId('lonfs_dir_' + fs_hash32(rel_path))`。  
-- `files_bucket_node_id_from_dir(rel_path) := LearningObjectNodeId('lonfs_files_' + sha256(('FILES:' + path_text(rel_path)).encode('utf-8')).hexdigest()[:32])`。  
 - 对任一同步得到的文件 `rel_path`，其 `instance_id` 必须等于 `id_from_rel_path(rel_path)`。  
 - 对任一同步得到的目录/文件 `rel_path`，其 `node_id` 必须等于 `node_id_from_rel_path(rel_path, kind)`。  
-- 对任一 `BROWSER_LOCAL` 派生树中的“文件桶”子容器，其 `node_id` 必须等于 `files_bucket_node_id_from_dir(dir_rel_path)`。  
 - 强约束：在启用 0b.1.5b 同步协议的项目内，系统不得允许用户通过 `add_learning_object_leaf/container` 任意指定 `node_id`；相关入口必须拒绝或仅作为调试入口存在且默认关闭（4.5）。  
 
 同步写入产物（同一 commit 生效）  
@@ -348,7 +348,7 @@ ID 生成（强约束；用于稳定引用）
 - 系统必须以“全量替换”方式写入 `LearningObjectNode` 集合：以 0b.1.5b 协议产出的权威结构结果重建该项目在 `LearningObjectNodeRepository` 下的全部节点（见 1.2.2 `replace_all_from_fs`），确保最终态满足 1.2.3 的树一致性校验。  
 - `LearningObjectLeaf.instance_id` 必须等于其对应文件条目的 `instance_id`。  
 - `SERVER_FS` 生成的 `Container.children` 顺序写死为：按 `child.relative_path.as_posix()` 的 Unicode code point 字典序升序排列（跨平台一致；见 0a.9a）。  
-- `BROWSER_LOCAL` 生成的 `Container.children` 顺序写死为：遵循上文“派生树”顺序口径；不得与 `SERVER_FS` 的孩子排序规则混用。  
+- `BROWSER_LOCAL` 生成的 `Container.children` 顺序写死为：按直接孩子 `relative_path.as_posix()` 的 Unicode code point 字典序升序排列。  
 
 失败语义（强约束）  
 - 目录结构损坏：必须拒绝同步且不产生任何写入（0b.5）。  
@@ -465,7 +465,7 @@ READ_ONLY（只读会话；强约束）
 
 * `StructuralInconsistencyError`
 
-  * 发生点：树形仓库的结构查询在 mutation session 内读取到的结构尚未满足其提交期结构约束时（例如双向一致/单父/同质/无环）。
+  * 发生点：树形仓库的结构查询在 mutation session 内读取到的结构尚未满足其提交期结构约束时（例如双向一致/单父/无环）。
   * staged 写入：可有（该错误用于“会话内读 + staged 写入”下的结构不一致表达）。
   * 会话语义（强约束）：发生 `StructuralInconsistencyError` 时，结构查询失败且不得返回部分结果；调用方必须在同一 session 内通过后续写操作修复结构后方可再次调用查询；实现不得自动修复。
 
@@ -483,7 +483,7 @@ READ_ONLY（只读会话；强约束）
 
 * `DirectoryStructureCorruptedError`（目录结构损坏；强约束）
 
-  * 发生点：执行 0b.1.5b 材料源同步协议时，发现任一目录的直接孩子集合违反同质约束（同时包含目录与文件），或发现目录树无法与 `LearningObjectNode` 树严格同构。
+  * 发生点：执行 0b.1.5b 材料源同步协议时，发现不受支持的目录条目（如符号链接、快捷方式、设备文件等），或发现目录树无法与 `LearningObjectNode` 树严格同构。
   * staged 写入：必须为无（拒绝时不产生任何写入；0b.5）。
   * 调用方行为（强约束）：调用方必须将其视为“用户需修复目录结构”的失败，并向用户提供损坏路径与混杂条目列表；修复后可重试同步。
 
@@ -503,7 +503,7 @@ READ_ONLY（只读会话；强约束）
 
 * 事务语义与回滚：0b.1
 * 仓库内结构校验（对象模型的一致性最终态）：  
-  * 树结构一致性：1.2.3、1.6.3（含无环/同质/双向一致/单父）  
+  * 树结构一致性：1.2.3、1.6.3（含无环/双向一致/单父；其中 1.6.3 仍含同质）  
   * 任务内去重：1.5.3  
   * RangeSnapshot 内容寻址唯一性：1.7.3  
 * 系统级不变量（跨仓库/跨子系统的已提交状态一致性）：  
@@ -738,32 +738,43 @@ READ_ONLY（只读会话；强约束）
 用途  
 在 `project_id` 作用域内持久化项目配置（控制面），用于：  
 - 为每层提供“复习链初始化模板”（4.3.2 Task Register 的初始 ReviewChain.queue 构造规则）。  
-- 为每层提供“聚合阈值默认值”（用于初始化 Layer 的 `K_node/K_point` 控制字段），并支持在 Layer 已存在时立即更新其阈值控制字段（使更新对未来立即生效）。  
+- 为每层提供“聚合阈值默认值”和“阈值自动上推开关”，并支持在 Layer 已存在时立即更新其阈值控制字段（使更新对未来立即生效）。  
 
 重要声明（强约束；写死）  
 - 配置更新为**未来生效**：不得追溯改写任何已提交的结构事实（见本节“Non-retroactive guarantee”）。  
-- 聚合触发判定（4.4.2）读取的是 `Layer` 当前持有的 `(K_node, K_point)` 控制字段；不得在聚合判定时读取或依赖 `ProjectConfig`（避免“不可重放”的双源行为）。  
-- 配置可写范围最小版（强约束；写死）：本规格的最小对外入口集合（4.5）仅要求可编辑 `layer_configs`（通过 `set_layer_config` 合并语义）。`push_config` 在最小版中为“创建时写入、只读使用”的配置事实：必须在项目 bootstrap 时写入默认值（见 0b.1.5a / 4.5 `create_project`）；`NativeRuntimeConfig / LocalModelConfig` 属于运行时层，不得写入 `ProjectConfig`，也不得通过项目级入口共享给其他端。
+- 聚合触发判定（4.4.2）读取的是 `Layer` 当前持有的 `(K_node, K_point)` 控制字段，以及该层配置的 `threshold_roll_up_enabled`；两者都必须来自持久化事实，且行为必须可重放。  
+- 配置可写范围最小版（强约束；写死）：本规格的最小对外入口集合（4.5）必须允许分别编辑 `layer_configs`（通过 `set_layer_config` 合并语义）与 `push_config`（通过 `set_review_recommendation_config` 合并语义）。`push_config` 仍属于项目级配置事实，必须在项目 bootstrap 时写入默认值（见 0b.1.5a / 4.5 `create_project`）；`NativeRuntimeConfig / LocalModelConfig` 属于运行时层，不得写入 `ProjectConfig`，也不得通过项目级入口共享给其他端。
+- `project_type` 是项目级业务规则源（强约束；写死）：
+  - `COURSE`：项目必须使用学习对象树与实例；复述点必须绑定可解析锚点。
+  - `BOOK`：项目必须使用学习对象树与实例；复述点必须绑定不可解析的文本锚点。
+  - `LOOSE_POINTS`：项目不得使用学习对象树与实例；复述点不得绑定锚点。
 
 存储字段（最小）
 - `project_id: ProjectId`
+- `project_type: ProjectType`
+  - 默认值（强约束；写死）：`COURSE`。
 - `layer_configs: Map[int, LayerConfig]`
   - Key：`layer_index`（见 0a.4）；必须满足 `layer_index >= 0`。  
-  - 语义：每层的控制面配置（阈值 + 初始链模板）。  
+  - 语义：每层的控制面配置（阈值自动上推开关 + 阈值 + 初始链模板）。  
   - 读取回退（强约束；写死）：若 `layer_configs` 不包含某 `layer_index`，则该层配置读取必须回退为系统默认 `LayerConfig`（其值等于本节写死的 `layer_index == 0` 默认值）。  
   - 强约束（写死默认值；用于跨实现一致）：`layer_configs` 必须至少包含 `layer_index == 0` 的一条配置，其默认值必须满足：  
     - `review_chain_template == [CONVERGENCE]`  
     - `aggregation_threshold == (K_node=10, K_point=200)`  
+    - `threshold_roll_up_enabled == true`
 - `push_config: RecallPointPushConfig`
   - 默认值（强约束；写死）：  
-    - `min_recall_points_to_enable = 30`  
-    - `max_history_len = 20`  
+    - `min_recall_points_to_enable = 0`
+    - `max_history_len = 20`
+    - `recommended_batch_size = 20`
+    - `forgetting_curve_decay_per_day = 0.20`
 - `updated_at: Timestamp`
   - 语义：最后更新时间戳；必须由系统时钟生成（0a.10）。
 
 LayerConfig（值对象；最小）
 - `review_chain_template: ReviewChainTemplate`
 - `aggregation_threshold: (K_node: int, K_point: int)`
+- `threshold_roll_up_enabled: bool`
+  - 语义：控制该层是否允许“达到阈值即自动进入聚合周期”（4.4.2）。`false` 仅禁止阈值自动上推；不得影响 4.4.5 的手动上推入口，也不得回滚已开始的聚合周期。
 
 ReviewChainTemplate（值对象；最小）
 - `items: Tuple[ReviewChainTemplateItem, ...]`（非空；顺序为权威解释顺序）
@@ -778,6 +789,7 @@ ReviewChainTemplateItem（值对象；最小）
 
 写前条件（强约束；写死以避免实现分叉）
 - `config.project_id == session.project_id`（不得跨项目写入）。
+- `config.project_type ∈ {COURSE, BOOK, LOOSE_POINTS}`。
 - 对任一 `layer_index, layer_cfg in layer_configs`：`layer_index >= 0`。
 - 对任一 `layer_cfg.review_chain_template`：
   - `items` 非空。
@@ -786,8 +798,9 @@ ReviewChainTemplateItem（值对象；最小）
     - `item.kind == CONVERGENCE`：`item.count` 必须为 `None` 或省略。  
     - `item.kind == REVIEW_TASK`：`item.count` 缺省视为 `1`，且必须满足 `count >= 1`。  
 - `K_node >= 1` 且 `K_point >= 1`。
+- `threshold_roll_up_enabled` 必须为布尔值。
 - `push_config: RecallPointPushConfig`
-  - 语义：复述点推荐/压缩感/漂移视图的阈值配置。强约束：该配置只影响只读视图判断，不得改写任何既有结构事实（LearningTask/LearningTaskNode/队列/链等）。
+  - 语义：复述点推荐/压缩感/漂移视图的只读配置。强约束：该配置只影响只读视图判断，不得改写任何既有结构事实（LearningTask/LearningTaskNode/队列/链等）。
 
 相关运行时配置（强约束；非项目事实，不进入仓库存储）
 - `NativeRuntimeConfig`
@@ -812,9 +825,13 @@ ReviewChainTemplateItem（值对象；最小）
 
 - `RecallPointPushConfig`
   - `min_recall_points_to_enable: int`
-    - 语义：当项目内复述点总数 `|RecallPointRepository.all(session)|` 小于该阈值时，系统必须禁用 4.7 的推荐模型路径，并返回空候选或使用固定规则（由实现决定，但必须确定性）。
+    - 语义：当项目内 ACTIVE 复述点总数 `|{rp ∈ RecallPointRepository.all(session) | rp.state == ACTIVE}|` 小于该阈值时，系统必须禁用 4.7 的推荐复习列表，并返回空列表；该门槛只影响只读推荐视图，不得影响正式 `ReviewTask` 调度。
   - `max_history_len: int`
-    - 语义：为特征向量编码保留的最大历史条目数（见 4.7.2）；超出则仅保留最近 `max_history_len` 条记录。
+    - 语义：参与遗忘曲线加权计算的最大历史条目数（见 4.7.2）；超出则仅保留最近 `max_history_len` 条记录。
+  - `recommended_batch_size: int`
+    - 语义：只读推荐复习页每批默认展示的复述点数量；用户点击“继续推荐”后，系统必须返回后续批次，而不得推进任何正式复习状态。
+  - `forgetting_curve_decay_per_day: float`
+    - 语义：遗忘曲线指数衰减参数 `λ`（按“天”为单位）；用于把历史复习记录映射为当前记忆强度与复习推荐指数。必须满足 `λ > 0`。
 
 
 
@@ -823,7 +840,7 @@ ReviewChainTemplateItem（值对象；最小）
 
 写接口  
 - `set(session: MutationSession, config: ProjectConfig) -> None`
-  - 语义：upsert；若已存在则**覆盖更新完整 ProjectConfig 对象**，即覆盖 `layer_configs / push_config / updated_at`。  
+  - 语义：upsert；若已存在则**覆盖更新完整 ProjectConfig 对象**，即覆盖 `project_type / layer_configs / push_config / updated_at`。  
   - 强约束：实现不得把该接口解释为“仅更新 `layer_configs`”；若系统仅希望更新层配置，必须通过 4.5 的 `set_layer_config(...)` 入口执行，而非改变本仓库接口语义。  
 
 读接口  
@@ -834,7 +851,7 @@ ReviewChainTemplateItem（值对象；最小）
 - 索引不变式：同一 `project_id` 作用域内必须且只能存在一条 `ProjectConfig` 记录（由项目 bootstrap 最小产物保证，0b.1.5a）。  
 
 Non-retroactive guarantee（强约束；可测试口径）
-- 任一配置更新（例如 4.5 的 `set_layer_config(...)`）不得对以下已提交对象做任何改写、重建或重排：  
+- 任一配置更新（例如 4.5 的 `set_layer_config(...)` / `set_review_recommendation_config(...)`）不得对以下已提交对象做任何改写、重建或重排：  
   - 任一既有 `ReviewChain.queue/head_index/state`  
   - 任一既有 `Convergence.seed_range_id/review_task_ids/state`  
   - 任一既有 `ReviewTask.input_range_id/state/executed_at/result_range_id`  
@@ -975,15 +992,14 @@ Non-retroactive guarantee（强约束；可测试口径）
 
 语义  
 - 叶子节点必须且只能绑定一个 `instance_id`。
-- 当项目启用 0b.1.5b 的同步/导入协议时：`LearningObjectNode` 树必须与当前权威材料源定义的权威结构严格同构（0b.1.5b）；其中 `SERVER_FS` 采用“目录/文件直接孩子集合严格同构”，`BROWSER_LOCAL` 与 `NATIVE_LOCAL` 采用“目录主容器 + 文件桶子容器”的派生树同构口径。  
+- 当项目启用 0b.1.5b 的同步/导入协议时：`LearningObjectNode` 树必须与当前权威材料源定义的权威结构严格同构（0b.1.5b）；`SERVER_FS`、`BROWSER_LOCAL` 与 `NATIVE_LOCAL` 均采用“目录容器 + 直接孩子集合”的同构口径。  
 - 容器节点不绑定 `instance_id`。  
 - `children` 定义该容器的直接子节点 `node_id` 有序序列；任何遍历/聚合均以该顺序为准。  
 - `children` 的顺序是权威事实源（authoritative order）；对已提交状态，该顺序必须保持稳定。  
 - `children` 中不允许出现重复的 `child_id`（同一容器内也不允许）。  
 - `children` 允许为空序列；此时该容器的覆盖实例序列为空（见下文派生定义）。  
 - 当项目未启用 0b.1.5b 协议时，空容器可作为稳定的手工挂载点/纲目节点存在；其本身不绑定 `Instance`，但可用于组织书本、章节、题册等非文件材料。
-- 同一容器下的子节点应保持同质：要么全是叶子，要么全是容器（不混杂；当 `children` 为空时同质性约束按 vacuous truth 视为成立）。
-  - Leaf/Container 的判定以 `LearningObjectNodeRepository` 中对 `child_id` 的解析结果之对象类型为准；无法解析视为校验失败（提交期；见 1.2.3）。
+- 同一容器允许同时包含叶子与容器子节点；Leaf/Container 的判定以 `LearningObjectNodeRepository` 中对 `child_id` 的解析结果之对象类型为准；无法解析视为校验失败（提交期；见 1.2.3）。
 
 森林语义（最小增补）
 
@@ -1059,8 +1075,6 @@ Queries 失败语义（强约束；用于实现一致性）
   - 对任一节点 `n`，若 `n.parent_id = p`，则必须满足 `n ∈ p.children`。  
 - 子列表不重复（No duplicate children）：对任一 Container `p`，`p.children` 不得包含重复 `child_id`。  
 - 单父（No multiple parents）：任何 `node_id` 不得同时出现在两个不同 Container 的 `children` 中。  
-- 同质性（Homogeneous children）：同一 Container 的 `children` 必须同质（全 Leaf 或全 Container；混杂视为结构不一致）。  
-  - `children` 为空时：同质性约束视为成立（无子节点不构成混杂）。  
 - 无环（Cycle-free）：基于 `children`（权威遍历顺序）检测可达环；由于双向一致，该结果等价于 `parent_id` 回溯无环。  
   - 检测范围为仓库内全体节点构成的有向图（由 Container.children 诱导的边）；允许存在多个根（`parent_id = None`）。  
   - 实现不得对已提交状态做隐式修复。  
@@ -1070,8 +1084,8 @@ Queries 失败语义（强约束；用于实现一致性）
 
 一致性与校验  
 - Failure：
-  - （同步门禁）当项目启用 0b.1.5b 的协议时，若权威材料源输入导致同一路径同时被解释为目录与文件，或在 `SERVER_FS` 模式下出现“某目录直接孩子混杂目录/文件”，系统必须在同步/导入协议阶段拒绝执行并返回“目录结构损坏”，且不得产生任何 staged 写入（0b.1.5b）。
-  - 若检测到结构不一致（断引用、单父冲突、父子不一致、同质性违反等），则 `commit()` 必须失败并整体回滚，对外不可见。  
+  - （同步门禁）当项目启用 0b.1.5b 的协议时，若权威材料源输入导致同一路径同时被解释为目录与文件，或包含不受支持的目录条目，则系统必须在同步/导入协议阶段拒绝执行并返回“目录结构损坏”，且不得产生任何 staged 写入（0b.1.5b）。
+  - 若检测到结构不一致（断引用、单父冲突、父子不一致等），则 `commit()` 必须失败并整体回滚，对外不可见。  
 - Query 前置条件
   - 只对“已提交且通过 commit 校验”的状态定义。
 
@@ -1106,6 +1120,16 @@ Queries 失败语义（强约束；用于实现一致性）
   * `position` 非空。
 * 任一写前条件失败：必须抛 `PreconditionFailure`，且失败不产生任何写入（0b.5）。
 
+项目类型约束（强约束；写死）
+* 当 `ProjectConfig.project_type == COURSE` 时：
+  - `Anchor` 必须存在；
+  - `position` 必须是系统可解析的位置编码；最小实现中必须满足 `position == "t=<非负整数毫秒>"`。
+* 当 `ProjectConfig.project_type == BOOK` 时：
+  - `Anchor` 必须存在；
+  - `position` 必须是不可解析的人类文本锚点；最小实现中不得接受 `t=<...>` 这种 COURSE 时间编码。
+* 当 `ProjectConfig.project_type == LOOSE_POINTS` 时：
+  - `Anchor` 不得出现；宿主对象必须以“无锚点”形式写入。
+
 非目标
 
 * `position` 的规范格式不在本 domain 强制；上层可定义 UI 规范化或显式校验接口，但不得把该类校验并入系统级 `commit()` 强制集合（0b.7.1/0b.7.2）。
@@ -1122,7 +1146,7 @@ Queries 失败语义（强约束；用于实现一致性）
 #### 1.4.1 数据模型
 
 用途  
-最小可复习条目：问题 + 答案 + 锚点。系统只记录，不判断对错。
+最小可复习条目：问题 + 答案 + 可选锚点。系统只记录，不判断对错；锚点是否存在由 `ProjectConfig.project_type` 决定。
 
 存储字段  
 - `project_id: ProjectId`
@@ -1137,7 +1161,8 @@ Queries 失败语义（强约束；用于实现一致性）
 - `answer: RichContent`  
 - `insights: Tuple[RichContent, ...]`
   - 语义：感悟列表（append-only；顺序稳定）；允许为空 Tuple。
-- `anchor: Anchor` 
+- `anchor: Optional[Anchor]`
+  - 语义：仅当项目类型要求绑定锚点时存在；是否允许为空由 1.4.3 的项目类型规则决定。
 
 派生字段  
 - `str(recall_point)`：简单的 Q/A 可读表示
@@ -1154,12 +1179,12 @@ Queries 失败语义（强约束；用于实现一致性）
 写接口  
 - `add(session: MutationSession, rp: RecallPoint) -> None`
   - 新增；若 `recall_point_id` 已存在，必须抛 `PreconditionFailure`（0b.5）。  
-  - 写前检查：必须满足 1.4.3 的 Write-time preconditions（其中 Anchor 的前置条件见 1.3.1）；额外写前条件（强引用）：`InstanceRepository` 可解析 `anchor.instance_id`；失败为 `PreconditionFailure` 且不产生任何写入（0b.5）。  
+  - 写前检查：必须满足 1.4.3 的 Write-time preconditions（其中 Anchor 的前置条件见 1.3.1）；若 `anchor != None`，则额外写前条件（强引用）：`InstanceRepository` 可解析 `anchor.instance_id`；失败为 `PreconditionFailure` 且不产生任何写入（0b.5）。  
 - `update(session: MutationSession, rp: RecallPoint) -> None`
   - 允许更新既有 RecallPoint。可更新字段为 `question`、`answer`、`anchor`；`insights` 不可通过 `update` 覆盖、删除或重排（只允许通过 `append_insight` 追加，既有顺序保持稳定）。`recall_point_id` 不可变。  
   - 强约束：`state/deleted_at` 不可通过 `update` 修改；墓碑删除只能通过 `mark_deleted(...)` 发生。  
   - NotFound：若 `recall_point_id` 不存在，必须抛 `NotFound`。
-  - 写前检查：必须满足 1.4.3 的 Write-time preconditions（其中 Anchor 的前置条件见 1.3.1）；额外写前条件（强引用）：`InstanceRepository` 可解析 `anchor.instance_id`，且目标 RecallPoint 当前 `state == ACTIVE`；失败为 `PreconditionFailure` 且不产生任何写入（0b.5）。
+  - 写前检查：必须满足 1.4.3 的 Write-time preconditions（其中 Anchor 的前置条件见 1.3.1）；若 `anchor != None`，则额外写前条件（强引用）：`InstanceRepository` 可解析 `anchor.instance_id`，且目标 RecallPoint 当前 `state == ACTIVE`；失败为 `PreconditionFailure` 且不产生任何写入（0b.5）。
   - 并发写口径继承 0b.4（single-writer），因此 update 不需要版本/CAS；其行为在串行写事务序列下定义。
 
 - `append_insight(session: MutationSession, recall_point_id: RecallPointId, insight: RichContent) -> None`
@@ -1196,8 +1221,10 @@ Queries 失败语义（强约束；用于实现一致性）
 - `deleted_at is None`。  
 - `question` 必须为合法 RichContent（0a.12；不得为空）。  
 - `answer` 必须为合法 RichContent（0a.12；不得为空）。  
-- `anchor.instance_id` 非空。  
-- `anchor.position` 非空。  
+- 项目类型规则（强约束；写死）：
+  - 当 `ProjectConfig.project_type == COURSE` 时：`anchor` 必须存在，且必须满足 1.3.1 的 COURSE 锚点规则。
+  - 当 `ProjectConfig.project_type == BOOK` 时：`anchor` 必须存在，且必须满足 1.3.1 的 BOOK 锚点规则。
+  - 当 `ProjectConfig.project_type == LOOSE_POINTS` 时：`anchor is None`。
 
 提交期强制校验  
 - 无（不新增提交期强制项）。  
@@ -1211,9 +1238,9 @@ Queries 失败语义（强约束；用于实现一致性）
 
 跨仓库可解析性（强引用；提交生效必须可解析）
 
-- 强约束：`RecallPoint.anchor.instance_id` 为强引用。任何已提交状态中，`anchor.instance_id` 必须能在 `InstanceRepository` 中解析到。
+- 强约束：若 `RecallPoint.anchor != None`，则 `RecallPoint.anchor.instance_id` 为强引用。任何已提交状态中，该 `anchor.instance_id` 都必须能在 `InstanceRepository` 中解析到。
 - Enforcement 点（强约束）：该可解析性必须作为 `RecallPointRepository.add/update` 的写前条件检查（precondition failure，0b.5）执行：
-  - 在 mutation session 内、在产生任何 staged 写入之前，调用 `InstanceRepository.get(session, anchor.instance_id)`；若 `NotFound`，对外统一映射为 `PreconditionFailure`。
+  - 仅当 `anchor != None` 时，在 mutation session 内、在产生任何 staged 写入之前，调用 `InstanceRepository.get(session, anchor.instance_id)`；若 `NotFound`，对外统一映射为 `PreconditionFailure`。
   - 该检查必须在 `session.project_id` 作用域内执行；不得解析到其他项目的 `Instance`。
 - 非目标：不在系统级 `commit()`（0b.7.1）追加额外强制校验；该约束仅由写接口前置条件保证。
 
@@ -1251,8 +1278,8 @@ Queries 失败语义（强约束；用于实现一致性）
 派生字段  
 - `size: int = len(recall_point_ids)`  
 - `covered_instance_id_set(task, recall_points_repo) -> Set[InstanceId]`
-  - 语义：遍历 `recall_point_ids`，取其 `anchor.instance_id` 去重。
-  - 历史视角（强约束）：该派生量按 `LearningTask.recall_point_ids` 的已提交存储内容解释，不做 `ACTIVE/DELETED` 过滤；若其中某个 `RecallPointId` 仍可解析到墓碑对象，则其 `anchor.instance_id` 仍计入本派生量。
+  - 语义：遍历 `recall_point_ids`，对其中 `anchor != None` 的项取其 `anchor.instance_id` 去重。
+  - 历史视角（强约束）：该派生量按 `LearningTask.recall_point_ids` 的已提交存储内容解释，不做 `ACTIVE/DELETED` 过滤；若其中某个 `RecallPointId` 仍可解析到墓碑对象，且其 `anchor != None`，则其 `anchor.instance_id` 仍计入本派生量。
   - 说明：若需要“当前内容视角”的范围派生，必须使用 1.6.1 的 `covered_rp_ids(...)` 及其下游派生；实现不得把本派生量隐式解释为当前内容视图。
 
 <a id="toc-1-5-2"></a>
@@ -1280,7 +1307,7 @@ Queries 失败语义（强约束；用于实现一致性）
 
 Queries（常用派生查询的仓库承诺）  
 - `covered_instance_id_set(session: MutationSession, learning_task_id: LearningTaskId, recall_points_repo: RecallPointRepository) -> Set[InstanceId]`  
-  - Postcondition：按历史视角遍历任务的 `recall_point_ids`，取对应 RecallPoint（包含可解析墓碑对象）的 `anchor.instance_id` 去重。  
+  - Postcondition：按历史视角遍历任务的 `recall_point_ids`，对其中 `anchor != None` 的 RecallPoint（包含可解析墓碑对象）取其 `anchor.instance_id` 去重。  
 
 <a id="toc-1-5-3"></a>
 
@@ -1921,7 +1948,7 @@ Queries
 
 用途（强约束；业务事实）
 - 记录每个复述点在每次复习中的结果与时间，用于：  
-  (a) 生成“复述点特征向量”（4.7.2），支持本地 ML/规则模型进行推荐、压缩感与漂移分析；  
+  (a) 基于遗忘曲线加权法（4.7.2）计算当前记忆强度、复习推荐指数与只读复习曲线；  
   (b) 向用户提供“复习历史”只读视图。  
 - 该对象不是审计日志：允许被系统读取并用于派生计算/推荐判断。  
 - 该对象为 append-only：只允许追加新记录，不允许修改或删除单条记录（项目删除除外）。
@@ -2018,7 +2045,7 @@ Queries
 在一次原子提交中创建：学习任务（LearningTask）及其入口学习任务节点（LearningTaskNode）。
 
 Request（输入载荷）
-- `items: Sequence[(question: RichContent, answer: RichContent, anchor: Anchor)]`，非空
+- `items: Sequence[(question: RichContent, answer: RichContent, anchor: Optional[Anchor])]`，非空
 - `title: str`，非空（强约束）
 
 Read-set（读取项）
@@ -2061,7 +2088,10 @@ Write-set（写入产物；同一 commit 原子生效）
 Failure 语义
 - 协议前置条件失败（0b.5）：  
   - 输入为空（items 为空）。 
-  - 任一 item 的 `anchor.instance_id` 在 `InstanceRepository` 不可解析（`NotFound` 对外统一映射为 `PreconditionFailure`），且失败不产生任何写入（0b.5）。
+  - 当 `project_type == COURSE` 时：任一 item 的 `anchor` 缺失、格式不是 `t=<毫秒>`，或其 `anchor.instance_id` 在 `InstanceRepository` 不可解析（`NotFound` 对外统一映射为 `PreconditionFailure`）。
+  - 当 `project_type == BOOK` 时：任一 item 的 `anchor` 缺失、`anchor.position` 为空、`anchor.position` 误用 `t=<毫秒>` 格式，或其 `anchor.instance_id` 在 `InstanceRepository` 不可解析（`NotFound` 对外统一映射为 `PreconditionFailure`）。
+  - 当 `project_type == LOOSE_POINTS` 时：任一 item 的 `anchor != None`。
+  - 以上任一失败都不得产生任何写入（0b.5）。
 
 备注
 - 2.1 为“纯业务事实子协议”：不得作为系统对外入口单独提交。
@@ -3282,7 +3312,9 @@ Orchestrator 的门禁判定必须使用与 3.3.3（advanceable/blocked）一致
 
 #### 4.4.2 聚合阈值与触发（Thresholds & Triggers）
 
-阈值由 `(K_node, K_point)` 表达；当候选节点数达到 `K_node`，或候选节点覆盖复述点总数达到 `K_point` 时，触发进入聚合周期。
+阈值由 `(K_node, K_point)` 表达；当且仅当 `threshold_roll_up_enabled == true` 且候选节点数达到 `K_node`，或候选节点覆盖复述点总数达到 `K_point` 时，触发进入聚合周期。
+
+- 若 `threshold_roll_up_enabled == false`：系统不得因为阈值满足而进入/保持 `CLEARING`，也不得记录 `THRESHOLD_DRAIN` 事件；候选节点继续保留在该层 `AggregationQueue` 中，直到用户手动上推（4.4.5）或后续重新开启该开关。
 
 <a id="toc-4-4-3"></a>
 
@@ -3321,7 +3353,7 @@ CLEARING（两段式循环）：
 
 用途  
 手动聚合的唯一语义：**清空目标层的聚合队列（AggregationQueue）**，并将“被清空的全部节点”在一次原子提交中**挂到同一个新建父容器节点**之下，然后按 4.4.4 的规则将该父节点登记到上层。  
-该入口不改变自动聚合阈值语义（4.4.2），仅提供“无需等待阈值、立即清空并上推”的显式路径。
+该入口不改变自动聚合阈值语义（4.4.2），仅提供“无需等待阈值、立即清空并上推”的显式路径；即使 `threshold_roll_up_enabled == false`，手动聚合仍然允许执行。
 
 接口（系统对外入口）
 
@@ -3433,7 +3465,7 @@ Failure 语义
   - `SCHEDULING_EFFECT = NONE`
 
 2) 项目管理（不产生调度副作用）
-- `create_project(title: str, project_root: str, initial_source_kind: MaterialSourceKind = SERVER_FS) -> ProjectId`
+- `create_project(title: str, project_root: str, initial_source_kind: MaterialSourceKind = SERVER_FS, initial_project_type: ProjectType = COURSE) -> ProjectId`
   - 语义：在一次系统级事务内创建 `Project` 并完成该项目 bootstrap（0b.1.5a）。在该成功提交的同一事务内，系统至少必须写入：  
     - `Project`  
     - 项目内全局队列单例 `ReviewTaskQueue(queue_id == GLOBAL_QUEUE)`  
@@ -3441,10 +3473,13 @@ Failure 语义
       - 强约束（写死默认目录名）：`learning_object_root = PurePosixPath("learning_objects")`。  
       - 若实现允许用户配置该相对路径，则必须通过新增白名单入口扩展；在最小版中不得提供该对外配置入口（避免实现分叉）。  
     - `ProjectMaterialSourceBinding(source_kind = initial_source_kind)`（见 1.0.4a / 0b.1.5b）  
-    - `ProjectConfig`（见 1.0.5；必须写入 `layer_index = 0` 的默认配置与 `push_config` 的写死默认值）  
+    - `ProjectConfig`（见 1.0.5；必须写入 `project_type = initial_project_type`，以及 `layer_index = 0` 的默认配置与 `push_config` 的写死默认值）  
     - 必须初始化 `layer_index = 0` 的 `Layer`（字段默认值见 0b.1.5a）  
     - 必须初始化 `layer_index = 0` 的 `AggregationQueue`（字段默认值见 0b.1.5a）  
-  - 写前条件补充（强约束；0b.5）：`initial_source_kind ∈ {SERVER_FS, BROWSER_LOCAL, NATIVE_LOCAL, MANUAL}`。
+  - 写前条件补充（强约束；0b.5）：
+    - `initial_source_kind ∈ {SERVER_FS, BROWSER_LOCAL, NATIVE_LOCAL, MANUAL}`。
+    - `initial_project_type ∈ {COURSE, BOOK, LOOSE_POINTS}`。
+    - 当 `initial_project_type ∈ {BOOK, LOOSE_POINTS}` 时，`initial_source_kind` 必须为 `MANUAL`。
   - `SCHEDULING_EFFECT = NONE`
 - `list_projects() -> Sequence[Project]`
   - `SCHEDULING_EFFECT = NONE`
@@ -3474,17 +3509,28 @@ Failure 语义
 - `add_instance(project_id: ProjectId, material_id: str) -> InstanceId`
   - 语义：在 `project_id` 作用域内创建一个新的 `Instance` 并返回其 `instance_id`。
   - 约束：`material_id` 的规范化与存储语义必须满足 1.1.1（使用 POSIX 语义 `PurePosixPath` 规范化；不得做可达性探测、外部访问或隐式修复）。当当前 `source_kind == MANUAL` 时，`material_id` 可以仅作为稳定的虚拟材料标识使用，例如书名/册别/章节路径样式标识。
+  - 额外约束（强约束）：当 `ProjectConfig.project_type == LOOSE_POINTS` 时，本入口必须抛 `PreconditionFailure`（该项目类型不维护实例）。
   - 额外约束（强约束）：当项目启用 0b.1.5b 的同步/导入协议时，本入口必须抛 `PreconditionFailure`（`Instance` 集合由材料源协议唯一维护，0b.1.5b）。
   - `SCHEDULING_EFFECT = NONE`
 - `add_learning_object_leaf(project_id: ProjectId, parent_id: Optional[LearningObjectNodeId], instance_id: InstanceId, title: str) -> LearningObjectNodeId`
   - 语义：在 `project_id` 作用域内创建一个新的 `LearningObjectLeaf` 并返回其 `node_id`。
   - 约束：不得触发任何调度推进；树一致性由 1.2.3 的提交期强制校验保证。当当前 `source_kind == MANUAL` 时，本入口可用于把书本、题册、讲义等非文件材料挂到手工目录树下。
+  - 额外约束（强约束）：当 `ProjectConfig.project_type == LOOSE_POINTS` 时，本入口必须抛 `PreconditionFailure`（该项目类型不维护学习对象树）。
   - 额外约束（强约束）：当项目启用 0b.1.5b 的同步/导入协议时，本入口必须抛 `PreconditionFailure`（`LearningObject` 树由材料源协议唯一维护，0b.1.5b）。
   - `SCHEDULING_EFFECT = NONE`
 - `add_learning_object_container(project_id: ProjectId, parent_id: Optional[LearningObjectNodeId], children: Sequence[LearningObjectNodeId], title: str) -> LearningObjectNodeId`
   - 语义：在 `project_id` 作用域内创建一个新的 `LearningObjectContainer` 并返回其 `node_id`。
   - 约束：不得触发任何调度推进；`children` 顺序为权威顺序；树一致性由 1.2.3 的提交期强制校验保证。允许 `children == ()`；当当前 `source_kind == MANUAL` 时，空容器可作为手工纲目/空目录挂载点使用。
+  - 额外约束（强约束）：当 `ProjectConfig.project_type == LOOSE_POINTS` 时，本入口必须抛 `PreconditionFailure`（该项目类型不维护学习对象树）。
   - 额外约束（强约束）：当项目启用 0b.1.5b 的同步/导入协议时，本入口必须抛 `PreconditionFailure`（`LearningObject` 树由材料源协议唯一维护，0b.1.5b）。
+  - `SCHEDULING_EFFECT = NONE`
+- `initialize_book_learning_objects(project_id: ProjectId, outline_items: Sequence[(depth: int, title: str)]) -> {created_instances_count: int, created_learning_object_nodes_count: int, root_count: int}`
+  - 语义：当且仅当 `project_type == BOOK` 且当前项目仍为空手工树时，按用户提供的目录层级文本一次性初始化书本学习对象树：非末级目录项创建 `LearningObjectContainer`，末级目录项创建 `LearningObjectLeaf`，并自动为每个末级目录项创建一个手工 `Instance`。
+  - 写前条件（强约束；0b.5）：
+    - `project_type == BOOK`。
+    - 当前 `ProjectMaterialSourceBinding.source_kind == MANUAL`。
+    - 当前项目内 `Instance` 集合与 `LearningObjectNode` 树都为空。
+    - `outline_items` 非空，首项 `depth == 0`，且层级每次最多只允许向下增加一级。
   - `SCHEDULING_EFFECT = NONE`
 
 4) 材料源同步与缺失迁移辅助（不产生调度副作用）
@@ -3497,7 +3543,7 @@ Failure 语义
   - `warnings: Tuple[str, ...]`
     - 语义：非致命提示；允许为空。实现不得在此字段中伪装错误成功。
 - `sync_learning_objects_from_fs(project_id: ProjectId) -> SyncReport`
-  - 语义：当且仅当 `source_kind == SERVER_FS` 时，按 0b.1.5b 对 `learning_object_root` 执行一次同步：检查目录同质性与同构；若一致则幂等返回；若不一致则重建 `LearningObjectNode` 树、为新增文件创建 `Instance`、并将缺失文件对应 `Instance` 标记为 `MISSING`。
+  - 语义：当且仅当 `project_type == COURSE` 且 `source_kind == SERVER_FS` 时，按 0b.1.5b 对 `learning_object_root` 执行一次同步：检查目录条目合法性与同构；若一致则幂等返回；若不一致则重建 `LearningObjectNode` 树、为新增文件创建 `Instance`、并将缺失文件对应 `Instance` 标记为 `MISSING`。
   - 返回约束（强约束）：
     - 若本次同步未产生任何持久化变更，则必须返回 `SyncReport(unchanged=true, created_instances_count=0, marked_missing_count=0, replaced_learning_object_nodes_count=0, warnings=...)`。
     - 若本次同步成功且产生了变更，则必须返回 `unchanged=false`，且三个 count 字段必须准确反映本次提交实际生效的变更数量。
@@ -3505,7 +3551,7 @@ Failure 语义
   - 门禁（强约束）：本入口不得调用 4.3.x 任一协议；不得创建/入队 ReviewTask。是否允许在队列非空时执行由实现决定，但若允许必须不改变任何调度相关对象。
   - Failure：目录结构损坏必须抛 `DirectoryStructureCorruptedError` 且不产生任何写入（0b.5）。
 - `import_learning_objects_from_browser_scan(project_id: ProjectId, root_title: Optional[str], relative_file_paths: Sequence[PurePath | str]) -> SyncReport`
-  - 语义：当且仅当 `source_kind == BROWSER_LOCAL` 时，按 0b.1.5b 接收一次浏览器本地目录显式导入：对 `relative_file_paths` 做规范化、构造父目录闭包与文件桶派生树；若与已提交结果一致则幂等返回；若不一致则重建 `LearningObjectNode` 树、为新增文件创建 `Instance`、并将缺失文件对应 `Instance` 标记为 `MISSING`。
+  - 语义：当且仅当 `project_type == COURSE` 且 `source_kind == BROWSER_LOCAL` 时，按 0b.1.5b 接收一次浏览器本地目录显式导入：对 `relative_file_paths` 做规范化、构造父目录闭包与直接孩子集合；若与已提交结果一致则幂等返回；若不一致则重建 `LearningObjectNode` 树、为新增文件创建 `Instance`、并将缺失文件对应 `Instance` 标记为 `MISSING`。
   - 额外语义（强约束）：若本次导入成功且当前绑定不是 `BROWSER_LOCAL`，系统必须在同一事务内将该项目的 `ProjectMaterialSourceBinding.source_kind` 更新为 `BROWSER_LOCAL`，并把 `source_root_label` 更新为导入使用的根目录显示名（若空则写入最小实现默认值 `"已授权目录"`）。
   - 返回约束（强约束）：
     - 若本次导入未产生任何持久化变更，则必须返回 `SyncReport(unchanged=true, created_instances_count=0, marked_missing_count=0, replaced_learning_object_nodes_count=0, warnings=...)`。
@@ -3514,7 +3560,7 @@ Failure 语义
   - 门禁（强约束）：本入口不得调用 4.3.x 任一协议；不得创建/入队 ReviewTask。是否允许在队列非空时执行由实现决定，但若允许必须不改变任何调度相关对象。
   - Failure：非法相对路径、空导入、非支持媒体扩展名或目录结构损坏必须抛明确错误且不产生任何写入（0b.5）。
 - `sync_learning_objects_from_native_scan(project_id: ProjectId, root_title: Optional[str], relative_file_paths: Sequence[PurePath | str]) -> SyncReport`
-  - 语义：当且仅当 `source_kind == NATIVE_LOCAL` 时，按 0b.1.5b 接收一次来自 `DESKTOP_NATIVE` 运行时稳定目录绑定的快照同步：对 `relative_file_paths` 做与 `BROWSER_LOCAL` 相同的规范化、构造父目录闭包与文件桶派生树；若与已提交结果一致则幂等返回；若不一致则重建 `LearningObjectNode` 树、为新增文件创建 `Instance`、并将缺失文件对应 `Instance` 标记为 `MISSING`。
+  - 语义：当且仅当 `project_type == COURSE` 且 `source_kind == NATIVE_LOCAL` 时，按 0b.1.5b 接收一次来自 `DESKTOP_NATIVE` 运行时稳定目录绑定的快照同步：对 `relative_file_paths` 做与 `BROWSER_LOCAL` 相同的规范化、构造父目录闭包与直接孩子集合；若与已提交结果一致则幂等返回；若不一致则重建 `LearningObjectNode` 树、为新增文件创建 `Instance`、并将缺失文件对应 `Instance` 标记为 `MISSING`。
   - 额外语义（强约束）：若本次同步成功且当前绑定不是 `NATIVE_LOCAL`，系统必须在同一事务内将该项目的 `ProjectMaterialSourceBinding.source_kind` 更新为 `NATIVE_LOCAL`，并把 `source_root_label` 更新为当前 Native 目录显示名（若空则写入最小实现默认值 `"已绑定目录"`）。
   - 返回约束（强约束）：
     - 若本次同步未产生任何持久化变更，则必须返回 `SyncReport(unchanged=true, created_instances_count=0, marked_missing_count=0, replaced_learning_object_nodes_count=0, warnings=...)`。
@@ -3527,7 +3573,7 @@ Failure 语义
   - `SCHEDULING_EFFECT = NONE`
 
 - `list_recall_points_by_instance(project_id: ProjectId, instance_id: InstanceId) -> Sequence[RecallPointId]`
-  - 语义：返回所有满足 `RecallPoint.anchor.instance_id == instance_id` 且 `RecallPoint.state == ACTIVE` 的复述点 ID（返回顺序按 `id_canonical_text(recall_point_id)` 升序）。
+  - 语义：返回所有满足 `RecallPoint.anchor != None`、`RecallPoint.anchor.instance_id == instance_id` 且 `RecallPoint.state == ACTIVE` 的复述点 ID（返回顺序按 `id_canonical_text(recall_point_id)` 升序）。
   - `SCHEDULING_EFFECT = NONE`
 
 - `bulk_remap_recall_points_instance(project_id: ProjectId, from_instance_id: InstanceId, to_instance_id: InstanceId, recall_point_ids: Optional[Sequence[RecallPointId]] = None) -> int`
@@ -3538,14 +3584,19 @@ Failure 语义
 
 5) 学习提交（会产生调度副作用）
 
-- `submit_learning_task(project_id: ProjectId, items: Sequence[(question: RichContent, answer: RichContent, anchor: Anchor)], title: str) -> LearningTaskNodeId`
+- `submit_learning_task(project_id: ProjectId, items: Sequence[(question: RichContent, answer: RichContent, anchor: Optional[Anchor])], title: str) -> LearningTaskNodeId`
   - 语义：执行 2.1（学习任务提交）并在同一提交中完成该入口节点的登记（4.3.2）；是否触发 Tick 由 Layer 的 `layer_mode` 决定（4.2.4）。
+  - 项目类型约束（强约束；写死）：
+    - `COURSE`：每个 item 的 `anchor` 必须存在，且必须满足 1.3.1 的 COURSE 锚点规则。
+    - `BOOK`：每个 item 的 `anchor` 必须存在，且必须满足 1.3.1 的 BOOK 锚点规则。
+    - `LOOSE_POINTS`：每个 item 的 `anchor` 必须为 `None`。
   - `SCHEDULING_EFFECT = ORCHESTRATION_MUTATING`
   - 门禁：受 4.1.3(a) 约束（项目内全局 ReviewTaskQueue 非空时必须拒绝）。
 
 6) 编辑/删除类写入（不产生调度副作用）
-- `edit_recall_point(project_id: ProjectId, recall_point_id: RecallPointId, question: RichContent, answer: RichContent, anchor: Anchor) -> None`
+- `edit_recall_point(project_id: ProjectId, recall_point_id: RecallPointId, question: RichContent, answer: RichContent, anchor: Optional[Anchor]) -> None`
   - 语义：只调用 `RecallPointRepository.update(...)` 产生业务事实更新；不得调用任一 4.3.x 推进协议；不得创建/入队 ReviewTask。
+  - 项目类型约束：同 `submit_learning_task(...)`。
   - `SCHEDULING_EFFECT = NONE`
   - 门禁：允许在队列非空时执行（4.1.3(b)）。
 - `delete_recall_point(project_id: ProjectId, recall_point_id: RecallPointId) -> None`
@@ -3557,7 +3608,7 @@ Failure 语义
   - 语义：在一次系统事务内调用 `LearningTaskRepository.update(...)` 更新该 LearningTask 的 `title`；不得调用任一 4.3.x 推进协议；不得创建/入队 ReviewTask。
   - `SCHEDULING_EFFECT = NONE`
   - 门禁：允许在队列非空时执行（4.1.3(b)）。
-- `set_layer_config(project_id: ProjectId, layer_index: int, review_chain_template: Optional[ReviewChainTemplate], K_node: Optional[int], K_point: Optional[int]) -> None`
+- `set_layer_config(project_id: ProjectId, layer_index: int, review_chain_template: Optional[ReviewChainTemplate], K_node: Optional[int], K_point: Optional[int], threshold_roll_up_enabled: Optional[bool]) -> None`
   - 语义：只修改配置与 Layer 控制字段；不得调用任一 4.3.x 推进协议；不得创建/入队 ReviewTask。
     - 在同一系统事务内 upsert：`ProjectConfig.layer_configs[layer_index]`（1.0.5）。  
     - 若该 `layer_index` 对应 Layer 已存在：必须在同一事务内调用 `LayerRepository.update_threshold(...)` 更新 Layer 当前阈值，使更新对未来立即生效。  
@@ -3663,8 +3714,14 @@ Failure 语义
 - `get_memory_barrage_at_time(project_id: ProjectId, instance_id: InstanceId, center_ms: int, window_ms: int = 30_000) -> Sequence[MemoryBarrageItem]`
   - 语义：返回目标时间窗内的“弹幕式记忆投影”；该结果只能由既有事实投影得到，不得写入任何“会/不会”结果。
   - `SCHEDULING_EFFECT = NONE`
-- `list_review_recommendations(project_id: ProjectId, max_results: int) -> Sequence[ReviewRecommendation]`
-  - 语义：按 4.7 计算结构化推荐项；纯读取。
+- `list_review_recommendations(project_id: ProjectId, offset: int = 0, limit: Optional[int] = None) -> (items: Sequence[RecallPointReviewRecommendation], total_count: int, next_offset: Optional[int], limit: int)`
+  - 语义：按 4.7 返回按推荐指数降序排列的“只读推荐复习”批次；若 `limit` 省略，则必须读取 `ProjectConfig.push_config.recommended_batch_size` 作为批大小；纯读取。
+  - `SCHEDULING_EFFECT = NONE`
+- `get_recall_point_review_projection(project_id: ProjectId, recall_point_id: RecallPointId) -> RecallPointReviewProjection`
+  - 语义：返回单个复述点的只读复习投影，包括历史记录、当前记忆强度、复习推荐指数与绘制复习曲线所需的数据；纯读取。
+  - `SCHEDULING_EFFECT = NONE`
+- `set_review_recommendation_config(project_id: ProjectId, min_recall_points_to_enable: Optional[int] = None, max_history_len: Optional[int] = None, recommended_batch_size: Optional[int] = None, forgetting_curve_decay_per_day: Optional[float] = None) -> None`
+  - 语义：合并更新 `ProjectConfig.push_config`；不得影响任何既有 `ReviewTask / ReviewChain / Convergence / LearningTaskNode`。
   - `SCHEDULING_EFFECT = NONE`
 - `get_compression_summary(project_id: ProjectId, learning_task_node_id: Optional[LearningTaskNodeId] = None) -> CompressionSummary`
   - 语义：按 4.7 返回压缩感摘要；纯读取。
@@ -3733,6 +3790,7 @@ Failure 语义
 - `delete_recall_point(...)` -> `DELETE_RECALL_POINT`
 - `edit_learning_task(...)` -> `EDIT_LEARNING_TASK`
 - `set_layer_config(...)` -> `EDIT_PROJECT_CONFIG`
+- `set_review_recommendation_config(...)` -> `EDIT_PROJECT_CONFIG`
 - `executor_commit_review_task(...)` -> `EXECUTOR_COMMIT_REVIEW_TASK`
 - `manual_roll_up(...)` -> `MANUAL_ROLL_UP`
 - `request_asr(...)` -> `REQUEST_ASR`
@@ -3771,49 +3829,63 @@ Payload 最小摘要建议（非强制；推荐）
 - `TimelineAnchor = {recall_point_id: RecallPointId, instance_id: InstanceId, center_ms: int, label: str}`
 - `MemoryBarrageItem = {occurred_at_ms: int, source_kind: Enum{RECALL_POINT, CANDIDATE_RECALL_POINT, TEMP_CONTEXT_FRAGMENT, STORY_ARTIFACT}, source_id: str, text: str}`
 - `ReviewRecommendation = {subject_kind: Enum{RECALL_POINT, CANDIDATE_RECALL_POINT, MEMORY_CANVAS, STORY_ARTIFACT}, subject_id: str, score: float, reasons: Tuple[str, ...], suggested_action: Enum{OPEN_REVIEW, ACCEPT_CANDIDATE, OPEN_CANVAS, READ_STORY}}`
+- `RecallPointReviewRecommendation = {recall_point_id: RecallPointId, review_recommendation_index: float, estimated_memory_strength: float, weighted_success_ratio: float, last_reviewed_at: Optional[Timestamp], last_review_result: Optional[Enum{CAN_RECALL, CANNOT_RECALL}], review_count: int}`
+- `RecallPointReviewProjection = {recall_point_id: RecallPointId, calculated_at: Timestamp, review_recommendation_index: float, estimated_memory_strength: float, weighted_success_ratio: float, forgetting_curve_decay_per_day: float, history_window_size: int, last_reviewed_at: Optional[Timestamp], last_review_result: Optional[Enum{CAN_RECALL, CANNOT_RECALL}], history: Sequence[(review_task_id: ReviewTaskId, occurred_at: Timestamp, result: Enum{CAN_RECALL, CANNOT_RECALL})]}`
 - `CompressionSummary = {target_learning_task_node_id: Optional[LearningTaskNodeId], score: float, reasons: Tuple[str, ...], summary_text: Optional[str]}`
 - `DriftAlert = {subject_kind: Enum{RECALL_POINT, LEARNING_TASK_NODE, MEMORY_CANVAS}, subject_id: str, severity: Enum{INFO, WARNING, CRITICAL}, reasons: Tuple[str, ...], suggested_action: Optional[str]}`
 
 强约束：
 - 以上返回形态均为只读值对象，不属于仓库存储对象。  
 - `get_memory_barrage_at_time(...)` 的结果只允许由既有 `RecallPoint`、候选点、临时片段、故事化产物投影得到；不得为弹幕层引入独立写协议。  
+- `RecallPointReviewRecommendation / RecallPointReviewProjection` 只允许投影既有 `RecallPoint` 与 `RecallPointReviewRecord`；不得创建 `ReviewTask`，不得新增 `RecallPointReviewRecord`，也不得把“查看推荐复习页/点击继续推荐”误记为正式复习。
 
-#### 4.7.2 推荐启用门槛与复述点特征向量（强约束）
+#### 4.7.2 推荐启用门槛、遗忘曲线加权法与排序（强约束）
 
 设：
 - `N := |{rp ∈ RecallPointRepository.all(session) | rp.state == ACTIVE}|`（项目内 ACTIVE 复述点总数）
 - `T := ProjectConfig.push_config.min_recall_points_to_enable`
+- `H := ProjectConfig.push_config.max_history_len`
+- `B := ProjectConfig.push_config.recommended_batch_size`
+- `λ := ProjectConfig.push_config.forgetting_curve_decay_per_day`
 
 强约束：
-- 若 `N < T`：系统必须视为“推荐未启用”，`list_review_recommendations(...)` 必须返回空列表（或实现定义的确定性退化策略，但不得调用本地推荐模型）。  
-- 若 `N >= T`：推荐启用；系统允许进入特征向量编码与本地推荐模型调用路径。  
-- `state == DELETED` 的 `RecallPoint` 必须完全排除在候选集合、候选排序、特征编码与模型输入之外。  
+- 若 `N < T`：系统必须视为“推荐未启用”，`list_review_recommendations(...)` 必须返回空列表。  
+- 若 `N >= T`：推荐启用；`state == DELETED` 的 `RecallPoint` 必须完全排除在候选集合、候选排序与指数计算之外。  
+- `H >= 0`，`B >= 1`，`λ > 0`。若 `limit` 省略，则 `list_review_recommendations(...)` 必须使用 `B`。  
 
-复述点特征向量（最小版，强约束）  
-- 对任一 `recall_point_id`：  
-  - 进入编码路径前必须满足其 `RecallPoint.state == ACTIVE`。  
-  - 令 `t0 := RecallPoint.created_at`。  
-  - 令 `R := RecallPointReviewRecordRepository.all_by_recall_point(session, recall_point_id)`，按 `occurred_at` 升序。  
-  - 仅取 `R` 的末尾至多 `ProjectConfig.push_config.max_history_len` 条。  
-- 编码规则：  
-  - 若 `R` 为空：特征向量为空序列（`[]`）。  
-  - 否则：  
-    - `Δt_0 := R[0].occurred_at - t0`（毫秒，允许为 0）。  
-    - 对 `i >= 1`：`Δt_i := R[i].occurred_at - R[i-1].occurred_at`。  
-    - `y_i := 1` 当且仅当 `R[i].result == CAN_RECALL`；否则 `y_i := 0`。  
-- 输出承载形态（推荐；非强制）：`features = [{"dt_ms": Δt_i, "y": y_i} for i in 0..k]` 或等价扁平数组 `[Δt_0, y_0, Δt_1, y_1, ...]`。  
+遗忘曲线加权法（最小版，强约束）
+- 对任一候选 `recall_point_id`：
+  - 进入计算路径前必须满足其 `RecallPoint.state == ACTIVE`。
+  - 令 `R := RecallPointReviewRecordRepository.all_by_recall_point(session, recall_point_id)`，按 `occurred_at` 升序。
+  - 若 `H > 0` 且 `|R| > H`，则仅保留 `R` 的末尾 `H` 条；若 `H == 0`，则视为 `R = []`。
+  - 对任一 `record_i ∈ R`，令 `y_i := 1` 当且仅当 `record_i.result == CAN_RECALL`，否则 `y_i := 0`。
+  - 令 `age_i_days := max(0, (calculated_at - record_i.occurred_at) / 1 day)`。
+  - 令 `w_i := exp(-λ * age_i_days)`。
+- 若 `R == []`：
+  - `weighted_success_ratio := 0`
+  - `estimated_memory_strength := 0`
+  - `review_recommendation_index := 100`
+- 否则：
+  - `weighted_success_ratio := (Σ_i w_i * y_i) / (Σ_i w_i)`
+  - `last_reviewed_at := R[-1].occurred_at`
+  - `last_age_days := max(0, (calculated_at - last_reviewed_at) / 1 day)`
+  - `freshness := exp(-λ * last_age_days)`
+  - `estimated_memory_strength := max(0, min(1, weighted_success_ratio * freshness))`
+  - `review_recommendation_index := 100 * (1 - estimated_memory_strength)`
 
-#### 4.7.3 本地模型与失败处理（强约束）
+排序与分页（强约束）
+- `list_review_recommendations(...)` 必须按以下键排序后再分页：
+  - 主键：`review_recommendation_index` 降序
+  - 次键：`last_reviewed_at` 升序；`None` 视为早于任何实际时间
+  - 末键：`id_canonical_text(recall_point_id)` 升序
+- 返回分页必须按已排序全量序列执行 `offset/limit` 切片，并返回 `next_offset`（若无后续批次则为 `None`）。
 
-配置来源（强约束）
-- 推荐模型配置只能来自 `NativeRuntimeConfig.local_models.recommender`（1.0.5）；服务端项目配置不得携带该信息。  
-- 若当前运行时不是 `DESKTOP_NATIVE`，或缺少 `LOCAL_RECOMMENDER` capability，或运行时模型配置缺失，则系统必须禁用模型调用，仅能返回空列表或固定规则结果（实现自定，但必须确定性）。  
+#### 4.7.3 只读推荐复习页边界与失败语义（强约束）
 
-调用形态（强约束）
-- 本地推荐、压缩感与漂移分析允许通过 Native 本地服务执行；该访问属于运行时能力，不得被描述为项目级共享能力。  
-
-失败处理（强约束）
-- 模型服务不可达、超时、返回格式错误：不得导致系统崩溃；`list_review_recommendations(...)` 必须返回空列表或回退到确定性规则，`get_compression_summary(...)` / `list_drift_alerts(...)` 必须返回空摘要或空列表，且不得写入任何持久化状态。  
+- “推荐复习页/继续推荐”是**只读复习**：它只能展示 `RecallPoint` 内容、历史记录、曲线和推荐指数；不得创建 `ReviewTask`、不得触发 `executor_commit_review_task(...)`、不得写入任何 `RecallPointReviewRecord`。
+- 用户在该页查看题面/答案、展开详情、切换批次，都不得被解释为“完成了一次正式复习任务”。
+- `get_recall_point_review_projection(...)` 必须返回当前用于绘制曲线的 `calculated_at` 与 `forgetting_curve_decay_per_day`，以保证前端渲染与后端计算口径一致。
+- 任一只读推荐接口失败不得产生任何持久化副作用；若目标 `RecallPoint` 不可解析则返回 `NotFound`，若分页超出尾部则返回空批次且 `next_offset = None`。
 
 <a id="toc-4-8"></a>
 

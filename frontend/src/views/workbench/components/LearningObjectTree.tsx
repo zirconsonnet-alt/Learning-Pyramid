@@ -4,6 +4,7 @@ import { ChevronRight } from "lucide-react"
 import { Link } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
+import type { ProjectType } from "@/ui/api/projects"
 import { ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { listLearningObjectNodes, type LearningObjectNode } from "@/ui/api/learningObjects"
 import { Button } from "@/ui/components/ui/button"
@@ -15,6 +16,8 @@ import { scanProjectDirectoryMedia, useProjectDirectoryBinding } from "@/ui/loca
 import { useImportLearningObjectsFromBrowser } from "@/ui/queries/workbench"
 import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { cn } from "@/ui/utils"
+
+const LEARNING_OBJECT_TREE_QUERY_TIMEOUT_MS = 90_000
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -150,10 +153,12 @@ function TreeNode({
 
 export function LearningObjectTree({
   projectId,
+  projectType,
   selectedInstanceId,
   onSelectInstance,
 }: {
   projectId: string
+  projectType: ProjectType
   selectedInstanceId: string | null
   onSelectInstance: (instanceId: string) => void
 }) {
@@ -161,7 +166,7 @@ export function LearningObjectTree({
   const importLearningObjectsM = useImportLearningObjectsFromBrowser(projectId)
   const q = useQuery({
     queryKey: ["learningObjectNodes", projectId],
-    queryFn: () => listLearningObjectNodes(projectId),
+    queryFn: ({ signal }) => listLearningObjectNodes(projectId, { signal, timeoutMs: LEARNING_OBJECT_TREE_QUERY_TIMEOUT_MS }),
     enabled: !!projectId,
   })
 
@@ -232,10 +237,15 @@ export function LearningObjectTree({
   }
 
   if (rootIds.length === 0) {
-    const canImportHere = directoryBinding.permission === "granted" && !directoryBinding.loading
+    const canImportHere = projectType === "COURSE" && directoryBinding.permission === "granted" && !directoryBinding.loading
     return (
       <div className="space-y-3 rounded-[1rem] border border-dashed border-border/70 bg-white p-4">
         <div className="text-sm font-medium text-foreground">当前还没有学习对象</div>
+        <div className="text-sm text-muted-foreground">
+          {projectType === "BOOK"
+            ? "书本项目需要先在项目设置里粘贴目录文本并完成一次目录初始化。"
+            : "先接入内容目录后，学习对象树会显示在这里。"}
+        </div>
         <div className="flex flex-wrap gap-2">
           {canImportHere ? (
             <Button size="sm" className="rounded-full" onClick={() => void onImportHere()} disabled={importLearningObjectsM.isPending}>
@@ -243,7 +253,7 @@ export function LearningObjectTree({
             </Button>
           ) : null}
           <Button asChild size="sm" variant={canImportHere ? "outline" : "default"} className="rounded-full">
-            <Link to={`/p/${projectId}/settings`}>{canImportHere ? "前往项目设置" : "前往项目设置"}</Link>
+            <Link to={`/p/${projectId}/settings`}>{projectType === "BOOK" ? "去初始化目录" : "前往项目设置"}</Link>
           </Button>
         </div>
       </div>

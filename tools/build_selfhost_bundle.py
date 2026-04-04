@@ -139,7 +139,20 @@ def _resolve_pnpm_command() -> list[str]:
     raise SystemExit("Could not find pnpm. Install pnpm or ensure corepack is available before building the self-host bundle.")
 
 
+def _clean_frontend_build_outputs() -> None:
+    dist_dir = PROJECT_ROOT / "frontend" / "dist"
+    if dist_dir.exists():
+        shutil.rmtree(dist_dir)
+
+    tmp_dir = PROJECT_ROOT / "frontend" / "node_modules" / ".tmp"
+    for buildinfo_name in ("tsconfig.app.tsbuildinfo", "tsconfig.node.tsbuildinfo"):
+        buildinfo_path = tmp_dir / buildinfo_name
+        if buildinfo_path.exists():
+            buildinfo_path.unlink()
+
+
 def _build_frontend() -> None:
+    _clean_frontend_build_outputs()
     subprocess.run([*_resolve_pnpm_command(), "build"], cwd=str(PROJECT_ROOT / "frontend"), check=True)
 
 

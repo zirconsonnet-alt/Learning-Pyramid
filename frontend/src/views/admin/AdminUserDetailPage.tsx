@@ -73,7 +73,7 @@ export function AdminUserDetailPage() {
   }
 
   if (userDetailQ.isLoading) {
-    return <LoadingNotice title="正在加载用户详情" message="我们正在整理该用户的资料、角色和小组信息。" />
+    return <LoadingNotice title="正在加载用户详情" message="我们正在整理该用户的资料、角色和最近后台记录。" />
   }
 
   if (userDetailQ.error || !userDetailQ.data) {
@@ -147,8 +147,8 @@ export function AdminUserDetailPage() {
                 </div>
               </div>
               <div className="rounded-[1rem] border border-[#e3e8ef] bg-white/80 p-4">
-                <div className="text-xs uppercase tracking-[0.12em] text-muted-foreground">学习小组</div>
-                <div className="mt-2 text-sm font-medium text-foreground">{user.groups.length} 个</div>
+                <div className="text-xs uppercase tracking-[0.12em] text-muted-foreground">公开 UID</div>
+                <div className="mt-2 text-sm font-medium text-foreground">{user.publicUid}</div>
               </div>
             </div>
           </CardContent>
@@ -206,54 +206,6 @@ export function AdminUserDetailPage() {
           </CardContent>
         </Card>
       </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>参与的小组</CardTitle>
-          <CardDescription>展示这个用户当前加入了哪些学习小组、在里面是什么角色，以及什么时候加入的。</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {user.groups.length === 0 ? (
-            <ContentEmptyState title="这个用户还没有加入任何小组" message="后续如果要排查用户互动行为，我们可以等第三轮的小组详情页一起串起来。" />
-          ) : null}
-
-          {user.groups.map((group) => (
-            <div key={group.groupId} className="rounded-[1rem] border border-[#e3e8ef] bg-white/80 p-4">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                <div className="min-w-0 flex flex-1 gap-3">
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-dashed border-[#d8e1ec] bg-[#f7fafc] text-sm font-semibold text-[#5c6f86]">
-                    {group.avatarUrl ? <img src={group.avatarUrl} alt={group.name} className="h-full w-full object-cover" /> : group.name.slice(0, 1).toUpperCase()}
-                  </div>
-                  <div className="min-w-0 flex-1 space-y-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <div className="text-sm font-semibold text-foreground">{group.name}</div>
-                      <StatusPill tone={group.status === "active" ? "accent" : group.status === "blocked" || group.status === "dissolved" ? "danger" : "default"}>
-                        {group.status}
-                      </StatusPill>
-                      <StatusPill>{group.memberRole}</StatusPill>
-                      <StatusPill>{group.memberCount} 成员</StatusPill>
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      组长：{group.ownerNickname} · UID {group.ownerPublicUid}
-                    </div>
-                    <p className="text-sm leading-6 text-[#53657b]">{group.description || "这个小组还没有填写介绍。"}</p>
-                    <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
-                      <span>加入时间：{formatDateTime(group.joinedAt)}</span>
-                      <span>可见性：{group.visibility}</span>
-                      <span>加入策略：{group.joinPolicy}</span>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex shrink-0 gap-2">
-                  <Button asChild variant="outline" size="sm">
-                    <Link to={`/groups/${group.groupId}`}>查看小组</Link>
-                  </Button>
-                </div>
-              </div>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
 
       <Card>
         <CardHeader>

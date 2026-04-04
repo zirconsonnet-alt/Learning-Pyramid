@@ -25,6 +25,7 @@ from backend.models.enums import (
     LayerMode,
     MaterialSourceKind,
     ProjectState,
+    ProjectType,
     RecallPointState,
     ReviewChainState,
     ReviewTaskState,
@@ -39,8 +40,10 @@ from backend.models.errors import (
     StructuralInconsistencyError,
     SessionClosedError,
 )
+from backend.models.global_settings import GlobalLlmSettings
 from backend.models.idgen import InMemoryIdGenerator
 from backend.models.instance import Instance
+from backend.models.instance_media_binding import InstanceMediaBinding
 from backend.models.layer import Layer
 from backend.models.learning_object_node import LearningObjectContainer, LearningObjectLeaf, LearningObjectNode
 from backend.models.learning_task import LearningTask
@@ -103,6 +106,7 @@ class ProjectStore:
     audit_log_events: Dict[str, AuditLogEvent] = field(default_factory=dict)
 
     instances: Dict[str, Instance] = field(default_factory=dict)
+    instance_media_bindings: Dict[str, InstanceMediaBinding] = field(default_factory=dict)
     learning_object_nodes: Dict[str, LearningObjectNode] = field(default_factory=dict)
     recall_points: Dict[str, RecallPoint] = field(default_factory=dict)
     recall_point_review_records: Dict[str, RecallPointReviewRecord] = field(default_factory=dict)
@@ -137,6 +141,8 @@ class ProjectStaged:
 
     instances: Dict[str, Instance] = field(default_factory=dict)
     instances_deleted: Set[str] = field(default_factory=set)
+    instance_media_bindings: Dict[str, InstanceMediaBinding] = field(default_factory=dict)
+    instance_media_bindings_deleted: Set[str] = field(default_factory=set)
     learning_object_nodes: Dict[str, LearningObjectNode] = field(default_factory=dict)
     learning_object_nodes_replaced: bool = False
     recall_points: Dict[str, RecallPoint] = field(default_factory=dict)
@@ -161,6 +167,7 @@ class ProjectStaged:
 @dataclass
 class GlobalStore:
     projects: Dict[str, ProjectStore] = field(default_factory=dict)
+    global_llm_settings: GlobalLlmSettings | None = None
     idgen: InMemoryIdGenerator = field(default_factory=InMemoryIdGenerator)
     _write_lock_held: bool = False
 
@@ -233,6 +240,13 @@ def _overlay_instances(ps: ProjectStore, st: ProjectStaged) -> Dict[str, Instanc
 
 def _overlay_media_assets(ps: ProjectStore, st: ProjectStaged) -> Dict[str, MediaAsset]:
     return _merge_dict(ps.media_assets, st.media_assets)
+
+def _overlay_instance_media_bindings(ps: ProjectStore, st: ProjectStaged) -> Dict[str, InstanceMediaBinding]:
+    merged = dict(getattr(ps, "instance_media_bindings", {}))
+    for k in getattr(st, "instance_media_bindings_deleted", set()):
+        merged.pop(k, None)
+    merged.update(getattr(st, "instance_media_bindings", {}))
+    return merged
 
 def _overlay_audit_log_events(ps: ProjectStore, st: ProjectStaged) -> Dict[str, AuditLogEvent]:
     return _merge_dict(getattr(ps, "audit_log_events", {}), getattr(st, "audit_log_events", {}))
@@ -599,12 +613,60 @@ class InstanceRepository:
         # 写前条件：不得被任何 RecallPoint.anchor.instance_id 引用；否则 PreconditionFailure
         recall_points = _merge_dict(ps.recall_points, st.recall_points)
         for rp in recall_points.values():
-            if id_canonical_text(rp.anchor.instance_id) == k:
+            if rp.anchor is not None and id_canonical_text(rp.anchor.instance_id) == k:
                 raise PreconditionFailure("InstanceRepository.delete: instance_id is referenced by RecallPoint.anchor.instance_id")
 
         st.instances_deleted.add(k)
         # If the instance was created/updated in this session, drop it from staged writes.
         st.instances.pop(k, None)
+        st.instance_media_bindings.pop(k, None)
+        st.instance_media_bindings_deleted.add(k)
+
+
+class InstanceMediaBindingRepository:
+    def __init__(self, g: GlobalStore) -> None:
+        self.g = g
+
+    def get(self, session: MutationSession, instance_id: InstanceId) -> InstanceMediaBinding:
+        session.assert_open()
+        ps = session._baseline
+        k = id_canonical_text(instance_id)
+        if k in session._staged.instance_media_bindings_deleted:
+            raise NotFound(instance_id)
+        return _overlay_get(getattr(ps, "instance_media_bindings", {}), session._staged.instance_media_bindings, k)
+
+    def maybe_get(self, session: MutationSession, instance_id: InstanceId) -> Optional[InstanceMediaBinding]:
+        session.assert_open()
+        ps = session._baseline
+        k = id_canonical_text(instance_id)
+        if k in session._staged.instance_media_bindings_deleted:
+            return None
+        return _overlay_maybe_get(getattr(ps, "instance_media_bindings", {}), session._staged.instance_media_bindings, k)
+
+    def all(self, session: MutationSession) -> Tuple[InstanceMediaBinding, ...]:
+        session.assert_open()
+        ps = session._baseline
+        return _overlay_all_sorted(getattr(ps, "instance_media_bindings", {}), session._staged.instance_media_bindings)
+
+    def set(self, session: MutationSession, binding: InstanceMediaBinding) -> None:
+        session.assert_open()
+        if session.mode != SessionMode.READ_WRITE:
+            raise PreconditionFailure("READ_ONLY session cannot write")
+        if binding.project_id != session.project_id:
+            raise PreconditionFailure("InstanceMediaBindingRepository.set must use matching session.project_id")
+        binding.validate_write_time()
+        session._staged.instance_media_bindings_deleted.discard(id_canonical_text(binding.instance_id))
+        session._staged.instance_media_bindings[id_canonical_text(binding.instance_id)] = binding
+
+    def delete(self, session: MutationSession, instance_id: InstanceId) -> None:
+        session.assert_open()
+        if session.mode != SessionMode.READ_WRITE:
+            raise PreconditionFailure("READ_ONLY session cannot write")
+        k = id_canonical_text(instance_id)
+        if self.maybe_get(session, instance_id) is None:
+            raise NotFound(instance_id)
+        session._staged.instance_media_bindings.pop(k, None)
+        session._staged.instance_media_bindings_deleted.add(k)
 
 
 class LearningObjectNodeRepository:
@@ -783,10 +845,11 @@ class RecallPointRepository:
         if rp.project_id != session.project_id:
             raise PreconditionFailure("RecallPoint.project_id must match session.project_id")
         rp.validate_write_time()
-        try:
-            self.instance_repo.get(session, rp.anchor.instance_id)
-        except NotFound:
-            raise PreconditionFailure("anchor.instance_id not resolvable")
+        if rp.anchor is not None:
+            try:
+                self.instance_repo.get(session, rp.anchor.instance_id)
+            except NotFound:
+                raise PreconditionFailure("anchor.instance_id not resolvable")
 
         # RichContent IMAGE blocks must be resolvable (0a.12)
         self._assert_rich_content_assets_resolvable(session, rp.question)
@@ -810,10 +873,11 @@ class RecallPointRepository:
         if rp.project_id != session.project_id:
             raise PreconditionFailure("RecallPoint.project_id must match session.project_id")
         rp.validate_write_time()
-        try:
-            self.instance_repo.get(session, rp.anchor.instance_id)
-        except NotFound:
-            raise PreconditionFailure("anchor.instance_id not resolvable")
+        if rp.anchor is not None:
+            try:
+                self.instance_repo.get(session, rp.anchor.instance_id)
+            except NotFound:
+                raise PreconditionFailure("anchor.instance_id not resolvable")
 
         # RichContent IMAGE blocks must be resolvable (0a.12)
         self._assert_rich_content_assets_resolvable(session, rp.question)
@@ -1046,7 +1110,8 @@ class LearningTaskRepository:
         out: Set[InstanceId] = set()
         for rp_id in t.recall_point_ids:
             rp = recall_points_repo.get(session, rp_id)
-            out.add(rp.anchor.instance_id)
+            if rp.anchor is not None:
+                out.add(rp.anchor.instance_id)
         return out
 
 
@@ -1081,6 +1146,27 @@ class LearningTaskNodeRepository:
             b = id_canonical_text(node.bound_learning_task_id)
             for n in list(ps.learning_task_nodes.values()) + list(session._staged.learning_task_nodes.values()):
                 if isinstance(n, LearningTaskLeaf) and id_canonical_text(n.bound_learning_task_id) == b:
+                    raise PreconditionFailure("LearningTaskId already bound by another LearningTaskLeaf")
+        session._staged.learning_task_nodes[k] = node
+
+    def update(self, session: MutationSession, node: LearningTaskNode) -> None:
+        session.assert_open()
+        if session.mode != SessionMode.READ_WRITE:
+            raise PreconditionFailure("READ_ONLY session cannot write")
+        ps = session._baseline
+        k = id_canonical_text(node.node_id)
+        current = _overlay_maybe_get(ps.learning_task_nodes, session._staged.learning_task_nodes, k)
+        if current is None:
+            raise NotFound(node.node_id)
+        if isinstance(current, LearningTaskLeaf) != isinstance(node, LearningTaskLeaf):
+            raise PreconditionFailure("LearningTaskNode kind cannot change")
+        node.validate_write_time()
+        if isinstance(node, LearningTaskLeaf):
+            b = id_canonical_text(node.bound_learning_task_id)
+            for existing_key, existing in _merge_dict(ps.learning_task_nodes, session._staged.learning_task_nodes).items():
+                if existing_key == k:
+                    continue
+                if isinstance(existing, LearningTaskLeaf) and id_canonical_text(existing.bound_learning_task_id) == b:
                     raise PreconditionFailure("LearningTaskId already bound by another LearningTaskLeaf")
         session._staged.learning_task_nodes[k] = node
 
@@ -1951,21 +2037,17 @@ def _validate_learning_object_tree_consistency(ps: ProjectStore, st: ProjectStag
     for nid, n in nodes.items():
         if isinstance(n, LearningObjectContainer):
             seen: Set[str] = set()
-            child_types: Set[type] = set()
             for cid in n.children:
                 ck = id_canonical_text(cid)
                 if ck in seen:
                     raise CommitTimeValidationFailure("Duplicate child in LearningObjectContainer.children")
                 seen.add(ck)
                 ch = get(ck)
-                child_types.add(type(ch))
                 if ch.parent_id is None or id_canonical_text(ch.parent_id) != nid:
                     raise CommitTimeValidationFailure("Bidirectional inconsistency (child.parent_id)")
                 if ck in parent_of and parent_of[ck] != nid:
                     raise CommitTimeValidationFailure("No multiple parents violated")
                 parent_of[ck] = nid
-            if len(child_types) > 1:
-                raise CommitTimeValidationFailure("Homogeneous children violated")
 
     for nid, n in nodes.items():
         if n.parent_id is not None:
@@ -2157,6 +2239,7 @@ class InMemorySystem:
         self.material_allowlist_repo = MaterialAllowlistRepository(self.g)
         self.media_asset_repo = MediaAssetRepository(self.g)
         self.instance_repo = InstanceRepository(self.g)
+        self.instance_media_binding_repo = InstanceMediaBindingRepository(self.g)
         self.learning_object_repo = LearningObjectNodeRepository(self.g)
         self.recall_point_repo = RecallPointRepository(self.g, self.instance_repo, self.media_asset_repo)
         self.learning_task_repo = LearningTaskRepository(self.g, self.recall_point_repo)
@@ -2231,7 +2314,8 @@ class InMemorySystem:
         data = self._persist_store.load_snapshot()
         if data is None:
             return False
-        projects_data, idgen_counters = decode_snapshot(data)
+        projects_data, idgen_counters, global_llm_settings = decode_snapshot(data)
+        self.g.global_llm_settings = global_llm_settings
         self.g.idgen._counters = dict(idgen_counters)
         needs_persist = False
 
@@ -2244,6 +2328,7 @@ class InMemorySystem:
                 ps.material_allowlist = d.get("material_allowlist")
                 ps.audit_log_events = d.get("audit_log_events", {})
                 ps.instances = d["instances"]
+                ps.instance_media_bindings = d.get("instance_media_bindings", {})
                 ps.learning_object_nodes = d["learning_object_nodes"]
                 ps.recall_points = d["recall_points"]
                 ps.recall_point_review_records = d.get("recall_point_review_records", {})
@@ -2330,6 +2415,7 @@ class InMemorySystem:
             ps.material_allowlist = d.get("material_allowlist")
             ps.audit_log_events = d.get("audit_log_events", {})
             ps.instances = d["instances"]
+            ps.instance_media_bindings = d.get("instance_media_bindings", {})
             ps.learning_object_nodes = d["learning_object_nodes"]
             ps.recall_points = d["recall_points"]
             ps.recall_point_review_records = d.get("recall_point_review_records", {})
@@ -2500,6 +2586,7 @@ class InMemorySystem:
                 cfg0.validate_write_time()
                 pcfg = ProjectConfig(
                     project_id=ps.project.project_id,
+                    project_type=ProjectType.COURSE,
                     layer_configs={0: cfg0},
                     push_config=default_push_config(),
                     updated_at=now_utc_ms(),
@@ -2535,7 +2622,11 @@ class InMemorySystem:
         if self._persist_store is None:
             return
         projects = projects_override if projects_override is not None else self.g.projects
-        snapshot = encode_snapshot(projects=projects, idgen_counters=self.g.idgen._counters)
+        snapshot = encode_snapshot(
+            projects=projects,
+            idgen_counters=self.g.idgen._counters,
+            global_llm_settings=self.g.global_llm_settings,
+        )
         self._persist_store.save_snapshot(snapshot)
 
     def _persist_project_to_disk(self, project_id: ProjectId, project_store: ProjectStore) -> None:
@@ -2641,6 +2732,7 @@ class InMemorySystem:
             next_ps.audit_log_events = dict(_overlay_audit_log_events(ps, st))
 
             next_ps.instances = dict(_overlay_instances(ps, st))
+            next_ps.instance_media_bindings = dict(_overlay_instance_media_bindings(ps, st))
             next_ps.learning_object_nodes = dict(_overlay_learning_object_nodes(ps, st))
             next_ps.recall_points = dict(ps.recall_points)
             next_ps.recall_points.update(st.recall_points)
@@ -2702,12 +2794,17 @@ class InMemorySystem:
         project_root: str | None = None,
         *,
         initial_source_kind: MaterialSourceKind = MaterialSourceKind.SERVER_FS,
+        initial_project_type: ProjectType = ProjectType.COURSE,
     ) -> ProjectId:
         pid = self.g.idgen.new_project_id()
         s = self._begin_project_bootstrap_session(pid)
         try:
             if not isinstance(initial_source_kind, MaterialSourceKind):
                 raise PreconditionFailure("create_project.initial_source_kind must be MaterialSourceKind")
+            if not isinstance(initial_project_type, ProjectType):
+                raise PreconditionFailure("create_project.initial_project_type must be ProjectType")
+            if initial_project_type in {ProjectType.BOOK, ProjectType.LOOSE_POINTS} and initial_source_kind != MaterialSourceKind.MANUAL:
+                raise PreconditionFailure("create_project for BOOK/LOOSE_POINTS must use MANUAL source kind")
             resolved_project_root = project_root
             if resolved_project_root is None:
                 auto_project_root, _ = allocate_project_root(title)
@@ -2746,7 +2843,7 @@ class InMemorySystem:
             self.project_material_source_binding_repo.set(s, binding)
 
             # Minimal project bootstrap (0b.1.5a): ProjectConfig singleton (defaults are fixed by spec).
-            pcfg = default_project_config(project_id=pid, updated_at=now_utc_ms())
+            pcfg = default_project_config(project_id=pid, updated_at=now_utc_ms(), project_type=initial_project_type)
             self.project_config_repo.set(s, pcfg)
 
             # Project bootstrap (0b.1.5a): layer 0 + its AggregationQueue
@@ -2772,7 +2869,7 @@ class InMemorySystem:
                     kind=AuditEventKind.PROJECT_CREATED,
                     api_name="create_project",
                     result=AuditResultCode.OK,
-                    payload=json.dumps({"projectId": str(pid)}, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
+                    payload=json.dumps({"projectId": str(pid), "projectType": initial_project_type.value}, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
                 ),
             )
 

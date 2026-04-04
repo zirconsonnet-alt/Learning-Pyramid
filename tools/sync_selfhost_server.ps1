@@ -241,6 +241,62 @@ function Get-LatestBundlePath {
     return $bundle.FullName
 }
 
+function Get-FrontendEntryAssetNameFromHtml {
+    param([string]$Html)
+    if ([string]::IsNullOrWhiteSpace($Html)) {
+        return $null
+    }
+
+    $match = [regex]::Match($Html, 'src=["'']/assets/(index-[A-Za-z0-9_-]+\.js)["'']')
+    if (-not $match.Success) {
+        return $null
+    }
+    return $match.Groups[1].Value
+}
+
+function Get-LocalBuiltFrontendEntryAssetName {
+    param([string]$RepoRoot)
+    $indexPath = Join-Path $RepoRoot "frontend/dist/index.html"
+    if (-not (Test-Path $indexPath)) {
+        throw "Local frontend/dist/index.html not found at $indexPath"
+    }
+    $html = Get-Content -LiteralPath $indexPath -Raw
+    $assetName = Get-FrontendEntryAssetNameFromHtml -Html $html
+    if (-not $assetName) {
+        throw "Could not find frontend entry asset in $indexPath"
+    }
+    return $assetName
+}
+
+function Get-PublicFrontendEntryAssetInfo {
+    param([string]$ServerHost)
+    $urls = @(
+        "https://$ServerHost/",
+        "http://$ServerHost/"
+    )
+
+    foreach ($url in $urls) {
+        try {
+            $html = & curl.exe -fsS --max-time 15 $url 2>$null
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($html)) {
+                continue
+            }
+            $assetName = Get-FrontendEntryAssetNameFromHtml -Html $html
+            if ($assetName) {
+                return @{
+                    Url = $url
+                    AssetName = $assetName
+                }
+            }
+        }
+        catch {
+            continue
+        }
+    }
+
+    return $null
+}
+
 function Invoke-WithRetry {
     param(
         [Parameter(Mandatory = $true)]
@@ -575,6 +631,8 @@ if ($SkipBuild -and -not $IncludePublicDownloads -and $bundleItem.Length -gt 100
     Write-Warning "The latest bundle is still very large. It was probably built earlier with public-downloads included. Re-run once without -SkipBuild to generate a smaller deploy bundle."
 }
 $bundleHash = (Get-FileHash -Path $bundlePath -Algorithm SHA256).Hash.ToUpperInvariant()
+$localFrontendEntryAssetName = Get-LocalBuiltFrontendEntryAssetName -RepoRoot $repoRoot
+Write-Host "Expected frontend entry asset: $localFrontendEntryAssetName"
 $includePublicDownloadsValue = if ($IncludePublicDownloads) { "1" } else { "0" }
 $envSyncFile = Join-Path $repoRoot ".env.selfhost.sync"
 $hasEnvSyncFile = Test-Path $envSyncFile
@@ -857,6 +915,31 @@ exit 1
     Invoke-ExternalCommandWithRetry -Description "Remote deploy" -Command {
         $remoteScript | & ssh @sshArgs $sshDestination bash -s
     } -MaxAttempts 4 -DelaySeconds 5
+
+    $remoteIndexHtml = & ssh @sshArgs $sshDestination "cat '$RemoteRoot/app/frontend/dist/index.html'"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not read deployed frontend/dist/index.html from server."
+    }
+
+    $remoteFrontendEntryAssetName = Get-FrontendEntryAssetNameFromHtml -Html ($remoteIndexHtml | Out-String)
+    if (-not $remoteFrontendEntryAssetName) {
+        throw "Could not parse deployed frontend entry asset from server index.html."
+    }
+    if ($remoteFrontendEntryAssetName -ne $localFrontendEntryAssetName) {
+        throw "Deployed frontend asset mismatch. local=$localFrontendEntryAssetName remote=$remoteFrontendEntryAssetName"
+    }
+    Write-Host "Verified deployed frontend asset: $remoteFrontendEntryAssetName"
+
+    $publicFrontendAssetInfo = Get-PublicFrontendEntryAssetInfo -ServerHost $ServerHost
+    if ($null -eq $publicFrontendAssetInfo) {
+        Write-Warning "Could not verify the public site root after deploy. The server-side bundle was verified, but the public host did not return a parseable frontend entry asset."
+    }
+    elseif ($publicFrontendAssetInfo.AssetName -ne $localFrontendEntryAssetName) {
+        throw "Public frontend asset mismatch after deploy. local=$localFrontendEntryAssetName public=$($publicFrontendAssetInfo.AssetName) url=$($publicFrontendAssetInfo.Url)"
+    }
+    else {
+        Write-Host "Verified public frontend asset: $($publicFrontendAssetInfo.AssetName) via $($publicFrontendAssetInfo.Url)"
+    }
 }
 finally {
     Stop-SshConnectionReuse -BaseSshArgs $baseSshArgs -ControlArgs $sshReuseControlArgs -Destination $sshDestination -TempRoot $sshReuseTempRoot

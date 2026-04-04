@@ -6,6 +6,7 @@ import { useNavigate, useParams } from "react-router-dom"
 import { listRecallPointsByInstance, type Instance } from "@/ui/api/instances"
 import { ApiError } from "@/ui/api/http"
 import type { ReviewChainTemplateItem } from "@/ui/api/projectConfig"
+import type { ProjectType } from "@/ui/api/projects"
 import { ContentNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
@@ -13,19 +14,23 @@ import { formatMaterialReference, formatRecallPointReference } from "@/ui/displa
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
 import { scanProjectDirectoryMedia, useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
+import { formatProjectTypeLabel } from "@/ui/projectTypes"
 import { useMyLlmSettings, useUpdateMyLlmSettings } from "@/ui/queries/profile"
 import { useEditProject, useProject } from "@/ui/queries/projects"
 import { useGlobalLlmSettings, useSystemCapabilities, useUpdateGlobalLlmSettings } from "@/ui/queries/system"
 import {
   useBulkRemapRecallPointsInstance,
   useImportLearningObjectsFromBrowser,
+  useInitializeBookLearningObjects,
   useInstances,
   useLayers,
   useProjectConfig,
+  useSetReviewRecommendationConfig,
   useSetLayerConfig,
 } from "@/ui/queries/workbench"
 import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { cn } from "@/ui/utils"
+import { BaiduNetdiskImportDialog } from "@/views/settings/components/BaiduNetdiskImportDialog"
 
 let nextTemplateItemId = 1
 
@@ -162,17 +167,28 @@ function PromptAssemblyModeSelector({
   )
 }
 
-function summarizeTemplateItems(items: ReviewChainTemplateItem[]) {
-  return items
-    .map((item) => {
-      if (item.kind === "CONVERGENCE") return "收敛"
-      return item.count && item.count > 1 ? `复习任务 × ${item.count}` : "复习任务"
-    })
-    .join(" · ")
-}
-
 function isDirectoryPickerAbort(err: unknown) {
   return err instanceof DOMException && err.name === "AbortError"
+}
+
+function countOutlineIndentDepth(rawLine: string) {
+  const prefix = rawLine.match(/^[\t ]*/)?.[0] ?? ""
+  let visualColumns = 0
+  for (const ch of prefix) {
+    visualColumns += ch === "\t" ? 2 : 1
+  }
+  return Math.floor(visualColumns / 2)
+}
+
+function parseBookOutlineDraft(value: string) {
+  return value
+    .split(/\r?\n/)
+    .map((line) => ({ rawLine: line, title: line.trim() }))
+    .filter((line) => line.title.length > 0)
+    .map((line) => ({
+      depth: countOutlineIndentDepth(line.rawLine),
+      title: line.title,
+    }))
 }
 
 function SettingsPanelSwitchCard(props: {
@@ -228,22 +244,44 @@ export function ProjectSettingsPage() {
   const directoryBinding = useProjectDirectoryBinding(pid)
   const directoryPermission = directoryBinding.permission
   const browserLocalMediaEnabled = capabilitiesQ.data?.browserLocalMediaEnabled ?? false
+  const baiduNetdiskEnabled = capabilitiesQ.data?.baiduNetdiskEnabled ?? false
 
   const layersQ = useLayers(pid)
   const projectConfigQ = useProjectConfig(pid)
   const instancesQ = useInstances(pid)
   const importLearningObjectsM = useImportLearningObjectsFromBrowser(pid)
+  const initializeBookLearningObjectsM = useInitializeBookLearningObjects(pid)
   const setLayerConfigM = useSetLayerConfig(pid)
+  const setReviewRecommendationConfigM = useSetReviewRecommendationConfig(pid)
   const bulkRemapM = useBulkRemapRecallPointsInstance(pid)
+  const projectType = projectConfigQ.data?.projectType ?? "COURSE"
 
-  const layerIndexes = useMemo(() => (layersQ.data ?? []).map((l) => l.layerIndex).sort((a, b) => a - b), [layersQ.data])
+  const existingLayerIndexes = useMemo(() => (layersQ.data ?? []).map((l) => l.layerIndex).sort((a, b) => a - b), [layersQ.data])
+  const configuredLayerIndexes = useMemo(
+    () =>
+      Object.keys(projectConfigQ.data?.layerConfigs ?? {})
+        .map((key) => Number(key))
+        .filter((key) => Number.isInteger(key) && key >= 0)
+        .sort((a, b) => a - b),
+    [projectConfigQ.data?.layerConfigs],
+  )
   const defaultLayerConfig = useMemo(
-    () => ({ reviewChainTemplate: [{ kind: "CONVERGENCE" as const }], aggregationKNode: 10, aggregationKPoint: 200 }),
+    () => ({ reviewChainTemplate: [{ kind: "CONVERGENCE" as const }], aggregationKNode: 10, aggregationKPoint: 200, thresholdRollUpEnabled: true }),
     [],
   )
 
   const [configLayerIndex, setConfigLayerIndex] = useState(0)
-  const effectiveConfigLayerIndex = layerIndexes.includes(configLayerIndex) ? configLayerIndex : (layerIndexes[0] ?? 0)
+  const effectiveConfigLayerIndex = configLayerIndex
+  const knownLayerIndexes = useMemo(
+    () =>
+      Array.from(new Set([...existingLayerIndexes, ...configuredLayerIndexes, effectiveConfigLayerIndex])).sort(
+        (a, b) => a - b,
+      ),
+    [configuredLayerIndexes, effectiveConfigLayerIndex, existingLayerIndexes],
+  )
+  const selectedLayerExists = existingLayerIndexes.includes(effectiveConfigLayerIndex)
+  const selectedLayerHasSavedConfig =
+    projectConfigQ.data?.layerConfigs[String(effectiveConfigLayerIndex)] !== undefined
 
   const effectiveLayerConfig = useMemo(() => {
     const k = String(effectiveConfigLayerIndex)
@@ -253,10 +291,12 @@ export function ProjectSettingsPage() {
     () => JSON.stringify(effectiveLayerConfig.reviewChainTemplate),
     [effectiveLayerConfig.reviewChainTemplate],
   )
-  const layerConfigVersion = `${effectiveConfigLayerIndex}:${effectiveLayerConfig.aggregationKNode}:${effectiveLayerConfig.aggregationKPoint}:${templateConfigSignature}`
+  const layerConfigVersion = `${effectiveConfigLayerIndex}:${effectiveLayerConfig.aggregationKNode}:${effectiveLayerConfig.aggregationKPoint}:${effectiveLayerConfig.thresholdRollUpEnabled}:${templateConfigSignature}`
 
   const [remapTargets, setRemapTargets] = useState<Record<string, string>>({})
   const [directoryAction, setDirectoryAction] = useState<"authorize" | "request" | "clear" | "import" | null>(null)
+  const [bookOutlineDraft, setBookOutlineDraft] = useState("")
+  const [isBaiduImportDialogOpen, setIsBaiduImportDialogOpen] = useState(false)
 
   const missingInstances = useMemo(
     () => (instancesQ.data ?? []).filter((item) => item.presence === "MISSING"),
@@ -300,21 +340,42 @@ export function ProjectSettingsPage() {
   const directoryBusy = directoryAction !== null
   const [activePanel, setActivePanel] = useState<SettingsPanelKey>("basic")
 
-  const directoryStatusText = browserLocalMediaEnabled
-    ? directoryPermission === "granted"
-      ? "目录已接通"
-      : directoryPermission === "denied"
-        ? "等待重授权"
-        : directoryPermission === "prompt"
-          ? "等待授权"
-          : "待配置"
-    : "基础配置"
+  const directoryStatusText =
+    projectType === "BOOK"
+      ? "目录初始化"
+      : projectType === "LOOSE_POINTS"
+        ? "零散模式"
+        : browserLocalMediaEnabled
+          ? directoryPermission === "granted"
+            ? "目录已接通"
+            : directoryPermission === "denied"
+              ? "等待重授权"
+              : directoryPermission === "prompt"
+                ? "等待授权"
+                : "待配置"
+          : "基础配置"
   const aiStatusText = capabilitiesQ.data?.llmConfigured ? "LLM 已可用" : "LLM 未接通"
-  const missingStatusText = missingRepairCountsLoading
-    ? "整理中..."
-    : actionableMissingInstances.length > 0
-      ? `${actionableMissingInstances.length} 个待修复`
-      : "当前无缺失实例"
+  const missingStatusText =
+    projectType === "LOOSE_POINTS"
+      ? "不适用"
+      : missingRepairCountsLoading
+        ? "整理中..."
+        : actionableMissingInstances.length > 0
+          ? `${actionableMissingInstances.length} 个待修复`
+          : "当前无缺失实例"
+  const parsedBookOutlineItems = useMemo(() => parseBookOutlineDraft(bookOutlineDraft), [bookOutlineDraft])
+  const bookOutlineValidationMessage = useMemo(() => {
+    if (projectType !== "BOOK") return null
+    if (parsedBookOutlineItems.length === 0) return "请先粘贴目录文本。"
+    if (parsedBookOutlineItems[0]?.depth !== 0) return "目录第一行必须是顶层节点，不能带缩进。"
+    for (let index = 1; index < parsedBookOutlineItems.length; index += 1) {
+      if (parsedBookOutlineItems[index].depth - parsedBookOutlineItems[index - 1].depth > 1) {
+        return "目录层级每次最多只能向下增加一级缩进。"
+      }
+    }
+    return null
+  }, [parsedBookOutlineItems, projectType])
+  const bookProjectAlreadyInitialized = (instancesQ.data?.length ?? 0) > 0
 
   async function onRemapMissingInstance(fromInstanceId: string) {
     const sourceInstance = actionableMissingInstances.find((item) => item.instanceId === fromInstanceId) ?? missingInstances.find((item) => item.instanceId === fromInstanceId)
@@ -415,6 +476,23 @@ export function ProjectSettingsPage() {
     }
   }
 
+  async function onInitializeBookOutline() {
+    if (projectType !== "BOOK") return
+    if (bookOutlineValidationMessage) {
+      showInfoFeedback("目录暂时还不能初始化", bookOutlineValidationMessage)
+      return
+    }
+    try {
+      const result = await initializeBookLearningObjectsM.mutateAsync({ items: parsedBookOutlineItems })
+      showSuccessFeedback(
+        "书本目录已初始化",
+        `已创建 ${result.created_learning_object_nodes_count} 个目录节点和 ${result.created_instances_count} 个书本实例。`,
+      )
+    } catch (err) {
+      showErrorFeedback("初始化书本目录失败", formatApiError(err))
+    }
+  }
+
   if (!pid) {
     return (
       <div className="space-y-4">
@@ -464,6 +542,7 @@ export function ProjectSettingsPage() {
       {activePanel === "basic" ? (
         <>
       <BasicInfoCard
+        baiduNetdiskEnabled={baiduNetdiskEnabled}
         browserLocalMediaEnabled={browserLocalMediaEnabled}
         canChooseDirectory={canChooseDirectory}
         canClearDirectory={canClearDirectory}
@@ -475,11 +554,13 @@ export function ProjectSettingsPage() {
         importError={importLearningObjectsM.error}
         isLoading={projectQ.isLoading}
         isPending={editProjectM.isPending}
+        projectType={projectType}
         projectTitle={projectQ.project?.title ?? ""}
         queryError={projectQ.error}
         saveError={editProjectM.error}
         onAuthorizeDirectory={onAuthorizeDirectory}
         onClearDirectoryBinding={onClearDirectoryBinding}
+        onOpenBaiduImport={() => setIsBaiduImportDialogOpen(true)}
         onImportAuthorizedDirectory={onImportAuthorizedDirectory}
         onRequestDirectoryPermission={onRequestDirectoryPermission}
         onSave={async (title) => {
@@ -492,33 +573,82 @@ export function ProjectSettingsPage() {
         }}
       />
 
+      {projectType === "BOOK" ? (
+        <BookOutlineSetupCard
+          draftValue={bookOutlineDraft}
+          initialized={bookProjectAlreadyInitialized}
+          isPending={initializeBookLearningObjectsM.isPending}
+          mutationError={initializeBookLearningObjectsM.error}
+          onChange={setBookOutlineDraft}
+          onInitialize={onInitializeBookOutline}
+          parsedCount={parsedBookOutlineItems.length}
+          validationMessage={bookOutlineValidationMessage}
+        />
+      ) : null}
+
       <LayerConfigEditor
         key={layerConfigVersion}
         canSave={!!pid}
+        existingLayerIndexes={existingLayerIndexes}
         initialConfig={effectiveLayerConfig}
-        layerIndexes={layerIndexes}
+        knownLayerIndexes={knownLayerIndexes}
         layersError={layersQ.error}
         mutationError={setLayerConfigM.error}
         projectConfigError={projectConfigQ.error}
+        selectedLayerExists={selectedLayerExists}
+        selectedLayerHasSavedConfig={selectedLayerHasSavedConfig}
         selectedLayerIndex={effectiveConfigLayerIndex}
         saving={setLayerConfigM.isPending}
-        onSave={async ({ kNode, kPoint, reviewChainTemplate }) => {
+        onSave={async ({ kNode, kPoint, reviewChainTemplate, thresholdRollUpEnabled }) => {
           try {
             await setLayerConfigM.mutateAsync({
               layerIndex: effectiveConfigLayerIndex,
               kNode,
               kPoint,
               reviewChainTemplate,
+              thresholdRollUpEnabled,
             })
             showSuccessFeedback(
-              "层配置已保存",
-              `第 ${effectiveConfigLayerIndex} 层现在使用 ${reviewChainTemplate.length} 个模板步骤，节点阈值 ${kNode}，复述点阈值 ${kPoint}。`,
+              selectedLayerExists ? "层配置已保存" : "未来层预配置已保存",
+              selectedLayerExists
+                ? `第 ${effectiveConfigLayerIndex} 层现在使用 ${reviewChainTemplate.length} 个模板步骤，节点阈值 ${kNode}，复述点阈值 ${kPoint}，阈值自动上推已${thresholdRollUpEnabled ? "开启" : "关闭"}。`
+                : `第 ${effectiveConfigLayerIndex} 层还不存在，已先保存预配置；等它被创建时会自动使用这 ${reviewChainTemplate.length} 个模板步骤、当前阈值和阈值自动上推${thresholdRollUpEnabled ? "开启" : "关闭"}状态。`,
             )
           } catch (err) {
             showErrorFeedback("保存层配置失败", formatApiError(err))
           }
         }}
         onSelectedLayerIndexChange={setConfigLayerIndex}
+      />
+
+      <BaiduNetdiskImportDialog
+        projectId={pid}
+        open={isBaiduImportDialogOpen}
+        onOpenChange={setIsBaiduImportDialogOpen}
+      />
+
+      <ReviewRecommendationConfigCard
+        config={projectConfigQ.data?.pushConfig ?? null}
+        isLoading={projectConfigQ.isLoading}
+        queryError={projectConfigQ.error}
+        saveError={setReviewRecommendationConfigM.error}
+        isPending={setReviewRecommendationConfigM.isPending}
+        onSave={async ({ minRecallPointsToEnable, maxHistoryLen, recommendedBatchSize, forgettingCurveDecayPerDay }) => {
+          try {
+            await setReviewRecommendationConfigM.mutateAsync({
+              minRecallPointsToEnable,
+              maxHistoryLen,
+              recommendedBatchSize,
+              forgettingCurveDecayPerDay,
+            })
+            showSuccessFeedback(
+              "推荐复习配置已保存",
+              `现在会按最近 ${maxHistoryLen} 条历史、每批 ${recommendedBatchSize} 条、衰减率 ${forgettingCurveDecayPerDay.toFixed(2)} 来计算推荐复习。`,
+            )
+          } catch (err) {
+            showErrorFeedback("保存推荐复习配置失败", formatApiError(err))
+          }
+        }}
       />
         </>
       ) : null}
@@ -589,22 +719,27 @@ export function ProjectSettingsPage() {
           <CardTitle>缺失材料修复</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4 text-sm">
+          {projectType === "LOOSE_POINTS" ? (
+            <div className="rounded-xl border bg-muted/30 p-4 text-sm text-muted-foreground">
+              零散知识点项目不维护材料实例，因此这里没有缺失实例修复项。
+            </div>
+          ) : null}
           {instancesQ.isLoading ? <p className="text-sm text-muted-foreground">加载实例中...</p> : null}
           {instancesQ.error ? <p className="text-sm text-destructive">{formatApiError(instancesQ.error)}</p> : null}
-          {!instancesQ.isLoading && !instancesQ.error && !missingRepairCountsLoading && actionableMissingInstances.length > 0 ? (
+          {!instancesQ.isLoading && !instancesQ.error && !missingRepairCountsLoading && actionableMissingInstances.length > 0 && projectType !== "LOOSE_POINTS" ? (
             <div className="rounded-xl border bg-muted/30 p-4 text-sm text-muted-foreground">
               这里只显示仍有活跃复述点需要迁移的缺失实例；已经没有迁移价值的旧实例会自动从列表里消失。
             </div>
           ) : null}
-          {!instancesQ.isLoading && !instancesQ.error && missingRepairCountsLoading ? (
+          {!instancesQ.isLoading && !instancesQ.error && missingRepairCountsLoading && projectType !== "LOOSE_POINTS" ? (
             <div className="rounded-xl border bg-muted/30 p-4 text-sm text-muted-foreground">正在整理仍需迁移的缺失实例...</div>
           ) : null}
-          {!instancesQ.isLoading && !instancesQ.error && !missingRepairCountsLoading && actionableMissingInstances.length === 0 ? (
+          {!instancesQ.isLoading && !instancesQ.error && !missingRepairCountsLoading && actionableMissingInstances.length === 0 && projectType !== "LOOSE_POINTS" ? (
             <div className="rounded-xl border bg-muted/30 p-4 text-sm text-muted-foreground">当前没有需要迁移的缺失材料实例。</div>
           ) : null}
 
           <div className="space-y-3">
-            {actionableMissingInstances.map((instance) => {
+            {projectType !== "LOOSE_POINTS" ? actionableMissingInstances.map((instance) => {
               const index = missingInstances.findIndex((item) => item.instanceId === instance.instanceId)
               const recallPointIds = recallPointIdsByInstanceId[instance.instanceId] ?? []
               const countQuery = missingRecallPointQs[index]
@@ -669,10 +804,10 @@ export function ProjectSettingsPage() {
                   </div>
                 </div>
               )
-            })}
+            }) : null}
           </div>
 
-          {bulkRemapM.error ? <p className="text-sm text-destructive">{formatApiError(bulkRemapM.error)}</p> : null}
+          {projectType !== "LOOSE_POINTS" && bulkRemapM.error ? <p className="text-sm text-destructive">{formatApiError(bulkRemapM.error)}</p> : null}
         </CardContent>
       </Card>
       ) : null}
@@ -680,7 +815,177 @@ export function ProjectSettingsPage() {
   )
 }
 
+function ReviewRecommendationConfigCard(props: {
+  config: {
+    minRecallPointsToEnable: number
+    maxHistoryLen: number
+    recommendedBatchSize: number
+    forgettingCurveDecayPerDay: number
+  } | null
+  isLoading: boolean
+  queryError: unknown
+  saveError: unknown
+  isPending: boolean
+  onSave: (params: {
+    minRecallPointsToEnable: number
+    maxHistoryLen: number
+    recommendedBatchSize: number
+    forgettingCurveDecayPerDay: number
+  }) => Promise<void>
+}) {
+  const { config, isLoading, queryError, saveError, isPending, onSave } = props
+  const [minRecallPointsToEnable, setMinRecallPointsToEnable] = useState("")
+  const [maxHistoryLen, setMaxHistoryLen] = useState("")
+  const [recommendedBatchSize, setRecommendedBatchSize] = useState("")
+  const [forgettingCurveDecayPerDay, setForgettingCurveDecayPerDay] = useState("")
+
+  useEffect(() => {
+    if (!config) return
+    setMinRecallPointsToEnable(String(config.minRecallPointsToEnable))
+    setMaxHistoryLen(String(config.maxHistoryLen))
+    setRecommendedBatchSize(String(config.recommendedBatchSize))
+    setForgettingCurveDecayPerDay(String(config.forgettingCurveDecayPerDay))
+  }, [config])
+
+  const parsedMin = Number(minRecallPointsToEnable)
+  const parsedHistory = Number(maxHistoryLen)
+  const parsedBatch = Number(recommendedBatchSize)
+  const parsedDecay = Number(forgettingCurveDecayPerDay)
+  const canSave =
+    Number.isFinite(parsedMin) &&
+    parsedMin >= 0 &&
+    Number.isInteger(parsedMin) &&
+    Number.isFinite(parsedHistory) &&
+    parsedHistory >= 0 &&
+    Number.isInteger(parsedHistory) &&
+    Number.isFinite(parsedBatch) &&
+    parsedBatch >= 1 &&
+    Number.isInteger(parsedBatch) &&
+    Number.isFinite(parsedDecay) &&
+    parsedDecay > 0
+
+  return (
+    <Card className="theme-card">
+      <CardHeader>
+        <CardTitle>推荐复习配置</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <p className="text-sm text-muted-foreground">
+          这里配置的是只读推荐复习，不会替代正式复习任务。推荐页会按遗忘曲线给复述点排序，并按批次分组展示。
+        </p>
+        {isLoading ? <p className="text-sm text-muted-foreground">加载推荐复习配置中...</p> : null}
+        {queryError ? <p className="text-sm text-destructive">{formatApiError(queryError)}</p> : null}
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="review-config-threshold">启用门槛</Label>
+            <Input id="review-config-threshold" value={minRecallPointsToEnable} onChange={(e) => setMinRecallPointsToEnable(e.target.value)} disabled={isPending} />
+            <p className="text-xs text-muted-foreground">活跃复述点少于这个数量时，推荐复习页会返回空列表。建议小项目保持 0。</p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="review-config-history">历史窗口</Label>
+            <Input id="review-config-history" value={maxHistoryLen} onChange={(e) => setMaxHistoryLen(e.target.value)} disabled={isPending} />
+            <p className="text-xs text-muted-foreground">计算推荐指数时最多使用最近多少条正式复习记录。0 表示按“未复习”处理。</p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="review-config-batch">每批条数</Label>
+            <Input id="review-config-batch" value={recommendedBatchSize} onChange={(e) => setRecommendedBatchSize(e.target.value)} disabled={isPending} />
+            <p className="text-xs text-muted-foreground">推荐复习页每次默认展示多少条，用户点“继续推荐”后会切到下一批。</p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="review-config-decay">遗忘衰减率 λ / 天</Label>
+            <Input id="review-config-decay" value={forgettingCurveDecayPerDay} onChange={(e) => setForgettingCurveDecayPerDay(e.target.value)} disabled={isPending} />
+            <p className="text-xs text-muted-foreground">数值越大，系统越认为记忆衰减更快，推荐指数上升也越快。</p>
+          </div>
+        </div>
+        <Button
+          onClick={() =>
+            void onSave({
+              minRecallPointsToEnable: parsedMin,
+              maxHistoryLen: parsedHistory,
+              recommendedBatchSize: parsedBatch,
+              forgettingCurveDecayPerDay: parsedDecay,
+            })
+          }
+          disabled={!canSave || isPending}
+        >
+          {isPending ? "保存中..." : "保存推荐复习配置"}
+        </Button>
+        {saveError ? <p className="text-sm text-destructive">{formatApiError(saveError)}</p> : null}
+      </CardContent>
+    </Card>
+  )
+}
+
+function BookOutlineSetupCard({
+  draftValue,
+  initialized,
+  isPending,
+  mutationError,
+  onChange,
+  onInitialize,
+  parsedCount,
+  validationMessage,
+}: {
+  draftValue: string
+  initialized: boolean
+  isPending: boolean
+  mutationError: unknown
+  onChange: (value: string) => void
+  onInitialize: () => Promise<void>
+  parsedCount: number
+  validationMessage: string | null
+}) {
+  return (
+    <Card className="theme-card">
+      <CardHeader>
+        <CardTitle>书本目录初始化</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4 pt-0 text-sm">
+        <div className="rounded-[1.2rem] border border-border/70 bg-muted/15 px-4 py-4 text-muted-foreground">
+          书本项目会维护学习对象树，但目录来源不是媒体扫描，而是你手工提供的目录文本。系统会把末级目录项自动转换为可绑定复述点的书本实例。
+        </div>
+
+        {initialized ? (
+          <div className="rounded-[1.2rem] border border-emerald-200 bg-emerald-50 px-4 py-4 text-emerald-700">
+            当前书本项目已经存在目录节点和实例。如需重新初始化，请先清理现有目录结构后再执行。
+          </div>
+        ) : (
+          <>
+            <div className="space-y-2">
+              <Label htmlFor="bookOutlineDraft">目录文本</Label>
+              <textarea
+                id="bookOutlineDraft"
+                value={draftValue}
+                onChange={(event) => onChange(event.target.value)}
+                placeholder={`第一章 极限\n  1.1 函数\n  1.2 极限定义\n第二章 导数\n  2.1 导数概念`}
+                rows={10}
+                className="min-h-[15rem] w-full resize-y rounded-[1rem] border border-border/70 bg-background px-4 py-3 text-sm leading-6 text-foreground outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15"
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+              <span>当前已解析 {parsedCount} 行有效目录</span>
+              <span>使用两个空格或一个 Tab 表示下一级缩进</span>
+            </div>
+
+            {validationMessage ? <p className="text-sm text-destructive">{validationMessage}</p> : null}
+
+            <div className="flex justify-end">
+              <Button type="button" onClick={() => void onInitialize()} disabled={isPending || !!validationMessage}>
+                {isPending ? "初始化中..." : "初始化书本目录"}
+              </Button>
+            </div>
+          </>
+        )}
+
+        {mutationError ? <p className="text-sm text-destructive">{formatApiError(mutationError)}</p> : null}
+      </CardContent>
+    </Card>
+  )
+}
+
 function BasicInfoCard({
+  baiduNetdiskEnabled,
   browserLocalMediaEnabled,
   canChooseDirectory,
   canClearDirectory,
@@ -692,15 +997,18 @@ function BasicInfoCard({
   importError,
   isLoading,
   isPending,
+  projectType,
   projectTitle,
   queryError,
   saveError,
   onAuthorizeDirectory,
   onClearDirectoryBinding,
+  onOpenBaiduImport,
   onImportAuthorizedDirectory,
   onRequestDirectoryPermission,
   onSave,
 }: {
+  baiduNetdiskEnabled: boolean
   browserLocalMediaEnabled: boolean
   canChooseDirectory: boolean
   canClearDirectory: boolean
@@ -712,11 +1020,13 @@ function BasicInfoCard({
   importError: unknown
   isLoading: boolean
   isPending: boolean
+  projectType: ProjectType
   projectTitle: string
   queryError: unknown
   saveError: unknown
   onAuthorizeDirectory: () => Promise<void>
   onClearDirectoryBinding: () => Promise<void>
+  onOpenBaiduImport: () => void
   onImportAuthorizedDirectory: (silentSuccess?: boolean) => Promise<void>
   onRequestDirectoryPermission: () => Promise<void>
   onSave: (title: string) => Promise<void>
@@ -774,100 +1084,148 @@ function BasicInfoCard({
 
         <section className="space-y-3">
           <div className="space-y-1">
+            <div className="text-sm font-semibold text-foreground">项目类型</div>
+            <div className="text-sm text-muted-foreground">项目类型会统一约束当前项目里复述点是否需要学习对象树、实例和锚点。</div>
+          </div>
+          <div className="rounded-[1.2rem] border border-border/70 bg-muted/15 px-4 py-4">
+            <div className="text-sm font-semibold text-foreground">{formatProjectTypeLabel(projectType)}</div>
+            <div className="mt-1 text-sm text-muted-foreground">
+              {projectType === "COURSE"
+                ? "使用视频实例和可解析时间锚点。"
+                : projectType === "BOOK"
+                  ? "使用手工目录初始化的学习对象树，并为复述点绑定文本锚点。"
+                  : "直接录入项目级零散知识点，不使用学习对象树，也不绑定锚点。"}
+            </div>
+          </div>
+        </section>
+
+        <div className="border-t border-border/60" />
+
+        <section className="space-y-3">
+          <div className="space-y-1">
             <div className="text-sm font-semibold text-foreground">素材接入</div>
           </div>
 
-          {browserLocalMediaEnabled ? (
-            <div className="theme-status-surface rounded-[1.35rem] border border-border/70 p-4">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                <div className="space-y-2">
-                  <div className="flex flex-wrap items-center gap-3">
-                    <span className="theme-meta-strong">本地素材目录</span>
-                    <span
-                      className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${describeDirectoryPermissionTone(directoryPermission)}`}
-                    >
-                      {describeDirectoryPermission(directoryPermission)}
-                    </span>
-                  </div>
-                  <div className="text-sm text-foreground">
-                    {directoryBinding.handleName ? directoryBinding.handleName : "当前项目还没有绑定浏览器目录。"}
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    {directoryBinding.handleName
-                      ? "目录记录已和当前项目关联。"
-                      : "绑定后才可以把媒体文件导入成学习对象树。"}
+          {projectType === "COURSE" ? (
+            <div className="space-y-3">
+              {browserLocalMediaEnabled ? (
+                <div className="theme-status-surface rounded-[1.35rem] border border-border/70 p-4">
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <span className="theme-meta-strong">本地素材目录</span>
+                        <span
+                          className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${describeDirectoryPermissionTone(directoryPermission)}`}
+                        >
+                          {describeDirectoryPermission(directoryPermission)}
+                        </span>
+                      </div>
+                      <div className="text-sm text-foreground">
+                        {directoryBinding.handleName ? directoryBinding.handleName : "当前项目还没有绑定浏览器目录。"}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2 lg:justify-end">
+                      {directoryPermission === "granted" ? (
+                        <>
+                          <Button type="button" onClick={() => void onImportAuthorizedDirectory()} disabled={directoryBusy}>
+                            {directoryAction === "import" ? "同步中..." : "同步目录内容"}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => void onAuthorizeDirectory()}
+                            disabled={!canChooseDirectory || directoryBusy}
+                          >
+                            {directoryAction === "authorize" ? "打开目录选择器..." : "更换目录"}
+                          </Button>
+                        </>
+                      ) : null}
+
+                      {(directoryPermission === "missing" || directoryPermission === "unsupported") ? (
+                        <Button type="button" onClick={() => void onAuthorizeDirectory()} disabled={!canChooseDirectory || directoryBusy}>
+                          {directoryAction === "authorize" ? "打开目录选择器..." : "选择目录"}
+                        </Button>
+                      ) : null}
+
+                      {(directoryPermission === "prompt" || directoryPermission === "denied") ? (
+                        <>
+                          <Button
+                            type="button"
+                            onClick={() => void onRequestDirectoryPermission()}
+                            disabled={!canRequestDirectoryPermission || directoryBusy}
+                          >
+                            {directoryAction === "request" ? "请求中..." : "继续授权"}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => void onAuthorizeDirectory()}
+                            disabled={!canChooseDirectory || directoryBusy}
+                          >
+                            {directoryAction === "authorize" ? "打开目录选择器..." : "更换目录"}
+                          </Button>
+                        </>
+                      ) : null}
+
+                      {(directoryPermission === "granted" || directoryPermission === "prompt" || directoryPermission === "denied") &&
+                      canClearDirectory ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="text-muted-foreground"
+                          onClick={() => void onClearDirectoryBinding()}
+                          disabled={!canClearDirectory || directoryBusy}
+                        >
+                          {directoryAction === "clear" ? "清除中..." : "清除本地绑定"}
+                        </Button>
+                      ) : null}
+                    </div>
                   </div>
                 </div>
-
-                <div className="flex flex-wrap gap-2 lg:justify-end">
-                  {directoryPermission === "granted" ? (
-                    <>
-                      <Button type="button" onClick={() => void onImportAuthorizedDirectory()} disabled={directoryBusy}>
-                        {directoryAction === "import" ? "同步中..." : "同步目录内容"}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => void onAuthorizeDirectory()}
-                        disabled={!canChooseDirectory || directoryBusy}
-                      >
-                        {directoryAction === "authorize" ? "打开目录选择器..." : "更换目录"}
-                      </Button>
-                    </>
-                  ) : null}
-
-                  {(directoryPermission === "missing" || directoryPermission === "unsupported") ? (
-                    <Button type="button" onClick={() => void onAuthorizeDirectory()} disabled={!canChooseDirectory || directoryBusy}>
-                      {directoryAction === "authorize" ? "打开目录选择器..." : "选择目录"}
-                    </Button>
-                  ) : null}
-
-                  {(directoryPermission === "prompt" || directoryPermission === "denied") ? (
-                    <>
-                      <Button
-                        type="button"
-                        onClick={() => void onRequestDirectoryPermission()}
-                        disabled={!canRequestDirectoryPermission || directoryBusy}
-                      >
-                        {directoryAction === "request" ? "请求中..." : "继续授权"}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => void onAuthorizeDirectory()}
-                        disabled={!canChooseDirectory || directoryBusy}
-                      >
-                        {directoryAction === "authorize" ? "打开目录选择器..." : "更换目录"}
-                      </Button>
-                    </>
-                  ) : null}
-
-                  {(directoryPermission === "granted" || directoryPermission === "prompt" || directoryPermission === "denied") &&
-                  canClearDirectory ? (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      className="text-muted-foreground"
-                      onClick={() => void onClearDirectoryBinding()}
-                      disabled={!canClearDirectory || directoryBusy}
-                    >
-                      {directoryAction === "clear" ? "清除中..." : "清除本地绑定"}
-                    </Button>
-                  ) : null}
+              ) : (
+                <div className="rounded-[1.2rem] border border-border/70 bg-muted/15 px-4 py-4 text-sm text-muted-foreground">
+                  当前部署没有开启浏览器本地目录模式。
                 </div>
-              </div>
+              )}
+
+              {baiduNetdiskEnabled ? (
+                <div className="theme-status-surface rounded-[1.35rem] border border-border/70 p-4">
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <span className="theme-meta-strong">百度网盘视频</span>
+                        <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-700">
+                          已启用
+                        </span>
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        支持在当前项目里浏览百度网盘目录、导入视频并按实例播放；字幕会按同目录同名规则自动识别。
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2 lg:justify-end">
+                      <Button type="button" onClick={onOpenBaiduImport}>
+                        从百度网盘导入
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </div>
           ) : (
             <div className="rounded-[1.2rem] border border-border/70 bg-muted/15 px-4 py-4 text-sm text-muted-foreground">
-              当前部署没有开启浏览器本地目录模式。
+              {projectType === "BOOK"
+                ? "书本项目不依赖浏览器目录授权；请使用“书本目录初始化”把目录文本转换为学习对象树。"
+                : "零散知识点项目不接入素材目录，也不会维护学习对象树。"}
             </div>
           )}
 
-          {directoryBinding.error ? <p className="text-sm text-destructive">{directoryBinding.error}</p> : null}
-          {!directoryBinding.supported ? (
+          {projectType === "COURSE" && directoryBinding.error ? <p className="text-sm text-destructive">{directoryBinding.error}</p> : null}
+          {projectType === "COURSE" && !directoryBinding.supported ? (
             <p className="text-sm text-muted-foreground">当前浏览器不支持目录授权。首版建议使用桌面 Chrome 或 Edge。</p>
           ) : null}
-          {importError ? <p className="text-sm text-destructive">{formatApiError(importError)}</p> : null}
+          {projectType === "COURSE" && importError ? <p className="text-sm text-destructive">{formatApiError(importError)}</p> : null}
         </section>
       </CardContent>
     </Card>
@@ -1211,10 +1569,6 @@ function UserLlmSettingsCard({
             </div>
           </div>
 
-          <div className="grid gap-3 rounded-[1rem] border border-border/60 bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
-            <p>保存后，AI 问答会直接使用你的账号配置；如果当前账号没有保存配置，就会被视为未接通，不再回退到部署级默认配置。</p>
-          </div>
-
           <div className="flex flex-wrap gap-2">
             <Button
               type="button"
@@ -1257,44 +1611,84 @@ function UserLlmSettingsCard({
 
 function LayerConfigEditor({
   canSave,
+  existingLayerIndexes,
   initialConfig,
-  layerIndexes,
+  knownLayerIndexes,
   layersError,
   mutationError,
   onSave,
   onSelectedLayerIndexChange,
   projectConfigError,
+  selectedLayerExists,
+  selectedLayerHasSavedConfig,
   saving,
   selectedLayerIndex,
 }: {
   canSave: boolean
-  initialConfig: { reviewChainTemplate: ReviewChainTemplateItem[]; aggregationKNode: number; aggregationKPoint: number }
-  layerIndexes: number[]
+  existingLayerIndexes: number[]
+  initialConfig: {
+    reviewChainTemplate: ReviewChainTemplateItem[]
+    aggregationKNode: number
+    aggregationKPoint: number
+    thresholdRollUpEnabled: boolean
+  }
+  knownLayerIndexes: number[]
   layersError: unknown
   mutationError: unknown
-  onSave: (payload: { kNode: number; kPoint: number; reviewChainTemplate: ReviewChainTemplateItem[] }) => Promise<void>
+  onSave: (payload: {
+    kNode: number
+    kPoint: number
+    reviewChainTemplate: ReviewChainTemplateItem[]
+    thresholdRollUpEnabled: boolean
+  }) => Promise<void>
   onSelectedLayerIndexChange: (layerIndex: number) => void
   projectConfigError: unknown
+  selectedLayerExists: boolean
+  selectedLayerHasSavedConfig: boolean
   saving: boolean
   selectedLayerIndex: number
 }) {
+  const [layerIndexDraft, setLayerIndexDraft] = useState(() => String(selectedLayerIndex))
   const [cfgKNode, setCfgKNode] = useState(() => String(initialConfig.aggregationKNode))
   const [cfgKPoint, setCfgKPoint] = useState(() => String(initialConfig.aggregationKPoint))
+  const [cfgThresholdRollUpEnabled, setCfgThresholdRollUpEnabled] = useState(() => initialConfig.thresholdRollUpEnabled)
   const [cfgTemplateItems, setCfgTemplateItems] = useState<TemplateEditorItem[]>(() => toTemplateEditorItems(initialConfig.reviewChainTemplate))
   const [cfgErr, setCfgErr] = useState<string | null>(null)
+  const [layerIndexErr, setLayerIndexErr] = useState<string | null>(null)
   const [pendingTemplateKind, setPendingTemplateKind] = useState<"" | "CONVERGENCE" | "REVIEW_TASK">("")
-  const templateSummary = summarizeTemplateItems(cfgTemplateItems.map((item) =>
-    item.kind === "CONVERGENCE"
-      ? { kind: "CONVERGENCE" as const }
-      : Number(item.count) > 1
-        ? { kind: "REVIEW_TASK" as const, count: Number(item.count) }
-        : { kind: "REVIEW_TASK" as const },
-  ))
+  const existingLayerSummary = existingLayerIndexes.length > 0 ? existingLayerIndexes.join(" / ") : "暂无"
+  const layerStatusText = selectedLayerExists
+    ? selectedLayerHasSavedConfig
+      ? "当前层已经存在，下面显示的是它的已保存配置。"
+      : "当前层已经存在，但还没有专属配置，当前显示的是系统默认值。"
+    : selectedLayerHasSavedConfig
+      ? "当前层还不存在，下面显示的是它的预配置；该层创建后会自动使用。"
+      : "当前层还不存在，当前显示的是系统默认值；保存后会成为这层的预配置。"
+
+  useEffect(() => {
+    setLayerIndexDraft(String(selectedLayerIndex))
+    setLayerIndexErr(null)
+  }, [selectedLayerIndex])
 
   function onAppendTemplateItem() {
     if (!pendingTemplateKind) return
     setCfgTemplateItems((prev) => [...prev, createTemplateEditorItem(pendingTemplateKind)])
     setPendingTemplateKind("")
+  }
+
+  function applyLayerIndexDraft() {
+    const raw = layerIndexDraft.trim()
+    if (!raw) {
+      setLayerIndexErr("层索引必须是大于等于 0 的整数")
+      return
+    }
+    const next = Number(raw)
+    if (!Number.isInteger(next) || next < 0) {
+      setLayerIndexErr("层索引必须是大于等于 0 的整数")
+      return
+    }
+    setLayerIndexErr(null)
+    onSelectedLayerIndexChange(next)
   }
 
   async function onSaveLayerConfig() {
@@ -1338,48 +1732,73 @@ function LayerConfigEditor({
       return
     }
 
-    await onSave({ kNode, kPoint, reviewChainTemplate: items })
+    await onSave({ kNode, kPoint, reviewChainTemplate: items, thresholdRollUpEnabled: cfgThresholdRollUpEnabled })
   }
 
   return (
     <Card className="theme-card">
-      <CardHeader className="flex-row items-center justify-between gap-4 space-y-0">
-        <CardTitle>层配置</CardTitle>
-        <div className="w-full max-w-[220px] shrink-0">
-          <Label htmlFor="configLayer" className="sr-only">
-            选择层
-          </Label>
-          <select
-            id="configLayer"
-            aria-label="选择层"
-            className="h-11 w-full rounded-xl border bg-background px-4 text-sm"
-            value={String(selectedLayerIndex)}
-            onChange={(e) => onSelectedLayerIndexChange(Number(e.target.value))}
-            disabled={layerIndexes.length === 0 || saving}
-          >
-            {layerIndexes.map((idx) => (
-              <option key={idx} value={idx}>
-                第 {idx} 层
-              </option>
-            ))}
-          </select>
+      <CardHeader className="space-y-4">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="space-y-1">
+            <CardTitle>层配置</CardTitle>
+            <p className="text-sm text-muted-foreground">{layerStatusText}</p>
+          </div>
+
+          <div className="w-full max-w-[360px] shrink-0 space-y-3">
+            <div className="space-y-2">
+              <Label htmlFor="configLayer">已知层</Label>
+              <select
+                id="configLayer"
+                aria-label="选择已知层"
+                className="h-11 w-full rounded-xl border bg-background px-4 text-sm"
+                value={String(selectedLayerIndex)}
+                onChange={(e) => {
+                  const next = Number(e.target.value)
+                  if (!Number.isInteger(next) || next < 0) return
+                  setLayerIndexDraft(String(next))
+                  setLayerIndexErr(null)
+                  onSelectedLayerIndexChange(next)
+                }}
+                disabled={knownLayerIndexes.length === 0 || saving}
+              >
+                {knownLayerIndexes.map((idx) => (
+                  <option key={idx} value={idx}>
+                    第 {idx} 层{existingLayerIndexes.includes(idx) ? "" : "（预配置）"}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-muted-foreground">当前已创建的层：{existingLayerSummary}</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="customConfigLayer">跳到任意层索引</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="customConfigLayer"
+                  inputMode="numeric"
+                  value={layerIndexDraft}
+                  onChange={(e) => {
+                    setLayerIndexDraft(e.target.value.replace(/[^\d]/g, ""))
+                    if (layerIndexErr) setLayerIndexErr(null)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault()
+                      applyLayerIndexDraft()
+                    }
+                  }}
+                  disabled={saving}
+                />
+                <Button type="button" variant="outline" onClick={applyLayerIndexDraft} disabled={saving}>
+                  切换
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">这里可以直接输入尚未创建的层索引，先保存预配置。</p>
+            </div>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-4 text-sm">
-        <div className="theme-status-surface rounded-[1.35rem] border border-border/70 p-4">
-          <div className="flex flex-wrap gap-2">
-            <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-medium text-sky-800">
-              当前模板：{templateSummary}
-            </span>
-            <span className="inline-flex items-center rounded-full border border-border/70 bg-background/85 px-3 py-1.5 text-xs font-medium text-foreground">
-              节点阈值：{initialConfig.aggregationKNode}
-            </span>
-            <span className="inline-flex items-center rounded-full border border-border/70 bg-background/85 px-3 py-1.5 text-xs font-medium text-foreground">
-              复述点阈值：{initialConfig.aggregationKPoint}
-            </span>
-          </div>
-        </div>
-
         <div className="grid gap-4">
           <div className="grid gap-4 rounded-[1.2rem] border border-border/70 bg-muted/15 p-4 md:grid-cols-2">
             <div className="space-y-2">
@@ -1389,6 +1808,27 @@ function LayerConfigEditor({
             <div className="space-y-2">
               <Label htmlFor="kPoint">复述点阈值</Label>
               <Input id="kPoint" value={cfgKPoint} onChange={(e) => setCfgKPoint(e.target.value)} disabled={saving} />
+            </div>
+          </div>
+
+          <div className="rounded-[1.2rem] border border-border/70 bg-muted/15 p-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div className="space-y-1">
+                <Label>阈值自动上推</Label>
+                <p className="text-xs text-muted-foreground">
+                  {cfgThresholdRollUpEnabled
+                    ? "达到节点数或复述点阈值后，系统会自动进入聚合周期。"
+                    : "已关闭自动阈值上推。达到阈值后，候选任务会继续保留在这一层，直到你手动上推或重新开启。"}
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant={cfgThresholdRollUpEnabled ? "outline" : "default"}
+                onClick={() => setCfgThresholdRollUpEnabled((prev) => !prev)}
+                disabled={saving}
+              >
+                {cfgThresholdRollUpEnabled ? "已开启，点击关闭" : "已关闭，点击开启"}
+              </Button>
             </div>
           </div>
 
@@ -1505,6 +1945,7 @@ function LayerConfigEditor({
 
           {layersError ? <p className="text-sm text-destructive">{formatApiError(layersError)}</p> : null}
           {projectConfigError ? <p className="text-sm text-destructive">{formatApiError(projectConfigError)}</p> : null}
+          {layerIndexErr ? <p className="text-sm text-destructive">{layerIndexErr}</p> : null}
           {cfgErr ? <p className="text-sm text-destructive">{cfgErr}</p> : null}
           {mutationError ? <p className="text-sm text-destructive">{formatApiError(mutationError)}</p> : null}
         </div>

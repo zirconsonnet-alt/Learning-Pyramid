@@ -17,7 +17,7 @@ from adapter.auth import auth_error_response, resolve_session_user
 from adapter.errors import register_exception_handlers
 from adapter.deps import get_auth_store
 from adapter.runtime_status import collect_runtime_status
-from adapter.routers import admin, asr, auth, layers, learning_tasks, materials, media, membership, profile, projects, push, review, study_groups, system, validation
+from adapter.routers import admin, asr, auth, friends, layers, learning_tasks, materials, media, membership, profile, projects, push, review, system, validation
 from backend.system.hosted_deployment_checks import hosted_runtime_warnings, validate_hosted_runtime_or_raise
 from backend.system.http_runtime_config import current_http_runtime_config
 from backend.system.runtime_features import current_runtime_features
@@ -181,12 +181,13 @@ def create_app() -> FastAPI:
         if not features.auth_enabled:
             return await call_next(request)
 
-        auth_store = get_auth_store()
         if _is_public_api_path(path):
             if _public_api_path_supports_optional_auth(path):
+                auth_store = get_auth_store()
                 request.state.auth_user = await run_in_threadpool(resolve_session_user, request, auth_store)
             return await call_next(request)
 
+        auth_store = get_auth_store()
         user = await run_in_threadpool(resolve_session_user, request, auth_store)
         if user is None:
             return auth_error_response(
@@ -214,7 +215,7 @@ def create_app() -> FastAPI:
     app.include_router(auth.router, prefix="/api", tags=["auth"])
     app.include_router(profile.router, prefix="/api", tags=["profile"])
     app.include_router(membership.router, prefix="/api", tags=["membership"])
-    app.include_router(study_groups.router, prefix="/api", tags=["study-groups"])
+    app.include_router(friends.router, prefix="/api", tags=["friends"])
     app.include_router(admin.router, prefix="/api", tags=["admin"])
     app.include_router(projects.router, prefix="/api", tags=["projects"])
     app.include_router(materials.router, prefix="/api", tags=["materials"])

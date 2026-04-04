@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-import { apiRequest } from "@/ui/api/http"
+import { apiRequest, type ApiRequestExecutionOptions } from "@/ui/api/http"
 
 export const LayerSchema = z.object({
   projectId: z.string(),
@@ -30,8 +30,13 @@ export type AggregationEvent = z.infer<typeof AggregationEventSchema>
 
 export const ManualRollUpResultSchema = z.object({ parentNodeId: z.string().nullable() })
 
-export function listLayers(projectId: string) {
-  return apiRequest({ path: `/projects/${projectId}/layers`, responseSchema: LayersSchema })
+export function listLayers(projectId: string, options?: ApiRequestExecutionOptions) {
+  return apiRequest({
+    path: `/projects/${projectId}/layers`,
+    responseSchema: LayersSchema,
+    signal: options?.signal,
+    timeoutMs: options?.timeoutMs,
+  })
 }
 
 export function getAggregationQueue(projectId: string, layerIndex: number) {

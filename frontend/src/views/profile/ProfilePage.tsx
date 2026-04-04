@@ -1,44 +1,35 @@
-import { type ChangeEvent, type ComponentType, useMemo, useRef, useState } from "react"
+import { type ChangeEvent, type KeyboardEvent, useMemo, useRef, useState } from "react"
 import { useQueries } from "@tanstack/react-query"
-import {
-  Activity,
-  BookCopy,
-  Camera,
-  Clock3,
-  Flame,
-  FolderKanban,
-  KeyRound,
-  Mail,
-  PenLine,
-  Save,
-  ShieldCheck,
-} from "lucide-react"
+import { Activity, ArrowRight, Camera, ChevronDown, Cloud, KeyRound, Link2Off, Mail, RefreshCw, Save } from "lucide-react"
+import { Link } from "react-router-dom"
 
-import { listAuditLogEvents } from "@/ui/api/auditLog"
+import { type AuditLogEvent, listAuditLogEvents } from "@/ui/api/auditLog"
+import type { CloudAccount } from "@/ui/api/cloudAccounts"
 import { ApiError } from "@/ui/api/http"
 import { ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
 import { useProjects } from "@/ui/queries/projects"
+import { useBaiduNetdiskCloudAccounts, useBeginBaiduNetdiskConnect, useDisconnectBaiduNetdiskAccount } from "@/ui/queries/cloudAccounts"
 import { useChangeMyPassword, useMyProfile, useUpdateMyProfile, useUploadMyAvatar } from "@/ui/queries/profile"
+import { useSystemCapabilities } from "@/ui/queries/system"
 import { getLocalDateKey, loadDailyPlaybackTotalsByDate } from "@/ui/store/workbenchDailyStats"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { cn } from "@/ui/utils"
-import { MembershipProfilePanel } from "@/views/membership/components/MembershipProfilePanel"
 
 import {
+  buildDateKeySpan,
   buildCurveGeometry,
   buildRecentDateKeys,
+  formatDateKeyShortLabel,
+  formatDateKeyWeekdayLabel,
   formatDateTimeLabel,
   formatDurationCompact,
-  formatLastStudyText,
-  getLastStudyAt,
   isLearningSubmitEvent,
   isReviewCommitEvent,
   isSuccessfulStudyEvent,
   type DailyStatPoint,
-  type ProjectActivitySnapshot,
 } from "./profileStats"
 
 type ProfileDraft = {
@@ -46,128 +37,350 @@ type ProfileDraft = {
   bio: string
 }
 
+type LearningMetric = "playback" | "learning" | "review"
+type LearningRange = "week" | "month" | "history"
+
+type LearningMetricOption = {
+  value: LearningMetric
+  label: string
+  stroke: string
+  surface: string
+  fillStart: string
+  fillEnd: string
+}
+
+const learningMetricOptions: LearningMetricOption[] = [
+  {
+    value: "playback",
+    label: "学习时长",
+    stroke: "#2563eb",
+    surface: "#eff6ff",
+    fillStart: "rgba(37,99,235,0.22)",
+    fillEnd: "rgba(37,99,235,0.03)",
+  },
+  {
+    value: "learning",
+    label: "复述点录入",
+    stroke: "#ef4444",
+    surface: "#fef2f2",
+    fillStart: "rgba(239,68,68,0.2)",
+    fillEnd: "rgba(239,68,68,0.03)",
+  },
+  {
+    value: "review",
+    label: "复述点复习",
+    stroke: "#14b8a6",
+    surface: "#ecfeff",
+    fillStart: "rgba(20,184,166,0.2)",
+    fillEnd: "rgba(20,184,166,0.03)",
+  },
+]
+
+const learningRangeOptions: Array<{ value: LearningRange; label: string }> = [
+  { value: "week", label: "周" },
+  { value: "month", label: "月" },
+  { value: "history", label: "历史" },
+]
+
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
   if (err instanceof Error) return err.message
   return "未知错误"
 }
 
-function StatTile({
-  icon: Icon,
-  label,
-  value,
-  hint,
-}: {
-  icon: ComponentType<{ className?: string }>
+function getLearningMetricValue(point: DailyStatPoint, metric: LearningMetric) {
+  if (metric === "learning") return point.learningCount
+  if (metric === "review") return point.reviewCount
+  return point.playbackMs
+}
+
+function getLearningMetricOption(metric: LearningMetric) {
+  return learningMetricOptions.find((option) => option.value === metric) ?? learningMetricOptions[0]
+}
+
+function formatLearningMetricValue(metric: LearningMetric, value: number) {
+  if (metric === "playback") return formatDurationCompact(value)
+  return `${value} 次`
+}
+
+function formatLearningMetricAverage(metric: LearningMetric, value: number) {
+  if (metric === "playback") {
+    const minutes = value / 60_000
+    if (minutes <= 0) return "0m"
+    if (minutes < 60) {
+      const roundedMinutes = Math.round(minutes * 10) / 10
+      return `${Number.isInteger(roundedMinutes) ? roundedMinutes : roundedMinutes.toFixed(1)}m`
+    }
+    const hours = minutes / 60
+    const roundedHours = Math.round(hours * 10) / 10
+    return `${Number.isInteger(roundedHours) ? roundedHours : roundedHours.toFixed(1)}h`
+  }
+  const roundedValue = Math.round(value * 10) / 10
+  return `${Number.isInteger(roundedValue) ? roundedValue : roundedValue.toFixed(1)} 次`
+}
+
+function formatLearningMetricVariance(value: number) {
+  const roundedValue = Math.round(value * 10) / 10
+  return Number.isInteger(roundedValue) ? `${roundedValue}` : roundedValue.toFixed(1)
+}
+
+function formatAccountExpiresAt(value: string | null | undefined) {
+  if (!value) return "未返回到期时间"
+  const dt = new Date(value)
+  return Number.isNaN(dt.getTime()) ? value : dt.toLocaleString()
+}
+
+function waitForBaiduNetdiskConnectPopup(popup: Window | null): Promise<CloudAccount> {
+  if (!popup) {
+    return Promise.reject(new Error("浏览器拦截了授权弹窗，请允许弹窗后重试"))
+  }
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const timerId = window.setInterval(() => {
+      if (!popup.closed) return
+      if (settled) return
+      settled = true
+      window.clearInterval(timerId)
+      window.removeEventListener("message", onMessage)
+      reject(new Error("授权窗口已关闭，绑定没有完成"))
+    }, 400)
+
+    function cleanup() {
+      window.clearInterval(timerId)
+      window.removeEventListener("message", onMessage)
+    }
+
+    function onMessage(event: MessageEvent) {
+      const data = event.data
+      if (!data || typeof data !== "object") return
+      const payload = data as { type?: unknown; ok?: unknown; message?: unknown; account?: unknown }
+      if (payload.type !== "plm:baidu-netdisk-connect") return
+      if (settled) return
+      settled = true
+      cleanup()
+      if (payload.ok !== true) {
+        reject(new Error(typeof payload.message === "string" && payload.message.trim() ? payload.message : "百度网盘授权失败"))
+        return
+      }
+      resolve(payload.account as CloudAccount)
+    }
+
+    window.addEventListener("message", onMessage)
+  })
+}
+
+function formatLearningMetricAxisLabel(metric: LearningMetric, value: number) {
+  if (metric === "playback") {
+    return formatLearningMetricAverage(metric, value)
+  }
+  const roundedValue = Math.round(value * 10) / 10
+  return `${Number.isInteger(roundedValue) ? roundedValue : roundedValue.toFixed(1)}`
+}
+
+function getLearningMetricStats(points: DailyStatPoint[], metric: LearningMetric) {
+  const values = points.map((point) => getLearningMetricValue(point, metric))
+  const total = values.reduce((sum, value) => sum + value, 0)
+  const average = values.length > 0 ? total / values.length : 0
+  const activePoints = points
+    .map((point) => ({
+      point,
+      value: getLearningMetricValue(point, metric),
+    }))
+    .filter((entry) => entry.value > 0)
+  const peakEntry = activePoints.reduce<(typeof activePoints)[number] | null>(
+    (best, entry) => (best === null || entry.value > best.value ? entry : best),
+    null,
+  )
+  const normalizedActiveValues = activePoints.map((entry) => (metric === "playback" ? entry.value / 60_000 : entry.value))
+  const activeMean =
+    normalizedActiveValues.length > 0
+      ? normalizedActiveValues.reduce((sum, value) => sum + value, 0) / normalizedActiveValues.length
+      : 0
+  const stability =
+    normalizedActiveValues.length > 1
+      ? normalizedActiveValues.reduce((sum, value) => sum + (value - activeMean) ** 2, 0) / normalizedActiveValues.length
+      : 0
+
+  return {
+    average,
+    activeDays: activePoints.length,
+    peakEntry,
+    stability,
+  }
+}
+
+function buildAxisTickIndices(total: number, maxLabels: number) {
+  if (total <= 0) return []
+  if (total <= maxLabels) return Array.from({ length: total }, (_, index) => index)
+  if (maxLabels <= 1) return [0]
+  return Array.from(new Set(Array.from({ length: maxLabels }, (_, index) => Math.round((index * (total - 1)) / (maxLabels - 1)))))
+}
+
+function MetricStatCard(props: {
   label: string
   value: string
-  hint: string
+  detail: string
 }) {
+  const { label, value, detail } = props
+
   return (
-    <div className="rounded-[1.4rem] border border-[#d6e2ee] bg-white/86 p-4 shadow-[0_16px_36px_-30px_rgba(15,23,42,0.28)]">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="text-[11px] uppercase tracking-[0.14em] text-[#7a8ca3]">{label}</div>
-          <div className="mt-2 text-[1.7rem] font-semibold tracking-tight text-[#17324d]">{value}</div>
-        </div>
-        <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#dbe6f1] bg-[#f5f9fd] text-[#406489]">
-          <Icon className="h-4 w-4" />
-        </div>
-      </div>
-      <div className="mt-2 text-sm leading-6 text-[#6f8195]">{hint}</div>
+    <div className="theme-subtle-surface px-4 py-3">
+      <div className="text-[11px] uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">{label}</div>
+      <div className="mt-2 text-xl font-semibold tracking-tight text-foreground">{value}</div>
+      <div className="mt-1 text-sm text-[color:var(--theme-subtle-text)]">{detail}</div>
     </div>
   )
 }
 
-function LearningCurve({
-  points,
-  totalPlaybackMs,
-  totalActions,
-}: {
-  points: DailyStatPoint[]
-  totalPlaybackMs: number
-  totalActions: number
+function LearningViewSelect(props: {
+  id: string
+  label: string
+  value: string
+  disabled?: boolean
+  onChange: (value: string) => void
+  options: Array<{ value: string; label: string }>
 }) {
-  const chartWidth = 640
-  const chartHeight = 220
-  const geometry = buildCurveGeometry(points, chartWidth, chartHeight)
+  const { id, label, value, disabled, onChange, options } = props
 
   return (
-    <div className="rounded-[1.6rem] border border-[#d4e0ec] bg-[linear-gradient(180deg,rgba(255,255,255,0.94),rgba(245,250,255,0.88))] p-5 shadow-[0_18px_40px_-34px_rgba(20,58,101,0.28)]">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <div className="text-[11px] uppercase tracking-[0.18em] text-[#7286a0]">近 7 天学习曲线</div>
-          <div className="mt-2 text-2xl font-semibold tracking-tight text-[#16314c]">{formatDurationCompact(totalPlaybackMs)}</div>
-          <div className="mt-1 text-sm text-[#6d7f95]">过去 7 天的学习时长来自工作台回放统计，下面这条线按每天的学习时长绘制。</div>
-        </div>
-        <div className="grid min-w-[10rem] gap-2 text-right">
-          <div>
-            <div className="text-[11px] uppercase tracking-[0.14em] text-[#8a9ab0]">最高单日</div>
-            <div className="mt-1 text-base font-semibold text-[#213c57]">
-              {formatDurationCompact(Math.max(...points.map((point) => point.playbackMs), 0))}
-            </div>
-          </div>
-          <div>
-            <div className="text-[11px] uppercase tracking-[0.14em] text-[#8a9ab0]">近 7 天动作</div>
-            <div className="mt-1 text-base font-semibold text-[#213c57]">{totalActions} 次</div>
-          </div>
+    <label htmlFor={id} className="space-y-1">
+      <div className="text-[10px] uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">{label}</div>
+      <div className="relative min-w-[8.5rem]">
+        <select
+          id={id}
+          value={value}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.value)}
+          className="theme-select h-10 w-full px-3 pr-10 font-medium"
+        >
+          {options.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 text-muted-foreground">
+          <ChevronDown className="h-4 w-4" />
         </div>
       </div>
+    </label>
+  )
+}
 
-      <div className="mt-5 overflow-hidden rounded-[1.4rem] border border-[#dbe5ef] bg-white/90 px-3 py-4">
+function LearningCurve(props: {
+  points: DailyStatPoint[]
+  metric: LearningMetric
+  range: LearningRange
+  onSelectMetric: (metric: LearningMetric) => void
+}) {
+  const { points, metric, range, onSelectMetric } = props
+  const chartWidth = 640
+  const chartHeight = 236
+  const selectedOption = getLearningMetricOption(metric)
+  const metricLabel = selectedOption.label
+  const selectedMaxValue = Math.max(...points.map((point) => Math.max(0, getLearningMetricValue(point, metric))), 1)
+  const geometryByMetric = Object.fromEntries(
+    learningMetricOptions.map((option) => [
+      option.value,
+      buildCurveGeometry(points, chartWidth, chartHeight, (point) => getLearningMetricValue(point, option.value)),
+    ]),
+  ) as Record<LearningMetric, ReturnType<typeof buildCurveGeometry<DailyStatPoint>>>
+  const selectedGeometry = geometryByMetric[metric]
+  const stats = getLearningMetricStats(points, metric)
+  const gridLabels = selectedGeometry.gridLines.map((_, index) => formatLearningMetricAxisLabel(metric, selectedMaxValue * ((3 - index) / 3)))
+  const selectedGradientId = `profile-curve-fill-${metric}`
+  const xAxisTickIndices = buildAxisTickIndices(points.length, range === "week" ? 7 : 6)
+
+  return (
+    <div className="theme-soft-surface rounded-[1.6rem] p-5">
+      <div className="theme-subtle-surface overflow-hidden rounded-[1.4rem] px-3 py-4">
         <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="h-56 w-full" preserveAspectRatio="none" aria-hidden="true">
           <defs>
-            <linearGradient id="profile-curve-fill" x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" stopColor="rgba(56,149,255,0.34)" />
-              <stop offset="100%" stopColor="rgba(56,149,255,0.04)" />
-            </linearGradient>
-            <linearGradient id="profile-curve-line" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stopColor="#3b82f6" />
-              <stop offset="100%" stopColor="#38bdf8" />
+            <linearGradient id={selectedGradientId} x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stopColor={selectedOption.fillStart} />
+              <stop offset="100%" stopColor={selectedOption.fillEnd} />
             </linearGradient>
           </defs>
 
-          {geometry.gridLines.map((lineY, index) => (
-            <line
-              key={`grid-${index}`}
-              x1="16"
-              x2={chartWidth - 16}
-              y1={lineY}
-              y2={lineY}
-              stroke="rgba(148, 163, 184, 0.18)"
-              strokeDasharray="6 8"
-            />
+          {selectedGeometry.gridLines.map((lineY, index) => (
+            <g key={`grid-${index}`}>
+              <line
+                x1="44"
+                x2={chartWidth - 44}
+                y1={lineY}
+                y2={lineY}
+                stroke="var(--theme-soft-border)"
+                strokeDasharray="6 8"
+              />
+              <text x="36" y={lineY + 4} textAnchor="end" fontSize="11" fill="var(--theme-subtle-text)">
+                {gridLabels[index]}
+              </text>
+            </g>
           ))}
 
-          <path d={geometry.areaPath} fill="url(#profile-curve-fill)" />
-          <path d={geometry.linePath} fill="none" stroke="url(#profile-curve-line)" strokeWidth="4" strokeLinecap="round" />
+          {learningMetricOptions
+            .filter((option) => option.value !== metric)
+            .map((option) => {
+              const geometry = geometryByMetric[option.value]
+              return (
+                <g
+                  key={option.value}
+                  onClick={() => onSelectMetric(option.value)}
+                  className="cursor-pointer"
+                  style={{ opacity: 0.34 }}
+                >
+                  <path d={geometry.linePath} fill="none" stroke={option.stroke} strokeWidth="2.5" strokeLinecap="round" strokeDasharray="9 9" />
+                </g>
+              )
+            })}
 
-          {geometry.nodes.map((node) => (
+          <path d={selectedGeometry.areaPath} fill={`url(#${selectedGradientId})`} />
+          <path d={selectedGeometry.linePath} fill="none" stroke={selectedOption.stroke} strokeWidth="4" strokeLinecap="round" />
+
+          {selectedGeometry.nodes.map((node) => (
             <g key={node.dateKey}>
+              <title>{`${node.shortLabel} ${node.weekdayLabel} · ${metricLabel}：${formatLearningMetricValue(metric, node.metricValue)}`}</title>
               <line
                 x1={node.x}
                 x2={node.x}
-                y1={geometry.baselineY}
-                y2={Math.max(geometry.baselineY - node.columnHeight, node.y)}
-                stroke="rgba(59,130,246,0.14)"
+                y1={selectedGeometry.baselineY}
+                y2={Math.max(selectedGeometry.baselineY - node.columnHeight, node.y)}
+                stroke={`${selectedOption.stroke}26`}
                 strokeWidth="10"
                 strokeLinecap="round"
               />
-              <circle cx={node.x} cy={node.y} r="6.5" fill="#ffffff" stroke="#2f7ef7" strokeWidth="3" />
+              <circle cx={node.x} cy={node.y} r="6.5" fill="var(--theme-subtle-bg)" stroke={selectedOption.stroke} strokeWidth="3" />
             </g>
           ))}
-        </svg>
 
-        <div className="mt-3 grid grid-cols-7 gap-2">
-          {points.map((point) => (
-            <div key={point.dateKey} className="rounded-2xl bg-[#f6f9fc] px-2 py-2 text-center">
-              <div className="text-[10px] uppercase tracking-[0.08em] text-[#7b8da4]">{point.shortLabel}</div>
-              <div className="mt-1 text-[11px] text-[#93a2b5]">{point.weekdayLabel}</div>
-              <div className="mt-2 text-xs font-semibold text-[#21405f]">{formatDurationCompact(point.playbackMs)}</div>
-              <div className="mt-1 text-[11px] text-[#718398]">{point.totalActions} 次动作</div>
-            </div>
-          ))}
-        </div>
+          {xAxisTickIndices.map((index) => {
+            const node = selectedGeometry.nodes[index]
+            if (!node) return null
+            return (
+              <g key={`axis-${node.dateKey}`}>
+                <line x1={node.x} x2={node.x} y1={selectedGeometry.baselineY} y2={selectedGeometry.baselineY + 6} stroke="var(--theme-soft-border)" />
+                <text x={node.x} y={chartHeight - 8} textAnchor="middle" fontSize="11" fill="var(--theme-subtle-text)">
+                  {node.shortLabel}
+                </text>
+              </g>
+            )
+          })}
+        </svg>
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricStatCard label="日均" value={formatLearningMetricAverage(metric, stats.average)} detail="当前范围平均值" />
+        <MetricStatCard
+          label="峰值日"
+          value={stats.peakEntry ? stats.peakEntry.point.shortLabel : "暂无"}
+          detail={
+            stats.peakEntry
+              ? `${stats.peakEntry.point.weekdayLabel} · ${formatLearningMetricValue(metric, stats.peakEntry.value)}`
+              : "当前范围还没有活跃记录"
+          }
+        />
+        <MetricStatCard label="活跃天数" value={`${stats.activeDays} 天`} detail="当前范围有记录的天数" />
+        <MetricStatCard label="稳定指数" value={formatLearningMetricVariance(stats.stability)} detail="活跃日方差" />
       </div>
     </div>
   )
@@ -177,10 +390,16 @@ export function ProfilePage() {
   const avatarInputRef = useRef<HTMLInputElement | null>(null)
   const profileQ = useMyProfile()
   const projectsQ = useProjects()
+  const capabilitiesQ = useSystemCapabilities()
   const updateProfile = useUpdateMyProfile()
   const changePassword = useChangeMyPassword()
   const uploadAvatar = useUploadMyAvatar()
+  const beginBaiduNetdiskConnect = useBeginBaiduNetdiskConnect()
+  const disconnectBaiduNetdiskAccount = useDisconnectBaiduNetdiskAccount()
 
+  const [selectedLearningProjectId, setSelectedLearningProjectId] = useState("all")
+  const [selectedLearningMetric, setSelectedLearningMetric] = useState<LearningMetric>("playback")
+  const [selectedLearningRange, setSelectedLearningRange] = useState<LearningRange>("week")
   const [isProfileEditing, setIsProfileEditing] = useState(false)
   const [profileDraft, setProfileDraft] = useState<ProfileDraft | null>(null)
   const [isPasswordEditing, setIsPasswordEditing] = useState(false)
@@ -188,18 +407,18 @@ export function ProfilePage() {
   const [newPassword, setNewPassword] = useState("")
 
   const profile = profileQ.data ?? null
-  const projects = useMemo(() => projectsQ.data ?? [], [projectsQ.data])
+  const baiduNetdiskEnabled = capabilitiesQ.data?.baiduNetdiskEnabled ?? false
+  const baiduAccountsQ = useBaiduNetdiskCloudAccounts(Boolean(profile) && baiduNetdiskEnabled)
+  const activeProjects = useMemo(() => (projectsQ.data ?? []).filter((project) => project.state !== "DELETED"), [projectsQ.data])
   const auditLogQs = useQueries({
-    queries: projects.map((project) => ({
+    queries: activeProjects.map((project) => ({
       queryKey: ["auditLogEvents", project.projectId],
       queryFn: () => listAuditLogEvents(project.projectId),
       enabled: !projectsQ.isLoading && !projectsQ.error,
       staleTime: 60_000,
-      refetchInterval: 60_000,
+      refetchOnWindowFocus: false,
     })),
   })
-
-  const recentDateKeys = useMemo(() => buildRecentDateKeys(7), [])
   const nickname = profileDraft?.nickname ?? profile?.nickname ?? ""
   const bio = profileDraft?.bio ?? profile?.bio ?? ""
   const bioRemaining = 120 - bio.length
@@ -210,45 +429,39 @@ export function ProfilePage() {
   )
   const hasPasswordInput = currentPassword.trim().length > 0 || newPassword.trim().length > 0
   const isSaving = updateProfile.isPending || changePassword.isPending
+  const effectiveSelectedLearningProjectId =
+    selectedLearningProjectId === "all" || activeProjects.some((project) => project.projectId === selectedLearningProjectId)
+      ? selectedLearningProjectId
+      : "all"
 
-  const projectActivitySnapshots = useMemo<ProjectActivitySnapshot[]>(() => {
-    return projects
-      .map((project, index) => {
-        const successfulEvents = (auditLogQs[index]?.data ?? []).filter(isSuccessfulStudyEvent)
-        const learningCount = successfulEvents.filter(isLearningSubmitEvent).length
-        const reviewCount = successfulEvents.filter(isReviewCommitEvent).length
-        return {
-          projectId: project.projectId,
-          title: project.title,
-          state: project.state,
-          learningCount,
-          reviewCount,
-          totalActions: learningCount + reviewCount,
-          lastStudyAt: getLastStudyAt(successfulEvents),
-        }
-      })
-      .sort((left, right) => {
-        const leftTime = left.lastStudyAt ? Date.parse(left.lastStudyAt) : 0
-        const rightTime = right.lastStudyAt ? Date.parse(right.lastStudyAt) : 0
-        return rightTime - leftTime
-      })
-  }, [auditLogQs, projects])
+  const successfulStudyEventsByProjectId = useMemo<Record<string, AuditLogEvent[]>>(() => {
+    const eventsByProjectId: Record<string, AuditLogEvent[]> = {}
+    activeProjects.forEach((project, index) => {
+      eventsByProjectId[project.projectId] = (auditLogQs[index]?.data ?? []).filter(isSuccessfulStudyEvent)
+    })
+    return eventsByProjectId
+  }, [activeProjects, auditLogQs])
 
-  const allStudyEvents = useMemo(
-    () => auditLogQs.flatMap((query) => (query.data ?? []).filter(isSuccessfulStudyEvent)),
-    [auditLogQs],
+  const selectedLearningProjectIds = useMemo(
+    () => (effectiveSelectedLearningProjectId === "all" ? activeProjects.map((project) => project.projectId) : [effectiveSelectedLearningProjectId]),
+    [activeProjects, effectiveSelectedLearningProjectId],
   )
 
-  const playbackTotalsByDate = useMemo(
-    () => loadDailyPlaybackTotalsByDate(projects.map((project) => project.projectId)),
-    [projects],
+  const selectedStudyEvents = useMemo(
+    () => selectedLearningProjectIds.flatMap((projectId) => successfulStudyEventsByProjectId[projectId] ?? []),
+    [selectedLearningProjectIds, successfulStudyEventsByProjectId],
   )
 
-  const recentActionCountsByDate = useMemo(() => {
+  const selectedPlaybackTotalsByDate = useMemo(
+    () => loadDailyPlaybackTotalsByDate(selectedLearningProjectIds),
+    [selectedLearningProjectIds],
+  )
+
+  const selectedActionCountsByDate = useMemo(() => {
     const learningByDate: Record<string, number> = {}
     const reviewByDate: Record<string, number> = {}
 
-    for (const event of allStudyEvents) {
+    for (const event of selectedStudyEvents) {
       const dateKey = getLocalDateKey(new Date(event.occurredAt))
       if (isLearningSubmitEvent(event)) {
         learningByDate[dateKey] = (learningByDate[dateKey] ?? 0) + 1
@@ -258,65 +471,43 @@ export function ProfilePage() {
     }
 
     return { learningByDate, reviewByDate }
-  }, [allStudyEvents])
+  }, [selectedStudyEvents])
 
-  const recentSeries = useMemo<DailyStatPoint[]>(() => {
-    return recentDateKeys.map((dateKey) => {
-      const learningCount = recentActionCountsByDate.learningByDate[dateKey] ?? 0
-      const reviewCount = recentActionCountsByDate.reviewByDate[dateKey] ?? 0
-      const date = new Date(`${dateKey}T00:00:00`)
-      return {
-        dateKey,
-        shortLabel: `${date.getMonth() + 1}.${date.getDate()}`,
-        weekdayLabel: date.toLocaleDateString("zh-CN", { weekday: "short" }),
-        playbackMs: playbackTotalsByDate[dateKey] ?? 0,
-        learningCount,
-        reviewCount,
-        totalActions: learningCount + reviewCount,
-      }
-    })
-  }, [playbackTotalsByDate, recentActionCountsByDate.learningByDate, recentActionCountsByDate.reviewByDate, recentDateKeys])
+  const visibleDateKeys = useMemo(() => {
+    if (selectedLearningRange === "week") return buildRecentDateKeys(7)
+    if (selectedLearningRange === "month") return buildRecentDateKeys(30)
 
-  const activeDayKeys = useMemo(() => {
-    const set = new Set<string>()
-    for (const [dateKey, playbackMs] of Object.entries(playbackTotalsByDate)) {
-      if (playbackMs > 0) set.add(dateKey)
-    }
-    for (const event of allStudyEvents) {
-      set.add(getLocalDateKey(new Date(event.occurredAt)))
-    }
-    return set
-  }, [allStudyEvents, playbackTotalsByDate])
+    const earliestDateKey = [
+      ...Object.keys(selectedPlaybackTotalsByDate),
+      ...Object.keys(selectedActionCountsByDate.learningByDate),
+      ...Object.keys(selectedActionCountsByDate.reviewByDate),
+    ]
+      .filter(Boolean)
+      .sort()[0]
 
-  const streakDays = useMemo(() => {
-    let streak = 0
-    const cursor = new Date()
-    cursor.setHours(0, 0, 0, 0)
+    return buildDateKeySpan(earliestDateKey ?? getLocalDateKey())
+  }, [selectedActionCountsByDate, selectedLearningRange, selectedPlaybackTotalsByDate])
 
-    for (;;) {
-      const dateKey = getLocalDateKey(cursor)
-      if (!activeDayKeys.has(dateKey)) break
-      streak += 1
-      cursor.setDate(cursor.getDate() - 1)
-    }
+  const recentSeries = useMemo<DailyStatPoint[]>(
+    () =>
+      visibleDateKeys.map((dateKey) => {
+        const learningCount = selectedActionCountsByDate.learningByDate[dateKey] ?? 0
+        const reviewCount = selectedActionCountsByDate.reviewByDate[dateKey] ?? 0
+        return {
+          dateKey,
+          shortLabel: formatDateKeyShortLabel(dateKey),
+          weekdayLabel: formatDateKeyWeekdayLabel(dateKey),
+          playbackMs: selectedPlaybackTotalsByDate[dateKey] ?? 0,
+          learningCount,
+          reviewCount,
+          totalActions: learningCount + reviewCount,
+        }
+      }),
+    [selectedActionCountsByDate, selectedPlaybackTotalsByDate, visibleDateKeys],
+  )
 
-    return streak
-  }, [activeDayKeys])
-
-  const totalLearningCount = allStudyEvents.filter(isLearningSubmitEvent).length
-  const totalReviewCount = allStudyEvents.filter(isReviewCommitEvent).length
-  const totalRecentPlaybackMs = recentSeries.reduce((sum, point) => sum + point.playbackMs, 0)
-  const totalRecentActions = recentSeries.reduce((sum, point) => sum + point.totalActions, 0)
-  const recentLearningCount = recentSeries.reduce((sum, point) => sum + point.learningCount, 0)
-  const recentReviewCount = recentSeries.reduce((sum, point) => sum + point.reviewCount, 0)
-  const activeProjectCount = projects.filter((project) => project.state !== "DELETED").length
-  const lastStudyAt = projectActivitySnapshots.find((item) => item.lastStudyAt)?.lastStudyAt ?? null
-  const lastStudyDisplay = formatLastStudyText(lastStudyAt)
-  const activityLoading = projectsQ.isLoading || auditLogQs.some((query) => query.isLoading)
-  const activityError = projectsQ.error ?? auditLogQs.find((query) => query.error)?.error ?? null
-  const overallActionCount = totalLearningCount + totalReviewCount
-  const learningShare = overallActionCount > 0 ? Math.round((totalLearningCount / overallActionCount) * 100) : 0
-  const reviewShare = overallActionCount > 0 ? Math.round((totalReviewCount / overallActionCount) * 100) : 0
+  const learningViewLoading = projectsQ.isLoading || auditLogQs.some((query) => query.isLoading)
+  const learningViewError = projectsQ.error ?? auditLogQs.find((query) => query.error)?.error ?? null
 
   function openProfileEditor() {
     if (!profile) return
@@ -336,6 +527,12 @@ export function ProfilePage() {
       bio: current?.bio ?? profile.bio,
       [field]: value,
     }))
+  }
+
+  function onProfileFieldKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return
+    event.preventDefault()
+    void onSaveChanges()
   }
 
   function resetProfileEditor() {
@@ -422,6 +619,34 @@ export function ProfilePage() {
     }
   }
 
+  async function onConnectBaiduNetdisk() {
+    const popup = window.open("", "plm-baidu-netdisk-connect", "popup=yes,width=720,height=820")
+    if (!popup) {
+      showErrorFeedback("无法打开授权窗口", "浏览器拦截了弹窗，请允许当前站点打开弹窗后重试。")
+      return
+    }
+    try {
+      const result = await beginBaiduNetdiskConnect.mutateAsync()
+      popup.location.href = result.authorizeUrl
+      const account = await waitForBaiduNetdiskConnectPopup(popup)
+      await baiduAccountsQ.refetch()
+      showSuccessFeedback("百度网盘已连接", `账号“${account.displayName}”已经绑定完成，现在可以去项目里导入视频。`)
+    } catch (err) {
+      popup.close()
+      showErrorFeedback("连接百度网盘失败", formatApiError(err))
+    }
+  }
+
+  async function onDisconnectCloudAccount(account: CloudAccount) {
+    try {
+      await disconnectBaiduNetdiskAccount.mutateAsync(account.accountId)
+      await baiduAccountsQ.refetch()
+      showSuccessFeedback("百度网盘已断开", `账号“${account.displayName}”已经从当前用户解绑。`)
+    } catch (err) {
+      showErrorFeedback("断开百度网盘失败", formatApiError(err))
+    }
+  }
+
   if (profileQ.isLoading) {
     return <LoadingNotice title="正在加载个人资料" message="稍等一下，我们正在准备你的账号信息。" />
   }
@@ -431,29 +656,110 @@ export function ProfilePage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-6xl">
       <div className="grid gap-6 xl:grid-cols-[minmax(21rem,25rem)_minmax(0,1fr)] xl:items-start">
-        <aside className="xl:sticky xl:top-28 xl:self-start">
+        <section className="order-2 xl:order-2">
+          <div className="space-y-6">
+            <div className="theme-card-main overflow-hidden">
+              <div className="theme-card-header px-6 py-5">
+                <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.18em] text-[color:var(--theme-subtle-text)]">Learning View</div>
+                    <div className="mt-2 flex items-center gap-2 text-2xl font-semibold tracking-tight text-foreground">
+                      <Activity className="h-5 w-5 text-primary" />
+                      学习视图
+                    </div>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    <LearningViewSelect
+                      id="learning-project-scope"
+                      label="项目"
+                      value={effectiveSelectedLearningProjectId}
+                      disabled={learningViewLoading}
+                      onChange={setSelectedLearningProjectId}
+                      options={[
+                        { value: "all", label: "总视图" },
+                        ...activeProjects.map((project) => ({
+                          value: project.projectId,
+                          label: project.title,
+                        })),
+                      ]}
+                    />
+                    <LearningViewSelect
+                      id="learning-range-scope"
+                      label="范围"
+                      value={selectedLearningRange}
+                      disabled={learningViewLoading}
+                      onChange={(value) => setSelectedLearningRange(value as LearningRange)}
+                      options={learningRangeOptions}
+                    />
+                    <LearningViewSelect
+                      id="learning-metric-scope"
+                      label="指标"
+                      value={selectedLearningMetric}
+                      disabled={learningViewLoading}
+                      onChange={(value) => setSelectedLearningMetric(value as LearningMetric)}
+                      options={learningMetricOptions.map((option) => ({
+                        value: option.value,
+                        label: option.label,
+                      }))}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-5 px-6 py-6">
+                {learningViewError ? (
+                  <div className="theme-warm-surface rounded-[1.3rem] px-4 py-3 text-sm leading-6">
+                    学习视图加载失败：{formatApiError(learningViewError)}
+                  </div>
+                ) : null}
+
+                {!learningViewError && learningViewLoading ? (
+                  <div className="theme-subtle-surface rounded-[1.4rem] border-dashed px-5 py-10 text-center text-sm text-[color:var(--theme-subtle-text)]">
+                    正在整理最近 7 天的学习视图。
+                  </div>
+                ) : null}
+
+                {!learningViewError && !learningViewLoading && activeProjects.length === 0 ? (
+                  <div className="theme-subtle-surface rounded-[1.4rem] border-dashed px-5 py-10 text-center text-sm text-[color:var(--theme-subtle-text)]">
+                    还没有可统计的项目。创建项目后，这里会提供总视图和项目视图。
+                  </div>
+                ) : null}
+
+                {!learningViewError && !learningViewLoading && activeProjects.length > 0 ? (
+                  <LearningCurve
+                    points={recentSeries}
+                    metric={selectedLearningMetric}
+                    range={selectedLearningRange}
+                    onSelectMetric={setSelectedLearningMetric}
+                  />
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <aside className="order-1 xl:order-1 xl:sticky xl:top-28 xl:self-start">
           <div className="theme-card-main overflow-hidden">
             <div className="theme-card-header px-6 py-5">
-              <div className="flex items-start justify-between gap-4">
+              <div className="flex items-start gap-4">
                 <div>
-                  <div className="text-[11px] uppercase tracking-[0.18em] text-[#7a8ca3]">Profile Card</div>
-                  <div className="mt-2 text-2xl font-semibold tracking-tight text-[#15314b]">账户信息</div>
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-[color:var(--theme-subtle-text)]">Profile Card</div>
+                  <div className="mt-2 text-2xl font-semibold tracking-tight text-foreground">账户信息</div>
                 </div>
-                <div className="theme-meta">{formatDateTimeLabel(profile.createdAt).split(" ")[0]}</div>
               </div>
             </div>
 
             <div className="space-y-6 px-6 py-6">
-              <div className="rounded-[1.8rem] border border-[#d8e3ef] bg-[linear-gradient(135deg,rgba(255,255,255,0.94),rgba(241,247,253,0.84))] p-5 shadow-[0_20px_42px_-34px_rgba(20,58,101,0.32)]">
+              <div className="theme-soft-surface rounded-[1.8rem] p-5">
                 <div className="flex items-start gap-4">
                   <input ref={avatarInputRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={onSelectAvatar} />
                   <button
                     type="button"
                     onClick={() => avatarInputRef.current?.click()}
                     disabled={uploadAvatar.isPending}
-                    className="group relative flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-[1.7rem] border border-[#d9e5f0] bg-[#eff5fb] text-3xl font-semibold text-[#587089] transition hover:border-[#bfd2e6] hover:shadow-[0_16px_30px_-24px_rgba(20,58,101,0.35)] disabled:cursor-wait"
+                    className="group relative flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-[1.7rem] border border-[color:var(--theme-subtle-border)] bg-[color:var(--theme-subtle-bg)] text-3xl font-semibold text-[color:var(--theme-subtle-text)] transition hover:border-primary/20 hover:shadow-[var(--theme-soft-shadow)] disabled:cursor-wait"
                     aria-label={uploadAvatar.isPending ? "头像上传中" : "点击修改头像"}
                     title={uploadAvatar.isPending ? "头像上传中..." : "点击修改头像"}
                   >
@@ -462,7 +768,7 @@ export function ProfilePage() {
                     ) : (
                       (profile.nickname || profile.email).slice(0, 1).toUpperCase()
                     )}
-                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#18314b]/0 text-white opacity-0 transition group-hover:bg-[#18314b]/56 group-hover:opacity-100">
+                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-foreground/0 text-background opacity-0 transition group-hover:bg-foreground/50 group-hover:opacity-100">
                       <Camera className="h-4 w-4" />
                       <span className="mt-1 text-[11px] font-medium">{uploadAvatar.isPending ? "上传中..." : "修改头像"}</span>
                     </div>
@@ -474,13 +780,17 @@ export function ProfilePage() {
                           <Input
                             value={nickname}
                             onChange={(event) => updateDraft("nickname", event.target.value)}
+                            onKeyDown={onProfileFieldKeyDown}
                             maxLength={40}
-                            className="h-11 max-w-[16rem] border-[#d7e2ee] bg-white/92 text-[1.45rem] font-semibold tracking-tight text-[#17314b]"
+                            className="inline-flex h-auto min-w-[8rem] max-w-full rounded-none border-0 bg-transparent px-0 py-0 text-2xl font-semibold tracking-tight text-foreground shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
                           />
                         ) : (
-                          <div className="truncate text-2xl font-semibold tracking-tight text-[#16314d]">{nickname || "未设置昵称"}</div>
+                          <div className="truncate text-2xl font-semibold tracking-tight text-foreground">{nickname || "未设置昵称"}</div>
                         )}
-                        <div className="mt-2 font-mono text-sm font-medium text-[#6a7f96]">UID {profile.publicUid}</div>
+                        <div className="mt-2 font-mono text-sm font-medium text-[color:var(--theme-subtle-text)]">UID {profile.publicUid}</div>
+                        <div className="mt-1 whitespace-nowrap text-sm leading-6 text-muted-foreground">
+                          注册时间 {formatDateTimeLabel(profile.createdAt).split(" ")[0]}
+                        </div>
                       </div>
                       {!isProfileEditing ? (
                         <Button type="button" size="sm" variant="outline" className="shrink-0 rounded-full" onClick={openProfileEditor}>
@@ -490,49 +800,54 @@ export function ProfilePage() {
                         <span className="theme-meta shrink-0">正在编辑</span>
                       )}
                     </div>
-                    <div className="text-sm leading-6 text-[#6d8095]">个人主页会展示你的昵称、头像和自我描述，右侧则记录你的学习节奏。</div>
-                    <div className="flex flex-wrap gap-2 pt-1">
-                      <Button type="button" size="sm" variant="ghost" onClick={openProfileEditor}>
-                        <PenLine className="h-3.5 w-3.5" />
-                        编辑资料
-                      </Button>
-                    </div>
                   </div>
                 </div>
               </div>
 
               <div className="space-y-4">
-                <div className="rounded-[1.4rem] border border-[#dbe4ee] bg-white/86 p-4">
+                <div className="theme-soft-surface rounded-[1.4rem] p-4">
                   <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#dce6f0] bg-[#f4f8fc] text-[#53708e]">
+                    <div className="theme-icon-surface h-10 w-10">
                       <Mail className="h-4 w-4" />
                     </div>
                     <div className="min-w-0">
-                      <div className="text-xs uppercase tracking-[0.14em] text-[#8a9ab0]">邮箱</div>
-                      <div className="mt-1 truncate text-sm font-medium text-[#1e3a56]">{profile.email}</div>
+                      <div className="text-xs uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">邮箱</div>
+                      <div className="mt-1 truncate text-sm font-medium text-foreground">{profile.email}</div>
                     </div>
                   </div>
                 </div>
 
-                <div className="rounded-[1.4rem] border border-[#dbe4ee] bg-white/86 p-4">
+                <div className="theme-soft-surface rounded-[1.4rem] p-4">
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex items-start gap-3">
-                      <div className="mt-0.5 flex h-10 w-10 items-center justify-center rounded-2xl border border-[#dce6f0] bg-[#f4f8fc] text-[#53708e]">
+                      <div className="theme-icon-surface mt-0.5 h-10 w-10">
                         <KeyRound className="h-4 w-4" />
                       </div>
                       <div className="min-w-0">
-                        <div className="text-xs uppercase tracking-[0.14em] text-[#8a9ab0]">密码</div>
+                        <div className="text-xs uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">密码</div>
                         {!isPasswordEditing ? (
-                          <div className="mt-1 text-sm font-medium tracking-[0.22em] text-[#1e3a56]">••••••••</div>
+                          <div className="mt-1 text-sm font-medium tracking-[0.22em] text-foreground">••••••••</div>
                         ) : (
                           <div className="mt-3 grid gap-3">
                             <div className="space-y-1.5">
                               <Label htmlFor="current-password">当前密码</Label>
-                              <Input id="current-password" type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} className="border-[#d7e2ee] bg-white/92" />
+                              <Input
+                                id="current-password"
+                                type="password"
+                                value={currentPassword}
+                                onChange={(event) => setCurrentPassword(event.target.value)}
+                                className="border-[color:var(--theme-subtle-border)] bg-[color:var(--theme-subtle-bg)]"
+                              />
                             </div>
                             <div className="space-y-1.5">
                               <Label htmlFor="new-password">新密码</Label>
-                              <Input id="new-password" type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} className="border-[#d7e2ee] bg-white/92" />
+                              <Input
+                                id="new-password"
+                                type="password"
+                                value={newPassword}
+                                onChange={(event) => setNewPassword(event.target.value)}
+                                className="border-[color:var(--theme-subtle-border)] bg-[color:var(--theme-subtle-bg)]"
+                              />
                             </div>
                           </div>
                         )}
@@ -549,7 +864,7 @@ export function ProfilePage() {
 
               <div className="space-y-4 pt-1">
                 <div className="flex items-center justify-between gap-4">
-                  <div className="text-xs uppercase tracking-[0.14em] text-[#8a9ab0]">自我描述</div>
+                  <div className="text-xs uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">自我描述</div>
                   {!isProfileEditing ? (
                     <Button type="button" size="sm" variant="ghost" onClick={openProfileEditor}>
                       编辑
@@ -559,18 +874,111 @@ export function ProfilePage() {
 
                 {isProfileEditing ? (
                   <div className="mt-4 space-y-2">
-                    <textarea value={bio} onChange={(event) => updateDraft("bio", event.target.value.slice(0, 120))} maxLength={120} className="min-h-32 w-full rounded-[1.2rem] border border-[#d7e2ee] bg-white/94 px-4 py-3 text-sm leading-6 text-[#17314b] outline-none transition focus-visible:ring-2 focus-visible:ring-ring" placeholder="写一点你的学习方向、偏好的材料类型，或者现在最想攻克的内容。" />
-                    <div className={cn("text-right text-xs", bioRemaining < 0 ? "text-destructive" : "text-[#7a8da3]")}>还可输入 {Math.max(0, bioRemaining)} 字</div>
+                    <textarea
+                      value={bio}
+                      onChange={(event) => updateDraft("bio", event.target.value.slice(0, 120))}
+                      maxLength={120}
+                      className="min-h-32 w-full rounded-[1.2rem] border border-[color:var(--theme-subtle-border)] bg-[color:var(--theme-subtle-bg)] px-4 py-3 text-sm leading-6 text-foreground outline-none transition focus-visible:ring-2 focus-visible:ring-ring"
+                      placeholder="写一点你的学习方向、偏好的材料类型，或者现在最想攻克的内容。"
+                    />
+                    <div className={cn("text-right text-xs", bioRemaining < 0 ? "text-destructive" : "text-[color:var(--theme-subtle-text)]")}>
+                      还可输入 {Math.max(0, bioRemaining)} 字
+                    </div>
                   </div>
                 ) : (
-                  <div className="mt-4 rounded-[1.2rem] border border-dashed border-[#d8e2ee] bg-[#f7fafd] px-4 py-4 text-sm leading-7 text-[#334f6b]">
+                  <div className="theme-subtle-surface mt-4 rounded-[1.2rem] border-dashed px-4 py-4 text-sm leading-7 text-[color:var(--theme-subtle-text)]">
                     {profile.bio.trim() || "还没有留下自我描述。"}
                   </div>
                 )}
+
+                <div className="theme-soft-surface mt-4 rounded-[1.2rem] p-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="text-xs uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">云账号</div>
+                      <div className="mt-1 text-sm leading-6 text-muted-foreground">
+                        把自己的百度网盘绑定到账号后，就可以在项目设置里直接浏览目录并导入视频。
+                      </div>
+                    </div>
+                    {baiduNetdiskEnabled ? (
+                      <Button type="button" variant="outline" className="shrink-0" onClick={() => void onConnectBaiduNetdisk()} disabled={beginBaiduNetdiskConnect.isPending}>
+                        {beginBaiduNetdiskConnect.isPending ? (
+                          <>
+                            <RefreshCw className="h-4 w-4 animate-spin" />
+                            连接中...
+                          </>
+                        ) : (
+                          <>
+                            <Cloud className="h-4 w-4" />
+                            连接百度网盘
+                          </>
+                        )}
+                      </Button>
+                    ) : (
+                      <span className="theme-meta shrink-0">当前部署未启用</span>
+                    )}
+                  </div>
+
+                  {!baiduNetdiskEnabled ? (
+                    <div className="theme-subtle-surface mt-4 rounded-[1rem] border-dashed px-4 py-4 text-sm text-[color:var(--theme-subtle-text)]">
+                      当前部署还没有开启百度网盘接入能力。
+                    </div>
+                  ) : baiduAccountsQ.isLoading ? (
+                    <div className="theme-subtle-surface mt-4 rounded-[1rem] border-dashed px-4 py-4 text-sm text-[color:var(--theme-subtle-text)]">
+                      正在加载已绑定的百度网盘账号。
+                    </div>
+                  ) : baiduAccountsQ.error ? (
+                    <div className="theme-warm-surface mt-4 rounded-[1rem] px-4 py-4 text-sm leading-6">
+                      百度网盘账号加载失败：{formatApiError(baiduAccountsQ.error)}
+                    </div>
+                  ) : (baiduAccountsQ.data?.length ?? 0) <= 0 ? (
+                    <div className="theme-subtle-surface mt-4 rounded-[1rem] border-dashed px-4 py-4 text-sm text-[color:var(--theme-subtle-text)]">
+                      还没有绑定百度网盘账号。完成连接后，这里会显示账号信息和授权状态。
+                    </div>
+                  ) : (
+                    <div className="mt-4 space-y-3">
+                      {(baiduAccountsQ.data ?? []).map((account) => (
+                        <div key={account.accountId} className="rounded-[1rem] border border-[color:var(--theme-subtle-border)] bg-[color:var(--theme-subtle-bg)] px-4 py-4">
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="min-w-0">
+                              <div className="text-sm font-semibold text-foreground">{account.displayName}</div>
+                              <div className="mt-1 text-xs text-[color:var(--theme-subtle-text)]">百度用户 ID：{account.providerUserId}</div>
+                              <div className="mt-1 text-xs text-[color:var(--theme-subtle-text)]">授权到期：{formatAccountExpiresAt(account.expiresAt)}</div>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              className="shrink-0 text-muted-foreground"
+                              onClick={() => void onDisconnectCloudAccount(account)}
+                              disabled={disconnectBaiduNetdiskAccount.isPending}
+                            >
+                              <Link2Off className="h-4 w-4" />
+                              断开
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="theme-soft-surface mt-4 rounded-[1.2rem] p-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="text-xs uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">会员中心</div>
+                      <div className="mt-1 text-sm leading-6 text-muted-foreground">开通、续费、查看邀请码和优惠券都从这里进入。</div>
+                    </div>
+                    <Button asChild className="shrink-0">
+                      <Link to="/membership">
+                        进入会员中心
+                        <ArrowRight className="h-4 w-4" />
+                      </Link>
+                    </Button>
+                  </div>
+                </div>
               </div>
 
               {isProfileEditing || isPasswordEditing ? (
-                <div className="flex items-center justify-end gap-3 border-t border-[#dce5ef] pt-2">
+                <div className="flex items-center justify-end gap-3 border-t border-border/60 pt-2">
                   <Button type="button" variant="ghost" onClick={cancelEdits} disabled={isSaving}>
                     取消
                   </Button>
@@ -583,162 +991,6 @@ export function ProfilePage() {
             </div>
           </div>
         </aside>
-
-        <section className="theme-card-main overflow-hidden">
-          <div className="theme-card-header px-6 py-5">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.18em] text-[#7a8ca3]">Learning Mirror</div>
-                <div className="mt-2 text-2xl font-semibold tracking-tight text-[#15314b]">学习统计</div>
-                <div className="mt-2 max-w-2xl text-sm leading-6 text-[#6d8095]">这里改成和用户指南一致的页面级滚动，统计内容跟随页面自然展开。</div>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <span className="theme-meta">{activityLoading ? "统计同步中" : `${projects.length} 个项目`}</span>
-                <span className={cn("theme-meta", lastStudyDisplay.className)}>{lastStudyDisplay.text}</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-5 px-6 py-6">
-            <div className="rounded-[1.8rem] border border-[#d5e0eb] bg-[radial-gradient(circle_at_top_left,rgba(115,163,255,0.16),transparent_42%),linear-gradient(135deg,rgba(255,255,255,0.96),rgba(241,247,253,0.88))] p-5 shadow-[0_22px_44px_-34px_rgba(20,58,101,0.28)]">
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div className="space-y-2">
-                  <span className="theme-meta-strong">当前节奏</span>
-                  <div className="text-3xl font-semibold tracking-tight text-[#17324d]">{formatDurationCompact(totalRecentPlaybackMs)}</div>
-                  <div className="text-sm leading-6 text-[#6e8096]">过去 7 天的学习时长来自工作台回放统计，历史提交来自每个项目的审计记录。</div>
-                </div>
-                <div className="grid min-w-[13rem] gap-3 sm:grid-cols-2">
-                  <div className="rounded-[1.2rem] border border-[#d7e3ef] bg-white/84 px-4 py-3">
-                    <div className="text-[11px] uppercase tracking-[0.14em] text-[#8a9ab0]">最近学习</div>
-                    <div className="mt-1 text-sm font-semibold text-[#203c58]">{lastStudyAt ? formatDateTimeLabel(lastStudyAt) : "暂无记录"}</div>
-                  </div>
-                  <div className="rounded-[1.2rem] border border-[#d7e3ef] bg-white/84 px-4 py-3">
-                    <div className="text-[11px] uppercase tracking-[0.14em] text-[#8a9ab0]">连续推进</div>
-                    <div className="mt-1 text-sm font-semibold text-[#203c58]">{streakDays > 0 ? `${streakDays} 天` : "从今天开始"}</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <MembershipProfilePanel />
-
-            <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-4">
-              <StatTile icon={FolderKanban} label="学习项目" value={String(activeProjectCount)} hint="当前仍在运行中的项目数量。" />
-              <StatTile icon={BookCopy} label="学习任务提交" value={String(totalLearningCount)} hint="累计正式提交到主闭环的学习任务次数。" />
-              <StatTile icon={ShieldCheck} label="复习提交" value={String(totalReviewCount)} hint="累计正式完成的复习提交次数。" />
-              <StatTile icon={Flame} label="连续学习" value={streakDays > 0 ? `${streakDays} 天` : "0 天"} hint="连续出现学习动作或学习时长的自然日。" />
-            </div>
-
-            <LearningCurve points={recentSeries} totalPlaybackMs={totalRecentPlaybackMs} totalActions={totalRecentActions} />
-
-            <div className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(18rem,0.8fr)]">
-              <div className="rounded-[1.6rem] border border-[#d4e0ec] bg-white/90 p-5 shadow-[0_18px_40px_-34px_rgba(20,58,101,0.28)]">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-[11px] uppercase tracking-[0.16em] text-[#7a8ca3]">最近活跃项目</div>
-                    <div className="mt-1 text-lg font-semibold text-[#17324d]">最近在推进什么</div>
-                  </div>
-                  <div className="theme-meta">{projectActivitySnapshots.filter((item) => item.lastStudyAt).length} 个有记录</div>
-                </div>
-                {activityError ? (
-                  <div className="mt-4 rounded-[1.2rem] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                    统计加载失败：{formatApiError(activityError)}
-                  </div>
-                ) : null}
-
-                <div className="mt-4 space-y-3">
-                  {projectActivitySnapshots.slice(0, 6).map((item) => {
-                    const lastStudy = formatLastStudyText(item.lastStudyAt)
-                    return (
-                      <div key={item.projectId} className="rounded-[1.25rem] border border-[#dbe4ee] bg-[#fbfdff] px-4 py-4 shadow-[0_12px_28px_-26px_rgba(15,23,42,0.3)]">
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-semibold text-[#1d3954]">{item.title}</div>
-                            <div className="mt-1 text-xs text-[#7b8da3]">学习提交 {item.learningCount} 次 · 复习提交 {item.reviewCount} 次</div>
-                          </div>
-                          <span className={cn("text-xs font-medium", lastStudy.className)}>{lastStudy.text}</span>
-                        </div>
-                      </div>
-                    )
-                  })}
-
-                  {projectActivitySnapshots.length === 0 && !activityLoading ? (
-                    <div className="rounded-[1.25rem] border border-dashed border-[#d8e3ef] bg-[#f7fafd] px-4 py-6 text-sm leading-6 text-[#6e8197]">
-                      还没有项目或学习动作。创建一个项目并开始录入复述点后，这里会出现最近的推进痕迹。
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-
-              <div className="space-y-5">
-                <div className="rounded-[1.6rem] border border-[#d4e0ec] bg-[linear-gradient(180deg,rgba(255,255,255,0.94),rgba(244,249,255,0.88))] p-5 shadow-[0_18px_40px_-34px_rgba(20,58,101,0.28)]">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#dae4ef] bg-[#f6f9fc] text-[#4e7092]">
-                      <Activity className="h-4 w-4" />
-                    </div>
-                    <div>
-                      <div className="text-[11px] uppercase tracking-[0.16em] text-[#7a8ca3]">学习动作分布</div>
-                      <div className="mt-1 text-lg font-semibold text-[#17324d]">学习与复习的比例</div>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 space-y-4">
-                    <div>
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-[#294867]">学习任务提交</span>
-                        <span className="font-semibold text-[#17324d]">{learningShare}%</span>
-                      </div>
-                      <div className="mt-2 h-2.5 rounded-full bg-[#e6edf5]">
-                        <div className="h-full rounded-full bg-[linear-gradient(90deg,#3b82f6,#38bdf8)]" style={{ width: `${learningShare}%` }} />
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-[#294867]">复习提交</span>
-                        <span className="font-semibold text-[#17324d]">{reviewShare}%</span>
-                      </div>
-                      <div className="mt-2 h-2.5 rounded-full bg-[#e6edf5]">
-                        <div className="h-full rounded-full bg-[linear-gradient(90deg,#0f766e,#2dd4bf)]" style={{ width: `${reviewShare}%` }} />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="rounded-[1.6rem] border border-[#d4e0ec] bg-[linear-gradient(180deg,rgba(255,255,255,0.94),rgba(244,249,255,0.88))] p-5 shadow-[0_18px_40px_-34px_rgba(20,58,101,0.28)]">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#dae4ef] bg-[#f6f9fc] text-[#4e7092]">
-                      <Clock3 className="h-4 w-4" />
-                    </div>
-                    <div>
-                      <div className="text-[11px] uppercase tracking-[0.16em] text-[#7a8ca3]">近 7 天摘要</div>
-                      <div className="mt-1 text-lg font-semibold text-[#17324d]">把最近一周压成四个数字</div>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                    <div className="rounded-[1.2rem] border border-[#dbe4ee] bg-white/84 px-4 py-3">
-                      <div className="text-[11px] uppercase tracking-[0.14em] text-[#8a9ab0]">学习时长</div>
-                      <div className="mt-1 text-base font-semibold text-[#203c58]">{formatDurationCompact(totalRecentPlaybackMs)}</div>
-                    </div>
-                    <div className="rounded-[1.2rem] border border-[#dbe4ee] bg-white/84 px-4 py-3">
-                      <div className="text-[11px] uppercase tracking-[0.14em] text-[#8a9ab0]">学习提交</div>
-                      <div className="mt-1 text-base font-semibold text-[#203c58]">{recentLearningCount} 次</div>
-                    </div>
-                    <div className="rounded-[1.2rem] border border-[#dbe4ee] bg-white/84 px-4 py-3">
-                      <div className="text-[11px] uppercase tracking-[0.14em] text-[#8a9ab0]">复习提交</div>
-                      <div className="mt-1 text-base font-semibold text-[#203c58]">{recentReviewCount} 次</div>
-                    </div>
-                    <div className="rounded-[1.2rem] border border-[#dbe4ee] bg-white/84 px-4 py-3">
-                      <div className="text-[11px] uppercase tracking-[0.14em] text-[#8a9ab0]">账号建立</div>
-                      <div className="mt-1 text-base font-semibold text-[#203c58]">{formatDateTimeLabel(profile.createdAt).split(" ")[0]}</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
       </div>
     </div>
   )

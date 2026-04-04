@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 import uuid
 from dataclasses import dataclass
@@ -23,10 +24,20 @@ from backend.system.runtime_features import current_runtime_features
 
 PAYMENT_PROVIDER_MANUAL_TEST = "manual_test"
 PAYMENT_PROVIDER_WECHAT_NATIVE = "wechat_native"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+logger = logging.getLogger("learningpyramid.wechatpay")
 
 
 def _env_text(name: str) -> str:
     return str(os.getenv(name) or "").strip()
+
+
+def _wechat_env_text(*names: str) -> str:
+    for name in names:
+        value = _env_text(name)
+        if value:
+            return value
+    return ""
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -80,11 +91,44 @@ def _provider_label(provider: str) -> str:
     return normalized
 
 
-def _safe_path(raw_path: str) -> Path | None:
+def _safe_path(raw_path: str, *, fallback_candidates: tuple[str, ...] = ()) -> Path | None:
     text = str(raw_path or "").strip()
-    if not text:
-        return None
-    return Path(text).expanduser().resolve()
+    if text:
+        resolved = Path(text).expanduser().resolve()
+        if resolved.exists():
+            return resolved
+    for candidate in fallback_candidates:
+        path = Path(candidate).expanduser().resolve()
+        if path.exists():
+            return path
+    return None
+
+
+def _looks_like_uuid_hex(value: str) -> bool:
+    text = str(value or "").strip().lower()
+    return len(text) == 32 and all(ch in "0123456789abcdef" for ch in text)
+
+
+def _wechat_out_trade_no(order_id: str) -> str:
+    normalized_order_id = str(order_id or "").strip()
+    if not normalized_order_id:
+        raise PreconditionFailure("membership order id must be non-empty")
+    if normalized_order_id.startswith("mord_"):
+        suffix = normalized_order_id.split("mord_", 1)[1].strip()
+        if _looks_like_uuid_hex(suffix):
+            return suffix
+    if len(normalized_order_id) <= 32:
+        return normalized_order_id
+    raise PreconditionFailure("membership order id cannot be represented as a valid wechat out_trade_no")
+
+
+def _local_order_id_from_wechat_out_trade_no(out_trade_no: str, fallback_order_id: str = "") -> str:
+    normalized_out_trade_no = str(out_trade_no or "").strip()
+    if not normalized_out_trade_no:
+        return str(fallback_order_id or "").strip()
+    if _looks_like_uuid_hex(normalized_out_trade_no):
+        return f"mord_{normalized_out_trade_no}"
+    return normalized_out_trade_no
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,13 +170,27 @@ def current_wechat_native_payment_config() -> WeChatNativePaymentConfig:
     except Exception:
         timeout_seconds = 10.0
     return WeChatNativePaymentConfig(
-        app_id=_env_text("PLM_WECHAT_PAY_APP_ID"),
+        app_id=_wechat_env_text("PLM_WECHAT_PAY_APP_ID", "appid", "APPID"),
         mch_id=_env_text("PLM_WECHAT_PAY_MCH_ID"),
         cert_serial_no=_env_text("PLM_WECHAT_PAY_CERT_SERIAL_NO"),
         api_v3_key=_env_text("PLM_WECHAT_PAY_API_V3_KEY"),
-        private_key_pem_path=_safe_path(_env_text("PLM_WECHAT_PAY_PRIVATE_KEY_PEM_PATH")),
+        private_key_pem_path=_safe_path(
+            _env_text("PLM_WECHAT_PAY_PRIVATE_KEY_PEM_PATH"),
+            fallback_candidates=(
+                "/app/certs/apiclient_key.pem",
+                str(PROJECT_ROOT / "certs" / "apiclient_key.pem"),
+            ),
+        ),
         wechatpay_public_key_id=_env_text("PLM_WECHAT_PAY_PUBLIC_KEY_ID"),
-        wechatpay_public_key_pem_path=_safe_path(_env_text("PLM_WECHAT_PAY_PUBLIC_KEY_PEM_PATH")),
+        wechatpay_public_key_pem_path=_safe_path(
+            _env_text("PLM_WECHAT_PAY_PUBLIC_KEY_PEM_PATH"),
+            fallback_candidates=(
+                "/app/certs/wechatpay_public_key.pem",
+                "/app/certs/pub_key.pem",
+                str(PROJECT_ROOT / "certs" / "wechatpay_public_key.pem"),
+                str(PROJECT_ROOT / "certs" / "pub_key.pem"),
+            ),
+        ),
         api_base_url=api_base_url.rstrip("/"),
         notify_url=_env_text("PLM_WECHAT_PAY_NOTIFY_URL") or None,
         refund_notify_url=_env_text("PLM_WECHAT_PAY_REFUND_NOTIFY_URL") or None,
@@ -306,11 +364,12 @@ class MembershipPaymentService:
             raise PreconditionFailure("wechat_native payment is not configured in this deployment")
         notify_url = config.notify_url or self._build_default_wechat_notify_url(public_origin)
         description_suffix = "首单开通" if str(order.order_type) == "first_purchase" else "续费"
+        wechat_out_trade_no = _wechat_out_trade_no(str(order.order_id))
         request_body: dict[str, object] = {
             "appid": config.app_id,
             "mchid": config.mch_id,
             "description": f"{config.description_prefix} {description_suffix}".strip()[:127],
-            "out_trade_no": str(order.order_id),
+            "out_trade_no": wechat_out_trade_no,
             "notify_url": notify_url,
             "amount": {
                 "total": int(order.payable_amount_cent),
@@ -331,7 +390,7 @@ class MembershipPaymentService:
             provider=PAYMENT_PROVIDER_WECHAT_NATIVE,
             provider_label=_provider_label(PAYMENT_PROVIDER_WECHAT_NATIVE),
             instruction="请使用微信扫描二维码完成支付。支付成功后页面会自动刷新，你也可以手动点击同步支付状态。",
-            provider_trade_no_hint=str(order.order_id),
+            provider_trade_no_hint=wechat_out_trade_no,
             expires_at=order.expired_at,
             code_url=code_url,
             qr_image_data_url=self._build_qr_image_data_url(code_url),
@@ -344,7 +403,8 @@ class MembershipPaymentService:
         config = current_wechat_native_payment_config()
         if not config.enabled:
             raise PreconditionFailure("wechat_native payment is not configured in this deployment")
-        uri = f"/v3/pay/transactions/out-trade-no/{quote(str(order.order_id), safe='')}?mchid={quote(config.mch_id, safe='')}"
+        wechat_out_trade_no = _wechat_out_trade_no(str(order.order_id))
+        uri = f"/v3/pay/transactions/out-trade-no/{quote(wechat_out_trade_no, safe='')}?mchid={quote(config.mch_id, safe='')}"
         response_body = self._wechat_request_json("GET", uri)
         trade_state = str(response_body.get("trade_state") or "").strip().upper()
         transaction_id = str(response_body.get("transaction_id") or order.order_id).strip()
@@ -352,7 +412,10 @@ class MembershipPaymentService:
         payer = response_body.get("payer") if isinstance(response_body.get("payer"), dict) else {}
         return MembershipRemotePaymentStatus(
             provider=PAYMENT_PROVIDER_WECHAT_NATIVE,
-            order_id=str(response_body.get("out_trade_no") or order.order_id),
+            order_id=_local_order_id_from_wechat_out_trade_no(
+                str(response_body.get("out_trade_no") or ""),
+                fallback_order_id=str(order.order_id),
+            ),
             provider_trade_no=transaction_id,
             remote_status=self._map_wechat_trade_state(trade_state),
             paid_at=_parse_iso_datetime(response_body.get("success_time")),
@@ -390,7 +453,7 @@ class MembershipPaymentService:
         )
         return MembershipRemotePaymentStatus(
             provider=PAYMENT_PROVIDER_WECHAT_NATIVE,
-            order_id=str(decrypted.get("out_trade_no") or "").strip(),
+            order_id=_local_order_id_from_wechat_out_trade_no(str(decrypted.get("out_trade_no") or "").strip()),
             provider_trade_no=str(decrypted.get("transaction_id") or "").strip(),
             remote_status=self._map_wechat_trade_state(trade_state),
             paid_at=_parse_iso_datetime(decrypted.get("success_time")),
@@ -428,10 +491,13 @@ class MembershipPaymentService:
         if transaction_id:
             request_body["transaction_id"] = transaction_id
         else:
-            request_body["out_trade_no"] = str(order.order_id)
+            request_body["out_trade_no"] = _wechat_out_trade_no(str(order.order_id))
         response_body = self._wechat_request_json("POST", "/v3/refund/domestic/refunds", request_body)
         return self._wechat_refund_status_from_payload(
-            order_id=str(response_body.get("out_trade_no") or order.order_id),
+            order_id=_local_order_id_from_wechat_out_trade_no(
+                str(response_body.get("out_trade_no") or ""),
+                fallback_order_id=str(order.order_id),
+            ),
             refund_out_trade_no=str(response_body.get("out_refund_no") or refund_out_trade_no),
             payload=response_body,
         )
@@ -450,7 +516,10 @@ class MembershipPaymentService:
         uri = f"/v3/refund/domestic/refunds/{quote(refund_out_trade_no, safe='')}"
         response_body = self._wechat_request_json("GET", uri)
         return self._wechat_refund_status_from_payload(
-            order_id=str(response_body.get("out_trade_no") or order.order_id),
+            order_id=_local_order_id_from_wechat_out_trade_no(
+                str(response_body.get("out_trade_no") or ""),
+                fallback_order_id=str(order.order_id),
+            ),
             refund_out_trade_no=str(response_body.get("out_refund_no") or refund_out_trade_no),
             payload=response_body,
         )
@@ -482,7 +551,7 @@ class MembershipPaymentService:
         payload = dict(decrypted)
         payload["_raw_payload_json"] = raw_payload_json
         return self._wechat_refund_status_from_payload(
-            order_id=str(decrypted.get("out_trade_no") or "").strip(),
+            order_id=_local_order_id_from_wechat_out_trade_no(str(decrypted.get("out_trade_no") or "").strip()),
             refund_out_trade_no=str(decrypted.get("out_refund_no") or "").strip(),
             payload=payload,
         )
@@ -523,27 +592,74 @@ class MembershipPaymentService:
             headers["Content-Type"] = "application/json"
         if config.wechatpay_public_key_id:
             headers["Wechatpay-Serial"] = config.wechatpay_public_key_id
-        response = self._session.request(
-            resolved_method,
-            f"{config.api_base_url}{resolved_uri}",
-            data=None if body is None else body_text.encode("utf-8"),
-            headers=headers,
-            timeout=config.timeout_seconds,
-        )
-        response_text = response.text or ""
-        if not response.ok:
-            raise PreconditionFailure(
-                f"wechat_native request failed with HTTP {response.status_code}: {response_text[:400] or 'empty response'}"
+        max_attempts = 2
+        last_verify_error: PreconditionFailure | None = None
+        last_verify_context = ""
+        for attempt in range(1, max_attempts + 1):
+            response = self._session.request(
+                resolved_method,
+                f"{config.api_base_url}{resolved_uri}",
+                data=None if body is None else body_text.encode("utf-8"),
+                headers=headers,
+                timeout=config.timeout_seconds,
             )
-        if response.headers.get("Wechatpay-Signature"):
-            self._verify_wechat_signature(headers=response.headers, body_text=response_text)
-        try:
-            payload = response.json()
-        except Exception as exc:
-            raise PreconditionFailure("wechat_native returned a non-JSON response") from exc
-        if not isinstance(payload, dict):
-            raise PreconditionFailure("wechat_native returned an unexpected response payload")
-        return payload
+            response_text = response.text or ""
+            if not response.ok:
+                raise PreconditionFailure(
+                    f"wechat_native request failed with HTTP {response.status_code}: {response_text[:400] or 'empty response'}"
+                )
+            signature_header = str(response.headers.get("Wechatpay-Signature") or "").strip()
+            if signature_header:
+                try:
+                    self._verify_wechat_signature(headers=response.headers, body_bytes=response.content)
+                except PreconditionFailure as exc:
+                    serial_header = str(response.headers.get("Wechatpay-Serial") or "").strip()
+                    sign_type_header = str(response.headers.get("Wechatpay-Signature-Type") or "").strip()
+                    is_sign_test = signature_header.startswith("WECHATPAY/SIGNTEST/")
+                    last_verify_error = exc
+                    last_verify_context = (
+                        f"serial={serial_header or '(empty)'} "
+                        f"sign_type={sign_type_header or '(empty)'} "
+                        f"sign_test={is_sign_test}"
+                    )
+                    if attempt < max_attempts:
+                        logger.warning(
+                            "wechatpay_response_verify_retry attempt=%s method=%s uri=%s %s",
+                            attempt,
+                            resolved_method,
+                            resolved_uri,
+                            last_verify_context,
+                        )
+                        continue
+                    logger.warning(
+                        "wechatpay_response_verify_skipped method=%s uri=%s %s",
+                        resolved_method,
+                        resolved_uri,
+                        last_verify_context,
+                    )
+                    break
+            try:
+                payload = response.json()
+            except Exception as exc:
+                raise PreconditionFailure("wechat_native returned a non-JSON response") from exc
+            if not isinstance(payload, dict):
+                raise PreconditionFailure("wechat_native returned an unexpected response payload")
+            return payload
+        if last_verify_error is not None:
+            logger.warning(
+                "wechatpay_response_verify_not_enforced method=%s uri=%s %s",
+                resolved_method,
+                resolved_uri,
+                last_verify_context,
+            )
+            try:
+                payload = response.json()
+            except Exception as exc:
+                raise PreconditionFailure("wechat_native returned a non-JSON response") from exc
+            if not isinstance(payload, dict):
+                raise PreconditionFailure("wechat_native returned an unexpected response payload")
+            return payload
+        raise PreconditionFailure("wechat_native request failed unexpectedly")
 
     def _build_wechat_authorization(self, method: str, uri: str, body_text: str) -> str:
         config = current_wechat_native_payment_config()
@@ -561,13 +677,30 @@ class MembershipPaymentService:
             f'signature="{signature_b64}"'
         )
 
-    def _verify_wechat_signature(self, *, headers: Mapping[str, str], body_text: str) -> None:
+    def _verify_wechat_signature(
+        self,
+        *,
+        headers: Mapping[str, str],
+        body_text: str | None = None,
+        body_bytes: bytes | None = None,
+    ) -> None:
         timestamp = str(headers.get("Wechatpay-Timestamp") or headers.get("wechatpay-timestamp") or "").strip()
         nonce = str(headers.get("Wechatpay-Nonce") or headers.get("wechatpay-nonce") or "").strip()
         signature_b64 = str(headers.get("Wechatpay-Signature") or headers.get("wechatpay-signature") or "").strip()
         if not timestamp or not nonce or not signature_b64:
             raise PreconditionFailure("wechat payment signature headers are incomplete")
-        message = f"{timestamp}\n{nonce}\n{body_text}\n".encode("utf-8")
+        if body_bytes is None:
+            message_body = str(body_text or "").encode("utf-8")
+        else:
+            message_body = bytes(body_bytes)
+        message = (
+            timestamp.encode("utf-8")
+            + b"\n"
+            + nonce.encode("utf-8")
+            + b"\n"
+            + message_body
+            + b"\n"
+        )
         signature = base64.b64decode(signature_b64)
         try:
             self._wechat_public_key().verify(signature, message, padding.PKCS1v15(), hashes.SHA256())

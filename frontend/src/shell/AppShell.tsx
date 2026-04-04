@@ -6,9 +6,12 @@ import { MainNav, getGlobalNavItems, getProjectNavItems } from "@/shell/MainNav"
 import { ApiError } from "@/ui/api/http"
 import { ErrorNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
+import { projectTypeRequiresLearningObjectTree } from "@/ui/projectTypes"
 import { useCurrentUser, useLogout } from "@/ui/queries/auth"
 import { useProject } from "@/ui/queries/projects"
 import { useSystemCapabilities } from "@/ui/queries/system"
+import { useProjectConfig } from "@/ui/queries/workbench"
+import { useAppStore } from "@/ui/store/appStore"
 import { useThemeStore } from "@/ui/store/themeStore"
 import { THEME_PRESETS } from "@/ui/theme/themePresets"
 import { cn } from "@/ui/utils"
@@ -34,31 +37,31 @@ function describeArea(pathname: string, projectTitle: string, hasProject: boolea
     }
   }
 
-  if (pathname.startsWith("/groups")) {
+  if (pathname.startsWith("/friends")) {
     return {
-      title: "学习小组",
-      context: "加入小组、找同学并一起互动学习",
+      title: "好友学习",
+      context: "向好友发送申请、查看学习排行与资料",
     }
   }
 
   if (pathname.startsWith("/membership")) {
     return {
       title: "会员中心",
-      context: "查看会员状态、价格和订单",
+      context: "从个人中心进入，查看会员权益、价格和订单",
     }
   }
 
   if (pathname.startsWith("/profile")) {
     return {
-      title: "个人资料",
-      context: "管理账号信息与安全设置",
+      title: "个人中心",
+      context: "管理账号信息、会员权益与安全设置",
     }
   }
 
   if (pathname.startsWith("/admin")) {
     return {
       title: "后台管理",
-      context: "管理用户状态与学习小组运行情况",
+      context: "管理用户状态、会员运营与后台记录",
     }
   }
 
@@ -66,6 +69,13 @@ function describeArea(pathname: string, projectTitle: string, hasProject: boolea
     if (pathname.includes("/workbench")) {
       return {
         title: "项目工作台",
+        context: projectTitle,
+      }
+    }
+
+    if (pathname.includes("/ai-chat")) {
+      return {
+        title: "AI问答",
         context: projectTitle,
       }
     }
@@ -109,12 +119,16 @@ export function AppShell() {
   const location = useLocation()
   const { projectId } = useParams()
   const pid = projectId ?? ""
+  const selectedProjectId = useAppStore((state) => state.selectedProjectId)
+  const setSelectedProjectId = useAppStore((state) => state.setSelectedProjectId)
+  const effectiveProjectId = pid || selectedProjectId || ""
   const [navMenuOpen, setNavMenuOpen] = useState(false)
   const capabilitiesQ = useSystemCapabilities()
   const authEnabled = capabilitiesQ.data?.authEnabled ?? false
   const currentUserQ = useCurrentUser(authEnabled)
   const canAccessApp = !authEnabled || Boolean(currentUserQ.data)
-  const { projectTitle } = useProject(pid, { enabled: canAccessApp })
+  const { projectTitle } = useProject(effectiveProjectId, { enabled: canAccessApp && Boolean(effectiveProjectId) })
+  const projectConfigQ = useProjectConfig(canAccessApp && effectiveProjectId ? effectiveProjectId : "")
   const logout = useLogout()
   const selectedTheme = useThemeStore((state) => state.theme)
   const setTheme = useThemeStore((state) => state.setTheme)
@@ -126,12 +140,23 @@ export function AppShell() {
   const menuRef = useRef<HTMLDivElement | null>(null)
   const menuButtonRef = useRef<HTMLButtonElement | null>(null)
   const previousLocationRef = useRef(locationToken)
-  const projectNavItems = useMemo(() => getProjectNavItems(pid), [pid])
+  const includeObjectTree = projectTypeRequiresLearningObjectTree(projectConfigQ.data?.projectType ?? "COURSE")
+  const projectNavItems = useMemo(
+    () => getProjectNavItems(effectiveProjectId, { includeObjectTree }),
+    [effectiveProjectId, includeObjectTree],
+  )
   const hasProjectContext = Boolean(pid)
+  const hasRememberedProjectContext = Boolean(effectiveProjectId)
   const isAdmin = Boolean(currentUserQ.data?.roles.some((role) => role === "super_admin" || role === "admin"))
   const globalNavItems = useMemo(() => getGlobalNavItems({ includeAdmin: isAdmin, includeMembership: authEnabled }), [authEnabled, isAdmin])
   const inlineNavItems = globalNavItems
-  const menuNavItems = hasProjectContext ? projectNavItems : globalNavItems
+  const menuProjectNavItems = hasRememberedProjectContext ? projectNavItems : []
+  const menuGlobalNavItems = hasProjectContext ? [] : globalNavItems
+
+  useEffect(() => {
+    if (!pid || selectedProjectId === pid) return
+    setSelectedProjectId(pid)
+  }, [pid, selectedProjectId, setSelectedProjectId])
 
   useEffect(() => {
     if (previousLocationRef.current === locationToken) return
@@ -247,7 +272,7 @@ export function AppShell() {
           <div className="relative flex w-full items-center gap-3 sm:gap-4">
             <Link
               to="/"
-              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[1.05rem] bg-[linear-gradient(160deg,#294f79,#1b3556)] text-primary-foreground shadow-[0_16px_34px_-26px_rgba(15,23,42,0.42)] transition-all hover:-translate-y-px hover:shadow-[0_20px_40px_-26px_rgba(15,23,42,0.48)]"
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[1.05rem] bg-[linear-gradient(160deg,hsl(var(--primary)),hsl(var(--primary)/0.72))] text-primary-foreground shadow-[0_16px_34px_-26px_hsl(var(--primary)/0.4)] transition-all hover:-translate-y-px hover:shadow-[0_20px_40px_-26px_hsl(var(--primary)/0.46)]"
               aria-label="查看公开首页"
               title="查看公开首页"
             >
@@ -256,8 +281,8 @@ export function AppShell() {
 
             <div className="min-w-0 flex-1">
               <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                <span className="text-[13px] font-semibold tracking-[0.04em] text-[#465a74]">LearningPyramid</span>
-                <span className="text-xs text-[#93a2b5]">/</span>
+                <span className="text-[13px] font-semibold tracking-[0.04em] text-[color:var(--theme-soft-text-strong)]">LearningPyramid</span>
+                <span className="text-xs text-muted-foreground">/</span>
                 <div className="min-w-0 truncate text-sm font-medium tracking-tight text-foreground sm:text-[15px]">{area.title}</div>
               </div>
             </div>
@@ -272,8 +297,8 @@ export function AppShell() {
                       to={item.to}
                       className={({ isActive }) =>
                         cn(
-                          "inline-flex h-9 items-center gap-2 rounded-xl border border-[#e3e8ef] bg-white px-3 text-[13px] text-[#5b6b82] shadow-[0_12px_24px_-24px_rgba(15,23,42,0.14)] transition-colors hover:border-primary/15 hover:text-foreground",
-                          isActive && "border-primary/15 bg-[#eef5ff] text-foreground",
+                          "inline-flex h-9 items-center gap-2 rounded-xl border [border-color:var(--theme-soft-border)] [background:var(--theme-soft-bg)] px-3 text-[13px] text-[color:var(--theme-subtle-text)] [box-shadow:var(--theme-soft-shadow)] transition-colors hover:border-primary/15 hover:text-foreground",
+                          isActive && "border-primary/15 bg-[hsl(var(--primary)/0.08)] text-foreground",
                         )
                       }
                     >
@@ -288,7 +313,7 @@ export function AppShell() {
                 ref={menuButtonRef}
                 variant="outline"
                 size="icon"
-                className="h-10 w-10 shrink-0 rounded-xl border-[#e3e8ef] bg-white"
+                className="h-10 w-10 shrink-0 rounded-xl [border-color:var(--theme-soft-border)] [background:var(--theme-soft-bg)]"
                 onClick={() => setNavMenuOpen((current) => !current)}
                 aria-expanded={navMenuOpen}
                 aria-haspopup="menu"
@@ -301,14 +326,35 @@ export function AppShell() {
             {navMenuOpen ? (
               <div
                 ref={menuRef}
-                className="absolute right-0 top-[calc(100%+0.65rem)] z-30 w-[min(22rem,calc(100vw-1rem))] overflow-hidden rounded-[1.6rem] border border-[#e3e8ef] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(246,248,251,0.96))] shadow-[0_24px_60px_-30px_rgba(15,23,42,0.24)] backdrop-blur-2xl"
+                className="absolute right-0 top-[calc(100%+0.65rem)] z-30 w-[min(22rem,calc(100vw-1rem))] overflow-hidden rounded-[1.6rem] border [border-color:var(--theme-soft-border)] [background:radial-gradient(circle_at_top_left,hsl(var(--primary)/0.08),transparent_34%),var(--theme-card-main-bg)] shadow-[0_24px_60px_-30px_rgba(15,23,42,0.24)] backdrop-blur-2xl"
               >
                 <div className="max-h-[min(70vh,calc(100dvh-5.5rem))] overflow-y-auto overscroll-contain p-3 [-webkit-overflow-scrolling:touch]">
                   {authEnabled && currentUserQ.data ? (
-                    <div className="rounded-[1.25rem] border border-[#e3e8ef] bg-white p-3">
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#6a7e98]">当前账号</div>
-                      <div className="mt-1 truncate text-sm font-medium text-foreground">{currentUserQ.data.nickname}</div>
-                      <div className="mt-1 truncate text-xs text-muted-foreground">{currentUserQ.data.email}</div>
+                    <div className="theme-soft-surface p-3">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">当前账号</div>
+                      <div className="mt-3 flex flex-col items-center text-center">
+                        <Link
+                          to="/profile"
+                          className="group relative inline-flex h-16 w-16 items-center justify-center overflow-hidden rounded-[1.4rem] border [border-color:var(--theme-icon-border)] [background:var(--theme-icon-bg)] text-lg font-semibold [color:var(--theme-icon-text)] transition hover:border-primary/15 hover:shadow-[0_16px_30px_-24px_hsl(var(--primary)/0.28)]"
+                          onClick={() => setNavMenuOpen(false)}
+                          aria-label="进入个人中心"
+                          title="进入个人中心"
+                        >
+                          {currentUserQ.data.avatarUrl ? (
+                            <img src={currentUserQ.data.avatarUrl} alt={currentUserQ.data.nickname} className="h-full w-full object-cover" />
+                          ) : (
+                            (currentUserQ.data.nickname || currentUserQ.data.email).slice(0, 1).toUpperCase()
+                          )}
+                        </Link>
+                        <Link
+                          to="/profile"
+                          className="mt-3 block w-full rounded-xl px-2 py-1.5 transition hover:[background:var(--theme-subtle-bg)]"
+                          onClick={() => setNavMenuOpen(false)}
+                        >
+                          <div className="truncate text-sm font-medium text-foreground">{currentUserQ.data.nickname}</div>
+                          <div className="mt-1 truncate text-xs text-muted-foreground">{currentUserQ.data.email}</div>
+                        </Link>
+                      </div>
                       <Button
                         variant="outline"
                         size="sm"
@@ -324,9 +370,24 @@ export function AppShell() {
                     </div>
                   ) : null}
 
-                  {menuNavItems.length > 0 ? (
-                    <div className="mt-3">
-                      <MainNav items={menuNavItems} onNavigate={() => setNavMenuOpen(false)} />
+                  {menuProjectNavItems.length > 0 ? (
+                    <div className="theme-soft-surface mt-3 p-3">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <div className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">当前项目</div>
+                        <div className="min-w-0 truncate text-sm font-medium text-foreground">{projectTitle || "当前项目"}</div>
+                      </div>
+                      <div className="mt-3">
+                        <MainNav items={menuProjectNavItems} onNavigate={() => setNavMenuOpen(false)} />
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {menuGlobalNavItems.length > 0 ? (
+                    <div className="theme-soft-surface mt-3 p-3">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">全局导航</div>
+                      <div className="mt-3">
+                        <MainNav items={menuGlobalNavItems} onNavigate={() => setNavMenuOpen(false)} />
+                      </div>
                     </div>
                   ) : null}
 

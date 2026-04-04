@@ -67,10 +67,51 @@ export const RecallPointSchema = z.object({
   deletedAt: z.string().nullable(),
   question: RichContentSchema,
   answer: RichContentSchema,
-  anchor: z.object({ instanceId: z.string(), position: z.string() }),
+  anchor: z.object({ instanceId: z.string(), position: z.string() }).nullable(),
   insights: z.array(RichContentSchema),
 })
 export type RecallPoint = z.infer<typeof RecallPointSchema>
+
+export const ReviewRecommendationItemSchema = z.object({
+  recallPoint: RecallPointSchema,
+  reviewRecommendationIndex: z.number(),
+  estimatedMemoryStrength: z.number(),
+  weightedSuccessRatio: z.number(),
+  lastReviewedAt: z.string().nullable(),
+  lastReviewResult: z.enum(["CAN_RECALL", "CANNOT_RECALL"]).nullable(),
+  reviewCount: z.number().int(),
+})
+export type ReviewRecommendationItem = z.infer<typeof ReviewRecommendationItemSchema>
+
+export const ReviewRecommendationPageSchema = z.object({
+  items: z.array(ReviewRecommendationItemSchema),
+  totalCount: z.number().int(),
+  offset: z.number().int(),
+  limit: z.number().int(),
+  nextOffset: z.number().int().nullable(),
+})
+export type ReviewRecommendationPage = z.infer<typeof ReviewRecommendationPageSchema>
+
+export const RecallPointReviewProjectionSchema = z.object({
+  recallPointId: z.string(),
+  calculatedAt: z.string(),
+  reviewRecommendationIndex: z.number(),
+  estimatedMemoryStrength: z.number(),
+  weightedSuccessRatio: z.number(),
+  forgettingCurveDecayPerDay: z.number(),
+  historyWindowSize: z.number().int(),
+  lastReviewedAt: z.string().nullable(),
+  lastReviewResult: z.enum(["CAN_RECALL", "CANNOT_RECALL"]).nullable(),
+  reviewCount: z.number().int(),
+  history: z.array(
+    z.object({
+      reviewTaskId: z.string(),
+      occurredAt: z.string(),
+      result: z.enum(["CAN_RECALL", "CANNOT_RECALL"]),
+    }),
+  ),
+})
+export type RecallPointReviewProjection = z.infer<typeof RecallPointReviewProjectionSchema>
 
 export function getReviewTask(projectId: string, reviewTaskId: string) {
   return apiRequest({ path: `/projects/${projectId}/review-tasks/${reviewTaskId}`, responseSchema: ReviewTaskSchema })
@@ -99,10 +140,32 @@ export function getRecallPoint(projectId: string, recallPointId: string) {
   return apiRequest({ path: `/projects/${projectId}/recall-points/${recallPointId}`, responseSchema: RecallPointSchema })
 }
 
+export function getRecallPointReviewProjection(projectId: string, recallPointId: string) {
+  return apiRequest({
+    path: `/projects/${projectId}/recall-points/${recallPointId}/review-projection`,
+    responseSchema: RecallPointReviewProjectionSchema,
+  })
+}
+
+export function listReviewRecommendations(projectId: string, params?: { offset?: number; limit?: number }) {
+  const search = new URLSearchParams()
+  if (params?.offset !== undefined) search.set("offset", String(params.offset))
+  if (params?.limit !== undefined) search.set("limit", String(params.limit))
+  const query = search.toString()
+  return apiRequest({
+    path: `/projects/${projectId}/review-recommendations${query ? `?${query}` : ""}`,
+    responseSchema: ReviewRecommendationPageSchema,
+  })
+}
+
 export function editRecallPoint(
   projectId: string,
   recallPointId: string,
-  params: { question: z.infer<typeof RichContentSchema>; answer: z.infer<typeof RichContentSchema>; anchor: { instanceId: string; position: string } },
+  params: {
+    question: z.infer<typeof RichContentSchema>
+    answer: z.infer<typeof RichContentSchema>
+    anchor: { instanceId: string; position: string } | null
+  },
 ) {
   return apiRequest({
     path: `/projects/${projectId}/recall-points/${recallPointId}`,

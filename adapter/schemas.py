@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from pydantic import BaseModel, EmailStr, Field
 from pydantic import conlist
@@ -10,6 +10,7 @@ class CreateProjectRequest(BaseModel):
     title: str = Field(min_length=1)
     projectRoot: Optional[str] = None
     initialSourceKind: Optional[str] = None
+    initialProjectType: Optional[str] = None
 
 
 class EditProjectRequest(BaseModel):
@@ -75,57 +76,18 @@ class ChangePasswordRequest(BaseModel):
     newPassword: str = Field(min_length=8)
 
 
-class CreateStudyGroupRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=60)
-    description: Optional[str] = Field(default="", max_length=1000)
-    visibility: str = Field(min_length=1)
-    joinPolicy: str = Field(min_length=1)
-
-
-class UpdateStudyGroupRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=60)
-    description: Optional[str] = Field(default="", max_length=1000)
-    visibility: str = Field(min_length=1)
-    joinPolicy: str = Field(min_length=1)
-
-
-class CreateStudyGroupPostRequest(BaseModel):
-    kind: str = Field(min_length=1)
-    content: str = Field(min_length=1, max_length=2000)
-
-
-class CreateStudyGroupPostCommentRequest(BaseModel):
-    content: str = Field(min_length=1, max_length=1000)
+class CreateFriendRequestRequest(BaseModel):
+    publicUid: str = Field(min_length=1)
+    message: Optional[str] = Field(default="", max_length=200)
 
 
 class UpdateUserStatusRequest(BaseModel):
     status: str = Field(min_length=1)
 
 
-class UpdateStudyGroupStatusRequest(BaseModel):
-    status: str = Field(min_length=1)
-
-
 class UpdateUserRoleRequest(BaseModel):
     role: str = Field(min_length=1)
     enabled: bool = True
-
-
-class UpdateStudyGroupMemberRoleRequest(BaseModel):
-    role: str = Field(min_length=1)
-
-
-class CreateStudyGroupJoinRequest(BaseModel):
-    message: Optional[str] = Field(default="", max_length=300)
-
-
-class ReviewStudyGroupJoinRequestRequest(BaseModel):
-    status: str = Field(min_length=1)
-
-
-class InviteStudyGroupMemberRequest(BaseModel):
-    publicUid: str = Field(min_length=1)
-    role: str = Field(default="member", min_length=1)
 
 
 class AddInstanceRequest(BaseModel):
@@ -135,6 +97,21 @@ class AddInstanceRequest(BaseModel):
 class ImportBrowserDirectoryRequest(BaseModel):
     rootTitle: Optional[str] = None
     relativeFilePaths: List[str] = Field(default_factory=list)
+
+
+class BaiduNetdiskImportItemDTO(BaseModel):
+    fileId: str = Field(min_length=1)
+    path: str = Field(min_length=1)
+    name: Optional[str] = None
+    isDir: bool = False
+    sizeBytes: Optional[int] = Field(default=None, ge=0)
+    mimeType: Optional[str] = None
+    durationMs: Optional[int] = Field(default=None, ge=0)
+
+
+class ImportLearningObjectsFromBaiduNetdiskRequest(BaseModel):
+    accountId: str = Field(min_length=1)
+    items: conlist(BaiduNetdiskImportItemDTO, min_items=1)
 
 
 class AddLearningObjectLeafRequest(BaseModel):
@@ -147,6 +124,15 @@ class AddLearningObjectContainerRequest(BaseModel):
     parentId: Optional[str] = None
     children: List[str] = Field(default_factory=list)
     title: str = Field(min_length=1)
+
+
+class BookOutlineItemDTO(BaseModel):
+    depth: int = Field(ge=0)
+    title: str = Field(min_length=1)
+
+
+class InitializeBookLearningObjectsRequest(BaseModel):
+    items: conlist(BookOutlineItemDTO, min_items=1)
 
 
 class AnchorDTO(BaseModel):
@@ -162,7 +148,7 @@ class ContentBlockDTO(BaseModel):
 class LearningItemDTO(BaseModel):
     question: conlist(ContentBlockDTO, min_items=1)
     answer: conlist(ContentBlockDTO, min_items=1)
-    anchor: AnchorDTO
+    anchor: Optional[AnchorDTO] = None
 
 
 class SubmitLearningTaskRequest(BaseModel):
@@ -181,7 +167,7 @@ class EditLearningTaskNodeRequest(BaseModel):
 class EditRecallPointRequest(BaseModel):
     question: conlist(ContentBlockDTO, min_items=1)
     answer: conlist(ContentBlockDTO, min_items=1)
-    anchor: AnchorDTO
+    anchor: Optional[AnchorDTO] = None
 
 class AppendedInsightDTO(BaseModel):
     recallPointId: str = Field(min_length=1)
@@ -212,6 +198,14 @@ class SetLayerConfigRequest(BaseModel):
     reviewChainTemplate: Optional[List[ReviewChainTemplateItemDTO]] = None
     kNode: Optional[int] = None
     kPoint: Optional[int] = None
+    thresholdRollUpEnabled: Optional[bool] = None
+
+
+class SetReviewRecommendationConfigRequest(BaseModel):
+    minRecallPointsToEnable: Optional[int] = Field(default=None, ge=0)
+    maxHistoryLen: Optional[int] = Field(default=None, ge=0)
+    recommendedBatchSize: Optional[int] = Field(default=None, ge=1)
+    forgettingCurveDecayPerDay: Optional[float] = Field(default=None, gt=0)
 
 
 class TransientServiceConfigRequest(BaseModel):
@@ -240,6 +234,7 @@ class UpdateGlobalLlmSettingsRequest(BaseModel):
     baseUrl: Optional[str] = None
     modelName: Optional[str] = None
     apiKey: Optional[str] = None
+    promptAssemblyMode: Optional[str] = None
     clearApiKey: bool = False
 
 
@@ -247,6 +242,7 @@ class UpdateUserServiceSettingsRequest(BaseModel):
     baseUrl: Optional[str] = None
     modelName: Optional[str] = None
     apiKey: Optional[str] = None
+    promptAssemblyMode: Optional[str] = None
     clearApiKey: bool = False
 
 
@@ -266,3 +262,13 @@ class AskProjectLlmRequest(BaseModel):
     recallPointId: Optional[str] = None
     learningTaskNodeId: Optional[str] = None
     learningObjectNodeId: Optional[str] = None
+
+
+class AskProjectLlmRawChatCompletionRequest(BaseModel):
+    messages: conlist(dict[str, Any], min_items=1)
+    tools: Optional[list[dict[str, Any]]] = None
+    toolChoice: Optional[Any] = None
+    parallelToolCalls: Optional[bool] = None
+    responseFormat: Optional[dict[str, Any]] = None
+    modelName: Optional[str] = None
+    temperature: Optional[float] = None

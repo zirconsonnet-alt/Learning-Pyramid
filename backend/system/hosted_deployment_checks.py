@@ -4,7 +4,6 @@ import os
 from urllib.parse import urlsplit
 
 from backend.system.auth_rate_limit_store import current_auth_rate_limit_config
-from backend.system.community_guardrails import current_community_guardrail_config
 from backend.system.http_runtime_config import current_http_runtime_config
 from backend.system.membership_payment_service import current_wechat_native_payment_config
 from backend.system.membership_payment_service import manual_test_payment_enabled
@@ -18,6 +17,10 @@ _PLACEHOLDER_MARKERS = ("change-me", "replace-me")
 
 def _env_text(name: str) -> str:
     return str(os.getenv(name) or "").strip()
+
+
+def _wechat_app_id() -> str:
+    return _env_text("PLM_WECHAT_PAY_APP_ID") or _env_text("appid") or _env_text("APPID")
 
 
 def _looks_like_placeholder(value: str) -> bool:
@@ -63,8 +66,6 @@ def hosted_runtime_warnings() -> tuple[str, ...]:
         warnings.append("PLM_ALLOW_SIGNUP=true leaves the hosted deployment open for self-registration.")
     if features.auth_enabled and not current_auth_rate_limit_config().enabled:
         warnings.append("PLM_ENABLE_AUTH_RATE_LIMITS=false disables login and sign-up throttling in hosted mode.")
-    if features.auth_enabled and not current_community_guardrail_config().enabled:
-        warnings.append("PLM_ENABLE_COMMUNITY_GUARDRAILS=false disables new-account cooldowns and study-group abuse throttling in hosted mode.")
     if manual_test_payment_enabled():
         warnings.append("PLM_ENABLE_MANUAL_TEST_PAYMENT=true exposes the manual_test membership payment provider in hosted mode.")
     if _env_text("PLM_SECURE_COOKIES").lower() not in _TRUE_VALUES:
@@ -87,7 +88,7 @@ def hosted_runtime_warnings() -> tuple[str, ...]:
 
     wechat_config = current_wechat_native_payment_config()
     wechat_fields = (
-        _env_text("PLM_WECHAT_PAY_APP_ID"),
+        _wechat_app_id(),
         _env_text("PLM_WECHAT_PAY_MCH_ID"),
         _env_text("PLM_WECHAT_PAY_CERT_SERIAL_NO"),
         _env_text("PLM_WECHAT_PAY_API_V3_KEY"),

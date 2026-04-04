@@ -40,7 +40,13 @@ export function useGlobalLlmSettings(enabled = true) {
 export function useUpdateGlobalLlmSettings() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (params: { baseUrl?: string; modelName?: string; apiKey?: string; clearApiKey?: boolean }) =>
+    mutationFn: (params: {
+      baseUrl?: string
+      modelName?: string
+      apiKey?: string
+      promptAssemblyMode?: "system" | "user_concat"
+      clearApiKey?: boolean
+    }) =>
       updateGlobalLlmSettings(params),
     onSuccess: async () => {
       await Promise.all([

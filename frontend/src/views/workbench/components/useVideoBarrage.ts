@@ -150,6 +150,7 @@ function buildVisibleBarrageCues(instanceId: string | null, recallPoints: Recall
   const cues: BarrageCue[] = []
   for (const recallPoint of recallPoints) {
     if (recallPoint.state !== "ACTIVE") continue
+    if (!recallPoint.anchor) continue
     if (!instanceId || recallPoint.anchor.instanceId !== instanceId) continue
     const anchorMs = parseAnchorMs(recallPoint.anchor.position)
     if (anchorMs === null) continue

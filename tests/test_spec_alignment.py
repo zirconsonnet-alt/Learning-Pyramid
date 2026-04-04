@@ -1,3 +1,5 @@
+from dataclasses import replace
+from datetime import timedelta
 import os
 import unittest
 from pathlib import Path
@@ -6,11 +8,17 @@ from unittest.mock import patch
 
 from backend.models.asr_artifact import AsrArtifact, AsrSegment
 from backend.models.enums import (
+    AggregationEventReason,
     AsrProvider,
     ClientRuntimeKind,
     FsSyncPolicy,
     InstancePresence,
+    LayerMode,
+    MaterialSourceKind,
+    ProjectType,
+    RecallPointReviewResult,
     RecallPointState,
+    ReviewTaskState,
     ReviewChainTemplateItemKind,
     SessionMode,
 )
@@ -25,6 +33,8 @@ from backend.models.project_config import (
 from backend.models.project_storage_config import ProjectStorageConfig
 from backend.models.range_snapshot import RangeSnapshot
 from backend.models.recall_point import Anchor, RecallPoint
+from backend.models.recall_point_review_record import RecallPointReviewRecord
+from backend.models.review_task import ReviewTask
 from backend.models.review_chain import ReviewChainItemKind
 from backend.models.rich_content import rich_text
 from backend.models.types import (
@@ -32,6 +42,7 @@ from backend.models.types import (
     InstanceId,
     RangeId,
     RecallPointId,
+    id_canonical_text,
     now_utc_ms,
 )
 from backend.system.api import SystemAPI, TickAttemptResult
@@ -234,6 +245,81 @@ class _SpecAlignmentBackendMixin:
         self.assertEqual(cfg.project_root.as_posix(), project_root.as_posix())
         self.assertEqual(cfg.learning_object_root.as_posix(), "learning_objects")
         self.assertEqual(cfg.fs_sync_policy, FsSyncPolicy.STARTUP_SYNC)
+
+    def test_set_layer_config_allows_preconfiguring_nonexistent_layer(self) -> None:
+        api, root = self._new_api()
+        project_root, _ = self._make_project_dirs(root, "videos")
+
+        project_id = api.create_project("ml", project_root.as_posix())
+        api.set_layer_config(
+            project_id,
+            3,
+            (
+                ReviewChainTemplateItem(kind=ReviewChainTemplateItemKind.REVIEW_TASK),
+                ReviewChainTemplateItem(kind=ReviewChainTemplateItemKind.CONVERGENCE),
+            ),
+            7,
+            70,
+            False,
+        )
+
+        cfg = api.get_project_config(project_id)
+        layer_cfg = cfg.layer_configs[3]
+        self.assertEqual(
+            layer_cfg.review_chain_template,
+            (
+                ReviewChainTemplateItem(kind=ReviewChainTemplateItemKind.REVIEW_TASK),
+                ReviewChainTemplateItem(kind=ReviewChainTemplateItemKind.CONVERGENCE),
+            ),
+        )
+        self.assertEqual(layer_cfg.aggregation_k_node, 7)
+        self.assertEqual(layer_cfg.aggregation_k_point, 70)
+        self.assertFalse(layer_cfg.threshold_roll_up_enabled)
+
+        session = api.sys.begin_session(project_id, SessionMode.READ_ONLY)
+        try:
+            self.assertIsNone(api.sys.layer_repo.maybe_get_by_index(session, 3))
+        finally:
+            api.sys.rollback(session)
+
+    def test_disabled_threshold_roll_up_keeps_candidates_until_manual_roll_up(self) -> None:
+        api, root = self._new_api()
+        project_root, learning_root = self._make_project_dirs(root, "videos")
+        (learning_root / "lesson.mp4").write_text("video", encoding="utf-8")
+
+        project_id = api.create_project("ml", project_root.as_posix())
+        api.sync_learning_objects_from_fs(project_id)
+
+        session = api.sys.begin_session(project_id, SessionMode.READ_WRITE)
+        try:
+            layer0 = api.sys.layer_repo.get_by_index(session, 0)
+            updated = replace(layer0, layer_mode=LayerMode.MANUAL_TICK_ON_ENTRY)
+            updated.validate_local_invariants()
+            session._staged.layers[id_canonical_text(updated.layer_id)] = updated
+            api.sys.commit(session)
+        except Exception:
+            if session.state == "OPEN":
+                api.sys.rollback(session)
+            raise
+
+        api.set_layer_config(project_id, 0, None, 1, None, False)
+        instance = api.list_instances(project_id)[0]
+        entry_node_id = api.submit_learning_task(
+            project_id,
+            items=[(rich_text("Q1"), rich_text("A1"), Anchor(instance.instance_id, position="t=1000"))],
+            title="Lesson 1",
+        )
+
+        self.assertEqual(api.get_aggregation_queue_current(project_id, 0), (entry_node_id,))
+        self.assertEqual(api.list_aggregation_events(project_id), tuple())
+        self.assertFalse(api.get_project_config(project_id).layer_configs[0].threshold_roll_up_enabled)
+
+        parent_node_id = api.manual_roll_up(project_id, 0, "Manual aggregation")
+        self.assertIsNotNone(parent_node_id)
+        events = api.list_aggregation_events(project_id)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].reason, AggregationEventReason.MANUAL_DRAIN)
+        self.assertEqual(events[0].title, "Manual aggregation")
 
     def test_create_project_auto_creates_project_dir_under_workspace_data_root(self) -> None:
         api, root = self._new_api()
@@ -451,6 +537,81 @@ class _SpecAlignmentBackendMixin:
             self.assertEqual(len(leaf_nodes), 1)
             self.assertEqual(leaf_nodes[0].parent_id, restarted_api.list_learning_object_roots(project_id)[0])
 
+    def test_manual_learning_object_tree_allows_mixed_children(self) -> None:
+        api, root = self._new_api()
+        project_root, _learning_root = self._make_project_dirs(root, "manual-materials")
+        project_id = api.create_project("ml", project_root.as_posix(), initial_source_kind=MaterialSourceKind.MANUAL)
+
+        root_node_id = api.add_learning_object_container(project_id, parent_id=None, children=tuple(), title="Root")
+        chapter_node_id = api.add_learning_object_container(project_id, parent_id=root_node_id, children=tuple(), title="Chapter 1")
+        intro_instance_id = api.add_instance(project_id, "manual/intro.mp4")
+        intro_leaf_id = api.add_learning_object_leaf(project_id, parent_id=root_node_id, instance_id=intro_instance_id, title="Intro")
+
+        nodes = {str(node.node_id): node for node in api.list_learning_object_nodes(project_id)}
+        root_node = nodes[str(root_node_id)]
+        self.assertEqual(tuple(str(child_id) for child_id in root_node.children), (str(chapter_node_id), str(intro_leaf_id)))
+        self.assertEqual(str(nodes[str(chapter_node_id)].parent_id), str(root_node_id))
+        self.assertEqual(str(nodes[str(intro_leaf_id)].parent_id), str(root_node_id))
+
+    def test_sync_learning_objects_from_fs_allows_mixed_direct_children(self) -> None:
+        api, root = self._new_api()
+        project_root, learning_root = self._make_project_dirs(root, "videos")
+        (learning_root / "001-intro.mp4").write_text("video", encoding="utf-8")
+        chapter_dir = learning_root / "chapter-1"
+        chapter_dir.mkdir()
+        (chapter_dir / "lesson-1.mp4").write_text("video", encoding="utf-8")
+
+        project_id = api.create_project("ml", project_root.as_posix())
+        report = api.sync_learning_objects_from_fs(project_id)
+
+        self.assertFalse(report["unchanged"])
+        self.assertEqual(report["created_instances_count"], 2)
+
+        nodes = {str(node.node_id): node for node in api.list_learning_object_nodes(project_id)}
+        roots = api.list_learning_object_roots(project_id)
+        self.assertEqual(len(roots), 1)
+        root_node = nodes[str(roots[0])]
+        self.assertEqual(root_node.title, "learning_objects")
+        self.assertEqual(len(root_node.children), 2)
+
+        child_nodes = [nodes[str(child_id)] for child_id in root_node.children]
+        self.assertEqual(tuple(getattr(node, "title", "") for node in child_nodes), ("001-intro.mp4", "chapter-1"))
+        self.assertEqual({node.__class__.__name__ for node in child_nodes}, {"LearningObjectContainer", "LearningObjectLeaf"})
+
+    def test_import_learning_objects_from_browser_scan_allows_mixed_direct_children(self) -> None:
+        api, root = self._new_api()
+        project_root, _learning_root = self._make_project_dirs(root, "videos")
+        project_id = api.create_project("ml", project_root.as_posix())
+
+        with patch.dict(
+            os.environ,
+            {
+                "PLM_ENABLE_SERVER_MEDIA_STREAM": "true",
+                "PLM_ENABLE_BROWSER_LOCAL_MEDIA": "true",
+            },
+            clear=False,
+        ):
+            report = api.import_learning_objects_from_browser_scan(
+                project_id,
+                root_title="Videos",
+                relative_file_paths=("001-intro.mp4", "chapter-1/lesson-1.mp4"),
+            )
+
+        self.assertFalse(report["unchanged"])
+        self.assertEqual(report["created_instances_count"], 2)
+
+        nodes = {str(node.node_id): node for node in api.list_learning_object_nodes(project_id)}
+        roots = api.list_learning_object_roots(project_id)
+        self.assertEqual(len(roots), 1)
+        root_node = nodes[str(roots[0])]
+        self.assertEqual(root_node.title, "Videos")
+        self.assertEqual(len(root_node.children), 2)
+        self.assertFalse(any(getattr(node, "title", "") == "Files" for node in nodes.values()))
+
+        child_nodes = [nodes[str(child_id)] for child_id in root_node.children]
+        self.assertEqual(tuple(getattr(node, "title", "") for node in child_nodes), ("001-intro.mp4", "chapter-1"))
+        self.assertEqual({node.__class__.__name__ for node in child_nodes}, {"LearningObjectContainer", "LearningObjectLeaf"})
+
     def test_sync_learning_objects_from_fs_noop_does_not_write_audit(self) -> None:
         api, root = self._new_api()
         project_root, learning_root = self._make_project_dirs(root, "videos")
@@ -537,6 +698,91 @@ class _SpecAlignmentBackendMixin:
         cfg = api.get_project_config(project_id)
         self.assertFalse(hasattr(cfg, "external_services"))
         self.assertFalse(hasattr(api, "set_external_services_config"))
+
+    def test_book_project_requires_manual_source_and_text_anchor(self) -> None:
+        api, root = self._new_api()
+        project_root, _ = self._make_project_dirs(root, "book-materials")
+
+        with self.assertRaises(PreconditionFailure):
+            api.create_project(
+                "book-invalid",
+                project_root.as_posix(),
+                initial_source_kind=MaterialSourceKind.SERVER_FS,
+                initial_project_type=ProjectType.BOOK,
+            )
+
+        project_id = api.create_project(
+            "book-valid",
+            project_root.as_posix(),
+            initial_source_kind=MaterialSourceKind.MANUAL,
+            initial_project_type=ProjectType.BOOK,
+        )
+        cfg = api.get_project_config(project_id)
+        self.assertEqual(cfg.project_type, ProjectType.BOOK)
+
+        report = api.initialize_book_learning_objects(
+            project_id,
+            outline_items=[
+                (0, "第一章 极限"),
+                (1, "1.1 函数"),
+                (1, "1.2 极限定义"),
+                (0, "第二章 导数"),
+                (1, "2.1 导数概念"),
+            ],
+        )
+        self.assertEqual(report["created_learning_object_nodes_count"], 5)
+        self.assertEqual(report["created_instances_count"], 3)
+        self.assertEqual(report["root_count"], 2)
+
+        instance = api.list_instances(project_id)[0]
+        with self.assertRaises(PreconditionFailure):
+            api.submit_learning_task(
+                project_id,
+                items=[(rich_text("极限是什么"), rich_text("描述函数逼近"), Anchor(instance.instance_id, position="t=1000"))],
+                title="第一章",
+            )
+
+        entry_node_id = api.submit_learning_task(
+            project_id,
+            items=[(rich_text("极限是什么"), rich_text("描述函数逼近"), Anchor(instance.instance_id, position="第 12 页 例 1"))],
+            title="第一章",
+        )
+        recall_points = api.list_recall_points_by_learning_task_node(project_id, entry_node_id)
+        self.assertEqual(len(recall_points), 1)
+        self.assertEqual(recall_points[0].anchor.position, "第 12 页 例 1")
+
+    def test_loose_points_project_disallows_tree_and_anchor_but_allows_anchorless_points(self) -> None:
+        api, root = self._new_api()
+        project_root, _ = self._make_project_dirs(root, "loose-points")
+
+        project_id = api.create_project(
+            "loose",
+            project_root.as_posix(),
+            initial_source_kind=MaterialSourceKind.MANUAL,
+            initial_project_type=ProjectType.LOOSE_POINTS,
+        )
+        cfg = api.get_project_config(project_id)
+        self.assertEqual(cfg.project_type, ProjectType.LOOSE_POINTS)
+        self.assertEqual(tuple(api.list_learning_object_nodes(project_id)), tuple())
+
+        with self.assertRaises(PreconditionFailure):
+            api.add_instance(project_id, "manual/should-not-exist")
+
+        with self.assertRaises(PreconditionFailure):
+            api.submit_learning_task(
+                project_id,
+                items=[(rich_text("Q"), rich_text("A"), Anchor(InstanceId("inst_fake"), position="t=1"))],
+                title="bad",
+            )
+
+        entry_node_id = api.submit_learning_task(
+            project_id,
+            items=[(rich_text("零散问题"), rich_text("零散答案"), None)],
+            title="项目级零散知识点",
+        )
+        recall_points = api.list_recall_points_by_learning_task_node(project_id, entry_node_id)
+        self.assertEqual(len(recall_points), 1)
+        self.assertIsNone(recall_points[0].anchor)
 
     def test_request_asr_passes_configured_model_to_external_service(self) -> None:
         api, root = self._new_api()
@@ -1210,12 +1456,16 @@ class _SpecAlignmentBackendMixin:
 
         captured_messages: list[dict[str, str]] = []
 
-        def fake_request_llm_chat_completion(*args, **kwargs):
+        def fake_build_transport(*args, **kwargs):
             nonlocal captured_messages
-            captured_messages = kwargs["messages"]
-            return {"choices": [{"message": {"content": "ok"}}]}
+            captured_messages = list(kwargs["messages"])
+            return ("http://example.invalid/v1/chat/completions", {"messages": captured_messages}, None)
 
-        with patch.object(SystemAPI, "request_llm_chat_completion", side_effect=fake_request_llm_chat_completion):
+        with patch.object(SystemAPI, "_build_llm_chat_completion_transport", side_effect=fake_build_transport), patch.object(
+            SystemAPI,
+            "_http_post_json",
+            return_value={"choices": [{"message": {"content": "ok"}}]},
+        ):
             content = api.request_project_llm_text(
                 project_id=project_id,
                 user_prompt="请总结一下",
@@ -1321,10 +1571,13 @@ class _SpecAlignmentBackendMixin:
                 session,
                 ProjectConfig(
                     project_id=cfg.project_id,
+                    project_type=cfg.project_type,
                     layer_configs=dict(cfg.layer_configs),
                     push_config=RecallPointPushConfig(
                         min_recall_points_to_enable=1,
                         max_history_len=cfg.push_config.max_history_len,
+                        recommended_batch_size=cfg.push_config.recommended_batch_size,
+                        forgetting_curve_decay_per_day=cfg.push_config.forgetting_curve_decay_per_day,
                     ),
                     updated_at=now_utc_ms(),
                 ),
@@ -1336,6 +1589,100 @@ class _SpecAlignmentBackendMixin:
             raise
 
         self.assertEqual(api.get_push_candidates(project_id, max_results=5), tuple())
+
+    def test_review_recommendations_follow_forgetting_curve_and_batch_config(self) -> None:
+        api, root = self._new_api()
+        project_root, learning_root = self._make_project_dirs(root, "videos")
+        (learning_root / "lesson.mp4").write_text("video", encoding="utf-8")
+
+        project_id = api.create_project("ml", project_root.as_posix())
+        api.sync_learning_objects_from_fs(project_id)
+        instance = api.list_instances(project_id)[0]
+        entry_node_id = api.submit_learning_task(
+            project_id,
+            items=[
+                (rich_text("Q1"), rich_text("A1"), Anchor(instance.instance_id, position="t=0")),
+                (rich_text("Q2"), rich_text("A2"), Anchor(instance.instance_id, position="t=1000")),
+                (rich_text("Q3"), rich_text("A3"), Anchor(instance.instance_id, position="t=2000")),
+            ],
+            title="Lesson 1",
+        )
+        learning_task = api.get_learning_task(project_id, api.get_learning_task_node(project_id, entry_node_id).bound_learning_task_id)  # type: ignore[attr-defined]
+        rp1, rp2, rp3 = tuple(learning_task.recall_point_ids)
+
+        api.set_review_recommendation_config(
+            project_id,
+            min_recall_points_to_enable=0,
+            max_history_len=5,
+            recommended_batch_size=2,
+            forgetting_curve_decay_per_day=0.2,
+        )
+        cfg = api.get_project_config(project_id)
+        self.assertEqual(cfg.push_config.recommended_batch_size, 2)
+        self.assertAlmostEqual(cfg.push_config.forgetting_curve_decay_per_day, 0.2, places=6)
+
+        system = api.sys
+        occurred_at = now_utc_ms() - timedelta(days=1)
+        session = system.begin_session(project_id, SessionMode.READ_WRITE)
+        try:
+            for review_task_id, rp_id, result in (
+                ("rt_review_cfg_1", rp2, RecallPointReviewResult.CAN_RECALL),
+                ("rt_review_cfg_2", rp3, RecallPointReviewResult.CANNOT_RECALL),
+            ):
+                input_range_id = system.range_repo.intern(session, (rp_id,))
+                system.review_task_repo.add(
+                    session,
+                    ReviewTask(
+                        project_id=project_id,
+                        review_task_id=review_task_id,
+                        input_range_id=input_range_id,
+                        created_at=occurred_at,
+                        state=ReviewTaskState.DONE,
+                        executed_at=occurred_at,
+                        result_range_id=None,
+                    ),
+                )
+                system.recall_point_review_record_repo.append(
+                    session,
+                    RecallPointReviewRecord(
+                        project_id=project_id,
+                        record_id=f"record_{review_task_id}",
+                        recall_point_id=rp_id,
+                        review_task_id=review_task_id,
+                        occurred_at=occurred_at,
+                        result=result,
+                    ),
+                )
+            system.commit(session)
+        except Exception:
+            if session.state == "OPEN":
+                system.rollback(session)
+            raise
+
+        page1 = api.list_review_recommendations(project_id, offset=0)
+        self.assertEqual(page1.total_count, 3)
+        self.assertEqual(page1.limit, 2)
+        self.assertEqual(page1.next_offset, 2)
+        self.assertEqual([str(item.recall_point.recall_point_id) for item in page1.items], [str(rp1), str(rp3)])
+        self.assertGreaterEqual(page1.items[0].review_recommendation_index, page1.items[1].review_recommendation_index)
+
+        page2 = api.list_review_recommendations(project_id, offset=page1.next_offset or 0)
+        self.assertEqual([str(item.recall_point.recall_point_id) for item in page2.items], [str(rp2)])
+        self.assertIsNone(page2.next_offset)
+
+        self.assertEqual(
+            [str(rp_id) for rp_id in api.get_push_candidates(project_id, max_results=3)],
+            [str(rp1), str(rp3), str(rp2)],
+        )
+
+        projection = api.get_recall_point_review_projection(project_id, rp2)
+        self.assertEqual(str(projection.recall_point_id), str(rp2))
+        self.assertEqual(projection.review_count, 1)
+        self.assertEqual(len(projection.history), 1)
+        self.assertEqual(projection.last_review_result, RecallPointReviewResult.CAN_RECALL)
+        self.assertGreater(projection.weighted_success_ratio, 0.99)
+        self.assertGreaterEqual(projection.review_recommendation_index, 0.0)
+        self.assertLessEqual(projection.review_recommendation_index, 100.0)
 
     def test_export_asr_by_learning_task_node_returns_scoped_artifacts(self) -> None:
         api, root = self._new_api()

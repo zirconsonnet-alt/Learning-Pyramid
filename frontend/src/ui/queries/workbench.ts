@@ -2,18 +2,30 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 
 import { ApiError } from "@/ui/api/http"
 import { getAggregationQueue, listAggregationEvents, listLayers, manualRollUp } from "@/ui/api/layers"
-import { getLearningObjectNode, importLearningObjectsFromBrowser } from "@/ui/api/learningObjects"
+import {
+  getLearningObjectNode,
+  importLearningObjectsFromBaiduNetdisk,
+  importLearningObjectsFromBrowser,
+  initializeBookLearningObjects,
+} from "@/ui/api/learningObjects"
+import { getInstancePlaybackDescriptor } from "@/ui/api/media"
 import { addInstance, bulkRemapRecallPointsInstance, listInstances, listMissingInstances, listRecallPointsByInstance } from "@/ui/api/instances"
 import { submitLearningTask } from "@/ui/api/learningTasks"
-import { getProjectConfig, setLayerConfig } from "@/ui/api/projectConfig"
+import { getProjectConfig, setLayerConfig, setReviewRecommendationConfig } from "@/ui/api/projectConfig"
 import type { ReviewChainTemplateItem } from "@/ui/api/projectConfig"
 import { getProjectStorageConfig } from "@/ui/api/projectStorageConfig"
 import { getQueue } from "@/ui/api/queue"
 import { commitReviewTask, getRangeSnapshot, getRecallPoint, getReviewTask } from "@/ui/api/review"
 import type { RichContent } from "@/ui/api/richContent"
 
+const WORKBENCH_QUERY_TIMEOUT_MS = 90_000
+
 export function useInstances(projectId: string) {
-  return useQuery({ queryKey: ["instances", projectId], queryFn: () => listInstances(projectId), enabled: !!projectId })
+  return useQuery({
+    queryKey: ["instances", projectId],
+    queryFn: ({ signal }) => listInstances(projectId, { signal, timeoutMs: WORKBENCH_QUERY_TIMEOUT_MS }),
+    enabled: !!projectId,
+  })
 }
 
 export function useMissingInstances(projectId: string) {
@@ -27,17 +39,26 @@ export function useMissingInstances(projectId: string) {
 export function useRecallPointsByInstance(projectId: string, instanceId: string) {
   return useQuery({
     queryKey: ["recallPointsByInstance", projectId, instanceId],
-    queryFn: () => listRecallPointsByInstance(projectId, instanceId),
+    queryFn: ({ signal }) => listRecallPointsByInstance(projectId, instanceId, { signal, timeoutMs: WORKBENCH_QUERY_TIMEOUT_MS }),
     enabled: !!projectId && !!instanceId,
+  })
+}
+
+export function useInstancePlaybackDescriptor(projectId: string, instanceId: string, enabled = true) {
+  return useQuery({
+    queryKey: ["instancePlaybackDescriptor", projectId, instanceId],
+    queryFn: ({ signal }) => getInstancePlaybackDescriptor(projectId, instanceId, { signal, timeoutMs: WORKBENCH_QUERY_TIMEOUT_MS }),
+    enabled: enabled && !!projectId && !!instanceId,
+    staleTime: 15_000,
   })
 }
 
 export function useQueue(projectId: string) {
   return useQuery({
     queryKey: ["queue", projectId],
-    queryFn: () => getQueue(projectId),
+    queryFn: ({ signal }) => getQueue(projectId, { signal, timeoutMs: WORKBENCH_QUERY_TIMEOUT_MS }),
     enabled: !!projectId,
-    refetchInterval: 1500,
+    refetchInterval: 5_000,
   })
 }
 
@@ -76,7 +97,11 @@ export function useLearningObjectNode(projectId: string, nodeId: string) {
 }
 
 export function useLayers(projectId: string) {
-  return useQuery({ queryKey: ["layers", projectId], queryFn: () => listLayers(projectId), enabled: !!projectId })
+  return useQuery({
+    queryKey: ["layers", projectId],
+    queryFn: ({ signal }) => listLayers(projectId, { signal, timeoutMs: WORKBENCH_QUERY_TIMEOUT_MS }),
+    enabled: !!projectId,
+  })
 }
 
 export function useProjectConfig(projectId: string) {
@@ -110,17 +135,39 @@ export function useProjectStorageConfig(projectId: string) {
 export function useSetLayerConfig(projectId: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (p: { layerIndex: number; reviewChainTemplate?: ReviewChainTemplateItem[]; kNode?: number; kPoint?: number }) =>
+    mutationFn: (p: {
+      layerIndex: number
+      reviewChainTemplate?: ReviewChainTemplateItem[]
+      kNode?: number
+      kPoint?: number
+      thresholdRollUpEnabled?: boolean
+    }) =>
       setLayerConfig(projectId, p.layerIndex, {
         reviewChainTemplate: p.reviewChainTemplate,
         kNode: p.kNode,
         kPoint: p.kPoint,
+        thresholdRollUpEnabled: p.thresholdRollUpEnabled,
       }),
     onSuccess: async () => {
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["projectConfig", projectId] }),
         qc.invalidateQueries({ queryKey: ["layers", projectId] }),
       ])
+    },
+  })
+}
+
+export function useSetReviewRecommendationConfig(projectId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (params: {
+      minRecallPointsToEnable?: number
+      maxHistoryLen?: number
+      recommendedBatchSize?: number
+      forgettingCurveDecayPerDay?: number
+    }) => setReviewRecommendationConfig(projectId, params),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["projectConfig", projectId] })
     },
   })
 }
@@ -148,7 +195,7 @@ export function useSubmitLearningTask(projectId: string) {
   return useMutation({
     mutationFn: (p: {
       title: string
-      items: { question: RichContent; answer: RichContent; anchor: { instanceId: string; position: string } }[]
+      items: { question: RichContent; answer: RichContent; anchor: { instanceId: string; position: string } | null }[]
     }) => submitLearningTask({ projectId, ...p }),
     onSuccess: async () => {
       await Promise.all([
@@ -158,6 +205,19 @@ export function useSubmitLearningTask(projectId: string) {
         qc.invalidateQueries({ queryKey: ["aggregationEvents", projectId] }),
         qc.invalidateQueries({ queryKey: ["learningTaskNodes", projectId] }),
         qc.invalidateQueries({ queryKey: ["recallPointsByTaskNode", projectId] }),
+      ])
+    },
+  })
+}
+
+export function useInitializeBookLearningObjects(projectId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (params: { items: { depth: number; title: string }[] }) => initializeBookLearningObjects(projectId, params),
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["instances", projectId] }),
+        qc.invalidateQueries({ queryKey: ["learningObjectNodes", projectId] }),
       ])
     },
   })
@@ -208,6 +268,8 @@ export function useCommitReviewTask(projectId: string) {
         qc.invalidateQueries({ queryKey: ["aggregationEvents", projectId] }),
         qc.invalidateQueries({ queryKey: ["reviewTask", projectId] }),
         qc.invalidateQueries({ queryKey: ["recallPoint", projectId] }),
+        qc.invalidateQueries({ queryKey: ["reviewRecommendations", projectId] }),
+        qc.invalidateQueries({ queryKey: ["recallPointReviewProjection", projectId] }),
       ])
     },
   })
@@ -236,6 +298,32 @@ export function useImportLearningObjectsFromBrowser(projectId: string) {
         qc.invalidateQueries({ queryKey: ["instances", projectId] }),
         qc.invalidateQueries({ queryKey: ["missingInstances", projectId] }),
         qc.invalidateQueries({ queryKey: ["learningObjectNodes", projectId] }),
+      ])
+    },
+  })
+}
+
+export function useImportLearningObjectsFromBaiduNetdisk(projectId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (params: {
+      accountId: string
+      items: Array<{
+        fileId: string
+        path: string
+        name?: string
+        isDir?: boolean
+        sizeBytes?: number
+        mimeType?: string | null
+        durationMs?: number | null
+      }>
+    }) => importLearningObjectsFromBaiduNetdisk(projectId, params),
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["instances", projectId] }),
+        qc.invalidateQueries({ queryKey: ["missingInstances", projectId] }),
+        qc.invalidateQueries({ queryKey: ["learningObjectNodes", projectId] }),
+        qc.invalidateQueries({ queryKey: ["instancePlaybackDescriptor", projectId] }),
       ])
     },
   })

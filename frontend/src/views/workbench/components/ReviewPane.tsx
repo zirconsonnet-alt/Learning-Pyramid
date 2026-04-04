@@ -148,13 +148,6 @@ export function ReviewPane({
     updateSessionState((current) => ({
       ...current,
       answers: { ...current.answers, [rpId]: nextValue },
-      showAnswer:
-        nextValue === 0
-          ? {
-              ...current.showAnswer,
-              [rpId]: true,
-            }
-          : current.showAnswer,
     }))
   }
 
@@ -169,6 +162,13 @@ export function ReviewPane({
     const nextId = recallPointIds[index]
     if (!nextId) return
     setActiveRecallPoint(nextId)
+  }
+
+  function chooseAnswerAndAdvance(rpId: string, nextValue: 0 | 1) {
+    chooseAnswer(rpId, nextValue)
+    if (activeRecallPointIndex >= 0 && activeRecallPointIndex < totalCount - 1) {
+      goToRecallPoint(activeRecallPointIndex + 1)
+    }
   }
 
   function toggleAnswerVisibility(rpId: string) {
@@ -242,7 +242,7 @@ export function ReviewPane({
     <Card className="theme-card-main">
       <CardHeader className="theme-card-header flex-col gap-4 space-y-0 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#e2e8f0] bg-[#f5f7fa] text-primary">
+          <div className="theme-icon-surface h-10 w-10">
             <ClipboardCheck className="h-5 w-5" />
           </div>
           <div>
@@ -253,13 +253,13 @@ export function ReviewPane({
         <div className="min-w-[180px] space-y-2">
           <div className="flex items-center justify-between gap-3 text-sm">
             <span className="theme-meta">{totalCount} 题</span>
-            <span className="font-medium text-slate-700">
+            <span className="font-medium text-[color:var(--theme-subtle-text)]">
               已完成 {answeredCount} / {totalCount}
             </span>
           </div>
-          <div className="h-2 overflow-hidden rounded-full bg-[#e8edf4]">
+          <div className="theme-progress-track h-2 overflow-hidden rounded-full">
             <div
-              className="h-full rounded-full bg-primary transition-[width] duration-300"
+              className="theme-progress-fill h-full rounded-full transition-[width] duration-300"
               style={{ width: `${completionPercent}%` }}
             />
           </div>
@@ -292,7 +292,7 @@ export function ReviewPane({
                         "flex size-10 items-center justify-center rounded-xl border text-sm font-semibold transition-all",
                         isRemembered && "border-emerald-200 bg-emerald-600 text-white shadow-[0_12px_24px_-20px_rgba(5,150,105,0.5)]",
                         isForgotten && "border-amber-200 bg-amber-50 text-amber-700",
-                        chosen === undefined && "border-[#d9e2eb] bg-white text-[#5e738b] hover:border-primary/25 hover:text-primary",
+                        chosen === undefined && "[border-color:var(--theme-soft-border)] [background:var(--theme-soft-bg)] text-[color:var(--theme-subtle-text)] hover:border-primary/25 hover:text-primary",
                         isActive && "ring-2 ring-primary/25 ring-offset-2 ring-offset-background",
                       )}
                       title={
@@ -319,12 +319,16 @@ export function ReviewPane({
               const draftInsight = insightDrafts[rpId] ?? ""
               const hasDraftInsight = draftInsight.trim().length > 0
               const insightEditorVisible = showInsightEditor[rpId] || hasDraftInsight
-              const inst = instances.find((i) => i.instanceId === activeRecallPoint.anchor.instanceId) ?? null
-              const anchorLabel = formatAnchorLabel(
-                activeRecallPoint.anchor.instanceId,
-                inst?.materialDisplayName,
-                activeRecallPoint.anchor.position,
-              )
+              const hasNextRecallPoint = activeRecallPointIndex >= 0 && activeRecallPointIndex < totalCount - 1
+              const activeAnchor = activeRecallPoint.anchor
+              const inst = activeAnchor ? instances.find((i) => i.instanceId === activeAnchor.instanceId) ?? null : null
+              const anchorLabel = activeAnchor
+                ? formatAnchorLabel(
+                    activeAnchor.instanceId,
+                    inst?.materialDisplayName,
+                    activeAnchor.position,
+                  )
+                : "未绑定锚点"
 
               return (
                 <div className="grid gap-3">
@@ -336,7 +340,7 @@ export function ReviewPane({
                       type="button"
                       variant="ghost"
                       size="icon"
-                      className="absolute inset-y-0 -left-4 z-10 h-auto w-4 rounded-none border-0 bg-transparent p-0 text-[#5e738b] shadow-none outline-none hover:bg-transparent hover:text-slate-900 focus-visible:ring-0 focus-visible:ring-offset-0 sm:-left-5 sm:w-5"
+                      className="absolute inset-y-0 -left-4 z-10 h-auto w-4 rounded-none border-0 bg-transparent p-0 text-[color:var(--theme-subtle-text)] shadow-none outline-none hover:bg-transparent hover:text-foreground focus-visible:ring-0 focus-visible:ring-offset-0 sm:-left-5 sm:w-5"
                       onClick={() => goToRecallPoint(activeRecallPointIndex - 1)}
                       disabled={activeRecallPointIndex <= 0}
                       aria-label="上一题"
@@ -348,7 +352,7 @@ export function ReviewPane({
                       type="button"
                       variant="ghost"
                       size="icon"
-                      className="absolute inset-y-0 -right-4 z-10 h-auto w-4 rounded-none border-0 bg-transparent p-0 text-[#5e738b] shadow-none outline-none hover:bg-transparent hover:text-slate-900 focus-visible:ring-0 focus-visible:ring-offset-0 sm:-right-5 sm:w-5"
+                      className="absolute inset-y-0 -right-4 z-10 h-auto w-4 rounded-none border-0 bg-transparent p-0 text-[color:var(--theme-subtle-text)] shadow-none outline-none hover:bg-transparent hover:text-foreground focus-visible:ring-0 focus-visible:ring-offset-0 sm:-right-5 sm:w-5"
                       onClick={() => goToRecallPoint(activeRecallPointIndex + 1)}
                       disabled={activeRecallPointIndex < 0 || activeRecallPointIndex >= totalCount - 1}
                       aria-label="下一题"
@@ -357,7 +361,7 @@ export function ReviewPane({
                       <ChevronRight className="h-4 w-4" />
                     </Button>
 
-                    <div className="theme-status-surface rounded-[1.15rem] border border-[#e2e8ef] px-4 py-4 sm:px-5">
+                    <div className="theme-status-surface rounded-[1.15rem] border border-[color:var(--theme-status-border)] px-4 py-4 sm:px-5">
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
@@ -375,7 +379,7 @@ export function ReviewPane({
                             className="group mt-2 block rounded-2xl px-2 py-1 -mx-2 -my-1 transition hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                             title="打开复述点详情"
                           >
-                            <div className="text-[15px] font-semibold leading-6 text-slate-900 transition group-hover:text-primary">
+                            <div className="text-[15px] font-semibold leading-6 text-foreground transition group-hover:text-primary">
                               <RichContentRenderer projectId={projectId} value={activeRecallPoint.question} />
                             </div>
                             <div className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary/85">
@@ -385,7 +389,7 @@ export function ReviewPane({
                           </Link>
 
                           <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                            <span className="rounded-full border border-[#dbe4ee] bg-white px-2.5 py-1 font-medium text-slate-600">
+                            <span className="theme-pill-default rounded-full px-2.5 py-1 font-medium">
                               {anchorLabel}
                             </span>
                             {activeRecallPoint.insights.length > 0 ? (
@@ -399,10 +403,10 @@ export function ReviewPane({
                       </div>
 
                       <div className="mt-3 flex flex-wrap gap-2">
-                        {onOpenAnchor ? (
-                          <Button variant="outline" size="sm" className="rounded-full" onClick={() => onOpenAnchor(activeRecallPoint.anchor)}>
+                        {onOpenAnchor && activeAnchor ? (
+                          <Button variant="outline" size="sm" className="rounded-full" onClick={() => onOpenAnchor(activeAnchor)}>
                             <PlayCircle className="h-4 w-4" />
-                            回到视频
+                            回到锚点
                           </Button>
                         ) : null}
 
@@ -427,21 +431,21 @@ export function ReviewPane({
                       </div>
 
                       {answerVisible ? (
-                        <div className="theme-canvas mt-3 rounded-2xl border border-[#e2e8ef] p-3 text-sm">
+                        <div className="theme-canvas mt-3 rounded-2xl border border-[color:var(--theme-soft-border)] p-3 text-sm">
                           <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">答案</div>
                           <RichContentRenderer projectId={projectId} value={activeRecallPoint.answer} />
                         </div>
                       ) : null}
 
                       {insightEditorVisible ? (
-                        <div className="mt-3 rounded-2xl border border-[#e2e8ef] bg-white p-3">
+                        <div className="theme-soft-surface mt-3 p-3">
                           <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">追加理解</div>
                           <textarea
                             value={draftInsight}
                             onChange={(event) => updateInsightDraft(rpId, event.target.value)}
                             rows={3}
                             placeholder="补充这道复习点的新理解、易错点、联想线索或自己的话解释。"
-                            className="w-full resize-y rounded-2xl border border-[#dbe4ee] bg-[#fbfdff] px-3 py-2 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-primary focus:ring-2 focus:ring-primary/15"
+                            className="w-full resize-y rounded-2xl border [border-color:var(--theme-subtle-border)] [background:var(--theme-subtle-bg)] px-3 py-2 text-sm text-foreground outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15"
                           />
                           <div className="mt-2 text-xs text-muted-foreground">提交本轮复习时，这段内容会作为新的“理解”追加到对应复述点。</div>
                         </div>
@@ -452,7 +456,7 @@ export function ReviewPane({
                           variant={isRemembered ? "default" : "outline"}
                           size="sm"
                           className={cn("min-w-[96px] rounded-full", isRemembered ? "bg-emerald-600 hover:bg-emerald-700" : "")}
-                          onClick={() => chooseAnswer(rpId, 1)}
+                          onClick={() => chooseAnswerAndAdvance(rpId, 1)}
                         >
                           记得
                         </Button>
@@ -463,7 +467,7 @@ export function ReviewPane({
                             "min-w-[96px] rounded-full",
                             isForgotten ? "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100" : "",
                           )}
-                          onClick={() => chooseAnswer(rpId, 0)}
+                          onClick={() => chooseAnswerAndAdvance(rpId, 0)}
                         >
                           不记得
                         </Button>
@@ -484,8 +488,12 @@ export function ReviewPane({
                         >
                           <CheckCircle2 className="h-4 w-4" />
                           {isRemembered
-                            ? "这题已标记为“记得”，可以继续下一题。"
-                            : "这题已标记为“不记得”，建议先核对答案，再补一句自己的理解。"}
+                            ? hasNextRecallPoint
+                              ? "这题已标记为“记得”，作答后会自动切到下一题。"
+                              : "这题已标记为“记得”，已经是最后一题，可以直接提交。"
+                            : hasNextRecallPoint
+                              ? "这题已标记为“不记得”，如需核对答案请手动点“查看答案”。"
+                              : "这题已标记为“不记得”，如需核对答案请手动点“查看答案”，然后直接提交。"}
                         </div>
                       ) : null}
                     </div>
@@ -493,7 +501,7 @@ export function ReviewPane({
                 </div>
               )
             })() : (
-              <div className="rounded-[1.15rem] border border-dashed border-[#dbe4ee] bg-[#fbfdff] px-4 py-6 text-sm text-muted-foreground">
+              <div className="theme-subtle-surface border-dashed px-4 py-6 text-sm text-muted-foreground">
                 当前题目载入中...
               </div>
             )}

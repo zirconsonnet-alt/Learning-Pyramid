@@ -68,6 +68,35 @@ def test_sqlite_store_persists_projects_across_restart(tmp_path: Path) -> None:
     assert cfg.project_root.as_posix() == project_root.as_posix()
 
 
+def test_sqlite_store_persists_global_llm_settings_across_restart(tmp_path: Path) -> None:
+    db_path = tmp_path / "plm_store.sqlite3"
+
+    api = SystemAPI(InMemorySystem(persist_store=SQLiteSnapshotStore(db_path)))
+    status_before = api.get_global_llm_status()
+    assert status_before["llmConfigured"] is False
+
+    updated = api.update_global_llm_settings(
+        base_url="https://api.openai.com/v1",
+        model_name="gpt-4o-mini",
+        api_key="sk-test-12345678",
+        prompt_assembly_mode="user_concat",
+    )
+    assert updated["llmConfigured"] is True
+    assert updated["llmSource"] == "global"
+    assert updated["promptAssemblyMode"] == "user_concat"
+    assert updated["savedApiKeyConfigured"] is True
+
+    reloaded = SystemAPI(InMemorySystem(persist_store=SQLiteSnapshotStore(db_path)))
+    status_after = reloaded.get_global_llm_status()
+    assert status_after["baseUrl"] == "https://api.openai.com/v1"
+    assert status_after["modelName"] == "gpt-4o-mini"
+    assert status_after["llmConfigured"] is True
+    assert status_after["llmSource"] == "global"
+    assert status_after["promptAssemblyMode"] == "user_concat"
+    assert status_after["savedApiKeyConfigured"] is True
+    assert status_after["savedApiKeyPreview"] == "sk-t...5678"
+
+
 def test_sqlite_store_imports_legacy_json_snapshot(tmp_path: Path) -> None:
     legacy_json_path = tmp_path / "legacy-store.json"
     db_path = tmp_path / "plm_store.sqlite3"
@@ -321,6 +350,7 @@ def test_decode_project_payload_uses_current_layer_config_defaults_for_missing_f
     assert cfg0.review_chain_template == expected.review_chain_template
     assert cfg0.aggregation_k_node == expected.aggregation_k_node
     assert cfg0.aggregation_k_point == expected.aggregation_k_point
+    assert cfg0.threshold_roll_up_enabled is expected.threshold_roll_up_enabled
 
 
 def test_json_store_save_project_snapshot_preserves_other_projects(tmp_path: Path) -> None:

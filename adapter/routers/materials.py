@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query, Request
 
+from adapter.auth import require_request_auth_user
 from adapter.deps import get_api
 from adapter.mappers import asr_artifact_to_dto, instance_to_dto, learning_object_node_to_dto, recall_point_to_dto
 from adapter.schemas import (
@@ -9,11 +10,15 @@ from adapter.schemas import (
     AddLearningObjectContainerRequest,
     AddLearningObjectLeafRequest,
     BulkRemapRecallPointsInstanceRequest,
+    ImportLearningObjectsFromBaiduNetdiskRequest,
     ImportBrowserDirectoryRequest,
+    InitializeBookLearningObjectsRequest,
 )
 from backend.models.types import InstanceId, LearningObjectNodeId
 from backend.models.types import RecallPointId
 from backend.system.api import SystemAPI
+from backend.system.auth_store import AuthStore
+from adapter.deps import get_auth_store
 
 
 router = APIRouter()
@@ -21,7 +26,20 @@ router = APIRouter()
 
 @router.get("/projects/{projectId}/instances")
 def list_instances(projectId: str, api: SystemAPI = Depends(get_api)) -> dict:
-    items = [instance_to_dto(i) for i in api.list_instances(projectId)]  # type: ignore[arg-type]
+    project_binding = api.get_project_material_source_binding(projectId)  # type: ignore[arg-type]
+    media_service = api._instance_media_service()
+    items = []
+    for instance in api.list_instances(projectId):  # type: ignore[arg-type]
+        media_binding = media_service.get_instance_media_binding(projectId, str(instance.instance_id))
+        effective_source_kind = media_binding.source_kind if media_binding is not None else project_binding.source_kind
+        items.append(
+            instance_to_dto(
+                instance,
+                media_source_kind=effective_source_kind.value,
+                playback_kind="FILE" if media_binding is None else media_binding.playback_kind,
+                duration_ms=None if media_binding is None else media_binding.duration_ms,
+            )
+        )
     return {"ok": True, "data": items}
 
 
@@ -29,6 +47,19 @@ def list_instances(projectId: str, api: SystemAPI = Depends(get_api)) -> dict:
 def add_instance(projectId: str, req: AddInstanceRequest, api: SystemAPI = Depends(get_api)) -> dict:
     iid = api.add_instance(projectId, req.materialId)  # type: ignore[arg-type]
     return {"ok": True, "data": {"instanceId": str(iid)}}
+
+
+@router.post("/projects/{projectId}/initialize-book-learning-objects")
+def initialize_book_learning_objects(
+    projectId: str,
+    req: InitializeBookLearningObjectsRequest,
+    api: SystemAPI = Depends(get_api),
+) -> dict:
+    result = api.initialize_book_learning_objects(  # type: ignore[arg-type]
+        projectId,
+        outline_items=tuple((int(item.depth), item.title) for item in req.items),
+    )
+    return {"ok": True, "data": result}
 
 @router.post("/projects/{projectId}/sync-learning-objects-from-fs")
 def sync_learning_objects_from_fs(projectId: str, api: SystemAPI = Depends(get_api)) -> dict:
@@ -46,6 +77,48 @@ def import_learning_objects_from_browser(
         projectId,
         root_title=req.rootTitle,
         relative_file_paths=req.relativeFilePaths,
+    )
+    return {"ok": True, "data": report}
+
+
+@router.get("/projects/{projectId}/baidu-netdisk/files")
+def list_baidu_netdisk_files(
+    projectId: str,
+    request: Request,
+    accountId: str = Query(min_length=1),
+    dirPath: str = Query(default="/"),
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=200, ge=1, le=500),
+    api: SystemAPI = Depends(get_api),
+    auth_store: AuthStore = Depends(get_auth_store),
+) -> dict:
+    user = require_request_auth_user(request)
+    data = api.list_baidu_netdisk_files(
+        auth_store=auth_store,
+        user_id=user.user_id,
+        account_id=accountId,
+        dir_path=dirPath,
+        page=page,
+        limit=limit,
+    )
+    return {"ok": True, "data": data}
+
+
+@router.post("/projects/{projectId}/import-learning-objects-from-baidu-netdisk")
+def import_learning_objects_from_baidu_netdisk(
+    projectId: str,
+    req: ImportLearningObjectsFromBaiduNetdiskRequest,
+    request: Request,
+    api: SystemAPI = Depends(get_api),
+    auth_store: AuthStore = Depends(get_auth_store),
+) -> dict:
+    user = require_request_auth_user(request)
+    report = api.import_learning_objects_from_baidu_netdisk(  # type: ignore[arg-type]
+        projectId,
+        auth_store=auth_store,
+        user_id=user.user_id,
+        account_id=req.accountId,
+        items=[item.model_dump() for item in req.items],
     )
     return {"ok": True, "data": report}
 

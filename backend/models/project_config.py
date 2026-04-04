@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, FrozenSet, Optional, Tuple, TypeAlias
 
-from backend.models.enums import ClientRuntimeKind, ReviewChainTemplateItemKind, RuntimeCapability
+from backend.models.enums import ClientRuntimeKind, ProjectType, ReviewChainTemplateItemKind, RuntimeCapability
 from backend.models.errors import PreconditionFailure
 from backend.models.types import ProjectId, Timestamp
 
@@ -11,8 +11,10 @@ from backend.models.types import ProjectId, Timestamp
 # Spec 1.0.5 / 0b.1.5a: defaults are fixed for cross-implementation consistency.
 DEFAULT_AGGREGATION_K_NODE: int = 10
 DEFAULT_AGGREGATION_K_POINT: int = 200
-DEFAULT_PUSH_MIN_RECALL_POINTS_TO_ENABLE: int = 30
+DEFAULT_PUSH_MIN_RECALL_POINTS_TO_ENABLE: int = 0
 DEFAULT_PUSH_MAX_HISTORY_LEN: int = 20
+DEFAULT_PUSH_RECOMMENDED_BATCH_SIZE: int = 20
+DEFAULT_PUSH_FORGETTING_CURVE_DECAY_PER_DAY: float = 0.2
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +64,7 @@ class LayerConfig:
     review_chain_template: ReviewChainTemplate
     aggregation_k_node: int
     aggregation_k_point: int
+    threshold_roll_up_enabled: bool = True
 
     def validate_write_time(self) -> None:
         validate_review_chain_template_write_time(self.review_chain_template)
@@ -69,6 +72,8 @@ class LayerConfig:
             raise PreconditionFailure("LayerConfig.aggregation_k_node must be >= 1")
         if int(self.aggregation_k_point) < 1:
             raise PreconditionFailure("LayerConfig.aggregation_k_point must be >= 1")
+        if not isinstance(self.threshold_roll_up_enabled, bool):
+            raise PreconditionFailure("LayerConfig.threshold_roll_up_enabled must be bool")
 
 
 def default_layer_config() -> LayerConfig:
@@ -76,6 +81,7 @@ def default_layer_config() -> LayerConfig:
         review_chain_template=(ReviewChainTemplateItem(kind=ReviewChainTemplateItemKind.CONVERGENCE),),
         aggregation_k_node=DEFAULT_AGGREGATION_K_NODE,
         aggregation_k_point=DEFAULT_AGGREGATION_K_POINT,
+        threshold_roll_up_enabled=True,
     )
 
 
@@ -141,12 +147,18 @@ class NativeRuntimeConfig:
 class RecallPointPushConfig:
     min_recall_points_to_enable: int
     max_history_len: int
+    recommended_batch_size: int
+    forgetting_curve_decay_per_day: float
 
     def validate_write_time(self) -> None:
         if int(self.min_recall_points_to_enable) < 0:
             raise PreconditionFailure("RecallPointPushConfig.min_recall_points_to_enable must be >= 0")
         if int(self.max_history_len) < 0:
             raise PreconditionFailure("RecallPointPushConfig.max_history_len must be >= 0")
+        if int(self.recommended_batch_size) < 1:
+            raise PreconditionFailure("RecallPointPushConfig.recommended_batch_size must be >= 1")
+        if float(self.forgetting_curve_decay_per_day) <= 0:
+            raise PreconditionFailure("RecallPointPushConfig.forgetting_curve_decay_per_day must be > 0")
 
 
 def default_local_model_config() -> LocalModelConfig:
@@ -157,12 +169,15 @@ def default_push_config() -> RecallPointPushConfig:
     return RecallPointPushConfig(
         min_recall_points_to_enable=DEFAULT_PUSH_MIN_RECALL_POINTS_TO_ENABLE,
         max_history_len=DEFAULT_PUSH_MAX_HISTORY_LEN,
+        recommended_batch_size=DEFAULT_PUSH_RECOMMENDED_BATCH_SIZE,
+        forgetting_curve_decay_per_day=DEFAULT_PUSH_FORGETTING_CURVE_DECAY_PER_DAY,
     )
 
 
 @dataclass(frozen=True, slots=True)
 class ProjectConfig:
     project_id: ProjectId
+    project_type: ProjectType
     layer_configs: Dict[int, LayerConfig]
     push_config: RecallPointPushConfig
     updated_at: Timestamp
@@ -170,6 +185,8 @@ class ProjectConfig:
     def validate_write_time(self) -> None:
         if not str(self.project_id).strip():
             raise PreconditionFailure("ProjectConfig.project_id must be non-empty")
+        if not isinstance(self.project_type, ProjectType):
+            raise PreconditionFailure("ProjectConfig.project_type must be ProjectType")
         if self.layer_configs is None:
             raise PreconditionFailure("ProjectConfig.layer_configs must not be null")
         if self.push_config is None:
@@ -187,9 +204,27 @@ class ProjectConfig:
         self.push_config.validate_write_time()
 
 
-def default_project_config(*, project_id: ProjectId, updated_at: Timestamp) -> ProjectConfig:
+def project_type_requires_learning_object_tree(project_type: ProjectType) -> bool:
+    return project_type in {ProjectType.COURSE, ProjectType.BOOK}
+
+
+def project_type_requires_anchor(project_type: ProjectType) -> bool:
+    return project_type in {ProjectType.COURSE, ProjectType.BOOK}
+
+
+def project_type_allows_anchor(project_type: ProjectType) -> bool:
+    return project_type != ProjectType.LOOSE_POINTS
+
+
+def default_project_config(
+    *,
+    project_id: ProjectId,
+    updated_at: Timestamp,
+    project_type: ProjectType = ProjectType.COURSE,
+) -> ProjectConfig:
     return ProjectConfig(
         project_id=project_id,
+        project_type=project_type,
         layer_configs={0: default_layer_config()},
         push_config=default_push_config(),
         updated_at=updated_at,

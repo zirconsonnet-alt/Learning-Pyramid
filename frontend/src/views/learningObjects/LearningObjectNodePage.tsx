@@ -1,11 +1,11 @@
-import { useMemo } from "react"
+import { useMemo, type ReactNode } from "react"
 import { useQuery } from "@tanstack/react-query"
+import { ChevronLeft, Sparkles } from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
 import { listInstances } from "@/ui/api/instances"
 import {
-  exportAsrByLearningObjectNode,
   exportRecallPointsByLearningObjectNode,
   getLearningObjectNode,
   listLearningObjectNodes,
@@ -13,10 +13,9 @@ import {
 } from "@/ui/api/learningObjects"
 import { ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
-import { formatInstanceReference } from "@/ui/displayIdentifiers"
+import { Card, CardContent, CardDescription, CardHeader } from "@/ui/components/ui/card"
+import { buildAiChatPath } from "@/views/ai/chatRouting"
 import { RecallPointListCard } from "@/views/recallPoints/components/RecallPointListCard"
-import { DetailSummaryCard } from "@/views/shared/DetailSummaryCard"
 import { NodeExportCard } from "@/views/shared/NodeExportCard"
 
 function formatApiError(err: unknown) {
@@ -101,6 +100,19 @@ export function LearningObjectNodePage() {
   }
 
   const title = nodeQ.data?.title?.trim() || "学习对象节点"
+  const backToObjectTreeAction = (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="-ml-2 h-8 rounded-full px-2 text-[#60748c] hover:bg-[#f3f7fb] hover:text-foreground"
+      asChild
+    >
+      <Link to={`/p/${pid}/object-tree`}>
+        <ChevronLeft className="h-4 w-4" />
+        返回学习对象树
+      </Link>
+    </Button>
+  )
   const summaryItems = nodeQ.data
     ? nodeQ.data.kind === "container"
       ? [
@@ -124,19 +136,25 @@ export function LearningObjectNodePage() {
           },
         ]
     : []
+  const summaryPanel = nodeQ.data ? (
+    <div className="space-y-4">
+      <LearningObjectSummaryCard
+        topAction={backToObjectTreeAction}
+        header={<h1 className="truncate text-lg font-semibold">{title}</h1>}
+        items={summaryItems}
+      />
+
+      <Button asChild className="w-full">
+        <Link to={buildAiChatPath(pid, { kind: "object", nodeId: nid })}>
+          <Sparkles className="h-4 w-4" />
+          AI问答
+        </Link>
+      </Button>
+    </div>
+  ) : null
 
   return (
     <div className="space-y-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-lg font-semibold">{title}</h1>
-          <p className="text-sm text-muted-foreground">学习对象节点详情。</p>
-        </div>
-        <Button variant="outline" asChild>
-          <Link to={`/p/${pid}/object-tree`}>返回学习对象树</Link>
-        </Button>
-      </div>
-
       {nodeQ.isLoading ? <LoadingNotice title="正在加载对象节点" message="正在读取这个节点的结构信息、绑定实例和覆盖范围。" /> : null}
       {nodeQ.error ? <ErrorNotice title="对象节点加载失败" message={formatApiError(nodeQ.error)} /> : null}
       {nodesQ.error ? <ErrorNotice title="对象树结构加载失败" message={formatApiError(nodesQ.error)} /> : null}
@@ -154,47 +172,68 @@ export function LearningObjectNodePage() {
       ) : null}
 
       {nodeQ.data ? (
-        <>
-          <DetailSummaryCard
-            title="节点摘要"
-            description="先确认这是哪类对象节点、覆盖了什么材料，再继续查看下方的复述点。"
-            items={summaryItems}
-          />
-
-          {boundInstance ? (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle>实例引用</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="rounded-xl border border-[#dbe4ee] bg-[#f8fafc] px-4 py-3 text-sm text-slate-700">
-                  当前节点绑定实例：<span className="font-medium text-slate-900">{formatInstanceReference(boundInstance.instanceId)}</span>
-                </div>
-              </CardContent>
-            </Card>
-          ) : null}
-        </>
-      ) : null}
-
-      <RecallPointListCard
-        projectId={pid}
-        items={recallPointsQ.data ?? []}
-        instanceTitleById={instanceTitleById}
-        isLoading={recallPointsQ.isLoading}
-        error={recallPointsQ.error}
-        title="复述点列表"
-        description="这个对象节点关联的复述点会显示在这里。"
-      />
-
-      {nodeQ.data ? (
-        <NodeExportCard
-          projectId={pid}
-          nodeTitle={title}
-          recallPoints={recallPointsQ.data ?? []}
-          exportRecallPoints={() => exportRecallPointsByLearningObjectNode(pid, nid)}
-          exportAsr={() => exportAsrByLearningObjectNode(pid, nid)}
-        />
+        <div className="grid gap-4 xl:grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)] xl:items-start">
+          {summaryPanel ? <aside className="xl:sticky xl:top-28 xl:self-start">{summaryPanel}</aside> : <div />}
+          <div className="min-w-0">
+            <RecallPointListCard
+              projectId={pid}
+              items={recallPointsQ.data ?? []}
+              instanceTitleById={instanceTitleById}
+              isLoading={recallPointsQ.isLoading}
+              error={recallPointsQ.error}
+              title="复述点列表"
+              headerAction={
+                <NodeExportCard
+                  projectId={pid}
+                  nodeTitle={title}
+                  recallPoints={recallPointsQ.data ?? []}
+                  exportRecallPoints={() => exportRecallPointsByLearningObjectNode(pid, nid)}
+                />
+              }
+            />
+          </div>
+        </div>
       ) : null}
     </div>
+  )
+}
+
+type SummaryItem = {
+  label: string
+  value: ReactNode
+}
+
+function LearningObjectSummaryCard({
+  description,
+  header,
+  items,
+  topAction,
+}: {
+  description?: string
+  header: ReactNode
+  items: SummaryItem[]
+  topAction?: ReactNode
+}) {
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        {topAction ? <div className="flex items-center">{topAction}</div> : null}
+        <div className="min-w-0">{header}</div>
+        {description ? <CardDescription>{description}</CardDescription> : null}
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-wrap gap-3">
+          {items.map((item) => (
+            <div
+              key={item.label}
+              className="min-w-[10rem] flex-1 rounded-xl border border-[#dbe4ee] bg-[#f8fafc] px-4 py-3 shadow-[0_10px_24px_-24px_rgba(15,23,42,0.6)]"
+            >
+              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#64748b]">{item.label}</div>
+              <div className="mt-1.5 text-sm font-semibold text-slate-900">{item.value}</div>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
   )
 }

@@ -26,6 +26,30 @@ export const PublicUserLookupSchema = z.object({
 
 export type PublicUserLookup = z.infer<typeof PublicUserLookupSchema>
 
+export const UserLlmSettingsSchema = z.object({
+  baseUrl: z.string(),
+  modelName: z.string(),
+  promptAssemblyMode: z.enum(["system", "user_concat"]),
+  savedApiKeyConfigured: z.boolean(),
+  savedApiKeyPreview: z.string().nullable(),
+  llmConfigured: z.boolean(),
+  storyGenerationConfigured: z.boolean(),
+  llmSource: z.enum(["user", "global", "env", "none"]),
+})
+
+export type UserLlmSettings = z.infer<typeof UserLlmSettingsSchema>
+
+export const UserAsrSettingsSchema = z.object({
+  baseUrl: z.string(),
+  modelName: z.string(),
+  savedApiKeyConfigured: z.boolean(),
+  savedApiKeyPreview: z.string().nullable(),
+  asrConfigured: z.boolean(),
+  asrSource: z.enum(["user", "env", "none"]),
+})
+
+export type UserAsrSettings = z.infer<typeof UserAsrSettingsSchema>
+
 export function getMyProfile() {
   return apiRequest({
     path: "/profile/me",
@@ -58,6 +82,49 @@ export function uploadMyAvatar(file: File) {
     body: file,
     headers: { "Content-Type": file.type || "application/octet-stream" },
     responseSchema: UserProfileSchema,
+  })
+}
+
+export function getMyLlmSettings() {
+  return apiRequest({
+    path: "/profile/me/llm-settings",
+    responseSchema: UserLlmSettingsSchema,
+  })
+}
+
+export function updateMyLlmSettings(params: {
+  baseUrl?: string
+  modelName?: string
+  apiKey?: string
+  promptAssemblyMode?: "system" | "user_concat"
+  clearApiKey?: boolean
+}) {
+  return apiRequest({
+    path: "/profile/me/llm-settings",
+    method: "PUT",
+    body: params,
+    responseSchema: UserLlmSettingsSchema,
+  })
+}
+
+export function getMyAsrSettings() {
+  return apiRequest({
+    path: "/profile/me/asr-settings",
+    responseSchema: UserAsrSettingsSchema,
+  })
+}
+
+export function updateMyAsrSettings(params: {
+  baseUrl?: string
+  modelName?: string
+  apiKey?: string
+  clearApiKey?: boolean
+}) {
+  return apiRequest({
+    path: "/profile/me/asr-settings",
+    method: "PUT",
+    body: params,
+    responseSchema: UserAsrSettingsSchema,
   })
 }
 

@@ -51,5 +51,12 @@ def set_layer_config(projectId: str, layerIndex: int, req: SetLayerConfigRequest
             items.append(ReviewChainTemplateItem(kind=kind, count=it.count))
         tmpl = tuple(items)
 
-    api.set_layer_config(projectId, layerIndex, tmpl, req.kNode, req.kPoint)  # type: ignore[arg-type]
+    api.set_layer_config(  # type: ignore[arg-type]
+        projectId,
+        layerIndex,
+        tmpl,
+        req.kNode,
+        req.kPoint,
+        req.thresholdRollUpEnabled,
+    )
     return {"ok": True, "data": None}

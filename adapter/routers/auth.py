@@ -1,13 +1,16 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import JSONResponse
+import json
 
-from adapter.auth import SESSION_COOKIE_NAME, clear_auth_cookie, resolve_session_user, set_auth_cookie
-from adapter.deps import get_auth_rate_limit_store, get_auth_store, get_membership_marketing_store
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse
+
+from adapter.auth import SESSION_COOKIE_NAME, clear_auth_cookie, require_request_auth_user, resolve_session_user, set_auth_cookie
+from adapter.deps import get_api, get_auth_rate_limit_store, get_auth_store, get_membership_marketing_store
 from adapter.schemas import AuthCredentialsRequest, RegisterAuthRequest
 from backend.models.errors import NotFound, PreconditionFailure
 from backend.system.auth_rate_limit_store import AuthRateLimitStore
+from backend.system.api import SystemAPI
 from backend.system.auth_store import AuthStore, AuthUser
 from backend.system.runtime_features import current_runtime_features
 
@@ -128,3 +131,128 @@ def get_current_auth_user(request: Request, auth_store: AuthStore = Depends(get_
         return {"ok": True, "data": None}
     user = resolve_session_user(request, auth_store)
     return {"ok": True, "data": None if user is None else _user_to_dto(user, auth_store)}
+
+
+def _cloud_callback_html(payload: dict[str, object], status_code: int = 200) -> HTMLResponse:
+    payload_text = json.dumps(payload, ensure_ascii=False)
+    html = f"""<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>百度网盘授权</title>
+    <style>
+      body {{
+        margin: 0;
+        font-family: "Segoe UI", "PingFang SC", sans-serif;
+        background: #f8fafc;
+        color: #0f172a;
+      }}
+      .shell {{
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+      }}
+      .card {{
+        width: min(440px, 100%);
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 20px;
+        box-shadow: 0 24px 60px rgba(15, 23, 42, 0.08);
+        padding: 28px;
+      }}
+      h1 {{
+        margin: 0 0 12px;
+        font-size: 22px;
+      }}
+      p {{
+        margin: 0;
+        line-height: 1.7;
+        color: #475569;
+      }}
+      .muted {{
+        margin-top: 10px;
+        font-size: 13px;
+        color: #64748b;
+      }}
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <div class="card">
+        <h1 id="title">正在完成百度网盘授权</h1>
+        <p id="message">请稍等，这个窗口会在完成后自动关闭。</p>
+        <p class="muted">如果窗口没有自动关闭，请返回主页面查看绑定结果。</p>
+      </div>
+    </div>
+    <script>
+      const payload = {payload_text};
+      const titleEl = document.getElementById("title");
+      const messageEl = document.getElementById("message");
+      if (payload.ok) {{
+        titleEl.textContent = "百度网盘已连接";
+        messageEl.textContent = "账号绑定成功，这个窗口即将自动关闭。";
+      }} else {{
+        titleEl.textContent = "百度网盘授权失败";
+        messageEl.textContent = String(payload.message || "授权没有完成，请返回主页面重试。");
+      }}
+      try {{
+        if (window.opener && !window.opener.closed) {{
+          window.opener.postMessage(payload, "*");
+        }}
+      }} catch (error) {{
+      }}
+      window.setTimeout(() => {{
+        window.close();
+      }}, payload.ok ? 700 : 1200);
+    </script>
+  </body>
+</html>
+"""
+    return HTMLResponse(content=html, status_code=status_code)
+
+
+@router.get("/auth/baidu-netdisk/callback")
+def complete_baidu_netdisk_connect(
+    request: Request,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    error_description: str | None = None,
+    auth_store: AuthStore = Depends(get_auth_store),
+    api: SystemAPI = Depends(get_api),
+) -> HTMLResponse:
+    try:
+        user = require_request_auth_user(request)
+        if error:
+            raise PreconditionFailure(str(error_description or error).strip() or "百度网盘授权失败")
+        if not str(code or "").strip():
+            raise PreconditionFailure("百度网盘授权回调缺少 code")
+        if not str(state or "").strip():
+            raise PreconditionFailure("百度网盘授权回调缺少 state")
+        account = api.complete_baidu_netdisk_connect(
+            auth_store=auth_store,
+            user_id=user.user_id,
+            code=str(code).strip(),
+            state=str(state).strip(),
+        )
+        return _cloud_callback_html(
+            {
+                "type": "plm:baidu-netdisk-connect",
+                "ok": True,
+                "account": account,
+            }
+        )
+    except Exception as exc:
+        message = str(exc) or "百度网盘授权失败"
+        if isinstance(exc, HTTPException):
+            message = str(exc.detail) if exc.detail else message
+        return _cloud_callback_html(
+            {
+                "type": "plm:baidu-netdisk-connect",
+                "ok": False,
+                "message": message,
+            },
+            status_code=400,
+        )

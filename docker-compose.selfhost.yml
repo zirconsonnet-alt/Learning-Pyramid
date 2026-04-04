@@ -32,6 +32,12 @@ services:
       PLM_ENABLE_ASR: ${PLM_ENABLE_ASR:-false}
       PLM_ENABLE_SERVER_MEDIA_STREAM: ${PLM_ENABLE_SERVER_MEDIA_STREAM:-false}
       PLM_ENABLE_BROWSER_LOCAL_MEDIA: ${PLM_ENABLE_BROWSER_LOCAL_MEDIA:-true}
+      PLM_ENABLE_BAIDU_NETDISK: ${PLM_ENABLE_BAIDU_NETDISK:-false}
+      PLM_BAIDU_NETDISK_CLIENT_ID: ${PLM_BAIDU_NETDISK_CLIENT_ID:-}
+      PLM_BAIDU_NETDISK_CLIENT_SECRET: ${PLM_BAIDU_NETDISK_CLIENT_SECRET:-}
+      PLM_BAIDU_NETDISK_REDIRECT_URI: ${PLM_BAIDU_NETDISK_REDIRECT_URI:-}
+      PLM_BAIDU_NETDISK_SCOPE: ${PLM_BAIDU_NETDISK_SCOPE:-basic,netdisk}
+      PLM_TOKEN_ENCRYPTION_KEY: ${PLM_TOKEN_ENCRYPTION_KEY:-}
       PLM_DATA_DIR: /data
       PLM_SECURE_COOKIES: ${PLM_SECURE_COOKIES:-true}
       PLM_PUBLIC_HOST: ${PLM_PUBLIC_HOST:-}
@@ -42,13 +48,29 @@ services:
       PLM_FORWARDED_ALLOW_IPS: ${PLM_FORWARDED_ALLOW_IPS:-127.0.0.1}
       PLM_MEDIA_ACCESS_TOKEN_TTL_SECONDS: ${PLM_MEDIA_ACCESS_TOKEN_TTL_SECONDS:-14400}
       PLM_MEDIA_ACCESS_TOKEN_SECRET: ${PLM_MEDIA_ACCESS_TOKEN_SECRET:-}
+      PLM_WECHAT_PAY_APP_ID: ${PLM_WECHAT_PAY_APP_ID:-}
+      PLM_WECHAT_PAY_MCH_ID: ${PLM_WECHAT_PAY_MCH_ID:-}
+      PLM_WECHAT_PAY_CERT_SERIAL_NO: ${PLM_WECHAT_PAY_CERT_SERIAL_NO:-}
+      PLM_WECHAT_PAY_API_V3_KEY: ${PLM_WECHAT_PAY_API_V3_KEY:-}
+      PLM_WECHAT_PAY_PRIVATE_KEY_PEM_PATH: ${PLM_WECHAT_PAY_PRIVATE_KEY_PEM_PATH:-}
+      PLM_WECHAT_PAY_PUBLIC_KEY_ID: ${PLM_WECHAT_PAY_PUBLIC_KEY_ID:-}
+      PLM_WECHAT_PAY_PUBLIC_KEY_PEM_PATH: ${PLM_WECHAT_PAY_PUBLIC_KEY_PEM_PATH:-}
+      PLM_WECHAT_PAY_NOTIFY_URL: ${PLM_WECHAT_PAY_NOTIFY_URL:-}
+      PLM_WECHAT_PAY_REFUND_NOTIFY_URL: ${PLM_WECHAT_PAY_REFUND_NOTIFY_URL:-}
+      PLM_WECHAT_PAY_API_BASE_URL: ${PLM_WECHAT_PAY_API_BASE_URL:-https://api.mch.weixin.qq.com}
+      PLM_WECHAT_PAY_TIMEOUT_SECONDS: ${PLM_WECHAT_PAY_TIMEOUT_SECONDS:-10}
+      PLM_WECHAT_PAY_DESCRIPTION_PREFIX: ${PLM_WECHAT_PAY_DESCRIPTION_PREFIX:-LearningPyramid 月会员}
+      PLM_MEMBERSHIP_PENDING_PAYMENT_RECONCILE_MIN_AGE_MINUTES: ${PLM_MEMBERSHIP_PENDING_PAYMENT_RECONCILE_MIN_AGE_MINUTES:-5}
+      PLM_MEMBERSHIP_PENDING_PAYMENT_RECONCILE_LIMIT: ${PLM_MEMBERSHIP_PENDING_PAYMENT_RECONCILE_LIMIT:-100}
     volumes:
       - ./data/selfhost:/data
+      - ${PLM_WECHAT_PAY_CERTS_DIR:-./certs}:/app/certs:ro
+      - ./public-downloads:/app/public-downloads:ro
     healthcheck:
       test:
         [
           "CMD-SHELL",
-          "python -c \"import os, urllib.request; host=(os.getenv('PLM_PUBLIC_HOST') or next((item.strip() for item in os.getenv('PLM_TRUSTED_HOSTS', '').split(',') if item.strip()), 'localhost')); req=urllib.request.Request('http://127.0.0.1:8001/api/health', headers={'Host': host}); urllib.request.urlopen(req, timeout=5).read()\"",
+          "python -c \"import os, urllib.request; host=(os.getenv('PLM_PUBLIC_HOST') or next((item.strip() for item in os.getenv('PLM_TRUSTED_HOSTS', '').split(',') if item.strip()), 'localhost')); req=urllib.request.Request('http://127.0.0.1:8001/api/health/live', headers={'Host': host}); urllib.request.urlopen(req, timeout=5).read()\"",
         ]
       interval: 15s
       timeout: 5s

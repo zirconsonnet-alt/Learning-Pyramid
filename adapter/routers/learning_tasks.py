@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 
 from adapter.deps import get_api
 from adapter.mappers import asr_artifact_to_dto, learning_task_node_to_dto, learning_task_to_dto, recall_point_to_dto, review_chain_binding_to_dto
-from adapter.schemas import EditLearningTaskRequest, SubmitLearningTaskRequest
+from adapter.schemas import EditLearningTaskNodeRequest, EditLearningTaskRequest, SubmitLearningTaskRequest
 from backend.models.enums import ContentBlockKind
 from backend.models.errors import PreconditionFailure
 from backend.models.learning_task_node import LearningTaskLeaf
@@ -36,7 +36,7 @@ def _to_rich_content(blocks) -> RichContent:
 def submit_learning_task(projectId: str, req: SubmitLearningTaskRequest, api: SystemAPI = Depends(get_api)) -> dict:
     items = []
     for it in req.items:
-        anc = Anchor(instance_id=InstanceId(it.anchor.instanceId), position=it.anchor.position)
+        anc = None if it.anchor is None else Anchor(instance_id=InstanceId(it.anchor.instanceId), position=it.anchor.position)
         items.append((_to_rich_content(it.question), _to_rich_content(it.answer), anc))
     entry_node_id = api.submit_learning_task(projectId, items=items, title=req.title)  # type: ignore[arg-type]
     return {"ok": True, "data": {"entryNodeId": str(entry_node_id)}}
@@ -112,4 +112,12 @@ def edit_learning_task(
     projectId: str, learningTaskId: str, req: EditLearningTaskRequest, api: SystemAPI = Depends(get_api)
 ) -> dict:
     api.edit_learning_task(projectId, LearningTaskId(learningTaskId), title=req.title)  # type: ignore[arg-type]
+    return {"ok": True, "data": None}
+
+
+@router.patch("/projects/{projectId}/learning-task-nodes/{nodeId}")
+def edit_learning_task_node(
+    projectId: str, nodeId: str, req: EditLearningTaskNodeRequest, api: SystemAPI = Depends(get_api)
+) -> dict:
+    api.edit_learning_task_node_title(projectId, nodeId, title=req.title)  # type: ignore[arg-type]
     return {"ok": True, "data": None}

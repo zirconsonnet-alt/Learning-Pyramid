@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from backend.models.enums import ClientRuntimeKind, RuntimeCapability
 from backend.models.errors import PreconditionFailure
 from backend.models.project_config import LocalModelConfig, LocalServiceConfig, NativeRuntimeConfig
-from backend.system.local_whisper import BUILTIN_WHISPER_BASE_URL
 
 
 @dataclass(frozen=True, slots=True)
@@ -15,6 +14,7 @@ class RuntimeFeatures:
     asr_enabled: bool
     server_media_stream_enabled: bool
     browser_local_media_enabled: bool
+    baidu_netdisk_enabled: bool
     auth_enabled: bool
     allow_signup: bool
 
@@ -45,9 +45,10 @@ def current_runtime_features() -> RuntimeFeatures:
     hosted = app_mode == "hosted"
     return RuntimeFeatures(
         app_mode=app_mode,
-        asr_enabled=_env_bool("PLM_ENABLE_ASR", not hosted),
+        asr_enabled=_env_bool("PLM_ENABLE_ASR", True),
         server_media_stream_enabled=_env_bool("PLM_ENABLE_SERVER_MEDIA_STREAM", not hosted),
         browser_local_media_enabled=_env_bool("PLM_ENABLE_BROWSER_LOCAL_MEDIA", True),
+        baidu_netdisk_enabled=_env_bool("PLM_ENABLE_BAIDU_NETDISK", False),
         auth_enabled=_env_bool("PLM_ENABLE_AUTH", hosted),
         allow_signup=_env_bool("PLM_ALLOW_SIGNUP", True),
     )
@@ -100,6 +101,24 @@ def _service_config_from_env(
     return cfg
 
 
+def current_env_asr_service_config() -> LocalServiceConfig | None:
+    if not current_runtime_features().asr_enabled:
+        return None
+    return _service_config_from_env(prefix="ASR")
+
+
+def current_env_recommender_service_config() -> LocalServiceConfig | None:
+    return _service_config_from_env(prefix="RECOMMENDER")
+
+
+def current_env_llm_qa_service_config() -> LocalServiceConfig | None:
+    return _service_config_from_env(prefix="LLM_QA")
+
+
+def current_env_story_generator_service_config() -> LocalServiceConfig | None:
+    return _service_config_from_env(prefix="STORY_GENERATOR")
+
+
 def current_native_runtime_config(
     runtime_kind: ClientRuntimeKind | None = None,
     runtime_capabilities: frozenset[RuntimeCapability] | None = None,
@@ -109,19 +128,19 @@ def current_native_runtime_config(
 
     asr_cfg: LocalServiceConfig | None = None
     if kind == ClientRuntimeKind.DESKTOP_NATIVE and RuntimeCapability.LOCAL_ASR in caps and current_runtime_features().asr_enabled:
-        asr_cfg = _service_config_from_env(prefix="ASR", default_base_url=BUILTIN_WHISPER_BASE_URL)
+        asr_cfg = current_env_asr_service_config()
 
     recommender_cfg: LocalServiceConfig | None = None
     if kind == ClientRuntimeKind.DESKTOP_NATIVE and RuntimeCapability.LOCAL_RECOMMENDER in caps:
-        recommender_cfg = _service_config_from_env(prefix="RECOMMENDER")
+        recommender_cfg = current_env_recommender_service_config()
 
     llm_cfg: LocalServiceConfig | None = None
     if kind == ClientRuntimeKind.DESKTOP_NATIVE and RuntimeCapability.LOCAL_LLM_QA in caps:
-        llm_cfg = _service_config_from_env(prefix="LLM_QA")
+        llm_cfg = current_env_llm_qa_service_config()
 
     story_cfg: LocalServiceConfig | None = None
     if kind == ClientRuntimeKind.DESKTOP_NATIVE and RuntimeCapability.STORY_GENERATION in caps:
-        story_cfg = _service_config_from_env(prefix="STORY_GENERATOR")
+        story_cfg = current_env_story_generator_service_config()
 
     config = NativeRuntimeConfig(
         runtime_kind=kind,

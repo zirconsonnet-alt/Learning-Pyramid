@@ -36,7 +36,7 @@ def learning_task_submit(
 
     强约束对齐：
     - items 非空、title 非空
-    - 任一 anchor.instance_id 不可解析 => PreconditionFailure，且失败不产生任何 staged 写入
+    - 锚点是否必填/可解析由上层项目类型规则决定；本协议只接受已完成规则校验的 items
     - NotFound 统一映射为 PreconditionFailure
     - 写入产物：RecallPoint* + LearningTask + LearningTaskNode(leaf)
     """
@@ -47,7 +47,7 @@ def learning_task_submit(
     if title is None or not str(title).strip():
         raise PreconditionFailure("LearningTaskSubmit.title must be non-empty")
 
-    # 逐项校验输入与 anchor 基础字段；并做 instance_id 可解析性检查
+    # 逐项校验输入；锚点是否存在与 instance 可解析性由上层规则先行保证。
     # 重要：在任何 repo.add() 之前完成，确保失败不产生 staged 写入（0b.5）
     for idx, it in enumerate(items):
         if it.question is None:
@@ -56,16 +56,14 @@ def learning_task_submit(
             raise PreconditionFailure(f"items[{idx}].answer must be provided")
         validate_rich_content_write_time(it.question)
         validate_rich_content_write_time(it.answer)
-        if it.anchor is None:
-            raise PreconditionFailure(f"items[{idx}].anchor must be provided")
-        it.anchor.validate_write_time()
-
-        try:
-            instance_repo.get(session, it.anchor.instance_id)
-        except NotFound:
-            raise PreconditionFailure(
-                f"items[{idx}].anchor.instance_id not resolvable: {it.anchor.instance_id}"
-            )
+        if it.anchor is not None:
+            it.anchor.validate_write_time()
+            try:
+                instance_repo.get(session, it.anchor.instance_id)
+            except NotFound:
+                raise PreconditionFailure(
+                    f"items[{idx}].anchor.instance_id not resolvable: {it.anchor.instance_id}"
+                )
 
     # ---- Writes (staged) ----
     project_id = session.project_id

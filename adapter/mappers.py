@@ -6,7 +6,7 @@ from enum import Enum
 from pathlib import PurePosixPath
 from typing import Any, Dict
 
-from backend.models.asr_artifact import AsrArtifact, AsrSegment
+from backend.models.asr_artifact import AsrArtifact, AsrSegment, AsrTranscriptResult, InstanceAsrTranscriptResult
 from backend.models.convergence import Convergence
 from backend.models.entry_registration import EntryRegistration
 from backend.models.instance import Instance
@@ -20,6 +20,11 @@ from backend.models.project_material_source_binding import ProjectMaterialSource
 from backend.models.project_storage_config import ProjectStorageConfig
 from backend.models.range_snapshot import RangeSnapshot
 from backend.models.recall_point import RecallPoint
+from backend.models.review_recommendation import (
+    RecallPointReviewProjection,
+    RecallPointReviewRecommendation,
+    RecallPointReviewRecommendationPage,
+)
 from backend.models.rich_content import ContentBlock, RichContent
 from backend.models.review_chain import ReviewChain
 from backend.models.review_task import ReviewTask
@@ -79,13 +84,22 @@ def project_material_source_binding_to_dto(binding: ProjectMaterialSourceBinding
     }
 
 
-def instance_to_dto(i: Instance) -> Dict[str, Any]:
+def instance_to_dto(
+    i: Instance,
+    *,
+    media_source_kind: str | None = None,
+    playback_kind: str | None = None,
+    duration_ms: int | None = None,
+) -> Dict[str, Any]:
     return {
         "instanceId": str(i.instance_id),
         "materialId": _jsonable(i.material_id),
         "materialDisplayName": i.material_display_name,
         "presence": _jsonable(getattr(i, "presence", None)),
         "lastSeenAt": _jsonable(getattr(i, "last_seen_at", None)),
+        "mediaSourceKind": media_source_kind,
+        "playbackKind": playback_kind,
+        "durationMs": duration_ms,
     }
 
 
@@ -111,8 +125,53 @@ def recall_point_to_dto(rp: RecallPoint) -> Dict[str, Any]:
         "deletedAt": _jsonable(rp.deleted_at),
         "question": _rich_content_to_dto(rp.question),
         "answer": _rich_content_to_dto(rp.answer),
-        "anchor": {"instanceId": str(rp.anchor.instance_id), "position": rp.anchor.position},
+        "anchor": None if rp.anchor is None else {"instanceId": str(rp.anchor.instance_id), "position": rp.anchor.position},
         "insights": [_rich_content_to_dto(x) for x in rp.insights],
+    }
+
+
+def review_recommendation_to_dto(item: RecallPointReviewRecommendation) -> Dict[str, Any]:
+    return {
+        "recallPoint": recall_point_to_dto(item.recall_point),
+        "reviewRecommendationIndex": float(item.review_recommendation_index),
+        "estimatedMemoryStrength": float(item.estimated_memory_strength),
+        "weightedSuccessRatio": float(item.weighted_success_ratio),
+        "lastReviewedAt": _jsonable(item.last_reviewed_at),
+        "lastReviewResult": _jsonable(item.last_review_result),
+        "reviewCount": int(item.review_count),
+    }
+
+
+def review_recommendation_page_to_dto(page: RecallPointReviewRecommendationPage) -> Dict[str, Any]:
+    return {
+        "items": [review_recommendation_to_dto(item) for item in page.items],
+        "totalCount": int(page.total_count),
+        "offset": int(page.offset),
+        "limit": int(page.limit),
+        "nextOffset": None if page.next_offset is None else int(page.next_offset),
+    }
+
+
+def recall_point_review_projection_to_dto(item: RecallPointReviewProjection) -> Dict[str, Any]:
+    return {
+        "recallPointId": str(item.recall_point_id),
+        "calculatedAt": _jsonable(item.calculated_at),
+        "reviewRecommendationIndex": float(item.review_recommendation_index),
+        "estimatedMemoryStrength": float(item.estimated_memory_strength),
+        "weightedSuccessRatio": float(item.weighted_success_ratio),
+        "forgettingCurveDecayPerDay": float(item.forgetting_curve_decay_per_day),
+        "historyWindowSize": int(item.history_window_size),
+        "lastReviewedAt": _jsonable(item.last_reviewed_at),
+        "lastReviewResult": _jsonable(item.last_review_result),
+        "reviewCount": int(item.review_count),
+        "history": [
+            {
+                "reviewTaskId": str(history_item.review_task_id),
+                "occurredAt": _jsonable(history_item.occurred_at),
+                "result": _jsonable(history_item.result),
+            }
+            for history_item in item.history
+        ],
     }
 
 
@@ -180,6 +239,7 @@ def _layer_config_to_dto(c: LayerConfig) -> Dict[str, Any]:
         "reviewChainTemplate": [_review_chain_template_item_to_dto(it) for it in c.review_chain_template],
         "aggregationKNode": int(c.aggregation_k_node),
         "aggregationKPoint": int(c.aggregation_k_point),
+        "thresholdRollUpEnabled": bool(c.threshold_roll_up_enabled),
     }
 
 
@@ -187,6 +247,7 @@ def project_config_to_dto(c: ProjectConfig) -> Dict[str, Any]:
     push = getattr(c, "push_config", None)
     return {
         "projectId": str(c.project_id),
+        "projectType": _jsonable(c.project_type),
         "updatedAt": _jsonable(c.updated_at),
         "layerConfigs": {str(int(k)): _layer_config_to_dto(v) for k, v in c.layer_configs.items()},
         "pushConfig": None
@@ -194,6 +255,8 @@ def project_config_to_dto(c: ProjectConfig) -> Dict[str, Any]:
         else {
             "minRecallPointsToEnable": int(push.min_recall_points_to_enable),
             "maxHistoryLen": int(push.max_history_len),
+            "recommendedBatchSize": int(push.recommended_batch_size),
+            "forgettingCurveDecayPerDay": float(push.forgetting_curve_decay_per_day),
         },
     }
 
@@ -334,4 +397,28 @@ def asr_artifact_to_dto(a: AsrArtifact) -> Dict[str, Any]:
         "preMs": int(a.pre_ms),
         "postMs": int(a.post_ms),
         "segments": [asr_segment_to_dto(x) for x in a.segments],
+    }
+
+
+def asr_transcript_result_to_dto(result: AsrTranscriptResult) -> Dict[str, Any]:
+    return {
+        "projectId": str(result.project_id),
+        "provider": _jsonable(result.provider),
+        "recallPointId": str(result.recall_point_id),
+        "sourceInstanceId": str(result.source_instance_id),
+        "centerMs": int(result.center_ms),
+        "preMs": int(result.pre_ms),
+        "postMs": int(result.post_ms),
+        "segments": [asr_segment_to_dto(x) for x in result.segments],
+    }
+
+
+def instance_asr_transcript_result_to_dto(result: InstanceAsrTranscriptResult) -> Dict[str, Any]:
+    return {
+        "projectId": str(result.project_id),
+        "provider": _jsonable(result.provider),
+        "sourceInstanceId": str(result.source_instance_id),
+        "startMs": int(result.start_ms),
+        "endMs": int(result.end_ms),
+        "segments": [asr_segment_to_dto(x) for x in result.segments],
     }

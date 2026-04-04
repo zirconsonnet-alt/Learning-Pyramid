@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
+import json
 import os
 import secrets
 import sqlite3
@@ -12,15 +14,14 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
 PUBLIC_UID_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 USER_STATUSES = {"active", "suspended", "deleted"}
 GLOBAL_ROLES = {"super_admin", "admin"}
-STUDY_GROUP_VISIBILITIES = {"public", "private"}
-STUDY_GROUP_JOIN_POLICIES = {"free", "approval", "invite_only"}
-STUDY_GROUP_STATUSES = {"active", "archived", "blocked", "dissolved"}
-STUDY_GROUP_MEMBER_ROLES = {"owner", "admin", "member"}
-STUDY_GROUP_POST_KINDS = {"notice", "discussion", "checkin"}
-STUDY_GROUP_JOIN_REQUEST_STATUSES = {"pending", "approved", "rejected", "cancelled"}
+FRIEND_REQUEST_STATUSES = {"pending", "accepted", "rejected", "cancelled"}
+USER_SERVICE_KINDS = {"llm", "asr"}
+CLOUD_ACCOUNT_PROVIDERS = {"baidu_netdisk"}
 USER_COLUMNS_SQL = """
     u.user_id,
     u.email,
@@ -33,7 +34,10 @@ USER_COLUMNS_SQL = """
     p.updated_at
 """
 
+from backend.models.cloud_account_binding import CloudAccountBinding
 from backend.models.errors import NotFound, PreconditionFailure
+from backend.models.global_settings import normalize_llm_prompt_assembly_mode
+from backend.models.project_config import LocalServiceConfig
 from backend.system.app_paths import resolve_auth_db_path
 from backend.system.postgres_runtime import get_postgres_pool, redact_postgres_dsn
 from backend.system.postgres_schema import (
@@ -76,6 +80,23 @@ def _require_psycopg() -> Any:
     if psycopg is None or dict_row is None:
         raise RuntimeError("psycopg[binary] is required for the PostgreSQL auth backend")
     return psycopg
+
+
+def _is_missing_optional_auth_table_error(exc: Exception) -> bool:
+    return bool(psycopg is not None and isinstance(exc, psycopg.errors.UndefinedTable))
+
+
+def _postgres_table_exists(conn: Any, table_name: str) -> bool:
+    row = conn.execute(
+        """
+        SELECT 1
+        FROM pg_tables
+        WHERE schemaname = current_schema() AND tablename = %s
+        LIMIT 1
+        """,
+        (str(table_name),),
+    ).fetchone()
+    return row is not None
 
 
 def _random_public_uid() -> str:
@@ -136,75 +157,6 @@ def _normalize_user_role_filter(role: str | None) -> str | None:
     return _normalize_global_role(value)
 
 
-def _normalize_group_visibility(visibility: str) -> str:
-    value = str(visibility).strip().lower()
-    if value not in STUDY_GROUP_VISIBILITIES:
-        raise PreconditionFailure("visibility must be one of public, private")
-    return value
-
-
-def _normalize_group_join_policy(join_policy: str) -> str:
-    value = str(join_policy).strip().lower()
-    if value not in STUDY_GROUP_JOIN_POLICIES:
-        raise PreconditionFailure("joinPolicy must be one of free, approval, invite_only")
-    return value
-
-
-def _normalize_group_status(status: str) -> str:
-    value = str(status).strip().lower()
-    if value not in STUDY_GROUP_STATUSES:
-        raise PreconditionFailure("group status must be one of active, archived, blocked, dissolved")
-    return value
-
-
-def _normalize_group_name(name: str) -> str:
-    value = str(name).strip()
-    if not value:
-        raise PreconditionFailure("group name must be non-empty")
-    if len(value) > 60:
-        raise PreconditionFailure("group name must be at most 60 characters")
-    return value
-
-
-def _normalize_group_description(description: str | None) -> str:
-    value = str(description or "").strip()
-    if len(value) > 1000:
-        raise PreconditionFailure("group description must be at most 1000 characters")
-    return value
-
-
-def _normalize_group_member_role(role: str) -> str:
-    value = str(role).strip().lower()
-    if value not in STUDY_GROUP_MEMBER_ROLES:
-        raise PreconditionFailure("group member role must be one of owner, admin, member")
-    return value
-
-
-def _normalize_group_post_kind(kind: str) -> str:
-    value = str(kind).strip().lower()
-    if value not in STUDY_GROUP_POST_KINDS:
-        raise PreconditionFailure("post kind must be one of notice, discussion, checkin")
-    return value
-
-
-def _normalize_group_post_content(content: str) -> str:
-    value = str(content).strip()
-    if not value:
-        raise PreconditionFailure("content must be non-empty")
-    if len(value) > 2000:
-        raise PreconditionFailure("content must be at most 2000 characters")
-    return value
-
-
-def _normalize_group_post_comment_content(content: str) -> str:
-    value = str(content).strip()
-    if not value:
-        raise PreconditionFailure("comment content must be non-empty")
-    if len(value) > 1000:
-        raise PreconditionFailure("comment content must be at most 1000 characters")
-    return value
-
-
 def _normalize_admin_action_field(value: str, *, field_name: str, maximum: int) -> str:
     text = str(value).strip()
     if not text:
@@ -214,18 +166,26 @@ def _normalize_admin_action_field(value: str, *, field_name: str, maximum: int) 
     return text
 
 
-def _normalize_join_request_message(message: str | None) -> str:
+def _normalize_friend_request_message(message: str | None) -> str:
     value = str(message or "").strip()
-    if len(value) > 300:
-        raise PreconditionFailure("join request message must be at most 300 characters")
+    if len(value) > 200:
+        raise PreconditionFailure("friend request message must be at most 200 characters")
     return value
 
 
-def _normalize_join_request_status(status: str) -> str:
+def _normalize_friend_request_status(status: str) -> str:
     value = str(status).strip().lower()
-    if value not in STUDY_GROUP_JOIN_REQUEST_STATUSES:
-        raise PreconditionFailure("join request status must be one of pending, approved, rejected, cancelled")
+    if value not in FRIEND_REQUEST_STATUSES:
+        raise PreconditionFailure("friend request status must be one of pending, accepted, rejected, cancelled")
     return value
+
+
+def _friend_pair(user_a_id: str, user_b_id: str) -> tuple[str, str]:
+    left = str(user_a_id).strip()
+    right = str(user_b_id).strip()
+    if not left or not right:
+        raise PreconditionFailure("friend user ids must be non-empty")
+    return (left, right) if left <= right else (right, left)
 
 
 def _normalize_limit(limit: int, *, default: int = 100, maximum: int = 200) -> int:
@@ -234,6 +194,117 @@ def _normalize_limit(limit: int, *, default: int = 100, maximum: int = 200) -> i
     except Exception:
         value = default
     return max(1, min(value, maximum))
+
+
+def _normalize_service_kind(service_kind: str) -> str:
+    value = str(service_kind).strip().lower()
+    if value not in USER_SERVICE_KINDS:
+        raise PreconditionFailure("service kind must be one of llm, asr")
+    return value
+
+
+def _normalize_service_base_url(base_url: str) -> str:
+    cfg = LocalServiceConfig(base_url=str(base_url).strip())
+    cfg.validate_write_time()
+    return cfg.base_url
+
+
+def _normalize_service_model_name(model_name: str | None) -> str:
+    value = str(model_name or "").strip()
+    if len(value) > 200:
+        raise PreconditionFailure("model name must be at most 200 characters")
+    return value
+
+
+def _normalize_service_api_key(api_key: str | None) -> str | None:
+    value = str(api_key or "").strip()
+    if len(value) > 500:
+        raise PreconditionFailure("api key must be at most 500 characters")
+    return value or None
+
+
+def _normalize_service_prompt_assembly_mode(prompt_assembly_mode: str | None) -> str:
+    return normalize_llm_prompt_assembly_mode(prompt_assembly_mode)
+
+
+def _normalize_cloud_account_provider(provider: str) -> str:
+    value = str(provider or "").strip().lower()
+    if value not in CLOUD_ACCOUNT_PROVIDERS:
+        raise PreconditionFailure("cloud account provider must be one of baidu_netdisk")
+    return value
+
+
+def _normalize_cloud_account_text(value: str | None, *, field_name: str, maximum: int = 500) -> str:
+    text = str(value or "").strip()
+    if not text:
+        raise PreconditionFailure(f"{field_name} must be non-empty")
+    if len(text) > maximum:
+        raise PreconditionFailure(f"{field_name} must be at most {maximum} characters")
+    return text
+
+
+def _normalize_cloud_account_optional_text(value: str | None, *, maximum: int = 2000) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if len(text) > maximum:
+        raise PreconditionFailure(f"cloud account field must be at most {maximum} characters")
+    return text
+
+
+def _normalize_cloud_account_scope(scope: str | None) -> str:
+    value = str(scope or "").strip()
+    if len(value) > 1000:
+        raise PreconditionFailure("cloud account scope must be at most 1000 characters")
+    return value
+
+
+def _normalize_cloud_account_meta(meta: dict[str, Any] | None) -> dict[str, Any]:
+    normalized = {} if meta is None else dict(meta)
+    try:
+        json.dumps(normalized, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    except Exception as exc:
+        raise PreconditionFailure("cloud account meta must be JSON-serializable") from exc
+    return normalized
+
+
+def _token_encryption_key() -> bytes:
+    raw = str(os.getenv("PLM_TOKEN_ENCRYPTION_KEY") or "").strip()
+    if not raw:
+        raise PreconditionFailure("PLM_TOKEN_ENCRYPTION_KEY must be configured")
+    return hashlib.sha256(raw.encode("utf-8")).digest()
+
+
+def encrypt_secret_value(plain_text: str) -> str:
+    text = str(plain_text or "")
+    if not text:
+        raise PreconditionFailure("secret value must be non-empty")
+    nonce = os.urandom(12)
+    ciphertext = AESGCM(_token_encryption_key()).encrypt(nonce, text.encode("utf-8"), b"plm:secret:v1")
+    payload = base64.urlsafe_b64encode(nonce + ciphertext).decode("ascii")
+    return f"aesgcm:v1:{payload}"
+
+
+def decrypt_secret_value(ciphertext: str) -> str:
+    raw = str(ciphertext or "").strip()
+    if not raw:
+        raise PreconditionFailure("secret ciphertext must be non-empty")
+    if not raw.startswith("aesgcm:v1:"):
+        raise PreconditionFailure("secret ciphertext format is unsupported")
+    payload = raw.split(":", 2)[2]
+    try:
+        blob = base64.urlsafe_b64decode(payload.encode("ascii"))
+    except Exception as exc:
+        raise PreconditionFailure("secret ciphertext is invalid") from exc
+    if len(blob) <= 12:
+        raise PreconditionFailure("secret ciphertext is truncated")
+    nonce = blob[:12]
+    encrypted = blob[12:]
+    try:
+        plain = AESGCM(_token_encryption_key()).decrypt(nonce, encrypted, b"plm:secret:v1")
+    except Exception as exc:
+        raise PreconditionFailure("secret ciphertext cannot be decrypted") from exc
+    return plain.decode("utf-8")
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,6 +317,17 @@ class AuthUser:
     bio: str
     avatar_key: str | None
     status: str
+    updated_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class UserServiceConfig:
+    user_id: str
+    service_kind: str
+    base_url: str
+    model_name: str
+    api_key: str | None
+    prompt_assembly_mode: str
     updated_at: str
 
 
@@ -264,58 +346,6 @@ class AdminUser:
 
 
 @dataclass(frozen=True, slots=True)
-class AdminUserStudyGroup:
-    group_id: str
-    name: str
-    description: str
-    visibility: str
-    join_policy: str
-    status: str
-    owner_user_id: str
-    owner_public_uid: str
-    owner_nickname: str
-    avatar_key: str | None
-    created_at: str
-    updated_at: str
-    member_count: int
-    member_role: str
-    joined_at: str
-
-
-@dataclass(frozen=True, slots=True)
-class AdminStudyGroupPost:
-    post_id: str
-    group_id: str
-    group_name: str
-    author_user_id: str
-    author_public_uid: str
-    author_nickname: str
-    author_avatar_key: str | None
-    kind: str
-    content: str
-    created_at: str
-    updated_at: str
-    comment_count: int
-
-
-@dataclass(frozen=True, slots=True)
-class AdminStudyGroupComment:
-    comment_id: str
-    group_id: str
-    group_name: str
-    post_id: str
-    post_kind: str
-    post_excerpt: str
-    author_user_id: str
-    author_public_uid: str
-    author_nickname: str
-    author_avatar_key: str | None
-    content: str
-    created_at: str
-    updated_at: str
-
-
-@dataclass(frozen=True, slots=True)
 class AdminActionLog:
     log_id: str
     actor_user_id: str
@@ -330,76 +360,41 @@ class AdminActionLog:
 
 
 @dataclass(frozen=True, slots=True)
-class StudyGroup:
-    group_id: str
-    name: str
-    description: str
-    visibility: str
-    join_policy: str
-    status: str
-    owner_user_id: str
-    owner_public_uid: str
-    owner_nickname: str
-    avatar_key: str | None
-    created_at: str
-    updated_at: str
-    member_count: int
-    member_role: str | None
-    join_request_status: str | None
-
-
-@dataclass(frozen=True, slots=True)
-class StudyGroupMember:
+class FriendListItem:
     user_id: str
     public_uid: str
     nickname: str
-    email: str
+    bio: str
     avatar_key: str | None
-    role: str
-    joined_at: str
+    friended_at: str
 
 
 @dataclass(frozen=True, slots=True)
-class StudyGroupPost:
-    post_id: str
-    group_id: str
-    author_user_id: str
-    author_public_uid: str
-    author_nickname: str
-    author_avatar_key: str | None
-    kind: str
-    content: str
-    created_at: str
-    updated_at: str
-
-
-@dataclass(frozen=True, slots=True)
-class StudyGroupPostComment:
-    comment_id: str
-    group_id: str
-    post_id: str
-    author_user_id: str
-    author_public_uid: str
-    author_nickname: str
-    author_avatar_key: str | None
-    content: str
-    created_at: str
-    updated_at: str
-
-
-@dataclass(frozen=True, slots=True)
-class StudyGroupJoinRequest:
+class FriendRequest:
     request_id: str
-    group_id: str
     requester_user_id: str
     requester_public_uid: str
     requester_nickname: str
+    requester_bio: str
     requester_avatar_key: str | None
+    receiver_user_id: str
+    receiver_public_uid: str
+    receiver_nickname: str
+    receiver_bio: str
+    receiver_avatar_key: str | None
     message: str
     status: str
     created_at: str
-    reviewed_at: str | None
-    reviewed_by_user_id: str | None
+    handled_at: str | None
+    handled_by_user_id: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class Friendship:
+    user_low_id: str
+    user_high_id: str
+    created_at: str
+    source_request_id: str | None
 
 
 class _AuthStoreImpl:
@@ -442,37 +437,19 @@ class _AuthStoreImpl:
         )
 
     @staticmethod
-    def _row_to_admin_group_post(row: Any) -> AdminStudyGroupPost:
-        return AdminStudyGroupPost(
-            post_id=str(row["post_id"]),
-            group_id=str(row["group_id"]),
-            group_name=str(row["group_name"]),
-            author_user_id=str(row["author_user_id"]),
-            author_public_uid=str(row["author_public_uid"]),
-            author_nickname=str(row["author_nickname"]),
-            author_avatar_key=_normalize_avatar_key(row["author_avatar_key"]),
-            kind=str(row["kind"]),
-            content=str(row["content"]),
-            created_at=str(row["created_at"]),
-            updated_at=str(row["updated_at"]),
-            comment_count=int(row["comment_count"]),
-        )
-
-    @staticmethod
-    def _row_to_admin_group_comment(row: Any) -> AdminStudyGroupComment:
-        return AdminStudyGroupComment(
-            comment_id=str(row["comment_id"]),
-            group_id=str(row["group_id"]),
-            group_name=str(row["group_name"]),
-            post_id=str(row["post_id"]),
-            post_kind=str(row["post_kind"]),
-            post_excerpt=str(row["post_excerpt"]),
-            author_user_id=str(row["author_user_id"]),
-            author_public_uid=str(row["author_public_uid"]),
-            author_nickname=str(row["author_nickname"]),
-            author_avatar_key=_normalize_avatar_key(row["author_avatar_key"]),
-            content=str(row["content"]),
-            created_at=str(row["created_at"]),
+    def _row_to_user_service_config(row: Any) -> UserServiceConfig:
+        prompt_assembly_mode = None
+        try:
+            prompt_assembly_mode = row["prompt_assembly_mode"]
+        except Exception:
+            prompt_assembly_mode = None
+        return UserServiceConfig(
+            user_id=str(row["user_id"]),
+            service_kind=_normalize_service_kind(str(row["service_kind"])),
+            base_url=str(row["base_url"]),
+            model_name=str(row["model_name"]),
+            api_key=_normalize_service_api_key(row["api_key"]),
+            prompt_assembly_mode=_normalize_service_prompt_assembly_mode(prompt_assembly_mode),
             updated_at=str(row["updated_at"]),
         )
 
@@ -492,103 +469,67 @@ class _AuthStoreImpl:
         )
 
     @staticmethod
-    def _row_to_group(row: Any) -> StudyGroup:
-        member_role = row["member_role"]
-        join_request_status = row["join_request_status"]
-        return StudyGroup(
-            group_id=str(row["group_id"]),
-            name=str(row["name"]),
-            description=str(row["description"]),
-            visibility=str(row["visibility"]),
-            join_policy=str(row["join_policy"]),
-            status=str(row["status"]),
-            owner_user_id=str(row["owner_user_id"]),
-            owner_public_uid=str(row["owner_public_uid"]),
-            owner_nickname=str(row["owner_nickname"]),
-            avatar_key=_normalize_avatar_key(row["avatar_key"]),
-            created_at=str(row["created_at"]),
-            updated_at=str(row["updated_at"]),
-            member_count=int(row["member_count"]),
-            member_role=None if member_role is None else str(member_role),
-            join_request_status=None if join_request_status is None else str(join_request_status),
-        )
-
-    @staticmethod
-    def _row_to_group_member(row: Any) -> StudyGroupMember:
-        return StudyGroupMember(
+    def _row_to_friend_list_item(row: Any) -> FriendListItem:
+        return FriendListItem(
             user_id=str(row["user_id"]),
             public_uid=str(row["public_uid"]),
             nickname=str(row["nickname"]),
-            email=str(row["email"]),
+            bio=str(row["bio"]),
             avatar_key=_normalize_avatar_key(row["avatar_key"]),
-            role=str(row["role"]),
-            joined_at=str(row["joined_at"]),
+            friended_at=str(row["friended_at"]),
         )
 
     @staticmethod
-    def _row_to_admin_user_group(row: Any) -> AdminUserStudyGroup:
-        return AdminUserStudyGroup(
-            group_id=str(row["group_id"]),
-            name=str(row["name"]),
-            description=str(row["description"]),
-            visibility=str(row["visibility"]),
-            join_policy=str(row["join_policy"]),
-            status=str(row["status"]),
-            owner_user_id=str(row["owner_user_id"]),
-            owner_public_uid=str(row["owner_public_uid"]),
-            owner_nickname=str(row["owner_nickname"]),
-            avatar_key=_normalize_avatar_key(row["avatar_key"]),
-            created_at=str(row["created_at"]),
-            updated_at=str(row["updated_at"]),
-            member_count=int(row["member_count"]),
-            member_role=str(row["member_role"]),
-            joined_at=str(row["joined_at"]),
-        )
-
-    @staticmethod
-    def _row_to_group_post(row: Any) -> StudyGroupPost:
-        return StudyGroupPost(
-            post_id=str(row["post_id"]),
-            group_id=str(row["group_id"]),
-            author_user_id=str(row["author_user_id"]),
-            author_public_uid=str(row["author_public_uid"]),
-            author_nickname=str(row["author_nickname"]),
-            author_avatar_key=_normalize_avatar_key(row["author_avatar_key"]),
-            kind=str(row["kind"]),
-            content=str(row["content"]),
-            created_at=str(row["created_at"]),
-            updated_at=str(row["updated_at"]),
-        )
-
-    @staticmethod
-    def _row_to_group_post_comment(row: Any) -> StudyGroupPostComment:
-        return StudyGroupPostComment(
-            comment_id=str(row["comment_id"]),
-            group_id=str(row["group_id"]),
-            post_id=str(row["post_id"]),
-            author_user_id=str(row["author_user_id"]),
-            author_public_uid=str(row["author_public_uid"]),
-            author_nickname=str(row["author_nickname"]),
-            author_avatar_key=_normalize_avatar_key(row["author_avatar_key"]),
-            content=str(row["content"]),
-            created_at=str(row["created_at"]),
-            updated_at=str(row["updated_at"]),
-        )
-
-    @staticmethod
-    def _row_to_join_request(row: Any) -> StudyGroupJoinRequest:
-        return StudyGroupJoinRequest(
+    def _row_to_friend_request(row: Any) -> FriendRequest:
+        return FriendRequest(
             request_id=str(row["request_id"]),
-            group_id=str(row["group_id"]),
             requester_user_id=str(row["requester_user_id"]),
             requester_public_uid=str(row["requester_public_uid"]),
             requester_nickname=str(row["requester_nickname"]),
+            requester_bio=str(row["requester_bio"]),
             requester_avatar_key=_normalize_avatar_key(row["requester_avatar_key"]),
+            receiver_user_id=str(row["receiver_user_id"]),
+            receiver_public_uid=str(row["receiver_public_uid"]),
+            receiver_nickname=str(row["receiver_nickname"]),
+            receiver_bio=str(row["receiver_bio"]),
+            receiver_avatar_key=_normalize_avatar_key(row["receiver_avatar_key"]),
             message=str(row["message"]),
             status=str(row["status"]),
             created_at=str(row["created_at"]),
-            reviewed_at=None if row["reviewed_at"] is None else str(row["reviewed_at"]),
-            reviewed_by_user_id=None if row["reviewed_by_user_id"] is None else str(row["reviewed_by_user_id"]),
+            handled_at=None if row["handled_at"] is None else str(row["handled_at"]),
+            handled_by_user_id=None if row["handled_by_user_id"] is None else str(row["handled_by_user_id"]),
+        )
+
+    @staticmethod
+    def _row_to_friendship(row: Any) -> Friendship:
+        return Friendship(
+            user_low_id=str(row["user_low_id"]),
+            user_high_id=str(row["user_high_id"]),
+            created_at=str(row["created_at"]),
+            source_request_id=None if row["source_request_id"] is None else str(row["source_request_id"]),
+        )
+
+    @staticmethod
+    def _row_to_cloud_account_binding(row: Any) -> CloudAccountBinding:
+        raw_meta = row["meta_json"]
+        meta = json.loads(str(raw_meta)) if raw_meta not in (None, "") else {}
+        if not isinstance(meta, dict):
+            meta = {}
+        return CloudAccountBinding.create(
+            account_id=str(row["account_id"]),
+            user_id=str(row["user_id"]),
+            provider=_normalize_cloud_account_provider(str(row["provider"])),
+            provider_user_id=str(row["provider_user_id"]),
+            display_name=str(row["display_name"]),
+            avatar_url=_normalize_cloud_account_optional_text(row["avatar_url"]),
+            access_token_ciphertext=str(row["access_token_ciphertext"]),
+            refresh_token_ciphertext=str(row["refresh_token_ciphertext"]),
+            expires_at=_normalize_cloud_account_optional_text(row["expires_at"]),
+            scope=_normalize_cloud_account_scope(row["scope"]),
+            meta=meta,
+            created_at=str(row["created_at"]),
+            updated_at=str(row["updated_at"]),
+            disabled_at=_normalize_cloud_account_optional_text(row["disabled_at"]),
         )
 
     @staticmethod
@@ -598,12 +539,11 @@ class _AuthStoreImpl:
         sessions: list[dict[str, str]],
         memberships: list[dict[str, str]],
         profiles: list[dict[str, str | None]],
+        user_service_configs: list[dict[str, str | None]],
         roles: list[dict[str, str]],
-        study_groups: list[dict[str, str | None]],
-        study_group_members: list[dict[str, str]],
-        study_group_posts: list[dict[str, str | None]],
-        study_group_post_comments: list[dict[str, str | None]],
-        study_group_join_requests: list[dict[str, str | None]],
+        cloud_accounts: list[dict[str, Any]],
+        friend_requests: list[dict[str, str | None]],
+        friendships: list[dict[str, str | None]],
         admin_action_logs: list[dict[str, str | None]],
     ) -> dict[str, Any]:
         return {
@@ -611,12 +551,11 @@ class _AuthStoreImpl:
             "sessions": sessions,
             "projectMemberships": memberships,
             "userProfiles": profiles,
+            "userServiceConfigs": user_service_configs,
             "userGlobalRoles": roles,
-            "studyGroups": study_groups,
-            "studyGroupMembers": study_group_members,
-            "studyGroupPosts": study_group_posts,
-            "studyGroupPostComments": study_group_post_comments,
-            "studyGroupJoinRequests": study_group_join_requests,
+            "userCloudAccounts": cloud_accounts,
+            "friendRequests": friend_requests,
+            "friendships": friendships,
             "adminActionLogs": admin_action_logs,
         }
 
@@ -700,6 +639,21 @@ class SQLiteAuthStore(_AuthStoreImpl):
             payload.setdefault(str(row["user_id"]), []).append(str(row["role"]))
         return {key: tuple(value) for key, value in payload.items()}
 
+    @staticmethod
+    def _ensure_user_service_prompt_assembly_mode_column(conn: sqlite3.Connection) -> None:
+        columns = {
+            str(row["name"])
+            for row in conn.execute("PRAGMA table_info(user_service_configs)").fetchall()
+        }
+        if "prompt_assembly_mode" in columns:
+            return
+        conn.execute(
+            """
+            ALTER TABLE user_service_configs
+            ADD COLUMN prompt_assembly_mode TEXT NOT NULL DEFAULT 'system'
+            """
+        )
+
     def _init_db(self) -> None:
         with self._lock:
             conn = self._connect()
@@ -742,6 +696,37 @@ class SQLiteAuthStore(_AuthStoreImpl):
                         FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE
                     );
 
+                    CREATE TABLE IF NOT EXISTS user_service_configs (
+                        user_id TEXT NOT NULL,
+                        service_kind TEXT NOT NULL,
+                        base_url TEXT NOT NULL,
+                        model_name TEXT NOT NULL DEFAULT '',
+                        api_key TEXT,
+                        prompt_assembly_mode TEXT NOT NULL DEFAULT 'system',
+                        updated_at TEXT NOT NULL,
+                        PRIMARY KEY(user_id, service_kind),
+                        FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE
+                    );
+
+                    CREATE TABLE IF NOT EXISTS user_cloud_accounts (
+                        account_id TEXT PRIMARY KEY,
+                        user_id TEXT NOT NULL,
+                        provider TEXT NOT NULL,
+                        provider_user_id TEXT NOT NULL,
+                        display_name TEXT NOT NULL,
+                        avatar_url TEXT,
+                        access_token_ciphertext TEXT NOT NULL,
+                        refresh_token_ciphertext TEXT NOT NULL,
+                        expires_at TEXT,
+                        scope TEXT NOT NULL DEFAULT '',
+                        meta_json TEXT NOT NULL DEFAULT '{}',
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        disabled_at TEXT,
+                        FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+                        UNIQUE(user_id, provider, provider_user_id)
+                    );
+
                     CREATE TABLE IF NOT EXISTS user_global_roles (
                         user_id TEXT NOT NULL,
                         role TEXT NOT NULL,
@@ -752,67 +737,28 @@ class SQLiteAuthStore(_AuthStoreImpl):
                         FOREIGN KEY(granted_by_user_id) REFERENCES users(user_id) ON DELETE CASCADE
                     );
 
-                    CREATE TABLE IF NOT EXISTS study_groups (
-                        group_id TEXT PRIMARY KEY,
-                        name TEXT NOT NULL,
-                        description TEXT NOT NULL DEFAULT '',
-                        visibility TEXT NOT NULL,
-                        join_policy TEXT NOT NULL,
-                        status TEXT NOT NULL,
-                        owner_user_id TEXT NOT NULL,
-                        avatar_key TEXT,
-                        created_at TEXT NOT NULL,
-                        updated_at TEXT NOT NULL,
-                        FOREIGN KEY(owner_user_id) REFERENCES users(user_id) ON DELETE CASCADE
-                    );
-
-                    CREATE TABLE IF NOT EXISTS study_group_members (
-                        group_id TEXT NOT NULL,
-                        user_id TEXT NOT NULL,
-                        role TEXT NOT NULL,
-                        joined_at TEXT NOT NULL,
-                        PRIMARY KEY(group_id, user_id),
-                        FOREIGN KEY(group_id) REFERENCES study_groups(group_id) ON DELETE CASCADE,
-                        FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE
-                    );
-
-                    CREATE TABLE IF NOT EXISTS study_group_posts (
-                        post_id TEXT PRIMARY KEY,
-                        group_id TEXT NOT NULL,
-                        author_user_id TEXT NOT NULL,
-                        kind TEXT NOT NULL,
-                        content TEXT NOT NULL,
-                        created_at TEXT NOT NULL,
-                        updated_at TEXT NOT NULL,
-                        FOREIGN KEY(group_id) REFERENCES study_groups(group_id) ON DELETE CASCADE,
-                        FOREIGN KEY(author_user_id) REFERENCES users(user_id) ON DELETE CASCADE
-                    );
-
-                    CREATE TABLE IF NOT EXISTS study_group_post_comments (
-                        comment_id TEXT PRIMARY KEY,
-                        group_id TEXT NOT NULL,
-                        post_id TEXT NOT NULL,
-                        author_user_id TEXT NOT NULL,
-                        content TEXT NOT NULL,
-                        created_at TEXT NOT NULL,
-                        updated_at TEXT NOT NULL,
-                        FOREIGN KEY(group_id) REFERENCES study_groups(group_id) ON DELETE CASCADE,
-                        FOREIGN KEY(post_id) REFERENCES study_group_posts(post_id) ON DELETE CASCADE,
-                        FOREIGN KEY(author_user_id) REFERENCES users(user_id) ON DELETE CASCADE
-                    );
-
-                    CREATE TABLE IF NOT EXISTS study_group_join_requests (
+                    CREATE TABLE IF NOT EXISTS friend_requests (
                         request_id TEXT PRIMARY KEY,
-                        group_id TEXT NOT NULL,
                         requester_user_id TEXT NOT NULL,
+                        receiver_user_id TEXT NOT NULL,
                         message TEXT NOT NULL DEFAULT '',
                         status TEXT NOT NULL,
                         created_at TEXT NOT NULL,
-                        reviewed_at TEXT,
-                        reviewed_by_user_id TEXT,
-                        FOREIGN KEY(group_id) REFERENCES study_groups(group_id) ON DELETE CASCADE,
+                        handled_at TEXT,
+                        handled_by_user_id TEXT,
                         FOREIGN KEY(requester_user_id) REFERENCES users(user_id) ON DELETE CASCADE,
-                        FOREIGN KEY(reviewed_by_user_id) REFERENCES users(user_id) ON DELETE SET NULL
+                        FOREIGN KEY(receiver_user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+                        FOREIGN KEY(handled_by_user_id) REFERENCES users(user_id) ON DELETE SET NULL
+                    );
+
+                    CREATE TABLE IF NOT EXISTS friendships (
+                        user_low_id TEXT NOT NULL,
+                        user_high_id TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        source_request_id TEXT,
+                        PRIMARY KEY(user_low_id, user_high_id),
+                        FOREIGN KEY(user_low_id) REFERENCES users(user_id) ON DELETE CASCADE,
+                        FOREIGN KEY(user_high_id) REFERENCES users(user_id) ON DELETE CASCADE
                     );
 
                     CREATE TABLE IF NOT EXISTS admin_action_logs (
@@ -827,15 +773,35 @@ class SQLiteAuthStore(_AuthStoreImpl):
                     );
 
                     CREATE INDEX IF NOT EXISTS idx_user_profiles_public_uid ON user_profiles (public_uid);
+                    CREATE INDEX IF NOT EXISTS idx_user_service_configs_kind ON user_service_configs (service_kind, updated_at DESC);
+                    CREATE INDEX IF NOT EXISTS idx_user_cloud_accounts_user_provider
+                    ON user_cloud_accounts (user_id, provider, updated_at DESC);
                     CREATE INDEX IF NOT EXISTS idx_user_global_roles_role ON user_global_roles (role, user_id);
-                    CREATE INDEX IF NOT EXISTS idx_study_group_members_user_id ON study_group_members (user_id, joined_at DESC);
-                    CREATE INDEX IF NOT EXISTS idx_study_group_posts_group_id ON study_group_posts (group_id, created_at DESC);
-                    CREATE INDEX IF NOT EXISTS idx_study_group_post_comments_post_id ON study_group_post_comments (post_id, created_at ASC);
-                    CREATE INDEX IF NOT EXISTS idx_study_group_join_requests_group_status
-                    ON study_group_join_requests (group_id, status, created_at DESC);
+                    CREATE INDEX IF NOT EXISTS idx_friend_requests_receiver_status
+                    ON friend_requests (receiver_user_id, status, created_at DESC);
+                    CREATE INDEX IF NOT EXISTS idx_friend_requests_requester_status
+                    ON friend_requests (requester_user_id, status, created_at DESC);
+                    CREATE INDEX IF NOT EXISTS idx_friend_requests_pair_status
+                    ON friend_requests (requester_user_id, receiver_user_id, status, created_at DESC);
+                    CREATE INDEX IF NOT EXISTS idx_friendships_user_low_created
+                    ON friendships (user_low_id, created_at DESC);
+                    CREATE INDEX IF NOT EXISTS idx_friendships_user_high_created
+                    ON friendships (user_high_id, created_at DESC);
                     CREATE INDEX IF NOT EXISTS idx_admin_action_logs_created_at ON admin_action_logs (created_at DESC);
                     """
                 )
+                conn.executescript(
+                    """
+                    DROP TABLE IF EXISTS study_group_post_comments;
+                    DROP TABLE IF EXISTS study_group_join_requests;
+                    DROP TABLE IF EXISTS study_group_posts;
+                    DROP TABLE IF EXISTS study_group_members;
+                    DROP TABLE IF EXISTS study_groups;
+                    """
+                )
+                # Older hosted auth databases may still carry the deprecated study-group tables.
+                # Drop them eagerly so upgraded installs converge on the friend-only schema.
+                self._ensure_user_service_prompt_assembly_mode_column(conn)
                 self._backfill_user_profiles(conn)
                 self._bootstrap_super_admin(conn)
                 conn.commit()
@@ -1005,6 +971,380 @@ class SQLiteAuthStore(_AuthStoreImpl):
             raise NotFound("user")
         return self._row_to_user(row)
 
+    def _get_friend_request(self, conn: sqlite3.Connection, request_id: str) -> FriendRequest:
+        row = conn.execute(
+            """
+            SELECT
+                r.request_id,
+                r.requester_user_id,
+                requester.public_uid AS requester_public_uid,
+                requester.nickname AS requester_nickname,
+                requester.bio AS requester_bio,
+                requester.avatar_key AS requester_avatar_key,
+                r.receiver_user_id,
+                receiver.public_uid AS receiver_public_uid,
+                receiver.nickname AS receiver_nickname,
+                receiver.bio AS receiver_bio,
+                receiver.avatar_key AS receiver_avatar_key,
+                r.message,
+                r.status,
+                r.created_at,
+                r.handled_at,
+                r.handled_by_user_id
+            FROM friend_requests r
+            JOIN user_profiles requester ON requester.user_id = r.requester_user_id
+            JOIN user_profiles receiver ON receiver.user_id = r.receiver_user_id
+            WHERE r.request_id = ?
+            """,
+            (str(request_id),),
+        ).fetchone()
+        if row is None:
+            raise NotFound("friend request")
+        return self._row_to_friend_request(row)
+
+    def create_friend_request(
+        self,
+        *,
+        requester_user_id: str,
+        receiver_user_id: str,
+        message: str | None,
+    ) -> FriendRequest:
+        requester_id = str(requester_user_id)
+        receiver_id = str(receiver_user_id)
+        if requester_id == receiver_id:
+            raise PreconditionFailure("cannot send a friend request to yourself")
+        normalized_message = _normalize_friend_request_message(message)
+        now_text = _utc_now().isoformat()
+        user_low_id, user_high_id = _friend_pair(requester_id, receiver_id)
+        with self._lock:
+            conn = self._connect()
+            try:
+                requester = conn.execute(
+                    "SELECT status FROM user_profiles WHERE user_id = ?",
+                    (requester_id,),
+                ).fetchone()
+                if requester is None:
+                    raise NotFound("user")
+                if str(requester["status"]) != "active":
+                    raise PreconditionFailure("only active users can send friend requests")
+
+                receiver = conn.execute(
+                    "SELECT status FROM user_profiles WHERE user_id = ?",
+                    (receiver_id,),
+                ).fetchone()
+                if receiver is None:
+                    raise NotFound("user")
+                if str(receiver["status"]) != "active":
+                    raise PreconditionFailure("only active users can receive friend requests")
+
+                existing_friendship = conn.execute(
+                    "SELECT 1 FROM friendships WHERE user_low_id = ? AND user_high_id = ? LIMIT 1",
+                    (user_low_id, user_high_id),
+                ).fetchone()
+                if existing_friendship is not None:
+                    raise PreconditionFailure("users are already friends")
+
+                reverse_request = conn.execute(
+                    """
+                    SELECT request_id
+                    FROM friend_requests
+                    WHERE requester_user_id = ? AND receiver_user_id = ? AND status = 'pending'
+                    ORDER BY created_at DESC, request_id DESC
+                    LIMIT 1
+                    """,
+                    (receiver_id, requester_id),
+                ).fetchone()
+                if reverse_request is not None:
+                    request_id = str(reverse_request["request_id"])
+                    conn.execute(
+                        """
+                        UPDATE friend_requests
+                        SET status = 'accepted', handled_at = ?, handled_by_user_id = ?
+                        WHERE request_id = ?
+                        """,
+                        (now_text, requester_id, request_id),
+                    )
+                    conn.execute(
+                        """
+                        INSERT OR IGNORE INTO friendships (user_low_id, user_high_id, created_at, source_request_id)
+                        VALUES (?, ?, ?, ?)
+                        """,
+                        (user_low_id, user_high_id, now_text, request_id),
+                    )
+                    conn.commit()
+                    return self._get_friend_request(conn, request_id)
+
+                duplicate_request = conn.execute(
+                    """
+                    SELECT 1
+                    FROM friend_requests
+                    WHERE requester_user_id = ? AND receiver_user_id = ? AND status = 'pending'
+                    LIMIT 1
+                    """,
+                    (requester_id, receiver_id),
+                ).fetchone()
+                if duplicate_request is not None:
+                    raise PreconditionFailure("friend request already pending")
+
+                request_id = f"friend_req_{uuid.uuid4().hex}"
+                conn.execute(
+                    """
+                    INSERT INTO friend_requests (
+                        request_id, requester_user_id, receiver_user_id, message, status, created_at, handled_at, handled_by_user_id
+                    )
+                    VALUES (?, ?, ?, ?, 'pending', ?, NULL, NULL)
+                    """,
+                    (request_id, requester_id, receiver_id, normalized_message, now_text),
+                )
+                conn.commit()
+                return self._get_friend_request(conn, request_id)
+            finally:
+                conn.close()
+
+    def list_incoming_friend_requests(self, user_id: str, *, limit: int = 100) -> tuple[FriendRequest, ...]:
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT
+                    r.request_id,
+                    r.requester_user_id,
+                    requester.public_uid AS requester_public_uid,
+                    requester.nickname AS requester_nickname,
+                    requester.bio AS requester_bio,
+                    requester.avatar_key AS requester_avatar_key,
+                    r.receiver_user_id,
+                    receiver.public_uid AS receiver_public_uid,
+                    receiver.nickname AS receiver_nickname,
+                    receiver.bio AS receiver_bio,
+                    receiver.avatar_key AS receiver_avatar_key,
+                    r.message,
+                    r.status,
+                    r.created_at,
+                    r.handled_at,
+                    r.handled_by_user_id
+                FROM friend_requests r
+                JOIN user_profiles requester ON requester.user_id = r.requester_user_id
+                JOIN user_profiles receiver ON receiver.user_id = r.receiver_user_id
+                WHERE r.receiver_user_id = ?
+                ORDER BY CASE WHEN r.status = 'pending' THEN 0 ELSE 1 END, r.created_at DESC, r.request_id DESC
+                LIMIT ?
+                """,
+                (str(user_id), _normalize_limit(limit)),
+            ).fetchall()
+        finally:
+            conn.close()
+        return tuple(self._row_to_friend_request(row) for row in rows)
+
+    def list_outgoing_friend_requests(self, user_id: str, *, limit: int = 100) -> tuple[FriendRequest, ...]:
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT
+                    r.request_id,
+                    r.requester_user_id,
+                    requester.public_uid AS requester_public_uid,
+                    requester.nickname AS requester_nickname,
+                    requester.bio AS requester_bio,
+                    requester.avatar_key AS requester_avatar_key,
+                    r.receiver_user_id,
+                    receiver.public_uid AS receiver_public_uid,
+                    receiver.nickname AS receiver_nickname,
+                    receiver.bio AS receiver_bio,
+                    receiver.avatar_key AS receiver_avatar_key,
+                    r.message,
+                    r.status,
+                    r.created_at,
+                    r.handled_at,
+                    r.handled_by_user_id
+                FROM friend_requests r
+                JOIN user_profiles requester ON requester.user_id = r.requester_user_id
+                JOIN user_profiles receiver ON receiver.user_id = r.receiver_user_id
+                WHERE r.requester_user_id = ?
+                ORDER BY CASE WHEN r.status = 'pending' THEN 0 ELSE 1 END, r.created_at DESC, r.request_id DESC
+                LIMIT ?
+                """,
+                (str(user_id), _normalize_limit(limit)),
+            ).fetchall()
+        finally:
+            conn.close()
+        return tuple(self._row_to_friend_request(row) for row in rows)
+
+    def accept_friend_request(self, request_id: str, *, actor_user_id: str) -> FriendRequest:
+        now_text = _utc_now().isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    """
+                    SELECT requester_user_id, receiver_user_id, status
+                    FROM friend_requests
+                    WHERE request_id = ?
+                    """,
+                    (str(request_id),),
+                ).fetchone()
+                if row is None:
+                    raise NotFound("friend request")
+                if str(row["receiver_user_id"]) != str(actor_user_id):
+                    raise PreconditionFailure("only the receiver can accept this friend request")
+                if _normalize_friend_request_status(str(row["status"])) != "pending":
+                    raise PreconditionFailure("friend request is not pending")
+
+                user_low_id, user_high_id = _friend_pair(str(row["requester_user_id"]), str(row["receiver_user_id"]))
+                conn.execute(
+                    """
+                    UPDATE friend_requests
+                    SET status = 'accepted', handled_at = ?, handled_by_user_id = ?
+                    WHERE request_id = ?
+                    """,
+                    (now_text, str(actor_user_id), str(request_id)),
+                )
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO friendships (user_low_id, user_high_id, created_at, source_request_id)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (user_low_id, user_high_id, now_text, str(request_id)),
+                )
+                conn.commit()
+                return self._get_friend_request(conn, str(request_id))
+            finally:
+                conn.close()
+
+    def reject_friend_request(self, request_id: str, *, actor_user_id: str) -> FriendRequest:
+        now_text = _utc_now().isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    """
+                    SELECT receiver_user_id, status
+                    FROM friend_requests
+                    WHERE request_id = ?
+                    """,
+                    (str(request_id),),
+                ).fetchone()
+                if row is None:
+                    raise NotFound("friend request")
+                if str(row["receiver_user_id"]) != str(actor_user_id):
+                    raise PreconditionFailure("only the receiver can reject this friend request")
+                if _normalize_friend_request_status(str(row["status"])) != "pending":
+                    raise PreconditionFailure("friend request is not pending")
+
+                conn.execute(
+                    """
+                    UPDATE friend_requests
+                    SET status = 'rejected', handled_at = ?, handled_by_user_id = ?
+                    WHERE request_id = ?
+                    """,
+                    (now_text, str(actor_user_id), str(request_id)),
+                )
+                conn.commit()
+                return self._get_friend_request(conn, str(request_id))
+            finally:
+                conn.close()
+
+    def cancel_friend_request(self, request_id: str, *, actor_user_id: str) -> FriendRequest:
+        now_text = _utc_now().isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    """
+                    SELECT requester_user_id, status
+                    FROM friend_requests
+                    WHERE request_id = ?
+                    """,
+                    (str(request_id),),
+                ).fetchone()
+                if row is None:
+                    raise NotFound("friend request")
+                if str(row["requester_user_id"]) != str(actor_user_id):
+                    raise PreconditionFailure("only the requester can cancel this friend request")
+                if _normalize_friend_request_status(str(row["status"])) != "pending":
+                    raise PreconditionFailure("friend request is not pending")
+
+                conn.execute(
+                    """
+                    UPDATE friend_requests
+                    SET status = 'cancelled', handled_at = ?, handled_by_user_id = ?
+                    WHERE request_id = ?
+                    """,
+                    (now_text, str(actor_user_id), str(request_id)),
+                )
+                conn.commit()
+                return self._get_friend_request(conn, str(request_id))
+            finally:
+                conn.close()
+
+    def list_friends_for_user(self, user_id: str, *, limit: int = 100) -> tuple[FriendListItem, ...]:
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT
+                    counterpart.user_id AS user_id,
+                    counterpart.public_uid AS public_uid,
+                    counterpart.nickname AS nickname,
+                    counterpart.bio AS bio,
+                    counterpart.avatar_key AS avatar_key,
+                    f.created_at AS friended_at
+                FROM friendships f
+                JOIN user_profiles counterpart
+                    ON counterpart.user_id = CASE
+                        WHEN f.user_low_id = ? THEN f.user_high_id
+                        ELSE f.user_low_id
+                    END
+                WHERE f.user_low_id = ? OR f.user_high_id = ?
+                ORDER BY f.created_at DESC, counterpart.public_uid ASC
+                LIMIT ?
+                """,
+                (str(user_id), str(user_id), str(user_id), _normalize_limit(limit)),
+            ).fetchall()
+        finally:
+            conn.close()
+        return tuple(self._row_to_friend_list_item(row) for row in rows)
+
+    def delete_friendship(self, friend_user_id: str, *, actor_user_id: str) -> None:
+        actor_id = str(actor_user_id)
+        friend_id = str(friend_user_id)
+        if actor_id == friend_id:
+            raise PreconditionFailure("cannot delete yourself from friends")
+        user_low_id, user_high_id = _friend_pair(actor_id, friend_id)
+        with self._lock:
+            conn = self._connect()
+            try:
+                existing = conn.execute(
+                    "SELECT 1 FROM friendships WHERE user_low_id = ? AND user_high_id = ? LIMIT 1",
+                    (user_low_id, user_high_id),
+                ).fetchone()
+                if existing is None:
+                    raise NotFound("friendship")
+                conn.execute(
+                    "DELETE FROM friendships WHERE user_low_id = ? AND user_high_id = ?",
+                    (user_low_id, user_high_id),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def users_are_friends(self, user_a_id: str, user_b_id: str) -> bool:
+        left = str(user_a_id).strip()
+        right = str(user_b_id).strip()
+        if not left or not right or left == right:
+            return False
+        user_low_id, user_high_id = _friend_pair(left, right)
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT 1 FROM friendships WHERE user_low_id = ? AND user_high_id = ? LIMIT 1",
+                (user_low_id, user_high_id),
+            ).fetchone()
+        finally:
+            conn.close()
+        return row is not None
+
     def update_user_profile(self, user_id: str, *, nickname: str, bio: str | None) -> AuthUser:
         normalized_nickname = _normalize_nickname(nickname)
         normalized_bio = _normalize_bio(bio)
@@ -1038,6 +1378,291 @@ class SQLiteAuthStore(_AuthStoreImpl):
             finally:
                 conn.close()
         return self.get_user_by_id(user_id)
+
+    def get_user_service_config(self, user_id: str, *, service_kind: str) -> UserServiceConfig | None:
+        normalized_kind = _normalize_service_kind(service_kind)
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT user_id, service_kind, base_url, model_name, api_key, prompt_assembly_mode, updated_at
+                FROM user_service_configs
+                WHERE user_id = ? AND service_kind = ?
+                """,
+                (str(user_id), normalized_kind),
+            ).fetchone()
+        finally:
+            conn.close()
+        if row is None:
+            return None
+        return self._row_to_user_service_config(row)
+
+    def upsert_user_service_config(
+        self,
+        user_id: str,
+        *,
+        service_kind: str,
+        base_url: str,
+        model_name: str | None,
+        api_key: str | None = None,
+        prompt_assembly_mode: str | None = None,
+        clear_api_key: bool = False,
+    ) -> UserServiceConfig:
+        normalized_kind = _normalize_service_kind(service_kind)
+        normalized_base_url = _normalize_service_base_url(base_url)
+        normalized_model_name = _normalize_service_model_name(model_name)
+        normalized_api_key = _normalize_service_api_key(api_key)
+        normalized_prompt_assembly_mode = _normalize_service_prompt_assembly_mode(prompt_assembly_mode)
+        now_text = _utc_now().isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                user_row = conn.execute("SELECT 1 FROM users WHERE user_id = ? LIMIT 1", (str(user_id),)).fetchone()
+                if user_row is None:
+                    raise NotFound("user")
+                current = conn.execute(
+                    "SELECT api_key FROM user_service_configs WHERE user_id = ? AND service_kind = ?",
+                    (str(user_id), normalized_kind),
+                ).fetchone()
+                if clear_api_key:
+                    resolved_api_key: str | None = None
+                elif normalized_api_key is not None:
+                    resolved_api_key = normalized_api_key
+                elif current is not None:
+                    resolved_api_key = _normalize_service_api_key(current["api_key"])
+                else:
+                    resolved_api_key = None
+                conn.execute(
+                    """
+                    INSERT INTO user_service_configs (
+                        user_id, service_kind, base_url, model_name, api_key, prompt_assembly_mode, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(user_id, service_kind) DO UPDATE SET
+                        base_url = excluded.base_url,
+                        model_name = excluded.model_name,
+                        api_key = excluded.api_key,
+                        prompt_assembly_mode = excluded.prompt_assembly_mode,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        str(user_id),
+                        normalized_kind,
+                        normalized_base_url,
+                        normalized_model_name,
+                        resolved_api_key,
+                        normalized_prompt_assembly_mode,
+                        now_text,
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        saved = self.get_user_service_config(user_id, service_kind=normalized_kind)
+        if saved is None:
+            raise NotFound("user_service_config")
+        return saved
+
+    def list_user_cloud_accounts(
+        self,
+        user_id: str,
+        *,
+        provider: str | None = None,
+        include_disabled: bool = False,
+    ) -> tuple[CloudAccountBinding, ...]:
+        normalized_provider = None if provider is None else _normalize_cloud_account_provider(provider)
+        conn = self._connect()
+        try:
+            sql = """
+                SELECT account_id, user_id, provider, provider_user_id, display_name, avatar_url,
+                       access_token_ciphertext, refresh_token_ciphertext, expires_at, scope,
+                       meta_json, created_at, updated_at, disabled_at
+                FROM user_cloud_accounts
+                WHERE user_id = ?
+            """
+            params: list[Any] = [str(user_id)]
+            if normalized_provider is not None:
+                sql += " AND provider = ?"
+                params.append(normalized_provider)
+            if not include_disabled:
+                sql += " AND disabled_at IS NULL"
+            sql += " ORDER BY updated_at DESC, account_id ASC"
+            rows = conn.execute(sql, tuple(params)).fetchall()
+        finally:
+            conn.close()
+        return tuple(self._row_to_cloud_account_binding(row) for row in rows)
+
+    def get_user_cloud_account(
+        self,
+        user_id: str,
+        *,
+        account_id: str,
+        provider: str | None = None,
+        include_disabled: bool = False,
+    ) -> CloudAccountBinding:
+        normalized_provider = None if provider is None else _normalize_cloud_account_provider(provider)
+        conn = self._connect()
+        try:
+            sql = """
+                SELECT account_id, user_id, provider, provider_user_id, display_name, avatar_url,
+                       access_token_ciphertext, refresh_token_ciphertext, expires_at, scope,
+                       meta_json, created_at, updated_at, disabled_at
+                FROM user_cloud_accounts
+                WHERE user_id = ? AND account_id = ?
+            """
+            params: list[Any] = [str(user_id), str(account_id)]
+            if normalized_provider is not None:
+                sql += " AND provider = ?"
+                params.append(normalized_provider)
+            if not include_disabled:
+                sql += " AND disabled_at IS NULL"
+            row = conn.execute(sql, tuple(params)).fetchone()
+        finally:
+            conn.close()
+        if row is None:
+            raise NotFound("cloud account")
+        return self._row_to_cloud_account_binding(row)
+
+    def get_cloud_account_by_id(self, account_id: str, *, include_disabled: bool = False) -> CloudAccountBinding:
+        conn = self._connect()
+        try:
+            sql = """
+                SELECT account_id, user_id, provider, provider_user_id, display_name, avatar_url,
+                       access_token_ciphertext, refresh_token_ciphertext, expires_at, scope,
+                       meta_json, created_at, updated_at, disabled_at
+                FROM user_cloud_accounts
+                WHERE account_id = ?
+            """
+            params: list[Any] = [str(account_id)]
+            if not include_disabled:
+                sql += " AND disabled_at IS NULL"
+            row = conn.execute(sql, tuple(params)).fetchone()
+        finally:
+            conn.close()
+        if row is None:
+            raise NotFound("cloud account")
+        return self._row_to_cloud_account_binding(row)
+
+    def upsert_user_cloud_account(
+        self,
+        *,
+        user_id: str,
+        provider: str,
+        provider_user_id: str,
+        display_name: str,
+        avatar_url: str | None,
+        access_token_ciphertext: str,
+        refresh_token_ciphertext: str,
+        expires_at: str | None,
+        scope: str = "",
+        meta: dict[str, Any] | None = None,
+    ) -> CloudAccountBinding:
+        normalized_provider = _normalize_cloud_account_provider(provider)
+        normalized_provider_user_id = _normalize_cloud_account_text(
+            provider_user_id,
+            field_name="provider_user_id",
+            maximum=200,
+        )
+        normalized_display_name = _normalize_cloud_account_text(display_name, field_name="display_name", maximum=200)
+        normalized_avatar_url = _normalize_cloud_account_optional_text(avatar_url, maximum=2000)
+        normalized_scope = _normalize_cloud_account_scope(scope)
+        normalized_meta = _normalize_cloud_account_meta(meta)
+        encrypted_access_token = _normalize_cloud_account_text(
+            access_token_ciphertext,
+            field_name="access_token_ciphertext",
+            maximum=8192,
+        )
+        encrypted_refresh_token = _normalize_cloud_account_text(
+            refresh_token_ciphertext,
+            field_name="refresh_token_ciphertext",
+            maximum=8192,
+        )
+        normalized_expires_at = _normalize_cloud_account_optional_text(expires_at)
+        now_text = _utc_now().isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                user_row = conn.execute("SELECT 1 FROM users WHERE user_id = ? LIMIT 1", (str(user_id),)).fetchone()
+                if user_row is None:
+                    raise NotFound("user")
+                existing = conn.execute(
+                    """
+                    SELECT account_id, created_at
+                    FROM user_cloud_accounts
+                    WHERE user_id = ? AND provider = ? AND provider_user_id = ?
+                    """,
+                    (str(user_id), normalized_provider, normalized_provider_user_id),
+                ).fetchone()
+                account_id = str(existing["account_id"]) if existing is not None else f"account_{uuid.uuid4().hex}"
+                created_at = str(existing["created_at"]) if existing is not None else now_text
+                conn.execute(
+                    """
+                    INSERT INTO user_cloud_accounts (
+                        account_id, user_id, provider, provider_user_id, display_name, avatar_url,
+                        access_token_ciphertext, refresh_token_ciphertext, expires_at, scope,
+                        meta_json, created_at, updated_at, disabled_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                    ON CONFLICT(account_id) DO UPDATE SET
+                        display_name = excluded.display_name,
+                        avatar_url = excluded.avatar_url,
+                        access_token_ciphertext = excluded.access_token_ciphertext,
+                        refresh_token_ciphertext = excluded.refresh_token_ciphertext,
+                        expires_at = excluded.expires_at,
+                        scope = excluded.scope,
+                        meta_json = excluded.meta_json,
+                        updated_at = excluded.updated_at,
+                        disabled_at = NULL
+                    """,
+                    (
+                        account_id,
+                        str(user_id),
+                        normalized_provider,
+                        normalized_provider_user_id,
+                        normalized_display_name,
+                        normalized_avatar_url,
+                        encrypted_access_token,
+                        encrypted_refresh_token,
+                        normalized_expires_at,
+                        normalized_scope,
+                        json.dumps(normalized_meta, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
+                        created_at,
+                        now_text,
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        return self.get_user_cloud_account(
+            str(user_id),
+            account_id=account_id,
+            provider=normalized_provider,
+            include_disabled=True,
+        )
+
+    def disable_user_cloud_account(
+        self,
+        user_id: str,
+        *,
+        account_id: str,
+        provider: str | None = None,
+    ) -> None:
+        normalized_provider = None if provider is None else _normalize_cloud_account_provider(provider)
+        now_text = _utc_now().isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                sql = "UPDATE user_cloud_accounts SET disabled_at = ?, updated_at = ? WHERE user_id = ? AND account_id = ?"
+                params: list[Any] = [now_text, now_text, str(user_id), str(account_id)]
+                if normalized_provider is not None:
+                    sql += " AND provider = ?"
+                    params.append(normalized_provider)
+                row = conn.execute(sql + " RETURNING account_id", tuple(params)).fetchone()
+                if row is None:
+                    raise NotFound("cloud account")
+                conn.commit()
+            finally:
+                conn.close()
 
     def change_password(self, user_id: str, *, current_password: str, new_password: str) -> None:
         new_hash = self._hash_password(new_password)
@@ -1253,19 +1878,11 @@ class SQLiteAuthStore(_AuthStoreImpl):
         try:
             users = int(conn.execute("SELECT COUNT(*) AS count FROM users").fetchone()["count"])
             active_users = int(conn.execute("SELECT COUNT(*) AS count FROM user_profiles WHERE status = 'active'").fetchone()["count"])
-            groups = int(conn.execute("SELECT COUNT(*) AS count FROM study_groups").fetchone()["count"])
-            active_groups = int(conn.execute("SELECT COUNT(*) AS count FROM study_groups WHERE status = 'active'").fetchone()["count"])
-            posts = int(conn.execute("SELECT COUNT(*) AS count FROM study_group_posts").fetchone()["count"])
-            comments = int(conn.execute("SELECT COUNT(*) AS count FROM study_group_post_comments").fetchone()["count"])
         finally:
             conn.close()
         return {
             "users": users,
             "activeUsers": active_users,
-            "groups": groups,
-            "activeGroups": active_groups,
-            "posts": posts,
-            "comments": comments,
         }
 
     def record_admin_action(
@@ -1339,1113 +1956,6 @@ class SQLiteAuthStore(_AuthStoreImpl):
             conn.close()
         return tuple(self._row_to_admin_action_log(row) for row in rows)
 
-    def list_admin_study_group_posts(self, *, search: str | None = None, limit: int = 100) -> tuple[AdminStudyGroupPost, ...]:
-        clauses = ["1 = 1"]
-        params: list[Any] = []
-        if search and str(search).strip():
-            needle = f"%{str(search).strip()}%"
-            clauses.append("(g.name LIKE ? OR p.content LIKE ? OR profile.nickname LIKE ? OR profile.public_uid LIKE ?)")
-            params.extend((needle, needle, needle, needle))
-        conn = self._connect()
-        try:
-            rows = conn.execute(
-                f"""
-                SELECT
-                    p.post_id,
-                    p.group_id,
-                    g.name AS group_name,
-                    p.author_user_id,
-                    profile.public_uid AS author_public_uid,
-                    profile.nickname AS author_nickname,
-                    profile.avatar_key AS author_avatar_key,
-                    p.kind,
-                    p.content,
-                    p.created_at,
-                    p.updated_at,
-                    COALESCE(comment_counts.comment_count, 0) AS comment_count
-                FROM study_group_posts p
-                JOIN study_groups g ON g.group_id = p.group_id
-                JOIN user_profiles profile ON profile.user_id = p.author_user_id
-                LEFT JOIN (
-                    SELECT post_id, COUNT(*) AS comment_count
-                    FROM study_group_post_comments
-                    GROUP BY post_id
-                ) comment_counts ON comment_counts.post_id = p.post_id
-                WHERE {' AND '.join(clauses)}
-                ORDER BY p.created_at DESC, p.post_id DESC
-                LIMIT ?
-                """,
-                (*params, _normalize_limit(limit)),
-            ).fetchall()
-        finally:
-            conn.close()
-        return tuple(self._row_to_admin_group_post(row) for row in rows)
-
-    def list_admin_study_group_comments(self, *, search: str | None = None, limit: int = 100) -> tuple[AdminStudyGroupComment, ...]:
-        clauses = ["1 = 1"]
-        params: list[Any] = []
-        if search and str(search).strip():
-            needle = f"%{str(search).strip()}%"
-            clauses.append("(g.name LIKE ? OR c.content LIKE ? OR p.content LIKE ? OR profile.nickname LIKE ? OR profile.public_uid LIKE ?)")
-            params.extend((needle, needle, needle, needle, needle))
-        conn = self._connect()
-        try:
-            rows = conn.execute(
-                f"""
-                SELECT
-                    c.comment_id,
-                    c.group_id,
-                    g.name AS group_name,
-                    c.post_id,
-                    p.kind AS post_kind,
-                    SUBSTR(p.content, 1, 120) AS post_excerpt,
-                    c.author_user_id,
-                    profile.public_uid AS author_public_uid,
-                    profile.nickname AS author_nickname,
-                    profile.avatar_key AS author_avatar_key,
-                    c.content,
-                    c.created_at,
-                    c.updated_at
-                FROM study_group_post_comments c
-                JOIN study_group_posts p ON p.post_id = c.post_id AND p.group_id = c.group_id
-                JOIN study_groups g ON g.group_id = c.group_id
-                JOIN user_profiles profile ON profile.user_id = c.author_user_id
-                WHERE {' AND '.join(clauses)}
-                ORDER BY c.created_at DESC, c.comment_id DESC
-                LIMIT ?
-                """,
-                (*params, _normalize_limit(limit)),
-            ).fetchall()
-        finally:
-            conn.close()
-        return tuple(self._row_to_admin_group_comment(row) for row in rows)
-
-    def delete_admin_study_group_post(self, post_id: str) -> AdminStudyGroupPost:
-        with self._lock:
-            conn = self._connect()
-            try:
-                row = conn.execute(
-                    """
-                    SELECT
-                        p.post_id,
-                        p.group_id,
-                        g.name AS group_name,
-                        p.author_user_id,
-                        profile.public_uid AS author_public_uid,
-                        profile.nickname AS author_nickname,
-                        profile.avatar_key AS author_avatar_key,
-                        p.kind,
-                        p.content,
-                        p.created_at,
-                        p.updated_at,
-                        COALESCE(comment_counts.comment_count, 0) AS comment_count
-                    FROM study_group_posts p
-                    JOIN study_groups g ON g.group_id = p.group_id
-                    JOIN user_profiles profile ON profile.user_id = p.author_user_id
-                    LEFT JOIN (
-                        SELECT post_id, COUNT(*) AS comment_count
-                        FROM study_group_post_comments
-                        GROUP BY post_id
-                    ) comment_counts ON comment_counts.post_id = p.post_id
-                    WHERE p.post_id = ?
-                    """,
-                    (str(post_id),),
-                ).fetchone()
-                if row is None:
-                    raise NotFound("study_group_post")
-                deleted = self._row_to_admin_group_post(row)
-                now_text = _utc_now().isoformat()
-                conn.execute("DELETE FROM study_group_posts WHERE post_id = ?", (str(post_id),))
-                conn.execute("UPDATE study_groups SET updated_at = ? WHERE group_id = ?", (now_text, deleted.group_id))
-                conn.commit()
-                return deleted
-            finally:
-                conn.close()
-
-    def delete_admin_study_group_comment(self, comment_id: str) -> AdminStudyGroupComment:
-        with self._lock:
-            conn = self._connect()
-            try:
-                row = conn.execute(
-                    """
-                    SELECT
-                        c.comment_id,
-                        c.group_id,
-                        g.name AS group_name,
-                        c.post_id,
-                        p.kind AS post_kind,
-                        SUBSTR(p.content, 1, 120) AS post_excerpt,
-                        c.author_user_id,
-                        profile.public_uid AS author_public_uid,
-                        profile.nickname AS author_nickname,
-                        profile.avatar_key AS author_avatar_key,
-                        c.content,
-                        c.created_at,
-                        c.updated_at
-                    FROM study_group_post_comments c
-                    JOIN study_group_posts p ON p.post_id = c.post_id AND p.group_id = c.group_id
-                    JOIN study_groups g ON g.group_id = c.group_id
-                    JOIN user_profiles profile ON profile.user_id = c.author_user_id
-                    WHERE c.comment_id = ?
-                    """,
-                    (str(comment_id),),
-                ).fetchone()
-                if row is None:
-                    raise NotFound("study_group_post_comment")
-                deleted = self._row_to_admin_group_comment(row)
-                now_text = _utc_now().isoformat()
-                conn.execute("DELETE FROM study_group_post_comments WHERE comment_id = ?", (str(comment_id),))
-                conn.execute("UPDATE study_groups SET updated_at = ? WHERE group_id = ?", (now_text, deleted.group_id))
-                conn.commit()
-                return deleted
-            finally:
-                conn.close()
-
-    def _get_study_group(self, conn: sqlite3.Connection, group_id: str, *, viewer_user_id: str | None) -> StudyGroup:
-        row = conn.execute(
-            """
-            SELECT
-                g.group_id,
-                g.name,
-                g.description,
-                g.visibility,
-                g.join_policy,
-                g.status,
-                g.owner_user_id,
-                owner_profile.public_uid AS owner_public_uid,
-                owner_profile.nickname AS owner_nickname,
-                g.avatar_key,
-                g.created_at,
-                g.updated_at,
-                COALESCE(member_counts.member_count, 0) AS member_count,
-                viewer_member.role AS member_role,
-                viewer_request.status AS join_request_status
-            FROM study_groups g
-            JOIN user_profiles owner_profile ON owner_profile.user_id = g.owner_user_id
-            LEFT JOIN (
-                SELECT group_id, COUNT(*) AS member_count
-                FROM study_group_members
-                GROUP BY group_id
-            ) member_counts ON member_counts.group_id = g.group_id
-            LEFT JOIN study_group_members viewer_member
-                ON viewer_member.group_id = g.group_id AND viewer_member.user_id = ?
-            LEFT JOIN study_group_join_requests viewer_request
-                ON viewer_request.group_id = g.group_id
-               AND viewer_request.requester_user_id = ?
-               AND viewer_request.status = 'pending'
-            WHERE g.group_id = ?
-            """,
-            (
-                None if viewer_user_id is None else str(viewer_user_id),
-                None if viewer_user_id is None else str(viewer_user_id),
-                str(group_id),
-            ),
-        ).fetchone()
-        if row is None:
-            raise NotFound("study_group")
-        return self._row_to_group(row)
-
-    def create_study_group(
-        self,
-        *,
-        owner_user_id: str,
-        name: str,
-        description: str | None,
-        visibility: str,
-        join_policy: str,
-    ) -> StudyGroup:
-        normalized_name = _normalize_group_name(name)
-        normalized_description = _normalize_group_description(description)
-        normalized_visibility = _normalize_group_visibility(visibility)
-        normalized_join_policy = _normalize_group_join_policy(join_policy)
-        now_text = _utc_now().isoformat()
-        group_id = f"group_{uuid.uuid4().hex}"
-        with self._lock:
-            conn = self._connect()
-            try:
-                conn.execute(
-                    """
-                    INSERT INTO study_groups (
-                        group_id, name, description, visibility, join_policy, status, owner_user_id, avatar_key, created_at, updated_at
-                    )
-                    VALUES (?, ?, ?, ?, ?, 'active', ?, NULL, ?, ?)
-                    """,
-                    (
-                        group_id,
-                        normalized_name,
-                        normalized_description,
-                        normalized_visibility,
-                        normalized_join_policy,
-                        str(owner_user_id),
-                        now_text,
-                        now_text,
-                    ),
-                )
-                conn.execute(
-                    "INSERT INTO study_group_members (group_id, user_id, role, joined_at) VALUES (?, ?, 'owner', ?)",
-                    (group_id, str(owner_user_id), now_text),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-        conn = self._connect()
-        try:
-            return self._get_study_group(conn, group_id, viewer_user_id=owner_user_id)
-        finally:
-            conn.close()
-
-    def list_study_groups_for_user(self, user_id: str, *, limit: int = 100) -> tuple[StudyGroup, ...]:
-        conn = self._connect()
-        try:
-            rows = conn.execute(
-                """
-                SELECT
-                    g.group_id,
-                    g.name,
-                    g.description,
-                    g.visibility,
-                    g.join_policy,
-                    g.status,
-                    g.owner_user_id,
-                    owner_profile.public_uid AS owner_public_uid,
-                    owner_profile.nickname AS owner_nickname,
-                    g.avatar_key,
-                    g.created_at,
-                    g.updated_at,
-                    COALESCE(member_counts.member_count, 0) AS member_count,
-                    viewer_member.role AS member_role,
-                    viewer_request.status AS join_request_status
-                FROM study_groups g
-                JOIN user_profiles owner_profile ON owner_profile.user_id = g.owner_user_id
-                LEFT JOIN (
-                    SELECT group_id, COUNT(*) AS member_count
-                    FROM study_group_members
-                    GROUP BY group_id
-                ) member_counts ON member_counts.group_id = g.group_id
-                LEFT JOIN study_group_members viewer_member
-                    ON viewer_member.group_id = g.group_id AND viewer_member.user_id = ?
-                LEFT JOIN study_group_join_requests viewer_request
-                    ON viewer_request.group_id = g.group_id
-                   AND viewer_request.requester_user_id = ?
-                   AND viewer_request.status = 'pending'
-                WHERE g.status <> 'dissolved' AND (g.visibility = 'public' OR viewer_member.user_id IS NOT NULL)
-                ORDER BY CASE WHEN viewer_member.user_id IS NOT NULL THEN 0 ELSE 1 END, g.updated_at DESC, g.group_id ASC
-                LIMIT ?
-                """,
-                (str(user_id), str(user_id), _normalize_limit(limit)),
-            ).fetchall()
-        finally:
-            conn.close()
-        return tuple(self._row_to_group(row) for row in rows)
-
-    def list_all_study_groups(self, *, search: str | None = None, status: str | None = None, limit: int = 100) -> tuple[StudyGroup, ...]:
-        clauses = ["1 = 1"]
-        params: list[Any] = []
-        if search and str(search).strip():
-            needle = f"%{str(search).strip()}%"
-            clauses.append("(g.name LIKE ? OR g.description LIKE ?)")
-            params.extend((needle, needle))
-        if status and str(status).strip():
-            clauses.append("g.status = ?")
-            params.append(_normalize_group_status(status))
-        conn = self._connect()
-        try:
-            rows = conn.execute(
-                f"""
-                SELECT
-                    g.group_id,
-                    g.name,
-                    g.description,
-                    g.visibility,
-                    g.join_policy,
-                    g.status,
-                    g.owner_user_id,
-                    owner_profile.public_uid AS owner_public_uid,
-                    owner_profile.nickname AS owner_nickname,
-                    g.avatar_key,
-                    g.created_at,
-                    g.updated_at,
-                    COALESCE(member_counts.member_count, 0) AS member_count,
-                    NULL AS member_role,
-                    NULL AS join_request_status
-                FROM study_groups g
-                JOIN user_profiles owner_profile ON owner_profile.user_id = g.owner_user_id
-                LEFT JOIN (
-                    SELECT group_id, COUNT(*) AS member_count
-                    FROM study_group_members
-                    GROUP BY group_id
-                ) member_counts ON member_counts.group_id = g.group_id
-                WHERE {' AND '.join(clauses)}
-                ORDER BY g.updated_at DESC, g.group_id ASC
-                LIMIT ?
-                """,
-                (*params, _normalize_limit(limit)),
-            ).fetchall()
-        finally:
-            conn.close()
-        return tuple(self._row_to_group(row) for row in rows)
-
-    def get_study_group(self, group_id: str, *, viewer_user_id: str | None) -> StudyGroup:
-        conn = self._connect()
-        try:
-            return self._get_study_group(conn, group_id, viewer_user_id=viewer_user_id)
-        finally:
-            conn.close()
-
-    def get_study_group_member_role(self, group_id: str, user_id: str) -> str | None:
-        conn = self._connect()
-        try:
-            row = conn.execute(
-                "SELECT role FROM study_group_members WHERE group_id = ? AND user_id = ?",
-                (str(group_id), str(user_id)),
-            ).fetchone()
-        finally:
-            conn.close()
-        return None if row is None else str(row["role"])
-
-    def update_study_group_member_role(
-        self,
-        group_id: str,
-        *,
-        target_user_id: str,
-        role: str,
-        actor_user_id: str,
-    ) -> StudyGroupMember:
-        normalized_role = _normalize_group_member_role(role)
-        now_text = _utc_now().isoformat()
-        with self._lock:
-            conn = self._connect()
-            try:
-                group = self._get_study_group(conn, group_id, viewer_user_id=actor_user_id)
-                actor_roles = set(self._roles_by_user_id(conn, (str(actor_user_id),)).get(str(actor_user_id), ()))
-                actor_is_admin = bool(actor_roles.intersection(GLOBAL_ROLES))
-                if not actor_is_admin and group.member_role != "owner":
-                    raise PreconditionFailure("only the group owner can manage member roles")
-
-                target_row = conn.execute(
-                    "SELECT role FROM study_group_members WHERE group_id = ? AND user_id = ?",
-                    (str(group_id), str(target_user_id)),
-                ).fetchone()
-                if target_row is None:
-                    raise NotFound("study_group_member")
-                current_role = str(target_row["role"])
-
-                if normalized_role == current_role:
-                    conn.commit()
-                elif normalized_role == "owner":
-                    if not actor_is_admin and str(actor_user_id) != str(group.owner_user_id):
-                        raise PreconditionFailure("only the current owner can transfer ownership")
-                    conn.execute(
-                        "UPDATE study_group_members SET role = 'admin' WHERE group_id = ? AND user_id = ?",
-                        (str(group_id), str(group.owner_user_id)),
-                    )
-                    conn.execute(
-                        "UPDATE study_group_members SET role = 'owner' WHERE group_id = ? AND user_id = ?",
-                        (str(group_id), str(target_user_id)),
-                    )
-                    conn.execute(
-                        "UPDATE study_groups SET owner_user_id = ?, updated_at = ? WHERE group_id = ?",
-                        (str(target_user_id), now_text, str(group_id)),
-                    )
-                    conn.commit()
-                else:
-                    if current_role == "owner":
-                        raise PreconditionFailure("transfer ownership before changing the current owner role")
-                    conn.execute(
-                        "UPDATE study_group_members SET role = ? WHERE group_id = ? AND user_id = ?",
-                        (normalized_role, str(group_id), str(target_user_id)),
-                    )
-                    conn.execute(
-                        "UPDATE study_groups SET updated_at = ? WHERE group_id = ?",
-                        (now_text, str(group_id)),
-                    )
-                    conn.commit()
-            finally:
-                conn.close()
-        members = self.list_study_group_members(group_id)
-        for member in members:
-            if member.user_id == str(target_user_id):
-                return member
-        raise NotFound("study_group_member")
-
-    def remove_study_group_member(self, group_id: str, *, target_user_id: str, actor_user_id: str) -> None:
-        now_text = _utc_now().isoformat()
-        with self._lock:
-            conn = self._connect()
-            try:
-                group = self._get_study_group(conn, group_id, viewer_user_id=actor_user_id)
-                actor_roles = set(self._roles_by_user_id(conn, (str(actor_user_id),)).get(str(actor_user_id), ()))
-                actor_is_admin = bool(actor_roles.intersection(GLOBAL_ROLES))
-                if not actor_is_admin and group.member_role != "owner":
-                    raise PreconditionFailure("only the group owner can remove members")
-
-                target_row = conn.execute(
-                    "SELECT role FROM study_group_members WHERE group_id = ? AND user_id = ?",
-                    (str(group_id), str(target_user_id)),
-                ).fetchone()
-                if target_row is None:
-                    raise NotFound("study_group_member")
-                if str(target_row["role"]) == "owner":
-                    raise PreconditionFailure("group owner cannot be removed")
-                conn.execute(
-                    "DELETE FROM study_group_members WHERE group_id = ? AND user_id = ?",
-                    (str(group_id), str(target_user_id)),
-                )
-                conn.execute(
-                    "UPDATE study_groups SET updated_at = ? WHERE group_id = ?",
-                    (now_text, str(group_id)),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-
-    def invite_study_group_member(
-        self,
-        group_id: str,
-        *,
-        target_user_id: str,
-        role: str,
-        actor_user_id: str,
-    ) -> StudyGroupMember:
-        normalized_role = _normalize_group_member_role(role)
-        if normalized_role == "owner":
-            raise PreconditionFailure("use ownership transfer to assign the owner role")
-        now_text = _utc_now().isoformat()
-        with self._lock:
-            conn = self._connect()
-            try:
-                group = self._get_study_group(conn, group_id, viewer_user_id=actor_user_id)
-                actor_roles = set(self._roles_by_user_id(conn, (str(actor_user_id),)).get(str(actor_user_id), ()))
-                actor_is_admin = bool(actor_roles.intersection(GLOBAL_ROLES))
-                if not actor_is_admin and group.member_role not in {"owner", "admin"}:
-                    raise PreconditionFailure("only group managers can invite members")
-                target_user = conn.execute(
-                    "SELECT status FROM user_profiles WHERE user_id = ?",
-                    (str(target_user_id),),
-                ).fetchone()
-                if target_user is None:
-                    raise NotFound("user")
-                if str(target_user["status"]) != "active":
-                    raise PreconditionFailure("only active users can be invited")
-                existing = conn.execute(
-                    "SELECT role FROM study_group_members WHERE group_id = ? AND user_id = ?",
-                    (str(group_id), str(target_user_id)),
-                ).fetchone()
-                if existing is not None:
-                    raise PreconditionFailure("user is already a group member")
-                conn.execute(
-                    "INSERT INTO study_group_members (group_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)",
-                    (str(group_id), str(target_user_id), normalized_role, now_text),
-                )
-                conn.execute(
-                    """
-                    UPDATE study_group_join_requests
-                    SET status = 'approved', reviewed_at = ?, reviewed_by_user_id = ?
-                    WHERE group_id = ? AND requester_user_id = ? AND status = 'pending'
-                    """,
-                    (now_text, str(actor_user_id), str(group_id), str(target_user_id)),
-                )
-                conn.execute(
-                    "UPDATE study_groups SET updated_at = ? WHERE group_id = ?",
-                    (now_text, str(group_id)),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-        members = self.list_study_group_members(group_id)
-        for member in members:
-            if member.user_id == str(target_user_id):
-                return member
-        raise NotFound("study_group_member")
-
-    def update_study_group(
-        self,
-        group_id: str,
-        *,
-        name: str,
-        description: str | None,
-        visibility: str,
-        join_policy: str,
-    ) -> StudyGroup:
-        normalized_name = _normalize_group_name(name)
-        normalized_description = _normalize_group_description(description)
-        normalized_visibility = _normalize_group_visibility(visibility)
-        normalized_join_policy = _normalize_group_join_policy(join_policy)
-        now_text = _utc_now().isoformat()
-        with self._lock:
-            conn = self._connect()
-            try:
-                row = conn.execute(
-                    """
-                    UPDATE study_groups
-                    SET name = ?, description = ?, visibility = ?, join_policy = ?, updated_at = ?
-                    WHERE group_id = ?
-                    RETURNING group_id
-                    """,
-                    (
-                        normalized_name,
-                        normalized_description,
-                        normalized_visibility,
-                        normalized_join_policy,
-                        now_text,
-                        str(group_id),
-                    ),
-                ).fetchone()
-                if row is None:
-                    raise NotFound("study_group")
-                conn.commit()
-            finally:
-                conn.close()
-        return self.get_study_group(group_id, viewer_user_id=None)
-
-    def update_study_group_avatar(self, group_id: str, *, avatar_key: str | None) -> StudyGroup:
-        now_text = _utc_now().isoformat()
-        with self._lock:
-            conn = self._connect()
-            try:
-                row = conn.execute(
-                    "UPDATE study_groups SET avatar_key = ?, updated_at = ? WHERE group_id = ? RETURNING group_id",
-                    (_normalize_avatar_key(avatar_key), now_text, str(group_id)),
-                ).fetchone()
-                if row is None:
-                    raise NotFound("study_group")
-                conn.commit()
-            finally:
-                conn.close()
-        return self.get_study_group(group_id, viewer_user_id=None)
-
-    def set_study_group_status(self, group_id: str, *, status: str) -> StudyGroup:
-        normalized_status = _normalize_group_status(status)
-        now_text = _utc_now().isoformat()
-        with self._lock:
-            conn = self._connect()
-            try:
-                row = conn.execute(
-                    "UPDATE study_groups SET status = ?, updated_at = ? WHERE group_id = ? RETURNING group_id",
-                    (normalized_status, now_text, str(group_id)),
-                ).fetchone()
-                if row is None:
-                    raise NotFound("study_group")
-                conn.commit()
-            finally:
-                conn.close()
-        return self.get_study_group(group_id, viewer_user_id=None)
-
-    def join_study_group(self, group_id: str, *, user_id: str) -> StudyGroup:
-        now_text = _utc_now().isoformat()
-        with self._lock:
-            conn = self._connect()
-            try:
-                group = self._get_study_group(conn, group_id, viewer_user_id=user_id)
-                if group.member_role is not None:
-                    return group
-                if group.status != "active":
-                    raise PreconditionFailure("group is not open for joining")
-                if group.join_policy != "free":
-                    raise PreconditionFailure("this group requires approval or invitation")
-                conn.execute(
-                    "INSERT INTO study_group_members (group_id, user_id, role, joined_at) VALUES (?, ?, 'member', ?)",
-                    (str(group_id), str(user_id), now_text),
-                )
-                conn.commit()
-                return self._get_study_group(conn, group_id, viewer_user_id=user_id)
-            finally:
-                conn.close()
-
-    def leave_study_group(self, group_id: str, *, user_id: str) -> None:
-        with self._lock:
-            conn = self._connect()
-            try:
-                row = conn.execute(
-                    "SELECT role FROM study_group_members WHERE group_id = ? AND user_id = ?",
-                    (str(group_id), str(user_id)),
-                ).fetchone()
-                if row is None:
-                    raise NotFound("study_group_member")
-                if str(row["role"]) == "owner":
-                    raise PreconditionFailure("group owner cannot leave before transferring ownership")
-                conn.execute(
-                    "DELETE FROM study_group_members WHERE group_id = ? AND user_id = ?",
-                    (str(group_id), str(user_id)),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-
-    def list_study_group_members(self, group_id: str) -> tuple[StudyGroupMember, ...]:
-        conn = self._connect()
-        try:
-            rows = conn.execute(
-                """
-                SELECT
-                    m.user_id,
-                    p.public_uid,
-                    p.nickname,
-                    u.email,
-                    p.avatar_key,
-                    m.role,
-                    m.joined_at
-                FROM study_group_members m
-                JOIN users u ON u.user_id = m.user_id
-                JOIN user_profiles p ON p.user_id = m.user_id
-                WHERE m.group_id = ?
-                ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, m.joined_at ASC
-                """,
-                (str(group_id),),
-            ).fetchall()
-        finally:
-            conn.close()
-        return tuple(self._row_to_group_member(row) for row in rows)
-
-    def list_admin_user_study_groups(self, user_id: str, *, limit: int = 100) -> tuple[AdminUserStudyGroup, ...]:
-        conn = self._connect()
-        try:
-            rows = conn.execute(
-                """
-                SELECT
-                    g.group_id,
-                    g.name,
-                    g.description,
-                    g.visibility,
-                    g.join_policy,
-                    g.status,
-                    g.owner_user_id,
-                    owner_profile.public_uid AS owner_public_uid,
-                    owner_profile.nickname AS owner_nickname,
-                    g.avatar_key,
-                    g.created_at,
-                    g.updated_at,
-                    COALESCE(member_counts.member_count, 0) AS member_count,
-                    m.role AS member_role,
-                    m.joined_at
-                FROM study_group_members m
-                JOIN study_groups g ON g.group_id = m.group_id
-                JOIN user_profiles owner_profile ON owner_profile.user_id = g.owner_user_id
-                LEFT JOIN (
-                    SELECT group_id, COUNT(*) AS member_count
-                    FROM study_group_members
-                    GROUP BY group_id
-                ) member_counts ON member_counts.group_id = g.group_id
-                WHERE m.user_id = ?
-                ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, m.joined_at ASC, g.group_id ASC
-                LIMIT ?
-                """,
-                (str(user_id), _normalize_limit(limit)),
-            ).fetchall()
-        finally:
-            conn.close()
-        return tuple(self._row_to_admin_user_group(row) for row in rows)
-
-    def create_study_group_join_request(self, group_id: str, *, requester_user_id: str, message: str | None) -> StudyGroupJoinRequest:
-        normalized_message = _normalize_join_request_message(message)
-        now_text = _utc_now().isoformat()
-        request_id = f"joinreq_{uuid.uuid4().hex}"
-        with self._lock:
-            conn = self._connect()
-            try:
-                group = self._get_study_group(conn, group_id, viewer_user_id=requester_user_id)
-                if group.member_role is not None:
-                    raise PreconditionFailure("you are already a group member")
-                if group.status != "active":
-                    raise PreconditionFailure("group is not open for join requests")
-                if group.join_policy != "approval":
-                    raise PreconditionFailure("this group does not accept join requests")
-                if group.visibility != "public":
-                    raise PreconditionFailure("this group is not discoverable")
-                existing = conn.execute(
-                    """
-                    SELECT 1
-                    FROM study_group_join_requests
-                    WHERE group_id = ? AND requester_user_id = ? AND status = 'pending'
-                    LIMIT 1
-                    """,
-                    (str(group_id), str(requester_user_id)),
-                ).fetchone()
-                if existing is not None:
-                    raise PreconditionFailure("join request already pending")
-                conn.execute(
-                    """
-                    INSERT INTO study_group_join_requests (
-                        request_id, group_id, requester_user_id, message, status, created_at, reviewed_at, reviewed_by_user_id
-                    )
-                    VALUES (?, ?, ?, ?, 'pending', ?, NULL, NULL)
-                    """,
-                    (request_id, str(group_id), str(requester_user_id), normalized_message, now_text),
-                )
-                conn.execute(
-                    "UPDATE study_groups SET updated_at = ? WHERE group_id = ?",
-                    (now_text, str(group_id)),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-        return self.list_study_group_join_requests(group_id, status="pending", limit=200)[0]
-
-    def list_study_group_join_requests(
-        self,
-        group_id: str,
-        *,
-        status: str | None = "pending",
-        limit: int = 100,
-    ) -> tuple[StudyGroupJoinRequest, ...]:
-        clauses = ["r.group_id = ?"]
-        params: list[Any] = [str(group_id)]
-        if status and str(status).strip():
-            clauses.append("r.status = ?")
-            params.append(_normalize_join_request_status(status))
-        conn = self._connect()
-        try:
-            rows = conn.execute(
-                f"""
-                SELECT
-                    r.request_id,
-                    r.group_id,
-                    r.requester_user_id,
-                    p.public_uid AS requester_public_uid,
-                    p.nickname AS requester_nickname,
-                    p.avatar_key AS requester_avatar_key,
-                    r.message,
-                    r.status,
-                    r.created_at,
-                    r.reviewed_at,
-                    r.reviewed_by_user_id
-                FROM study_group_join_requests r
-                JOIN user_profiles p ON p.user_id = r.requester_user_id
-                WHERE {' AND '.join(clauses)}
-                ORDER BY r.created_at DESC, r.request_id DESC
-                LIMIT ?
-                """,
-                (*params, _normalize_limit(limit)),
-            ).fetchall()
-        finally:
-            conn.close()
-        return tuple(self._row_to_join_request(row) for row in rows)
-
-    def review_study_group_join_request(
-        self,
-        group_id: str,
-        *,
-        request_id: str,
-        actor_user_id: str,
-        status: str,
-    ) -> StudyGroupJoinRequest:
-        normalized_status = _normalize_join_request_status(status)
-        if normalized_status not in {"approved", "rejected"}:
-            raise PreconditionFailure("join request review status must be approved or rejected")
-        now_text = _utc_now().isoformat()
-        with self._lock:
-            conn = self._connect()
-            try:
-                group = self._get_study_group(conn, group_id, viewer_user_id=actor_user_id)
-                actor_roles = set(self._roles_by_user_id(conn, (str(actor_user_id),)).get(str(actor_user_id), ()))
-                actor_is_admin = bool(actor_roles.intersection(GLOBAL_ROLES))
-                if not actor_is_admin and group.member_role not in {"owner", "admin"}:
-                    raise PreconditionFailure("only group managers can review join requests")
-                row = conn.execute(
-                    """
-                    SELECT request_id, requester_user_id, status
-                    FROM study_group_join_requests
-                    WHERE request_id = ? AND group_id = ?
-                    """,
-                    (str(request_id), str(group_id)),
-                ).fetchone()
-                if row is None:
-                    raise NotFound("study_group_join_request")
-                if str(row["status"]) != "pending":
-                    raise PreconditionFailure("join request has already been reviewed")
-                if normalized_status == "approved":
-                    existing_member = conn.execute(
-                        "SELECT 1 FROM study_group_members WHERE group_id = ? AND user_id = ? LIMIT 1",
-                        (str(group_id), str(row["requester_user_id"])),
-                    ).fetchone()
-                    if existing_member is None:
-                        conn.execute(
-                            "INSERT INTO study_group_members (group_id, user_id, role, joined_at) VALUES (?, ?, 'member', ?)",
-                            (str(group_id), str(row["requester_user_id"]), now_text),
-                        )
-                conn.execute(
-                    """
-                    UPDATE study_group_join_requests
-                    SET status = ?, reviewed_at = ?, reviewed_by_user_id = ?
-                    WHERE request_id = ? AND group_id = ?
-                    """,
-                    (normalized_status, now_text, str(actor_user_id), str(request_id), str(group_id)),
-                )
-                conn.execute(
-                    "UPDATE study_groups SET updated_at = ? WHERE group_id = ?",
-                    (now_text, str(group_id)),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-        requests = self.list_study_group_join_requests(group_id, status=None, limit=200)
-        for item in requests:
-            if item.request_id == str(request_id):
-                return item
-        raise NotFound("study_group_join_request")
-
-    def list_study_group_posts(self, group_id: str, *, limit: int = 100) -> tuple[StudyGroupPost, ...]:
-        conn = self._connect()
-        try:
-            rows = conn.execute(
-                """
-                SELECT
-                    p.post_id,
-                    p.group_id,
-                    p.author_user_id,
-                    profile.public_uid AS author_public_uid,
-                    profile.nickname AS author_nickname,
-                    profile.avatar_key AS author_avatar_key,
-                    p.kind,
-                    p.content,
-                    p.created_at,
-                    p.updated_at
-                FROM study_group_posts p
-                JOIN user_profiles profile ON profile.user_id = p.author_user_id
-                WHERE p.group_id = ?
-                ORDER BY p.created_at DESC, p.post_id DESC
-                LIMIT ?
-                """,
-                (str(group_id), _normalize_limit(limit)),
-            ).fetchall()
-        finally:
-            conn.close()
-        return tuple(self._row_to_group_post(row) for row in rows)
-
-    def create_study_group_post(self, group_id: str, *, author_user_id: str, kind: str, content: str) -> StudyGroupPost:
-        normalized_kind = _normalize_group_post_kind(kind)
-        normalized_content = _normalize_group_post_content(content)
-        now_text = _utc_now().isoformat()
-        post_id = f"post_{uuid.uuid4().hex}"
-        with self._lock:
-            conn = self._connect()
-            try:
-                membership = conn.execute(
-                    "SELECT role FROM study_group_members WHERE group_id = ? AND user_id = ?",
-                    (str(group_id), str(author_user_id)),
-                ).fetchone()
-                if membership is None:
-                    raise PreconditionFailure("only group members can post")
-                conn.execute(
-                    """
-                    INSERT INTO study_group_posts (post_id, group_id, author_user_id, kind, content, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (post_id, str(group_id), str(author_user_id), normalized_kind, normalized_content, now_text, now_text),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-        conn = self._connect()
-        try:
-            row = conn.execute(
-                """
-                SELECT
-                    p.post_id,
-                    p.group_id,
-                    p.author_user_id,
-                    profile.public_uid AS author_public_uid,
-                    profile.nickname AS author_nickname,
-                    profile.avatar_key AS author_avatar_key,
-                    p.kind,
-                    p.content,
-                    p.created_at,
-                    p.updated_at
-                FROM study_group_posts p
-                JOIN user_profiles profile ON profile.user_id = p.author_user_id
-                WHERE p.post_id = ?
-                """,
-                (post_id,),
-            ).fetchone()
-        finally:
-            conn.close()
-        if row is None:
-            raise NotFound("study_group_post")
-        return self._row_to_group_post(row)
-
-    def delete_study_group_post(self, group_id: str, post_id: str, *, actor_user_id: str) -> StudyGroupPost:
-        now_text = _utc_now().isoformat()
-        with self._lock:
-            conn = self._connect()
-            try:
-                group = self._get_study_group(conn, group_id, viewer_user_id=actor_user_id)
-                actor_roles = set(self._roles_by_user_id(conn, (str(actor_user_id),)).get(str(actor_user_id), ()))
-                actor_is_admin = bool(actor_roles.intersection(GLOBAL_ROLES))
-                row = conn.execute(
-                    """
-                    SELECT
-                        p.post_id,
-                        p.group_id,
-                        p.author_user_id,
-                        profile.public_uid AS author_public_uid,
-                        profile.nickname AS author_nickname,
-                        profile.avatar_key AS author_avatar_key,
-                        p.kind,
-                        p.content,
-                        p.created_at,
-                        p.updated_at
-                    FROM study_group_posts p
-                    JOIN user_profiles profile ON profile.user_id = p.author_user_id
-                    WHERE p.post_id = ? AND p.group_id = ?
-                    """,
-                    (str(post_id), str(group_id)),
-                ).fetchone()
-                if row is None:
-                    raise NotFound("study_group_post")
-                deleted = self._row_to_group_post(row)
-                if not actor_is_admin and group.member_role not in {"owner", "admin"} and str(actor_user_id) != deleted.author_user_id:
-                    raise PreconditionFailure("only the author or group managers can delete this post")
-                conn.execute(
-                    "DELETE FROM study_group_posts WHERE post_id = ? AND group_id = ?",
-                    (str(post_id), str(group_id)),
-                )
-                conn.execute(
-                    "UPDATE study_groups SET updated_at = ? WHERE group_id = ?",
-                    (now_text, str(group_id)),
-                )
-                conn.commit()
-                return deleted
-            finally:
-                conn.close()
-
-    def list_study_group_post_comments(self, group_id: str, *, limit: int = 200) -> tuple[StudyGroupPostComment, ...]:
-        conn = self._connect()
-        try:
-            rows = conn.execute(
-                """
-                SELECT
-                    c.comment_id,
-                    c.group_id,
-                    c.post_id,
-                    c.author_user_id,
-                    profile.public_uid AS author_public_uid,
-                    profile.nickname AS author_nickname,
-                    profile.avatar_key AS author_avatar_key,
-                    c.content,
-                    c.created_at,
-                    c.updated_at
-                FROM study_group_post_comments c
-                JOIN study_group_posts p ON p.post_id = c.post_id AND p.group_id = c.group_id
-                JOIN user_profiles profile ON profile.user_id = c.author_user_id
-                WHERE c.group_id = ?
-                ORDER BY c.created_at ASC, c.comment_id ASC
-                LIMIT ?
-                """,
-                (str(group_id), _normalize_limit(limit, default=200, maximum=500)),
-            ).fetchall()
-        finally:
-            conn.close()
-        return tuple(self._row_to_group_post_comment(row) for row in rows)
-
-    def create_study_group_post_comment(
-        self,
-        group_id: str,
-        post_id: str,
-        *,
-        author_user_id: str,
-        content: str,
-    ) -> StudyGroupPostComment:
-        normalized_content = _normalize_group_post_comment_content(content)
-        now_text = _utc_now().isoformat()
-        comment_id = f"comment_{uuid.uuid4().hex}"
-        with self._lock:
-            conn = self._connect()
-            try:
-                membership = conn.execute(
-                    "SELECT role FROM study_group_members WHERE group_id = ? AND user_id = ?",
-                    (str(group_id), str(author_user_id)),
-                ).fetchone()
-                if membership is None:
-                    raise PreconditionFailure("only group members can comment")
-                post_row = conn.execute(
-                    "SELECT 1 FROM study_group_posts WHERE post_id = ? AND group_id = ?",
-                    (str(post_id), str(group_id)),
-                ).fetchone()
-                if post_row is None:
-                    raise NotFound("study_group_post")
-                conn.execute(
-                    """
-                    INSERT INTO study_group_post_comments (
-                        comment_id, group_id, post_id, author_user_id, content, created_at, updated_at
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (comment_id, str(group_id), str(post_id), str(author_user_id), normalized_content, now_text, now_text),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-        conn = self._connect()
-        try:
-            row = conn.execute(
-                """
-                SELECT
-                    c.comment_id,
-                    c.group_id,
-                    c.post_id,
-                    c.author_user_id,
-                    profile.public_uid AS author_public_uid,
-                    profile.nickname AS author_nickname,
-                    profile.avatar_key AS author_avatar_key,
-                    c.content,
-                    c.created_at,
-                    c.updated_at
-                FROM study_group_post_comments c
-                JOIN user_profiles profile ON profile.user_id = c.author_user_id
-                WHERE c.comment_id = ?
-                """,
-                (comment_id,),
-            ).fetchone()
-        finally:
-            conn.close()
-        if row is None:
-            raise NotFound("study_group_post_comment")
-        return self._row_to_group_post_comment(row)
-
-    def delete_study_group_post_comment(self, group_id: str, comment_id: str, *, actor_user_id: str) -> StudyGroupPostComment:
-        now_text = _utc_now().isoformat()
-        with self._lock:
-            conn = self._connect()
-            try:
-                group = self._get_study_group(conn, group_id, viewer_user_id=actor_user_id)
-                actor_roles = set(self._roles_by_user_id(conn, (str(actor_user_id),)).get(str(actor_user_id), ()))
-                actor_is_admin = bool(actor_roles.intersection(GLOBAL_ROLES))
-                row = conn.execute(
-                    """
-                    SELECT
-                        c.comment_id,
-                        c.group_id,
-                        c.post_id,
-                        c.author_user_id,
-                        profile.public_uid AS author_public_uid,
-                        profile.nickname AS author_nickname,
-                        profile.avatar_key AS author_avatar_key,
-                        c.content,
-                        c.created_at,
-                        c.updated_at
-                    FROM study_group_post_comments c
-                    JOIN user_profiles profile ON profile.user_id = c.author_user_id
-                    WHERE c.comment_id = ? AND c.group_id = ?
-                    """,
-                    (str(comment_id), str(group_id)),
-                ).fetchone()
-                if row is None:
-                    raise NotFound("study_group_post_comment")
-                deleted = self._row_to_group_post_comment(row)
-                if not actor_is_admin and group.member_role not in {"owner", "admin"} and str(actor_user_id) != deleted.author_user_id:
-                    raise PreconditionFailure("only the author or group managers can delete this comment")
-                conn.execute(
-                    "DELETE FROM study_group_post_comments WHERE comment_id = ? AND group_id = ?",
-                    (str(comment_id), str(group_id)),
-                )
-                conn.execute(
-                    "UPDATE study_groups SET updated_at = ? WHERE group_id = ?",
-                    (now_text, str(group_id)),
-                )
-                conn.commit()
-                return deleted
-            finally:
-                conn.close()
 
     def export_snapshot(self) -> dict[str, Any]:
         conn = self._connect()
@@ -2506,6 +2016,78 @@ class SQLiteAuthStore(_AuthStoreImpl):
                     """
                 ).fetchall()
             ]
+            user_service_configs = [
+                {
+                    "userId": str(row["user_id"]),
+                    "serviceKind": str(row["service_kind"]),
+                    "baseUrl": str(row["base_url"]),
+                    "modelName": str(row["model_name"]),
+                    "apiKey": None if row["api_key"] is None else str(row["api_key"]),
+                    "promptAssemblyMode": _normalize_service_prompt_assembly_mode(row["prompt_assembly_mode"]),
+                    "updatedAt": str(row["updated_at"]),
+                }
+                for row in conn.execute(
+                    """
+                    SELECT user_id, service_kind, base_url, model_name, api_key, prompt_assembly_mode, updated_at
+                    FROM user_service_configs
+                    ORDER BY user_id ASC, service_kind ASC
+                    """
+                ).fetchall()
+            ]
+            cloud_accounts = [
+                {
+                    "accountId": str(row["account_id"]),
+                    "userId": str(row["user_id"]),
+                    "provider": str(row["provider"]),
+                    "providerUserId": str(row["provider_user_id"]),
+                    "displayName": str(row["display_name"]),
+                    "avatarUrl": None if row["avatar_url"] is None else str(row["avatar_url"]),
+                    "accessTokenCiphertext": str(row["access_token_ciphertext"]),
+                    "refreshTokenCiphertext": str(row["refresh_token_ciphertext"]),
+                    "expiresAt": None if row["expires_at"] is None else str(row["expires_at"]),
+                    "scope": str(row["scope"]),
+                    "meta": json.loads(str(row["meta_json"]) if row["meta_json"] is not None else "{}"),
+                    "createdAt": str(row["created_at"]),
+                    "updatedAt": str(row["updated_at"]),
+                    "disabledAt": None if row["disabled_at"] is None else str(row["disabled_at"]),
+                }
+                for row in conn.execute(
+                    """
+                    SELECT account_id, user_id, provider, provider_user_id, display_name, avatar_url,
+                           access_token_ciphertext, refresh_token_ciphertext, expires_at, scope,
+                           meta_json, created_at, updated_at, disabled_at
+                    FROM user_cloud_accounts
+                    ORDER BY user_id ASC, provider ASC, updated_at DESC, account_id ASC
+                    """
+                ).fetchall()
+            ]
+            cloud_accounts = [
+                {
+                    "accountId": str(row["account_id"]),
+                    "userId": str(row["user_id"]),
+                    "provider": str(row["provider"]),
+                    "providerUserId": str(row["provider_user_id"]),
+                    "displayName": str(row["display_name"]),
+                    "avatarUrl": None if row["avatar_url"] is None else str(row["avatar_url"]),
+                    "accessTokenCiphertext": str(row["access_token_ciphertext"]),
+                    "refreshTokenCiphertext": str(row["refresh_token_ciphertext"]),
+                    "expiresAt": None if row["expires_at"] is None else str(row["expires_at"]),
+                    "scope": str(row["scope"]),
+                    "meta": json.loads(str(row["meta_json"]) if row["meta_json"] is not None else "{}"),
+                    "createdAt": str(row["created_at"]),
+                    "updatedAt": str(row["updated_at"]),
+                    "disabledAt": None if row["disabled_at"] is None else str(row["disabled_at"]),
+                }
+                for row in conn.execute(
+                    """
+                    SELECT account_id, user_id, provider, provider_user_id, display_name, avatar_url,
+                           access_token_ciphertext, refresh_token_ciphertext, expires_at, scope,
+                           meta_json, created_at, updated_at, disabled_at
+                    FROM user_cloud_accounts
+                    ORDER BY user_id ASC, provider ASC, updated_at DESC, account_id ASC
+                    """
+                ).fetchall()
+            ]
             roles = [
                 {
                     "userId": str(row["user_id"]),
@@ -2517,86 +2099,37 @@ class SQLiteAuthStore(_AuthStoreImpl):
                     "SELECT user_id, role, granted_by_user_id, created_at FROM user_global_roles ORDER BY user_id ASC, role ASC"
                 ).fetchall()
             ]
-            study_groups = [
-                {
-                    "groupId": str(row["group_id"]),
-                    "name": str(row["name"]),
-                    "description": str(row["description"]),
-                    "visibility": str(row["visibility"]),
-                    "joinPolicy": str(row["join_policy"]),
-                    "status": str(row["status"]),
-                    "ownerUserId": str(row["owner_user_id"]),
-                    "avatarKey": None if row["avatar_key"] is None else str(row["avatar_key"]),
-                    "createdAt": str(row["created_at"]),
-                    "updatedAt": str(row["updated_at"]),
-                }
-                for row in conn.execute(
-                    """
-                    SELECT group_id, name, description, visibility, join_policy, status, owner_user_id, avatar_key, created_at, updated_at
-                    FROM study_groups
-                    ORDER BY created_at ASC, group_id ASC
-                    """
-                ).fetchall()
-            ]
-            study_group_members = [
-                {
-                    "groupId": str(row["group_id"]),
-                    "userId": str(row["user_id"]),
-                    "role": str(row["role"]),
-                    "joinedAt": str(row["joined_at"]),
-                }
-                for row in conn.execute(
-                    "SELECT group_id, user_id, role, joined_at FROM study_group_members ORDER BY group_id ASC, user_id ASC"
-                ).fetchall()
-            ]
-            study_group_posts = [
-                {
-                    "postId": str(row["post_id"]),
-                    "groupId": str(row["group_id"]),
-                    "authorUserId": str(row["author_user_id"]),
-                    "kind": str(row["kind"]),
-                    "content": str(row["content"]),
-                    "createdAt": str(row["created_at"]),
-                    "updatedAt": str(row["updated_at"]),
-                }
-                for row in conn.execute(
-                    "SELECT post_id, group_id, author_user_id, kind, content, created_at, updated_at FROM study_group_posts ORDER BY created_at ASC, post_id ASC"
-                ).fetchall()
-            ]
-            study_group_post_comments = [
-                {
-                    "commentId": str(row["comment_id"]),
-                    "groupId": str(row["group_id"]),
-                    "postId": str(row["post_id"]),
-                    "authorUserId": str(row["author_user_id"]),
-                    "content": str(row["content"]),
-                    "createdAt": str(row["created_at"]),
-                    "updatedAt": str(row["updated_at"]),
-                }
-                for row in conn.execute(
-                    """
-                    SELECT comment_id, group_id, post_id, author_user_id, content, created_at, updated_at
-                    FROM study_group_post_comments
-                    ORDER BY created_at ASC, comment_id ASC
-                    """
-                ).fetchall()
-            ]
-            study_group_join_requests = [
+            friend_requests = [
                 {
                     "requestId": str(row["request_id"]),
-                    "groupId": str(row["group_id"]),
                     "requesterUserId": str(row["requester_user_id"]),
+                    "receiverUserId": str(row["receiver_user_id"]),
                     "message": str(row["message"]),
                     "status": str(row["status"]),
                     "createdAt": str(row["created_at"]),
-                    "reviewedAt": None if row["reviewed_at"] is None else str(row["reviewed_at"]),
-                    "reviewedByUserId": None if row["reviewed_by_user_id"] is None else str(row["reviewed_by_user_id"]),
+                    "handledAt": None if row["handled_at"] is None else str(row["handled_at"]),
+                    "handledByUserId": None if row["handled_by_user_id"] is None else str(row["handled_by_user_id"]),
                 }
                 for row in conn.execute(
                     """
-                    SELECT request_id, group_id, requester_user_id, message, status, created_at, reviewed_at, reviewed_by_user_id
-                    FROM study_group_join_requests
+                    SELECT request_id, requester_user_id, receiver_user_id, message, status, created_at, handled_at, handled_by_user_id
+                    FROM friend_requests
                     ORDER BY created_at ASC, request_id ASC
+                    """
+                ).fetchall()
+            ]
+            friendships = [
+                {
+                    "userLowId": str(row["user_low_id"]),
+                    "userHighId": str(row["user_high_id"]),
+                    "createdAt": str(row["created_at"]),
+                    "sourceRequestId": None if row["source_request_id"] is None else str(row["source_request_id"]),
+                }
+                for row in conn.execute(
+                    """
+                    SELECT user_low_id, user_high_id, created_at, source_request_id
+                    FROM friendships
+                    ORDER BY created_at ASC, user_low_id ASC, user_high_id ASC
                     """
                 ).fetchall()
             ]
@@ -2623,12 +2156,11 @@ class SQLiteAuthStore(_AuthStoreImpl):
                 sessions=sessions,
                 memberships=memberships,
                 profiles=profiles,
+                user_service_configs=user_service_configs,
                 roles=roles,
-                study_groups=study_groups,
-                study_group_members=study_group_members,
-                study_group_posts=study_group_posts,
-                study_group_post_comments=study_group_post_comments,
-                study_group_join_requests=study_group_join_requests,
+                cloud_accounts=cloud_accounts,
+                friend_requests=friend_requests,
+                friendships=friendships,
                 admin_action_logs=admin_action_logs,
             )
         finally:
@@ -2639,24 +2171,22 @@ class SQLiteAuthStore(_AuthStoreImpl):
         sessions = list(snapshot.get("sessions", []))
         memberships = list(snapshot.get("projectMemberships", []))
         profiles = list(snapshot.get("userProfiles", []))
+        user_service_configs = list(snapshot.get("userServiceConfigs", []))
         roles = list(snapshot.get("userGlobalRoles", []))
-        study_groups = list(snapshot.get("studyGroups", []))
-        study_group_members = list(snapshot.get("studyGroupMembers", []))
-        study_group_posts = list(snapshot.get("studyGroupPosts", []))
-        study_group_post_comments = list(snapshot.get("studyGroupPostComments", []))
-        study_group_join_requests = list(snapshot.get("studyGroupJoinRequests", []))
+        cloud_accounts = list(snapshot.get("userCloudAccounts", []))
+        friend_requests = list(snapshot.get("friendRequests", []))
+        friendships = list(snapshot.get("friendships", []))
         admin_action_logs = list(snapshot.get("adminActionLogs", []))
         with self._lock:
             conn = self._connect()
             try:
                 if replace:
                     conn.execute("DELETE FROM admin_action_logs")
-                    conn.execute("DELETE FROM study_group_post_comments")
-                    conn.execute("DELETE FROM study_group_join_requests")
-                    conn.execute("DELETE FROM study_group_posts")
-                    conn.execute("DELETE FROM study_group_members")
-                    conn.execute("DELETE FROM study_groups")
+                    conn.execute("DELETE FROM friendships")
+                    conn.execute("DELETE FROM friend_requests")
                     conn.execute("DELETE FROM user_global_roles")
+                    conn.execute("DELETE FROM user_cloud_accounts")
+                    conn.execute("DELETE FROM user_service_configs")
                     conn.execute("DELETE FROM project_memberships")
                     conn.execute("DELETE FROM sessions")
                     conn.execute("DELETE FROM user_profiles")
@@ -2697,6 +2227,68 @@ class SQLiteAuthStore(_AuthStoreImpl):
                     )
                 if not profiles:
                     self._backfill_user_profiles(conn)
+                for item in user_service_configs:
+                    row = dict(item)
+                    conn.execute(
+                        """
+                        INSERT INTO user_service_configs (
+                            user_id, service_kind, base_url, model_name, api_key, prompt_assembly_mode, updated_at
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            str(row.get("userId", "")),
+                            _normalize_service_kind(str(row.get("serviceKind", ""))),
+                            _normalize_service_base_url(str(row.get("baseUrl", ""))),
+                            _normalize_service_model_name(row.get("modelName")),
+                            _normalize_service_api_key(row.get("apiKey")),
+                            _normalize_service_prompt_assembly_mode(row.get("promptAssemblyMode")),
+                            str(row.get("updatedAt", "")),
+                        ),
+                    )
+                for item in cloud_accounts:
+                    row = dict(item)
+                    conn.execute(
+                        """
+                        INSERT INTO user_cloud_accounts (
+                            account_id, user_id, provider, provider_user_id, display_name, avatar_url,
+                            access_token_ciphertext, refresh_token_ciphertext, expires_at, scope,
+                            meta_json, created_at, updated_at, disabled_at
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            str(row.get("accountId", "")),
+                            str(row.get("userId", "")),
+                            _normalize_cloud_account_provider(str(row.get("provider", ""))),
+                            _normalize_cloud_account_text(row.get("providerUserId"), field_name="provider_user_id", maximum=200),
+                            _normalize_cloud_account_text(row.get("displayName"), field_name="display_name", maximum=200),
+                            _normalize_cloud_account_optional_text(row.get("avatarUrl"), maximum=2000),
+                            _normalize_cloud_account_text(
+                                row.get("accessTokenCiphertext"),
+                                field_name="access_token_ciphertext",
+                                maximum=8192,
+                            ),
+                            _normalize_cloud_account_text(
+                                row.get("refreshTokenCiphertext"),
+                                field_name="refresh_token_ciphertext",
+                                maximum=8192,
+                            ),
+                            _normalize_cloud_account_optional_text(row.get("expiresAt")),
+                            _normalize_cloud_account_scope(row.get("scope")),
+                            json.dumps(
+                                _normalize_cloud_account_meta(
+                                    row.get("meta") if isinstance(row.get("meta"), dict) else None
+                                ),
+                                ensure_ascii=False,
+                                separators=(",", ":"),
+                                sort_keys=True,
+                            ),
+                            str(row.get("createdAt", "")),
+                            str(row.get("updatedAt", "")),
+                            _normalize_cloud_account_optional_text(row.get("disabledAt")),
+                        ),
+                    )
                 for item in roles:
                     row = dict(item)
                     conn.execute(
@@ -2741,94 +2333,38 @@ class SQLiteAuthStore(_AuthStoreImpl):
                             str(row.get("createdAt", "")),
                         ),
                     )
-                for item in study_groups:
+                for item in friend_requests:
                     row = dict(item)
                     conn.execute(
                         """
-                        INSERT INTO study_groups (group_id, name, description, visibility, join_policy, status, owner_user_id, avatar_key, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            str(row.get("groupId", "")),
-                            str(row.get("name", "")),
-                            str(row.get("description", "")),
-                            str(row.get("visibility", "public")),
-                            str(row.get("joinPolicy", "free")),
-                            str(row.get("status", "active")),
-                            str(row.get("ownerUserId", "")),
-                            _normalize_avatar_key(row.get("avatarKey")),
-                            str(row.get("createdAt", "")),
-                            str(row.get("updatedAt", row.get("createdAt", ""))),
-                        ),
-                    )
-                for item in study_group_members:
-                    row = dict(item)
-                    conn.execute(
-                        """
-                        INSERT INTO study_group_members (group_id, user_id, role, joined_at)
-                        VALUES (?, ?, ?, ?)
-                        """,
-                        (
-                            str(row.get("groupId", "")),
-                            str(row.get("userId", "")),
-                            str(row.get("role", "member")),
-                            str(row.get("joinedAt", "")),
-                        ),
-                    )
-                for item in study_group_posts:
-                    row = dict(item)
-                    conn.execute(
-                        """
-                        INSERT INTO study_group_posts (post_id, group_id, author_user_id, kind, content, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            str(row.get("postId", "")),
-                            str(row.get("groupId", "")),
-                            str(row.get("authorUserId", "")),
-                            str(row.get("kind", "discussion")),
-                            str(row.get("content", "")),
-                            str(row.get("createdAt", "")),
-                            str(row.get("updatedAt", row.get("createdAt", ""))),
-                        ),
-                    )
-                for item in study_group_post_comments:
-                    row = dict(item)
-                    conn.execute(
-                        """
-                        INSERT INTO study_group_post_comments (
-                            comment_id, group_id, post_id, author_user_id, content, created_at, updated_at
-                        )
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            str(row.get("commentId", "")),
-                            str(row.get("groupId", "")),
-                            str(row.get("postId", "")),
-                            str(row.get("authorUserId", "")),
-                            str(row.get("content", "")),
-                            str(row.get("createdAt", "")),
-                            str(row.get("updatedAt", row.get("createdAt", ""))),
-                        ),
-                    )
-                for item in study_group_join_requests:
-                    row = dict(item)
-                    conn.execute(
-                        """
-                        INSERT INTO study_group_join_requests (
-                            request_id, group_id, requester_user_id, message, status, created_at, reviewed_at, reviewed_by_user_id
+                        INSERT INTO friend_requests (
+                            request_id, requester_user_id, receiver_user_id, message, status, created_at, handled_at, handled_by_user_id
                         )
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             str(row.get("requestId", "")),
-                            str(row.get("groupId", "")),
                             str(row.get("requesterUserId", "")),
+                            str(row.get("receiverUserId", "")),
                             str(row.get("message", "")),
                             str(row.get("status", "pending")),
                             str(row.get("createdAt", "")),
-                            row.get("reviewedAt"),
-                            row.get("reviewedByUserId"),
+                            row.get("handledAt"),
+                            row.get("handledByUserId"),
+                        ),
+                    )
+                for item in friendships:
+                    row = dict(item)
+                    conn.execute(
+                        """
+                        INSERT INTO friendships (user_low_id, user_high_id, created_at, source_request_id)
+                        VALUES (?, ?, ?, ?)
+                        """,
+                        (
+                            str(row.get("userLowId", "")),
+                            str(row.get("userHighId", "")),
+                            str(row.get("createdAt", "")),
+                            row.get("sourceRequestId"),
                         ),
                     )
                 for item in admin_action_logs:
@@ -3082,6 +2618,355 @@ class PostgresAuthStore(_AuthStoreImpl):
             raise NotFound("user")
         return self._row_to_user(row)
 
+    def _get_friend_request(self, conn, request_id: str) -> FriendRequest:
+        row = conn.execute(
+            """
+            SELECT
+                r.request_id,
+                r.requester_user_id,
+                requester.public_uid AS requester_public_uid,
+                requester.nickname AS requester_nickname,
+                requester.bio AS requester_bio,
+                requester.avatar_key AS requester_avatar_key,
+                r.receiver_user_id,
+                receiver.public_uid AS receiver_public_uid,
+                receiver.nickname AS receiver_nickname,
+                receiver.bio AS receiver_bio,
+                receiver.avatar_key AS receiver_avatar_key,
+                r.message,
+                r.status,
+                r.created_at,
+                r.handled_at,
+                r.handled_by_user_id
+            FROM friend_requests r
+            JOIN user_profiles requester ON requester.user_id = r.requester_user_id
+            JOIN user_profiles receiver ON receiver.user_id = r.receiver_user_id
+            WHERE r.request_id = %s
+            """,
+            (str(request_id),),
+        ).fetchone()
+        if row is None:
+            raise NotFound("friend request")
+        return self._row_to_friend_request(row)
+
+    def create_friend_request(
+        self,
+        *,
+        requester_user_id: str,
+        receiver_user_id: str,
+        message: str | None,
+    ) -> FriendRequest:
+        requester_id = str(requester_user_id)
+        receiver_id = str(receiver_user_id)
+        if requester_id == receiver_id:
+            raise PreconditionFailure("cannot send a friend request to yourself")
+        normalized_message = _normalize_friend_request_message(message)
+        now_text = _utc_now().isoformat()
+        user_low_id, user_high_id = _friend_pair(requester_id, receiver_id)
+        with self._lock:
+            with self._connect() as conn:
+                requester = conn.execute(
+                    "SELECT status FROM user_profiles WHERE user_id = %s",
+                    (requester_id,),
+                ).fetchone()
+                if requester is None:
+                    raise NotFound("user")
+                if str(requester["status"]) != "active":
+                    raise PreconditionFailure("only active users can send friend requests")
+
+                receiver = conn.execute(
+                    "SELECT status FROM user_profiles WHERE user_id = %s",
+                    (receiver_id,),
+                ).fetchone()
+                if receiver is None:
+                    raise NotFound("user")
+                if str(receiver["status"]) != "active":
+                    raise PreconditionFailure("only active users can receive friend requests")
+
+                existing_friendship = conn.execute(
+                    "SELECT 1 FROM friendships WHERE user_low_id = %s AND user_high_id = %s LIMIT 1",
+                    (user_low_id, user_high_id),
+                ).fetchone()
+                if existing_friendship is not None:
+                    raise PreconditionFailure("users are already friends")
+
+                reverse_request = conn.execute(
+                    """
+                    SELECT request_id
+                    FROM friend_requests
+                    WHERE requester_user_id = %s AND receiver_user_id = %s AND status = 'pending'
+                    ORDER BY created_at DESC, request_id DESC
+                    LIMIT 1
+                    """,
+                    (receiver_id, requester_id),
+                ).fetchone()
+                if reverse_request is not None:
+                    request_id = str(reverse_request["request_id"])
+                    conn.execute(
+                        """
+                        UPDATE friend_requests
+                        SET status = 'accepted', handled_at = %s, handled_by_user_id = %s
+                        WHERE request_id = %s
+                        """,
+                        (now_text, requester_id, request_id),
+                    )
+                    conn.execute(
+                        """
+                        INSERT INTO friendships (user_low_id, user_high_id, created_at, source_request_id)
+                        VALUES (%s, %s, %s, %s)
+                        ON CONFLICT(user_low_id, user_high_id) DO NOTHING
+                        """,
+                        (user_low_id, user_high_id, now_text, request_id),
+                    )
+                    conn.commit()
+                    return self._get_friend_request(conn, request_id)
+
+                duplicate_request = conn.execute(
+                    """
+                    SELECT 1
+                    FROM friend_requests
+                    WHERE requester_user_id = %s AND receiver_user_id = %s AND status = 'pending'
+                    LIMIT 1
+                    """,
+                    (requester_id, receiver_id),
+                ).fetchone()
+                if duplicate_request is not None:
+                    raise PreconditionFailure("friend request already pending")
+
+                request_id = f"friend_req_{uuid.uuid4().hex}"
+                conn.execute(
+                    """
+                    INSERT INTO friend_requests (
+                        request_id, requester_user_id, receiver_user_id, message, status, created_at, handled_at, handled_by_user_id
+                    )
+                    VALUES (%s, %s, %s, %s, 'pending', %s, NULL, NULL)
+                    """,
+                    (request_id, requester_id, receiver_id, normalized_message, now_text),
+                )
+                conn.commit()
+                return self._get_friend_request(conn, request_id)
+
+    def list_incoming_friend_requests(self, user_id: str, *, limit: int = 100) -> tuple[FriendRequest, ...]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    r.request_id,
+                    r.requester_user_id,
+                    requester.public_uid AS requester_public_uid,
+                    requester.nickname AS requester_nickname,
+                    requester.bio AS requester_bio,
+                    requester.avatar_key AS requester_avatar_key,
+                    r.receiver_user_id,
+                    receiver.public_uid AS receiver_public_uid,
+                    receiver.nickname AS receiver_nickname,
+                    receiver.bio AS receiver_bio,
+                    receiver.avatar_key AS receiver_avatar_key,
+                    r.message,
+                    r.status,
+                    r.created_at,
+                    r.handled_at,
+                    r.handled_by_user_id
+                FROM friend_requests r
+                JOIN user_profiles requester ON requester.user_id = r.requester_user_id
+                JOIN user_profiles receiver ON receiver.user_id = r.receiver_user_id
+                WHERE r.receiver_user_id = %s
+                ORDER BY CASE WHEN r.status = 'pending' THEN 0 ELSE 1 END, r.created_at DESC, r.request_id DESC
+                LIMIT %s
+                """,
+                (str(user_id), _normalize_limit(limit)),
+            ).fetchall()
+        return tuple(self._row_to_friend_request(row) for row in rows)
+
+    def list_outgoing_friend_requests(self, user_id: str, *, limit: int = 100) -> tuple[FriendRequest, ...]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    r.request_id,
+                    r.requester_user_id,
+                    requester.public_uid AS requester_public_uid,
+                    requester.nickname AS requester_nickname,
+                    requester.bio AS requester_bio,
+                    requester.avatar_key AS requester_avatar_key,
+                    r.receiver_user_id,
+                    receiver.public_uid AS receiver_public_uid,
+                    receiver.nickname AS receiver_nickname,
+                    receiver.bio AS receiver_bio,
+                    receiver.avatar_key AS receiver_avatar_key,
+                    r.message,
+                    r.status,
+                    r.created_at,
+                    r.handled_at,
+                    r.handled_by_user_id
+                FROM friend_requests r
+                JOIN user_profiles requester ON requester.user_id = r.requester_user_id
+                JOIN user_profiles receiver ON receiver.user_id = r.receiver_user_id
+                WHERE r.requester_user_id = %s
+                ORDER BY CASE WHEN r.status = 'pending' THEN 0 ELSE 1 END, r.created_at DESC, r.request_id DESC
+                LIMIT %s
+                """,
+                (str(user_id), _normalize_limit(limit)),
+            ).fetchall()
+        return tuple(self._row_to_friend_request(row) for row in rows)
+
+    def accept_friend_request(self, request_id: str, *, actor_user_id: str) -> FriendRequest:
+        now_text = _utc_now().isoformat()
+        with self._lock:
+            with self._connect() as conn:
+                row = conn.execute(
+                    """
+                    SELECT requester_user_id, receiver_user_id, status
+                    FROM friend_requests
+                    WHERE request_id = %s
+                    """,
+                    (str(request_id),),
+                ).fetchone()
+                if row is None:
+                    raise NotFound("friend request")
+                if str(row["receiver_user_id"]) != str(actor_user_id):
+                    raise PreconditionFailure("only the receiver can accept this friend request")
+                if _normalize_friend_request_status(str(row["status"])) != "pending":
+                    raise PreconditionFailure("friend request is not pending")
+
+                user_low_id, user_high_id = _friend_pair(str(row["requester_user_id"]), str(row["receiver_user_id"]))
+                conn.execute(
+                    """
+                    UPDATE friend_requests
+                    SET status = 'accepted', handled_at = %s, handled_by_user_id = %s
+                    WHERE request_id = %s
+                    """,
+                    (now_text, str(actor_user_id), str(request_id)),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO friendships (user_low_id, user_high_id, created_at, source_request_id)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT(user_low_id, user_high_id) DO NOTHING
+                    """,
+                    (user_low_id, user_high_id, now_text, str(request_id)),
+                )
+                conn.commit()
+                return self._get_friend_request(conn, str(request_id))
+
+    def reject_friend_request(self, request_id: str, *, actor_user_id: str) -> FriendRequest:
+        now_text = _utc_now().isoformat()
+        with self._lock:
+            with self._connect() as conn:
+                row = conn.execute(
+                    """
+                    SELECT receiver_user_id, status
+                    FROM friend_requests
+                    WHERE request_id = %s
+                    """,
+                    (str(request_id),),
+                ).fetchone()
+                if row is None:
+                    raise NotFound("friend request")
+                if str(row["receiver_user_id"]) != str(actor_user_id):
+                    raise PreconditionFailure("only the receiver can reject this friend request")
+                if _normalize_friend_request_status(str(row["status"])) != "pending":
+                    raise PreconditionFailure("friend request is not pending")
+
+                conn.execute(
+                    """
+                    UPDATE friend_requests
+                    SET status = 'rejected', handled_at = %s, handled_by_user_id = %s
+                    WHERE request_id = %s
+                    """,
+                    (now_text, str(actor_user_id), str(request_id)),
+                )
+                conn.commit()
+                return self._get_friend_request(conn, str(request_id))
+
+    def cancel_friend_request(self, request_id: str, *, actor_user_id: str) -> FriendRequest:
+        now_text = _utc_now().isoformat()
+        with self._lock:
+            with self._connect() as conn:
+                row = conn.execute(
+                    """
+                    SELECT requester_user_id, status
+                    FROM friend_requests
+                    WHERE request_id = %s
+                    """,
+                    (str(request_id),),
+                ).fetchone()
+                if row is None:
+                    raise NotFound("friend request")
+                if str(row["requester_user_id"]) != str(actor_user_id):
+                    raise PreconditionFailure("only the requester can cancel this friend request")
+                if _normalize_friend_request_status(str(row["status"])) != "pending":
+                    raise PreconditionFailure("friend request is not pending")
+
+                conn.execute(
+                    """
+                    UPDATE friend_requests
+                    SET status = 'cancelled', handled_at = %s, handled_by_user_id = %s
+                    WHERE request_id = %s
+                    """,
+                    (now_text, str(actor_user_id), str(request_id)),
+                )
+                conn.commit()
+                return self._get_friend_request(conn, str(request_id))
+
+    def list_friends_for_user(self, user_id: str, *, limit: int = 100) -> tuple[FriendListItem, ...]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    counterpart.user_id AS user_id,
+                    counterpart.public_uid AS public_uid,
+                    counterpart.nickname AS nickname,
+                    counterpart.bio AS bio,
+                    counterpart.avatar_key AS avatar_key,
+                    f.created_at AS friended_at
+                FROM friendships f
+                JOIN user_profiles counterpart
+                    ON counterpart.user_id = CASE
+                        WHEN f.user_low_id = %s THEN f.user_high_id
+                        ELSE f.user_low_id
+                    END
+                WHERE f.user_low_id = %s OR f.user_high_id = %s
+                ORDER BY f.created_at DESC, counterpart.public_uid ASC
+                LIMIT %s
+                """,
+                (str(user_id), str(user_id), str(user_id), _normalize_limit(limit)),
+            ).fetchall()
+        return tuple(self._row_to_friend_list_item(row) for row in rows)
+
+    def delete_friendship(self, friend_user_id: str, *, actor_user_id: str) -> None:
+        actor_id = str(actor_user_id)
+        friend_id = str(friend_user_id)
+        if actor_id == friend_id:
+            raise PreconditionFailure("cannot delete yourself from friends")
+        user_low_id, user_high_id = _friend_pair(actor_id, friend_id)
+        with self._lock:
+            with self._connect() as conn:
+                existing = conn.execute(
+                    "SELECT 1 FROM friendships WHERE user_low_id = %s AND user_high_id = %s LIMIT 1",
+                    (user_low_id, user_high_id),
+                ).fetchone()
+                if existing is None:
+                    raise NotFound("friendship")
+                conn.execute(
+                    "DELETE FROM friendships WHERE user_low_id = %s AND user_high_id = %s",
+                    (user_low_id, user_high_id),
+                )
+                conn.commit()
+
+    def users_are_friends(self, user_a_id: str, user_b_id: str) -> bool:
+        left = str(user_a_id).strip()
+        right = str(user_b_id).strip()
+        if not left or not right or left == right:
+            return False
+        user_low_id, user_high_id = _friend_pair(left, right)
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM friendships WHERE user_low_id = %s AND user_high_id = %s LIMIT 1",
+                (user_low_id, user_high_id),
+            ).fetchone()
+        return row is not None
+
     def update_user_profile(self, user_id: str, *, nickname: str, bio: str | None) -> AuthUser:
         normalized_nickname = _normalize_nickname(nickname)
         normalized_bio = _normalize_bio(bio)
@@ -3109,6 +2994,286 @@ class PostgresAuthStore(_AuthStoreImpl):
                     raise NotFound("user")
                 conn.commit()
         return self.get_user_by_id(user_id)
+
+    def get_user_service_config(self, user_id: str, *, service_kind: str) -> UserServiceConfig | None:
+        normalized_kind = _normalize_service_kind(service_kind)
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT user_id, service_kind, base_url, model_name, api_key, prompt_assembly_mode, updated_at
+                FROM user_service_configs
+                WHERE user_id = %s AND service_kind = %s
+                """,
+                (str(user_id), normalized_kind),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_user_service_config(row)
+
+    def upsert_user_service_config(
+        self,
+        user_id: str,
+        *,
+        service_kind: str,
+        base_url: str,
+        model_name: str | None,
+        api_key: str | None = None,
+        prompt_assembly_mode: str | None = None,
+        clear_api_key: bool = False,
+    ) -> UserServiceConfig:
+        normalized_kind = _normalize_service_kind(service_kind)
+        normalized_base_url = _normalize_service_base_url(base_url)
+        normalized_model_name = _normalize_service_model_name(model_name)
+        normalized_api_key = _normalize_service_api_key(api_key)
+        normalized_prompt_assembly_mode = _normalize_service_prompt_assembly_mode(prompt_assembly_mode)
+        now_text = _utc_now().isoformat()
+        with self._lock:
+            with self._connect() as conn:
+                user_row = conn.execute("SELECT 1 FROM users WHERE user_id = %s LIMIT 1", (str(user_id),)).fetchone()
+                if user_row is None:
+                    raise NotFound("user")
+                current = conn.execute(
+                    "SELECT api_key FROM user_service_configs WHERE user_id = %s AND service_kind = %s",
+                    (str(user_id), normalized_kind),
+                ).fetchone()
+                if clear_api_key:
+                    resolved_api_key: str | None = None
+                elif normalized_api_key is not None:
+                    resolved_api_key = normalized_api_key
+                elif current is not None:
+                    resolved_api_key = _normalize_service_api_key(current["api_key"])
+                else:
+                    resolved_api_key = None
+                conn.execute(
+                    """
+                    INSERT INTO user_service_configs (
+                        user_id, service_kind, base_url, model_name, api_key, prompt_assembly_mode, updated_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT(user_id, service_kind) DO UPDATE SET
+                        base_url = EXCLUDED.base_url,
+                        model_name = EXCLUDED.model_name,
+                        api_key = EXCLUDED.api_key,
+                        prompt_assembly_mode = EXCLUDED.prompt_assembly_mode,
+                        updated_at = EXCLUDED.updated_at
+                    """,
+                    (
+                        str(user_id),
+                        normalized_kind,
+                        normalized_base_url,
+                        normalized_model_name,
+                        resolved_api_key,
+                        normalized_prompt_assembly_mode,
+                        now_text,
+                    ),
+                )
+                conn.commit()
+        saved = self.get_user_service_config(user_id, service_kind=normalized_kind)
+        if saved is None:
+            raise NotFound("user_service_config")
+        return saved
+
+    def list_user_cloud_accounts(
+        self,
+        user_id: str,
+        *,
+        provider: str | None = None,
+        include_disabled: bool = False,
+    ) -> tuple[CloudAccountBinding, ...]:
+        normalized_provider = None if provider is None else _normalize_cloud_account_provider(provider)
+        sql = """
+            SELECT account_id, user_id, provider, provider_user_id, display_name, avatar_url,
+                   access_token_ciphertext, refresh_token_ciphertext, expires_at, scope,
+                   meta_json, created_at, updated_at, disabled_at
+            FROM user_cloud_accounts
+            WHERE user_id = %s
+        """
+        params: list[Any] = [str(user_id)]
+        if normalized_provider is not None:
+            sql += " AND provider = %s"
+            params.append(normalized_provider)
+        if not include_disabled:
+            sql += " AND disabled_at IS NULL"
+        sql += " ORDER BY updated_at DESC, account_id ASC"
+        try:
+            with self._connect() as conn:
+                rows = conn.execute(sql, tuple(params)).fetchall()
+        except Exception as exc:
+            if _is_missing_optional_auth_table_error(exc):
+                return tuple()
+            raise
+        return tuple(self._row_to_cloud_account_binding(row) for row in rows)
+
+    def get_user_cloud_account(
+        self,
+        user_id: str,
+        *,
+        account_id: str,
+        provider: str | None = None,
+        include_disabled: bool = False,
+    ) -> CloudAccountBinding:
+        normalized_provider = None if provider is None else _normalize_cloud_account_provider(provider)
+        sql = """
+            SELECT account_id, user_id, provider, provider_user_id, display_name, avatar_url,
+                   access_token_ciphertext, refresh_token_ciphertext, expires_at, scope,
+                   meta_json, created_at, updated_at, disabled_at
+            FROM user_cloud_accounts
+            WHERE user_id = %s AND account_id = %s
+        """
+        params: list[Any] = [str(user_id), str(account_id)]
+        if normalized_provider is not None:
+            sql += " AND provider = %s"
+            params.append(normalized_provider)
+        if not include_disabled:
+            sql += " AND disabled_at IS NULL"
+        try:
+            with self._connect() as conn:
+                row = conn.execute(sql, tuple(params)).fetchone()
+        except Exception as exc:
+            if _is_missing_optional_auth_table_error(exc):
+                raise NotFound("cloud account") from exc
+            raise
+        if row is None:
+            raise NotFound("cloud account")
+        return self._row_to_cloud_account_binding(row)
+
+    def get_cloud_account_by_id(self, account_id: str, *, include_disabled: bool = False) -> CloudAccountBinding:
+        sql = """
+            SELECT account_id, user_id, provider, provider_user_id, display_name, avatar_url,
+                   access_token_ciphertext, refresh_token_ciphertext, expires_at, scope,
+                   meta_json, created_at, updated_at, disabled_at
+            FROM user_cloud_accounts
+            WHERE account_id = %s
+        """
+        params: list[Any] = [str(account_id)]
+        if not include_disabled:
+            sql += " AND disabled_at IS NULL"
+        try:
+            with self._connect() as conn:
+                row = conn.execute(sql, tuple(params)).fetchone()
+        except Exception as exc:
+            if _is_missing_optional_auth_table_error(exc):
+                raise NotFound("cloud account") from exc
+            raise
+        if row is None:
+            raise NotFound("cloud account")
+        return self._row_to_cloud_account_binding(row)
+
+    def upsert_user_cloud_account(
+        self,
+        *,
+        user_id: str,
+        provider: str,
+        provider_user_id: str,
+        display_name: str,
+        avatar_url: str | None,
+        access_token_ciphertext: str,
+        refresh_token_ciphertext: str,
+        expires_at: str | None,
+        scope: str = "",
+        meta: dict[str, Any] | None = None,
+    ) -> CloudAccountBinding:
+        normalized_provider = _normalize_cloud_account_provider(provider)
+        normalized_provider_user_id = _normalize_cloud_account_text(
+            provider_user_id,
+            field_name="provider_user_id",
+            maximum=200,
+        )
+        normalized_display_name = _normalize_cloud_account_text(display_name, field_name="display_name", maximum=200)
+        normalized_avatar_url = _normalize_cloud_account_optional_text(avatar_url, maximum=2000)
+        normalized_scope = _normalize_cloud_account_scope(scope)
+        normalized_meta = _normalize_cloud_account_meta(meta)
+        encrypted_access_token = _normalize_cloud_account_text(
+            access_token_ciphertext,
+            field_name="access_token_ciphertext",
+            maximum=8192,
+        )
+        encrypted_refresh_token = _normalize_cloud_account_text(
+            refresh_token_ciphertext,
+            field_name="refresh_token_ciphertext",
+            maximum=8192,
+        )
+        normalized_expires_at = _normalize_cloud_account_optional_text(expires_at)
+        now_text = _utc_now().isoformat()
+        with self._lock:
+            with self._connect() as conn:
+                user_row = conn.execute("SELECT 1 FROM users WHERE user_id = %s LIMIT 1", (str(user_id),)).fetchone()
+                if user_row is None:
+                    raise NotFound("user")
+                existing = conn.execute(
+                    """
+                    SELECT account_id, created_at
+                    FROM user_cloud_accounts
+                    WHERE user_id = %s AND provider = %s AND provider_user_id = %s
+                    """,
+                    (str(user_id), normalized_provider, normalized_provider_user_id),
+                ).fetchone()
+                account_id = str(existing["account_id"]) if existing is not None else f"account_{uuid.uuid4().hex}"
+                created_at = str(existing["created_at"]) if existing is not None else now_text
+                conn.execute(
+                    """
+                    INSERT INTO user_cloud_accounts (
+                        account_id, user_id, provider, provider_user_id, display_name, avatar_url,
+                        access_token_ciphertext, refresh_token_ciphertext, expires_at, scope,
+                        meta_json, created_at, updated_at, disabled_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL)
+                    ON CONFLICT(account_id) DO UPDATE SET
+                        display_name = EXCLUDED.display_name,
+                        avatar_url = EXCLUDED.avatar_url,
+                        access_token_ciphertext = EXCLUDED.access_token_ciphertext,
+                        refresh_token_ciphertext = EXCLUDED.refresh_token_ciphertext,
+                        expires_at = EXCLUDED.expires_at,
+                        scope = EXCLUDED.scope,
+                        meta_json = EXCLUDED.meta_json,
+                        updated_at = EXCLUDED.updated_at,
+                        disabled_at = NULL
+                    """,
+                    (
+                        account_id,
+                        str(user_id),
+                        normalized_provider,
+                        normalized_provider_user_id,
+                        normalized_display_name,
+                        normalized_avatar_url,
+                        encrypted_access_token,
+                        encrypted_refresh_token,
+                        normalized_expires_at,
+                        normalized_scope,
+                        json.dumps(normalized_meta, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
+                        created_at,
+                        now_text,
+                    ),
+                )
+                conn.commit()
+        return self.get_user_cloud_account(
+            str(user_id),
+            account_id=account_id,
+            provider=normalized_provider,
+            include_disabled=True,
+        )
+
+    def disable_user_cloud_account(
+        self,
+        user_id: str,
+        *,
+        account_id: str,
+        provider: str | None = None,
+    ) -> None:
+        normalized_provider = None if provider is None else _normalize_cloud_account_provider(provider)
+        now_text = _utc_now().isoformat()
+        with self._lock:
+            with self._connect() as conn:
+                sql = "UPDATE user_cloud_accounts SET disabled_at = %s, updated_at = %s WHERE user_id = %s AND account_id = %s"
+                params: list[Any] = [now_text, now_text, str(user_id), str(account_id)]
+                if normalized_provider is not None:
+                    sql += " AND provider = %s"
+                    params.append(normalized_provider)
+                sql += " RETURNING account_id"
+                row = conn.execute(sql, tuple(params)).fetchone()
+                if row is None:
+                    raise NotFound("cloud account")
+                conn.commit()
 
     def change_password(self, user_id: str, *, current_password: str, new_password: str) -> None:
         new_hash = self._hash_password(new_password)
@@ -3298,17 +3463,9 @@ class PostgresAuthStore(_AuthStoreImpl):
         with self._connect() as conn:
             users = int(conn.execute("SELECT COUNT(*) AS count FROM users").fetchone()["count"])
             active_users = int(conn.execute("SELECT COUNT(*) AS count FROM user_profiles WHERE status = 'active'").fetchone()["count"])
-            groups = int(conn.execute("SELECT COUNT(*) AS count FROM study_groups").fetchone()["count"])
-            active_groups = int(conn.execute("SELECT COUNT(*) AS count FROM study_groups WHERE status = 'active'").fetchone()["count"])
-            posts = int(conn.execute("SELECT COUNT(*) AS count FROM study_group_posts").fetchone()["count"])
-            comments = int(conn.execute("SELECT COUNT(*) AS count FROM study_group_post_comments").fetchone()["count"])
         return {
             "users": users,
             "activeUsers": active_users,
-            "groups": groups,
-            "activeGroups": active_groups,
-            "posts": posts,
-            "comments": comments,
         }
 
     def record_admin_action(
@@ -3376,1023 +3533,6 @@ class PostgresAuthStore(_AuthStoreImpl):
             ).fetchall()
         return tuple(self._row_to_admin_action_log(row) for row in rows)
 
-    def list_admin_study_group_posts(self, *, search: str | None = None, limit: int = 100) -> tuple[AdminStudyGroupPost, ...]:
-        clauses = ["1 = 1"]
-        params: list[Any] = []
-        if search and str(search).strip():
-            needle = f"%{str(search).strip()}%"
-            clauses.append("(g.name ILIKE %s OR p.content ILIKE %s OR profile.nickname ILIKE %s OR profile.public_uid ILIKE %s)")
-            params.extend((needle, needle, needle, needle))
-        with self._connect() as conn:
-            rows = conn.execute(
-                f"""
-                SELECT
-                    p.post_id,
-                    p.group_id,
-                    g.name AS group_name,
-                    p.author_user_id,
-                    profile.public_uid AS author_public_uid,
-                    profile.nickname AS author_nickname,
-                    profile.avatar_key AS author_avatar_key,
-                    p.kind,
-                    p.content,
-                    p.created_at,
-                    p.updated_at,
-                    COALESCE(comment_counts.comment_count, 0) AS comment_count
-                FROM study_group_posts p
-                JOIN study_groups g ON g.group_id = p.group_id
-                JOIN user_profiles profile ON profile.user_id = p.author_user_id
-                LEFT JOIN (
-                    SELECT post_id, COUNT(*) AS comment_count
-                    FROM study_group_post_comments
-                    GROUP BY post_id
-                ) comment_counts ON comment_counts.post_id = p.post_id
-                WHERE {' AND '.join(clauses)}
-                ORDER BY p.created_at DESC, p.post_id DESC
-                LIMIT %s
-                """,
-                (*params, _normalize_limit(limit)),
-            ).fetchall()
-        return tuple(self._row_to_admin_group_post(row) for row in rows)
-
-    def list_admin_study_group_comments(self, *, search: str | None = None, limit: int = 100) -> tuple[AdminStudyGroupComment, ...]:
-        clauses = ["1 = 1"]
-        params: list[Any] = []
-        if search and str(search).strip():
-            needle = f"%{str(search).strip()}%"
-            clauses.append("(g.name ILIKE %s OR c.content ILIKE %s OR p.content ILIKE %s OR profile.nickname ILIKE %s OR profile.public_uid ILIKE %s)")
-            params.extend((needle, needle, needle, needle, needle))
-        with self._connect() as conn:
-            rows = conn.execute(
-                f"""
-                SELECT
-                    c.comment_id,
-                    c.group_id,
-                    g.name AS group_name,
-                    c.post_id,
-                    p.kind AS post_kind,
-                    SUBSTRING(p.content FROM 1 FOR 120) AS post_excerpt,
-                    c.author_user_id,
-                    profile.public_uid AS author_public_uid,
-                    profile.nickname AS author_nickname,
-                    profile.avatar_key AS author_avatar_key,
-                    c.content,
-                    c.created_at,
-                    c.updated_at
-                FROM study_group_post_comments c
-                JOIN study_group_posts p ON p.post_id = c.post_id AND p.group_id = c.group_id
-                JOIN study_groups g ON g.group_id = c.group_id
-                JOIN user_profiles profile ON profile.user_id = c.author_user_id
-                WHERE {' AND '.join(clauses)}
-                ORDER BY c.created_at DESC, c.comment_id DESC
-                LIMIT %s
-                """,
-                (*params, _normalize_limit(limit)),
-            ).fetchall()
-        return tuple(self._row_to_admin_group_comment(row) for row in rows)
-
-    def delete_admin_study_group_post(self, post_id: str) -> AdminStudyGroupPost:
-        with self._lock:
-            with self._connect() as conn:
-                row = conn.execute(
-                    """
-                    SELECT
-                        p.post_id,
-                        p.group_id,
-                        g.name AS group_name,
-                        p.author_user_id,
-                        profile.public_uid AS author_public_uid,
-                        profile.nickname AS author_nickname,
-                        profile.avatar_key AS author_avatar_key,
-                        p.kind,
-                        p.content,
-                        p.created_at,
-                        p.updated_at,
-                        COALESCE(comment_counts.comment_count, 0) AS comment_count
-                    FROM study_group_posts p
-                    JOIN study_groups g ON g.group_id = p.group_id
-                    JOIN user_profiles profile ON profile.user_id = p.author_user_id
-                    LEFT JOIN (
-                        SELECT post_id, COUNT(*) AS comment_count
-                        FROM study_group_post_comments
-                        GROUP BY post_id
-                    ) comment_counts ON comment_counts.post_id = p.post_id
-                    WHERE p.post_id = %s
-                    """,
-                    (str(post_id),),
-                ).fetchone()
-                if row is None:
-                    raise NotFound("study_group_post")
-                deleted = self._row_to_admin_group_post(row)
-                now_text = _utc_now().isoformat()
-                conn.execute("DELETE FROM study_group_posts WHERE post_id = %s", (str(post_id),))
-                conn.execute("UPDATE study_groups SET updated_at = %s WHERE group_id = %s", (now_text, deleted.group_id))
-                conn.commit()
-                return deleted
-
-    def delete_admin_study_group_comment(self, comment_id: str) -> AdminStudyGroupComment:
-        with self._lock:
-            with self._connect() as conn:
-                row = conn.execute(
-                    """
-                    SELECT
-                        c.comment_id,
-                        c.group_id,
-                        g.name AS group_name,
-                        c.post_id,
-                        p.kind AS post_kind,
-                        SUBSTRING(p.content FROM 1 FOR 120) AS post_excerpt,
-                        c.author_user_id,
-                        profile.public_uid AS author_public_uid,
-                        profile.nickname AS author_nickname,
-                        profile.avatar_key AS author_avatar_key,
-                        c.content,
-                        c.created_at,
-                        c.updated_at
-                    FROM study_group_post_comments c
-                    JOIN study_group_posts p ON p.post_id = c.post_id AND p.group_id = c.group_id
-                    JOIN study_groups g ON g.group_id = c.group_id
-                    JOIN user_profiles profile ON profile.user_id = c.author_user_id
-                    WHERE c.comment_id = %s
-                    """,
-                    (str(comment_id),),
-                ).fetchone()
-                if row is None:
-                    raise NotFound("study_group_post_comment")
-                deleted = self._row_to_admin_group_comment(row)
-                now_text = _utc_now().isoformat()
-                conn.execute("DELETE FROM study_group_post_comments WHERE comment_id = %s", (str(comment_id),))
-                conn.execute("UPDATE study_groups SET updated_at = %s WHERE group_id = %s", (now_text, deleted.group_id))
-                conn.commit()
-                return deleted
-
-    def _get_study_group(self, conn, group_id: str, *, viewer_user_id: str | None) -> StudyGroup:
-        row = conn.execute(
-            """
-            SELECT
-                g.group_id,
-                g.name,
-                g.description,
-                g.visibility,
-                g.join_policy,
-                g.status,
-                g.owner_user_id,
-                owner_profile.public_uid AS owner_public_uid,
-                owner_profile.nickname AS owner_nickname,
-                g.avatar_key,
-                g.created_at,
-                g.updated_at,
-                COALESCE(member_counts.member_count, 0) AS member_count,
-                viewer_member.role AS member_role,
-                viewer_request.status AS join_request_status
-            FROM study_groups g
-            JOIN user_profiles owner_profile ON owner_profile.user_id = g.owner_user_id
-            LEFT JOIN (
-                SELECT group_id, COUNT(*) AS member_count
-                FROM study_group_members
-                GROUP BY group_id
-            ) member_counts ON member_counts.group_id = g.group_id
-            LEFT JOIN study_group_members viewer_member
-                ON viewer_member.group_id = g.group_id AND viewer_member.user_id = %s
-            LEFT JOIN study_group_join_requests viewer_request
-                ON viewer_request.group_id = g.group_id
-               AND viewer_request.requester_user_id = %s
-               AND viewer_request.status = 'pending'
-            WHERE g.group_id = %s
-            """,
-            (
-                None if viewer_user_id is None else str(viewer_user_id),
-                None if viewer_user_id is None else str(viewer_user_id),
-                str(group_id),
-            ),
-        ).fetchone()
-        if row is None:
-            raise NotFound("study_group")
-        return self._row_to_group(row)
-
-    def create_study_group(
-        self,
-        *,
-        owner_user_id: str,
-        name: str,
-        description: str | None,
-        visibility: str,
-        join_policy: str,
-    ) -> StudyGroup:
-        normalized_name = _normalize_group_name(name)
-        normalized_description = _normalize_group_description(description)
-        normalized_visibility = _normalize_group_visibility(visibility)
-        normalized_join_policy = _normalize_group_join_policy(join_policy)
-        now_text = _utc_now().isoformat()
-        group_id = f"group_{uuid.uuid4().hex}"
-        with self._lock:
-            with self._connect() as conn:
-                conn.execute(
-                    """
-                    INSERT INTO study_groups (
-                        group_id, name, description, visibility, join_policy, status, owner_user_id, avatar_key, created_at, updated_at
-                    )
-                    VALUES (%s, %s, %s, %s, %s, 'active', %s, NULL, %s, %s)
-                    """,
-                    (
-                        group_id,
-                        normalized_name,
-                        normalized_description,
-                        normalized_visibility,
-                        normalized_join_policy,
-                        str(owner_user_id),
-                        now_text,
-                        now_text,
-                    ),
-                )
-                conn.execute(
-                    "INSERT INTO study_group_members (group_id, user_id, role, joined_at) VALUES (%s, %s, 'owner', %s)",
-                    (group_id, str(owner_user_id), now_text),
-                )
-                conn.commit()
-        return self.get_study_group(group_id, viewer_user_id=owner_user_id)
-
-    def list_study_groups_for_user(self, user_id: str, *, limit: int = 100) -> tuple[StudyGroup, ...]:
-        with self._connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT
-                    g.group_id,
-                    g.name,
-                    g.description,
-                    g.visibility,
-                    g.join_policy,
-                    g.status,
-                    g.owner_user_id,
-                    owner_profile.public_uid AS owner_public_uid,
-                    owner_profile.nickname AS owner_nickname,
-                    g.avatar_key,
-                    g.created_at,
-                    g.updated_at,
-                    COALESCE(member_counts.member_count, 0) AS member_count,
-                    viewer_member.role AS member_role,
-                    viewer_request.status AS join_request_status
-                FROM study_groups g
-                JOIN user_profiles owner_profile ON owner_profile.user_id = g.owner_user_id
-                LEFT JOIN (
-                    SELECT group_id, COUNT(*) AS member_count
-                    FROM study_group_members
-                    GROUP BY group_id
-                ) member_counts ON member_counts.group_id = g.group_id
-                LEFT JOIN study_group_members viewer_member
-                    ON viewer_member.group_id = g.group_id AND viewer_member.user_id = %s
-                LEFT JOIN study_group_join_requests viewer_request
-                    ON viewer_request.group_id = g.group_id
-                   AND viewer_request.requester_user_id = %s
-                   AND viewer_request.status = 'pending'
-                WHERE g.status <> 'dissolved' AND (g.visibility = 'public' OR viewer_member.user_id IS NOT NULL)
-                ORDER BY CASE WHEN viewer_member.user_id IS NOT NULL THEN 0 ELSE 1 END, g.updated_at DESC, g.group_id ASC
-                LIMIT %s
-                """,
-                (str(user_id), str(user_id), _normalize_limit(limit)),
-            ).fetchall()
-        return tuple(self._row_to_group(row) for row in rows)
-
-    def list_all_study_groups(self, *, search: str | None = None, status: str | None = None, limit: int = 100) -> tuple[StudyGroup, ...]:
-        clauses = ["1 = 1"]
-        params: list[Any] = []
-        if search and str(search).strip():
-            needle = f"%{str(search).strip()}%"
-            clauses.append("(g.name ILIKE %s OR g.description ILIKE %s)")
-            params.extend((needle, needle))
-        if status and str(status).strip():
-            clauses.append("g.status = %s")
-            params.append(_normalize_group_status(status))
-        with self._connect() as conn:
-            rows = conn.execute(
-                f"""
-                SELECT
-                    g.group_id,
-                    g.name,
-                    g.description,
-                    g.visibility,
-                    g.join_policy,
-                    g.status,
-                    g.owner_user_id,
-                    owner_profile.public_uid AS owner_public_uid,
-                    owner_profile.nickname AS owner_nickname,
-                    g.avatar_key,
-                    g.created_at,
-                    g.updated_at,
-                    COALESCE(member_counts.member_count, 0) AS member_count,
-                    NULL AS member_role,
-                    NULL AS join_request_status
-                FROM study_groups g
-                JOIN user_profiles owner_profile ON owner_profile.user_id = g.owner_user_id
-                LEFT JOIN (
-                    SELECT group_id, COUNT(*) AS member_count
-                    FROM study_group_members
-                    GROUP BY group_id
-                ) member_counts ON member_counts.group_id = g.group_id
-                WHERE {' AND '.join(clauses)}
-                ORDER BY g.updated_at DESC, g.group_id ASC
-                LIMIT %s
-                """,
-                (*params, _normalize_limit(limit)),
-            ).fetchall()
-        return tuple(self._row_to_group(row) for row in rows)
-
-    def get_study_group(self, group_id: str, *, viewer_user_id: str | None) -> StudyGroup:
-        with self._connect() as conn:
-            return self._get_study_group(conn, group_id, viewer_user_id=viewer_user_id)
-
-    def get_study_group_member_role(self, group_id: str, user_id: str) -> str | None:
-        with self._connect() as conn:
-            row = conn.execute(
-                "SELECT role FROM study_group_members WHERE group_id = %s AND user_id = %s",
-                (str(group_id), str(user_id)),
-            ).fetchone()
-        return None if row is None else str(row["role"])
-
-    def update_study_group_member_role(
-        self,
-        group_id: str,
-        *,
-        target_user_id: str,
-        role: str,
-        actor_user_id: str,
-    ) -> StudyGroupMember:
-        normalized_role = _normalize_group_member_role(role)
-        now_text = _utc_now().isoformat()
-        with self._lock:
-            with self._connect() as conn:
-                group = self._get_study_group(conn, group_id, viewer_user_id=actor_user_id)
-                actor_roles = set(self._roles_by_user_id(conn, (str(actor_user_id),)).get(str(actor_user_id), ()))
-                actor_is_admin = bool(actor_roles.intersection(GLOBAL_ROLES))
-                if not actor_is_admin and group.member_role != "owner":
-                    raise PreconditionFailure("only the group owner can manage member roles")
-
-                target_row = conn.execute(
-                    "SELECT role FROM study_group_members WHERE group_id = %s AND user_id = %s",
-                    (str(group_id), str(target_user_id)),
-                ).fetchone()
-                if target_row is None:
-                    raise NotFound("study_group_member")
-                current_role = str(target_row["role"])
-
-                if normalized_role == current_role:
-                    conn.commit()
-                elif normalized_role == "owner":
-                    if not actor_is_admin and str(actor_user_id) != str(group.owner_user_id):
-                        raise PreconditionFailure("only the current owner can transfer ownership")
-                    conn.execute(
-                        "UPDATE study_group_members SET role = 'admin' WHERE group_id = %s AND user_id = %s",
-                        (str(group_id), str(group.owner_user_id)),
-                    )
-                    conn.execute(
-                        "UPDATE study_group_members SET role = 'owner' WHERE group_id = %s AND user_id = %s",
-                        (str(group_id), str(target_user_id)),
-                    )
-                    conn.execute(
-                        "UPDATE study_groups SET owner_user_id = %s, updated_at = %s WHERE group_id = %s",
-                        (str(target_user_id), now_text, str(group_id)),
-                    )
-                    conn.commit()
-                else:
-                    if current_role == "owner":
-                        raise PreconditionFailure("transfer ownership before changing the current owner role")
-                    conn.execute(
-                        "UPDATE study_group_members SET role = %s WHERE group_id = %s AND user_id = %s",
-                        (normalized_role, str(group_id), str(target_user_id)),
-                    )
-                    conn.execute(
-                        "UPDATE study_groups SET updated_at = %s WHERE group_id = %s",
-                        (now_text, str(group_id)),
-                    )
-                    conn.commit()
-        members = self.list_study_group_members(group_id)
-        for member in members:
-            if member.user_id == str(target_user_id):
-                return member
-        raise NotFound("study_group_member")
-
-    def remove_study_group_member(self, group_id: str, *, target_user_id: str, actor_user_id: str) -> None:
-        now_text = _utc_now().isoformat()
-        with self._lock:
-            with self._connect() as conn:
-                group = self._get_study_group(conn, group_id, viewer_user_id=actor_user_id)
-                actor_roles = set(self._roles_by_user_id(conn, (str(actor_user_id),)).get(str(actor_user_id), ()))
-                actor_is_admin = bool(actor_roles.intersection(GLOBAL_ROLES))
-                if not actor_is_admin and group.member_role != "owner":
-                    raise PreconditionFailure("only the group owner can remove members")
-
-                target_row = conn.execute(
-                    "SELECT role FROM study_group_members WHERE group_id = %s AND user_id = %s",
-                    (str(group_id), str(target_user_id)),
-                ).fetchone()
-                if target_row is None:
-                    raise NotFound("study_group_member")
-                if str(target_row["role"]) == "owner":
-                    raise PreconditionFailure("group owner cannot be removed")
-                conn.execute(
-                    "DELETE FROM study_group_members WHERE group_id = %s AND user_id = %s",
-                    (str(group_id), str(target_user_id)),
-                )
-                conn.execute(
-                    "UPDATE study_groups SET updated_at = %s WHERE group_id = %s",
-                    (now_text, str(group_id)),
-                )
-                conn.commit()
-
-    def invite_study_group_member(
-        self,
-        group_id: str,
-        *,
-        target_user_id: str,
-        role: str,
-        actor_user_id: str,
-    ) -> StudyGroupMember:
-        normalized_role = _normalize_group_member_role(role)
-        if normalized_role == "owner":
-            raise PreconditionFailure("use ownership transfer to assign the owner role")
-        now_text = _utc_now().isoformat()
-        with self._lock:
-            with self._connect() as conn:
-                group = self._get_study_group(conn, group_id, viewer_user_id=actor_user_id)
-                actor_roles = set(self._roles_by_user_id(conn, (str(actor_user_id),)).get(str(actor_user_id), ()))
-                actor_is_admin = bool(actor_roles.intersection(GLOBAL_ROLES))
-                if not actor_is_admin and group.member_role not in {"owner", "admin"}:
-                    raise PreconditionFailure("only group managers can invite members")
-                target_user = conn.execute(
-                    "SELECT status FROM user_profiles WHERE user_id = %s",
-                    (str(target_user_id),),
-                ).fetchone()
-                if target_user is None:
-                    raise NotFound("user")
-                if str(target_user["status"]) != "active":
-                    raise PreconditionFailure("only active users can be invited")
-                existing = conn.execute(
-                    "SELECT role FROM study_group_members WHERE group_id = %s AND user_id = %s",
-                    (str(group_id), str(target_user_id)),
-                ).fetchone()
-                if existing is not None:
-                    raise PreconditionFailure("user is already a group member")
-                conn.execute(
-                    "INSERT INTO study_group_members (group_id, user_id, role, joined_at) VALUES (%s, %s, %s, %s)",
-                    (str(group_id), str(target_user_id), normalized_role, now_text),
-                )
-                conn.execute(
-                    """
-                    UPDATE study_group_join_requests
-                    SET status = 'approved', reviewed_at = %s, reviewed_by_user_id = %s
-                    WHERE group_id = %s AND requester_user_id = %s AND status = 'pending'
-                    """,
-                    (now_text, str(actor_user_id), str(group_id), str(target_user_id)),
-                )
-                conn.execute(
-                    "UPDATE study_groups SET updated_at = %s WHERE group_id = %s",
-                    (now_text, str(group_id)),
-                )
-                conn.commit()
-        members = self.list_study_group_members(group_id)
-        for member in members:
-            if member.user_id == str(target_user_id):
-                return member
-        raise NotFound("study_group_member")
-
-    def update_study_group(
-        self,
-        group_id: str,
-        *,
-        name: str,
-        description: str | None,
-        visibility: str,
-        join_policy: str,
-    ) -> StudyGroup:
-        normalized_name = _normalize_group_name(name)
-        normalized_description = _normalize_group_description(description)
-        normalized_visibility = _normalize_group_visibility(visibility)
-        normalized_join_policy = _normalize_group_join_policy(join_policy)
-        now_text = _utc_now().isoformat()
-        with self._lock:
-            with self._connect() as conn:
-                row = conn.execute(
-                    """
-                    UPDATE study_groups
-                    SET name = %s, description = %s, visibility = %s, join_policy = %s, updated_at = %s
-                    WHERE group_id = %s
-                    RETURNING group_id
-                    """,
-                    (
-                        normalized_name,
-                        normalized_description,
-                        normalized_visibility,
-                        normalized_join_policy,
-                        now_text,
-                        str(group_id),
-                    ),
-                ).fetchone()
-                if row is None:
-                    raise NotFound("study_group")
-                conn.commit()
-        return self.get_study_group(group_id, viewer_user_id=None)
-
-    def update_study_group_avatar(self, group_id: str, *, avatar_key: str | None) -> StudyGroup:
-        now_text = _utc_now().isoformat()
-        with self._lock:
-            with self._connect() as conn:
-                row = conn.execute(
-                    "UPDATE study_groups SET avatar_key = %s, updated_at = %s WHERE group_id = %s RETURNING group_id",
-                    (_normalize_avatar_key(avatar_key), now_text, str(group_id)),
-                ).fetchone()
-                if row is None:
-                    raise NotFound("study_group")
-                conn.commit()
-        return self.get_study_group(group_id, viewer_user_id=None)
-
-    def set_study_group_status(self, group_id: str, *, status: str) -> StudyGroup:
-        normalized_status = _normalize_group_status(status)
-        now_text = _utc_now().isoformat()
-        with self._lock:
-            with self._connect() as conn:
-                row = conn.execute(
-                    "UPDATE study_groups SET status = %s, updated_at = %s WHERE group_id = %s RETURNING group_id",
-                    (normalized_status, now_text, str(group_id)),
-                ).fetchone()
-                if row is None:
-                    raise NotFound("study_group")
-                conn.commit()
-        return self.get_study_group(group_id, viewer_user_id=None)
-
-    def join_study_group(self, group_id: str, *, user_id: str) -> StudyGroup:
-        now_text = _utc_now().isoformat()
-        with self._lock:
-            with self._connect() as conn:
-                group = self._get_study_group(conn, group_id, viewer_user_id=user_id)
-                if group.member_role is not None:
-                    return group
-                if group.status != "active":
-                    raise PreconditionFailure("group is not open for joining")
-                if group.join_policy != "free":
-                    raise PreconditionFailure("this group requires approval or invitation")
-                conn.execute(
-                    "INSERT INTO study_group_members (group_id, user_id, role, joined_at) VALUES (%s, %s, 'member', %s)",
-                    (str(group_id), str(user_id), now_text),
-                )
-                conn.commit()
-                return self._get_study_group(conn, group_id, viewer_user_id=user_id)
-
-    def leave_study_group(self, group_id: str, *, user_id: str) -> None:
-        with self._lock:
-            with self._connect() as conn:
-                row = conn.execute(
-                    "SELECT role FROM study_group_members WHERE group_id = %s AND user_id = %s",
-                    (str(group_id), str(user_id)),
-                ).fetchone()
-                if row is None:
-                    raise NotFound("study_group_member")
-                if str(row["role"]) == "owner":
-                    raise PreconditionFailure("group owner cannot leave before transferring ownership")
-                conn.execute(
-                    "DELETE FROM study_group_members WHERE group_id = %s AND user_id = %s",
-                    (str(group_id), str(user_id)),
-                )
-                conn.commit()
-
-    def list_study_group_members(self, group_id: str) -> tuple[StudyGroupMember, ...]:
-        with self._connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT
-                    m.user_id,
-                    p.public_uid,
-                    p.nickname,
-                    u.email,
-                    p.avatar_key,
-                    m.role,
-                    m.joined_at
-                FROM study_group_members m
-                JOIN users u ON u.user_id = m.user_id
-                JOIN user_profiles p ON p.user_id = m.user_id
-                WHERE m.group_id = %s
-                ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, m.joined_at ASC
-                """,
-                (str(group_id),),
-            ).fetchall()
-        return tuple(self._row_to_group_member(row) for row in rows)
-
-    def list_admin_user_study_groups(self, user_id: str, *, limit: int = 100) -> tuple[AdminUserStudyGroup, ...]:
-        with self._connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT
-                    g.group_id,
-                    g.name,
-                    g.description,
-                    g.visibility,
-                    g.join_policy,
-                    g.status,
-                    g.owner_user_id,
-                    owner_profile.public_uid AS owner_public_uid,
-                    owner_profile.nickname AS owner_nickname,
-                    g.avatar_key,
-                    g.created_at,
-                    g.updated_at,
-                    COALESCE(member_counts.member_count, 0) AS member_count,
-                    m.role AS member_role,
-                    m.joined_at
-                FROM study_group_members m
-                JOIN study_groups g ON g.group_id = m.group_id
-                JOIN user_profiles owner_profile ON owner_profile.user_id = g.owner_user_id
-                LEFT JOIN (
-                    SELECT group_id, COUNT(*) AS member_count
-                    FROM study_group_members
-                    GROUP BY group_id
-                ) member_counts ON member_counts.group_id = g.group_id
-                WHERE m.user_id = %s
-                ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, m.joined_at ASC, g.group_id ASC
-                LIMIT %s
-                """,
-                (str(user_id), _normalize_limit(limit)),
-            ).fetchall()
-        return tuple(self._row_to_admin_user_group(row) for row in rows)
-
-    def create_study_group_join_request(self, group_id: str, *, requester_user_id: str, message: str | None) -> StudyGroupJoinRequest:
-        normalized_message = _normalize_join_request_message(message)
-        now_text = _utc_now().isoformat()
-        request_id = f"joinreq_{uuid.uuid4().hex}"
-        with self._lock:
-            with self._connect() as conn:
-                group = self._get_study_group(conn, group_id, viewer_user_id=requester_user_id)
-                if group.member_role is not None:
-                    raise PreconditionFailure("you are already a group member")
-                if group.status != "active":
-                    raise PreconditionFailure("group is not open for join requests")
-                if group.join_policy != "approval":
-                    raise PreconditionFailure("this group does not accept join requests")
-                if group.visibility != "public":
-                    raise PreconditionFailure("this group is not discoverable")
-                existing = conn.execute(
-                    """
-                    SELECT 1
-                    FROM study_group_join_requests
-                    WHERE group_id = %s AND requester_user_id = %s AND status = 'pending'
-                    LIMIT 1
-                    """,
-                    (str(group_id), str(requester_user_id)),
-                ).fetchone()
-                if existing is not None:
-                    raise PreconditionFailure("join request already pending")
-                conn.execute(
-                    """
-                    INSERT INTO study_group_join_requests (
-                        request_id, group_id, requester_user_id, message, status, created_at, reviewed_at, reviewed_by_user_id
-                    )
-                    VALUES (%s, %s, %s, %s, 'pending', %s, NULL, NULL)
-                    """,
-                    (request_id, str(group_id), str(requester_user_id), normalized_message, now_text),
-                )
-                conn.execute(
-                    "UPDATE study_groups SET updated_at = %s WHERE group_id = %s",
-                    (now_text, str(group_id)),
-                )
-                conn.commit()
-        requests = self.list_study_group_join_requests(group_id, status="pending", limit=200)
-        for item in requests:
-            if item.request_id == request_id:
-                return item
-        raise NotFound("study_group_join_request")
-
-    def list_study_group_join_requests(
-        self,
-        group_id: str,
-        *,
-        status: str | None = "pending",
-        limit: int = 100,
-    ) -> tuple[StudyGroupJoinRequest, ...]:
-        clauses = ["r.group_id = %s"]
-        params: list[Any] = [str(group_id)]
-        if status and str(status).strip():
-            clauses.append("r.status = %s")
-            params.append(_normalize_join_request_status(status))
-        with self._connect() as conn:
-            rows = conn.execute(
-                f"""
-                SELECT
-                    r.request_id,
-                    r.group_id,
-                    r.requester_user_id,
-                    p.public_uid AS requester_public_uid,
-                    p.nickname AS requester_nickname,
-                    p.avatar_key AS requester_avatar_key,
-                    r.message,
-                    r.status,
-                    r.created_at,
-                    r.reviewed_at,
-                    r.reviewed_by_user_id
-                FROM study_group_join_requests r
-                JOIN user_profiles p ON p.user_id = r.requester_user_id
-                WHERE {' AND '.join(clauses)}
-                ORDER BY r.created_at DESC, r.request_id DESC
-                LIMIT %s
-                """,
-                (*params, _normalize_limit(limit)),
-            ).fetchall()
-        return tuple(self._row_to_join_request(row) for row in rows)
-
-    def review_study_group_join_request(
-        self,
-        group_id: str,
-        *,
-        request_id: str,
-        actor_user_id: str,
-        status: str,
-    ) -> StudyGroupJoinRequest:
-        normalized_status = _normalize_join_request_status(status)
-        if normalized_status not in {"approved", "rejected"}:
-            raise PreconditionFailure("join request review status must be approved or rejected")
-        now_text = _utc_now().isoformat()
-        with self._lock:
-            with self._connect() as conn:
-                group = self._get_study_group(conn, group_id, viewer_user_id=actor_user_id)
-                actor_roles = set(self._roles_by_user_id(conn, (str(actor_user_id),)).get(str(actor_user_id), ()))
-                actor_is_admin = bool(actor_roles.intersection(GLOBAL_ROLES))
-                if not actor_is_admin and group.member_role not in {"owner", "admin"}:
-                    raise PreconditionFailure("only group managers can review join requests")
-                row = conn.execute(
-                    """
-                    SELECT request_id, requester_user_id, status
-                    FROM study_group_join_requests
-                    WHERE request_id = %s AND group_id = %s
-                    """,
-                    (str(request_id), str(group_id)),
-                ).fetchone()
-                if row is None:
-                    raise NotFound("study_group_join_request")
-                if str(row["status"]) != "pending":
-                    raise PreconditionFailure("join request has already been reviewed")
-                if normalized_status == "approved":
-                    existing_member = conn.execute(
-                        "SELECT 1 FROM study_group_members WHERE group_id = %s AND user_id = %s LIMIT 1",
-                        (str(group_id), str(row["requester_user_id"])),
-                    ).fetchone()
-                    if existing_member is None:
-                        conn.execute(
-                            "INSERT INTO study_group_members (group_id, user_id, role, joined_at) VALUES (%s, %s, 'member', %s)",
-                            (str(group_id), str(row["requester_user_id"]), now_text),
-                        )
-                conn.execute(
-                    """
-                    UPDATE study_group_join_requests
-                    SET status = %s, reviewed_at = %s, reviewed_by_user_id = %s
-                    WHERE request_id = %s AND group_id = %s
-                    """,
-                    (normalized_status, now_text, str(actor_user_id), str(request_id), str(group_id)),
-                )
-                conn.execute(
-                    "UPDATE study_groups SET updated_at = %s WHERE group_id = %s",
-                    (now_text, str(group_id)),
-                )
-                conn.commit()
-        requests = self.list_study_group_join_requests(group_id, status=None, limit=200)
-        for item in requests:
-            if item.request_id == str(request_id):
-                return item
-        raise NotFound("study_group_join_request")
-
-    def list_study_group_posts(self, group_id: str, *, limit: int = 100) -> tuple[StudyGroupPost, ...]:
-        with self._connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT
-                    p.post_id,
-                    p.group_id,
-                    p.author_user_id,
-                    profile.public_uid AS author_public_uid,
-                    profile.nickname AS author_nickname,
-                    profile.avatar_key AS author_avatar_key,
-                    p.kind,
-                    p.content,
-                    p.created_at,
-                    p.updated_at
-                FROM study_group_posts p
-                JOIN user_profiles profile ON profile.user_id = p.author_user_id
-                WHERE p.group_id = %s
-                ORDER BY p.created_at DESC, p.post_id DESC
-                LIMIT %s
-                """,
-                (str(group_id), _normalize_limit(limit)),
-            ).fetchall()
-        return tuple(self._row_to_group_post(row) for row in rows)
-
-    def create_study_group_post(self, group_id: str, *, author_user_id: str, kind: str, content: str) -> StudyGroupPost:
-        normalized_kind = _normalize_group_post_kind(kind)
-        normalized_content = _normalize_group_post_content(content)
-        now_text = _utc_now().isoformat()
-        post_id = f"post_{uuid.uuid4().hex}"
-        with self._lock:
-            with self._connect() as conn:
-                membership = conn.execute(
-                    "SELECT role FROM study_group_members WHERE group_id = %s AND user_id = %s",
-                    (str(group_id), str(author_user_id)),
-                ).fetchone()
-                if membership is None:
-                    raise PreconditionFailure("only group members can post")
-                conn.execute(
-                    """
-                    INSERT INTO study_group_posts (post_id, group_id, author_user_id, kind, content, created_at, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    """,
-                    (post_id, str(group_id), str(author_user_id), normalized_kind, normalized_content, now_text, now_text),
-                )
-                conn.commit()
-        with self._connect() as conn:
-            row = conn.execute(
-                """
-                SELECT
-                    p.post_id,
-                    p.group_id,
-                    p.author_user_id,
-                    profile.public_uid AS author_public_uid,
-                    profile.nickname AS author_nickname,
-                    profile.avatar_key AS author_avatar_key,
-                    p.kind,
-                    p.content,
-                    p.created_at,
-                    p.updated_at
-                FROM study_group_posts p
-                JOIN user_profiles profile ON profile.user_id = p.author_user_id
-                WHERE p.post_id = %s
-                """,
-                (post_id,),
-            ).fetchone()
-        if row is None:
-            raise NotFound("study_group_post")
-        return self._row_to_group_post(row)
-
-    def delete_study_group_post(self, group_id: str, post_id: str, *, actor_user_id: str) -> StudyGroupPost:
-        now_text = _utc_now().isoformat()
-        with self._lock:
-            with self._connect() as conn:
-                group = self._get_study_group(conn, group_id, viewer_user_id=actor_user_id)
-                actor_roles = set(self._roles_by_user_id(conn, (str(actor_user_id),)).get(str(actor_user_id), ()))
-                actor_is_admin = bool(actor_roles.intersection(GLOBAL_ROLES))
-                row = conn.execute(
-                    """
-                    SELECT
-                        p.post_id,
-                        p.group_id,
-                        p.author_user_id,
-                        profile.public_uid AS author_public_uid,
-                        profile.nickname AS author_nickname,
-                        profile.avatar_key AS author_avatar_key,
-                        p.kind,
-                        p.content,
-                        p.created_at,
-                        p.updated_at
-                    FROM study_group_posts p
-                    JOIN user_profiles profile ON profile.user_id = p.author_user_id
-                    WHERE p.post_id = %s AND p.group_id = %s
-                    """,
-                    (str(post_id), str(group_id)),
-                ).fetchone()
-                if row is None:
-                    raise NotFound("study_group_post")
-                deleted = self._row_to_group_post(row)
-                if not actor_is_admin and group.member_role not in {"owner", "admin"} and str(actor_user_id) != deleted.author_user_id:
-                    raise PreconditionFailure("only the author or group managers can delete this post")
-                conn.execute(
-                    "DELETE FROM study_group_posts WHERE post_id = %s AND group_id = %s",
-                    (str(post_id), str(group_id)),
-                )
-                conn.execute(
-                    "UPDATE study_groups SET updated_at = %s WHERE group_id = %s",
-                    (now_text, str(group_id)),
-                )
-                conn.commit()
-                return deleted
-
-    def list_study_group_post_comments(self, group_id: str, *, limit: int = 200) -> tuple[StudyGroupPostComment, ...]:
-        with self._connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT
-                    c.comment_id,
-                    c.group_id,
-                    c.post_id,
-                    c.author_user_id,
-                    profile.public_uid AS author_public_uid,
-                    profile.nickname AS author_nickname,
-                    profile.avatar_key AS author_avatar_key,
-                    c.content,
-                    c.created_at,
-                    c.updated_at
-                FROM study_group_post_comments c
-                JOIN study_group_posts p ON p.post_id = c.post_id AND p.group_id = c.group_id
-                JOIN user_profiles profile ON profile.user_id = c.author_user_id
-                WHERE c.group_id = %s
-                ORDER BY c.created_at ASC, c.comment_id ASC
-                LIMIT %s
-                """,
-                (str(group_id), _normalize_limit(limit, default=200, maximum=500)),
-            ).fetchall()
-        return tuple(self._row_to_group_post_comment(row) for row in rows)
-
-    def create_study_group_post_comment(
-        self,
-        group_id: str,
-        post_id: str,
-        *,
-        author_user_id: str,
-        content: str,
-    ) -> StudyGroupPostComment:
-        normalized_content = _normalize_group_post_comment_content(content)
-        now_text = _utc_now().isoformat()
-        comment_id = f"comment_{uuid.uuid4().hex}"
-        with self._lock:
-            with self._connect() as conn:
-                membership = conn.execute(
-                    "SELECT role FROM study_group_members WHERE group_id = %s AND user_id = %s",
-                    (str(group_id), str(author_user_id)),
-                ).fetchone()
-                if membership is None:
-                    raise PreconditionFailure("only group members can comment")
-                post_row = conn.execute(
-                    "SELECT 1 FROM study_group_posts WHERE post_id = %s AND group_id = %s",
-                    (str(post_id), str(group_id)),
-                ).fetchone()
-                if post_row is None:
-                    raise NotFound("study_group_post")
-                conn.execute(
-                    """
-                    INSERT INTO study_group_post_comments (
-                        comment_id, group_id, post_id, author_user_id, content, created_at, updated_at
-                    )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    """,
-                    (comment_id, str(group_id), str(post_id), str(author_user_id), normalized_content, now_text, now_text),
-                )
-                conn.commit()
-        with self._connect() as conn:
-            row = conn.execute(
-                """
-                SELECT
-                    c.comment_id,
-                    c.group_id,
-                    c.post_id,
-                    c.author_user_id,
-                    profile.public_uid AS author_public_uid,
-                    profile.nickname AS author_nickname,
-                    profile.avatar_key AS author_avatar_key,
-                    c.content,
-                    c.created_at,
-                    c.updated_at
-                FROM study_group_post_comments c
-                JOIN user_profiles profile ON profile.user_id = c.author_user_id
-                WHERE c.comment_id = %s
-                """,
-                (comment_id,),
-            ).fetchone()
-        if row is None:
-            raise NotFound("study_group_post_comment")
-        return self._row_to_group_post_comment(row)
-
-    def delete_study_group_post_comment(self, group_id: str, comment_id: str, *, actor_user_id: str) -> StudyGroupPostComment:
-        now_text = _utc_now().isoformat()
-        with self._lock:
-            with self._connect() as conn:
-                group = self._get_study_group(conn, group_id, viewer_user_id=actor_user_id)
-                actor_roles = set(self._roles_by_user_id(conn, (str(actor_user_id),)).get(str(actor_user_id), ()))
-                actor_is_admin = bool(actor_roles.intersection(GLOBAL_ROLES))
-                row = conn.execute(
-                    """
-                    SELECT
-                        c.comment_id,
-                        c.group_id,
-                        c.post_id,
-                        c.author_user_id,
-                        profile.public_uid AS author_public_uid,
-                        profile.nickname AS author_nickname,
-                        profile.avatar_key AS author_avatar_key,
-                        c.content,
-                        c.created_at,
-                        c.updated_at
-                    FROM study_group_post_comments c
-                    JOIN user_profiles profile ON profile.user_id = c.author_user_id
-                    WHERE c.comment_id = %s AND c.group_id = %s
-                    """,
-                    (str(comment_id), str(group_id)),
-                ).fetchone()
-                if row is None:
-                    raise NotFound("study_group_post_comment")
-                deleted = self._row_to_group_post_comment(row)
-                if not actor_is_admin and group.member_role not in {"owner", "admin"} and str(actor_user_id) != deleted.author_user_id:
-                    raise PreconditionFailure("only the author or group managers can delete this comment")
-                conn.execute(
-                    "DELETE FROM study_group_post_comments WHERE comment_id = %s AND group_id = %s",
-                    (str(comment_id), str(group_id)),
-                )
-                conn.execute(
-                    "UPDATE study_groups SET updated_at = %s WHERE group_id = %s",
-                    (now_text, str(group_id)),
-                )
-                conn.commit()
-                return deleted
 
     def export_snapshot(self) -> dict[str, Any]:
         with self._connect() as conn:
@@ -4452,6 +3592,24 @@ class PostgresAuthStore(_AuthStoreImpl):
                     """
                 ).fetchall()
             ]
+            user_service_configs = [
+                {
+                    "userId": str(row["user_id"]),
+                    "serviceKind": str(row["service_kind"]),
+                    "baseUrl": str(row["base_url"]),
+                    "modelName": str(row["model_name"]),
+                    "apiKey": None if row["api_key"] is None else str(row["api_key"]),
+                    "promptAssemblyMode": _normalize_service_prompt_assembly_mode(row["prompt_assembly_mode"]),
+                    "updatedAt": str(row["updated_at"]),
+                }
+                for row in conn.execute(
+                    """
+                    SELECT user_id, service_kind, base_url, model_name, api_key, prompt_assembly_mode, updated_at
+                    FROM user_service_configs
+                    ORDER BY user_id ASC, service_kind ASC
+                    """
+                ).fetchall()
+            ]
             roles = [
                 {
                     "userId": str(row["user_id"]),
@@ -4463,86 +3621,37 @@ class PostgresAuthStore(_AuthStoreImpl):
                     "SELECT user_id, role, granted_by_user_id, created_at FROM user_global_roles ORDER BY user_id ASC, role ASC"
                 ).fetchall()
             ]
-            study_groups = [
-                {
-                    "groupId": str(row["group_id"]),
-                    "name": str(row["name"]),
-                    "description": str(row["description"]),
-                    "visibility": str(row["visibility"]),
-                    "joinPolicy": str(row["join_policy"]),
-                    "status": str(row["status"]),
-                    "ownerUserId": str(row["owner_user_id"]),
-                    "avatarKey": None if row["avatar_key"] is None else str(row["avatar_key"]),
-                    "createdAt": str(row["created_at"]),
-                    "updatedAt": str(row["updated_at"]),
-                }
-                for row in conn.execute(
-                    """
-                    SELECT group_id, name, description, visibility, join_policy, status, owner_user_id, avatar_key, created_at, updated_at
-                    FROM study_groups
-                    ORDER BY created_at ASC, group_id ASC
-                    """
-                ).fetchall()
-            ]
-            study_group_members = [
-                {
-                    "groupId": str(row["group_id"]),
-                    "userId": str(row["user_id"]),
-                    "role": str(row["role"]),
-                    "joinedAt": str(row["joined_at"]),
-                }
-                for row in conn.execute(
-                    "SELECT group_id, user_id, role, joined_at FROM study_group_members ORDER BY group_id ASC, user_id ASC"
-                ).fetchall()
-            ]
-            study_group_posts = [
-                {
-                    "postId": str(row["post_id"]),
-                    "groupId": str(row["group_id"]),
-                    "authorUserId": str(row["author_user_id"]),
-                    "kind": str(row["kind"]),
-                    "content": str(row["content"]),
-                    "createdAt": str(row["created_at"]),
-                    "updatedAt": str(row["updated_at"]),
-                }
-                for row in conn.execute(
-                    "SELECT post_id, group_id, author_user_id, kind, content, created_at, updated_at FROM study_group_posts ORDER BY created_at ASC, post_id ASC"
-                ).fetchall()
-            ]
-            study_group_post_comments = [
-                {
-                    "commentId": str(row["comment_id"]),
-                    "groupId": str(row["group_id"]),
-                    "postId": str(row["post_id"]),
-                    "authorUserId": str(row["author_user_id"]),
-                    "content": str(row["content"]),
-                    "createdAt": str(row["created_at"]),
-                    "updatedAt": str(row["updated_at"]),
-                }
-                for row in conn.execute(
-                    """
-                    SELECT comment_id, group_id, post_id, author_user_id, content, created_at, updated_at
-                    FROM study_group_post_comments
-                    ORDER BY created_at ASC, comment_id ASC
-                    """
-                ).fetchall()
-            ]
-            study_group_join_requests = [
+            friend_requests = [
                 {
                     "requestId": str(row["request_id"]),
-                    "groupId": str(row["group_id"]),
                     "requesterUserId": str(row["requester_user_id"]),
+                    "receiverUserId": str(row["receiver_user_id"]),
                     "message": str(row["message"]),
                     "status": str(row["status"]),
                     "createdAt": str(row["created_at"]),
-                    "reviewedAt": None if row["reviewed_at"] is None else str(row["reviewed_at"]),
-                    "reviewedByUserId": None if row["reviewed_by_user_id"] is None else str(row["reviewed_by_user_id"]),
+                    "handledAt": None if row["handled_at"] is None else str(row["handled_at"]),
+                    "handledByUserId": None if row["handled_by_user_id"] is None else str(row["handled_by_user_id"]),
                 }
                 for row in conn.execute(
                     """
-                    SELECT request_id, group_id, requester_user_id, message, status, created_at, reviewed_at, reviewed_by_user_id
-                    FROM study_group_join_requests
+                    SELECT request_id, requester_user_id, receiver_user_id, message, status, created_at, handled_at, handled_by_user_id
+                    FROM friend_requests
                     ORDER BY created_at ASC, request_id ASC
+                    """
+                ).fetchall()
+            ]
+            friendships = [
+                {
+                    "userLowId": str(row["user_low_id"]),
+                    "userHighId": str(row["user_high_id"]),
+                    "createdAt": str(row["created_at"]),
+                    "sourceRequestId": None if row["source_request_id"] is None else str(row["source_request_id"]),
+                }
+                for row in conn.execute(
+                    """
+                    SELECT user_low_id, user_high_id, created_at, source_request_id
+                    FROM friendships
+                    ORDER BY created_at ASC, user_low_id ASC, user_high_id ASC
                     """
                 ).fetchall()
             ]
@@ -4569,12 +3678,11 @@ class PostgresAuthStore(_AuthStoreImpl):
             sessions=sessions,
             memberships=memberships,
             profiles=profiles,
+            user_service_configs=user_service_configs,
             roles=roles,
-            study_groups=study_groups,
-            study_group_members=study_group_members,
-            study_group_posts=study_group_posts,
-            study_group_post_comments=study_group_post_comments,
-            study_group_join_requests=study_group_join_requests,
+            cloud_accounts=cloud_accounts,
+            friend_requests=friend_requests,
+            friendships=friendships,
             admin_action_logs=admin_action_logs,
         )
 
@@ -4583,23 +3691,21 @@ class PostgresAuthStore(_AuthStoreImpl):
         sessions = list(snapshot.get("sessions", []))
         memberships = list(snapshot.get("projectMemberships", []))
         profiles = list(snapshot.get("userProfiles", []))
+        user_service_configs = list(snapshot.get("userServiceConfigs", []))
         roles = list(snapshot.get("userGlobalRoles", []))
-        study_groups = list(snapshot.get("studyGroups", []))
-        study_group_members = list(snapshot.get("studyGroupMembers", []))
-        study_group_posts = list(snapshot.get("studyGroupPosts", []))
-        study_group_post_comments = list(snapshot.get("studyGroupPostComments", []))
-        study_group_join_requests = list(snapshot.get("studyGroupJoinRequests", []))
+        cloud_accounts = list(snapshot.get("userCloudAccounts", []))
+        friend_requests = list(snapshot.get("friendRequests", []))
+        friendships = list(snapshot.get("friendships", []))
         admin_action_logs = list(snapshot.get("adminActionLogs", []))
         with self._lock:
             with self._connect() as conn:
                 if replace:
                     conn.execute("DELETE FROM admin_action_logs")
-                    conn.execute("DELETE FROM study_group_post_comments")
-                    conn.execute("DELETE FROM study_group_join_requests")
-                    conn.execute("DELETE FROM study_group_posts")
-                    conn.execute("DELETE FROM study_group_members")
-                    conn.execute("DELETE FROM study_groups")
+                    conn.execute("DELETE FROM friendships")
+                    conn.execute("DELETE FROM friend_requests")
                     conn.execute("DELETE FROM user_global_roles")
+                    conn.execute("DELETE FROM user_cloud_accounts")
+                    conn.execute("DELETE FROM user_service_configs")
                     conn.execute("DELETE FROM project_memberships")
                     conn.execute("DELETE FROM sessions")
                     conn.execute("DELETE FROM user_profiles")
@@ -4654,6 +3760,74 @@ class PostgresAuthStore(_AuthStoreImpl):
                         FROM users u
                         ON CONFLICT (user_id) DO NOTHING
                         """
+                    )
+                for item in user_service_configs:
+                    row = dict(item)
+                    conn.execute(
+                        """
+                        INSERT INTO user_service_configs (
+                            user_id, service_kind, base_url, model_name, api_key, prompt_assembly_mode, updated_at
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT(user_id, service_kind) DO UPDATE SET
+                            base_url = EXCLUDED.base_url,
+                            model_name = EXCLUDED.model_name,
+                            api_key = EXCLUDED.api_key,
+                            prompt_assembly_mode = EXCLUDED.prompt_assembly_mode,
+                            updated_at = EXCLUDED.updated_at
+                        """,
+                        (
+                            str(row.get("userId", "")),
+                            _normalize_service_kind(str(row.get("serviceKind", ""))),
+                            _normalize_service_base_url(str(row.get("baseUrl", ""))),
+                            _normalize_service_model_name(row.get("modelName")),
+                            _normalize_service_api_key(row.get("apiKey")),
+                            _normalize_service_prompt_assembly_mode(row.get("promptAssemblyMode")),
+                            str(row.get("updatedAt", "")),
+                        ),
+                    )
+                for item in cloud_accounts:
+                    row = dict(item)
+                    conn.execute(
+                        """
+                        INSERT INTO user_cloud_accounts (
+                            account_id, user_id, provider, provider_user_id, display_name, avatar_url,
+                            access_token_ciphertext, refresh_token_ciphertext, expires_at, scope,
+                            meta_json, created_at, updated_at, disabled_at
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            str(row.get("accountId", "")),
+                            str(row.get("userId", "")),
+                            _normalize_cloud_account_provider(str(row.get("provider", ""))),
+                            _normalize_cloud_account_text(row.get("providerUserId"), field_name="provider_user_id", maximum=200),
+                            _normalize_cloud_account_text(row.get("displayName"), field_name="display_name", maximum=200),
+                            _normalize_cloud_account_optional_text(row.get("avatarUrl"), maximum=2000),
+                            _normalize_cloud_account_text(
+                                row.get("accessTokenCiphertext"),
+                                field_name="access_token_ciphertext",
+                                maximum=8192,
+                            ),
+                            _normalize_cloud_account_text(
+                                row.get("refreshTokenCiphertext"),
+                                field_name="refresh_token_ciphertext",
+                                maximum=8192,
+                            ),
+                            _normalize_cloud_account_optional_text(row.get("expiresAt")),
+                            _normalize_cloud_account_scope(row.get("scope")),
+                            json.dumps(
+                                _normalize_cloud_account_meta(
+                                    row.get("meta") if isinstance(row.get("meta"), dict) else None
+                                ),
+                                ensure_ascii=False,
+                                separators=(",", ":"),
+                                sort_keys=True,
+                            ),
+                            str(row.get("createdAt", "")),
+                            str(row.get("updatedAt", "")),
+                            _normalize_cloud_account_optional_text(row.get("disabledAt")),
+                        ),
                     )
                 for item in roles:
                     row = dict(item)
@@ -4714,127 +3888,41 @@ class PostgresAuthStore(_AuthStoreImpl):
                             str(row.get("createdAt", "")),
                         ),
                     )
-                for item in study_groups:
+                for item in friend_requests:
                     row = dict(item)
                     conn.execute(
                         """
-                        INSERT INTO study_groups (group_id, name, description, visibility, join_policy, status, owner_user_id, avatar_key, created_at, updated_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT(group_id) DO UPDATE SET
-                            name = EXCLUDED.name,
-                            description = EXCLUDED.description,
-                            visibility = EXCLUDED.visibility,
-                            join_policy = EXCLUDED.join_policy,
-                            status = EXCLUDED.status,
-                            owner_user_id = EXCLUDED.owner_user_id,
-                            avatar_key = EXCLUDED.avatar_key,
-                            created_at = EXCLUDED.created_at,
-                            updated_at = EXCLUDED.updated_at
-                        """,
-                        (
-                            str(row.get("groupId", "")),
-                            str(row.get("name", "")),
-                            str(row.get("description", "")),
-                            str(row.get("visibility", "public")),
-                            str(row.get("joinPolicy", "free")),
-                            str(row.get("status", "active")),
-                            str(row.get("ownerUserId", "")),
-                            _normalize_avatar_key(row.get("avatarKey")),
-                            str(row.get("createdAt", "")),
-                            str(row.get("updatedAt", row.get("createdAt", ""))),
-                        ),
-                    )
-                for item in study_group_members:
-                    row = dict(item)
-                    conn.execute(
-                        """
-                        INSERT INTO study_group_members (group_id, user_id, role, joined_at)
-                        VALUES (%s, %s, %s, %s)
-                        ON CONFLICT(group_id, user_id) DO UPDATE SET
-                            role = EXCLUDED.role,
-                            joined_at = EXCLUDED.joined_at
-                        """,
-                        (
-                            str(row.get("groupId", "")),
-                            str(row.get("userId", "")),
-                            str(row.get("role", "member")),
-                            str(row.get("joinedAt", "")),
-                        ),
-                    )
-                for item in study_group_posts:
-                    row = dict(item)
-                    conn.execute(
-                        """
-                        INSERT INTO study_group_posts (post_id, group_id, author_user_id, kind, content, created_at, updated_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT(post_id) DO UPDATE SET
-                            group_id = EXCLUDED.group_id,
-                            author_user_id = EXCLUDED.author_user_id,
-                            kind = EXCLUDED.kind,
-                            content = EXCLUDED.content,
-                            created_at = EXCLUDED.created_at,
-                            updated_at = EXCLUDED.updated_at
-                        """,
-                        (
-                            str(row.get("postId", "")),
-                            str(row.get("groupId", "")),
-                            str(row.get("authorUserId", "")),
-                            str(row.get("kind", "discussion")),
-                            str(row.get("content", "")),
-                            str(row.get("createdAt", "")),
-                            str(row.get("updatedAt", row.get("createdAt", ""))),
-                        ),
-                    )
-                for item in study_group_post_comments:
-                    row = dict(item)
-                    conn.execute(
-                        """
-                        INSERT INTO study_group_post_comments (comment_id, group_id, post_id, author_user_id, content, created_at, updated_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT(comment_id) DO UPDATE SET
-                            group_id = EXCLUDED.group_id,
-                            post_id = EXCLUDED.post_id,
-                            author_user_id = EXCLUDED.author_user_id,
-                            content = EXCLUDED.content,
-                            created_at = EXCLUDED.created_at,
-                            updated_at = EXCLUDED.updated_at
-                        """,
-                        (
-                            str(row.get("commentId", "")),
-                            str(row.get("groupId", "")),
-                            str(row.get("postId", "")),
-                            str(row.get("authorUserId", "")),
-                            str(row.get("content", "")),
-                            str(row.get("createdAt", "")),
-                            str(row.get("updatedAt", row.get("createdAt", ""))),
-                        ),
-                    )
-                for item in study_group_join_requests:
-                    row = dict(item)
-                    conn.execute(
-                        """
-                        INSERT INTO study_group_join_requests (
-                            request_id, group_id, requester_user_id, message, status, created_at, reviewed_at, reviewed_by_user_id
+                        INSERT INTO friend_requests (
+                            request_id, requester_user_id, receiver_user_id, message, status, created_at, handled_at, handled_by_user_id
                         )
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT(request_id) DO UPDATE SET
-                            group_id = EXCLUDED.group_id,
-                            requester_user_id = EXCLUDED.requester_user_id,
-                            message = EXCLUDED.message,
-                            status = EXCLUDED.status,
-                            created_at = EXCLUDED.created_at,
-                            reviewed_at = EXCLUDED.reviewed_at,
-                            reviewed_by_user_id = EXCLUDED.reviewed_by_user_id
                         """,
                         (
                             str(row.get("requestId", "")),
-                            str(row.get("groupId", "")),
                             str(row.get("requesterUserId", "")),
+                            str(row.get("receiverUserId", "")),
                             str(row.get("message", "")),
                             str(row.get("status", "pending")),
                             str(row.get("createdAt", "")),
-                            row.get("reviewedAt"),
-                            row.get("reviewedByUserId"),
+                            row.get("handledAt"),
+                            row.get("handledByUserId"),
+                        ),
+                    )
+                for item in friendships:
+                    row = dict(item)
+                    conn.execute(
+                        """
+                        INSERT INTO friendships (user_low_id, user_high_id, created_at, source_request_id)
+                        VALUES (%s, %s, %s, %s)
+                        ON CONFLICT(user_low_id, user_high_id) DO UPDATE SET
+                            created_at = EXCLUDED.created_at,
+                            source_request_id = EXCLUDED.source_request_id
+                        """,
+                        (
+                            str(row.get("userLowId", "")),
+                            str(row.get("userHighId", "")),
+                            str(row.get("createdAt", "")),
+                            row.get("sourceRequestId"),
                         ),
                     )
                 for item in admin_action_logs:
@@ -4880,14 +3968,31 @@ class PostgresAuthStore(_AuthStoreImpl):
                     health["ok"] = False
                     health["error"] = migration_error
                 else:
-                    conn.execute("SELECT 1 FROM users LIMIT 1").fetchone()
-                    conn.execute("SELECT 1 FROM user_profiles LIMIT 1").fetchone()
-                    conn.execute("SELECT 1 FROM sessions LIMIT 1").fetchone()
-                    conn.execute("SELECT 1 FROM user_global_roles LIMIT 1").fetchone()
-                    health["probe"] = {
-                        "ok": True,
-                        "targets": ["users", "user_profiles", "sessions", "user_global_roles"],
-                    }
+                    required_targets = [
+                        "users",
+                        "user_profiles",
+                        "sessions",
+                        "user_global_roles",
+                    ]
+                    optional_targets = [
+                        "user_service_configs",
+                        "user_cloud_accounts",
+                        "friend_requests",
+                        "friendships",
+                    ]
+                    for table_name in required_targets:
+                        conn.execute(f"SELECT 1 FROM {table_name} LIMIT 1").fetchone()
+                    probed_targets = list(required_targets)
+                    skipped_optional_targets: list[str] = []
+                    for table_name in optional_targets:
+                        if not _postgres_table_exists(conn, table_name):
+                            skipped_optional_targets.append(table_name)
+                            continue
+                        conn.execute(f"SELECT 1 FROM {table_name} LIMIT 1").fetchone()
+                        probed_targets.append(table_name)
+                    health["probe"] = {"ok": True, "targets": probed_targets}
+                    if skipped_optional_targets:
+                        health["probe"]["skippedOptionalTargets"] = skipped_optional_targets
             except Exception as exc:
                 health["ok"] = False
                 health["error"] = str(exc)
@@ -4949,11 +4054,143 @@ class AuthStore:
     def get_user_by_public_uid(self, public_uid: str) -> AuthUser:
         return self._impl.get_user_by_public_uid(public_uid)
 
+    def create_friend_request(
+        self,
+        *,
+        requester_user_id: str,
+        receiver_user_id: str,
+        message: str | None,
+    ) -> FriendRequest:
+        return self._impl.create_friend_request(
+            requester_user_id=requester_user_id,
+            receiver_user_id=receiver_user_id,
+            message=message,
+        )
+
+    def list_incoming_friend_requests(self, user_id: str, *, limit: int = 100) -> tuple[FriendRequest, ...]:
+        return self._impl.list_incoming_friend_requests(user_id, limit=limit)
+
+    def list_outgoing_friend_requests(self, user_id: str, *, limit: int = 100) -> tuple[FriendRequest, ...]:
+        return self._impl.list_outgoing_friend_requests(user_id, limit=limit)
+
+    def accept_friend_request(self, request_id: str, *, actor_user_id: str) -> FriendRequest:
+        return self._impl.accept_friend_request(request_id, actor_user_id=actor_user_id)
+
+    def reject_friend_request(self, request_id: str, *, actor_user_id: str) -> FriendRequest:
+        return self._impl.reject_friend_request(request_id, actor_user_id=actor_user_id)
+
+    def cancel_friend_request(self, request_id: str, *, actor_user_id: str) -> FriendRequest:
+        return self._impl.cancel_friend_request(request_id, actor_user_id=actor_user_id)
+
+    def list_friends_for_user(self, user_id: str, *, limit: int = 100) -> tuple[FriendListItem, ...]:
+        return self._impl.list_friends_for_user(user_id, limit=limit)
+
+    def delete_friendship(self, friend_user_id: str, *, actor_user_id: str) -> None:
+        self._impl.delete_friendship(friend_user_id, actor_user_id=actor_user_id)
+
+    def users_are_friends(self, user_a_id: str, user_b_id: str) -> bool:
+        return self._impl.users_are_friends(user_a_id, user_b_id)
+
     def update_user_profile(self, user_id: str, *, nickname: str, bio: str | None) -> AuthUser:
         return self._impl.update_user_profile(user_id, nickname=nickname, bio=bio)
 
     def update_user_avatar(self, user_id: str, *, avatar_key: str | None) -> AuthUser:
         return self._impl.update_user_avatar(user_id, avatar_key=avatar_key)
+
+    def get_user_service_config(self, user_id: str, *, service_kind: str) -> UserServiceConfig | None:
+        return self._impl.get_user_service_config(user_id, service_kind=service_kind)
+
+    def upsert_user_service_config(
+        self,
+        user_id: str,
+        *,
+        service_kind: str,
+        base_url: str,
+        model_name: str | None,
+        api_key: str | None = None,
+        prompt_assembly_mode: str | None = None,
+        clear_api_key: bool = False,
+    ) -> UserServiceConfig:
+        return self._impl.upsert_user_service_config(
+            user_id,
+            service_kind=service_kind,
+            base_url=base_url,
+            model_name=model_name,
+            api_key=api_key,
+            prompt_assembly_mode=prompt_assembly_mode,
+            clear_api_key=clear_api_key,
+        )
+
+    def list_user_cloud_accounts(
+        self,
+        user_id: str,
+        *,
+        provider: str | None = None,
+        include_disabled: bool = False,
+    ) -> tuple[CloudAccountBinding, ...]:
+        return self._impl.list_user_cloud_accounts(
+            user_id,
+            provider=provider,
+            include_disabled=include_disabled,
+        )
+
+    def get_cloud_account_by_id(self, account_id: str, *, include_disabled: bool = False) -> CloudAccountBinding:
+        return self._impl.get_cloud_account_by_id(account_id, include_disabled=include_disabled)
+
+    def get_user_cloud_account(
+        self,
+        user_id: str,
+        *,
+        account_id: str,
+        provider: str | None = None,
+        include_disabled: bool = False,
+    ) -> CloudAccountBinding:
+        return self._impl.get_user_cloud_account(
+            user_id,
+            account_id=account_id,
+            provider=provider,
+            include_disabled=include_disabled,
+        )
+
+    def upsert_user_cloud_account(
+        self,
+        *,
+        user_id: str,
+        provider: str,
+        provider_user_id: str,
+        display_name: str,
+        avatar_url: str | None,
+        access_token_ciphertext: str,
+        refresh_token_ciphertext: str,
+        expires_at: str | None,
+        scope: str = "",
+        meta: dict[str, Any] | None = None,
+    ) -> CloudAccountBinding:
+        return self._impl.upsert_user_cloud_account(
+            user_id=user_id,
+            provider=provider,
+            provider_user_id=provider_user_id,
+            display_name=display_name,
+            avatar_url=avatar_url,
+            access_token_ciphertext=access_token_ciphertext,
+            refresh_token_ciphertext=refresh_token_ciphertext,
+            expires_at=expires_at,
+            scope=scope,
+            meta=meta,
+        )
+
+    def disable_user_cloud_account(
+        self,
+        user_id: str,
+        *,
+        account_id: str,
+        provider: str | None = None,
+    ) -> None:
+        self._impl.disable_user_cloud_account(
+            user_id,
+            account_id=account_id,
+            provider=provider,
+        )
 
     def change_password(self, user_id: str, *, current_password: str, new_password: str) -> None:
         self._impl.change_password(user_id, current_password=current_password, new_password=new_password)
@@ -5003,176 +4240,6 @@ class AuthStore:
     def list_admin_action_logs(self, *, limit: int = 100) -> tuple[AdminActionLog, ...]:
         return self._impl.list_admin_action_logs(limit=limit)
 
-    def list_admin_study_group_posts(self, *, search: str | None = None, limit: int = 100) -> tuple[AdminStudyGroupPost, ...]:
-        return self._impl.list_admin_study_group_posts(search=search, limit=limit)
-
-    def list_admin_study_group_comments(
-        self,
-        *,
-        search: str | None = None,
-        limit: int = 100,
-    ) -> tuple[AdminStudyGroupComment, ...]:
-        return self._impl.list_admin_study_group_comments(search=search, limit=limit)
-
-    def delete_admin_study_group_post(self, post_id: str) -> AdminStudyGroupPost:
-        return self._impl.delete_admin_study_group_post(post_id)
-
-    def delete_admin_study_group_comment(self, comment_id: str) -> AdminStudyGroupComment:
-        return self._impl.delete_admin_study_group_comment(comment_id)
-
-    def create_study_group(
-        self,
-        *,
-        owner_user_id: str,
-        name: str,
-        description: str | None,
-        visibility: str,
-        join_policy: str,
-    ) -> StudyGroup:
-        return self._impl.create_study_group(
-            owner_user_id=owner_user_id,
-            name=name,
-            description=description,
-            visibility=visibility,
-            join_policy=join_policy,
-        )
-
-    def list_study_groups_for_user(self, user_id: str, *, limit: int = 100) -> tuple[StudyGroup, ...]:
-        return self._impl.list_study_groups_for_user(user_id, limit=limit)
-
-    def list_all_study_groups(self, *, search: str | None = None, status: str | None = None, limit: int = 100) -> tuple[StudyGroup, ...]:
-        return self._impl.list_all_study_groups(search=search, status=status, limit=limit)
-
-    def get_study_group(self, group_id: str, *, viewer_user_id: str | None) -> StudyGroup:
-        return self._impl.get_study_group(group_id, viewer_user_id=viewer_user_id)
-
-    def get_study_group_member_role(self, group_id: str, user_id: str) -> str | None:
-        return self._impl.get_study_group_member_role(group_id, user_id)
-
-    def update_study_group_member_role(
-        self,
-        group_id: str,
-        *,
-        target_user_id: str,
-        role: str,
-        actor_user_id: str,
-    ) -> StudyGroupMember:
-        return self._impl.update_study_group_member_role(
-            group_id,
-            target_user_id=target_user_id,
-            role=role,
-            actor_user_id=actor_user_id,
-        )
-
-    def remove_study_group_member(self, group_id: str, *, target_user_id: str, actor_user_id: str) -> None:
-        self._impl.remove_study_group_member(group_id, target_user_id=target_user_id, actor_user_id=actor_user_id)
-
-    def invite_study_group_member(
-        self,
-        group_id: str,
-        *,
-        target_user_id: str,
-        role: str,
-        actor_user_id: str,
-    ) -> StudyGroupMember:
-        return self._impl.invite_study_group_member(
-            group_id,
-            target_user_id=target_user_id,
-            role=role,
-            actor_user_id=actor_user_id,
-        )
-
-    def update_study_group(
-        self,
-        group_id: str,
-        *,
-        name: str,
-        description: str | None,
-        visibility: str,
-        join_policy: str,
-    ) -> StudyGroup:
-        return self._impl.update_study_group(
-            group_id,
-            name=name,
-            description=description,
-            visibility=visibility,
-            join_policy=join_policy,
-        )
-
-    def update_study_group_avatar(self, group_id: str, *, avatar_key: str | None) -> StudyGroup:
-        return self._impl.update_study_group_avatar(group_id, avatar_key=avatar_key)
-
-    def set_study_group_status(self, group_id: str, *, status: str) -> StudyGroup:
-        return self._impl.set_study_group_status(group_id, status=status)
-
-    def join_study_group(self, group_id: str, *, user_id: str) -> StudyGroup:
-        return self._impl.join_study_group(group_id, user_id=user_id)
-
-    def leave_study_group(self, group_id: str, *, user_id: str) -> None:
-        self._impl.leave_study_group(group_id, user_id=user_id)
-
-    def list_study_group_members(self, group_id: str) -> tuple[StudyGroupMember, ...]:
-        return self._impl.list_study_group_members(group_id)
-
-    def list_admin_user_study_groups(self, user_id: str, *, limit: int = 100) -> tuple[AdminUserStudyGroup, ...]:
-        return self._impl.list_admin_user_study_groups(user_id, limit=limit)
-
-    def create_study_group_join_request(self, group_id: str, *, requester_user_id: str, message: str | None) -> StudyGroupJoinRequest:
-        return self._impl.create_study_group_join_request(group_id, requester_user_id=requester_user_id, message=message)
-
-    def list_study_group_join_requests(
-        self,
-        group_id: str,
-        *,
-        status: str | None = "pending",
-        limit: int = 100,
-    ) -> tuple[StudyGroupJoinRequest, ...]:
-        return self._impl.list_study_group_join_requests(group_id, status=status, limit=limit)
-
-    def review_study_group_join_request(
-        self,
-        group_id: str,
-        *,
-        request_id: str,
-        actor_user_id: str,
-        status: str,
-    ) -> StudyGroupJoinRequest:
-        return self._impl.review_study_group_join_request(
-            group_id,
-            request_id=request_id,
-            actor_user_id=actor_user_id,
-            status=status,
-        )
-
-    def list_study_group_posts(self, group_id: str, *, limit: int = 100) -> tuple[StudyGroupPost, ...]:
-        return self._impl.list_study_group_posts(group_id, limit=limit)
-
-    def list_study_group_post_comments(self, group_id: str, *, limit: int = 200) -> tuple[StudyGroupPostComment, ...]:
-        return self._impl.list_study_group_post_comments(group_id, limit=limit)
-
-    def create_study_group_post(self, group_id: str, *, author_user_id: str, kind: str, content: str) -> StudyGroupPost:
-        return self._impl.create_study_group_post(group_id, author_user_id=author_user_id, kind=kind, content=content)
-
-    def delete_study_group_post(self, group_id: str, post_id: str, *, actor_user_id: str) -> StudyGroupPost:
-        return self._impl.delete_study_group_post(group_id, post_id, actor_user_id=actor_user_id)
-
-    def create_study_group_post_comment(
-        self,
-        group_id: str,
-        post_id: str,
-        *,
-        author_user_id: str,
-        content: str,
-    ) -> StudyGroupPostComment:
-        return self._impl.create_study_group_post_comment(
-            group_id,
-            post_id,
-            author_user_id=author_user_id,
-            content=content,
-        )
-
-    def delete_study_group_post_comment(self, group_id: str, comment_id: str, *, actor_user_id: str) -> StudyGroupPostComment:
-        return self._impl.delete_study_group_post_comment(group_id, comment_id, actor_user_id=actor_user_id)
 
     def export_snapshot(self) -> dict[str, Any]:
         return self._impl.export_snapshot()

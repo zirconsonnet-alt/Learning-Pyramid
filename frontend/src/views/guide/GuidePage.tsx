@@ -244,7 +244,7 @@ function renderInline(text: string, keyPrefix: string) {
       pieces.push(
         <code
           key={`${keyPrefix}-code-${pieceIndex}`}
-          className="rounded-md bg-[#eef4ff] px-1.5 py-0.5 font-mono text-[0.92em] text-[#1e3a5f]"
+          className="rounded-md border border-[color:var(--theme-subtle-border)] bg-[color:var(--theme-subtle-bg)] px-1.5 py-0.5 font-mono text-[0.92em] text-[color:var(--theme-subtle-text)]"
         >
           {matchedText.slice(1, -1)}
         </code>,
@@ -315,7 +315,7 @@ function MarkdownContent({ blocks }: { blocks: MarkdownBlock[] }) {
 
         if (block.type === "paragraph") {
           return (
-            <p key={`paragraph-${blockIndex}`} className="whitespace-pre-wrap text-[15px] leading-7 text-[#243246]">
+            <p key={`paragraph-${blockIndex}`} className="whitespace-pre-wrap text-[15px] leading-7 text-foreground">
               {renderInline(block.text, `paragraph-${blockIndex}`)}
             </p>
           )
@@ -327,7 +327,7 @@ function MarkdownContent({ blocks }: { blocks: MarkdownBlock[] }) {
             <ListTag
               key={`list-${blockIndex}`}
               className={cn(
-                "space-y-2 pl-6 text-[15px] leading-7 text-[#243246]",
+                "space-y-2 pl-6 text-[15px] leading-7 text-foreground",
                 block.ordered ? "list-decimal" : "list-disc",
               )}
             >
@@ -342,7 +342,7 @@ function MarkdownContent({ blocks }: { blocks: MarkdownBlock[] }) {
           return (
             <div
               key={`math-${blockIndex}`}
-              className="overflow-x-auto rounded-[1.25rem] border border-[#d9e5f2] bg-[#f7faff] px-4 py-4 text-[#1e3a5f]"
+              className="overflow-x-auto rounded-[1.25rem] border border-[color:var(--theme-subtle-border)] bg-[color:var(--theme-subtle-bg)] px-4 py-4 text-[color:var(--theme-subtle-text)]"
               dangerouslySetInnerHTML={{ __html: renderMathHtml(block.text, true) }}
             />
           )
@@ -352,7 +352,7 @@ function MarkdownContent({ blocks }: { blocks: MarkdownBlock[] }) {
           return (
             <pre
               key={`code-${blockIndex}`}
-              className="overflow-x-auto rounded-[1.25rem] border border-[#d9e5f2] bg-[#f7faff] px-4 py-4 text-sm leading-6 text-[#1e3a5f]"
+              className="overflow-x-auto rounded-[1.25rem] border border-[color:var(--theme-subtle-border)] bg-[color:var(--theme-subtle-bg)] px-4 py-4 text-sm leading-6 text-[color:var(--theme-subtle-text)]"
             >
               <code>{block.text}</code>
             </pre>
@@ -369,10 +369,6 @@ export function GuidePage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const requestedSlug = searchParams.get("doc")
   const activeDoc = docs.find((item) => item.slug === requestedSlug) ?? docs[0]
-  const outlineLevelCap = 3
-  const outline = activeDoc.parsed.headings.filter(
-    (heading, index) => index > 0 && heading.text !== "目录" && heading.level <= outlineLevelCap,
-  )
 
   function selectDoc(slug: string) {
     const nextSearchParams = new URLSearchParams(searchParams)
@@ -388,13 +384,10 @@ export function GuidePage() {
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-6 xl:grid-cols-[18rem_minmax(0,1fr)_16rem]">
+      <div className="grid gap-6 xl:grid-cols-[18rem_minmax(0,1fr)]">
         <aside className="xl:sticky xl:top-28 xl:self-start">
           <section className="theme-card p-4">
-            <div className="mb-3">
-              <div className="text-sm font-semibold text-foreground">文档目录</div>
-              <p className="mt-1 text-xs leading-5 text-muted-foreground">当前页面收录的用户文档入口。</p>
-            </div>
+            <div className="mb-3 text-sm font-semibold text-foreground">文档目录</div>
             <div className="space-y-2">
               {docs.map((doc) => {
                 const isActive = doc.slug === activeDoc.slug
@@ -406,18 +399,11 @@ export function GuidePage() {
                     className={cn(
                       "w-full rounded-2xl border p-4 text-left transition-colors",
                       isActive
-                        ? "border-primary/15 bg-[#eef4ff] shadow-[0_14px_30px_-26px_rgba(30,58,95,0.38)]"
-                        : "border-border/70 bg-white/90 hover:border-primary/15 hover:bg-accent/60",
+                        ? "border-primary/15 bg-primary/10 shadow-[0_14px_30px_-26px_rgba(30,58,95,0.38)]"
+                        : "border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] hover:border-primary/15 hover:bg-accent/60",
                     )}
                   >
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="font-medium text-foreground">{doc.label}</div>
-                      <span className={cn("theme-meta", isActive && "border-primary/15 bg-white text-primary")}>
-                        {doc.audience}
-                      </span>
-                    </div>
-                    <p className="mt-2 text-sm leading-6 text-muted-foreground">{doc.summary}</p>
-                    <div className="mt-3 text-xs text-[#486284]">{doc.sourcePath}</div>
+                    <div className="font-medium text-foreground">{doc.label}</div>
                   </button>
                 )
               })}
@@ -426,52 +412,10 @@ export function GuidePage() {
         </aside>
 
         <section className="theme-card-main overflow-hidden">
-          <div className="theme-card-header px-6 py-6 sm:px-8">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-              <div className="space-y-2">
-                <div className="theme-meta-strong">{activeDoc.audience}</div>
-                <div>
-                  <h2 className="text-2xl font-semibold tracking-tight text-foreground">{activeDoc.label}</h2>
-                  <p className="mt-2 max-w-3xl text-sm leading-7 text-muted-foreground">{activeDoc.summary}</p>
-                </div>
-              </div>
-              <div className="rounded-2xl border border-white/80 bg-white/72 px-4 py-3 text-xs leading-5 text-muted-foreground">
-                <div className="font-medium text-foreground">内容来源</div>
-                <div className="mt-1 text-[#486284]">{activeDoc.sourcePath}</div>
-              </div>
-            </div>
-          </div>
           <div className="px-6 py-8 sm:px-8">
             <MarkdownContent blocks={activeDoc.parsed.blocks} />
           </div>
         </section>
-
-        <aside className="hidden xl:sticky xl:top-28 xl:block xl:self-start">
-          <section className="theme-card p-4">
-            <div className="mb-3">
-              <div className="text-sm font-semibold text-foreground">本页导航</div>
-              <p className="mt-1 text-xs leading-5 text-muted-foreground">快速跳到当前文档的主要章节。</p>
-            </div>
-            <div className="max-h-[70vh] space-y-1 overflow-y-auto pr-1">
-              {outline.length > 0 ? (
-                outline.map((heading) => (
-                  <a
-                    key={heading.id}
-                    href={`#${heading.id}`}
-                    className={cn(
-                      "block rounded-xl px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground",
-                      heading.level >= 3 && "ml-3 text-[13px]",
-                    )}
-                  >
-                    {heading.text}
-                  </a>
-                ))
-              ) : (
-                <p className="text-sm text-muted-foreground">当前文档没有可提取的章节导航。</p>
-              )}
-            </div>
-          </section>
-        </aside>
       </div>
     </div>
   )

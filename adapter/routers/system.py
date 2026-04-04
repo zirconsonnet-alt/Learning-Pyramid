@@ -7,7 +7,12 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from adapter.auth import get_request_auth_user
 from adapter.deps import get_api, get_auth_store
-from adapter.schemas import AskLlmRequest, AskProjectLlmRequest, UpdateGlobalLlmSettingsRequest
+from adapter.schemas import (
+    AskLlmRequest,
+    AskProjectLlmRawChatCompletionRequest,
+    AskProjectLlmRequest,
+    UpdateGlobalLlmSettingsRequest,
+)
 from adapter.runtime_status import collect_runtime_status
 from backend.models.types import LearningObjectNodeId, LearningTaskNodeId, RecallPointId
 from backend.models.errors import ExternalServiceError, NotFound, PreconditionFailure
@@ -52,6 +57,7 @@ def get_system_capabilities(
             "asrEnabled": features.asr_enabled,
             "serverMediaStreamEnabled": features.server_media_stream_enabled,
             "browserLocalMediaEnabled": features.browser_local_media_enabled,
+            "baiduNetdiskEnabled": features.baidu_netdisk_enabled,
             "authEnabled": features.auth_enabled,
             "allowSignup": features.allow_signup,
             "sqlBackend": runtime.get("sqlBackend"),
@@ -155,6 +161,30 @@ def ask_project_llm(
         user_id=None if current_user is None else current_user.user_id,
     )
     return {"ok": True, "data": {"content": content}}
+
+
+@router.post("/projects/{projectId}/llm/chat-completions")
+def ask_project_llm_chat_completions(
+    projectId: str,
+    req: AskProjectLlmRawChatCompletionRequest,
+    request: Request,
+    api: SystemAPI = Depends(get_api),
+    auth_store: AuthStore = Depends(get_auth_store),
+) -> dict:
+    current_user = get_request_auth_user(request)
+    data = api.request_llm_chat_completion_raw(
+        messages=req.messages,
+        tools=req.tools,
+        tool_choice=req.toolChoice,
+        parallel_tool_calls=req.parallelToolCalls,
+        response_format=req.responseFormat,
+        model_name=req.modelName,
+        temperature=req.temperature,
+        timeout_sec=90.0,
+        auth_store=auth_store,
+        user_id=None if current_user is None else current_user.user_id,
+    )
+    return {"ok": True, "data": data}
 
 
 @router.get("/projects/{projectId}/llm/debug/latest")

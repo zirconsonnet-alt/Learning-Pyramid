@@ -14,15 +14,17 @@ type UseVideoSubtitlesParams = {
   projectId: string
   instance: Instance | null
   playbackMs: number
-  enabled: boolean
+  subtitlesEnabled: boolean
+  detectionEnabled: boolean
   sourceKind: MaterialSourceKind | null | undefined
   subtitleDelayMs: number
 }
 
 export function useVideoSubtitles(params: UseVideoSubtitlesParams) {
-  const { projectId, instance, playbackMs, enabled, sourceKind, subtitleDelayMs } = params
+  const { projectId, instance, playbackMs, subtitlesEnabled, detectionEnabled, sourceKind, subtitleDelayMs } = params
   const [document, setDocument] = useState<SubtitleDocument | null>(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [missingText, setMissingText] = useState<string | null>(null)
   const [errorText, setErrorText] = useState<string | null>(null)
   const [retryNonce, setRetryNonce] = useState(0)
 
@@ -32,15 +34,17 @@ export function useVideoSubtitles(params: UseVideoSubtitlesParams) {
   )
 
   useEffect(() => {
-    if (!enabled || !instance || !sourceKind) {
+    if (!detectionEnabled || !instance || !sourceKind) {
       setDocument(null)
       setIsLoading(false)
+      setMissingText(null)
       setErrorText(null)
       return
     }
 
     let cancelled = false
     setIsLoading(true)
+    setMissingText(null)
     setErrorText(null)
 
     void loadSubtitleDocumentForInstance({ projectId, instance, sourceKind })
@@ -48,12 +52,13 @@ export function useVideoSubtitles(params: UseVideoSubtitlesParams) {
         if (cancelled) return
         setDocument(nextDocument)
         if (!nextDocument) {
-          setErrorText(`当前视频同目录下没有找到同名字幕文件（支持 ${SUPPORTED_SUBTITLE_EXTENSIONS_LABEL}）。`)
+          setMissingText(`当前视频同目录下没有找到同名字幕文件（支持 ${SUPPORTED_SUBTITLE_EXTENSIONS_LABEL}）。`)
         }
       })
       .catch((error) => {
         if (cancelled) return
         setDocument(null)
+        setMissingText(null)
         setErrorText(error instanceof Error ? error.message : "读取字幕文件失败")
       })
       .finally(() => {
@@ -64,12 +69,12 @@ export function useVideoSubtitles(params: UseVideoSubtitlesParams) {
     return () => {
       cancelled = true
     }
-  }, [enabled, instance, projectId, retryNonce, sourceKind])
+  }, [detectionEnabled, instance, projectId, retryNonce, sourceKind])
 
   const text = useMemo(() => {
-    if (!enabled || !document) return null
+    if (!subtitlesEnabled || !document) return null
     return findSubtitleTextAtMs(document.segments, effectivePlaybackMs)
-  }, [document, effectivePlaybackMs, enabled])
+  }, [document, effectivePlaybackMs, subtitlesEnabled])
 
   const retry = useCallback(() => {
     clearSubtitleDocumentCache()
@@ -79,8 +84,9 @@ export function useVideoSubtitles(params: UseVideoSubtitlesParams) {
   return {
     text,
     isLoading,
-    isBootstrapping: false,
+    missingText,
     errorText,
+    hasSubtitleFile: document !== null,
     retry,
   }
 }

@@ -11,6 +11,8 @@ import {
   isSyntheticFilesContainer,
   sortLearningObjectNodeIdsForDisplay,
 } from "@/ui/learningObjectDisplayOrder"
+import { projectTypeRequiresLearningObjectTree } from "@/ui/projectTypes"
+import { useProjectConfig } from "@/ui/queries/workbench"
 import {
   LearningObjectTreeCanvas,
   type LearningObjectTreeCanvasNode,
@@ -42,6 +44,9 @@ export function ObjectTreePage() {
   const pid = projectId ?? ""
   const nav = useNavigate()
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null)
+  const projectConfigQ = useProjectConfig(pid)
+  const projectType = projectConfigQ.data?.projectType ?? "COURSE"
+  const usesLearningObjectTree = projectTypeRequiresLearningObjectTree(projectType)
 
   const nodesQ = useQuery({
     queryKey: ["learningObjectNodes", pid],
@@ -195,16 +200,24 @@ export function ObjectTreePage() {
 
       <div className="theme-canvas min-h-[36rem] p-4 md:p-5">
         {isLoading ? <LoadingNotice title="正在加载学习对象树" message="正在整理目录结构、材料节点和层级布局。" /> : null}
+        {projectConfigQ.error ? <ErrorNotice title="项目配置加载失败" message={formatApiError(projectConfigQ.error)} /> : null}
         {nodesQ.error ? <ErrorNotice title="学习对象树加载失败" message={formatApiError(nodesQ.error)} /> : null}
         {instancesQ.error ? <ErrorNotice title="实例详情加载失败" message={formatApiError(instancesQ.error)} /> : null}
-        {!isLoading && !nodesQ.error && !hasData ? (
+        {!projectConfigQ.isLoading && !projectConfigQ.error && !usesLearningObjectTree ? (
+          <ContentEmptyState
+            icon={FolderTree}
+            title="当前项目不使用学习对象树"
+            message="零散知识点项目不会维护对象树结构。你可以回到工作台直接录入项目级复述点。"
+          />
+        ) : null}
+        {!isLoading && !projectConfigQ.error && usesLearningObjectTree && !nodesQ.error && !hasData ? (
           <ContentEmptyState
             icon={FolderTree}
             title="当前项目还没有学习对象树"
             message="先在项目设置里导入内容目录或补齐当前素材接入方式；完成后对象节点会显示在这里。"
           />
         ) : null}
-        {!isLoading && !nodesQ.error && hasData ? (
+        {!isLoading && !projectConfigQ.error && usesLearningObjectTree && !nodesQ.error && hasData ? (
           <LearningObjectTreeCanvas
             rootIds={rootIds}
             nodeById={nodeById}

@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-import { apiRequest } from "@/ui/api/http"
+import { apiRequest, type ApiRequestExecutionOptions } from "@/ui/api/http"
 
 export const QueueSchema = z.object({
   headId: z.string().nullable(),
@@ -8,7 +8,11 @@ export const QueueSchema = z.object({
 })
 export type Queue = z.infer<typeof QueueSchema>
 
-export function getQueue(projectId: string) {
-  return apiRequest({ path: `/projects/${projectId}/queue`, responseSchema: QueueSchema })
+export function getQueue(projectId: string, options?: ApiRequestExecutionOptions) {
+  return apiRequest({
+    path: `/projects/${projectId}/queue`,
+    responseSchema: QueueSchema,
+    signal: options?.signal,
+    timeoutMs: options?.timeoutMs,
+  })
 }
-

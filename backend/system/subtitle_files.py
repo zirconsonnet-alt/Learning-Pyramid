@@ -52,8 +52,13 @@ def find_sibling_subtitle_file(material_path: Path) -> Path | None:
 
 
 def parse_subtitle_file(file_path: Path) -> SubtitleDocument:
-    text = file_path.read_text(encoding="utf-8-sig")
     ext = file_path.suffix.lower()
+    text = file_path.read_text(encoding="utf-8-sig")
+    return parse_subtitle_text(text, suffix=ext)
+
+
+def parse_subtitle_text(text: str, *, suffix: str) -> SubtitleDocument:
+    ext = str(suffix or "").lower()
     if ext == ".srt":
         return SubtitleDocument(format="srt", segments=_parse_srt(text))
     if ext == ".vtt":

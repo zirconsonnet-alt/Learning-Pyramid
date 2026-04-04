@@ -24,6 +24,7 @@ from backend.models.enums import (
     ConvergenceState,
     InstancePresence,
     LayerMode,
+    MaterialSourceKind,
     MediaAssetKind,
     ProjectState,
     RecallPointState,
@@ -32,6 +33,7 @@ from backend.models.enums import (
     ReviewTaskState,
 )
 from backend.models.instance import Instance
+from backend.models.instance_media_binding import InstanceMediaBinding
 from backend.models.learning_object_node import LearningObjectContainer, LearningObjectLeaf, LearningObjectNode
 from backend.models.learning_task import LearningTask
 from backend.models.learning_task_node import LearningTaskContainer, LearningTaskLeaf, LearningTaskNode
@@ -112,6 +114,10 @@ class SqlStore(SnapshotStore, Protocol):
     def list_instances(self, project_id: str) -> tuple[Instance, ...]: ...
 
     def get_instance(self, project_id: str, instance_id: str) -> Instance | None: ...
+
+    def list_instance_media_bindings(self, project_id: str) -> tuple[InstanceMediaBinding, ...]: ...
+
+    def get_instance_media_binding(self, project_id: str, instance_id: str) -> InstanceMediaBinding | None: ...
 
     def list_missing_instance_ids(self, project_id: str) -> tuple[InstanceId, ...]: ...
 
@@ -211,13 +217,17 @@ class JsonSnapshotStore:
     ) -> None:
         current = self.load_snapshot()
         projects = {}
+        global_llm_settings = None
         if current is not None:
-            projects = dict(self._normalize_snapshot(current).get("projects", {}))
+            normalized_current = self._normalize_snapshot(current)
+            projects = dict(normalized_current.get("projects", {}))
+            global_llm_settings = normalized_current.get("globalLlmSettings")
         projects[str(project_id)] = dict(project_snapshot)
         self.save_snapshot(
             {
                 "schemaVersion": int(schema_version),
                 "idgenCounters": dict(idgen_counters),
+                "globalLlmSettings": global_llm_settings,
                 "projects": projects,
             }
         )
@@ -229,10 +239,13 @@ class JsonSnapshotStore:
     def _normalize_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         schema_version = int(snapshot.get("schemaVersion", 1))
         idgen_counters = dict(snapshot.get("idgenCounters", {}))
+        raw_global_llm_settings = snapshot.get("globalLlmSettings")
+        global_llm_settings = dict(raw_global_llm_settings) if isinstance(raw_global_llm_settings, dict) else None
         projects = dict(snapshot.get("projects", {}))
         return {
             "schemaVersion": schema_version,
             "idgenCounters": idgen_counters,
+            "globalLlmSettings": global_llm_settings,
             "projects": projects,
         }
 
@@ -286,6 +299,15 @@ class SQLiteSnapshotStore:
                         slot INTEGER PRIMARY KEY CHECK (slot = 1),
                         schema_version INTEGER NOT NULL,
                         idgen_counters_json TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS global_settings_index (
+                        settings_key TEXT PRIMARY KEY,
+                        payload_json TEXT NOT NULL,
                         updated_at TEXT NOT NULL
                     )
                     """
@@ -349,6 +371,33 @@ class SQLiteSnapshotStore:
                     """
                     CREATE INDEX IF NOT EXISTS idx_instance_index_project
                     ON instance_index (project_id)
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS instance_media_binding_index (
+                        project_id TEXT NOT NULL,
+                        instance_id TEXT NOT NULL,
+                        source_kind TEXT NOT NULL,
+                        playback_kind TEXT NOT NULL DEFAULT 'FILE',
+                        account_id TEXT,
+                        remote_file_id TEXT,
+                        remote_path TEXT,
+                        mime_type TEXT,
+                        size_bytes INTEGER,
+                        duration_ms INTEGER,
+                        source_payload_json TEXT NOT NULL DEFAULT '{}',
+                        updated_at_ms INTEGER NOT NULL,
+                        PRIMARY KEY (project_id, instance_id),
+                        FOREIGN KEY(project_id) REFERENCES project_snapshots(project_id) ON DELETE CASCADE,
+                        FOREIGN KEY(project_id, instance_id) REFERENCES instance_index(project_id, instance_id) ON DELETE CASCADE
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_instance_media_binding_index_project
+                    ON instance_media_binding_index (project_id, source_kind, updated_at_ms DESC)
                     """
                 )
                 conn.execute(
@@ -805,20 +854,44 @@ class SQLiteSnapshotStore:
 
     @classmethod
     def _decode_recall_point(cls, *, project_id: str, raw: dict[str, Any]) -> RecallPoint:
-        anchor_payload = dict(raw.get("anchor", {}))
+        raw_anchor = raw.get("anchor")
+        anchor_payload = None if raw_anchor is None else dict(raw_anchor)
         return RecallPoint(
             project_id=ProjectId(str(project_id)),
             recall_point_id=RecallPointId(str(raw.get("recallPointId"))),
             created_at=cls._ms_to_ts(int(raw.get("createdAtMs", 0))),
             question=cls._decode_rich_content(raw.get("question")),
             answer=cls._decode_rich_content(raw.get("answer")),
-            anchor=Anchor(
+            anchor=None
+            if anchor_payload is None
+            else Anchor(
                 instance_id=InstanceId(str(anchor_payload.get("instanceId", ""))),
                 position=str(anchor_payload.get("position", "")),
             ),
             insights=tuple(cls._decode_rich_content(item) for item in list(raw.get("insights", []))),
             state=RecallPointState(str(raw.get("state", RecallPointState.ACTIVE.value))),
             deleted_at=cls._ms_to_ts(None if raw.get("deletedAtMs") is None else int(raw.get("deletedAtMs"))),
+        )
+
+    @classmethod
+    def _decode_instance_media_binding(cls, *, project_id: str, row: sqlite3.Row) -> InstanceMediaBinding:
+        payload_json = str(row["source_payload_json"]) if row["source_payload_json"] is not None else "{}"
+        payload = json.loads(payload_json)
+        if not isinstance(payload, dict):
+            raise ValueError("InstanceMediaBinding.source_payload_json must decode to a JSON object")
+        return InstanceMediaBinding.create(
+            ProjectId(str(project_id)),
+            InstanceId(str(row["instance_id"])),
+            source_kind=MaterialSourceKind(str(row["source_kind"])),
+            playback_kind=str(row["playback_kind"] or "FILE"),
+            account_id=None if row["account_id"] is None else str(row["account_id"]),
+            remote_file_id=None if row["remote_file_id"] is None else str(row["remote_file_id"]),
+            remote_path=None if row["remote_path"] is None else str(row["remote_path"]),
+            mime_type=None if row["mime_type"] is None else str(row["mime_type"]),
+            size_bytes=None if row["size_bytes"] is None else int(row["size_bytes"]),
+            duration_ms=None if row["duration_ms"] is None else int(row["duration_ms"]),
+            source_payload=payload,
+            updated_at=cls._ms_to_ts(int(row["updated_at_ms"])),
         )
 
     def _refresh_project_entity_indexes(
@@ -831,6 +904,7 @@ class SQLiteSnapshotStore:
         conn.execute("DELETE FROM project_storage_config_index WHERE project_id = ?", (project_id,))
         conn.execute("DELETE FROM project_config_index WHERE project_id = ?", (project_id,))
         conn.execute("DELETE FROM instance_index WHERE project_id = ?", (project_id,))
+        conn.execute("DELETE FROM instance_media_binding_index WHERE project_id = ?", (project_id,))
         conn.execute("DELETE FROM learning_object_node_index WHERE project_id = ?", (project_id,))
         conn.execute("DELETE FROM recall_point_index WHERE project_id = ?", (project_id,))
         conn.execute("DELETE FROM learning_task_index WHERE project_id = ?", (project_id,))
@@ -915,6 +989,43 @@ class SQLiteSnapshotStore:
                 ),
             )
 
+        for instance_id, raw_binding in dict(project_payload.get("instanceMediaBindings", {})).items():
+            binding_payload = dict(raw_binding)
+            source_payload = dict(binding_payload.get("sourcePayload", {}))
+            conn.execute(
+                """
+                INSERT INTO instance_media_binding_index (
+                    project_id,
+                    instance_id,
+                    source_kind,
+                    playback_kind,
+                    account_id,
+                    remote_file_id,
+                    remote_path,
+                    mime_type,
+                    size_bytes,
+                    duration_ms,
+                    source_payload_json,
+                    updated_at_ms
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    project_id,
+                    str(instance_id),
+                    str(binding_payload.get("sourceKind", MaterialSourceKind.SERVER_FS.value)),
+                    str(binding_payload.get("playbackKind", "FILE")),
+                    None if binding_payload.get("accountId") is None else str(binding_payload.get("accountId")),
+                    None if binding_payload.get("remoteFileId") is None else str(binding_payload.get("remoteFileId")),
+                    None if binding_payload.get("remotePath") is None else str(binding_payload.get("remotePath")),
+                    None if binding_payload.get("mimeType") is None else str(binding_payload.get("mimeType")),
+                    None if binding_payload.get("sizeBytes") is None else int(binding_payload.get("sizeBytes")),
+                    None if binding_payload.get("durationMs") is None else int(binding_payload.get("durationMs")),
+                    json.dumps(source_payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
+                    int(binding_payload.get("updatedAtMs", 0)),
+                ),
+            )
+
         for node_id, raw_node in dict(project_payload.get("learningObjectNodes", {})).items():
             node_payload = dict(raw_node)
             children = list(node_payload.get("children", []))
@@ -950,7 +1061,8 @@ class SQLiteSnapshotStore:
 
         for recall_point_id, raw_recall_point in dict(project_payload.get("recallPoints", {})).items():
             recall_point_payload = dict(raw_recall_point)
-            anchor_payload = dict(recall_point_payload.get("anchor", {}))
+            raw_anchor_payload = recall_point_payload.get("anchor")
+            anchor_payload = None if raw_anchor_payload is None else dict(raw_anchor_payload)
             conn.execute(
                 """
                 INSERT INTO recall_point_index (
@@ -970,8 +1082,8 @@ class SQLiteSnapshotStore:
                     project_id,
                     str(recall_point_id),
                     int(recall_point_payload.get("createdAtMs", 0)),
-                    str(anchor_payload.get("instanceId", "")),
-                    str(anchor_payload.get("position", "")),
+                    "" if anchor_payload is None else str(anchor_payload.get("instanceId", "")),
+                    "" if anchor_payload is None else str(anchor_payload.get("position", "")),
                     self._rich_content_to_plain_text(recall_point_payload.get("question")),
                     self._rich_content_to_plain_text(recall_point_payload.get("answer")),
                     len(list(recall_point_payload.get("insights", []))),
@@ -1406,6 +1518,7 @@ class SQLiteSnapshotStore:
         # The authoritative project facts now live in normalized index tables.
         raw = dict(project_payload)
         raw.pop("instances", None)
+        raw.pop("instanceMediaBindings", None)
         raw.pop("learningObjectNodes", None)
         raw.pop("recallPoints", None)
         raw.pop("learningTasks", None)
@@ -1511,7 +1624,9 @@ class SQLiteSnapshotStore:
             "deletedAtMs": None,
             "question": [{"kind": "TEXT", "text": str(row["question_plain_text"])}],
             "answer": [{"kind": "TEXT", "text": str(row["answer_plain_text"])}],
-            "anchor": {
+            "anchor": None
+            if not str(row["anchor_instance_id"] or "").strip() and not str(row["anchor_position"] or "").strip()
+            else {
                 "instanceId": str(row["anchor_instance_id"]),
                 "position": str(row["anchor_position"]),
             },
@@ -1987,6 +2102,34 @@ class SQLiteSnapshotStore:
             for row in instance_rows
         }
 
+        instance_media_binding_rows = conn.execute(
+            """
+            SELECT instance_id, source_kind, playback_kind, account_id, remote_file_id, remote_path,
+                   mime_type, size_bytes, duration_ms, source_payload_json, updated_at_ms
+            FROM instance_media_binding_index
+            WHERE project_id = ?
+            ORDER BY instance_id ASC
+            """,
+            (str(project_id),),
+        ).fetchall()
+        hydrated["instanceMediaBindings"] = {
+            str(row["instance_id"]): {
+                "projectId": str(project_id),
+                "instanceId": str(row["instance_id"]),
+                "sourceKind": str(row["source_kind"]),
+                "playbackKind": str(row["playback_kind"] or "FILE"),
+                "accountId": None if row["account_id"] is None else str(row["account_id"]),
+                "remoteFileId": None if row["remote_file_id"] is None else str(row["remote_file_id"]),
+                "remotePath": None if row["remote_path"] is None else str(row["remote_path"]),
+                "mimeType": None if row["mime_type"] is None else str(row["mime_type"]),
+                "sizeBytes": None if row["size_bytes"] is None else int(row["size_bytes"]),
+                "durationMs": None if row["duration_ms"] is None else int(row["duration_ms"]),
+                "sourcePayload": json.loads(str(row["source_payload_json"]) if row["source_payload_json"] is not None else "{}"),
+                "updatedAtMs": int(row["updated_at_ms"]),
+            }
+            for row in instance_media_binding_rows
+        }
+
         node_rows = conn.execute(
             """
             SELECT node_id, node_kind, source, relative_path, parent_id, instance_id, title, children_json
@@ -2327,6 +2470,38 @@ class SQLiteSnapshotStore:
             }
         }
 
+    def _load_global_llm_settings_payload(self, conn: sqlite3.Connection) -> dict[str, Any] | None:
+        row = conn.execute(
+            """
+            SELECT payload_json
+            FROM global_settings_index
+            WHERE settings_key = ?
+            """,
+            ("global_llm",),
+        ).fetchone()
+        if row is None:
+            return None
+        payload = json.loads(str(row["payload_json"]))
+        if not isinstance(payload, dict):
+            raise ValueError("Global LLM settings payload must be a JSON object")
+        return payload
+
+    def _replace_global_llm_settings_payload(self, conn: sqlite3.Connection, payload: dict[str, Any] | None, *, updated_at: str) -> None:
+        conn.execute("DELETE FROM global_settings_index WHERE settings_key = ?", ("global_llm",))
+        if payload is None:
+            return
+        conn.execute(
+            """
+            INSERT INTO global_settings_index (settings_key, payload_json, updated_at)
+            VALUES (?, ?, ?)
+            """,
+            (
+                "global_llm",
+                json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
+                str(updated_at),
+            ),
+        )
+
     def _hydrate_project_payload_from_row(self, conn: sqlite3.Connection, *, row: sqlite3.Row) -> tuple[dict[str, Any], bool]:
         compat_payload = self._decode_compat_snapshot_payload(row["snapshot_json"])
         project_payload = dict(compat_payload)
@@ -2344,10 +2519,13 @@ class SQLiteSnapshotStore:
     def _normalize_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         schema_version = int(snapshot.get("schemaVersion", 1))
         idgen_counters = dict(snapshot.get("idgenCounters", {}))
+        raw_global_llm_settings = snapshot.get("globalLlmSettings")
+        global_llm_settings = dict(raw_global_llm_settings) if isinstance(raw_global_llm_settings, dict) else None
         projects = dict(snapshot.get("projects", {}))
         return {
             "schemaVersion": schema_version,
             "idgenCounters": idgen_counters,
+            "globalLlmSettings": global_llm_settings,
             "projects": projects,
         }
 
@@ -2358,6 +2536,7 @@ class SQLiteSnapshotStore:
         system_row = conn.execute(
             "SELECT schema_version, idgen_counters_json FROM system_state WHERE slot = 1"
         ).fetchone()
+        global_llm_settings = self._load_global_llm_settings_payload(conn)
         project_rows = conn.execute(
             """
             SELECT project_id, project_title, project_state, created_at_ms, deleted_at_ms, snapshot_json
@@ -2366,7 +2545,7 @@ class SQLiteSnapshotStore:
             """
         ).fetchall()
 
-        if system_row is None and not project_rows:
+        if system_row is None and global_llm_settings is None and not project_rows:
             return None, False
 
         if system_row is None:
@@ -2390,6 +2569,7 @@ class SQLiteSnapshotStore:
             {
                 "schemaVersion": schema_version,
                 "idgenCounters": idgen_counters,
+                "globalLlmSettings": global_llm_settings,
                 "projects": projects,
             },
             needs_compaction,
@@ -2561,6 +2741,11 @@ class SQLiteSnapshotStore:
                     updated_at=updated_at,
                 ),
             )
+            self._replace_global_llm_settings_payload(
+                uow.connection,
+                normalized.get("globalLlmSettings"),
+                updated_at=updated_at,
+            )
             projects = dict(normalized["projects"])
             uow.project_snapshots.delete_absent(uow.session, tuple(projects.keys()))
             for project_id, project_payload in projects.items():
@@ -2719,6 +2904,41 @@ class SQLiteSnapshotStore:
             presence=InstancePresence(str(row["presence"] or InstancePresence.PRESENT.value)),
             last_seen_at=self._ms_to_ts(None if row["last_seen_at_ms"] is None else int(row["last_seen_at_ms"])),
         )
+
+    def list_instance_media_bindings(self, project_id: str) -> tuple[InstanceMediaBinding, ...]:
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT instance_id, source_kind, playback_kind, account_id, remote_file_id, remote_path,
+                       mime_type, size_bytes, duration_ms, source_payload_json, updated_at_ms
+                FROM instance_media_binding_index
+                WHERE project_id = ?
+                ORDER BY instance_id ASC
+                """,
+                (str(project_id),),
+            ).fetchall()
+        finally:
+            conn.close()
+        return tuple(self._decode_instance_media_binding(project_id=str(project_id), row=row) for row in rows)
+
+    def get_instance_media_binding(self, project_id: str, instance_id: str) -> InstanceMediaBinding | None:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT instance_id, source_kind, playback_kind, account_id, remote_file_id, remote_path,
+                       mime_type, size_bytes, duration_ms, source_payload_json, updated_at_ms
+                FROM instance_media_binding_index
+                WHERE project_id = ? AND instance_id = ?
+                """,
+                (str(project_id), str(instance_id)),
+            ).fetchone()
+        finally:
+            conn.close()
+        if row is None:
+            return None
+        return self._decode_instance_media_binding(project_id=str(project_id), row=row)
 
     def list_missing_instance_ids(self, project_id: str) -> tuple[InstanceId, ...]:
         conn = self._connect()

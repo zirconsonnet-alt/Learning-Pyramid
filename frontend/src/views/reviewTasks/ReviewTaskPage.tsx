@@ -226,9 +226,15 @@ export function ReviewTaskPage() {
                         <div className="text-xs text-muted-foreground">序号 #{index + 1}</div>
                         <div className="font-medium text-foreground">{formatRecallPointReference(recallPointId)}</div>
                         <div className="text-xs text-muted-foreground">
-                          锚点：<span className="text-foreground">{formatInstanceReference(recallPoint.anchor.instanceId)}</span>
-                          <span className="mx-1">·</span>
-                          <span className="text-foreground">{recallPoint.anchor.position}</span>
+                          {recallPoint.anchor ? (
+                            <>
+                              锚点：<span className="text-foreground">{formatInstanceReference(recallPoint.anchor.instanceId)}</span>
+                              <span className="mx-1">·</span>
+                              <span className="text-foreground">{recallPoint.anchor.position}</span>
+                            </>
+                          ) : (
+                            <>锚点：<span className="text-foreground">未绑定锚点</span></>
+                          )}
                         </div>
                       </div>
                       <div className={`rounded-full border px-3 py-1 text-xs font-medium ${reviewOutcomeClasses(outcome)}`}>

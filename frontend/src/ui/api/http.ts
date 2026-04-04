@@ -31,7 +31,7 @@ export type ApiRequestExecutionOptions = {
   timeoutMs?: number
 }
 
-const API_GET_TIMEOUT_MS = 12_000
+const API_GET_TIMEOUT_MS = 25_000
 const API_MUTATION_TIMEOUT_MS = 25_000
 
 export function getBaseUrl() {
@@ -55,6 +55,27 @@ function buildNetworkFailureMessage() {
 
 function buildGenericFailureMessage() {
   return "请求失败，请稍后重试。"
+}
+
+function buildNonJsonResponseError(params: {
+  status: number
+  body: string
+  url: string
+  cause: string
+}) {
+  const { status, body, url, cause } = params
+  if (status === 413) {
+    return new ApiError("上传的音频片段过大，服务器或网关拒绝了这次请求。请稍后重试；如果问题持续出现，需要调大站点上传限制。", {
+      code: "PAYLOAD_TOO_LARGE",
+      status,
+      details: { url, body: body.slice(0, 500), cause },
+    })
+  }
+  return new ApiError(`Invalid JSON response (status=${status})`, {
+    code: "INVALID_JSON",
+    status,
+    details: { url, body: body.slice(0, 500), cause },
+  })
 }
 
 function toFailureCause(error: unknown) {
@@ -151,6 +172,13 @@ export async function apiRequest<T>({
   listeners.forEach((cleanup) => cleanup())
   const raw = text.trim()
   if (!raw) {
+    if (res.status === 413) {
+      throw new ApiError("上传的音频片段过大，服务器或网关拒绝了这次请求。请稍后重试；如果问题持续出现，需要调大站点上传限制。", {
+        code: "PAYLOAD_TOO_LARGE",
+        status: res.status,
+        details: { url },
+      })
+    }
     throw new ApiError(`Empty response body (status=${res.status})`, { code: "EMPTY_RESPONSE", status: res.status })
   }
 
@@ -158,10 +186,11 @@ export async function apiRequest<T>({
   try {
     json = JSON.parse(text)
   } catch (e) {
-    throw new ApiError(`Invalid JSON response (status=${res.status})`, {
-      code: "INVALID_JSON",
+    throw buildNonJsonResponseError({
       status: res.status,
-      details: { url, body: text.slice(0, 500), cause: String(e) },
+      body: text,
+      url,
+      cause: String(e),
     })
   }
 

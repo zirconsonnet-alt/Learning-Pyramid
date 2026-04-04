@@ -18,7 +18,9 @@ import {
 } from "@/ui/components/ui/dialog"
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
+import type { ProjectType } from "@/ui/api/projects"
 import { useCreateProject, useDeleteProject, useProjects } from "@/ui/queries/projects"
+import { formatProjectTypeLabel } from "@/ui/projectTypes"
 import { useAppStore } from "@/ui/store/appStore"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { useWorkbenchStore } from "@/ui/store/workbenchStore"
@@ -49,7 +51,7 @@ function formatLastStudyText(occurredAt: string | null) {
   if (!occurredAt) {
     return {
       text: "还未开始学习",
-      className: "text-[#7b8797]",
+      className: "text-muted-foreground",
     }
   }
 
@@ -57,7 +59,7 @@ function formatLastStudyText(occurredAt: string | null) {
   if (Number.isNaN(dt.getTime())) {
     return {
       text: "学习时间未知",
-      className: "text-[#7b8797]",
+      className: "text-muted-foreground",
     }
   }
 
@@ -76,20 +78,20 @@ function formatLastStudyText(occurredAt: string | null) {
   if (dayDiff === 1) {
     return {
       text: "昨天学习过",
-      className: "text-[#64748b]",
+      className: "text-[color:var(--theme-subtle-text)]",
     }
   }
 
   if (dayDiff <= 7) {
     return {
       text: `上次学习 ${dayDiff} 天前`,
-      className: "text-[#6b7280]",
+      className: "text-[color:var(--theme-subtle-text)]",
     }
   }
 
   return {
     text: `已 ${dayDiff} 天未学习`,
-    className: "text-[#b7791f]",
+    className: "text-[color:var(--theme-warm-text)]",
   }
 }
 
@@ -117,6 +119,7 @@ export function ProjectsPage() {
   const projects = data ?? []
 
   const [title, setTitle] = useState("")
+  const [projectType, setProjectType] = useState<ProjectType>("COURSE")
   const [createOpen, setCreateOpen] = useState(false)
   const [sortMode, setSortMode] = useState<ProjectSortMode>("recent")
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null)
@@ -184,11 +187,16 @@ export function ProjectsPage() {
     const t = title.trim()
     if (!t) return
     try {
-      const res = await create.mutateAsync({ title: t })
+      const res = await create.mutateAsync({
+        title: t,
+        initialProjectType: projectType,
+        initialSourceKind: projectType === "COURSE" ? undefined : "MANUAL",
+      })
       setTitle("")
+      setProjectType("COURSE")
       setSelectedProjectId(res.projectId)
       setCreateOpen(false)
-      showSuccessFeedback("项目已创建", `“${t}” 已准备好，正在进入工作台。`)
+      showSuccessFeedback("项目已创建", `“${t}” 已按${formatProjectTypeLabel(projectType)}模式准备好，正在进入工作台。`)
       nav(`/p/${res.projectId}/workbench`)
     } catch (err) {
       showErrorFeedback("创建项目失败", formatApiError(err))
@@ -224,19 +232,19 @@ export function ProjectsPage() {
               <span className="theme-meta px-3 py-1 text-sm">{projects.length} 个项目</span>
             </div>
             <div className="relative">
-              <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-[#6a7e98]">
+              <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-muted-foreground">
                 <ArrowUpDown className="h-4 w-4" />
               </div>
               <select
                 id="projectSort"
-                className="h-11 appearance-none rounded-2xl border border-[#dbe4ef] bg-white/90 pl-10 pr-11 text-sm font-medium text-[#42566f] shadow-[0_14px_30px_-26px_rgba(15,23,42,0.2)] outline-none transition-colors hover:border-primary/20 focus:border-primary/30"
+                className="theme-select h-11 rounded-2xl pl-10 pr-11 font-medium"
                 value={sortMode}
                 onChange={(event) => setSortMode(event.target.value as ProjectSortMode)}
               >
                 <option value="recent">最近使用</option>
                 <option value="created">最新创建</option>
               </select>
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 text-[#6a7e98]">
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 text-muted-foreground">
                 <ChevronDown className="h-4 w-4" />
               </div>
             </div>
@@ -257,7 +265,7 @@ export function ProjectsPage() {
                     <Card
                       key={p.projectId}
                       className={cn(
-                        "h-full border-white/80 bg-white/90 transition-all duration-200",
+                        "h-full border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] shadow-[var(--theme-soft-shadow)] transition-all duration-200",
                         selectedProjectId === p.projectId && "border-primary/20 shadow-[0_24px_60px_-38px_rgba(30,58,95,0.34)] ring-1 ring-primary/10",
                       )}
                     >
@@ -267,7 +275,7 @@ export function ProjectsPage() {
                             <CardTitle className="truncate text-xl">{p.title}</CardTitle>
                             <CardDescription className="flex flex-wrap items-center gap-2 text-xs">
                               <span className="theme-meta">{formatProjectState(p.state)}</span>
-                              <span className={cn("font-medium", activityLoading ? "text-[#7b8797]" : lastStudyDisplay.className)}>
+                              <span className={cn("font-medium", activityLoading ? "text-muted-foreground" : lastStudyDisplay.className)}>
                                 {activityLoading ? "学习记录载入中" : lastStudyDisplay.text}
                               </span>
                             </CardDescription>
@@ -315,9 +323,9 @@ export function ProjectsPage() {
               <button
                 type="button"
                 onClick={() => setCreateOpen(true)}
-                className="group flex h-full min-h-[12.75rem] flex-col items-start gap-5 rounded-[1.75rem] border border-dashed border-[#d5deea] bg-white/75 p-8 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/25 hover:bg-white"
+                className="group flex h-full min-h-[12.75rem] flex-col items-start gap-5 rounded-[1.75rem] border border-dashed border-[color:var(--theme-subtle-border)] bg-[color:var(--theme-subtle-bg)] p-8 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/25 hover:bg-[color:var(--theme-soft-bg)]"
               >
-                <div className="flex h-14 w-14 items-center justify-center rounded-3xl bg-[#edf4ff] text-primary transition-transform duration-200 group-hover:scale-105">
+                <div className="theme-icon-surface h-14 w-14 rounded-3xl transition-transform duration-200 group-hover:scale-105">
                   <Plus className="h-6 w-6" />
                 </div>
                 <div className="text-xl font-semibold text-foreground">新建项目</div>
@@ -332,7 +340,7 @@ export function ProjectsPage() {
           <DialogHeader>
             <DialogTitle>创建新项目</DialogTitle>
           </DialogHeader>
-          <div>
+          <div className="space-y-4">
             <div className="grid gap-2">
               <Label htmlFor="title">项目标题</Label>
               <Input
@@ -342,6 +350,46 @@ export function ProjectsPage() {
                 placeholder="例如：机器学习 / 医学解剖 / 英语听力"
                 autoFocus
               />
+            </div>
+            <div className="grid gap-2">
+              <Label>项目类型</Label>
+              <div className="grid gap-2">
+                {[
+                  {
+                    value: "COURSE" as const,
+                    title: "网课",
+                    description: "保留当前视频学习流，复述点需要绑定可解析时间锚点。",
+                  },
+                  {
+                    value: "BOOK" as const,
+                    title: "书本",
+                    description: "保留学习对象树，但目录由手工初始化，复述点绑定文本锚点。",
+                  },
+                  {
+                    value: "LOOSE_POINTS" as const,
+                    title: "零散知识点",
+                    description: "不使用学习对象树，复述点也不需要绑定锚点。",
+                  },
+                ].map((option) => {
+                  const active = projectType === option.value
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setProjectType(option.value)}
+                      className={cn(
+                        "rounded-2xl border px-4 py-3 text-left transition",
+                        active
+                          ? "border-primary/30 bg-primary/5 shadow-[0_16px_32px_-24px_hsl(var(--primary)/0.4)]"
+                          : "border-border/70 bg-background hover:border-primary/20 hover:bg-primary/5",
+                      )}
+                    >
+                      <div className="text-sm font-semibold text-foreground">{option.title}</div>
+                      <div className="mt-1 text-xs leading-5 text-muted-foreground">{option.description}</div>
+                    </button>
+                  )
+                })}
+              </div>
             </div>
           </div>
           <DialogFooter>

@@ -46,12 +46,12 @@ function StatusPill(props: { children: ReactNode; tone?: "default" | "accent" | 
       className={cn(
         "inline-flex items-center rounded-full border px-2.5 py-1 text-xs",
         props.tone === "accent"
-          ? "border-primary/20 bg-[#eef5ff] text-[#1d4f8f]"
+          ? "theme-pill-accent"
           : props.tone === "warm"
-            ? "border-[#f2d4a7] bg-[#fff4df] text-[#8b5a15]"
+            ? "theme-pill-warm"
             : props.tone === "danger"
-              ? "border-[#f5c2c7] bg-[#fff4f5] text-[#b42318]"
-              : "border-[#dde5ee] bg-[#f8fafc] text-[#5b6b82]",
+              ? "theme-pill-danger"
+              : "theme-pill-default",
       )}
     >
       {props.children}
@@ -138,12 +138,12 @@ function DetailMetric(props: { label: string; value: string; tone?: "default" | 
       className={cn(
         "rounded-2xl border px-4 py-3",
         props.tone === "accent"
-          ? "border-primary/20 bg-[#eef5ff]"
+          ? "theme-accent-surface"
           : props.tone === "warm"
-            ? "border-[#f2d4a7] bg-[#fff7ea]"
+            ? "theme-warm-surface"
             : props.tone === "danger"
-              ? "border-[#f5c2c7] bg-[#fff5f6]"
-              : "border-[#e3e8ef] bg-[#fbfdff]",
+              ? "theme-danger-surface"
+              : "theme-subtle-surface",
       )}
     >
       <div className="text-xs text-muted-foreground">{props.label}</div>
@@ -165,15 +165,15 @@ function TimelineRow(props: {
           className={cn(
             "mt-1 h-2.5 w-2.5 rounded-full",
             props.tone === "accent"
-              ? "bg-[#1d4f8f]"
+              ? "bg-primary"
               : props.tone === "warm"
-                ? "bg-[#c27b18]"
+                ? "bg-[color:var(--theme-warm-text)]"
                 : props.tone === "danger"
-                  ? "bg-[#b42318]"
-                  : "bg-[#9aa8b7]",
+                  ? "bg-destructive"
+                  : "bg-[color:var(--theme-subtle-text)]",
           )}
         />
-        <span className="mt-1 h-full w-px bg-[#e2e8f0]" />
+        <span className="mt-1 h-full w-px bg-[color:var(--theme-soft-border)]" />
       </div>
       <div className="min-w-0 flex-1 pb-4">
         <div className="text-sm font-medium text-foreground">{props.title}</div>
@@ -614,7 +614,7 @@ export function AdminMembershipPage() {
                   onChange={(event) => setGrantMinSpendCent(event.target.value)}
                 />
               </div>
-              <div className="md:col-span-2 flex flex-wrap items-center justify-between gap-3 rounded-[1rem] border border-dashed border-[#dce6f1] bg-[#f8fbff] px-4 py-3">
+              <div className="theme-subtle-surface md:col-span-2 flex flex-wrap items-center justify-between gap-3 rounded-[1rem] border-dashed px-4 py-3">
                 <div className="text-sm text-muted-foreground">
                   当前表单会发放一张面额 {formatMembershipPrice(Number(grantAmountCent) || 0)}、最低消费{" "}
                   {formatMembershipPrice(Number(grantMinSpendCent) || 0)} 的会员券。
@@ -642,17 +642,17 @@ export function AdminMembershipPage() {
                 className={cn(
                   "rounded-[1rem] border px-4 py-4",
                   item.tone === "danger"
-                    ? "border-[#f5c2c7] bg-[#fff7f7]"
+                    ? "theme-danger-surface"
                     : item.tone === "warm"
-                      ? "border-[#f2d4a7] bg-[#fffaf0]"
-                      : "border-[#dde5ee] bg-white/80",
+                      ? "theme-warm-surface"
+                      : "theme-soft-surface",
                 )}
               >
                 <div className="text-sm font-semibold text-foreground">{item.title}</div>
                 <p className="mt-2 text-sm leading-6 text-muted-foreground">{item.message}</p>
               </div>
             ))}
-            <div className="rounded-[1rem] border border-dashed border-[#dce6f1] bg-[#fbfdff] px-4 py-4 text-sm leading-6 text-muted-foreground">
+            <div className="theme-subtle-surface rounded-[1rem] border-dashed px-4 py-4 text-sm leading-6 text-muted-foreground">
               建议运营侧重点关注三类动作：待支付订单的重复创建、邀请码绑定后长期不转化、以及后台补偿券是否被及时消费或回收。
             </div>
           </CardContent>
@@ -679,7 +679,7 @@ export function AdminMembershipPage() {
               <Label htmlFor="admin-membership-order-status">订单状态</Label>
               <select
                 id="admin-membership-order-status"
-                className="h-10 w-full rounded-xl border border-input bg-white px-3 text-sm"
+                className="theme-select h-10 w-full px-3"
                 value={orderStatus}
                 onChange={(event) => setOrderStatus(event.target.value)}
               >
@@ -696,7 +696,7 @@ export function AdminMembershipPage() {
               <Label htmlFor="admin-membership-order-type">订单类型</Label>
               <select
                 id="admin-membership-order-type"
-                className="h-10 w-full rounded-xl border border-input bg-white px-3 text-sm"
+                className="theme-select h-10 w-full px-3"
                 value={orderType}
                 onChange={(event) => setOrderType(event.target.value)}
               >
@@ -709,7 +709,7 @@ export function AdminMembershipPage() {
               <Label htmlFor="admin-membership-order-provider">支付方式</Label>
               <select
                 id="admin-membership-order-provider"
-                className="h-10 w-full rounded-xl border border-input bg-white px-3 text-sm"
+                className="theme-select h-10 w-full px-3"
                 value={orderProvider}
                 onChange={(event) => setOrderProvider(event.target.value)}
               >
@@ -735,8 +735,10 @@ export function AdminMembershipPage() {
                   <div
                     key={order.orderId}
                     className={cn(
-                      "w-full rounded-[1rem] border p-4 text-left transition hover:border-primary/30 hover:bg-[#fbfdff]",
-                      isSelected ? "border-primary/40 bg-[#f8fbff] shadow-sm" : "border-[#e3e8ef] bg-white/80",
+                      "w-full rounded-[1rem] border p-4 text-left transition hover:border-primary/30 hover:bg-accent/40",
+                      isSelected
+                        ? "border-primary/40 bg-primary/10 shadow-sm"
+                        : "border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)]",
                     )}
                     onClick={() => setSelectedOrderId(order.orderId)}
                   >
@@ -916,7 +918,7 @@ export function AdminMembershipPage() {
                       <DetailMetric label="客户端" value={`${selectedOrderDetail.order.clientVersion || "未上报"} / ${selectedOrderDetail.order.clientIp || "未上报"}`} />
                     </div>
 
-                    <div className="rounded-[1rem] border border-[#e3e8ef] bg-[#fbfdff] p-4">
+                    <div className="theme-soft-surface rounded-[1rem] p-4">
                       <div className="text-sm font-semibold text-foreground">支付与退款时间线</div>
                       <div className="mt-4">
                         <TimelineRow
@@ -982,7 +984,7 @@ export function AdminMembershipPage() {
                       </div>
                     </div>
 
-                    <div className="rounded-[1rem] border border-[#e3e8ef] bg-white/90 p-4">
+                    <div className="theme-soft-surface rounded-[1rem] p-4">
                       <div className="text-sm font-semibold text-foreground">营销关联</div>
                       <div className="mt-4 space-y-3 text-sm text-muted-foreground">
                         <div>
@@ -1012,7 +1014,7 @@ export function AdminMembershipPage() {
 
                     <div className="space-y-3">
                       {detailNotes.length === 0 ? (
-                        <div className="rounded-[1rem] border border-dashed border-[#dce6f1] bg-[#fbfdff] px-4 py-4 text-sm leading-6 text-muted-foreground">
+                        <div className="theme-subtle-surface rounded-[1rem] border-dashed px-4 py-4 text-sm leading-6 text-muted-foreground">
                           当前这笔订单没有明显异常信号，支付、退款和营销关联看起来是自洽的。
                         </div>
                       ) : null}
@@ -1022,12 +1024,12 @@ export function AdminMembershipPage() {
                           className={cn(
                             "rounded-[1rem] border px-4 py-4",
                             item.tone === "danger"
-                              ? "border-[#f5c2c7] bg-[#fff7f7]"
+                              ? "theme-danger-surface"
                               : item.tone === "warm"
-                                ? "border-[#f2d4a7] bg-[#fffaf0]"
+                                ? "theme-warm-surface"
                                 : item.tone === "accent"
-                                  ? "border-primary/20 bg-[#eef5ff]"
-                                  : "border-[#dde5ee] bg-white/80",
+                                  ? "theme-accent-surface"
+                                  : "theme-soft-surface",
                           )}
                         >
                           <div className="text-sm font-semibold text-foreground">{item.title}</div>
@@ -1085,7 +1087,7 @@ export function AdminMembershipPage() {
               <Label htmlFor="admin-membership-invite-status">绑定状态</Label>
               <select
                 id="admin-membership-invite-status"
-                className="h-10 w-full rounded-xl border border-input bg-white px-3 text-sm"
+                className="theme-select h-10 w-full px-3"
                 value={inviteStatus}
                 onChange={(event) => setInviteStatus(event.target.value)}
               >
@@ -1106,7 +1108,7 @@ export function AdminMembershipPage() {
             const inviter = userLabel(item.inviter)
             const invitee = userLabel(item.invitee)
             return (
-              <div key={`${item.invitee.userId}:${item.boundAt}`} className="rounded-[1rem] border border-[#e3e8ef] bg-white/80 p-4">
+              <div key={`${item.invitee.userId}:${item.boundAt}`} className="theme-soft-surface rounded-[1rem] p-4">
                 <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                   <div className="min-w-0 flex-1 space-y-2">
                     <div className="flex flex-wrap items-center gap-2">
@@ -1168,7 +1170,7 @@ export function AdminMembershipPage() {
               <Label htmlFor="admin-membership-coupon-status">优惠券状态</Label>
               <select
                 id="admin-membership-coupon-status"
-                className="h-10 w-full rounded-xl border border-input bg-white px-3 text-sm"
+                className="theme-select h-10 w-full px-3"
                 value={couponStatus}
                 onChange={(event) => setCouponStatus(event.target.value)}
               >
@@ -1191,7 +1193,7 @@ export function AdminMembershipPage() {
             const owner = userLabel(coupon.user)
             const sourceInvitee = coupon.sourceInvitee ? userLabel(coupon.sourceInvitee) : null
             return (
-              <div key={coupon.couponId} className="rounded-[1rem] border border-[#e3e8ef] bg-white/80 p-4">
+              <div key={coupon.couponId} className="theme-soft-surface rounded-[1rem] p-4">
                 <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                   <div className="min-w-0 flex-1 space-y-2">
                     <div className="flex flex-wrap items-center gap-2">

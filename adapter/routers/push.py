@@ -3,24 +3,21 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 
 from adapter.deps import get_api
+from adapter.mappers import review_recommendation_page_to_dto
 from backend.system.api import SystemAPI
 
 
 router = APIRouter()
 
-
-def _review_recommendations_response(project_id: str, max_results: int, api: SystemAPI) -> dict:
-    ids = api.list_review_recommendations(project_id, max_results)  # type: ignore[arg-type]
-    return {"ok": True, "data": {"recallPointIds": [str(x) for x in ids]}}
-
-
 @router.get("/projects/{projectId}/review-recommendations")
 def list_review_recommendations(
     projectId: str,
-    maxResults: int = Query(50, ge=1),
+    offset: int = Query(0, ge=0),
+    limit: int | None = Query(None, ge=1),
     api: SystemAPI = Depends(get_api),
 ) -> dict:
-    return _review_recommendations_response(projectId, maxResults, api)
+    page = api.list_review_recommendations(projectId, offset=offset, limit=limit)  # type: ignore[arg-type]
+    return {"ok": True, "data": review_recommendation_page_to_dto(page)}
 
 
 @router.get("/projects/{projectId}/push-candidates")
@@ -29,4 +26,5 @@ def get_push_candidates(
     maxResults: int = Query(50, ge=1),
     api: SystemAPI = Depends(get_api),
 ) -> dict:
-    return _review_recommendations_response(projectId, maxResults, api)
+    ids = api.get_push_candidates(projectId, maxResults)  # type: ignore[arg-type]
+    return {"ok": True, "data": {"recallPointIds": [str(x) for x in ids]}}
