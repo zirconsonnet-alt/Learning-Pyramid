@@ -3,15 +3,22 @@ from __future__ import annotations
 import json
 import threading
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterator
+
+try:
+    import psycopg
+except ImportError:  # pragma: no cover - exercised in environments without psycopg installed
+    psycopg = None
 
 from backend.models.aggregation_event import AggregationEvent
 from backend.models.asr_artifact import AsrArtifact
 from backend.models.audit_log_event import AuditLogEvent
 from backend.models.entry_registration import EntryRegistration
-from backend.models.enums import InstancePresence, ProjectState, RecallPointState
+from backend.models.enums import InstancePresence, MaterialSourceKind, ProjectState, RecallPointState
 from backend.models.instance import Instance
+from backend.models.instance_media_binding import InstanceMediaBinding
 from backend.models.learning_object_node import LearningObjectContainer, LearningObjectLeaf, LearningObjectNode
 from backend.models.learning_task import LearningTask
 from backend.models.learning_task_node import LearningTaskNode
@@ -38,7 +45,7 @@ from backend.models.types import (
     ReviewTaskId,
     id_canonical_text,
 )
-from backend.repositories.persistence_interfaces import SqlUnitOfWork
+from backend.repositories.persistence_interfaces import SqlUnitOfWork, SystemStateRecord
 from backend.repositories.postgres_persistence import PostgresPersistenceUnitOfWork, connect_postgres
 from backend.system.persistence_json import decode_project_config_payload, decode_project_storage_config_payload
 from backend.system.postgres_runtime import get_postgres_pool, redact_postgres_dsn
@@ -49,6 +56,33 @@ from backend.system.postgres_schema import (
     validate_postgres_migration_plan,
 )
 from backend.system.persistence_store import SQLiteSnapshotStore
+
+
+def _is_missing_optional_table_error(exc: Exception) -> bool:
+    return bool(psycopg is not None and isinstance(exc, psycopg.errors.UndefinedTable))
+
+
+class _SkippedPostgresCursor:
+    def fetchone(self) -> None:
+        return None
+
+    def fetchall(self) -> list[Any]:
+        return []
+
+
+class _OptionalTableCompatConnection:
+    def __init__(self, delegate: Any, *, skipped_tables: set[str] | tuple[str, ...]) -> None:
+        self._delegate = delegate
+        self._skipped_tables = tuple(str(name).strip().lower() for name in skipped_tables if str(name).strip())
+
+    def execute(self, sql: str, params: tuple[Any, ...] = ()) -> Any:
+        normalized_sql = " ".join(str(sql).lower().split())
+        if any(table_name in normalized_sql for table_name in self._skipped_tables):
+            return _SkippedPostgresCursor()
+        return self._delegate.execute(sql, params)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._delegate, name)
 
 
 class PostgresStore(SQLiteSnapshotStore):
@@ -85,6 +119,66 @@ class PostgresStore(SQLiteSnapshotStore):
     @staticmethod
     def _in_clause(values: tuple[str, ...]) -> str:
         return ", ".join("%s" for _ in values)
+
+    def _load_global_llm_settings_payload(self, conn) -> dict[str, Any] | None:
+        try:
+            row = conn.execute(
+                """
+                SELECT payload_json
+                FROM global_settings_index
+                WHERE settings_key = %s
+                """,
+                ("global_llm",),
+            ).fetchone()
+        except Exception as exc:
+            if _is_missing_optional_table_error(exc):
+                return None
+            raise
+        if row is None:
+            return None
+        payload = json.loads(str(row["payload_json"]))
+        if not isinstance(payload, dict):
+            raise ValueError("Global LLM settings payload must be a JSON object")
+        return payload
+
+    def _replace_global_llm_settings_payload(self, conn, payload: dict[str, Any] | None, *, updated_at: str) -> None:
+        try:
+            conn.execute("DELETE FROM global_settings_index WHERE settings_key = %s", ("global_llm",))
+        except Exception as exc:
+            if _is_missing_optional_table_error(exc):
+                return
+            raise
+        if payload is None:
+            return
+        try:
+            conn.execute(
+                """
+                INSERT INTO global_settings_index (settings_key, payload_json, updated_at)
+                VALUES (%s, %s, %s)
+                """,
+                (
+                    "global_llm",
+                    json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
+                    str(updated_at),
+                ),
+            )
+        except Exception as exc:
+            if _is_missing_optional_table_error(exc):
+                return
+            raise
+
+    @staticmethod
+    def _table_exists(conn, table_name: str) -> bool:
+        row = conn.execute(
+            """
+            SELECT 1
+            FROM pg_tables
+            WHERE schemaname = current_schema() AND tablename = %s
+            LIMIT 1
+            """,
+            (str(table_name),),
+        ).fetchone()
+        return row is not None
 
     def _init_db(self) -> None:
         with self._lock:
@@ -215,10 +309,57 @@ class PostgresStore(SQLiteSnapshotStore):
             self._archive_legacy_snapshot()
             return self._normalize_snapshot(legacy_data)
 
+    def save_snapshot(self, snapshot: dict[str, Any]) -> None:
+        normalized = self._normalize_snapshot(snapshot)
+        updated_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        with self.begin_unit_of_work() as uow:
+            missing_optional_tables = {
+                table_name
+                for table_name in ("global_settings_index", "instance_media_binding_index")
+                if not self._table_exists(uow.connection, table_name)
+            }
+            compat_connection = _OptionalTableCompatConnection(
+                uow.connection,
+                skipped_tables=missing_optional_tables,
+            )
+            uow.system_state.upsert(
+                uow.session,
+                SystemStateRecord(
+                    schema_version=int(normalized["schemaVersion"]),
+                    idgen_counters=dict(normalized["idgenCounters"]),
+                    updated_at=updated_at,
+                ),
+            )
+            self._replace_global_llm_settings_payload(
+                compat_connection,
+                normalized.get("globalLlmSettings"),
+                updated_at=updated_at,
+            )
+            projects = dict(normalized["projects"])
+            uow.project_snapshots.delete_absent(uow.session, tuple(projects.keys()))
+            for project_id, project_payload in projects.items():
+                if not isinstance(project_payload, dict):
+                    raise ValueError("Project snapshot must be a JSON object")
+                uow.project_snapshots.upsert(
+                    uow.session,
+                    self._project_snapshot_record(
+                        project_id=str(project_id),
+                        project_payload=project_payload,
+                        updated_at=updated_at,
+                    ),
+                )
+                self._refresh_project_entity_indexes(
+                    compat_connection,
+                    project_id=str(project_id),
+                    project_payload=project_payload,
+                )
+            compat_connection.execute("DELETE FROM snapshot_state WHERE slot = 1")
+
     def _load_from_sharded_tables_native(self, conn) -> tuple[dict[str, Any] | None, bool]:
         system_row = conn.execute(
             "SELECT schema_version, idgen_counters_json FROM system_state WHERE slot = 1"
         ).fetchone()
+        global_llm_settings = self._load_global_llm_settings_payload(conn)
         project_rows = conn.execute(
             """
             SELECT project_id, project_title, project_state, created_at_ms, deleted_at_ms, snapshot_json
@@ -226,7 +367,7 @@ class PostgresStore(SQLiteSnapshotStore):
             ORDER BY project_id ASC
             """
         ).fetchall()
-        if system_row is None and not project_rows:
+        if system_row is None and global_llm_settings is None and not project_rows:
             return None, False
 
         if system_row is None:
@@ -250,6 +391,7 @@ class PostgresStore(SQLiteSnapshotStore):
             {
                 "schemaVersion": schema_version,
                 "idgenCounters": idgen_counters,
+                "globalLlmSettings": global_llm_settings,
                 "projects": projects,
             },
             needs_compaction,
@@ -316,6 +458,40 @@ class PostgresStore(SQLiteSnapshotStore):
                 "lastSeenAtMs": None if row["last_seen_at_ms"] is None else int(row["last_seen_at_ms"]),
             }
             for row in instance_rows
+        }
+
+        try:
+            instance_media_binding_rows = conn.execute(
+                """
+                SELECT instance_id, source_kind, playback_kind, account_id, remote_file_id, remote_path,
+                       mime_type, size_bytes, duration_ms, source_payload_json, updated_at_ms
+                FROM instance_media_binding_index
+                WHERE project_id = %s
+                ORDER BY instance_id ASC
+                """,
+                (str(project_id),),
+            ).fetchall()
+        except Exception as exc:
+            if _is_missing_optional_table_error(exc):
+                instance_media_binding_rows = []
+            else:
+                raise
+        hydrated["instanceMediaBindings"] = {
+            str(row["instance_id"]): {
+                "projectId": str(project_id),
+                "instanceId": str(row["instance_id"]),
+                "sourceKind": str(row["source_kind"]),
+                "playbackKind": str(row["playback_kind"] or "FILE"),
+                "accountId": None if row["account_id"] is None else str(row["account_id"]),
+                "remoteFileId": None if row["remote_file_id"] is None else str(row["remote_file_id"]),
+                "remotePath": None if row["remote_path"] is None else str(row["remote_path"]),
+                "mimeType": None if row["mime_type"] is None else str(row["mime_type"]),
+                "sizeBytes": None if row["size_bytes"] is None else int(row["size_bytes"]),
+                "durationMs": None if row["duration_ms"] is None else int(row["duration_ms"]),
+                "sourcePayload": json.loads(str(row["source_payload_json"]) if row["source_payload_json"] is not None else "{}"),
+                "updatedAtMs": int(row["updated_at_ms"]),
+            }
+            for row in instance_media_binding_rows
         }
 
         node_rows = conn.execute(
@@ -730,6 +906,43 @@ class PostgresStore(SQLiteSnapshotStore):
             presence=InstancePresence(str(row["presence"] or InstancePresence.PRESENT.value)),
             last_seen_at=self._ms_to_ts(None if row["last_seen_at_ms"] is None else int(row["last_seen_at_ms"])),
         )
+
+    def list_instance_media_bindings(self, project_id: str) -> tuple[InstanceMediaBinding, ...]:
+        try:
+            rows = self._fetchall(
+                """
+                SELECT instance_id, source_kind, playback_kind, account_id, remote_file_id, remote_path,
+                       mime_type, size_bytes, duration_ms, source_payload_json, updated_at_ms
+                FROM instance_media_binding_index
+                WHERE project_id = %s
+                ORDER BY instance_id ASC
+                """,
+                (str(project_id),),
+            )
+        except Exception as exc:
+            if _is_missing_optional_table_error(exc):
+                return tuple()
+            raise
+        return tuple(self._decode_instance_media_binding(project_id=str(project_id), row=row) for row in rows)
+
+    def get_instance_media_binding(self, project_id: str, instance_id: str) -> InstanceMediaBinding | None:
+        try:
+            row = self._fetchone(
+                """
+                SELECT instance_id, source_kind, playback_kind, account_id, remote_file_id, remote_path,
+                       mime_type, size_bytes, duration_ms, source_payload_json, updated_at_ms
+                FROM instance_media_binding_index
+                WHERE project_id = %s AND instance_id = %s
+                """,
+                (str(project_id), str(instance_id)),
+            )
+        except Exception as exc:
+            if _is_missing_optional_table_error(exc):
+                return None
+            raise
+        if row is None:
+            return None
+        return self._decode_instance_media_binding(project_id=str(project_id), row=row)
 
     def list_missing_instance_ids(self, project_id: str) -> tuple[InstanceId, ...]:
         rows = self._fetchall(

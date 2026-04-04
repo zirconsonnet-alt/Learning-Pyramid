@@ -1,19 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import { useQueries } from "@tanstack/react-query"
+import Hls from "hls.js"
 import {
   Captions,
+  Copy,
   LoaderCircle,
   Maximize2,
-  Minus,
+  MessageSquarePlus,
   Minimize2,
   NotebookPen,
   Pause,
   Play,
-  Plus,
-  RefreshCw,
   RotateCcw,
   RotateCw,
-  TriangleAlert,
+  Sparkles,
   VideoOff,
   Volume2,
   VolumeX,
@@ -21,6 +21,8 @@ import {
 } from "lucide-react"
 
 import type { Instance } from "@/ui/api/instances"
+import { ApiError } from "@/ui/api/http"
+import { resolvePlaybackDescriptorUrl } from "@/ui/api/media"
 import { getRecallPoint, type RecallPoint } from "@/ui/api/review"
 import {
   appendImageBlock,
@@ -30,13 +32,17 @@ import {
   setRichContentText,
   type RichContent,
 } from "@/ui/api/richContent"
+import { MarkdownRichText } from "@/ui/components/MarkdownRichText"
 import { RichContentEditor } from "@/ui/components/RichContentEditor"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent } from "@/ui/components/ui/card"
+import { askCourseAgent } from "@/ui/llm/courseAgent"
 import { resolveProjectFile, useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
 import { useProjectMaterialSourceBinding } from "@/ui/queries/projects"
 import { useSystemCapabilities } from "@/ui/queries/system"
+import type { AiChatCourseEvidence } from "@/ui/store/aiChatStore"
 import { useRecallPointsByInstance } from "@/ui/queries/workbench"
+import { useInstancePlaybackDescriptor } from "@/ui/queries/workbench"
 import { showInfoFeedback } from "@/ui/store/feedbackStore"
 import { SUPPORTED_SUBTITLE_EXTENSIONS_LABEL } from "@/ui/subtitles/subtitleSupport"
 import { addDailyPlaybackMs } from "@/ui/store/workbenchDailyStats"
@@ -67,6 +73,21 @@ const PLAYBACK_RATE_OPTIONS = [0.75, 1, 1.25, 1.5, 2]
 
 type FullscreenCapableVideo = HTMLVideoElement & {
   webkitDisplayingFullscreen?: boolean
+}
+
+type CapturePanelMode = "capture" | "assistant"
+
+type CourseAssistantTurn = {
+  id: string
+  role: "user" | "assistant"
+  content: string
+  createdAt: number
+  evidence?: AiChatCourseEvidence[]
+}
+
+type CapturedVideoFrame = {
+  timeMs: number
+  imageDataUrl: string
 }
 
 function isRelativeMaterialId(materialId: string) {
@@ -118,76 +139,16 @@ function formatPlaybackClock(ms: number) {
   return `${hh}${mm}:${ss}`
 }
 
-function measureSubtitleDisplayUnits(value: string) {
-  let total = 0
-  for (const char of value) {
-    total += /[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/.test(char) ? 2 : 1
-  }
-  return total
-}
-
-function sliceSubtitleByDisplayUnits(value: string, maxUnits: number) {
-  if (maxUnits <= 0 || !value) return ""
-  let total = 0
-  let out = ""
-  for (const char of value) {
-    const width = /[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/.test(char) ? 2 : 1
-    if (total + width > maxUnits) break
-    out += char
-    total += width
-  }
-  return out
-}
-
 function formatSubtitleLines(text: string | null | undefined) {
-  const normalized = String(text ?? "").replace(/\s+/g, " ").trim()
-  if (!normalized) return []
-  const maxUnitsPerLine = 28
-  const segments = normalized
-    .split(/(?<=[，。！？；,.!?;:])\s*|\s+/)
-    .map((segment) => segment.trim())
+  const normalized = String(text ?? "")
+    .replace(/\r\n?/g, "\n")
+    .split(/\n+/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
     .filter(Boolean)
-
-  if (segments.length === 0) return [normalized]
-
-  const lines: string[] = []
-  let current = ""
-
-  for (const segment of segments) {
-    const candidate = current ? `${current} ${segment}` : segment
-    if (!current || measureSubtitleDisplayUnits(candidate) <= maxUnitsPerLine) {
-      current = candidate
-      continue
-    }
-    lines.push(current)
-    current = segment
-    if (lines.length === 1 && measureSubtitleDisplayUnits(current) > maxUnitsPerLine) {
-      break
-    }
-    if (lines.length >= 2) break
-  }
-  if (current && lines.length < 2) {
-    lines.push(current)
-  }
-
-  if (lines.length === 0) {
-    return [sliceSubtitleByDisplayUnits(normalized, maxUnitsPerLine)]
-  }
-
-  if (lines.length > 2) {
-    return lines.slice(0, 2)
-  }
-
-  const consumed = lines.join(" ").trim()
-  if (consumed.length < normalized.length) {
-    const lastIndex = lines.length - 1
-    const room = Math.max(8, maxUnitsPerLine - 2)
-    lines[lastIndex] = `${sliceSubtitleByDisplayUnits(lines[lastIndex], room).trimEnd()}...`
-  } else if (measureSubtitleDisplayUnits(lines[lines.length - 1]) > maxUnitsPerLine) {
-    lines[lines.length - 1] = `${sliceSubtitleByDisplayUnits(lines[lines.length - 1], maxUnitsPerLine - 2).trimEnd()}...`
-  }
-
-  return lines.slice(0, 2)
+    .join(" ")
+    .trim()
+  if (!normalized) return []
+  return [normalized]
 }
 
 function formatSubtitleDelayLabel(delayMs: number) {
@@ -199,6 +160,67 @@ function formatSubtitleDelayLabel(delayMs: number) {
 
 function newLocalId() {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}_${Math.random().toString(16).slice(2)}`
+}
+
+function formatCourseAssistantError(error: unknown) {
+  if (error instanceof ApiError) return `${error.code}: ${error.message}`
+  if (error instanceof Error) return error.message
+  return "视频助手暂时不可用"
+}
+
+function formatPlaybackError(error: unknown) {
+  if (error instanceof ApiError) return error.message
+  if (error instanceof Error) return error.message
+  return "当前视频暂时不可用。"
+}
+
+function formatEvidenceTimeRange(startMs: number, endMs: number) {
+  return startMs === endMs ? formatPlaybackClock(startMs) : `${formatPlaybackClock(startMs)}-${formatPlaybackClock(endMs)}`
+}
+
+async function copyText(text: string) {
+  if (!text.trim()) return
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+  throw new Error("当前环境不支持剪贴板")
+}
+
+async function captureDisplayedVideoFrame(video: HTMLVideoElement, timeMs: number): Promise<CapturedVideoFrame> {
+  const width = video.videoWidth || 0
+  const height = video.videoHeight || 0
+  if (width <= 0 || height <= 0) {
+    throw new Error("当前视频帧尚未就绪")
+  }
+
+  const scale = Math.min(1, 960 / Math.max(width, height))
+  const canvas = document.createElement("canvas")
+  canvas.width = Math.max(1, Math.round(width * scale))
+  canvas.height = Math.max(1, Math.round(height * scale))
+  const context = canvas.getContext("2d")
+  if (!context) throw new Error("无法初始化画布")
+  context.drawImage(video, 0, 0, canvas.width, canvas.height)
+
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.78))
+  if (!blob) throw new Error("当前画面编码失败")
+  const imageDataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result)
+        return
+      }
+      reject(new Error("当前画面读取失败"))
+    }
+    reader.onerror = () => reject(reader.error ?? new Error("当前画面读取失败"))
+    reader.readAsDataURL(blob)
+  })
+
+  return {
+    timeMs: Math.max(0, Math.floor(timeMs)),
+    imageDataUrl,
+  }
 }
 
 export function VideoPane({
@@ -223,6 +245,7 @@ export function VideoPane({
   const barrageLayerRef = useRef<HTMLDivElement | null>(null)
   const questionInputRef = useRef<HTMLTextAreaElement | null>(null)
   const answerTextareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const assistantInputRef = useRef<HTMLTextAreaElement | null>(null)
   const pendingSeekRef = useRef<{ instanceId: string; ms: number; nonce: number } | null>(null)
   const fullscreenTransitionRef = useRef(false)
   const chromeHideTimerRef = useRef<number | null>(null)
@@ -231,6 +254,8 @@ export function VideoPane({
   const restoreSavedPositionRef = useRef(true)
   const lastPersistedPlaybackSecondRef = useRef<number | null>(null)
   const lastPlaybackTrackedAtRef = useRef<number | null>(null)
+  const assistantAbortRef = useRef<AbortController | null>(null)
+  const hlsRef = useRef<Hls | null>(null)
 
   const [playbackMs, setPlaybackMs] = useState(0)
   const [durationMs, setDurationMs] = useState(0)
@@ -244,23 +269,40 @@ export function VideoPane({
   const [isShellFullscreen, setIsShellFullscreen] = useState(false)
   const [isChromeAwake, setIsChromeAwake] = useState(true)
   const [isCapturePanelOpen, setIsCapturePanelOpen] = useState(false)
+  const [capturePanelMode, setCapturePanelMode] = useState<CapturePanelMode>("capture")
   const [captureAnchorMs, setCaptureAnchorMs] = useState(0)
   const [questionContent, setQuestionContent] = useState<RichContent>(() => richText(""))
   const [answerContent, setAnswerContent] = useState<RichContent>(() => richText(""))
   const [captureError, setCaptureError] = useState<string | null>(null)
+  const [assistantComposer, setAssistantComposer] = useState("")
+  const [assistantTurns, setAssistantTurns] = useState<CourseAssistantTurn[]>([])
+  const [assistantStatus, setAssistantStatus] = useState<string | null>(null)
+  const [assistantError, setAssistantError] = useState<string | null>(null)
+  const [assistantFrame, setAssistantFrame] = useState<CapturedVideoFrame | null>(null)
+  const [isAssistantAsking, setIsAssistantAsking] = useState(false)
   const [isBarrageEnabled, setIsBarrageEnabled] = useState(() => loadVideoBarrageEnabled())
   const [isSubtitleEnabled, setIsSubtitleEnabled] = useState(() => loadVideoSubtitleEnabled())
   const [subtitleDelayMs, setSubtitleDelayMs] = useState(() => loadVideoSubtitleDelayMs())
-  const [dismissedSubtitleErrorText, setDismissedSubtitleErrorText] = useState<string | null>(null)
 
   const addDraft = useWorkbenchStore((s) => s.addDraft)
 
   const instanceId = instance?.instanceId ?? null
   const capabilitiesQ = useSystemCapabilities()
   const materialSourceBindingQ = useProjectMaterialSourceBinding(projectId)
+  const playbackDescriptorQ = useInstancePlaybackDescriptor(projectId, instanceId ?? "", !!instanceId)
   const directoryBinding = useProjectDirectoryBinding(projectId)
   const serverMediaStreamEnabled = capabilitiesQ.data?.serverMediaStreamEnabled ?? false
   const browserLocalMediaEnabled = capabilitiesQ.data?.browserLocalMediaEnabled ?? false
+  const effectiveSourceKind = instance?.mediaSourceKind ?? materialSourceBindingQ.data?.sourceKind ?? null
+  const playbackKind =
+    playbackDescriptorQ.data?.playbackKind ??
+    instance?.playbackKind ??
+    (effectiveSourceKind === "BAIDU_NETDISK" ? "HLS" : "FILE")
+  const playbackDescriptorUrl = playbackDescriptorQ.data?.url ? resolvePlaybackDescriptorUrl(playbackDescriptorQ.data.url) : null
+  const canCaptureVideoFrame =
+    playbackDescriptorQ.data?.supportsFrameGrab ??
+    (capabilitiesQ.data?.serverMediaStreamEnabled === true ||
+      (effectiveSourceKind === "BROWSER_LOCAL" && directoryBinding.permission === "granted"))
   const displayPlaybackMs = durationMs > 0 ? Math.min(playbackMs, durationMs) : playbackMs
   const progressMax = Math.max(durationMs, 1)
   const playbackProgressPercent = progressMax > 0 ? Math.min(100, Math.max(0, (displayPlaybackMs / progressMax) * 100)) : 0
@@ -280,25 +322,34 @@ export function VideoPane({
     () => recallPointQs.flatMap((query) => (query.data ? [query.data] : [])),
     [recallPointQs],
   )
+  const subtitleSourceKind = effectiveSourceKind
+  const canProbeSubtitles =
+    !!instanceId &&
+    !!subtitleSourceKind &&
+    (subtitleSourceKind !== "BROWSER_LOCAL" || directoryBinding.permission === "granted")
   const subtitleState = useVideoSubtitles({
     projectId,
     instance,
     playbackMs: displayPlaybackMs,
-    enabled: isSubtitleEnabled && !!materialSourceBindingQ.data?.sourceKind,
-    sourceKind: materialSourceBindingQ.data?.sourceKind,
+    subtitlesEnabled: isSubtitleEnabled,
+    detectionEnabled: canProbeSubtitles,
+    sourceKind: subtitleSourceKind,
     subtitleDelayMs,
   })
-  const subtitleErrorDismissed = !!subtitleState.errorText && subtitleState.errorText === dismissedSubtitleErrorText
-  const subtitleStatusText = isSubtitleEnabled
-    ? subtitleState.isLoading
-      ? "正在查找并读取字幕文件..."
-      : subtitleState.errorText && !subtitleErrorDismissed
-        ? subtitleState.errorText
-        : null
-    : null
-  const subtitleButtonLabel = subtitleState.isLoading ? "字幕载入" : isSubtitleEnabled ? "字幕开" : "字幕关"
+  const subtitleMissingText = subtitleState.missingText
+  const subtitleErrorText = subtitleState.errorText
+  const subtitleHasFile = subtitleState.hasSubtitleFile
+  const retrySubtitleLookup = subtitleState.retry
+  const subtitleMissing = canProbeSubtitles && !subtitleState.isLoading && !subtitleHasFile && !!subtitleMissingText
+  const subtitleButtonDisabled = !instanceId || subtitleMissing
+  const subtitleButtonLabel = subtitleState.isLoading ? "字幕载入" : subtitleMissing ? "无字幕" : isSubtitleEnabled ? "字幕开" : "字幕关"
   const subtitleDisplayLines = useMemo(() => formatSubtitleLines(subtitleState.text), [subtitleState.text])
-  const subtitleDelayLabel = useMemo(() => formatSubtitleDelayLabel(subtitleDelayMs), [subtitleDelayMs])
+  const llmConfigured = capabilitiesQ.data?.llmConfigured ?? false
+  const canAskCourseAssistant =
+    !!instanceId &&
+    !!subtitleSourceKind &&
+    llmConfigured &&
+    (subtitleSourceKind !== "BROWSER_LOCAL" || directoryBinding.permission === "granted")
 
   const flushPlaybackDuration = useCallback(() => {
     if (!instanceId) {
@@ -501,73 +552,23 @@ export function VideoPane({
     applySubtitleDelayMs(0, { announce: true })
   }, [applySubtitleDelayMs, subtitleDelayMs])
 
-  const renderCompactSubtitleDelayControls = useCallback(
-    (tone: "default" | "danger" = "default") => {
-      if (!isSubtitleEnabled) return null
-      return (
-        <div className="mt-2 flex items-center justify-center gap-1 md:hidden">
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            className={cn(
-              "h-7 w-7 rounded-full border text-white/82 hover:bg-white/12 hover:text-white",
-              tone === "danger" ? "border-white/14 bg-white/8" : "border-white/12 bg-white/[0.05]",
-            )}
-            onClick={() => nudgeSubtitleDelay(-VIDEO_SUBTITLE_DELAY_STEP_MS)}
-            title={`字幕提前 ${(VIDEO_SUBTITLE_DELAY_STEP_MS / 1000).toFixed(2)}s`}
-          >
-            <Minus className="h-3.5 w-3.5" />
-            <span className="sr-only">字幕提前 {VIDEO_SUBTITLE_DELAY_STEP_MS} 毫秒</span>
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className={cn(
-              "h-7 min-w-[6.25rem] rounded-full border px-2 text-[10px] tabular-nums hover:bg-white/12 hover:text-white",
-              subtitleDelayMs === 0 ? "text-white/56" : "text-white/82",
-              tone === "danger" ? "border-white/14 bg-white/8" : "border-white/12 bg-white/[0.05]",
-            )}
-            onClick={resetSubtitleDelay}
-            disabled={subtitleDelayMs === 0}
-            title={subtitleDelayMs === 0 ? "字幕时序已归零" : "重置字幕时序"}
-          >
-            {subtitleDelayLabel}
-          </Button>
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            className={cn(
-              "h-7 w-7 rounded-full border text-white/82 hover:bg-white/12 hover:text-white",
-              tone === "danger" ? "border-white/14 bg-white/8" : "border-white/12 bg-white/[0.05]",
-            )}
-            onClick={() => nudgeSubtitleDelay(VIDEO_SUBTITLE_DELAY_STEP_MS)}
-            title={`字幕延后 ${(VIDEO_SUBTITLE_DELAY_STEP_MS / 1000).toFixed(2)}s`}
-          >
-            <Plus className="h-3.5 w-3.5" />
-            <span className="sr-only">字幕延后 {VIDEO_SUBTITLE_DELAY_STEP_MS} 毫秒</span>
-          </Button>
-        </div>
-      )
-    },
-    [isSubtitleEnabled, nudgeSubtitleDelay, resetSubtitleDelay, subtitleDelayLabel, subtitleDelayMs],
-  )
-
   const toggleSubtitles = useCallback(() => {
     if (!instanceId) return
-    if (materialSourceBindingQ.isLoading) {
+    if (subtitleMissing) return
+    if (!effectiveSourceKind && materialSourceBindingQ.isLoading) {
       showInfoFeedback("正在准备字幕", "素材来源信息还在加载，稍后再试。")
       return
     }
-    if (materialSourceBindingQ.error || !materialSourceBindingQ.data?.sourceKind) {
+    if (materialSourceBindingQ.error || !subtitleSourceKind) {
       showInfoFeedback("字幕暂不可用", "当前项目的素材来源信息不可用，暂时无法检查同目录字幕文件。")
       return
     }
-    if (materialSourceBindingQ.data.sourceKind === "BROWSER_LOCAL" && directoryBinding.permission !== "granted") {
+    if (subtitleSourceKind === "BROWSER_LOCAL" && directoryBinding.permission !== "granted") {
       showInfoFeedback("字幕暂不可用", "浏览器还没有本地目录读取权限，暂时无法检查视频同目录下的字幕文件。")
       return
+    }
+    if (subtitleErrorText && !subtitleHasFile) {
+      retrySubtitleLookup()
     }
     setIsSubtitleEnabled((current) => {
       const next = !current
@@ -576,18 +577,24 @@ export function VideoPane({
       }
       return next
     })
-  }, [directoryBinding.permission, instanceId, materialSourceBindingQ.data?.sourceKind, materialSourceBindingQ.error, materialSourceBindingQ.isLoading])
+  }, [directoryBinding.permission, effectiveSourceKind, instanceId, materialSourceBindingQ.error, materialSourceBindingQ.isLoading, retrySubtitleLookup, subtitleErrorText, subtitleHasFile, subtitleMissing, subtitleSourceKind])
 
   const closeCapturePanel = useCallback(() => {
+    assistantAbortRef.current?.abort()
+    assistantAbortRef.current = null
     setIsCapturePanelOpen(false)
+    setCapturePanelMode("capture")
     setCaptureError(null)
     setQuestionContent(richText(""))
     setAnswerContent(richText(""))
+    setAssistantStatus(null)
+    setAssistantError(null)
+    setIsAssistantAsking(false)
   }, [])
 
   const openCapturePanel = useCallback(
-    async (anchorMs?: number, keepFullscreen = false) => {
-      if (queueHasGate) {
+    async (anchorMs?: number, keepFullscreen = false, mode: CapturePanelMode = "capture") => {
+      if (mode === "capture" && queueHasGate) {
         showInfoFeedback("当前处于复习模式", "请先完成复习，再继续录入新的复述点。")
         return
       }
@@ -606,9 +613,13 @@ export function VideoPane({
       if (!keepFullscreen && !isElementInFullscreen(playerShellRef.current)) return
 
       setCaptureAnchorMs(captureMs)
+      setCapturePanelMode(mode)
       setQuestionContent(richText(""))
       setAnswerContent(richText(""))
       setCaptureError(null)
+      setAssistantFrame(null)
+      setAssistantStatus(null)
+      setAssistantError(null)
       setIsCapturePanelOpen(true)
       wakeChrome()
     },
@@ -622,6 +633,119 @@ export function VideoPane({
       wakeChrome,
     ],
   )
+
+  const copyLatestAssistantAnswer = useCallback(async () => {
+    const latestAssistantTurn = [...assistantTurns].reverse().find((turn) => turn.role === "assistant")
+    if (!latestAssistantTurn?.content.trim()) return
+    try {
+      await copyText(latestAssistantTurn.content)
+      showInfoFeedback("回答已复制", "视频助手的最新回答已经复制到剪贴板。")
+    } catch (error) {
+      setAssistantError(formatCourseAssistantError(error))
+    }
+  }, [assistantTurns])
+
+  const submitAssistantQuestion = useCallback(async () => {
+    const prompt = assistantComposer.trim()
+    const video = videoRef.current
+
+    if (!prompt) {
+      setAssistantError("先输入一个问题，再让视频助手帮你看这一段。")
+      return
+    }
+    if (!instance || !instanceId || !subtitleSourceKind || !video) {
+      setAssistantError("当前视频上下文还没有准备好。")
+      return
+    }
+    if (!llmConfigured) {
+      setAssistantError("当前还没有配置可用的 LLM 服务。")
+      return
+    }
+    if (subtitleSourceKind === "BROWSER_LOCAL" && directoryBinding.permission !== "granted") {
+      setAssistantError("浏览器还没有本地目录读取权限，视频助手暂时无法读取视频与字幕。")
+      return
+    }
+    if (isAssistantAsking) return
+
+    const historyMessages = assistantTurns.map((turn) => ({
+      role: turn.role,
+      content: turn.content,
+    }))
+    const userTurn: CourseAssistantTurn = {
+      id: newLocalId(),
+      role: "user",
+      content: prompt,
+      createdAt: Date.now(),
+    }
+
+    setAssistantTurns((current) => [...current, userTurn])
+    setAssistantComposer("")
+    setAssistantError(null)
+    setAssistantStatus("正在捕获当前画面...")
+    setIsAssistantAsking(true)
+
+    const controller = new AbortController()
+    assistantAbortRef.current = controller
+
+    try {
+      const frame = await captureDisplayedVideoFrame(video, captureAnchorMs)
+      if (controller.signal.aborted) return
+
+      setAssistantFrame(frame)
+      setAssistantStatus("正在检索相关字幕...")
+
+      const result = await askCourseAgent({
+        projectId,
+        instance,
+        sourceKind: subtitleSourceKind,
+        nodeLabel: instance.materialDisplayName || instance.materialId || "当前视频",
+        userPrompt: prompt,
+        anchorMs: captureAnchorMs,
+        initialFrame: frame,
+        canCaptureVideoFrame,
+        preferHighDetailFrame: true,
+        historyMessages,
+        temperature: 0.2,
+        signal: controller.signal,
+        timeoutMs: 90_000,
+        onStatus: (status) => setAssistantStatus(status),
+      })
+      if (controller.signal.aborted) return
+
+      setAssistantTurns((current) => [
+        ...current,
+        {
+          id: newLocalId(),
+          role: "assistant",
+          content: result.content,
+          createdAt: Date.now(),
+          evidence: result.evidence,
+        },
+      ])
+      setAssistantStatus(null)
+    } catch (error) {
+      if (controller.signal.aborted) return
+      setAssistantError(formatCourseAssistantError(error))
+      setAssistantStatus(null)
+    } finally {
+      if (assistantAbortRef.current === controller) {
+        assistantAbortRef.current = null
+      }
+      setIsAssistantAsking(false)
+    }
+  }, [
+    assistantComposer,
+    assistantTurns,
+    canCaptureVideoFrame,
+    captureAnchorMs,
+    directoryBinding.permission,
+    instance,
+    instanceId,
+    isAssistantAsking,
+    llmConfigured,
+    projectId,
+    subtitleSourceKind,
+  ])
 
   const saveCaptureDraft = useCallback(() => {
     if (!instanceId) {
@@ -704,10 +828,10 @@ export function VideoPane({
   }, [subtitleDelayMs])
 
   useEffect(() => {
-    if (!isSubtitleEnabled || !subtitleState.errorText) {
-      setDismissedSubtitleErrorText(null)
+    if (subtitleMissing && isSubtitleEnabled) {
+      setIsSubtitleEnabled(false)
     }
-  }, [isSubtitleEnabled, subtitleState.errorText])
+  }, [isSubtitleEnabled, subtitleMissing])
 
   useEffect(() => {
     syncPlaybackClock(0)
@@ -720,10 +844,19 @@ export function VideoPane({
     setIsShellFullscreen(false)
     setIsChromeAwake(true)
     setIsCapturePanelOpen(false)
+    setCapturePanelMode("capture")
     setCaptureAnchorMs(0)
     setQuestionContent(richText(""))
     setAnswerContent(richText(""))
     setCaptureError(null)
+    setAssistantComposer("")
+    setAssistantTurns([])
+    setAssistantStatus(null)
+    setAssistantError(null)
+    setAssistantFrame(null)
+    setIsAssistantAsking(false)
+    assistantAbortRef.current?.abort()
+    assistantAbortRef.current = null
     pendingSeekRef.current = null
     lastAppliedNonceRef.current = null
     restoreSavedPositionRef.current = true
@@ -773,7 +906,7 @@ export function VideoPane({
   useEffect(() => {
     if (!isCapturePanelOpen) return
     const focusField = () => {
-      const field = questionInputRef.current
+      const field = capturePanelMode === "assistant" ? assistantInputRef.current : questionInputRef.current
       if (!field) return
       field.focus()
       const caret = field.value.length
@@ -786,7 +919,7 @@ export function VideoPane({
       window.cancelAnimationFrame(rafId)
       window.clearTimeout(timeoutId)
     }
-  }, [isCapturePanelOpen])
+  }, [capturePanelMode, isCapturePanelOpen])
 
   useEffect(() => {
     if (!isCapturePanelOpen || isShellFullscreen) return
@@ -807,11 +940,19 @@ export function VideoPane({
   useEffect(() => clearChromeHideTimer, [clearChromeHideTimer])
 
   useEffect(() => {
+    if (!instanceId) return
+    const nextDurationMs = playbackDescriptorQ.data?.durationMs
+    if (typeof nextDurationMs !== "number" || nextDurationMs <= 0) return
+    setDurationMs((current) => (current === nextDurationMs ? current : nextDurationMs))
+    onDurationResolved?.(instanceId, nextDurationMs)
+  }, [instanceId, onDurationResolved, playbackDescriptorQ.data?.durationMs])
+
+  useEffect(() => {
     let cancelled = false
     let objectUrl: string | null = null
 
     async function loadLocalMedia() {
-      if (serverMediaStreamEnabled || !instance) {
+      if (!instance || effectiveSourceKind !== "BROWSER_LOCAL" || serverMediaStreamEnabled) {
         if (!cancelled) {
           setLocalSrc(null)
           setLocalError(null)
@@ -872,15 +1013,98 @@ export function VideoPane({
         URL.revokeObjectURL(objectUrl)
       }
     }
-  }, [browserLocalMediaEnabled, directoryBinding.permission, instance, projectId, serverMediaStreamEnabled])
+  }, [browserLocalMediaEnabled, directoryBinding.permission, effectiveSourceKind, instance, projectId, serverMediaStreamEnabled])
 
   const src = useMemo(() => {
     if (!instance) return null
-    if (serverMediaStreamEnabled) {
-      return `/api/projects/${projectId}/media/instances/${instance.instanceId}`
+    if (effectiveSourceKind === "BROWSER_LOCAL" && !serverMediaStreamEnabled) {
+      return localSrc
     }
-    return localSrc
-  }, [instance, localSrc, projectId, serverMediaStreamEnabled])
+    if (playbackDescriptorUrl) {
+      return playbackDescriptorUrl
+    }
+    if (serverMediaStreamEnabled && playbackKind === "FILE") {
+      return resolvePlaybackDescriptorUrl(`/api/projects/${projectId}/media/instances/${instance.instanceId}`)
+    }
+    return null
+  }, [effectiveSourceKind, instance, localSrc, playbackDescriptorUrl, playbackKind, projectId, serverMediaStreamEnabled])
+
+  useEffect(() => {
+    let cancelled = false
+    const video = videoRef.current
+
+    if (hlsRef.current) {
+      hlsRef.current.destroy()
+      hlsRef.current = null
+    }
+
+    async function loadHlsPlayback() {
+      if (!video || !src || playbackKind !== "HLS") return
+      setMediaElementError(null)
+      try {
+        const response = await fetch(src, {
+          method: "GET",
+          credentials: "include",
+        })
+        const text = await response.text()
+        if (cancelled) return
+        if (!response.ok) {
+          let message = "百度网盘视频流加载失败，请稍后重试。"
+          try {
+            const parsed = JSON.parse(text) as { error?: { message?: unknown } }
+            if (typeof parsed.error?.message === "string" && parsed.error.message.trim()) {
+              message = parsed.error.message
+            }
+          } catch {
+          }
+          setMediaElementError(message)
+          return
+        }
+        if (video.canPlayType("application/vnd.apple.mpegurl")) {
+          video.src = src
+          return
+        }
+        if (!Hls.isSupported()) {
+          setMediaElementError("当前浏览器不支持 HLS 视频播放。")
+          return
+        }
+        const hls = new Hls({
+          enableWorker: true,
+          xhrSetup: (xhr) => {
+            xhr.withCredentials = true
+          },
+        })
+        hlsRef.current = hls
+        hls.on(Hls.Events.ERROR, (_event, data) => {
+          if (!data.fatal || cancelled) return
+          setMediaElementError(
+            data.type === Hls.ErrorTypes.NETWORK_ERROR
+              ? "百度网盘视频流加载失败，请稍后重试。"
+              : "百度网盘视频播放失败，请刷新后重试。",
+          )
+          hls.destroy()
+          if (hlsRef.current === hls) {
+            hlsRef.current = null
+          }
+        })
+        hls.loadSource(src)
+        hls.attachMedia(video)
+      } catch (error) {
+        if (cancelled) return
+        setMediaElementError(formatPlaybackError(error))
+      }
+    }
+
+    void loadHlsPlayback()
+
+    return () => {
+      cancelled = true
+      if (hlsRef.current) {
+        hlsRef.current.destroy()
+        hlsRef.current = null
+      }
+    }
+  }, [playbackKind, src])
 
   const { hoveredBarrage } = useVideoBarrage({
     projectId,
@@ -896,10 +1120,11 @@ export function VideoPane({
 
   const playbackError = useMemo(() => {
     if (!instance) return null
+    if (playbackDescriptorQ.error) return formatPlaybackError(playbackDescriptorQ.error)
     if (mediaElementError) return mediaElementError
-    if (!serverMediaStreamEnabled) return localError
+    if (effectiveSourceKind === "BROWSER_LOCAL" && !serverMediaStreamEnabled) return localError
     return null
-  }, [instance, localError, mediaElementError, serverMediaStreamEnabled])
+  }, [effectiveSourceKind, instance, localError, mediaElementError, playbackDescriptorQ.error, serverMediaStreamEnabled])
 
   useEffect(() => {
     if (!seekTo) return
@@ -956,7 +1181,17 @@ export function VideoPane({
     const video = videoRef.current
     const mediaError = video?.error
     if (!mediaError) {
-      setMediaElementError("当前浏览器无法播放该视频。")
+      setMediaElementError(effectiveSourceKind === "BAIDU_NETDISK" ? "百度网盘视频流播放失败，请稍后重试。" : "当前浏览器无法播放该视频。")
+      return
+    }
+    if (effectiveSourceKind === "BAIDU_NETDISK") {
+      const baiduMessageByCode: Record<number, string> = {
+        1: "百度网盘视频流加载被中断。",
+        2: "百度网盘视频流加载失败，请稍后重试。",
+        3: "百度网盘视频流解码失败，请刷新后重试。",
+        4: "当前浏览器不支持百度网盘视频播放。",
+      }
+      setMediaElementError(baiduMessageByCode[mediaError.code] ?? "百度网盘视频流播放失败，请稍后重试。")
       return
     }
     const messageByCode: Record<number, string> = {
@@ -1036,6 +1271,13 @@ export function VideoPane({
         return
       }
 
+      if ((event.key === "q" || event.key === "Q") && !isCapturePanelOpen) {
+        event.preventDefault()
+        if (event.repeat || !instanceId) return
+        void openCapturePanel(undefined, true, "assistant")
+        return
+      }
+
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return
 
       event.preventDefault()
@@ -1062,6 +1304,13 @@ export function VideoPane({
   ])
 
   const shouldRenderVideo = Boolean(src)
+  const videoElementSrc = playbackKind === "HLS" ? undefined : (src ?? undefined)
+  const videoCrossOrigin = src?.startsWith("http") ? "use-credentials" : undefined
+  const isBaiduConnecting = Boolean(instance && effectiveSourceKind === "BAIDU_NETDISK" && !src && !playbackError)
+  const latestAssistantTurn = useMemo(
+    () => [...assistantTurns].reverse().find((turn) => turn.role === "assistant") ?? null,
+    [assistantTurns],
+  )
 
   return (
     <Card className="theme-card-main overflow-hidden">
@@ -1084,7 +1333,8 @@ export function VideoPane({
                   ? "h-[calc(100dvh-2rem)] max-h-full rounded-[1.2rem] border border-white/10 object-contain"
                   : "rounded-[1.2rem] object-contain",
               )}
-              src={src ?? undefined}
+              src={videoElementSrc}
+              crossOrigin={videoCrossOrigin}
               playsInline
               preload="metadata"
               disablePictureInPicture
@@ -1152,84 +1402,32 @@ export function VideoPane({
             />
 
             {subtitleState.text ? (
-              <div className="pointer-events-none absolute inset-x-0 bottom-16 z-[18] flex justify-center px-4">
+              <div
+                className={cn(
+                  "pointer-events-none absolute inset-x-0 z-[18] flex justify-center px-4",
+                  isShellFullscreen ? "bottom-24 px-6" : "bottom-16",
+                )}
+              >
                 <div
                   className={cn(
-                    "max-w-[min(78ch,calc(100%-1rem))] rounded-[1rem] border border-white/18 bg-black/48 px-4 py-2.5 text-center text-white shadow-[0_18px_42px_-28px_rgba(0,0,0,0.92)] backdrop-blur-xl",
+                    "w-auto max-w-[min(92vw,58rem)] text-center text-white",
+                    isShellFullscreen && "max-w-[min(90vw,78rem)]",
                   )}
                 >
                   {subtitleDisplayLines.map((line, index) => (
                     <div
                       key={`${index}:${line}`}
                       className={cn(
-                        "text-sm font-medium leading-6 [text-shadow:0_1px_8px_rgba(0,0,0,0.55)] sm:text-[15px]",
+                        "whitespace-normal break-words font-semibold [text-shadow:0_2px_14px_rgba(0,0,0,0.92)]",
+                        isShellFullscreen
+                          ? "text-[clamp(1.3rem,1.9vw,2rem)] leading-[1.55]"
+                          : "text-[15px] leading-7 sm:text-[17px]",
                         index > 0 && "mt-0.5",
                       )}
                     >
                       {line}
                     </div>
                   ))}
-                  {renderCompactSubtitleDelayControls()}
-                </div>
-              </div>
-            ) : null}
-
-            {!subtitleState.text && subtitleStatusText ? (
-              <div className="pointer-events-none absolute inset-x-0 bottom-16 z-[18] flex justify-center px-4">
-                <div
-                  className={cn(
-                    "pointer-events-auto max-w-[min(34rem,calc(100%-1rem))] rounded-[1rem] border px-4 py-3 shadow-[0_18px_42px_-28px_rgba(0,0,0,0.92)] backdrop-blur-xl",
-                    subtitleState.errorText
-                      ? "border-rose-300/18 bg-rose-950/54 text-rose-100"
-                      : "border-white/12 bg-slate-950/68 text-white/78",
-                  )}
-                >
-                  <div className="flex items-center justify-center gap-2 text-center text-xs leading-6 sm:text-sm">
-                    {subtitleState.errorText ? (
-                      <TriangleAlert className="h-4 w-4 shrink-0" />
-                    ) : (
-                      <LoaderCircle className="h-4 w-4 shrink-0 animate-spin" />
-                    )}
-                    <span>{subtitleStatusText}</span>
-                  </div>
-                  <div className="mt-2 flex items-center justify-center gap-2">
-                    {subtitleState.errorText ? (
-                      <div className="flex flex-col items-center justify-center">
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          className="h-8 gap-1.5 rounded-full border-white/18 bg-white/8 px-3 text-xs text-white hover:bg-white/14"
-                          onClick={() => {
-                            setDismissedSubtitleErrorText(null)
-                            subtitleState.retry()
-                          }}
-                          disabled={subtitleState.isLoading}
-                        >
-                          <RefreshCw className={cn("h-3.5 w-3.5", subtitleState.isLoading && "animate-spin")} />
-                          {subtitleState.isLoading ? "重试中..." : "重试字幕"}
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          className="mt-2 h-8 gap-1.5 rounded-full px-3 text-xs text-white/78 hover:bg-white/10 hover:text-white"
-                          onClick={() => setDismissedSubtitleErrorText(subtitleState.errorText ?? null)}
-                        >
-                          <X className="h-3.5 w-3.5" />
-                          关闭提示
-                        </Button>
-                        {renderCompactSubtitleDelayControls("danger")}
-                      </div>
-                    ) : (
-                      <div>
-                        <div className="text-[11px] text-white/54">
-                          系统只会读取视频同目录下的同名字幕文件，不会再用 ASR 或 ffmpeg 自动生成字幕。
-                        </div>
-                        {renderCompactSubtitleDelayControls()}
-                      </div>
-                    )}
-                  </div>
                 </div>
               </div>
             ) : null}
@@ -1378,15 +1576,19 @@ export function VideoPane({
                         variant="ghost"
                         className={cn(
                           "h-7 min-w-[4.5rem] gap-1.5 rounded-full px-2 text-[10px] sm:text-[11px]",
-                          isSubtitleEnabled
+                          subtitleMissing
+                            ? "border border-white/8 bg-white/[0.04] text-white/34 hover:bg-white/[0.04] hover:text-white/34"
+                            : isSubtitleEnabled
                             ? "border border-emerald-200/18 bg-emerald-300/18 text-emerald-50 hover:bg-emerald-300/24"
                             : "border border-white/10 text-white/72 hover:bg-white/10 hover:text-white",
                         )}
                         aria-pressed={isSubtitleEnabled}
                         onClick={toggleSubtitles}
-                        disabled={!instanceId}
+                        disabled={subtitleButtonDisabled}
                         title={
-                          isSubtitleEnabled
+                          subtitleMissing
+                            ? (subtitleMissingText ?? "当前视频没有可用字幕文件")
+                            : isSubtitleEnabled
                             ? "字幕已开启，点击关闭 (全屏时按 C；[ / ] 微调时序，\\ 归零)"
                             : `字幕已关闭，点击开启后会检查同目录同名字幕文件 (${SUPPORTED_SUBTITLE_EXTENSIONS_LABEL})`
                         }
@@ -1398,50 +1600,6 @@ export function VideoPane({
                         )}
                         {subtitleButtonLabel}
                       </Button>
-                      {isSubtitleEnabled ? (
-                        <div className="hidden items-center gap-1 rounded-full border border-white/12 bg-white/[0.06] px-1 py-1 text-[10px] text-white/76 md:flex">
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            className="h-6 w-6 rounded-full text-white/78 hover:bg-white/10 hover:text-white"
-                            onClick={() => nudgeSubtitleDelay(-VIDEO_SUBTITLE_DELAY_STEP_MS)}
-                            title={`字幕提前 ${(VIDEO_SUBTITLE_DELAY_STEP_MS / 1000).toFixed(2)}s ([)`}
-                          >
-                            <Minus className="h-3.5 w-3.5" />
-                            <span className="sr-only">字幕提前 {VIDEO_SUBTITLE_DELAY_STEP_MS} 毫秒</span>
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            className={cn(
-                              "h-6 min-w-[6.5rem] rounded-full px-2 text-[10px] tabular-nums hover:bg-white/10 hover:text-white",
-                              subtitleDelayMs === 0 ? "text-white/54" : "text-white/82",
-                            )}
-                            onClick={resetSubtitleDelay}
-                            disabled={subtitleDelayMs === 0}
-                            title={
-                              subtitleDelayMs === 0
-                                ? "字幕时序已归零"
-                                : "重置字幕时序 (\\)"
-                            }
-                          >
-                            {subtitleDelayLabel}
-                          </Button>
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            className="h-6 w-6 rounded-full text-white/78 hover:bg-white/10 hover:text-white"
-                            onClick={() => nudgeSubtitleDelay(VIDEO_SUBTITLE_DELAY_STEP_MS)}
-                            title={`字幕延后 ${(VIDEO_SUBTITLE_DELAY_STEP_MS / 1000).toFixed(2)}s (])`}
-                          >
-                            <Plus className="h-3.5 w-3.5" />
-                            <span className="sr-only">字幕延后 {VIDEO_SUBTITLE_DELAY_STEP_MS} 毫秒</span>
-                          </Button>
-                        </div>
-                      ) : null}
                       <Button
                         type="button"
                         size="sm"
@@ -1458,20 +1616,35 @@ export function VideoPane({
                       >
                         {isBarrageEnabled ? "弹幕开" : "弹幕关"}
                       </Button>
-                      {isShellFullscreen ? (
-                        <Button
-                          type="button"
+                      <Button
+                        type="button"
                         size="icon"
                         variant="ghost"
                         className="h-7 w-7 rounded-full text-white hover:bg-white/10"
-                        onClick={() => void openCapturePanel()}
+                        onClick={() => void openCapturePanel(undefined, true, "capture")}
                         disabled={!instanceId || queueHasGate}
                         title="记复述点 (Enter)"
                       >
-                          <NotebookPen className="h-3.5 w-3.5" />
-                          <span className="sr-only">记复述点</span>
-                        </Button>
-                      ) : null}
+                        <NotebookPen className="h-3.5 w-3.5" />
+                        <span className="sr-only">记复述点</span>
+                      </Button>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className={cn(
+                          "h-7 w-7 rounded-full hover:bg-white/10",
+                          capturePanelMode === "assistant" && isCapturePanelOpen
+                            ? "text-cyan-100"
+                            : "text-white",
+                        )}
+                        onClick={() => void openCapturePanel(undefined, true, "assistant")}
+                        disabled={!instanceId || !llmConfigured}
+                        title={llmConfigured ? "问视频助手 (Q)" : "当前还没有配置视频助手所需的 LLM"}
+                      >
+                        <MessageSquarePlus className="h-3.5 w-3.5" />
+                        <span className="sr-only">问视频助手</span>
+                      </Button>
                       <Button
                         type="button"
                         size="icon"
@@ -1491,12 +1664,28 @@ export function VideoPane({
 
             {isCapturePanelOpen ? (
               <div className="pointer-events-none absolute inset-0 z-30">
-                <div className="pointer-events-auto absolute bottom-12 right-3 w-[min(24rem,calc(100%-1.5rem))] rounded-[1rem] border border-white/12 bg-[linear-gradient(180deg,rgba(15,23,42,0.84),rgba(2,6,23,0.92))] p-4 text-white shadow-[0_28px_64px_-34px_rgba(15,23,42,0.96)] backdrop-blur-xl">
+                <div
+                  className={cn(
+                    "pointer-events-auto absolute bottom-12 right-3 flex max-h-[calc(100%-4.5rem)] flex-col overflow-hidden rounded-[1rem] border border-white/12 bg-[linear-gradient(180deg,rgba(15,23,42,0.84),rgba(2,6,23,0.94))] p-4 text-white shadow-[0_28px_64px_-34px_rgba(15,23,42,0.96)] backdrop-blur-xl",
+                    capturePanelMode === "assistant"
+                      ? "w-[min(42rem,calc(100%-1.5rem))]"
+                      : "w-[min(24rem,calc(100%-1.5rem))]",
+                  )}
+                >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-white/42">记复述点</div>
-                      <div className="mt-2 inline-flex items-center rounded-full border border-cyan-200/18 bg-cyan-200/10 px-2.5 py-1 text-[11px] text-cyan-100">
-                        锚点 {formatPlaybackClock(captureAnchorMs)}
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-white/42">
+                          {capturePanelMode === "assistant" ? "视频助手" : "记复述点"}
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <div className="inline-flex items-center rounded-full border border-cyan-200/18 bg-cyan-200/10 px-2.5 py-1 text-[11px] text-cyan-100">
+                          锚点 {formatPlaybackClock(captureAnchorMs)}
+                        </div>
+                        {capturePanelMode === "assistant" && assistantFrame ? (
+                          <div className="inline-flex items-center rounded-full border border-white/12 bg-white/[0.06] px-2.5 py-1 text-[11px] text-white/72">
+                            已附带画面 {formatPlaybackClock(assistantFrame.timeMs)}
+                          </div>
+                        ) : null}
                       </div>
                     </div>
                     <Button
@@ -1505,106 +1694,268 @@ export function VideoPane({
                       variant="ghost"
                       className="h-8 w-8 rounded-full text-white/72 hover:bg-white/10 hover:text-white"
                       onClick={closeCapturePanel}
-                      title="关闭记复述点"
+                      title={capturePanelMode === "assistant" ? "关闭视频助手" : "关闭记复述点"}
                     >
                       <X className="h-4 w-4" />
-                      <span className="sr-only">关闭记复述点</span>
+                      <span className="sr-only">{capturePanelMode === "assistant" ? "关闭视频助手" : "关闭记复述点"}</span>
                     </Button>
                   </div>
 
-                  <div className="mt-3 space-y-3">
-                    <label className="block">
-                      <div className="mb-1 text-xs text-white/62">问题</div>
-                      <RichContentEditor
-                        projectId={projectId}
-                        field="question"
-                        value={questionContent}
-                        textareaRef={questionInputRef}
-                        placeholder="输入复述点问题，或直接 Ctrl+V 粘贴图片"
-                        textareaClassName="min-h-[84px] rounded-xl border-white/10 bg-white/[0.05] px-3 py-2 text-sm text-white outline-none placeholder:text-white/28 focus:border-cyan-200/24 focus:bg-white/[0.08]"
-                        imageClassName="h-24 w-24 rounded-xl border-white/10 bg-white/[0.06] object-cover"
-                        onTextChange={(text) => {
-                          setQuestionContent((prev) => setRichContentText(prev, text))
-                          if (captureError) setCaptureError(null)
-                        }}
-                        onAppendImage={(assetId) => {
-                          setQuestionContent((prev) => appendImageBlock(prev, assetId))
-                          if (captureError) setCaptureError(null)
-                        }}
-                        onRemoveImage={(imageIndex) => {
-                          setQuestionContent((prev) => removeImageBlockAt(prev, imageIndex))
-                          if (captureError) setCaptureError(null)
-                        }}
-                        onTextKeyDown={(event) => {
-                          if (event.key === "Escape") {
-                            event.preventDefault()
-                            closeCapturePanel()
-                            return
-                          }
-                          if (event.nativeEvent.isComposing) return
-                          if (event.key === "Enter" && !(event.ctrlKey || event.metaKey)) {
-                            event.preventDefault()
-                            answerTextareaRef.current?.focus()
-                          }
-                        }}
-                      />
-                    </label>
+                  {capturePanelMode === "assistant" ? (
+                    <div className="mt-3 flex min-h-0 flex-1 flex-col gap-3">
+                      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_8.5rem]">
+                        <label className="block">
+                          <div className="mb-1 text-xs text-white/62">问题</div>
+                          <textarea
+                            ref={assistantInputRef}
+                            value={assistantComposer}
+                            onChange={(event) => {
+                              setAssistantComposer(event.target.value)
+                              if (assistantError) setAssistantError(null)
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key === "Escape") {
+                                event.preventDefault()
+                                closeCapturePanel()
+                                return
+                              }
+                              if (event.nativeEvent.isComposing) return
+                              if (event.key === "Enter" && !(event.ctrlKey || event.metaKey || event.shiftKey)) {
+                                event.preventDefault()
+                                void submitAssistantQuestion()
+                              }
+                            }}
+                            placeholder={
+                              canAskCourseAssistant
+                                ? "例如：这页公式在讲什么？为什么这里要这样推？"
+                                : "当前项目还没有满足视频助手的上下文条件"
+                            }
+                            disabled={!canAskCourseAssistant || isAssistantAsking}
+                            className="min-h-[104px] w-full rounded-xl border border-white/10 bg-white/[0.05] px-3 py-2 text-sm text-white outline-none placeholder:text-white/28 focus:border-cyan-200/24 focus:bg-white/[0.08] disabled:cursor-not-allowed disabled:text-white/42"
+                          />
+                        </label>
 
-                    <label className="block">
-                      <div className="mb-1 text-xs text-white/62">答案</div>
-                      <RichContentEditor
-                        projectId={projectId}
-                        field="answer"
-                        value={answerContent}
-                        textareaRef={answerTextareaRef}
-                        placeholder="输入答案或你的复述内容，或直接 Ctrl+V 粘贴图片"
-                        textareaClassName="min-h-[124px] rounded-xl border-white/10 bg-white/[0.05] px-3 py-2 text-sm text-white outline-none placeholder:text-white/28 focus:border-cyan-200/24 focus:bg-white/[0.08]"
-                        imageClassName="h-24 w-24 rounded-xl border-white/10 bg-white/[0.06] object-cover"
-                        onTextChange={(text) => {
-                          setAnswerContent((prev) => setRichContentText(prev, text))
-                          if (captureError) setCaptureError(null)
-                        }}
-                        onAppendImage={(assetId) => {
-                          setAnswerContent((prev) => appendImageBlock(prev, assetId))
-                          if (captureError) setCaptureError(null)
-                        }}
-                        onRemoveImage={(imageIndex) => {
-                          setAnswerContent((prev) => removeImageBlockAt(prev, imageIndex))
-                          if (captureError) setCaptureError(null)
-                        }}
-                        onTextKeyDown={(event) => {
-                          if (event.key === "Escape") {
-                            event.preventDefault()
-                            closeCapturePanel()
-                            return
-                          }
-                          if (event.nativeEvent.isComposing) return
-                          if (event.key === "Enter" && !(event.ctrlKey || event.metaKey)) {
-                            event.preventDefault()
-                            void saveCaptureDraft()
-                          }
-                        }}
-                      />
-                    </label>
-                  </div>
+                        <div className="overflow-hidden rounded-[1rem] border border-white/10 bg-white/[0.05]">
+                          {assistantFrame ? (
+                            <img
+                              src={assistantFrame.imageDataUrl}
+                              alt={`当前视频帧 ${formatPlaybackClock(assistantFrame.timeMs)}`}
+                              className="h-full min-h-[8.5rem] w-full object-cover"
+                              loading="lazy"
+                            />
+                          ) : (
+                            <div className="flex h-full min-h-[8.5rem] items-center justify-center px-3 text-center text-xs leading-5 text-white/48">
+                              提问时会自动附带当前视频帧
+                            </div>
+                          )}
+                        </div>
+                      </div>
 
-                  <div className={cn("mt-2 text-xs", captureError ? "text-rose-200" : "text-white/44")}>
-                    {captureError ?? "全屏时 Enter 可打开录入；问题中 Enter 切到答案，答案中 Enter 保存，Ctrl+Enter 换行，Ctrl+V 粘贴图片会先上传到服务器。"}
-                  </div>
+                      <div className="min-h-0 flex-1 overflow-y-auto rounded-[1rem] border border-white/10 bg-white/[0.04] p-3">
+                        {assistantTurns.length === 0 && !isAssistantAsking ? (
+                          <div className="flex h-full min-h-[12rem] flex-col items-center justify-center px-4 text-center">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-full border border-cyan-200/18 bg-cyan-200/10 text-cyan-100">
+                              <Sparkles className="h-4 w-4" />
+                            </div>
+                            <div className="mt-3 text-sm font-medium text-white">直接问这一刻正在讲什么</div>
+                            <div className="mt-2 max-w-[28rem] text-xs leading-6 text-white/56">
+                              每次提问都会附带当前视频帧；视频助手也会按需回看当前到前面一段时间的字幕，再给你答案。
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="space-y-3">
+                            {assistantTurns.map((turn) =>
+                              turn.role === "user" ? (
+                                <div key={turn.id} className="flex justify-end">
+                                  <div className="max-w-[85%] rounded-[1.2rem] border border-cyan-200/18 bg-cyan-300/12 px-4 py-3 text-sm leading-6 text-cyan-50">
+                                    <div className="whitespace-pre-wrap break-words">{turn.content}</div>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div
+                                  key={turn.id}
+                                  className="rounded-[1.2rem] border border-slate-200/70 bg-[rgba(252,254,255,0.98)] px-4 py-4 text-slate-900 shadow-[0_16px_32px_-28px_rgba(15,23,42,0.7)]"
+                                >
+                                  <MarkdownRichText text={turn.content} className="text-slate-900" />
+                                  {turn.evidence && turn.evidence.length > 0 ? (
+                                    <div className="mt-4 space-y-2">
+                                      <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                                        依据片段
+                                      </div>
+                                      <div className="flex flex-wrap gap-2">
+                                        {turn.evidence.map((evidence, index) => (
+                                          <button
+                                            key={`${turn.id}:${evidence.kind}:${evidence.startMs}:${evidence.endMs}:${index}`}
+                                            type="button"
+                                            className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-left text-[11px] leading-5 text-slate-600 transition hover:border-cyan-300/50 hover:bg-cyan-50 hover:text-cyan-800"
+                                            onClick={() => {
+                                              applySeekMs(evidence.startMs)
+                                              setCaptureAnchorMs(evidence.startMs)
+                                              setAssistantFrame(null)
+                                            }}
+                                            title="跳到这一段"
+                                          >
+                                            {evidence.title} · {formatEvidenceTimeRange(evidence.startMs, evidence.endMs)}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  ) : null}
+                                </div>
+                              ),
+                            )}
+                            {isAssistantAsking ? (
+                              <div className="rounded-[1.2rem] border border-white/10 bg-white/[0.06] px-4 py-3 text-sm text-white/82">
+                                <div className="inline-flex items-center gap-2">
+                                  <LoaderCircle className="h-4 w-4 animate-spin" />
+                                  {assistantStatus ?? "正在思考..."}
+                                </div>
+                              </div>
+                            ) : null}
+                          </div>
+                        )}
+                      </div>
 
-                  <div className="mt-3 flex items-center justify-end gap-2">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      className="text-white/72 hover:bg-white/10 hover:text-white"
-                      onClick={closeCapturePanel}
-                    >
-                      取消
-                    </Button>
-                    <Button type="button" onClick={() => void saveCaptureDraft()}>
-                      保存复述点
-                    </Button>
-                  </div>
+                      <div className={cn("text-xs leading-5", assistantError ? "text-rose-200" : "text-white/52")}>
+                        {assistantError ??
+                          (assistantStatus ??
+                            "Enter 提交问题，Shift+Enter / Ctrl+Enter 换行。每次都会附带当前视频帧，并可按需回看当前到前面一段字幕。")}
+                      </div>
+
+                      <div className="flex items-center justify-between gap-2">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="text-white/72 hover:bg-white/10 hover:text-white"
+                          onClick={() => void copyLatestAssistantAnswer()}
+                          disabled={!latestAssistantTurn?.content.trim()}
+                        >
+                          <Copy className="h-4 w-4" />
+                          复制回答
+                        </Button>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            className="text-white/72 hover:bg-white/10 hover:text-white"
+                            onClick={closeCapturePanel}
+                          >
+                            关闭
+                          </Button>
+                          <Button
+                            type="button"
+                            onClick={() => void submitAssistantQuestion()}
+                            disabled={!canAskCourseAssistant || isAssistantAsking || !assistantComposer.trim()}
+                          >
+                            {isAssistantAsking ? (
+                              <>
+                                <LoaderCircle className="h-4 w-4 animate-spin" />
+                                思考中
+                              </>
+                            ) : (
+                              "发送问题"
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="mt-3 space-y-3">
+                        <label className="block">
+                          <div className="mb-1 text-xs text-white/62">问题</div>
+                          <RichContentEditor
+                            projectId={projectId}
+                            field="question"
+                            value={questionContent}
+                            textareaRef={questionInputRef}
+                            placeholder="输入复述点问题，或直接 Ctrl+V 粘贴图片"
+                            textareaClassName="min-h-[84px] rounded-xl border-white/10 bg-white/[0.05] px-3 py-2 text-sm text-white outline-none placeholder:text-white/28 focus:border-cyan-200/24 focus:bg-white/[0.08]"
+                            imageClassName="h-24 w-24 rounded-xl border-white/10 bg-white/[0.06] object-cover"
+                            onTextChange={(text) => {
+                              setQuestionContent((prev) => setRichContentText(prev, text))
+                              if (captureError) setCaptureError(null)
+                            }}
+                            onAppendImage={(assetId) => {
+                              setQuestionContent((prev) => appendImageBlock(prev, assetId))
+                              if (captureError) setCaptureError(null)
+                            }}
+                            onRemoveImage={(imageIndex) => {
+                              setQuestionContent((prev) => removeImageBlockAt(prev, imageIndex))
+                              if (captureError) setCaptureError(null)
+                            }}
+                            onTextKeyDown={(event) => {
+                              if (event.key === "Escape") {
+                                event.preventDefault()
+                                closeCapturePanel()
+                                return
+                              }
+                              if (event.nativeEvent.isComposing) return
+                              if (event.key === "Enter" && !(event.ctrlKey || event.metaKey)) {
+                                event.preventDefault()
+                                answerTextareaRef.current?.focus()
+                              }
+                            }}
+                          />
+                        </label>
+
+                        <label className="block">
+                          <div className="mb-1 text-xs text-white/62">答案</div>
+                          <RichContentEditor
+                            projectId={projectId}
+                            field="answer"
+                            value={answerContent}
+                            textareaRef={answerTextareaRef}
+                            placeholder="输入答案或你的复述内容，或直接 Ctrl+V 粘贴图片"
+                            textareaClassName="min-h-[124px] rounded-xl border-white/10 bg-white/[0.05] px-3 py-2 text-sm text-white outline-none placeholder:text-white/28 focus:border-cyan-200/24 focus:bg-white/[0.08]"
+                            imageClassName="h-24 w-24 rounded-xl border-white/10 bg-white/[0.06] object-cover"
+                            onTextChange={(text) => {
+                              setAnswerContent((prev) => setRichContentText(prev, text))
+                              if (captureError) setCaptureError(null)
+                            }}
+                            onAppendImage={(assetId) => {
+                              setAnswerContent((prev) => appendImageBlock(prev, assetId))
+                              if (captureError) setCaptureError(null)
+                            }}
+                            onRemoveImage={(imageIndex) => {
+                              setAnswerContent((prev) => removeImageBlockAt(prev, imageIndex))
+                              if (captureError) setCaptureError(null)
+                            }}
+                            onTextKeyDown={(event) => {
+                              if (event.key === "Escape") {
+                                event.preventDefault()
+                                closeCapturePanel()
+                                return
+                              }
+                              if (event.nativeEvent.isComposing) return
+                              if (event.key === "Enter" && !(event.ctrlKey || event.metaKey)) {
+                                event.preventDefault()
+                                void saveCaptureDraft()
+                              }
+                            }}
+                          />
+                        </label>
+                      </div>
+
+                      <div className={cn("mt-2 text-xs", captureError ? "text-rose-200" : "text-white/44")}>
+                        {captureError ?? "全屏时 Enter 可打开录入；问题中 Enter 切到答案，答案中 Enter 保存，Ctrl+Enter 换行，Ctrl+V 粘贴图片会先上传到服务器。"}
+                      </div>
+
+                      <div className="mt-3 flex items-center justify-end gap-2">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="text-white/72 hover:bg-white/10 hover:text-white"
+                          onClick={closeCapturePanel}
+                        >
+                          取消
+                        </Button>
+                        <Button type="button" onClick={() => void saveCaptureDraft()}>
+                          保存复述点
+                        </Button>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             ) : null}
@@ -1619,7 +1970,12 @@ export function VideoPane({
                 <div className="text-sm font-medium text-foreground">当前视频还未进入可播放状态</div>
                 <div>
                   {instance
-                    ? playbackError ?? (!serverMediaStreamEnabled ? "正在准备播放资源..." : "当前视频暂时不可用。")
+                    ? playbackError ??
+                      (isBaiduConnecting
+                        ? "正在连接百度网盘视频流..."
+                        : !serverMediaStreamEnabled && effectiveSourceKind === "BROWSER_LOCAL"
+                          ? "正在准备播放资源..."
+                          : "当前视频暂时不可用。")
                     : "请先在左侧选择一个视频实例。"}
                 </div>
               </div>

@@ -7,6 +7,7 @@ param(
     [int]$SshPort = 22,
     [string]$SshKeyPath = "",
     [switch]$SkipBuild,
+    [switch]$IncludePublicDownloads,
     [switch]$AllowDirtyWorktree,
     [switch]$PromptOnDirtyWorktree,
     [switch]$DisableSshKey
@@ -517,8 +518,6 @@ Require-Command ssh-keygen
 
 $repoRoot = Get-RepoRoot
 Assert-CleanGitWorktree -RepoRoot $repoRoot -AllowDirty:$AllowDirtyWorktree -PromptOnDirty:$PromptOnDirtyWorktree
-$deployScratchRoot = Get-DeployScratchRoot -RepoRoot $repoRoot
-Remove-StaleDeployTempDirectories -Roots @([System.IO.Path]::GetTempPath(), $deployScratchRoot)
 $connectHostInfo = Resolve-DeployConnectHost -ServerHost $ServerHost
 $connectHost = $connectHostInfo.ConnectHost
 
@@ -554,25 +553,38 @@ $sshArgs = @($baseSshArgs)
 
 if (-not $SkipBuild) {
     Write-Host "Building self-host bundle..."
-    & python (Join-Path $repoRoot "tools/build_selfhost_bundle.py") --build-frontend
+    $buildArgs = @((Join-Path $repoRoot "tools/build_selfhost_bundle.py"), "--build-frontend")
+    if ($IncludePublicDownloads) {
+        $buildArgs += "--include-public-downloads"
+        Write-Host "Including public-downloads/ in the deploy bundle."
+    }
+    else {
+        Write-Host "Skipping public-downloads/ to keep the deploy bundle smaller."
+    }
+    & python @buildArgs
     if ($LASTEXITCODE -ne 0) {
         throw "build_selfhost_bundle.py failed"
     }
 }
 
 $bundlePath = Get-LatestBundlePath -RepoRoot $repoRoot
+$bundleItem = Get-Item -LiteralPath $bundlePath
+$bundleSizeMb = [math]::Round(($bundleItem.Length / 1MB), 1)
+Write-Host "Selected self-host bundle: $bundlePath (${bundleSizeMb} MB)"
+if ($SkipBuild -and -not $IncludePublicDownloads -and $bundleItem.Length -gt 100MB) {
+    Write-Warning "The latest bundle is still very large. It was probably built earlier with public-downloads included. Re-run once without -SkipBuild to generate a smaller deploy bundle."
+}
 $bundleHash = (Get-FileHash -Path $bundlePath -Algorithm SHA256).Hash.ToUpperInvariant()
-$remotePayloadPath = "$RemoteRoot/upload/deploy-payload.zip"
-$remoteTarget = "${ServerUser}@${connectHost}:${remotePayloadPath}"
-$payloadArchiveTempRoot = $null
-$payloadArchivePath = $null
+$includePublicDownloadsValue = if ($IncludePublicDownloads) { "1" } else { "0" }
+$envSyncFile = Join-Path $repoRoot ".env.selfhost.sync"
+$hasEnvSyncFile = Test-Path $envSyncFile
+$remoteZipPath = "$RemoteRoot/upload/latest.zip"
+$remoteTarget = "${ServerUser}@${connectHost}:${remoteZipPath}"
+$remoteEnvSyncPath = "$RemoteRoot/upload/selfhost.env.sync"
+$remoteEnvSyncTarget = "${ServerUser}@${connectHost}:${remoteEnvSyncPath}"
 $sshReuseTempRoot = $null
 $sshReuseControlArgs = @()
 $sshDestination = "${ServerUser}@${connectHost}"
-
-$payloadInfo = New-DeployPayloadArchive -BundlePath $bundlePath -ScratchRoot $deployScratchRoot
-$payloadArchiveTempRoot = $payloadInfo.TempRoot
-$payloadArchivePath = $payloadInfo.ArchivePath
 
 try {
     $supportsSshConnectionReuse = $true
@@ -598,20 +610,29 @@ try {
         Invoke-SshPreflightAuthCheck -BaseSshArgs $baseSshArgs -Destination $sshDestination
     }
 
-    Write-Host "Uploading deploy payload: $payloadArchivePath"
+    Write-Host "Uploading self-host bundle: $bundlePath"
     Invoke-ExternalCommandWithRetry -Description "scp upload" -Command {
-        & scp @scpArgs $payloadArchivePath $remoteTarget
+        & scp @scpArgs $bundlePath $remoteTarget
     } -MaxAttempts 6 -DelaySeconds 3
 
-    $remoteScript = @"
+    if ($hasEnvSyncFile) {
+        Write-Host "Uploading deploy-time env overlay: $envSyncFile"
+        Invoke-ExternalCommandWithRetry -Description "scp env overlay upload" -Command {
+            & scp @scpArgs $envSyncFile $remoteEnvSyncTarget
+        } -MaxAttempts 6 -DelaySeconds 3
+    }
+
+$remoteScript = @"
 set -euo pipefail
 
 REMOTE_ROOT='$RemoteRoot'
 APP_DIR="`$REMOTE_ROOT/app"
 TMP_DIR="`$REMOTE_ROOT/release-tmp"
-PAYLOAD_PATH="`$REMOTE_ROOT/upload/deploy-payload.zip"
 ZIP_PATH="`$REMOTE_ROOT/upload/latest.zip"
 EXPECTED_HASH='$bundleHash'
+INCLUDE_PUBLIC_DOWNLOADS='$includePublicDownloadsValue'
+HAS_ENV_SYNC='$(if ($hasEnvSyncFile) { "1" } else { "0" })'
+ENV_SYNC_UPLOAD_PATH="`$REMOTE_ROOT/upload/selfhost.env.sync"
 
 mkdir -p "`$REMOTE_ROOT/upload" "`$TMP_DIR" "`$APP_DIR"
 
@@ -622,7 +643,51 @@ fi
 
 read_env() {
   local name="`$1"
-  grep "^`$name=" "`$APP_DIR/.env" | tail -n 1 | cut -d= -f2- | tr -d '\r'
+  grep "^`$name=" "`$APP_DIR/.env" | tail -n 1 | cut -d= -f2- | tr -d '\r' || true
+}
+
+merge_env_overlay() {
+  local dst_file="`$1"
+  local src_file="`$2"
+  local tmp_file
+  tmp_file=`$(mktemp)
+  awk '
+    BEGIN { n = 0 }
+    FNR == NR {
+      if (`$0 ~ /^[A-Za-z_][A-Za-z0-9_]*=/) {
+        key = `$0
+        sub(/=.*/, "", key)
+        value = `$0
+        sub(/^[^=]*=/, "", value)
+        overlay[key] = value
+        order[++n] = key
+      }
+      next
+    }
+    {
+      if (`$0 ~ /^[A-Za-z_][A-Za-z0-9_]*=/) {
+        key = `$0
+        sub(/=.*/, "", key)
+        if (key in overlay) {
+          print key "=" overlay[key]
+          seen[key] = 1
+        } else {
+          print `$0
+        }
+      } else {
+        print `$0
+      }
+    }
+    END {
+      for (i = 1; i <= n; i++) {
+        key = order[i]
+        if (!(key in seen)) {
+          print key "=" overlay[key]
+        }
+      }
+    }
+  ' "`$src_file" "`$dst_file" > "`$tmp_file"
+  mv "`$tmp_file" "`$dst_file"
 }
 
 looks_like_placeholder() {
@@ -633,6 +698,51 @@ looks_like_placeholder() {
   esac
   return 1
 }
+
+if [ ! -f "`$ZIP_PATH" ]; then
+  echo "Deploy bundle not found: `$ZIP_PATH" >&2
+  exit 1
+fi
+
+ACTUAL_HASH=`$(sha256sum "`$ZIP_PATH" | awk '{print toupper(`$1)}')
+if [ "`$ACTUAL_HASH" != "`$EXPECTED_HASH" ]; then
+  echo "Bundle SHA256 mismatch: expected=`$EXPECTED_HASH actual=`$ACTUAL_HASH" >&2
+  exit 1
+fi
+
+if ! command -v rsync >/dev/null 2>&1; then
+  apt-get update
+  apt-get install -y rsync
+fi
+
+rm -rf "`$TMP_DIR"/*
+unzip -o "`$ZIP_PATH" -d "`$TMP_DIR" >/dev/null
+
+SRC_DIR=`$(find "`$TMP_DIR" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+if [ -z "`$SRC_DIR" ]; then
+  echo "Could not find extracted bundle directory under `$TMP_DIR" >&2
+  exit 1
+fi
+
+RSYNC_ARGS=(-a --delete --exclude '.env' --exclude 'data/' --exclude 'release/')
+if [ "`$INCLUDE_PUBLIC_DOWNLOADS" != "1" ]; then
+  RSYNC_ARGS+=(--exclude 'public-downloads/')
+fi
+rsync "`${RSYNC_ARGS[@]}" "`$SRC_DIR"/ "`$APP_DIR"/
+
+if [ "`$HAS_ENV_SYNC" = "1" ]; then
+  if [ ! -f "`$ENV_SYNC_UPLOAD_PATH" ]; then
+    echo "Deploy-time env overlay upload missing: `$ENV_SYNC_UPLOAD_PATH" >&2
+    exit 1
+  fi
+  cp "`$ENV_SYNC_UPLOAD_PATH" "`$APP_DIR/.env.selfhost.sync"
+else
+  rm -f "`$APP_DIR/.env.selfhost.sync" "`$ENV_SYNC_UPLOAD_PATH"
+fi
+
+if [ -f "`$APP_DIR/.env.selfhost.sync" ]; then
+  merge_env_overlay "`$APP_DIR/.env" "`$APP_DIR/.env.selfhost.sync"
+fi
 
 MEDIA_ACCESS_TOKEN_SECRET=`$(read_env PLM_MEDIA_ACCESS_TOKEN_SECRET)
 POSTGRES_PASSWORD=`$(read_env PLM_POSTGRES_PASSWORD)
@@ -667,37 +777,17 @@ if [ -z "`$TRUSTED_HOSTS_RAW" ]; then
   echo "Warning: PLM_TRUSTED_HOSTS is empty. Set it before public deployment." >&2
 fi
 
-if [ ! -f "`$PAYLOAD_PATH" ]; then
-  echo "Deploy payload not found: `$PAYLOAD_PATH" >&2
-  exit 1
-fi
-
-rm -f "`$ZIP_PATH"
-unzip -o "`$PAYLOAD_PATH" -d "`$REMOTE_ROOT/upload" >/dev/null
-
-ACTUAL_HASH=`$(sha256sum "`$ZIP_PATH" | awk '{print toupper(`$1)}')
-if [ "`$ACTUAL_HASH" != "`$EXPECTED_HASH" ]; then
-  echo "Bundle SHA256 mismatch: expected=`$EXPECTED_HASH actual=`$ACTUAL_HASH" >&2
-  exit 1
-fi
-
-if ! command -v rsync >/dev/null 2>&1; then
-  apt-get update
-  apt-get install -y rsync
-fi
-
-rm -rf "`$TMP_DIR"/*
-unzip -o "`$ZIP_PATH" -d "`$TMP_DIR" >/dev/null
-
-SRC_DIR=`$(find "`$TMP_DIR" -mindepth 1 -maxdepth 1 -type d | head -n 1)
-if [ -z "`$SRC_DIR" ]; then
-  echo "Could not find extracted bundle directory under `$TMP_DIR" >&2
-  exit 1
-fi
-
-rsync -a --delete --exclude '.env' --exclude 'data/' --exclude 'release/' "`$SRC_DIR"/ "`$APP_DIR"/
-
 cd "`$APP_DIR"
+if [ -f tools/post_deploy_selfhost.sh ]; then
+  chmod +x tools/post_deploy_selfhost.sh
+  docker compose \
+    -f docker-compose.selfhost.yml \
+    -f docker-compose.selfhost.postgres.yml \
+    --env-file .env \
+    up -d postgres
+  bash tools/post_deploy_selfhost.sh
+fi
+
 docker compose \
   -f docker-compose.selfhost.yml \
   -f docker-compose.selfhost.postgres.yml \
@@ -724,10 +814,20 @@ ATTEMPTS=30
 SLEEP_SECONDS=3
 i=1
 while [ `$i -le `$ATTEMPTS ]; do
-  if curl -fsS -H "Host: `$HOST_HEADER" http://127.0.0.1:8001/api/health; then
+  if curl -fsS -H "Host: `$HOST_HEADER" http://127.0.0.1:8001/api/health/live >/dev/null; then
     echo
     if curl -fsS -H "Host: `$HOST_HEADER" http://127.0.0.1:8001/api/system/capabilities >/dev/null; then
       echo "Smoke check passed: /api/system/capabilities"
+      if [ -f "`$APP_DIR/public-downloads/catalog.json" ]; then
+        CATALOG_PAYLOAD=`$(curl -fsS -H "Host: `$HOST_HEADER" http://127.0.0.1:8001/api/system/public-downloads)
+        if printf '%s' "`$CATALOG_PAYLOAD" | grep -q '"items":[[:space:]]*\[[[:space:]]*{'; then
+          echo "Smoke check passed: /api/system/public-downloads"
+          exit 0
+        fi
+        echo "Smoke check failed: /api/system/public-downloads returned no items" >&2
+        printf '%s\n' "`$CATALOG_PAYLOAD" >&2
+        break
+      fi
       exit 0
     fi
     echo "Smoke check failed: /api/system/capabilities" >&2
@@ -751,6 +851,7 @@ docker compose \
   logs --tail=80 app >&2 || true
 exit 1
 "@
+    $remoteScript = $remoteScript -replace "`r`n", "`n"
 
     Write-Host "Deploying on server..."
     Invoke-ExternalCommandWithRetry -Description "Remote deploy" -Command {
@@ -759,7 +860,6 @@ exit 1
 }
 finally {
     Stop-SshConnectionReuse -BaseSshArgs $baseSshArgs -ControlArgs $sshReuseControlArgs -Destination $sshDestination -TempRoot $sshReuseTempRoot
-    Remove-PathIfPresent -Path $payloadArchiveTempRoot
 }
 
 Write-Host ""

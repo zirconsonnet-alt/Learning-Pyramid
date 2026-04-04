@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { useQueries } from "@tanstack/react-query"
 import { FolderTree, RadioTower } from "lucide-react"
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 
@@ -7,10 +6,13 @@ import { getBaseUrl } from "@/ui/api/http"
 import { ApiError } from "@/ui/api/http"
 import { listRecallPointsByInstance } from "@/ui/api/instances"
 import type { Instance } from "@/ui/api/instances"
+import { getInstancePlaybackDescriptor } from "@/ui/api/media"
 import type { LearningTaskNode } from "@/ui/api/learningTaskNodes"
+import type { ProjectType } from "@/ui/api/projects"
 import { ContentNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
+import { projectTypeRequiresLearningObjectTree, projectTypeUsesResolvableCourseAnchor } from "@/ui/projectTypes"
 import { resolveProjectFile, useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
 import { useAuditLogEvents } from "@/ui/queries/auditLog"
 import { useLearningTaskNodes } from "@/ui/queries/learningTasks"
@@ -19,7 +21,9 @@ import {
   useInstances,
   useLayers,
   useManualRollUp,
+  useProjectConfig,
   useQueue,
+  useSetLayerConfig,
 } from "@/ui/queries/workbench"
 import { useAppStore } from "@/ui/store/appStore"
 import { getLocalDateKey, loadDailyWorkbenchStats } from "@/ui/store/workbenchDailyStats"
@@ -75,6 +79,7 @@ function isRelativeMaterialId(materialId: string) {
 }
 
 const DURATION_PROBE_CONCURRENCY = 4
+const WATCHED_PROGRESS_PROBE_CONCURRENCY = 2
 
 function readMediaDurationMs(src: string) {
   return new Promise<number>((resolve, reject) => {
@@ -118,6 +123,16 @@ async function resolveInstanceDurationMs(params: {
   directoryPermission: "unsupported" | "missing" | "prompt" | "granted" | "denied"
 }) {
   const { projectId, instance, serverMediaStreamEnabled, browserLocalMediaEnabled, directoryPermission } = params
+  if (typeof instance.durationMs === "number" && instance.durationMs > 0) {
+    return instance.durationMs
+  }
+  if (instance.playbackKind === "HLS" || instance.mediaSourceKind === "BAIDU_NETDISK") {
+    const playback = await getInstancePlaybackDescriptor(projectId, instance.instanceId, { timeoutMs: 90_000 })
+    if (typeof playback.durationMs === "number" && playback.durationMs > 0) {
+      return playback.durationMs
+    }
+    return null
+  }
   if (serverMediaStreamEnabled) {
     return await readMediaDurationMs(`${getBaseUrl()}/projects/${projectId}/media/instances/${instance.instanceId}`)
   }
@@ -139,11 +154,36 @@ function StatusMetricRow(props: { label: string; value: string; emphasize?: bool
   const { label, value } = props
   return (
     <div className="flex items-center justify-between gap-4 py-2.5">
-      <div className="text-[13px] font-medium text-[#70839a]">{label}</div>
-      <div className={cn("text-[15px] font-semibold tracking-[-0.02em]", props.emphasize ? "text-[#1f3952]" : "text-[#33495f]")}>
+      <div className="text-[13px] font-medium text-muted-foreground">{label}</div>
+      <div className={cn("text-[15px] font-semibold tracking-[-0.02em]", props.emphasize ? "text-foreground" : "text-[color:var(--theme-soft-text-strong)]")}>
         {value}
       </div>
     </div>
+  )
+}
+
+function StudyModePane({
+  projectType,
+  instance,
+}: {
+  projectType: ProjectType
+  instance: Instance | null
+}) {
+  return (
+    <Card className="theme-card-main">
+      <CardHeader className="theme-card-header">
+        <CardTitle>{projectType === "BOOK" ? "书本定位" : "零散知识点模式"}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3 pt-5">
+        <div className="rounded-[1.15rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] px-4 py-4 text-sm leading-6 text-[color:var(--theme-soft-text-strong)]">
+          {projectType === "BOOK"
+            ? instance
+              ? `当前正在“${instance.materialDisplayName}”下录入复述点。请为每条复述点填写页码、章节、小节、题号或段落说明等文本锚点。`
+              : "请先从左侧目录中选择一个章节、小节或条目，再开始录入书本复述点。"
+            : "当前项目按零散知识点模式运行。你可以直接录入复述点，不需要选择学习对象，也不需要绑定锚点。"}
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -181,8 +221,13 @@ export function WorkbenchPage() {
   const layersQ = useLayers(pid)
   const auditLogQ = useAuditLogEvents(pid)
   const rollUpM = useManualRollUp(pid)
+  const projectConfigQ = useProjectConfig(pid)
+  const setLayerConfigM = useSetLayerConfig(pid)
   const capabilitiesQ = useSystemCapabilities()
   const directoryBinding = useProjectDirectoryBinding(pid)
+  const projectType = projectConfigQ.data?.projectType ?? "COURSE"
+  const requiresLearningObjectTree = projectTypeRequiresLearningObjectTree(projectType)
+  const usesResolvableCourseAnchor = projectTypeUsesResolvableCourseAnchor(projectType)
 
   const selectedInstanceId = ps?.selectedInstanceId ?? null
   const queueHasGate = !!queueQ.data?.headId
@@ -204,7 +249,10 @@ export function WorkbenchPage() {
   const [videoDurationByInstanceId, setVideoDurationByInstanceId] = useState<Record<string, number>>({})
   const [durationProbeAttemptedByInstanceId, setDurationProbeAttemptedByInstanceId] = useState<Record<string, true>>({})
   const [durationProbeInFlightByInstanceId, setDurationProbeInFlightByInstanceId] = useState<Record<string, true>>({})
+  const [watchedStatusByInstanceId, setWatchedStatusByInstanceId] = useState<Record<string, "watched" | "empty" | "failed">>({})
+  const [watchedProbeInFlightByInstanceId, setWatchedProbeInFlightByInstanceId] = useState<Record<string, true>>({})
   const durationProbeSessionRef = useRef(0)
+  const watchedProbeSessionRef = useRef(0)
 
   useEffect(() => {
     if (!pid) return
@@ -262,38 +310,29 @@ export function WorkbenchPage() {
       return
     }
     const instanceIds = (instancesQ.data ?? []).map((item) => item.instanceId)
-    setVideoDurationByInstanceId(loadVideoDurationMap(pid, instanceIds))
+    const stored = loadVideoDurationMap(pid, instanceIds)
+    const fromInstances = Object.fromEntries(
+      (instancesQ.data ?? [])
+        .filter((item) => typeof item.durationMs === "number" && item.durationMs > 0)
+        .map((item) => [item.instanceId, item.durationMs as number]),
+    )
+    setVideoDurationByInstanceId({ ...stored, ...fromInstances })
   }, [instancesQ.data, pid])
 
   useEffect(() => {
     setDurationProbeAttemptedByInstanceId({})
     setDurationProbeInFlightByInstanceId({})
     durationProbeSessionRef.current += 1
-  }, [browserLocalMediaEnabled, directoryBinding.permission, pid, serverMediaStreamEnabled])
+  }, [browserLocalMediaEnabled, directoryBinding.permission, pid, serverMediaStreamEnabled, usesResolvableCourseAnchor])
 
-  const recallPointIdsByInstanceQs = useQueries({
-    queries: (instancesQ.data ?? []).map((instance) => ({
-      queryKey: ["recallPointsByInstance", pid, instance.instanceId],
-      queryFn: () => listRecallPointsByInstance(pid, instance.instanceId),
-      enabled: !!pid && !!instance.instanceId,
-      staleTime: 30_000,
-    })),
-  })
-
-  const watchedInstanceIds = useMemo(() => {
-    const out = new Set<string>()
-    for (let index = 0; index < (instancesQ.data ?? []).length; index += 1) {
-      const instance = instancesQ.data?.[index]
-      if (!instance) continue
-      const recallPointIds = recallPointIdsByInstanceQs[index]?.data?.recallPointIds ?? []
-      if (recallPointIds.length > 0) {
-        out.add(instance.instanceId)
-      }
-    }
-    return out
-  }, [instancesQ.data, recallPointIdsByInstanceQs])
+  useEffect(() => {
+    setWatchedStatusByInstanceId({})
+    setWatchedProbeInFlightByInstanceId({})
+    watchedProbeSessionRef.current += 1
+  }, [pid, usesResolvableCourseAnchor])
 
   const pendingDurationProbeInstances = useMemo(() => {
+    if (!usesResolvableCourseAnchor) return []
     const availableSlots = Math.max(0, DURATION_PROBE_CONCURRENCY - Object.keys(durationProbeInFlightByInstanceId).length)
     if (availableSlots <= 0) return []
     const pending: Instance[] = []
@@ -305,7 +344,21 @@ export function WorkbenchPage() {
       if (pending.length >= availableSlots) break
     }
     return pending
-  }, [durationProbeAttemptedByInstanceId, durationProbeInFlightByInstanceId, instancesQ.data, videoDurationByInstanceId])
+  }, [durationProbeAttemptedByInstanceId, durationProbeInFlightByInstanceId, instancesQ.data, usesResolvableCourseAnchor, videoDurationByInstanceId])
+
+  const pendingWatchedProbeInstances = useMemo(() => {
+    if (!usesResolvableCourseAnchor) return []
+    const availableSlots = Math.max(0, WATCHED_PROGRESS_PROBE_CONCURRENCY - Object.keys(watchedProbeInFlightByInstanceId).length)
+    if (availableSlots <= 0) return []
+    const pending: Instance[] = []
+    for (const item of instancesQ.data ?? []) {
+      if (watchedStatusByInstanceId[item.instanceId]) continue
+      if (watchedProbeInFlightByInstanceId[item.instanceId]) continue
+      pending.push(item)
+      if (pending.length >= availableSlots) break
+    }
+    return pending
+  }, [instancesQ.data, usesResolvableCourseAnchor, watchedProbeInFlightByInstanceId, watchedStatusByInstanceId])
 
   useEffect(() => {
     if (!pid || pendingDurationProbeInstances.length <= 0) return
@@ -364,6 +417,76 @@ export function WorkbenchPage() {
     }
   }, [browserLocalMediaEnabled, directoryBinding.permission, pendingDurationProbeInstances, pid, serverMediaStreamEnabled])
 
+  useEffect(() => {
+    if (!pid || pendingWatchedProbeInstances.length <= 0) return
+    const probeSession = watchedProbeSessionRef.current
+    const pendingInstanceIds = pendingWatchedProbeInstances.map((item) => item.instanceId)
+
+    setWatchedProbeInFlightByInstanceId((current) => {
+      let changed = false
+      const next = { ...current }
+      for (const instanceId of pendingInstanceIds) {
+        if (next[instanceId]) continue
+        next[instanceId] = true
+        changed = true
+      }
+      return changed ? next : current
+    })
+
+    for (const targetInstance of pendingWatchedProbeInstances) {
+      void (async () => {
+        try {
+          const result = await listRecallPointsByInstance(pid, targetInstance.instanceId, { timeoutMs: 90_000 })
+          if (watchedProbeSessionRef.current !== probeSession) return
+          setWatchedStatusByInstanceId((current) =>
+            current[targetInstance.instanceId]
+              ? current
+              : {
+                  ...current,
+                  [targetInstance.instanceId]: result.recallPointIds.length > 0 ? "watched" : "empty",
+                },
+          )
+        } catch {
+          if (watchedProbeSessionRef.current !== probeSession) return
+          // This metric is advisory only; mark failures so the page stays responsive.
+          setWatchedStatusByInstanceId((current) =>
+            current[targetInstance.instanceId] ? current : { ...current, [targetInstance.instanceId]: "failed" },
+          )
+        } finally {
+          if (watchedProbeSessionRef.current === probeSession) {
+            setWatchedProbeInFlightByInstanceId((current) => {
+              if (!current[targetInstance.instanceId]) return current
+              const next = { ...current }
+              delete next[targetInstance.instanceId]
+              return next
+            })
+          }
+        }
+      })()
+    }
+  }, [pendingWatchedProbeInstances, pid])
+
+  const watchedInstanceIds = useMemo(() => {
+    const out = new Set<string>()
+    for (const [instanceId, status] of Object.entries(watchedStatusByInstanceId)) {
+      if (status === "watched") {
+        out.add(instanceId)
+      }
+    }
+    return out
+  }, [watchedStatusByInstanceId])
+
+  const thresholdRollUpEnabledByLayerIndex = useMemo(
+    () =>
+      Object.fromEntries(
+        (layersQ.data ?? []).map((layer) => [
+          layer.layerIndex,
+          projectConfigQ.data?.layerConfigs[String(layer.layerIndex)]?.thresholdRollUpEnabled ?? true,
+        ]),
+      ) as Record<number, boolean>,
+    [layersQ.data, projectConfigQ.data?.layerConfigs],
+  )
+
   const videoProgress = useMemo(() => {
     const items = instancesQ.data ?? []
     let totalMs = 0
@@ -406,6 +529,20 @@ export function WorkbenchPage() {
     }
   }
 
+  async function onToggleThresholdRollUp(layerIndex: number, enabled: boolean) {
+    try {
+      await setLayerConfigM.mutateAsync({ layerIndex, thresholdRollUpEnabled: enabled })
+      showSuccessFeedback(
+        enabled ? "已恢复阈值上推" : "已禁止阈值上推",
+        enabled
+          ? `L${layerIndex} 达到阈值后会再次自动进入聚合周期。`
+          : `L${layerIndex} 达到阈值后将不再自动上推，你仍然可以手动上推。`,
+      )
+    } catch (err) {
+      showErrorFeedback(enabled ? "恢复阈值上推失败" : "禁止阈值上推失败", formatApiError(err))
+    }
+  }
+
   function onOpenAnchor(a: { instanceId: string; position: string }) {
     setCenterPanelMode("main")
     setSelectedInstanceId(pid, a.instanceId)
@@ -430,7 +567,9 @@ export function WorkbenchPage() {
       ? `${queueLength} 个任务待复习`
       : selectedInstanceId
         ? "正在学习"
-        : "等待开始"
+        : projectType === "LOOSE_POINTS"
+          ? "可直接录入"
+          : "等待开始"
 
   if (!pid) {
     return (
@@ -446,62 +585,74 @@ export function WorkbenchPage() {
 
   return (
     <div className="space-y-5">
-      <div className="grid gap-5 xl:items-start xl:grid-cols-[300px_minmax(0,1.2fr)_320px]">
-        <aside className="xl:sticky xl:top-28 xl:self-start">
-          <Card
-            id="workbench-content-tree"
-            className="theme-card-main xl:flex xl:max-h-[calc(100dvh-9rem)] xl:min-h-0 xl:flex-col xl:overflow-hidden"
-          >
-            <CardHeader className="theme-card-header">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#e2e8f0] bg-[#f5f7fa] text-primary">
-                  <FolderTree className="h-5 w-5" />
+      <div
+        className={cn(
+          "grid gap-5 xl:items-start",
+          requiresLearningObjectTree ? "xl:grid-cols-[300px_minmax(0,1.2fr)_320px]" : "xl:grid-cols-[minmax(0,1.2fr)_320px]",
+        )}
+      >
+        {requiresLearningObjectTree ? (
+          <aside className="xl:sticky xl:top-28 xl:self-start">
+            <Card
+              id="workbench-content-tree"
+              className="theme-card-main xl:flex xl:max-h-[calc(100dvh-9rem)] xl:min-h-0 xl:flex-col xl:overflow-hidden"
+            >
+              <CardHeader className="theme-card-header">
+                <div className="flex items-center gap-3">
+                  <div className="theme-icon-surface h-10 w-10">
+                    <FolderTree className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <CardTitle>内容目录</CardTitle>
+                  </div>
                 </div>
-                <div>
-                  <CardTitle>内容目录</CardTitle>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="pt-2 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:overscroll-contain xl:pr-3">
-              <LearningObjectTree
-                projectId={pid}
-                selectedInstanceId={selectedInstanceId}
-                onSelectInstance={(instanceId) => {
-                  setSelectedInstanceId(pid, instanceId)
-                  setSeekTo(null)
-                  setCurrentMs(0)
-                }}
-              />
-            </CardContent>
-          </Card>
-        </aside>
+              </CardHeader>
+              <CardContent className="pt-2 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:overscroll-contain xl:pr-3">
+                <LearningObjectTree
+                  projectId={pid}
+                  projectType={projectType}
+                  selectedInstanceId={selectedInstanceId}
+                  onSelectInstance={(instanceId) => {
+                    setSelectedInstanceId(pid, instanceId)
+                    setSeekTo(null)
+                    setCurrentMs(0)
+                  }}
+                />
+              </CardContent>
+            </Card>
+          </aside>
+        ) : null}
 
         <section className="space-y-4 xl:min-w-0">
           <div ref={videoPaneRef} id="workbench-video-pane" className="shrink-0 scroll-mt-28">
-            <VideoPane
-              key={instance?.instanceId ?? "none"}
-              projectId={pid}
-              instance={instance}
-              setCurrentMs={setCurrentMs}
-              seekTo={seekTo}
-              onSeekApplied={(nonce) => setSeekTo((s) => (s && s.nonce === nonce ? null : s))}
-              onDurationResolved={(instanceId, durationMs) =>
-                setVideoDurationByInstanceId((current) =>
-                  current[instanceId] === durationMs ? current : { ...current, [instanceId]: durationMs },
-                )
-              }
-              queueHasGate={queueHasGate}
-            />
+            {usesResolvableCourseAnchor ? (
+              <VideoPane
+                key={instance?.instanceId ?? "none"}
+                projectId={pid}
+                instance={instance}
+                setCurrentMs={setCurrentMs}
+                seekTo={seekTo}
+                onSeekApplied={(nonce) => setSeekTo((s) => (s && s.nonce === nonce ? null : s))}
+                onDurationResolved={(instanceId, durationMs) =>
+                  setVideoDurationByInstanceId((current) =>
+                    current[instanceId] === durationMs ? current : { ...current, [instanceId]: durationMs },
+                  )
+                }
+                queueHasGate={queueHasGate}
+              />
+            ) : (
+              <StudyModePane projectType={projectType} instance={instance} />
+            )}
           </div>
-          <div className="shrink-0 rounded-[1.25rem] border border-[#dfe6ef] bg-[#f7f9fc] p-1">
+          <div className="theme-subtle-surface shrink-0 p-1">
             <div className="grid grid-cols-2 gap-1">
               <button
                 type="button"
                 className={cn(
                   "rounded-[1rem] border px-4 py-2.5 text-sm font-medium transition-colors",
                   centerPanelMode === "main"
-                    ? "border-primary/20 bg-white text-primary shadow-[0_10px_22px_-20px_rgba(30,58,95,0.32)]"
-                    : "border-transparent bg-transparent text-[#41566f] hover:border-[#dde5ef] hover:bg-white/80",
+                    ? "border-primary/20 bg-[var(--theme-card-main-bg)] text-primary shadow-[0_10px_22px_-20px_hsl(var(--primary)/0.28)]"
+                    : "border-transparent bg-transparent text-[color:var(--theme-subtle-text)] hover:[border-color:var(--theme-soft-border)] hover:[background:var(--theme-soft-bg)]",
                 )}
                 onClick={() => setCenterPanelMode("main")}
               >
@@ -512,8 +663,8 @@ export function WorkbenchPage() {
                 className={cn(
                   "rounded-[1rem] border px-4 py-2.5 text-sm font-medium transition-colors",
                   centerPanelMode === "rollup"
-                    ? "border-primary/20 bg-white text-primary shadow-[0_10px_22px_-20px_rgba(30,58,95,0.32)]"
-                    : "border-transparent bg-transparent text-[#41566f] hover:border-[#dde5ef] hover:bg-white/80",
+                    ? "border-primary/20 bg-[var(--theme-card-main-bg)] text-primary shadow-[0_10px_22px_-20px_hsl(var(--primary)/0.28)]"
+                    : "border-transparent bg-transparent text-[color:var(--theme-subtle-text)] hover:[border-color:var(--theme-soft-border)] hover:[background:var(--theme-soft-bg)]",
                 )}
                 onClick={() => setCenterPanelMode("rollup")}
               >
@@ -535,6 +686,7 @@ export function WorkbenchPage() {
               ) : (
                 <ComposePane
                   projectId={pid}
+                  projectType={projectType}
                   selectedInstanceId={selectedInstanceId}
                   instance={instance}
                   currentMs={currentMs}
@@ -552,48 +704,53 @@ export function WorkbenchPage() {
               learningTaskNodesLoading={learningTaskNodesQ.isLoading}
               queueHasGate={queueHasGate}
               isRollingUp={rollUpM.isPending}
+              isThresholdRollUpUpdating={setLayerConfigM.isPending}
               onRollUp={(layerIndex) => void onManualRollUp(layerIndex)}
+              onToggleThresholdRollUp={(layerIndex, enabled) => void onToggleThresholdRollUp(layerIndex, enabled)}
               rollUpError={rollUpM.error}
+              thresholdRollUpEnabledByLayerIndex={thresholdRollUpEnabledByLayerIndex}
             />
           )}
         </section>
 
         <aside className="xl:sticky xl:top-28 xl:self-start">
-          <Card className="theme-card-main xl:flex xl:max-h-[calc(100dvh-9rem)] xl:min-h-0 xl:flex-col xl:overflow-hidden">
+            <Card className="theme-card-main xl:flex xl:max-h-[calc(100dvh-9rem)] xl:min-h-0 xl:flex-col xl:overflow-hidden">
             <CardHeader className="theme-card-header">
               <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-[#e2e8f0] bg-[#f5f7fa] text-primary">
+                <div className="theme-icon-surface h-10 w-10">
                   <RadioTower className="h-5 w-5" />
                 </div>
                 <div>
                   <CardTitle>工作状态</CardTitle>
-                  <div className="mt-1 text-[15px] font-medium text-[#314a63]">{workStatusDetail}</div>
+                  <div className="mt-1 text-[15px] font-medium text-[color:var(--theme-soft-text-strong)]">{workStatusDetail}</div>
                 </div>
               </div>
             </CardHeader>
             <CardContent className="space-y-5 pt-4 text-sm xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:overscroll-contain xl:pr-3">
-              <section className="space-y-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-[12px] font-medium text-[#7b8ba0]">视频进度</div>
-                    <div className="mt-1 text-[17px] font-semibold tracking-[-0.02em] text-[#314a63]">
-                      {formatDurationCompact(videoProgress.watchedMs)} / {formatDurationCompact(videoProgress.totalMs)}
+              {usesResolvableCourseAnchor ? (
+                <>
+                  <section className="space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-[12px] font-medium text-muted-foreground">视频进度</div>
+                        <div className="mt-1 text-[17px] font-semibold tracking-[-0.02em] text-[color:var(--theme-soft-text-strong)]">
+                          {formatDurationCompact(videoProgress.watchedMs)} / {formatDurationCompact(videoProgress.totalMs)}
+                        </div>
+                      </div>
+                      <div className="text-[13px] font-semibold text-[color:var(--theme-soft-text-strong)]">
+                        {Math.round(videoProgressPercent)}%
+                      </div>
                     </div>
-                  </div>
-                  <div className="text-[13px] font-semibold text-[#49627c]">
-                    {Math.round(videoProgressPercent)}%
-                  </div>
-                </div>
-                <div className="h-2 overflow-hidden rounded-full bg-[#e7edf5]">
-                  <div
-                    className="h-full rounded-full bg-[linear-gradient(90deg,#245c96_0%,#5f9fda_100%)] transition-[width] duration-500"
-                    style={{ width: `${videoProgressPercent}%` }}
-                  />
-                </div>
-                {remainingDurationProbeCount > 0 ? (
-                  <div className="text-[12px] text-[#7b8ba0]">正在统计 {remainingDurationProbeCount} 个视频时长</div>
-                ) : null}
-              </section>
+                    <div className="theme-progress-track h-2 overflow-hidden rounded-full">
+                      <div
+                        className="theme-progress-fill h-full rounded-full transition-[width] duration-500"
+                        style={{ width: `${videoProgressPercent}%` }}
+                      />
+                    </div>
+                    {remainingDurationProbeCount > 0 ? <div className="text-[12px] text-muted-foreground">正在统计 {remainingDurationProbeCount} 个视频时长</div> : null}
+                  </section>
+                </>
+              ) : null}
 
               <div className="h-px bg-border/70" />
 

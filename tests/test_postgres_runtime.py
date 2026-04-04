@@ -8,7 +8,7 @@ from pathlib import Path
 
 import psycopg
 import pytest
-from backend.models.errors import PreconditionFailure
+from backend.models.errors import NotFound, PreconditionFailure
 from backend.repositories.persistence_interfaces import ProjectSnapshotRecord
 from backend.system.api import SystemAPI
 from backend.system.auth_store import PostgresAuthStore, SQLiteAuthStore
@@ -26,6 +26,61 @@ def test_postgres_store_persists_projects_across_restart(tmp_path: Path) -> None
     project_root = tmp_path / "project-postgres"
     api = SystemAPI(InMemorySystem(persist_store=PostgresStore(dsn)))
     project_id = api.create_project("Postgres Project", project_root=str(project_root))
+
+    reloaded = SystemAPI(InMemorySystem(persist_store=PostgresStore(dsn)))
+    projects = reloaded.list_projects()
+    cfg = reloaded.get_project_storage_config(project_id)
+    reloaded.edit_project(project_id, "Postgres Compat Project Renamed")
+    renamed_projects = reloaded.list_projects()
+
+    assert any(str(project.project_id) == str(project_id) for project in projects)
+    assert cfg.project_root.as_posix() == project_root.as_posix()
+    assert any(
+        str(project.project_id) == str(project_id) and str(project.title) == "Postgres Compat Project Renamed"
+        for project in renamed_projects
+    )
+
+
+def test_postgres_store_tolerates_missing_global_settings_table(tmp_path: Path) -> None:
+    dsn = require_postgres_test_dsn()
+    reset_postgres_database(dsn)
+
+    api = SystemAPI(InMemorySystem(persist_store=PostgresStore(dsn)))
+    first_root = tmp_path / "project-postgres-global"
+    project_id = api.create_project("Postgres Global Compat Project", project_root=str(first_root))
+
+    conn = psycopg.connect(dsn)
+    try:
+        conn.execute("DROP TABLE global_settings_index")
+        conn.commit()
+    finally:
+        conn.close()
+
+    reloaded = SystemAPI(InMemorySystem(persist_store=PostgresStore(dsn)))
+    reloaded.edit_project(project_id, "Postgres Global Compat Project Renamed")
+    renamed_projects = reloaded.list_projects()
+
+    assert reloaded.get_project_storage_config(project_id).project_root.as_posix() == first_root.as_posix()
+    assert any(
+        str(project.project_id) == str(project_id) and str(project.title) == "Postgres Global Compat Project Renamed"
+        for project in renamed_projects
+    )
+
+
+def test_postgres_store_tolerates_missing_instance_media_binding_table(tmp_path: Path) -> None:
+    dsn = require_postgres_test_dsn()
+    reset_postgres_database(dsn)
+
+    project_root = tmp_path / "project-postgres-compat"
+    api = SystemAPI(InMemorySystem(persist_store=PostgresStore(dsn)))
+    project_id = api.create_project("Postgres Compat Project", project_root=str(project_root))
+
+    conn = psycopg.connect(dsn)
+    try:
+        conn.execute("DROP TABLE instance_media_binding_index")
+        conn.commit()
+    finally:
+        conn.close()
 
     reloaded = SystemAPI(InMemorySystem(persist_store=PostgresStore(dsn)))
     projects = reloaded.list_projects()
@@ -92,6 +147,29 @@ def test_postgres_auth_store_round_trip() -> None:
         auth.create_user("user@example.com", "password-456")
 
 
+def test_postgres_auth_store_tolerates_missing_user_cloud_accounts_table() -> None:
+    dsn = require_postgres_test_dsn()
+    reset_postgres_database(dsn)
+
+    auth = PostgresAuthStore(dsn)
+    user = auth.create_user("cloud-compat@example.com", "password-123")
+
+    conn = psycopg.connect(dsn)
+    try:
+        conn.execute("DROP TABLE user_cloud_accounts")
+        conn.commit()
+    finally:
+        conn.close()
+
+    reloaded = PostgresAuthStore(dsn)
+    assert reloaded.list_user_cloud_accounts(user.user_id, provider="baidu_netdisk") == ()
+    with pytest.raises(NotFound, match="cloud account"):
+        reloaded.get_cloud_account_by_id("account_missing")
+    health = reloaded.healthcheck()
+    assert health["ok"] is True
+    assert "user_cloud_accounts" in list(health["probe"].get("skippedOptionalTargets", []))
+
+
 def test_migrate_sqlite_to_postgres_round_trip(tmp_path: Path) -> None:
     dsn = require_postgres_test_dsn()
     reset_postgres_database(dsn)
@@ -106,6 +184,20 @@ def test_migrate_sqlite_to_postgres_round_trip(tmp_path: Path) -> None:
     sqlite_auth = SQLiteAuthStore(auth_db)
     user = sqlite_auth.create_user("migrate@example.com", "password-123")
     sqlite_auth.add_project_owner(str(project_id), user.user_id)
+    sqlite_auth.upsert_user_service_config(
+        user.user_id,
+        service_kind="llm",
+        base_url="https://api.openai.com/v1",
+        model_name="gpt-4o-mini",
+        api_key="sk-migrate-12345678",
+    )
+    sqlite_auth.upsert_user_service_config(
+        user.user_id,
+        service_kind="asr",
+        base_url="https://api.openai.com/v1",
+        model_name="whisper-1",
+        api_key="sk-asr-migrate-1234",
+    )
 
     migrate_sqlite_to_postgres(store_db=store_db, auth_db=auth_db, postgres_dsn=dsn)
 
@@ -116,6 +208,8 @@ def test_migrate_sqlite_to_postgres_round_trip(tmp_path: Path) -> None:
     assert pg_api.get_project_storage_config(project_id).project_root.as_posix() == project_root.as_posix()
     assert pg_auth.authenticate_user("migrate@example.com", "password-123").user_id == user.user_id
     assert pg_auth.list_project_ids_for_user(user.user_id) == (str(project_id),)
+    assert pg_auth.get_user_service_config(user.user_id, service_kind="llm") is not None
+    assert pg_auth.get_user_service_config(user.user_id, service_kind="asr") is not None
 
 
 def test_postgres_runtime_records_schema_migrations_and_uses_hot_indexes() -> None:
@@ -138,10 +232,34 @@ def test_postgres_runtime_records_schema_migrations_and_uses_hot_indexes() -> No
             ("auth", 5, "auth_group_post_comments"),
             ("auth", 6, "auth_admin_action_logs"),
             ("auth", 7, "auth_identity_uniques"),
+            ("auth", 8, "auth_user_service_configs"),
+            ("auth", 9, "auth_user_service_prompt_mode"),
+            ("auth", 10, "auth_friendships"),
+            ("auth", 11, "auth_remove_study_group_tables"),
+            ("auth", 12, "auth_user_cloud_accounts"),
             ("store", 1, "initial_store_schema"),
             ("store", 2, "store_hot_indexes"),
             ("store", 3, "entry_registration_seq"),
+            ("store", 4, "global_settings_index"),
+            ("store", 5, "instance_media_binding_index"),
         ]
+
+        removed_auth_tables = conn.execute(
+            """
+            SELECT tablename
+            FROM pg_tables
+            WHERE schemaname = current_schema()
+              AND tablename IN (
+                'study_groups',
+                'study_group_members',
+                'study_group_posts',
+                'study_group_post_comments',
+                'study_group_join_requests'
+              )
+            ORDER BY tablename ASC
+            """
+        ).fetchall()
+        assert removed_auth_tables == []
 
         index_rows = conn.execute(
             """
@@ -160,13 +278,14 @@ def test_postgres_runtime_records_schema_migrations_and_uses_hot_indexes() -> No
             SELECT tablename, indexname
             FROM pg_indexes
             WHERE schemaname = current_schema()
-              AND tablename IN ('users', 'user_profiles')
+              AND tablename IN ('users', 'user_profiles', 'user_service_configs')
             ORDER BY tablename ASC, indexname ASC
             """
         ).fetchall()
         auth_indexes = {(str(row[0]), str(row[1])) for row in auth_index_rows}
         assert ("users", "idx_users_email_unique") in auth_indexes
         assert ("user_profiles", "idx_user_profiles_public_uid_unique") in auth_indexes
+        assert ("user_service_configs", "idx_user_service_configs_kind") in auth_indexes
 
         conn.execute(
             """
@@ -351,8 +470,8 @@ def test_apply_postgres_migrations_status_and_check_commands() -> None:
     status_body = json.loads(status.stdout)
     assert status_body["pending"] == []
     assert status_body["conflicts"] == []
-    assert status_body["scopes"]["store"]["version"] == 3
-    assert status_body["scopes"]["auth"]["version"] == 7
+    assert status_body["scopes"]["store"]["version"] == 5
+    assert status_body["scopes"]["auth"]["version"] == 12
 
 
 def test_postgres_auth_conflicts_fail_check_and_startup() -> None:
@@ -418,7 +537,7 @@ def test_postgres_auth_conflicts_fail_check_and_startup() -> None:
             "scope": "auth",
             "version": 8,
             "appliedName": "desktop_agent_diagnostic_events",
-            "expectedName": None,
+            "expectedName": "auth_user_service_configs",
         },
     ]
 
