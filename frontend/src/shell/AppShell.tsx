@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { House, Menu, Settings2, Sparkles, TimerReset } from "lucide-react"
+import { House, Menu, Sparkles, TimerReset } from "lucide-react"
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate, useParams } from "react-router-dom"
 
 import { MainNav, getGlobalNavItems, getProjectNavItems } from "@/shell/MainNav"
@@ -17,8 +17,6 @@ import { useSystemCapabilities } from "@/ui/queries/system"
 import { useProjectConfig } from "@/ui/queries/workbench"
 import { usePomodoroPreTransitionSpeech, usePomodoroTransitionSound } from "@/ui/pomodoroAudio"
 import { useAppStore } from "@/ui/store/appStore"
-import { useGlobalConfigStore } from "@/ui/store/globalConfigStore"
-import { formatStudyMaterialTypeLabel } from "@/ui/subjects/studyMaterials"
 import {
   formatPomodoroCountdown,
   getPomodoroSnapshot,
@@ -26,11 +24,8 @@ import {
   usePomodoroNow,
   usePomodoroStore,
 } from "@/ui/store/pomodoroStore"
-import { useThemeStore } from "@/ui/store/themeStore"
-import { THEME_PRESETS } from "@/ui/theme/themePresets"
 import { cn } from "@/ui/utils"
 import { buildPomodoroPath } from "@/views/pomodoro/pomodoroRouting"
-import { buildGlobalSettingsPath } from "@/views/settings/globalSettingsRouting"
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -155,7 +150,8 @@ export function AppShell() {
   const selectedProjectId = useAppStore((state) => state.selectedProjectId)
   const setSelectedProjectId = useAppStore((state) => state.setSelectedProjectId)
   const effectiveProjectId = pid || selectedProjectId || ""
-  const [navMenuOpen, setNavMenuOpen] = useState(false)
+  const [projectMenuOpen, setProjectMenuOpen] = useState(false)
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false)
   const capabilitiesQ = useSystemCapabilities()
   const authEnabled = capabilitiesQ.data?.authEnabled ?? false
   const currentUserQ = useCurrentUser(authEnabled)
@@ -170,8 +166,6 @@ export function AppShell() {
   const pomodoroEnabled = usePomodoroStore((state) => state.enabled)
   const pomodoroWeeklySchedule = usePomodoroStore((state) => state.weeklySchedule)
   const pomodoroTransitionSoundEnabled = usePomodoroStore((state) => state.transitionSoundEnabled)
-  const selectedTheme = useThemeStore((state) => state.theme)
-  const defaultProjectReviewTemplate = useGlobalConfigStore((state) => state.defaultProjectReviewTemplate)
   const pomodoroNow = usePomodoroNow(pomodoroEnabled)
   const fallbackProjectTitle = projectTitle || pid || "当前学科"
   const subjectTitle = subjectContextQ.data?.subject.title ?? fallbackProjectTitle
@@ -188,8 +182,10 @@ export function AppShell() {
   const currentUserUnavailableError =
     authEnabled && currentUserQ.error && currentUserQ.data === undefined ? formatApiError(currentUserQ.error) : null
   const locationToken = `${location.pathname}${location.search}${location.hash}`
-  const menuRef = useRef<HTMLDivElement | null>(null)
-  const menuButtonRef = useRef<HTMLButtonElement | null>(null)
+  const projectMenuRef = useRef<HTMLDivElement | null>(null)
+  const projectMenuButtonRef = useRef<HTMLButtonElement | null>(null)
+  const accountMenuRef = useRef<HTMLDivElement | null>(null)
+  const accountMenuButtonRef = useRef<HTMLButtonElement | null>(null)
   const pomodoroAutoJumpKeyRef = useRef("")
   const previousLocationRef = useRef(locationToken)
   const includeObjectTree = projectTypeRequiresLearningObjectTree(projectConfigQ.data?.projectType ?? "COURSE")
@@ -198,13 +194,10 @@ export function AppShell() {
     [effectiveProjectId, includeObjectTree, isSubjectRoot],
   )
   const hasProjectContext = Boolean(pid)
-  const hasRememberedProjectContext = Boolean(effectiveProjectId)
   const isAdmin = Boolean(currentUserQ.data?.roles.some((role) => role === "super_admin" || role === "admin"))
   const globalNavItems = useMemo(() => getGlobalNavItems({ includeAdmin: isAdmin, includeMembership: authEnabled }), [authEnabled, isAdmin])
-  const inlineNavItems = hasProjectContext ? projectNavItems : globalNavItems
-  const menuProjectNavItems = hasRememberedProjectContext ? projectNavItems : []
-  const menuGlobalNavItems = globalNavItems
-  const subjectMaterials = subjectContextQ.data?.materials ?? []
+  const inlineNavItems = globalNavItems
+  const menuProjectNavItems = hasProjectContext ? projectNavItems : []
   const pomodoroSnapshot = useMemo(
     () => getPomodoroSnapshot({ enabled: pomodoroEnabled, weeklySchedule: pomodoroWeeklySchedule }, pomodoroNow),
     [pomodoroEnabled, pomodoroNow, pomodoroWeeklySchedule],
@@ -282,8 +275,6 @@ export function AppShell() {
             : pomodoroSnapshot.idleReason === "waiting"
               ? `距离开始 ${formatPomodoroCountdown(pomodoroSnapshot.untilStartMs)}`
               : "已关闭"
-  const selectedThemeLabel = THEME_PRESETS.find((theme) => theme.id === selectedTheme)?.label ?? "雾蓝"
-  const reviewTemplateSummary = `${defaultProjectReviewTemplate.length} 个默认步骤`
 
   useEffect(() => {
     if (!pid || selectedProjectId === pid) return
@@ -293,7 +284,8 @@ export function AppShell() {
   useEffect(() => {
     if (previousLocationRef.current === locationToken) return
     previousLocationRef.current = locationToken
-    setNavMenuOpen(false)
+    setProjectMenuOpen(false)
+    setAccountMenuOpen(false)
   }, [locationToken])
 
   useEffect(() => {
@@ -329,18 +321,22 @@ export function AppShell() {
   }, [location.pathname, nav, pomodoroAutoJumpKey, pomodoroFocusProjectId])
 
   useEffect(() => {
-    if (!navMenuOpen) return
+    if (!projectMenuOpen && !accountMenuOpen) return
 
     function onPointerDown(event: MouseEvent | TouchEvent) {
       const target = event.target
       if (!(target instanceof Node)) return
-      if (menuRef.current?.contains(target) || menuButtonRef.current?.contains(target)) return
-      setNavMenuOpen(false)
+      const withinProjectMenu = projectMenuRef.current?.contains(target) || projectMenuButtonRef.current?.contains(target)
+      const withinAccountMenu = accountMenuRef.current?.contains(target) || accountMenuButtonRef.current?.contains(target)
+      if (withinProjectMenu || withinAccountMenu) return
+      setProjectMenuOpen(false)
+      setAccountMenuOpen(false)
     }
 
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
-        setNavMenuOpen(false)
+        setProjectMenuOpen(false)
+        setAccountMenuOpen(false)
       }
     }
 
@@ -352,7 +348,7 @@ export function AppShell() {
       document.removeEventListener("touchstart", onPointerDown)
       document.removeEventListener("keydown", onKeyDown)
     }
-  }, [navMenuOpen])
+  }, [accountMenuOpen, projectMenuOpen])
 
   async function onLogout() {
     await logout.mutateAsync()
@@ -476,7 +472,7 @@ export function AppShell() {
               </div>
             </div>
 
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="flex min-w-0 items-center gap-2">
               {showPomodoroShortcut ? (
                 <Link
                   to={buildPomodoroPath()}
@@ -492,7 +488,7 @@ export function AppShell() {
                 </Link>
               ) : null}
 
-              <div className={cn("hidden items-center gap-2", hasProjectContext ? "lg:flex" : "sm:flex")}>
+              <div className="hidden min-w-0 items-center gap-2 overflow-x-auto sm:flex">
                 {inlineNavItems.map((item) => {
                   const Icon = item.icon
                   return (
@@ -513,160 +509,128 @@ export function AppShell() {
                 })}
               </div>
 
-              <Button
-                ref={menuButtonRef}
-                variant="outline"
-                size="icon"
-                className="h-10 w-10 shrink-0 rounded-xl [border-color:var(--theme-soft-border)] [background:var(--theme-soft-bg)]"
-                onClick={() => setNavMenuOpen((current) => !current)}
-                aria-expanded={navMenuOpen}
-                aria-haspopup="menu"
-              >
-                <Menu className="h-4.5 w-4.5" />
-                <span className="sr-only">打开导航菜单</span>
-              </Button>
-            </div>
+              {menuProjectNavItems.length > 0 ? (
+                <div className="relative shrink-0">
+                  <Button
+                    ref={projectMenuButtonRef}
+                    variant="outline"
+                    size="icon"
+                    className="h-10 w-10 rounded-xl [border-color:var(--theme-soft-border)] [background:var(--theme-soft-bg)]"
+                    onClick={() => {
+                      setAccountMenuOpen(false)
+                      setProjectMenuOpen((current) => !current)
+                    }}
+                    aria-expanded={projectMenuOpen}
+                    aria-haspopup="menu"
+                  >
+                    <Menu className="h-4.5 w-4.5" />
+                    <span className="sr-only">打开项目菜单</span>
+                  </Button>
 
-            {navMenuOpen ? (
-              <div
-                ref={menuRef}
-                className="absolute right-0 top-[calc(100%+0.65rem)] z-30 w-[min(22rem,calc(100vw-1rem))] overflow-hidden rounded-[1.6rem] border [border-color:var(--theme-soft-border)] [background:radial-gradient(circle_at_top_left,hsl(var(--primary)/0.08),transparent_34%),var(--theme-card-main-bg)] shadow-[0_24px_60px_-30px_rgba(15,23,42,0.24)] backdrop-blur-2xl"
-              >
-                <div className="max-h-[min(70vh,calc(100dvh-5.5rem))] overflow-y-auto overscroll-contain p-3 [-webkit-overflow-scrolling:touch]">
-                  {authEnabled && currentUserQ.data ? (
-                    <div className="theme-soft-surface p-3">
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">当前账号</div>
-                      <div className="mt-3 flex flex-col items-center text-center">
-                        <Link
-                          to="/profile"
-                          className="group relative inline-flex h-16 w-16 items-center justify-center overflow-hidden rounded-[1.4rem] border [border-color:var(--theme-icon-border)] [background:var(--theme-icon-bg)] text-lg font-semibold [color:var(--theme-icon-text)] transition hover:border-primary/15 hover:shadow-[0_16px_30px_-24px_hsl(var(--primary)/0.28)]"
-                          onClick={() => setNavMenuOpen(false)}
-                          aria-label="进入个人中心"
-                          title="进入个人中心"
-                        >
-                          {currentUserQ.data.avatarUrl ? (
-                            <img src={currentUserQ.data.avatarUrl} alt={currentUserQ.data.nickname} className="h-full w-full object-cover" />
-                          ) : (
-                            (currentUserQ.data.nickname || currentUserQ.data.email).slice(0, 1).toUpperCase()
-                          )}
-                        </Link>
-                        <Link
-                          to="/profile"
-                          className="mt-3 block w-full rounded-xl px-2 py-1.5 transition hover:[background:var(--theme-subtle-bg)]"
-                          onClick={() => setNavMenuOpen(false)}
-                        >
-                          <div className="truncate text-sm font-medium text-foreground">{currentUserQ.data.nickname}</div>
-                          <div className="mt-1 truncate text-xs text-muted-foreground">{currentUserQ.data.email}</div>
-                        </Link>
-                      </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="mt-3 w-full rounded-xl"
-                        onClick={() => {
-                          setNavMenuOpen(false)
-                          void onLogout()
-                        }}
-                        disabled={logout.isPending}
-                      >
-                        {logout.isPending ? "退出中..." : "退出登录"}
-                      </Button>
-                    </div>
-                  ) : null}
-
-                  {menuProjectNavItems.length > 0 ? (
-                    <div className="theme-soft-surface mt-3 p-3">
-                      <div className="flex min-w-0 items-center gap-2">
-                        <div className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                          {isSubjectRoot ? "当前学科" : "当前材料"}
-                        </div>
-                        <div className="min-w-0 truncate text-sm font-medium text-foreground">
-                          {isSubjectRoot ? subjectTitle : currentMaterialTitle}
+                  {projectMenuOpen ? (
+                    <div
+                      ref={projectMenuRef}
+                      className="absolute right-0 top-[calc(100%+0.65rem)] z-30 w-[min(22rem,calc(100vw-1rem))] overflow-hidden rounded-[1.6rem] border [border-color:var(--theme-soft-border)] [background:radial-gradient(circle_at_top_left,hsl(var(--primary)/0.08),transparent_34%),var(--theme-card-main-bg)] shadow-[0_24px_60px_-30px_rgba(15,23,42,0.24)] backdrop-blur-2xl"
+                    >
+                      <div className="max-h-[min(70vh,calc(100dvh-5.5rem))] overflow-y-auto overscroll-contain p-3 [-webkit-overflow-scrolling:touch]">
+                        <div className="theme-soft-surface p-3">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <div className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                              {isSubjectRoot ? "当前学科" : "当前材料"}
+                            </div>
+                            <div className="min-w-0 truncate text-sm font-medium text-foreground">
+                              {isSubjectRoot ? subjectTitle : currentMaterialTitle}
+                            </div>
+                          </div>
+                          {!isSubjectRoot ? <div className="mt-1 text-xs text-muted-foreground">{subjectTitle}</div> : null}
+                          <div className="mt-3">
+                            <MainNav items={menuProjectNavItems} onNavigate={() => setProjectMenuOpen(false)} />
+                          </div>
                         </div>
                       </div>
-                      {!isSubjectRoot ? <div className="mt-1 text-xs text-muted-foreground">{subjectTitle}</div> : null}
-                      <div className="mt-3">
-                        <MainNav items={menuProjectNavItems} onNavigate={() => setNavMenuOpen(false)} />
-                      </div>
                     </div>
                   ) : null}
-
-                  {hasRememberedProjectContext && subjectMaterials.length > 0 ? (
-                    <div className="theme-soft-surface mt-3 p-3">
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">学科材料</div>
-                      <div className="mt-3 grid gap-2">
-                        {subjectMaterials.map((material) => {
-                          const compatibilityProjectId = material.compatibilityProjectId
-                          const active = compatibilityProjectId === effectiveProjectId
-                          return (
-                            <button
-                              key={material.materialId}
-                              type="button"
-                              disabled={!compatibilityProjectId}
-                              onClick={() => {
-                                if (!compatibilityProjectId) return
-                                setNavMenuOpen(false)
-                                nav(`/p/${compatibilityProjectId}/workbench`)
-                              }}
-                              className={cn(
-                                "rounded-xl border px-3 py-2 text-left transition-colors",
-                                active
-                                  ? "border-primary/20 bg-[hsl(var(--primary)/0.08)]"
-                                  : "border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] hover:border-primary/15",
-                                !compatibilityProjectId && "cursor-not-allowed opacity-60",
-                              )}
-                            >
-                              <div className="flex items-center justify-between gap-3">
-                                <div className="min-w-0">
-                                  <div className="truncate text-sm font-medium text-foreground">{material.title}</div>
-                                  <div className="mt-1 text-[11px] text-muted-foreground">{formatStudyMaterialTypeLabel(material.materialType)}</div>
-                                </div>
-                                {active ? <span className="theme-meta-strong">当前</span> : null}
-                              </div>
-                            </button>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {menuGlobalNavItems.length > 0 ? (
-                    <div className="theme-soft-surface mt-3 p-3">
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">全局导航</div>
-                      <div className="mt-3">
-                        <MainNav items={menuGlobalNavItems} onNavigate={() => setNavMenuOpen(false)} />
-                      </div>
-                    </div>
-                  ) : null}
-
-                  <div className="theme-status-surface mt-3 p-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">全局配置</div>
-                        <div className="mt-1 text-sm font-medium text-foreground">主题与默认模板</div>
-                        <div className="mt-1 text-xs leading-5 text-muted-foreground">这里保留真正的全局偏好。番茄钟已经独立成固定功能页，在顶栏里随时可进。</div>
-                      </div>
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border [border-color:var(--theme-icon-border)] [background:var(--theme-icon-bg)] [color:var(--theme-icon-text)]">
-                        <Settings2 className="h-4.5 w-4.5" />
-                      </div>
-                    </div>
-                    <div className="mt-3 grid gap-2">
-                      <div className="rounded-xl border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-3 py-2 text-xs text-muted-foreground">
-                        当前主题：<span className="font-medium text-foreground">{selectedThemeLabel}</span>
-                      </div>
-                      <div className="rounded-xl border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-3 py-2 text-xs text-muted-foreground">
-                        默认模板：<span className="font-medium text-foreground">{reviewTemplateSummary}</span>
-                      </div>
-                    </div>
-                    <Button asChild className="mt-3 w-full rounded-xl">
-                      <Link to={buildGlobalSettingsPath()} onClick={() => setNavMenuOpen(false)}>
-                        前往全局配置
-                      </Link>
-                    </Button>
-                  </div>
                 </div>
-              </div>
-            ) : null}
+              ) : null}
+
+              {authEnabled && currentUserQ.data ? (
+                <div className="relative shrink-0">
+                  <button
+                    ref={accountMenuButtonRef}
+                    type="button"
+                    className="inline-flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border [border-color:var(--theme-soft-border)] [background:var(--theme-soft-bg)] text-sm font-semibold text-[color:var(--theme-soft-text-strong)] [box-shadow:var(--theme-soft-shadow)] transition-colors hover:border-primary/15"
+                    onClick={() => {
+                      setProjectMenuOpen(false)
+                      setAccountMenuOpen((current) => !current)
+                    }}
+                    aria-expanded={accountMenuOpen}
+                    aria-haspopup="menu"
+                    aria-label="打开账号菜单"
+                    title={currentUserQ.data.nickname || currentUserQ.data.email}
+                  >
+                    {currentUserQ.data.avatarUrl ? (
+                      <img src={currentUserQ.data.avatarUrl} alt={currentUserQ.data.nickname} className="h-full w-full object-cover" />
+                    ) : (
+                      (currentUserQ.data.nickname || currentUserQ.data.email).slice(0, 1).toUpperCase()
+                    )}
+                  </button>
+
+                  {accountMenuOpen ? (
+                    <div
+                      ref={accountMenuRef}
+                      className="absolute right-0 top-[calc(100%+0.65rem)] z-30 w-[min(18rem,calc(100vw-1rem))] overflow-hidden rounded-[1.6rem] border [border-color:var(--theme-soft-border)] [background:radial-gradient(circle_at_top_left,hsl(var(--primary)/0.08),transparent_34%),var(--theme-card-main-bg)] shadow-[0_24px_60px_-30px_rgba(15,23,42,0.24)] backdrop-blur-2xl"
+                    >
+                      <div className="p-3">
+                        <div className="theme-soft-surface p-3">
+                          <div className="flex items-center gap-3">
+                            <div className="inline-flex h-12 w-12 items-center justify-center overflow-hidden rounded-2xl border [border-color:var(--theme-icon-border)] [background:var(--theme-icon-bg)] text-base font-semibold [color:var(--theme-icon-text)]">
+                              {currentUserQ.data.avatarUrl ? (
+                                <img src={currentUserQ.data.avatarUrl} alt={currentUserQ.data.nickname} className="h-full w-full object-cover" />
+                              ) : (
+                                (currentUserQ.data.nickname || currentUserQ.data.email).slice(0, 1).toUpperCase()
+                              )}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-medium text-foreground">{currentUserQ.data.nickname}</div>
+                              <div className="mt-1 truncate text-xs text-muted-foreground">{currentUserQ.data.email}</div>
+                            </div>
+                          </div>
+                          <div className="mt-3 grid gap-2">
+                            <Button asChild variant="outline" className="w-full justify-start rounded-xl">
+                              <Link
+                                to="/profile"
+                                onClick={() => setAccountMenuOpen(false)}
+                              >
+                                个人中心
+                              </Link>
+                            </Button>
+                            <Button asChild variant="outline" className="w-full justify-start rounded-xl">
+                              <Link
+                                to="/membership"
+                                onClick={() => setAccountMenuOpen(false)}
+                              >
+                                会员中心
+                              </Link>
+                            </Button>
+                            <Button
+                              variant="outline"
+                              className="w-full justify-start rounded-xl"
+                              onClick={() => {
+                                setAccountMenuOpen(false)
+                                void onLogout()
+                              }}
+                              disabled={logout.isPending}
+                            >
+                              {logout.isPending ? "退出中..." : "退出登录"}
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
           </div>
         </div>
       </header>

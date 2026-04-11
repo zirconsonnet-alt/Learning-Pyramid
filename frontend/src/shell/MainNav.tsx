@@ -3,6 +3,7 @@ import { BookOpenText, Clock3, FolderKanban, PanelsTopLeft, Settings2, Shield, T
 import { NavLink } from "react-router-dom"
 
 import { cn } from "@/ui/utils"
+import { buildGlobalSettingsPath } from "@/views/settings/globalSettingsRouting"
 
 export type NavItem = {
   to: string
@@ -15,10 +16,11 @@ const BASE_GLOBAL_NAV_ITEMS: NavItem[] = [
   { to: "/pomodoro", label: "番茄钟", icon: TimerReset },
   { to: "/friends", label: "好友", icon: UsersRound },
   { to: "/guide", label: "用户指南", icon: BookOpenText },
+  { to: buildGlobalSettingsPath(), label: "全局设置", icon: Settings2 },
 ]
 
 export function getGlobalNavItems(options?: { includeAdmin?: boolean; includeMembership?: boolean }): NavItem[] {
-  const items = options?.includeMembership ? [...BASE_GLOBAL_NAV_ITEMS] : BASE_GLOBAL_NAV_ITEMS.filter((item) => item.to !== "/membership")
+  const items = [...BASE_GLOBAL_NAV_ITEMS]
   if (options?.includeAdmin) {
     items.push({ to: "/admin", label: "后台管理", icon: Shield })
   }

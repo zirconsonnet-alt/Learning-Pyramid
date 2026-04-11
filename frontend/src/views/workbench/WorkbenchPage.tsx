@@ -954,27 +954,7 @@ export function WorkbenchPage() {
 
   let workbenchGuideNotice: ReactNode = null
 
-  if (queueHasGate) {
-    workbenchGuideNotice = (
-      <ContentNotice
-        title="当前先完成复习"
-        message="系统已经排出了待复习内容。先完成这一轮复习，再继续录入新的复述点，节奏会更稳。"
-        tone="info"
-        action={
-          <div className="flex flex-wrap gap-2">
-            <Button
-              onClick={() => {
-                setCenterPanelMode("main")
-                scrollToWorkbenchSection("workbench-review-pane")
-              }}
-            >
-              去复习区
-            </Button>
-          </div>
-        }
-      />
-    )
-  } else if (actionableMissingGate) {
+  if (actionableMissingGate) {
     workbenchGuideNotice = (
       <ContentNotice
         title="先修复缺失实例"
@@ -1032,139 +1012,6 @@ export function WorkbenchPage() {
           </div>
         }
       />
-    )
-  }
-
-  let sidebarPrimaryAction: ReactNode = null
-
-  if (queueHasGate) {
-    sidebarPrimaryAction = (
-      <section className="theme-status-surface p-4">
-        <SidebarSectionTitle title="当前主动作" note="先把系统已经排出的复习做完，再继续录入新的复述点。" />
-        <div className="mt-3 text-[17px] font-semibold tracking-[-0.02em] text-[color:var(--theme-soft-text-strong)]">先完成复习任务</div>
-        <p className="mt-2 text-[13px] leading-6 text-muted-foreground">当前还有 {queueLength} 个待复习任务。先回忆、再看答案、再判断会不会，系统节奏会更稳。</p>
-        <div className="mt-4 flex flex-wrap gap-2">
-          <Button
-            size="sm"
-            onClick={() => {
-              setCenterPanelMode("main")
-              scrollToWorkbenchSection("workbench-review-pane")
-            }}
-          >
-            去复习区
-          </Button>
-        </div>
-      </section>
-    )
-  } else if (actionableMissingGate) {
-    sidebarPrimaryAction = (
-      <section className="theme-status-surface p-4">
-        <SidebarSectionTitle title="当前主动作" note="先排除阻塞项，再继续推进学习和层级任务。" />
-        <div className="mt-3 text-[17px] font-semibold tracking-[-0.02em] text-[color:var(--theme-soft-text-strong)]">先修复缺失实例</div>
-        <p className="mt-2 text-[13px] leading-6 text-muted-foreground">还有 {actionableMissingInstanceCount} 个缺失实例会挡住继续学习，先去项目设置修复，修复后再回来继续。</p>
-        <div className="mt-4 flex flex-wrap gap-2">
-          <Button size="sm" onClick={() => navigate(`/p/${pid}/settings`)}>
-            去项目设置
-          </Button>
-        </div>
-      </section>
-    )
-  } else if (requiresLearningObjectTree && !instancesQ.isLoading && (instancesQ.data?.length ?? 0) === 0) {
-    sidebarPrimaryAction = (
-      <section className="theme-status-surface p-4">
-        <SidebarSectionTitle title="当前主动作" note="先把工作台真正需要的内容准备好。" />
-        <div className="mt-3 text-[17px] font-semibold tracking-[-0.02em] text-[color:var(--theme-soft-text-strong)]">
-          {projectType === "BOOK" ? "先初始化书本目录" : projectType === "MISTAKE_BOOK" ? "先准备错题入口" : courseContentPrepTitle}
-        </div>
-        <p className="mt-2 text-[13px] leading-6 text-muted-foreground">
-          {projectType === "BOOK"
-            ? "还没有可用章节。先初始化目录结构，再回工作台选章节开始学习。"
-            : projectType === "MISTAKE_BOOK"
-              ? "还没有可用错题条目。先准备错题入口，再回工作台选条目开始整理。"
-              : courseContentPrepMessage}
-        </p>
-        <div className="mt-4 flex flex-wrap gap-2">
-          <Button size="sm" onClick={() => navigate(`/p/${pid}/settings`)}>
-            去项目设置
-          </Button>
-        </div>
-      </section>
-    )
-  } else if (requiresLearningObjectTree && !selectedInstanceId) {
-    sidebarPrimaryAction = (
-      <section className="theme-status-surface p-4">
-        <SidebarSectionTitle title="当前主动作" note="工作台已经准备好了，接下来只差选中你正在处理的内容。" />
-        <div className="mt-3 text-[17px] font-semibold tracking-[-0.02em] text-[color:var(--theme-soft-text-strong)]">
-          {projectType === "BOOK" ? "先选一个章节开始学习" : projectType === "MISTAKE_BOOK" ? "先选一个错题条目开始整理" : "先选一个视频开始学习"}
-        </div>
-        <p className="mt-2 text-[13px] leading-6 text-muted-foreground">
-          {projectType === "BOOK"
-            ? "内容已准备好。先选中章节、小节或条目，再开始录入和回看。"
-            : projectType === "MISTAKE_BOOK"
-              ? "内容已准备好。先选中当前要整理的条目，再继续录入和整理。"
-              : "内容已准备好。先选中当前视频，再开始录入和复习。"}
-        </p>
-        <div className="mt-4 flex flex-wrap gap-2">
-          <Button size="sm" variant="outline" onClick={() => scrollToWorkbenchSection("workbench-content-tree")}>
-            去左侧选内容
-          </Button>
-        </div>
-      </section>
-    )
-  } else if (centerPanelMode === "rollup") {
-    sidebarPrimaryAction = (
-      <section className="theme-status-surface p-4">
-        <SidebarSectionTitle title="当前主动作" note="你现在在看层推进和学习任务结构。" />
-        <div className="mt-3 text-[17px] font-semibold tracking-[-0.02em] text-[color:var(--theme-soft-text-strong)]">继续判断是否要推进层级</div>
-        <p className="mt-2 text-[13px] leading-6 text-muted-foreground">如果现在想回到学习主流程，可以直接切回录入区；如果要检查层状态，就继续看当前面板。</p>
-        <div className="mt-4 flex flex-wrap gap-2">
-          <Button size="sm" variant="outline" onClick={() => scrollToWorkbenchSection("workbench-rollup-pane")}>
-            看层推进
-          </Button>
-          <Button
-            size="sm"
-            onClick={() => {
-              setCenterPanelMode("main")
-              scrollToWorkbenchSection(queueHasGate ? "workbench-review-pane" : "workbench-compose-pane")
-            }}
-          >
-            回主流程
-          </Button>
-        </div>
-      </section>
-    )
-  } else if (selectedInstanceId && instance) {
-    sidebarPrimaryAction = (
-      <section className="theme-status-surface p-4">
-        <SidebarSectionTitle title="当前主动作" note="内容已经选定，可以直接继续学习动作。" />
-        <div className="mt-3 text-[17px] font-semibold tracking-[-0.02em] text-[color:var(--theme-soft-text-strong)]">继续处理当前内容</div>
-        <p className="mt-2 text-[13px] leading-6 text-muted-foreground">
-          当前正在处理“{instance.materialDisplayName}”。可以继续看视频定位，或直接回到复述点录入区完成这一轮学习。
-        </p>
-        <div className="mt-4 flex flex-wrap gap-2">
-          {usesResolvableCourseAnchor ? (
-            <Button size="sm" variant="outline" onClick={() => scrollToWorkbenchSection("workbench-video-pane")}>
-              去视频区
-            </Button>
-          ) : null}
-          <Button size="sm" onClick={() => scrollToWorkbenchSection("workbench-compose-pane")}>
-            去录入区
-          </Button>
-        </div>
-      </section>
-    )
-  } else {
-    sidebarPrimaryAction = (
-      <section className="theme-status-surface p-4">
-        <SidebarSectionTitle title="当前主动作" note="当前项目不依赖左侧内容树，可以直接开始录入。" />
-        <div className="mt-3 text-[17px] font-semibold tracking-[-0.02em] text-[color:var(--theme-soft-text-strong)]">直接开始录入复述点</div>
-        <p className="mt-2 text-[13px] leading-6 text-muted-foreground">先写下问题和答案，再提交学习，系统就会开始积累你的节奏和后续复习依据。</p>
-        <div className="mt-4 flex flex-wrap gap-2">
-          <Button size="sm" onClick={() => scrollToWorkbenchSection("workbench-compose-pane")}>
-            去录入区
-          </Button>
-        </div>
-      </section>
     )
   }
 
@@ -1318,8 +1165,6 @@ export function WorkbenchPage() {
               </div>
             </CardHeader>
             <CardContent className="space-y-5 pt-4 text-sm xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:overscroll-contain xl:pr-3">
-              {sidebarPrimaryAction}
-
               <section className="space-y-3">
                 <SidebarSectionTitle title="推进判断" note="先看剩余量、计划节奏和覆盖情况，再决定今天往哪推进。" />
 
