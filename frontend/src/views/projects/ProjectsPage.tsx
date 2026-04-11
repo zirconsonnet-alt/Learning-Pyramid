@@ -198,8 +198,8 @@ export function ProjectsPage() {
       setTitle("")
       setSelectedProjectId(res.compatibilityProjectId)
       setCreateOpen(false)
-      showSuccessFeedback("学科已创建", `“${t}” 已准备好。先从默认网课材料开始；书本、错题和零散入口会在这个学科下继续收拢。`)
-      nav(`/p/${res.compatibilityProjectId}/workbench`)
+      showSuccessFeedback("学科已创建", `“${t}” 已准备好。先在学科总面板里选择或创建材料项目。`)
+      nav(`/subjects/${res.subjectId}`)
     } catch (err) {
       showErrorFeedback("创建学科失败", formatApiError(err))
     }
@@ -219,9 +219,10 @@ export function ProjectsPage() {
     }
   }
 
-  function openProject(projectId: string, target: "workbench" | "settings") {
+  function openSubject(subject: Subject, target: "dashboard" | "settings") {
+    const projectId = subject.compatibilityProjectId
     setSelectedProjectId(projectId)
-    nav(target === "workbench" ? `/p/${projectId}/workbench` : `/p/${projectId}/settings`)
+    nav(target === "dashboard" ? `/subjects/${subject.subjectId}` : `/p/${projectId}/settings`)
   }
 
   return (
@@ -291,16 +292,16 @@ export function ProjectsPage() {
                         <div className="flex flex-wrap gap-2">
                           <Button
                             onClick={() => {
-                              openProject(p.subjectId, "workbench")
+                              openSubject(p, "dashboard")
                             }}
                           >
                             <ArrowRight className="h-4 w-4" />
-                            进入工作台
+                            进入学科
                           </Button>
                           <Button
                             variant="outline"
                             onClick={() => {
-                              openProject(p.subjectId, "settings")
+                              openSubject(p, "settings")
                             }}
                           >
                             <Settings2 className="h-4 w-4" />
@@ -362,7 +363,7 @@ export function ProjectsPage() {
               取消
             </Button>
             <Button onClick={onCreate} disabled={create.isPending || !title.trim()}>
-              {create.isPending ? "创建中..." : "创建学科并进入"}
+              {create.isPending ? "创建中..." : "创建学科"}
             </Button>
           </DialogFooter>
           {create.error ? <p className="text-sm text-destructive">{formatApiError(create.error)}</p> : null}

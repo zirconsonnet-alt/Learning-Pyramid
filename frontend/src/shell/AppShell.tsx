@@ -50,6 +50,13 @@ function describeArea(
     }
   }
 
+  if (pathname.startsWith("/subjects/")) {
+    return {
+      title: "学科总面板",
+      context: "创建和切换学科材料",
+    }
+  }
+
   if (pathname.startsWith("/pomodoro")) {
     return {
       title: "番茄钟",
@@ -498,7 +505,8 @@ export function AppShell() {
                       className={({ isActive }) =>
                         cn(
                           "inline-flex h-9 items-center gap-2 rounded-xl border [border-color:var(--theme-soft-border)] [background:var(--theme-soft-bg)] px-3 text-[13px] text-[color:var(--theme-subtle-text)] [box-shadow:var(--theme-soft-shadow)] transition-colors hover:border-primary/15 hover:text-foreground",
-                          isActive && "border-primary/15 bg-[hsl(var(--primary)/0.08)] text-foreground",
+                          (isActive || (item.to === "/projects" && location.pathname.startsWith("/subjects/"))) &&
+                            "border-primary/15 bg-[hsl(var(--primary)/0.08)] text-foreground",
                         )
                       }
                     >

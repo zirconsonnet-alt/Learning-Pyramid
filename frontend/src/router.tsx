@@ -36,6 +36,7 @@ const ReviewTaskPage = lazy(async () => ({ default: (await import("@/views/revie
 const ProjectSettingsPage = lazy(async () => ({ default: (await import("@/views/settings/ProjectSettingsPage")).ProjectSettingsPage }))
 const GlobalSettingsPage = lazy(async () => ({ default: (await import("@/views/settings/GlobalSettingsPage")).GlobalSettingsPage }))
 const SubtitleToolPage = lazy(async () => ({ default: (await import("@/views/subtitleTool/SubtitleToolPage")).SubtitleToolPage }))
+const SubjectDashboardPage = lazy(async () => ({ default: (await import("@/views/subjects/SubjectDashboardPage")).SubjectDashboardPage }))
 const ObjectTreePage = lazy(async () => ({ default: (await import("@/views/trees/ObjectTreePage")).ObjectTreePage }))
 const TaskTreePage = lazy(async () => ({ default: (await import("@/views/trees/TaskTreePage")).TaskTreePage }))
 const WorkbenchPage = lazy(async () => ({ default: (await import("@/views/workbench/WorkbenchPage")).WorkbenchPage }))
@@ -73,6 +74,7 @@ export const router = createBrowserRouter([
       { path: "/docs", element: <Navigate to="/guide" replace /> },
       { path: "/guide", element: lazyElement(<GuidePage />) },
       { path: "/projects", element: lazyElement(<ProjectsPage />) },
+      { path: "/subjects/:subjectId", element: lazyElement(<SubjectDashboardPage />) },
       { path: "/friends", element: lazyElement(<FriendsPage />) },
       { path: "/groups", element: <Navigate to="/friends" replace /> },
       { path: "/groups/:groupId", element: <Navigate to="/friends" replace /> },
