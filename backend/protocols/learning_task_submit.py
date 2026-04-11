@@ -1,5 +1,6 @@
 from typing import Sequence
 
+from backend.models.enums import RecallPointState
 from backend.models.errors import NotFound, PreconditionFailure
 from backend.models.learning_task import LearningTask
 from backend.models.learning_task_node import LearningTaskLeaf
@@ -64,6 +65,24 @@ def learning_task_submit(
                 raise PreconditionFailure(
                     f"items[{idx}].anchor.instance_id not resolvable: {it.anchor.instance_id}"
                 )
+        seen_references: set[str] = set()
+        for reference in it.references:
+            ref_key = str(reference).strip()
+            if not ref_key:
+                raise PreconditionFailure(f"items[{idx}].references must contain non-empty RecallPointId")
+            if ref_key in seen_references:
+                raise PreconditionFailure(f"items[{idx}].references must not contain duplicates")
+            seen_references.add(ref_key)
+            try:
+                referenced = recall_point_repo.get(session, reference)
+            except NotFound:
+                raise PreconditionFailure(
+                    f"items[{idx}].references contains unresolvable recall_point_id: {reference}"
+                )
+            if referenced.state != RecallPointState.ACTIVE:
+                raise PreconditionFailure(
+                    f"items[{idx}].references contains non-ACTIVE recall_point_id: {reference}"
+                )
 
     # ---- Writes (staged) ----
     project_id = session.project_id
@@ -78,6 +97,7 @@ def learning_task_submit(
             question=it.question,
             answer=it.answer,
             anchor=it.anchor,
+            references=tuple(it.references),
         )
         rp.validate_write_time()
         recall_point_repo.add(session, rp)

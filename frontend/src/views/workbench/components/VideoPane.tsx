@@ -38,16 +38,18 @@ import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent } from "@/ui/components/ui/card"
 import { askCourseAgent } from "@/ui/llm/courseAgent"
 import { resolveProjectFile, useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
-import { useProjectMaterialSourceBinding } from "@/ui/queries/projects"
+import { useProjectMaterialSourceBinding, useProjects } from "@/ui/queries/projects"
 import { useSystemCapabilities } from "@/ui/queries/system"
 import type { AiChatCourseEvidence } from "@/ui/store/aiChatStore"
+import { formatPomodoroCountdown, getPomodoroUpcomingSegmentPreview, usePomodoroNow, usePomodoroStore } from "@/ui/store/pomodoroStore"
 import { useRecallPointsByInstance } from "@/ui/queries/workbench"
 import { useInstancePlaybackDescriptor } from "@/ui/queries/workbench"
 import { showInfoFeedback } from "@/ui/store/feedbackStore"
 import { SUPPORTED_SUBTITLE_EXTENSIONS_LABEL } from "@/ui/subtitles/subtitleSupport"
-import { addDailyPlaybackMs } from "@/ui/store/workbenchDailyStats"
+import { recordStudyActivity, touchDailyStudyActivity } from "@/ui/store/workbenchDailyStats"
 import { clearPlaybackResumeMs, loadPlaybackResumeMs, savePlaybackResumeMs } from "@/ui/store/playbackResume"
 import { saveVideoDurationMs } from "@/ui/store/videoDurations"
+import { recordVideoWatchCoverageRange } from "@/ui/store/videoWatchCoverage"
 import { useWorkbenchStore } from "@/ui/store/workbenchStore"
 import { cn } from "@/ui/utils"
 import {
@@ -70,6 +72,9 @@ import { useVideoSubtitles } from "./useVideoSubtitles"
 const FULLSCREEN_KEYBOARD_SEEK_STEP_MS = 5000
 const CHROME_HIDE_DELAY_MS = 1600
 const PLAYBACK_RATE_OPTIONS = [0.75, 1, 1.25, 1.5, 2]
+const WATCH_TRACKING_MAX_CHUNK_MS = 5000
+const COMPOSE_ACTIVITY_WINDOW_MS = 60_000
+const QA_ACTIVITY_WINDOW_MS = 30_000
 
 type FullscreenCapableVideo = HTMLVideoElement & {
   webkitDisplayingFullscreen?: boolean
@@ -254,6 +259,8 @@ export function VideoPane({
   const restoreSavedPositionRef = useRef(true)
   const lastPersistedPlaybackSecondRef = useRef<number | null>(null)
   const lastPlaybackTrackedAtRef = useRef<number | null>(null)
+  const lastPlaybackTrackedPositionRef = useRef<number | null>(null)
+  const lastPlaybackTrackedPositionClockRef = useRef<number | null>(null)
   const assistantAbortRef = useRef<AbortController | null>(null)
   const hlsRef = useRef<Hls | null>(null)
 
@@ -285,6 +292,10 @@ export function VideoPane({
   const [subtitleDelayMs, setSubtitleDelayMs] = useState(() => loadVideoSubtitleDelayMs())
 
   const addDraft = useWorkbenchStore((s) => s.addDraft)
+  const pomodoroEnabled = usePomodoroStore((state) => state.enabled)
+  const pomodoroWeeklySchedule = usePomodoroStore((state) => state.weeklySchedule)
+  const pomodoroNow = usePomodoroNow(pomodoroEnabled)
+  const projectsQ = useProjects(true)
 
   const instanceId = instance?.instanceId ?? null
   const capabilitiesQ = useSystemCapabilities()
@@ -351,17 +362,65 @@ export function VideoPane({
     llmConfigured &&
     (subtitleSourceKind !== "BROWSER_LOCAL" || directoryBinding.permission === "granted")
 
+  const touchComposeActivity = useCallback(() => {
+    touchDailyStudyActivity(projectId, "compose", COMPOSE_ACTIVITY_WINDOW_MS)
+  }, [projectId])
+
+  const touchQaActivity = useCallback(() => {
+    touchDailyStudyActivity(projectId, "qa", QA_ACTIVITY_WINDOW_MS)
+  }, [projectId])
+
+  const resetPlaybackCoverageAnchor = useCallback((playbackMs?: number | null) => {
+    const nextPlaybackMs = Number.isFinite(playbackMs) ? Math.max(0, Math.floor(playbackMs ?? 0)) : null
+    lastPlaybackTrackedPositionRef.current = nextPlaybackMs
+    lastPlaybackTrackedPositionClockRef.current = nextPlaybackMs === null ? null : Date.now()
+  }, [])
+
+  const flushPlaybackCoverage = useCallback(
+    (playbackMs?: number | null) => {
+      if (!instanceId) {
+        lastPlaybackTrackedPositionRef.current = null
+        lastPlaybackTrackedPositionClockRef.current = null
+        return
+      }
+
+      const nextPlaybackMs = Number.isFinite(playbackMs) ? Math.max(0, Math.floor(playbackMs ?? 0)) : null
+      const previousPlaybackMs = lastPlaybackTrackedPositionRef.current
+      const previousClockMs = lastPlaybackTrackedPositionClockRef.current
+      const now = Date.now()
+
+      lastPlaybackTrackedPositionRef.current = nextPlaybackMs
+      lastPlaybackTrackedPositionClockRef.current = nextPlaybackMs === null ? null : now
+
+      if (nextPlaybackMs === null || previousPlaybackMs === null || previousClockMs === null) return
+
+      const playbackDeltaMs = nextPlaybackMs - previousPlaybackMs
+      if (playbackDeltaMs <= 250) return
+
+      const video = videoRef.current
+      const playbackRate = Math.max(video?.playbackRate ?? 1, 0.25)
+      const wallDeltaMs = Math.max(0, now - previousClockMs)
+      const maxExpectedAdvanceMs = Math.max(2_500, wallDeltaMs * playbackRate * 2.25 + 1_500)
+      if (playbackDeltaMs > maxExpectedAdvanceMs) return
+
+      recordVideoWatchCoverageRange(projectId, instanceId, previousPlaybackMs, nextPlaybackMs, durationMs > 0 ? durationMs : null)
+    },
+    [durationMs, instanceId, projectId],
+  )
+
   const flushPlaybackDuration = useCallback(() => {
     if (!instanceId) {
       lastPlaybackTrackedAtRef.current = null
       return
     }
-    const now = performance.now()
+    const now = Date.now()
     const previous = lastPlaybackTrackedAtRef.current
     lastPlaybackTrackedAtRef.current = now
     if (previous === null) return
-    const deltaMs = Math.max(0, Math.min(now - previous, 5000))
-    if (deltaMs > 0) addDailyPlaybackMs(projectId, deltaMs)
+    const boundedStartAtMs = Math.max(previous, now - WATCH_TRACKING_MAX_CHUNK_MS)
+    if (now > boundedStartAtMs) {
+      recordStudyActivity(projectId, "watch", boundedStartAtMs, now)
+    }
   }, [instanceId, projectId])
 
   const clearChromeHideTimer = useCallback(() => {
@@ -445,16 +504,24 @@ export function VideoPane({
     (ms: number, options?: { persist?: boolean }) => {
       const video = videoRef.current
       if (!video) return
+      const currentPlaybackMs = clampPlaybackMs(video, Math.floor(video.currentTime * 1000))
+      if (!video.paused && !video.ended) {
+        flushPlaybackDuration()
+        flushPlaybackCoverage(currentPlaybackMs)
+      } else {
+        resetPlaybackCoverageAnchor(currentPlaybackMs)
+      }
       const nextMs = clampPlaybackMs(video, ms)
       video.currentTime = nextMs / 1000
       syncPlaybackClock(nextMs)
       if (options?.persist !== false) {
         persistPlaybackPosition(nextMs)
       }
+      resetPlaybackCoverageAnchor(nextMs)
       syncVideoUiState(video)
       wakeChrome()
     },
-    [persistPlaybackPosition, syncPlaybackClock, syncVideoUiState, wakeChrome],
+    [flushPlaybackCoverage, flushPlaybackDuration, persistPlaybackPosition, resetPlaybackCoverageAnchor, syncPlaybackClock, syncVideoUiState, wakeChrome],
   )
 
   const seekByDelta = useCallback(
@@ -480,9 +547,10 @@ export function VideoPane({
     const pauseMs = clampPlaybackMs(video, Math.floor(video.currentTime * 1000))
     syncPlaybackClock(pauseMs)
     persistPlaybackPosition(pauseMs)
+    flushPlaybackCoverage(pauseMs)
     syncVideoUiState(video)
     wakeChrome()
-  }, [persistPlaybackPosition, syncPlaybackClock, syncVideoUiState, wakeChrome])
+  }, [flushPlaybackCoverage, persistPlaybackPosition, syncPlaybackClock, syncVideoUiState, wakeChrome])
 
   const setVideoVolume = useCallback(
     (nextPercent: number) => {
@@ -598,6 +666,8 @@ export function VideoPane({
         showInfoFeedback("当前处于复习模式", "请先完成复习，再继续录入新的复述点。")
         return
       }
+      if (mode === "assistant") touchQaActivity()
+      else touchComposeActivity()
       const video = videoRef.current
       if (!video || !instanceId) return
 
@@ -630,6 +700,8 @@ export function VideoPane({
       requestShellFullscreen,
       syncPlaybackClock,
       syncVideoUiState,
+      touchComposeActivity,
+      touchQaActivity,
       wakeChrome,
     ],
   )
@@ -638,12 +710,13 @@ export function VideoPane({
     const latestAssistantTurn = [...assistantTurns].reverse().find((turn) => turn.role === "assistant")
     if (!latestAssistantTurn?.content.trim()) return
     try {
+      touchQaActivity()
       await copyText(latestAssistantTurn.content)
       showInfoFeedback("回答已复制", "视频助手的最新回答已经复制到剪贴板。")
     } catch (error) {
       setAssistantError(formatCourseAssistantError(error))
     }
-  }, [assistantTurns])
+  }, [assistantTurns, touchQaActivity])
 
   const submitAssistantQuestion = useCallback(async () => {
     const prompt = assistantComposer.trim()
@@ -667,6 +740,7 @@ export function VideoPane({
     }
     if (isAssistantAsking) return
 
+    touchQaActivity()
     const historyMessages = assistantTurns.map((turn) => ({
       role: turn.role,
       content: turn.content,
@@ -764,12 +838,14 @@ export function VideoPane({
     }
 
     const now = Date.now()
+    touchComposeActivity()
     addDraft(projectId, {
       localId: newLocalId(),
       instanceId,
       position: `t=${captureAnchorMs}`,
       question: questionContent,
       answer: answerContent,
+      references: [],
       createdAt: now,
       updatedAt: now,
     })
@@ -783,6 +859,7 @@ export function VideoPane({
     projectId,
     questionContent,
     queueHasGate,
+    touchComposeActivity,
   ])
 
   function handleTimeUpdate() {
@@ -792,6 +869,9 @@ export function VideoPane({
       flushPlaybackDuration()
     }
     const nextMs = Math.max(0, Math.floor(video.currentTime * 1000))
+    if (!video.paused && !video.ended) {
+      flushPlaybackCoverage(nextMs)
+    }
     syncPlaybackClock(nextMs)
     if (!instanceId) return
     const currentSecond = Math.floor(nextMs / 1000)
@@ -834,6 +914,7 @@ export function VideoPane({
   }, [isSubtitleEnabled, subtitleMissing])
 
   useEffect(() => {
+    flushPlaybackDuration()
     syncPlaybackClock(0)
     setDurationMs(0)
     setIsPlaying(false)
@@ -862,8 +943,10 @@ export function VideoPane({
     restoreSavedPositionRef.current = true
     lastPersistedPlaybackSecondRef.current = null
     lastPlaybackTrackedAtRef.current = null
+    lastPlaybackTrackedPositionRef.current = null
+    lastPlaybackTrackedPositionClockRef.current = null
     clearChromeHideTimer()
-  }, [clearChromeHideTimer, instance?.instanceId, localSrc, serverMediaStreamEnabled, syncPlaybackClock])
+  }, [clearChromeHideTimer, flushPlaybackDuration, instance?.instanceId, localSrc, resetPlaybackCoverageAnchor, serverMediaStreamEnabled, syncPlaybackClock])
 
   useEffect(() => {
     async function syncFullscreenState() {
@@ -938,6 +1021,44 @@ export function VideoPane({
   }, [clearChromeHideTimer, isCapturePanelOpen, isChromeAwake, isPlaying])
 
   useEffect(() => clearChromeHideTimer, [clearChromeHideTimer])
+
+  useEffect(
+    () => () => {
+      const video = videoRef.current
+      const currentPlaybackMs = video ? clampPlaybackMs(video, Math.floor(video.currentTime * 1000)) : null
+      flushPlaybackCoverage(currentPlaybackMs)
+      flushPlaybackDuration()
+      lastPlaybackTrackedAtRef.current = null
+      lastPlaybackTrackedPositionRef.current = null
+      lastPlaybackTrackedPositionClockRef.current = null
+    },
+    [flushPlaybackCoverage, flushPlaybackDuration],
+  )
+
+  useEffect(() => {
+    function flushOnBackground() {
+      const video = videoRef.current
+      const currentPlaybackMs = video ? clampPlaybackMs(video, Math.floor(video.currentTime * 1000)) : null
+      flushPlaybackCoverage(currentPlaybackMs)
+      flushPlaybackDuration()
+      lastPlaybackTrackedAtRef.current = null
+      lastPlaybackTrackedPositionRef.current = null
+      lastPlaybackTrackedPositionClockRef.current = null
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "hidden") {
+        flushOnBackground()
+      }
+    }
+
+    window.addEventListener("pagehide", flushOnBackground)
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+    return () => {
+      window.removeEventListener("pagehide", flushOnBackground)
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
+    }
+  }, [flushPlaybackCoverage, flushPlaybackDuration])
 
   useEffect(() => {
     if (!instanceId) return
@@ -1207,6 +1328,8 @@ export function VideoPane({
     if (!instanceId) return
     clearPlaybackResumeMs(projectId, instanceId)
     lastPersistedPlaybackSecondRef.current = null
+    lastPlaybackTrackedPositionRef.current = null
+    lastPlaybackTrackedPositionClockRef.current = null
     setIsPlaying(false)
   }
 
@@ -1311,6 +1434,31 @@ export function VideoPane({
     () => [...assistantTurns].reverse().find((turn) => turn.role === "assistant") ?? null,
     [assistantTurns],
   )
+  const pomodoroUpcomingSegment = useMemo(
+    () =>
+      getPomodoroUpcomingSegmentPreview(
+        { enabled: pomodoroEnabled, weeklySchedule: pomodoroWeeklySchedule },
+        pomodoroNow,
+      ),
+    [pomodoroEnabled, pomodoroNow, pomodoroWeeklySchedule],
+  )
+  const fullscreenUpcomingProjectTitle = useMemo(() => {
+    const upcomingProjectId = pomodoroUpcomingSegment?.projectId ?? ""
+    if (!upcomingProjectId) return ""
+    return projectsQ.data?.find((project) => project.projectId === upcomingProjectId)?.title ?? ""
+  }, [pomodoroUpcomingSegment?.projectId, projectsQ.data])
+  const showFullscreenFocusPreview =
+    isShellFullscreen &&
+    pomodoroUpcomingSegment?.phase === "focus" &&
+    Boolean(pomodoroUpcomingSegment?.projectId) &&
+    pomodoroUpcomingSegment.projectId !== projectId &&
+    pomodoroUpcomingSegment.startsInMs > 0 &&
+    pomodoroUpcomingSegment.startsInMs <= 10_000
+  const showFullscreenBreakPreview =
+    isShellFullscreen &&
+    pomodoroUpcomingSegment?.phase === "break" &&
+    pomodoroUpcomingSegment.startsInMs > 0 &&
+    pomodoroUpcomingSegment.startsInMs <= 10_000
 
   return (
     <Card className="theme-card-main overflow-hidden">
@@ -1354,25 +1502,65 @@ export function VideoPane({
               onCanPlay={handleCanPlay}
               onDurationChange={() => syncVideoUiState(videoRef.current)}
               onPlay={() => {
-                lastPlaybackTrackedAtRef.current = performance.now()
+                lastPlaybackTrackedAtRef.current = Date.now()
+                resetPlaybackCoverageAnchor(Math.floor((videoRef.current?.currentTime ?? 0) * 1000))
                 setIsPlaying(true)
                 wakeChrome()
               }}
               onPause={() => {
+                flushPlaybackCoverage(Math.floor((videoRef.current?.currentTime ?? 0) * 1000))
                 flushPlaybackDuration()
                 lastPlaybackTrackedAtRef.current = null
+                lastPlaybackTrackedPositionRef.current = null
+                lastPlaybackTrackedPositionClockRef.current = null
                 setIsPlaying(false)
               }}
               onVolumeChange={() => syncVideoUiState(videoRef.current)}
               onError={handleVideoError}
               onEnded={() => {
+                flushPlaybackCoverage(Math.floor((videoRef.current?.currentTime ?? 0) * 1000))
                 flushPlaybackDuration()
                 lastPlaybackTrackedAtRef.current = null
+                lastPlaybackTrackedPositionRef.current = null
+                lastPlaybackTrackedPositionClockRef.current = null
                 handleEnded()
               }}
               onTimeUpdate={handleTimeUpdate}
-              onSeeked={handleTimeUpdate}
+              onSeeked={() => {
+                const nextMs = Math.floor((videoRef.current?.currentTime ?? 0) * 1000)
+                resetPlaybackCoverageAnchor(nextMs)
+                handleTimeUpdate()
+              }}
             />
+
+            {showFullscreenFocusPreview && pomodoroUpcomingSegment ? (
+              <div className="pointer-events-none absolute inset-x-0 top-4 z-[22] flex justify-center px-4">
+                <div className="w-full max-w-[min(92vw,34rem)] rounded-[1.2rem] border border-white/18 bg-[linear-gradient(140deg,rgba(7,12,24,0.84),rgba(18,31,60,0.76))] px-4 py-3 text-white shadow-[0_22px_56px_-34px_rgba(7,12,24,0.88)] backdrop-blur-xl">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-white/70">Upcoming Jump</div>
+                  <div className="mt-1 text-base font-semibold">
+                    {formatPomodoroCountdown(pomodoroUpcomingSegment.startsInMs)} 后切到
+                    {fullscreenUpcomingProjectTitle ? `“${fullscreenUpcomingProjectTitle}”` : "绑定项目"}
+                  </div>
+                  <div className="mt-1 text-sm leading-6 text-white/80">
+                    第 {pomodoroUpcomingSegment.pomodoroIndex}/{pomodoroUpcomingSegment.totalPomodoros} 个番茄即将开始，系统会自动离开当前项目并进入对应工作台。
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {showFullscreenBreakPreview && pomodoroUpcomingSegment ? (
+              <div className="pointer-events-none absolute inset-x-0 top-4 z-[22] flex justify-center px-4">
+                <div className="w-full max-w-[min(92vw,34rem)] rounded-[1.2rem] border border-white/18 bg-[linear-gradient(140deg,rgba(34,20,6,0.82),rgba(79,45,10,0.74))] px-4 py-3 text-white shadow-[0_22px_56px_-34px_rgba(42,22,6,0.9)] backdrop-blur-xl">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-white/70">Upcoming Lock</div>
+                  <div className="mt-1 text-base font-semibold">
+                    {formatPomodoroCountdown(pomodoroUpcomingSegment.startsInMs)} 后进入休息时间
+                  </div>
+                  <div className="mt-1 text-sm leading-6 text-white/80">
+                    当前工作台即将锁定，系统会把你拦回番茄钟页，建议先收尾当前操作。
+                  </div>
+                </div>
+              </div>
+            ) : null}
 
             {!isPlaying && !isCapturePanelOpen ? (
               <div className="pointer-events-none absolute inset-0 z-[9] flex items-center justify-center">
@@ -1710,10 +1898,14 @@ export function VideoPane({
                             ref={assistantInputRef}
                             value={assistantComposer}
                             onChange={(event) => {
+                              touchQaActivity()
                               setAssistantComposer(event.target.value)
                               if (assistantError) setAssistantError(null)
                             }}
+                            onFocus={touchQaActivity}
+                            onClick={touchQaActivity}
                             onKeyDown={(event) => {
+                              touchQaActivity()
                               if (event.key === "Escape") {
                                 event.preventDefault()
                                 closeCapturePanel()
@@ -1751,7 +1943,10 @@ export function VideoPane({
                         </div>
                       </div>
 
-                      <div className="min-h-0 flex-1 overflow-y-auto rounded-[1rem] border border-white/10 bg-white/[0.04] p-3">
+                      <div
+                        className="min-h-0 flex-1 overflow-y-auto rounded-[1rem] border border-white/10 bg-white/[0.04] p-3"
+                        onScroll={touchQaActivity}
+                      >
                         {assistantTurns.length === 0 && !isAssistantAsking ? (
                           <div className="flex h-full min-h-[12rem] flex-col items-center justify-center px-4 text-center">
                             <div className="flex h-10 w-10 items-center justify-center rounded-full border border-cyan-200/18 bg-cyan-200/10 text-cyan-100">
@@ -1789,6 +1984,7 @@ export function VideoPane({
                                             type="button"
                                             className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-left text-[11px] leading-5 text-slate-600 transition hover:border-cyan-300/50 hover:bg-cyan-50 hover:text-cyan-800"
                                             onClick={() => {
+                                              touchQaActivity()
                                               applySeekMs(evidence.startMs)
                                               setCaptureAnchorMs(evidence.startMs)
                                               setAssistantFrame(null)
@@ -1869,22 +2065,27 @@ export function VideoPane({
                             field="question"
                             value={questionContent}
                             textareaRef={questionInputRef}
+                            onUserActivity={touchComposeActivity}
                             placeholder="输入复述点问题，或直接 Ctrl+V 粘贴图片"
                             textareaClassName="min-h-[84px] rounded-xl border-white/10 bg-white/[0.05] px-3 py-2 text-sm text-white outline-none placeholder:text-white/28 focus:border-cyan-200/24 focus:bg-white/[0.08]"
                             imageClassName="h-24 w-24 rounded-xl border-white/10 bg-white/[0.06] object-cover"
                             onTextChange={(text) => {
+                              touchComposeActivity()
                               setQuestionContent((prev) => setRichContentText(prev, text))
                               if (captureError) setCaptureError(null)
                             }}
                             onAppendImage={(assetId) => {
+                              touchComposeActivity()
                               setQuestionContent((prev) => appendImageBlock(prev, assetId))
                               if (captureError) setCaptureError(null)
                             }}
                             onRemoveImage={(imageIndex) => {
+                              touchComposeActivity()
                               setQuestionContent((prev) => removeImageBlockAt(prev, imageIndex))
                               if (captureError) setCaptureError(null)
                             }}
                             onTextKeyDown={(event) => {
+                              touchComposeActivity()
                               if (event.key === "Escape") {
                                 event.preventDefault()
                                 closeCapturePanel()
@@ -1906,22 +2107,27 @@ export function VideoPane({
                             field="answer"
                             value={answerContent}
                             textareaRef={answerTextareaRef}
+                            onUserActivity={touchComposeActivity}
                             placeholder="输入答案或你的复述内容，或直接 Ctrl+V 粘贴图片"
                             textareaClassName="min-h-[124px] rounded-xl border-white/10 bg-white/[0.05] px-3 py-2 text-sm text-white outline-none placeholder:text-white/28 focus:border-cyan-200/24 focus:bg-white/[0.08]"
                             imageClassName="h-24 w-24 rounded-xl border-white/10 bg-white/[0.06] object-cover"
                             onTextChange={(text) => {
+                              touchComposeActivity()
                               setAnswerContent((prev) => setRichContentText(prev, text))
                               if (captureError) setCaptureError(null)
                             }}
                             onAppendImage={(assetId) => {
+                              touchComposeActivity()
                               setAnswerContent((prev) => appendImageBlock(prev, assetId))
                               if (captureError) setCaptureError(null)
                             }}
                             onRemoveImage={(imageIndex) => {
+                              touchComposeActivity()
                               setAnswerContent((prev) => removeImageBlockAt(prev, imageIndex))
                               if (captureError) setCaptureError(null)
                             }}
                             onTextKeyDown={(event) => {
+                              touchComposeActivity()
                               if (event.key === "Escape") {
                                 event.preventDefault()
                                 closeCapturePanel()

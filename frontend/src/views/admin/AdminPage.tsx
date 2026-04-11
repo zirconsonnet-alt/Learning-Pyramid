@@ -12,6 +12,7 @@ import { useAdminActionLogs, useAdminOverview, useAdminUsers, useUpdateAdminUser
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { cn } from "@/ui/utils"
 import { AdminNav } from "@/views/admin/AdminNav"
+import { formatDurationCompact } from "@/views/profile/profileStats"
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -82,6 +83,13 @@ export function AdminPage() {
     ? [
         { label: "注册用户", value: overviewQ.data.users, help: "当前账号总量" },
         { label: "活跃用户", value: overviewQ.data.activeUsers, help: "状态为 active" },
+        { label: "学习用户", value: overviewQ.data.studyUsers, help: "至少同步过一次学习时长" },
+        { label: "近 7 日学习用户", value: overviewQ.data.studyUsers7d, help: "最近 7 天有学习同步记录" },
+        { label: "累计有效学习", value: formatDurationCompact(overviewQ.data.effectiveStudyMs), help: "去重后的累计学习时长" },
+        { label: "材料接触", value: formatDurationCompact(overviewQ.data.watchMs), help: "累计材料播放/阅读时长" },
+        { label: "复述点构建", value: formatDurationCompact(overviewQ.data.composeMs), help: "累计编辑与构建时长" },
+        { label: "复习时长", value: formatDurationCompact(overviewQ.data.reviewMs), help: "累计复习交互时长" },
+        { label: "AI 问答", value: formatDurationCompact(overviewQ.data.qaMs), help: "累计 AI 问答交互时长" },
       ]
     : []
 
@@ -95,7 +103,7 @@ export function AdminPage() {
         <AdminNav />
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {stats.map((item) => (
           <Card key={item.label}>
             <CardHeader className="pb-3">

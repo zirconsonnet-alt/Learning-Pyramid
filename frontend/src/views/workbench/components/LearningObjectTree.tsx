@@ -13,7 +13,7 @@ import {
   sortLearningObjectNodeIdsForDisplay,
 } from "@/ui/learningObjectDisplayOrder"
 import { scanProjectDirectoryMedia, useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
-import { useImportLearningObjectsFromBrowser } from "@/ui/queries/workbench"
+import { useEnsureMistakeInbox, useImportLearningObjectsFromBrowser } from "@/ui/queries/workbench"
 import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { cn } from "@/ui/utils"
 
@@ -164,6 +164,7 @@ export function LearningObjectTree({
 }) {
   const directoryBinding = useProjectDirectoryBinding(projectId)
   const importLearningObjectsM = useImportLearningObjectsFromBrowser(projectId)
+  const ensureMistakeInboxM = useEnsureMistakeInbox(projectId)
   const q = useQuery({
     queryKey: ["learningObjectNodes", projectId],
     queryFn: ({ signal }) => listLearningObjectNodes(projectId, { signal, timeoutMs: LEARNING_OBJECT_TREE_QUERY_TIMEOUT_MS }),
@@ -228,6 +229,19 @@ export function LearningObjectTree({
     }
   }
 
+  async function onCreateMistakeInbox() {
+    try {
+      const result = await ensureMistakeInboxM.mutateAsync()
+      showSuccessFeedback(
+        result.created ? "待整理入口已创建" : "待整理入口已就绪",
+        "现在可以直接在这个错题材料里录入和整理错题了。",
+      )
+      onSelectInstance(result.instance_id)
+    } catch (err) {
+      showErrorFeedback("创建待整理入口失败", formatApiError(err))
+    }
+  }
+
   if (q.isLoading) {
     return <LoadingNotice title="正在加载内容目录" message="正在读取这个项目的学习对象树和材料层级。" />
   }
@@ -243,17 +257,26 @@ export function LearningObjectTree({
         <div className="text-sm font-medium text-foreground">当前还没有学习对象</div>
         <div className="text-sm text-muted-foreground">
           {projectType === "BOOK"
-            ? "书本项目需要先在项目设置里粘贴目录文本并完成一次目录初始化。"
-            : "先接入内容目录后，学习对象树会显示在这里。"}
+            ? "书本项目需要先在材料设置里粘贴目录文本，或一键复用某个网课材料的学习对象树。"
+            : projectType === "MISTAKE_BOOK"
+              ? "错题材料需要先创建一个“待整理”入口，或在材料设置里复用网课/书本结构作为错题骨架。"
+              : "先接入内容目录后，学习对象树会显示在这里。"}
         </div>
         <div className="flex flex-wrap gap-2">
+          {projectType === "MISTAKE_BOOK" ? (
+            <Button size="sm" className="rounded-full" onClick={() => void onCreateMistakeInbox()} disabled={ensureMistakeInboxM.isPending}>
+              {ensureMistakeInboxM.isPending ? "创建中..." : "创建待整理入口"}
+            </Button>
+          ) : null}
           {canImportHere ? (
             <Button size="sm" className="rounded-full" onClick={() => void onImportHere()} disabled={importLearningObjectsM.isPending}>
               {importLearningObjectsM.isPending ? "导入中..." : "立即导入"}
             </Button>
           ) : null}
           <Button asChild size="sm" variant={canImportHere ? "outline" : "default"} className="rounded-full">
-            <Link to={`/p/${projectId}/settings`}>{projectType === "BOOK" ? "去初始化目录" : "前往项目设置"}</Link>
+            <Link to={`/p/${projectId}/settings`}>
+              {projectType === "BOOK" ? "去初始化目录" : projectType === "MISTAKE_BOOK" ? "去设置错题结构" : "前往项目设置"}
+            </Link>
           </Button>
         </div>
       </div>

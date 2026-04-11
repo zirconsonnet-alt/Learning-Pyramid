@@ -65,6 +65,7 @@ def _is_public_api_path(path: str) -> bool:
         "/api/redoc",
         "/api/system/capabilities",
         "/api/system/public-downloads",
+        "/api/system/pomodoro/tts-preview",
     }
     if path in public_paths:
         return True

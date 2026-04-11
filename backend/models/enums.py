@@ -71,7 +71,24 @@ class MaterialSourceKind(str, Enum):
 class ProjectType(str, Enum):
     COURSE = "COURSE"
     BOOK = "BOOK"
+    MISTAKE_BOOK = "MISTAKE_BOOK"
     LOOSE_POINTS = "LOOSE_POINTS"
+
+
+class RollUpStrategy(str, Enum):
+    MANUAL = "MANUAL"
+    THRESHOLD_AUTO = "THRESHOLD_AUTO"
+    LEARNING_OBJECT_ISOMORPHIC = "LEARNING_OBJECT_ISOMORPHIC"
+
+
+class LearningTaskNodeOrigin(str, Enum):
+    AGGREGATION = "AGGREGATION"
+    OBJECT_MIRROR = "OBJECT_MIRROR"
+
+
+class ObjectMirrorStatus(str, Enum):
+    ACTIVE = "ACTIVE"
+    ORPHANED = "ORPHANED"
 
 
 class ClientRuntimeKind(str, Enum):
@@ -104,6 +121,12 @@ class AsrProvider(str, Enum):
 class RecallPointReviewResult(str, Enum):
     CAN_RECALL = "CAN_RECALL"
     CANNOT_RECALL = "CANNOT_RECALL"
+
+
+class MistakeStatus(str, Enum):
+    OPEN = "OPEN"
+    RESOLVING = "RESOLVING"
+    RESOLVED = "RESOLVED"
 
 
 class ContentBlockKind(str, Enum):
@@ -139,6 +162,7 @@ class AuditEventKind(str, Enum):
     EDIT_RECALL_POINT = "EDIT_RECALL_POINT"
     DELETE_RECALL_POINT = "DELETE_RECALL_POINT"
     APPEND_RECALL_POINT_INSIGHT = "APPEND_RECALL_POINT_INSIGHT"
+    COLLECT_RECALL_POINT_TO_MISTAKE_BOOK = "COLLECT_RECALL_POINT_TO_MISTAKE_BOOK"
     EDIT_LEARNING_TASK = "EDIT_LEARNING_TASK"
     EDIT_LEARNING_TASK_NODE = "EDIT_LEARNING_TASK_NODE"
     EDIT_PROJECT_CONFIG = "EDIT_PROJECT_CONFIG"

@@ -17,9 +17,13 @@ export const LayerConfigSchema = z.object({
 })
 export type LayerConfig = z.infer<typeof LayerConfigSchema>
 
+export const RollUpStrategySchema = z.enum(["MANUAL", "THRESHOLD_AUTO", "LEARNING_OBJECT_ISOMORPHIC"])
+export type RollUpStrategy = z.infer<typeof RollUpStrategySchema>
+
 export const ProjectConfigSchema = z.object({
   projectId: z.string(),
   projectType: ProjectTypeSchema,
+  rollUpStrategy: RollUpStrategySchema.default("THRESHOLD_AUTO"),
   updatedAt: z.string(),
   layerConfigs: z.record(z.string(), LayerConfigSchema),
   pushConfig: z
@@ -74,6 +78,15 @@ export function setLayerConfig(
     path: `/projects/${projectId}/layers/${layerIndex}/config`,
     method: "POST",
     body,
+    responseSchema: z.null(),
+  })
+}
+
+export function setProjectRollUpStrategy(projectId: string, rollUpStrategy: RollUpStrategy) {
+  return apiRequest({
+    path: `/projects/${projectId}/roll-up-strategy`,
+    method: "POST",
+    body: { rollUpStrategy },
     responseSchema: z.null(),
   })
 }

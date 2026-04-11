@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from backend.models.enums import ContentBlockKind
-from backend.models.recall_point import Anchor
-from backend.models.rich_content import ContentBlock
+from backend.models.enums import ContentBlockKind, SessionMode
+from backend.models.recall_point import Anchor, RecallPoint
+from backend.models.rich_content import ContentBlock, rich_text
+from backend.models.types import now_utc_ms
 from backend.system.api import SystemAPI
 from backend.system.inmemory_system import InMemorySystem
 from backend.system.persistence_store import SQLiteSnapshotStore
@@ -78,6 +79,103 @@ def test_submit_learning_task_accepts_image_rich_content(tmp_path: Path) -> None
     assert len(recall_points) == 1
     assert any(block.kind == ContentBlockKind.IMAGE and str(block.asset_id) == str(asset.asset_id) for block in recall_points[0].question)
     assert any(block.kind == ContentBlockKind.IMAGE and str(block.asset_id) == str(asset.asset_id) for block in recall_points[0].answer)
+
+
+def test_submit_learning_task_persists_recall_point_references(tmp_path: Path) -> None:
+    db_path = tmp_path / "plm_store.sqlite3"
+    project_root = tmp_path / "project-references"
+    learning_root = project_root / "learning_objects"
+    learning_root.mkdir(parents=True)
+    (learning_root / "lesson.mp4").write_bytes(b"video")
+
+    api = SystemAPI(InMemorySystem(persist_store=SQLiteSnapshotStore(db_path)))
+    project_id = api.create_project("Recall References", project_root=str(project_root))
+    api.sync_learning_objects_from_fs(project_id)
+    instance = api.list_instances(project_id)[0]
+
+    session = api.sys.begin_session(project_id, SessionMode.READ_WRITE)
+    try:
+        first_recall_point = RecallPoint(
+            project_id=project_id,
+            recall_point_id=api.idgen.new_recall_point_id(project_id),
+            created_at=now_utc_ms(),
+            question=rich_text("第一问"),
+            answer=rich_text("第一答"),
+            anchor=Anchor(instance_id=instance.instance_id, position="t=1024"),
+        )
+        api.sys.recall_point_repo.add(session, first_recall_point)
+        api.sys.commit(session)
+    except Exception:
+        api.sys.rollback(session)
+        raise
+
+    second_entry_node_id = api.submit_learning_task(
+        project_id,
+        items=[
+            (
+                tuple([ContentBlock(kind=ContentBlockKind.TEXT, text="第二问")]),
+                tuple([ContentBlock(kind=ContentBlockKind.TEXT, text="第二答")]),
+                Anchor(instance_id=instance.instance_id, position="t=2048"),
+                (first_recall_point.recall_point_id,),
+            )
+        ],
+        title="第二条",
+    )
+    second_recall_point = api.list_recall_points_by_learning_task_node(project_id, second_entry_node_id)[0]
+
+    assert tuple(second_recall_point.references) == (first_recall_point.recall_point_id,)
+    assert "第一问" not in str(second_recall_point)
+    listed = api.list_recall_points(project_id)
+    assert [str(item.recall_point_id) for item in listed] == [
+        str(first_recall_point.recall_point_id),
+        str(second_recall_point.recall_point_id),
+    ]
+
+    reloaded = SystemAPI(InMemorySystem(persist_store=SQLiteSnapshotStore(db_path)))
+    restored = reloaded.get_recall_point(project_id, second_recall_point.recall_point_id)
+    assert tuple(restored.references) == (first_recall_point.recall_point_id,)
+
+
+def test_search_recall_points_filters_and_limits_candidates(tmp_path: Path) -> None:
+    db_path = tmp_path / "plm_store.sqlite3"
+    project_root = tmp_path / "project-search-references"
+    learning_root = project_root / "learning_objects"
+    learning_root.mkdir(parents=True)
+    (learning_root / "lesson.mp4").write_bytes(b"video")
+
+    api = SystemAPI(InMemorySystem(persist_store=SQLiteSnapshotStore(db_path)))
+    project_id = api.create_project("Recall Search", project_root=str(project_root))
+    api.sync_learning_objects_from_fs(project_id)
+    instance = api.list_instances(project_id)[0]
+
+    session = api.sys.begin_session(project_id, SessionMode.READ_WRITE)
+    try:
+        created_ids: list[str] = []
+        for question_text, answer_text in [
+            ("导数定义", "极限刻画"),
+            ("导数法则", "乘法求导"),
+            ("积分技巧", "换元积分"),
+        ]:
+            recall_point = RecallPoint(
+                project_id=project_id,
+                recall_point_id=api.idgen.new_recall_point_id(project_id),
+                created_at=now_utc_ms(),
+                question=rich_text(question_text),
+                answer=rich_text(answer_text),
+                anchor=Anchor(instance_id=instance.instance_id, position=f"t={1000 + len(created_ids)}"),
+            )
+            api.sys.recall_point_repo.add(session, recall_point)
+            created_ids.append(str(recall_point.recall_point_id))
+        api.sys.commit(session)
+    except Exception:
+        api.sys.rollback(session)
+        raise
+
+    search_results = api.search_recall_points(project_id, query="导数", limit=5)
+    assert [str(item.recall_point_id) for item in search_results] == [created_ids[1], created_ids[0]]
+
+    latest_results = api.search_recall_points(project_id, limit=2)
+    assert [str(item.recall_point_id) for item in latest_results] == [created_ids[2], created_ids[1]]
 
 
 def test_edit_recall_point_keeps_server_image_assets_after_reload(tmp_path: Path) -> None:

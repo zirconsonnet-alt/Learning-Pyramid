@@ -24,7 +24,7 @@ import {
 } from "@/ui/queries/friends"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { cn } from "@/ui/utils"
-import { formatDateTimeLabel, formatLastStudyText } from "@/views/profile/profileStats"
+import { formatDateTimeLabel, formatDurationCompact, formatLastStudyText } from "@/views/profile/profileStats"
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -428,12 +428,19 @@ export function FriendsPage() {
               {friendProfileQ.data ? (
                 <>
                   <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <StatCard label="有效学习" value={formatDurationCompact(friendProfileQ.data.stats.effectiveMs)} detail="去重后的学习时长" />
+                    <StatCard label="材料接触" value={formatDurationCompact(friendProfileQ.data.stats.watchMs)} />
+                    <StatCard label="复述点构建" value={formatDurationCompact(friendProfileQ.data.stats.composeMs)} />
+                    <StatCard label="复习时长" value={formatDurationCompact(friendProfileQ.data.stats.reviewMs)} />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <StatCard label="AI 问答" value={formatDurationCompact(friendProfileQ.data.stats.qaMs)} />
                     <StatCard label="学习动作" value={friendProfileQ.data.stats.totalActions} detail="学习任务提交 + 复习提交" />
                     <StatCard label="新建任务" value={friendProfileQ.data.stats.learningCount} />
                     <StatCard label="复习提交" value={friendProfileQ.data.stats.reviewCount} />
-                    <StatCard label="活跃天数" value={friendProfileQ.data.stats.studyDays} />
                   </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <StatCard label="活跃天数" value={friendProfileQ.data.stats.studyDays} />
                     <StatCard label="项目数" value={friendProfileQ.data.stats.projectCount} />
                     <StatCard
                       label="上次学习"
@@ -555,7 +562,7 @@ function FriendLeaderboard(props: {
           <Trophy className="h-5 w-5 text-amber-500" />
           好友学习排行榜
         </CardTitle>
-        <CardDescription>按学习动作总数排序，同分时参考活跃天数和最近学习时间。</CardDescription>
+        <CardDescription>按有效学习时长排序，同分时参考学习动作、活跃天数和最近学习时间。</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {loading ? <LoadingNotice title="正在计算排行榜" message="请稍候..." /> : null}
@@ -569,9 +576,8 @@ function FriendLeaderboard(props: {
                 <tr className="text-left text-xs uppercase tracking-[0.18em] text-[color:var(--theme-subtle-text)]">
                   <th className="pb-3 pr-3">排名</th>
                   <th className="pb-3 pr-3">好友</th>
-                  <th className="pb-3 pr-3">总动作</th>
-                  <th className="pb-3 pr-3">新建任务</th>
-                  <th className="pb-3 pr-3">复习提交</th>
+                  <th className="pb-3 pr-3">有效学习</th>
+                  <th className="pb-3 pr-3">学习动作</th>
                   <th className="pb-3 pr-3">活跃天数</th>
                   <th className="pb-3">上次学习</th>
                 </tr>
@@ -591,9 +597,18 @@ function FriendLeaderboard(props: {
                           </div>
                         </div>
                       </td>
-                      <td className="py-3 pr-3 align-middle font-semibold text-primary">{entry.stats.totalActions}</td>
-                      <td className="py-3 pr-3 align-middle">{entry.stats.learningCount}</td>
-                      <td className="py-3 pr-3 align-middle">{entry.stats.reviewCount}</td>
+                      <td className="py-3 pr-3 align-middle">
+                        <div className="font-semibold text-primary">{formatDurationCompact(entry.stats.effectiveMs)}</div>
+                        <div className="text-xs text-muted-foreground">
+                          看 {formatDurationCompact(entry.stats.watchMs)} · 构 {formatDurationCompact(entry.stats.composeMs)} · 复 {formatDurationCompact(entry.stats.reviewMs)} · 问 {formatDurationCompact(entry.stats.qaMs)}
+                        </div>
+                      </td>
+                      <td className="py-3 pr-3 align-middle">
+                        <div className="font-medium">{entry.stats.totalActions}</div>
+                        <div className="text-xs text-muted-foreground">
+                          任务 {entry.stats.learningCount} · 复习 {entry.stats.reviewCount}
+                        </div>
+                      </td>
                       <td className="py-3 pr-3 align-middle">{entry.stats.studyDays}</td>
                       <td className="py-3 align-middle">
                         <div className={lastStudy.className}>{lastStudy.text}</div>

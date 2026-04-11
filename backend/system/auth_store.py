@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import sqlite3
 import threading
@@ -22,6 +23,18 @@ GLOBAL_ROLES = {"super_admin", "admin"}
 FRIEND_REQUEST_STATUSES = {"pending", "accepted", "rejected", "cancelled"}
 USER_SERVICE_KINDS = {"llm", "asr"}
 CLOUD_ACCOUNT_PROVIDERS = {"baidu_netdisk"}
+STUDY_DATE_KEY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+REVIEW_CHAIN_TEMPLATE_KINDS = {"CONVERGENCE", "REVIEW_TASK"}
+LEARNING_PLAN_TARGET_KINDS = {"PROJECT", "LEARNING_OBJECT_NODES"}
+DEFAULT_USER_THEME = "mist"
+DEFAULT_POMODORO_ENABLED = False
+DEFAULT_POMODORO_TRANSITION_SOUND_ENABLED = False
+DEFAULT_POMODORO_FOCUS_MINUTES = 25
+DEFAULT_POMODORO_BREAK_MINUTES = 5
+DEFAULT_POMODORO_COUNT = 4
+DEFAULT_POMODORO_START_TIME = "19:00"
+MAX_POMODORO_PROMPT_LENGTH = 200
+POMODORO_WEEKDAY_KEYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 USER_COLUMNS_SQL = """
     u.user_id,
     u.email,
@@ -132,6 +145,105 @@ def _normalize_bio(bio: str | None) -> str:
 def _normalize_avatar_key(value: str | None) -> str | None:
     text = str(value or "").strip()
     return text or None
+
+
+def _normalize_project_id(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        raise PreconditionFailure("project_id must be non-empty")
+    if len(text) > 200:
+        raise PreconditionFailure("project_id must be at most 200 characters")
+    return text
+
+
+def _normalize_learning_plan_text(value: Any, *, maximum: int) -> str:
+    text = str(value or "").strip()
+    return text[:maximum]
+
+
+def _normalize_learning_plan_int(value: Any, *, default: int, minimum: int = 0, maximum: int = 9_999_999_999_999) -> int:
+    try:
+        parsed = int(value)
+    except Exception:
+        parsed = default
+    return max(minimum, min(maximum, parsed))
+
+
+def _normalize_learning_plan_ratio(value: Any) -> float:
+    try:
+        parsed = float(value)
+    except Exception:
+        parsed = 0.0
+    return max(0.0, min(1.0, parsed))
+
+
+def _default_learning_plans_payload() -> dict[str, Any]:
+    return {"plans": [], "progressSnapshots": []}
+
+
+def _normalize_learning_plans_payload(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return _default_learning_plans_payload()
+    plans: list[dict[str, Any]] = []
+    raw_plans = value.get("plans")
+    if isinstance(raw_plans, list):
+        for item in raw_plans[:500]:
+            if not isinstance(item, dict):
+                continue
+            plan_id = _normalize_learning_plan_text(item.get("planId"), maximum=240)
+            project_id = _normalize_learning_plan_text(item.get("projectId"), maximum=200)
+            if not plan_id or not project_id:
+                continue
+            target_kind = str(item.get("targetKind") or "PROJECT").strip()
+            if target_kind not in LEARNING_PLAN_TARGET_KINDS:
+                target_kind = "PROJECT"
+            node_ids = item.get("learningObjectNodeIds")
+            if not isinstance(node_ids, list):
+                node_ids = []
+            normalized_node_ids = []
+            seen_node_ids: set[str] = set()
+            for node_id_item in node_ids[:500]:
+                node_id = _normalize_learning_plan_text(node_id_item, maximum=240)
+                if not node_id or node_id in seen_node_ids:
+                    continue
+                seen_node_ids.add(node_id)
+                normalized_node_ids.append(node_id)
+            archived_at = item.get("archivedAt")
+            plans.append(
+                {
+                    "planId": plan_id,
+                    "projectId": project_id,
+                    "title": _normalize_learning_plan_text(item.get("title"), maximum=120) or "学习计划",
+                    "targetKind": target_kind,
+                    "learningObjectNodeIds": normalized_node_ids,
+                    "targetDays": _normalize_learning_plan_int(item.get("targetDays"), default=1, minimum=1, maximum=3650),
+                    "createdDateKey": _normalize_learning_plan_text(item.get("createdDateKey"), maximum=10),
+                    "dueDateKey": _normalize_learning_plan_text(item.get("dueDateKey"), maximum=10),
+                    "archivedAt": None
+                    if archived_at is None
+                    else _normalize_learning_plan_int(archived_at, default=0, minimum=0),
+                    "updatedAt": _normalize_learning_plan_int(item.get("updatedAt"), default=0, minimum=0),
+                }
+            )
+    snapshots: list[dict[str, Any]] = []
+    raw_snapshots = value.get("progressSnapshots")
+    if isinstance(raw_snapshots, list):
+        for item in raw_snapshots[:5000]:
+            if not isinstance(item, dict):
+                continue
+            plan_id = _normalize_learning_plan_text(item.get("planId"), maximum=240)
+            date_key = _normalize_learning_plan_text(item.get("dateKey"), maximum=10)
+            if not plan_id or not date_key:
+                continue
+            snapshots.append(
+                {
+                    "planId": plan_id,
+                    "dateKey": date_key,
+                    "progressRatio": _normalize_learning_plan_ratio(item.get("progressRatio")),
+                    "updatedAt": _normalize_learning_plan_int(item.get("updatedAt"), default=0, minimum=0),
+                }
+            )
+    return {"plans": plans, "progressSnapshots": snapshots}
 
 
 def _normalize_user_status(status: str) -> str:
@@ -252,6 +364,300 @@ def _normalize_cloud_account_optional_text(value: str | None, *, maximum: int = 
     return text
 
 
+def _normalize_study_date_key(value: str) -> str:
+    text = str(value or "").strip()
+    if not STUDY_DATE_KEY_RE.fullmatch(text):
+        raise PreconditionFailure("study date key must use YYYY-MM-DD")
+    return text
+
+
+def _normalize_study_duration_ms(value: int | float | str | None, *, field_name: str) -> int:
+    try:
+        number = int(value or 0)
+    except Exception as exc:
+        raise PreconditionFailure(f"{field_name} must be an integer") from exc
+    if number < 0:
+        raise PreconditionFailure(f"{field_name} must be non-negative")
+    return number
+
+
+def _normalize_study_ranges(ranges: Iterable[tuple[int, int] | list[int]]) -> tuple[tuple[int, int], ...]:
+    normalized: list[tuple[int, int]] = []
+    for item in ranges:
+        if not isinstance(item, (tuple, list)) or len(item) < 2:
+            raise PreconditionFailure("study ranges must be [start_ms, end_ms] pairs")
+        start_ms = _normalize_study_duration_ms(item[0], field_name="study range start_ms")
+        end_ms = _normalize_study_duration_ms(item[1], field_name="study range end_ms")
+        if end_ms <= start_ms:
+            raise PreconditionFailure("study range end_ms must be greater than start_ms")
+        normalized.append((start_ms, end_ms))
+
+    if len(normalized) <= 1:
+        return tuple(normalized)
+
+    normalized.sort(key=lambda item: item[0])
+    merged: list[tuple[int, int]] = [normalized[0]]
+    for start_ms, end_ms in normalized[1:]:
+        last_start_ms, last_end_ms = merged[-1]
+        if start_ms <= last_end_ms:
+            merged[-1] = (last_start_ms, max(last_end_ms, end_ms))
+            continue
+        merged.append((start_ms, end_ms))
+    return tuple(merged)
+
+
+def _sum_study_ranges(ranges: Iterable[tuple[int, int]]) -> int:
+    return sum(max(0, int(end_ms) - int(start_ms)) for start_ms, end_ms in ranges)
+
+
+def _merge_study_metric_value(existing_ms: int, incoming_ms: int, merged_ranges: tuple[tuple[int, int], ...]) -> int:
+    return max(int(existing_ms), int(incoming_ms), _sum_study_ranges(merged_ranges))
+
+
+def _clamp_int(value: int | float | str | None, *, minimum: int, maximum: int, field_name: str) -> int:
+    try:
+        number = int(value)
+    except Exception as exc:
+        raise PreconditionFailure(f"{field_name} must be an integer") from exc
+    return max(minimum, min(maximum, number))
+
+
+def _normalize_user_theme(value: str | None) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return DEFAULT_USER_THEME
+    if len(text) > 40:
+        raise PreconditionFailure("theme must be at most 40 characters")
+    return text
+
+
+def _normalize_pomodoro_start_time(value: str | None) -> str:
+    text = str(value or "").strip()
+    match = re.fullmatch(r"(\d{1,2}):(\d{1,2})", text)
+    if not match:
+        return DEFAULT_POMODORO_START_TIME
+    hours = _clamp_int(match.group(1), minimum=0, maximum=23, field_name="pomodoro start hour")
+    minutes = _clamp_int(match.group(2), minimum=0, maximum=59, field_name="pomodoro start minute")
+    return f"{hours:02d}:{minutes:02d}"
+
+
+def _normalize_pomodoro_prompt_text(value: str | None) -> str:
+    text = re.sub(r"\s+", " ", str(value or "").strip())
+    if len(text) > MAX_POMODORO_PROMPT_LENGTH:
+        raise PreconditionFailure(f"pomodoro prompt must be at most {MAX_POMODORO_PROMPT_LENGTH} characters")
+    return text
+
+
+def _create_pomodoro_schedule_day(
+    day_key: str,
+    *,
+    enabled: bool = False,
+    start_time: str = DEFAULT_POMODORO_START_TIME,
+    focus_minutes: int = DEFAULT_POMODORO_FOCUS_MINUTES,
+    break_minutes: int = DEFAULT_POMODORO_BREAK_MINUTES,
+    pomodoro_count: int = DEFAULT_POMODORO_COUNT,
+    project_ids: Iterable[str | None] | None = None,
+    break_prompt: str | None = None,
+    focus_prompts: Iterable[str | None] | None = None,
+) -> PomodoroScheduleDay:
+    normalized_day_key = str(day_key or "").strip().lower()
+    if normalized_day_key not in POMODORO_WEEKDAY_KEYS:
+        raise PreconditionFailure("pomodoro weekday must be one of mon, tue, wed, thu, fri, sat, sun")
+    normalized_pomodoro_count = _clamp_int(
+        pomodoro_count,
+        minimum=1,
+        maximum=12,
+        field_name="pomodoro count",
+    )
+    return PomodoroScheduleDay(
+        day_key=normalized_day_key,
+        enabled=bool(enabled),
+        start_time=_normalize_pomodoro_start_time(start_time),
+        focus_minutes=_clamp_int(
+            focus_minutes,
+            minimum=1,
+            maximum=180,
+            field_name="pomodoro focus minutes",
+        ),
+        break_minutes=_clamp_int(
+            break_minutes,
+            minimum=1,
+            maximum=60,
+            field_name="pomodoro break minutes",
+        ),
+        pomodoro_count=normalized_pomodoro_count,
+        project_ids=_normalize_pomodoro_project_ids(project_ids, pomodoro_count=normalized_pomodoro_count),
+        break_prompt=_normalize_pomodoro_prompt_text(break_prompt),
+        focus_prompts=_normalize_pomodoro_focus_prompts(focus_prompts, pomodoro_count=normalized_pomodoro_count),
+    )
+
+
+def _normalize_pomodoro_project_id(value: Any) -> str | None:
+    text = str(value or "").strip()
+    return text or None
+
+
+def _normalize_pomodoro_project_ids(
+    raw_project_ids: Iterable[str | None] | None,
+    *,
+    pomodoro_count: int,
+) -> tuple[str | None, ...]:
+    normalized_count = _clamp_int(
+        pomodoro_count,
+        minimum=1,
+        maximum=12,
+        field_name="pomodoro count",
+    )
+    raw_items = list(raw_project_ids or [])
+    normalized: list[str | None] = []
+    for index in range(normalized_count):
+        normalized.append(_normalize_pomodoro_project_id(raw_items[index] if index < len(raw_items) else None))
+    return tuple(normalized)
+
+
+def _normalize_pomodoro_focus_prompts(
+    raw_focus_prompts: Iterable[str | None] | None,
+    *,
+    pomodoro_count: int,
+) -> tuple[str, ...]:
+    normalized_count = _clamp_int(
+        pomodoro_count,
+        minimum=1,
+        maximum=12,
+        field_name="pomodoro count",
+    )
+    raw_items = list(raw_focus_prompts or [])
+    normalized: list[str] = []
+    for index in range(normalized_count):
+        normalized.append(_normalize_pomodoro_prompt_text(raw_items[index] if index < len(raw_items) else None))
+    return tuple(normalized)
+
+
+def _normalize_pomodoro_weekly_schedule(
+    raw_schedule: Any,
+    *,
+    legacy_focus_minutes: int | float | str | None = DEFAULT_POMODORO_FOCUS_MINUTES,
+    legacy_break_minutes: int | float | str | None = DEFAULT_POMODORO_BREAK_MINUTES,
+    legacy_pomodoro_count: int | float | str | None = DEFAULT_POMODORO_COUNT,
+) -> tuple[PomodoroScheduleDay, ...]:
+    payload = raw_schedule if isinstance(raw_schedule, dict) else {}
+    normalized_focus_minutes = _clamp_int(
+        legacy_focus_minutes,
+        minimum=1,
+        maximum=180,
+        field_name="pomodoro focus minutes",
+    )
+    normalized_break_minutes = _clamp_int(
+        legacy_break_minutes,
+        minimum=1,
+        maximum=60,
+        field_name="pomodoro break minutes",
+    )
+    normalized_pomodoro_count = _clamp_int(
+        legacy_pomodoro_count,
+        minimum=1,
+        maximum=12,
+        field_name="pomodoro count",
+    )
+    items: list[PomodoroScheduleDay] = []
+    for day_key in POMODORO_WEEKDAY_KEYS:
+        day_payload = payload.get(day_key)
+        if not isinstance(day_payload, dict):
+            day_payload = {}
+        items.append(
+            _create_pomodoro_schedule_day(
+                day_key,
+                enabled=bool(day_payload.get("enabled", False)),
+                start_time=str(day_payload.get("startTime", DEFAULT_POMODORO_START_TIME)),
+                focus_minutes=day_payload.get("focusMinutes", normalized_focus_minutes),
+                break_minutes=day_payload.get("breakMinutes", normalized_break_minutes),
+                pomodoro_count=day_payload.get("pomodoroCount", normalized_pomodoro_count),
+                project_ids=day_payload.get("projectIds"),
+                break_prompt=day_payload.get("breakPrompt"),
+                focus_prompts=day_payload.get("focusPrompts"),
+            )
+        )
+    return tuple(items)
+
+
+def _pomodoro_weekly_schedule_to_json(items: Iterable[PomodoroScheduleDay]) -> dict[str, dict[str, Any]]:
+    payload: dict[str, dict[str, Any]] = {}
+    for item in items:
+        payload[item.day_key] = {
+            "enabled": bool(item.enabled),
+            "startTime": _normalize_pomodoro_start_time(item.start_time),
+            "focusMinutes": _clamp_int(
+                item.focus_minutes,
+                minimum=1,
+                maximum=180,
+                field_name="pomodoro focus minutes",
+            ),
+            "breakMinutes": _clamp_int(
+                item.break_minutes,
+                minimum=1,
+                maximum=60,
+                field_name="pomodoro break minutes",
+            ),
+            "pomodoroCount": _clamp_int(
+                item.pomodoro_count,
+                minimum=1,
+                maximum=12,
+                field_name="pomodoro count",
+            ),
+            "projectIds": list(
+                _normalize_pomodoro_project_ids(item.project_ids, pomodoro_count=item.pomodoro_count)
+            ),
+            "breakPrompt": _normalize_pomodoro_prompt_text(item.break_prompt),
+            "focusPrompts": list(
+                _normalize_pomodoro_focus_prompts(item.focus_prompts, pomodoro_count=item.pomodoro_count)
+            ),
+        }
+    return payload
+
+
+def _normalize_review_chain_template_item(kind: str | None, count: int | float | str | None = None) -> tuple[str, int | None]:
+    normalized_kind = str(kind or "").strip().upper()
+    if normalized_kind not in REVIEW_CHAIN_TEMPLATE_KINDS:
+        raise PreconditionFailure("review chain template kind must be CONVERGENCE or REVIEW_TASK")
+    if normalized_kind == "CONVERGENCE":
+        return ("CONVERGENCE", None)
+    normalized_count = _clamp_int(count or 1, minimum=1, maximum=999, field_name="review chain template count")
+    return ("REVIEW_TASK", normalized_count)
+
+
+def _normalize_review_chain_template(
+    items: Iterable[dict[str, Any] | tuple[str, int | None] | list[Any]],
+) -> tuple[tuple[str, int | None], ...]:
+    normalized: list[tuple[str, int | None]] = []
+    has_convergence = False
+    for item in items:
+        if isinstance(item, dict):
+            kind, count = _normalize_review_chain_template_item(item.get("kind"), item.get("count"))
+        elif isinstance(item, (tuple, list)) and len(item) >= 1:
+            raw_count = item[1] if len(item) > 1 else None
+            kind, count = _normalize_review_chain_template_item(item[0], raw_count)
+        else:
+            continue
+        normalized.append((kind, count))
+        if kind == "CONVERGENCE":
+            has_convergence = True
+    if not normalized:
+        return (("CONVERGENCE", None),)
+    if not has_convergence:
+        normalized.insert(0, ("CONVERGENCE", None))
+    return tuple(normalized)
+
+
+def _review_chain_template_to_json(items: Iterable[tuple[str, int | None]]) -> list[dict[str, Any]]:
+    payload: list[dict[str, Any]] = []
+    for kind, count in items:
+        if kind == "REVIEW_TASK" and int(count or 1) > 1:
+            payload.append({"kind": "REVIEW_TASK", "count": int(count or 1)})
+        else:
+            payload.append({"kind": kind})
+    return payload
+
+
 def _normalize_cloud_account_scope(scope: str | None) -> str:
     value = str(scope or "").strip()
     if len(value) > 1000:
@@ -332,6 +738,37 @@ class UserServiceConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class ReviewChainTemplateStep:
+    kind: str
+    count: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PomodoroScheduleDay:
+    day_key: str
+    enabled: bool
+    start_time: str
+    focus_minutes: int
+    break_minutes: int
+    pomodoro_count: int
+    project_ids: tuple[str | None, ...] = ()
+    break_prompt: str = ""
+    focus_prompts: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class UserGlobalSettings:
+    user_id: str
+    theme: str
+    pomodoro_enabled: bool
+    pomodoro_transition_sound_enabled: bool
+    pomodoro_weekly_schedule: tuple[PomodoroScheduleDay, ...]
+    default_project_review_template: tuple[ReviewChainTemplateStep, ...]
+    learning_plans: dict[str, Any]
+    updated_at: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class AdminUser:
     user_id: str
     email: str
@@ -397,6 +834,92 @@ class Friendship:
     source_request_id: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class UserProjectDailyStudyStatInput:
+    project_id: str
+    date_key: str
+    effective_ms: int
+    watch_ms: int
+    compose_ms: int
+    review_ms: int
+    qa_ms: int
+    effective_ranges: tuple[tuple[int, int], ...]
+    watch_ranges: tuple[tuple[int, int], ...]
+    compose_ranges: tuple[tuple[int, int], ...]
+    review_ranges: tuple[tuple[int, int], ...]
+    qa_ranges: tuple[tuple[int, int], ...]
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        project_id: str,
+        date_key: str,
+        effective_ms: int | float | str | None = 0,
+        watch_ms: int | float | str | None = 0,
+        compose_ms: int | float | str | None = 0,
+        review_ms: int | float | str | None = 0,
+        qa_ms: int | float | str | None = 0,
+        effective_ranges: Iterable[tuple[int, int] | list[int]] = (),
+        watch_ranges: Iterable[tuple[int, int] | list[int]] = (),
+        compose_ranges: Iterable[tuple[int, int] | list[int]] = (),
+        review_ranges: Iterable[tuple[int, int] | list[int]] = (),
+        qa_ranges: Iterable[tuple[int, int] | list[int]] = (),
+    ) -> "UserProjectDailyStudyStatInput":
+        normalized_effective_ranges = _normalize_study_ranges(effective_ranges)
+        normalized_watch_ranges = _normalize_study_ranges(watch_ranges)
+        normalized_compose_ranges = _normalize_study_ranges(compose_ranges)
+        normalized_review_ranges = _normalize_study_ranges(review_ranges)
+        normalized_qa_ranges = _normalize_study_ranges(qa_ranges)
+        return cls(
+            project_id=_normalize_project_id(project_id),
+            date_key=_normalize_study_date_key(date_key),
+            effective_ms=max(
+                _normalize_study_duration_ms(effective_ms, field_name="effective_ms"),
+                _sum_study_ranges(normalized_effective_ranges),
+            ),
+            watch_ms=max(
+                _normalize_study_duration_ms(watch_ms, field_name="watch_ms"),
+                _sum_study_ranges(normalized_watch_ranges),
+            ),
+            compose_ms=max(
+                _normalize_study_duration_ms(compose_ms, field_name="compose_ms"),
+                _sum_study_ranges(normalized_compose_ranges),
+            ),
+            review_ms=max(
+                _normalize_study_duration_ms(review_ms, field_name="review_ms"),
+                _sum_study_ranges(normalized_review_ranges),
+            ),
+            qa_ms=max(
+                _normalize_study_duration_ms(qa_ms, field_name="qa_ms"),
+                _sum_study_ranges(normalized_qa_ranges),
+            ),
+            effective_ranges=normalized_effective_ranges,
+            watch_ranges=normalized_watch_ranges,
+            compose_ranges=normalized_compose_ranges,
+            review_ranges=normalized_review_ranges,
+            qa_ranges=normalized_qa_ranges,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class UserProjectDailyStudyStat:
+    user_id: str
+    project_id: str
+    date_key: str
+    effective_ms: int
+    watch_ms: int
+    compose_ms: int
+    review_ms: int
+    qa_ms: int
+    effective_ranges: tuple[tuple[int, int], ...]
+    watch_ranges: tuple[tuple[int, int], ...]
+    compose_ranges: tuple[tuple[int, int], ...]
+    review_ranges: tuple[tuple[int, int], ...]
+    qa_ranges: tuple[tuple[int, int], ...]
+    updated_at: str
+
+
 class _AuthStoreImpl:
     @staticmethod
     def _hash_password(password: str) -> str:
@@ -451,6 +974,69 @@ class _AuthStoreImpl:
             api_key=_normalize_service_api_key(row["api_key"]),
             prompt_assembly_mode=_normalize_service_prompt_assembly_mode(prompt_assembly_mode),
             updated_at=str(row["updated_at"]),
+        )
+
+    @staticmethod
+    def _default_user_global_settings(user_id: str) -> UserGlobalSettings:
+        return UserGlobalSettings(
+            user_id=str(user_id),
+            theme=DEFAULT_USER_THEME,
+            pomodoro_enabled=DEFAULT_POMODORO_ENABLED,
+            pomodoro_transition_sound_enabled=DEFAULT_POMODORO_TRANSITION_SOUND_ENABLED,
+            pomodoro_weekly_schedule=_normalize_pomodoro_weekly_schedule({}),
+            default_project_review_template=(ReviewChainTemplateStep(kind="CONVERGENCE"),),
+            learning_plans=_default_learning_plans_payload(),
+            updated_at=None,
+        )
+
+    @staticmethod
+    def _row_to_user_global_settings(row: Any) -> UserGlobalSettings:
+        raw_payload = row["payload_json"]
+        try:
+            payload = json.loads(str(raw_payload)) if raw_payload not in (None, "") else {}
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        normalized_template = _normalize_review_chain_template(payload.get("defaultProjectReviewTemplate", ()))
+        pomodoro_payload = payload.get("pomodoro")
+        legacy_focus_minutes = (
+            pomodoro_payload.get("focusMinutes", DEFAULT_POMODORO_FOCUS_MINUTES)
+            if isinstance(pomodoro_payload, dict)
+            else DEFAULT_POMODORO_FOCUS_MINUTES
+        )
+        legacy_break_minutes = (
+            pomodoro_payload.get("breakMinutes", DEFAULT_POMODORO_BREAK_MINUTES)
+            if isinstance(pomodoro_payload, dict)
+            else DEFAULT_POMODORO_BREAK_MINUTES
+        )
+        legacy_pomodoro_count = (
+            pomodoro_payload.get("pomodoroCount", DEFAULT_POMODORO_COUNT)
+            if isinstance(pomodoro_payload, dict)
+            else DEFAULT_POMODORO_COUNT
+        )
+        return UserGlobalSettings(
+            user_id=str(row["user_id"]),
+            theme=_normalize_user_theme(payload.get("theme")),
+            pomodoro_enabled=bool(pomodoro_payload.get("enabled", DEFAULT_POMODORO_ENABLED))
+            if isinstance(pomodoro_payload, dict)
+            else DEFAULT_POMODORO_ENABLED,
+            pomodoro_transition_sound_enabled=bool(
+                pomodoro_payload.get("transitionSoundEnabled", DEFAULT_POMODORO_TRANSITION_SOUND_ENABLED)
+            )
+            if isinstance(pomodoro_payload, dict)
+            else DEFAULT_POMODORO_TRANSITION_SOUND_ENABLED,
+            pomodoro_weekly_schedule=_normalize_pomodoro_weekly_schedule(
+                pomodoro_payload.get("weeklySchedule") if isinstance(pomodoro_payload, dict) else {},
+                legacy_focus_minutes=legacy_focus_minutes,
+                legacy_break_minutes=legacy_break_minutes,
+                legacy_pomodoro_count=legacy_pomodoro_count,
+            ),
+            default_project_review_template=tuple(
+                ReviewChainTemplateStep(kind=kind, count=count) for kind, count in normalized_template
+            ),
+            learning_plans=_normalize_learning_plans_payload(payload.get("learningPlans")),
+            updated_at=None if row["updated_at"] is None else str(row["updated_at"]),
         )
 
     @staticmethod
@@ -533,6 +1119,36 @@ class _AuthStoreImpl:
         )
 
     @staticmethod
+    def _row_to_user_project_daily_study_stat(row: Any) -> UserProjectDailyStudyStat:
+        def parse_ranges(key: str) -> tuple[tuple[int, int], ...]:
+            raw = row[key]
+            payload = json.loads(str(raw)) if raw not in (None, "") else []
+            if not isinstance(payload, list):
+                payload = []
+            parsed: list[tuple[int, int] | list[int]] = []
+            for item in payload:
+                if isinstance(item, (list, tuple)) and len(item) >= 2:
+                    parsed.append((item[0], item[1]))
+            return _normalize_study_ranges(parsed)
+
+        return UserProjectDailyStudyStat(
+            user_id=str(row["user_id"]),
+            project_id=_normalize_project_id(row["project_id"]),
+            date_key=_normalize_study_date_key(row["date_key"]),
+            effective_ms=_normalize_study_duration_ms(row["effective_ms"], field_name="effective_ms"),
+            watch_ms=_normalize_study_duration_ms(row["watch_ms"], field_name="watch_ms"),
+            compose_ms=_normalize_study_duration_ms(row["compose_ms"], field_name="compose_ms"),
+            review_ms=_normalize_study_duration_ms(row["review_ms"], field_name="review_ms"),
+            qa_ms=_normalize_study_duration_ms(row["qa_ms"], field_name="qa_ms"),
+            effective_ranges=parse_ranges("effective_ranges_json"),
+            watch_ranges=parse_ranges("watch_ranges_json"),
+            compose_ranges=parse_ranges("compose_ranges_json"),
+            review_ranges=parse_ranges("review_ranges_json"),
+            qa_ranges=parse_ranges("qa_ranges_json"),
+            updated_at=str(row["updated_at"]),
+        )
+
+    @staticmethod
     def _snapshot_payload(
         *,
         users: list[dict[str, str]],
@@ -540,6 +1156,7 @@ class _AuthStoreImpl:
         memberships: list[dict[str, str]],
         profiles: list[dict[str, str | None]],
         user_service_configs: list[dict[str, str | None]],
+        user_global_settings: list[dict[str, Any]],
         roles: list[dict[str, str]],
         cloud_accounts: list[dict[str, Any]],
         friend_requests: list[dict[str, str | None]],
@@ -552,6 +1169,7 @@ class _AuthStoreImpl:
             "projectMemberships": memberships,
             "userProfiles": profiles,
             "userServiceConfigs": user_service_configs,
+            "userGlobalSettings": user_global_settings,
             "userGlobalRoles": roles,
             "userCloudAccounts": cloud_accounts,
             "friendRequests": friend_requests,
@@ -708,6 +1326,13 @@ class SQLiteAuthStore(_AuthStoreImpl):
                         FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE
                     );
 
+                    CREATE TABLE IF NOT EXISTS user_global_settings (
+                        user_id TEXT PRIMARY KEY,
+                        payload_json TEXT NOT NULL DEFAULT '{}',
+                        updated_at TEXT NOT NULL,
+                        FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE
+                    );
+
                     CREATE TABLE IF NOT EXISTS user_cloud_accounts (
                         account_id TEXT PRIMARY KEY,
                         user_id TEXT NOT NULL,
@@ -772,8 +1397,28 @@ class SQLiteAuthStore(_AuthStoreImpl):
                         FOREIGN KEY(actor_user_id) REFERENCES users(user_id) ON DELETE CASCADE
                     );
 
+                    CREATE TABLE IF NOT EXISTS user_project_daily_study_stats (
+                        user_id TEXT NOT NULL,
+                        project_id TEXT NOT NULL,
+                        date_key TEXT NOT NULL,
+                        effective_ms INTEGER NOT NULL DEFAULT 0,
+                        watch_ms INTEGER NOT NULL DEFAULT 0,
+                        compose_ms INTEGER NOT NULL DEFAULT 0,
+                        review_ms INTEGER NOT NULL DEFAULT 0,
+                        qa_ms INTEGER NOT NULL DEFAULT 0,
+                        effective_ranges_json TEXT NOT NULL DEFAULT '[]',
+                        watch_ranges_json TEXT NOT NULL DEFAULT '[]',
+                        compose_ranges_json TEXT NOT NULL DEFAULT '[]',
+                        review_ranges_json TEXT NOT NULL DEFAULT '[]',
+                        qa_ranges_json TEXT NOT NULL DEFAULT '[]',
+                        updated_at TEXT NOT NULL,
+                        PRIMARY KEY(user_id, project_id, date_key),
+                        FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE
+                    );
+
                     CREATE INDEX IF NOT EXISTS idx_user_profiles_public_uid ON user_profiles (public_uid);
                     CREATE INDEX IF NOT EXISTS idx_user_service_configs_kind ON user_service_configs (service_kind, updated_at DESC);
+                    CREATE INDEX IF NOT EXISTS idx_user_global_settings_updated_at ON user_global_settings (updated_at DESC);
                     CREATE INDEX IF NOT EXISTS idx_user_cloud_accounts_user_provider
                     ON user_cloud_accounts (user_id, provider, updated_at DESC);
                     CREATE INDEX IF NOT EXISTS idx_user_global_roles_role ON user_global_roles (role, user_id);
@@ -788,6 +1433,10 @@ class SQLiteAuthStore(_AuthStoreImpl):
                     CREATE INDEX IF NOT EXISTS idx_friendships_user_high_created
                     ON friendships (user_high_id, created_at DESC);
                     CREATE INDEX IF NOT EXISTS idx_admin_action_logs_created_at ON admin_action_logs (created_at DESC);
+                    CREATE INDEX IF NOT EXISTS idx_user_project_daily_study_stats_user_project_date
+                    ON user_project_daily_study_stats (user_id, project_id, date_key DESC);
+                    CREATE INDEX IF NOT EXISTS idx_user_project_daily_study_stats_user_date
+                    ON user_project_daily_study_stats (user_id, date_key DESC);
                     """
                 )
                 conn.executescript(
@@ -1463,6 +2112,81 @@ class SQLiteAuthStore(_AuthStoreImpl):
             raise NotFound("user_service_config")
         return saved
 
+    def get_user_global_settings(self, user_id: str) -> UserGlobalSettings:
+        conn = self._connect()
+        try:
+            user_row = conn.execute("SELECT 1 FROM users WHERE user_id = ? LIMIT 1", (str(user_id),)).fetchone()
+            if user_row is None:
+                raise NotFound("user")
+            row = conn.execute(
+                """
+                SELECT user_id, payload_json, updated_at
+                FROM user_global_settings
+                WHERE user_id = ?
+                """,
+                (str(user_id),),
+            ).fetchone()
+        finally:
+            conn.close()
+        if row is None:
+            return self._default_user_global_settings(str(user_id))
+        return self._row_to_user_global_settings(row)
+
+    def upsert_user_global_settings(
+        self,
+        user_id: str,
+        *,
+        theme: str | None,
+        pomodoro_enabled: bool,
+        pomodoro_transition_sound_enabled: bool,
+        pomodoro_weekly_schedule: dict[str, Any],
+        default_project_review_template: Iterable[dict[str, Any] | tuple[str, int | None] | list[Any]],
+        learning_plans: dict[str, Any] | None = None,
+    ) -> UserGlobalSettings:
+        current = self.get_user_global_settings(user_id)
+        normalized_theme = _normalize_user_theme(theme)
+        normalized_template = _normalize_review_chain_template(default_project_review_template)
+        normalized_weekly_schedule = _normalize_pomodoro_weekly_schedule(pomodoro_weekly_schedule)
+        normalized_learning_plans = (
+            current.learning_plans if learning_plans is None else _normalize_learning_plans_payload(learning_plans)
+        )
+        payload_json = json.dumps(
+            {
+                "theme": normalized_theme,
+                "pomodoro": {
+                    "enabled": bool(pomodoro_enabled),
+                    "transitionSoundEnabled": bool(pomodoro_transition_sound_enabled),
+                    "weeklySchedule": _pomodoro_weekly_schedule_to_json(normalized_weekly_schedule),
+                },
+                "defaultProjectReviewTemplate": _review_chain_template_to_json(normalized_template),
+                "learningPlans": normalized_learning_plans,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        now_text = _utc_now().isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                user_row = conn.execute("SELECT 1 FROM users WHERE user_id = ? LIMIT 1", (str(user_id),)).fetchone()
+                if user_row is None:
+                    raise NotFound("user")
+                conn.execute(
+                    """
+                    INSERT INTO user_global_settings (user_id, payload_json, updated_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(user_id) DO UPDATE SET
+                        payload_json = excluded.payload_json,
+                        updated_at = excluded.updated_at
+                    """,
+                    (str(user_id), payload_json, now_text),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        return self.get_user_global_settings(user_id)
+
     def list_user_cloud_accounts(
         self,
         user_id: str,
@@ -1730,6 +2454,160 @@ class SQLiteAuthStore(_AuthStoreImpl):
             conn.close()
         return row is not None
 
+    def upsert_user_project_daily_study_stats(
+        self,
+        user_id: str,
+        *,
+        entries: Iterable[UserProjectDailyStudyStatInput],
+    ) -> tuple[UserProjectDailyStudyStat, ...]:
+        normalized_entries = tuple(entries)
+        if not normalized_entries:
+            return tuple()
+        now_text = _utc_now().isoformat()
+        saved: list[UserProjectDailyStudyStat] = []
+        with self._lock:
+            conn = self._connect()
+            try:
+                for entry in normalized_entries:
+                    current_row = conn.execute(
+                        """
+                        SELECT
+                            user_id,
+                            project_id,
+                            date_key,
+                            effective_ms,
+                            watch_ms,
+                            compose_ms,
+                            review_ms,
+                            qa_ms,
+                            effective_ranges_json,
+                            watch_ranges_json,
+                            compose_ranges_json,
+                            review_ranges_json,
+                            qa_ranges_json,
+                            updated_at
+                        FROM user_project_daily_study_stats
+                        WHERE user_id = ? AND project_id = ? AND date_key = ?
+                        """,
+                        (str(user_id), entry.project_id, entry.date_key),
+                    ).fetchone()
+                    current = None if current_row is None else self._row_to_user_project_daily_study_stat(current_row)
+                    effective_ranges = _normalize_study_ranges(
+                        [*(current.effective_ranges if current else ()), *entry.effective_ranges]
+                    )
+                    watch_ranges = _normalize_study_ranges([*(current.watch_ranges if current else ()), *entry.watch_ranges])
+                    compose_ranges = _normalize_study_ranges([*(current.compose_ranges if current else ()), *entry.compose_ranges])
+                    review_ranges = _normalize_study_ranges([*(current.review_ranges if current else ()), *entry.review_ranges])
+                    qa_ranges = _normalize_study_ranges([*(current.qa_ranges if current else ()), *entry.qa_ranges])
+                    merged = UserProjectDailyStudyStat(
+                        user_id=str(user_id),
+                        project_id=entry.project_id,
+                        date_key=entry.date_key,
+                        effective_ms=_merge_study_metric_value(current.effective_ms if current else 0, entry.effective_ms, effective_ranges),
+                        watch_ms=_merge_study_metric_value(current.watch_ms if current else 0, entry.watch_ms, watch_ranges),
+                        compose_ms=_merge_study_metric_value(current.compose_ms if current else 0, entry.compose_ms, compose_ranges),
+                        review_ms=_merge_study_metric_value(current.review_ms if current else 0, entry.review_ms, review_ranges),
+                        qa_ms=_merge_study_metric_value(current.qa_ms if current else 0, entry.qa_ms, qa_ranges),
+                        effective_ranges=effective_ranges,
+                        watch_ranges=watch_ranges,
+                        compose_ranges=compose_ranges,
+                        review_ranges=review_ranges,
+                        qa_ranges=qa_ranges,
+                        updated_at=now_text,
+                    )
+                    conn.execute(
+                        """
+                        INSERT OR REPLACE INTO user_project_daily_study_stats (
+                            user_id,
+                            project_id,
+                            date_key,
+                            effective_ms,
+                            watch_ms,
+                            compose_ms,
+                            review_ms,
+                            qa_ms,
+                            effective_ranges_json,
+                            watch_ranges_json,
+                            compose_ranges_json,
+                            review_ranges_json,
+                            qa_ranges_json,
+                            updated_at
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            merged.user_id,
+                            merged.project_id,
+                            merged.date_key,
+                            merged.effective_ms,
+                            merged.watch_ms,
+                            merged.compose_ms,
+                            merged.review_ms,
+                            merged.qa_ms,
+                            json.dumps(merged.effective_ranges, ensure_ascii=False, separators=(",", ":")),
+                            json.dumps(merged.watch_ranges, ensure_ascii=False, separators=(",", ":")),
+                            json.dumps(merged.compose_ranges, ensure_ascii=False, separators=(",", ":")),
+                            json.dumps(merged.review_ranges, ensure_ascii=False, separators=(",", ":")),
+                            json.dumps(merged.qa_ranges, ensure_ascii=False, separators=(",", ":")),
+                            merged.updated_at,
+                        ),
+                    )
+                    saved.append(merged)
+                conn.commit()
+            finally:
+                conn.close()
+        return tuple(saved)
+
+    def list_user_project_daily_study_stats(
+        self,
+        user_id: str,
+        *,
+        project_ids: Iterable[str],
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> tuple[UserProjectDailyStudyStat, ...]:
+        normalized_project_ids = tuple(dict.fromkeys(_normalize_project_id(project_id) for project_id in project_ids))
+        if not normalized_project_ids:
+            return tuple()
+        normalized_date_from = None if date_from is None else _normalize_study_date_key(date_from)
+        normalized_date_to = None if date_to is None else _normalize_study_date_key(date_to)
+        if normalized_date_from and normalized_date_to and normalized_date_from > normalized_date_to:
+            raise PreconditionFailure("date_from must be less than or equal to date_to")
+        placeholders = ", ".join("?" for _ in normalized_project_ids)
+        sql = f"""
+            SELECT
+                user_id,
+                project_id,
+                date_key,
+                effective_ms,
+                watch_ms,
+                compose_ms,
+                review_ms,
+                qa_ms,
+                effective_ranges_json,
+                watch_ranges_json,
+                compose_ranges_json,
+                review_ranges_json,
+                qa_ranges_json,
+                updated_at
+            FROM user_project_daily_study_stats
+            WHERE user_id = ? AND project_id IN ({placeholders})
+        """
+        params: list[Any] = [str(user_id), *normalized_project_ids]
+        if normalized_date_from is not None:
+            sql += " AND date_key >= ?"
+            params.append(normalized_date_from)
+        if normalized_date_to is not None:
+            sql += " AND date_key <= ?"
+            params.append(normalized_date_to)
+        sql += " ORDER BY date_key ASC, project_id ASC"
+        conn = self._connect()
+        try:
+            rows = conn.execute(sql, tuple(params)).fetchall()
+        finally:
+            conn.close()
+        return tuple(self._row_to_user_project_daily_study_stat(row) for row in rows)
+
     def list_user_roles(self, user_id: str) -> tuple[str, ...]:
         conn = self._connect()
         try:
@@ -1878,11 +2756,44 @@ class SQLiteAuthStore(_AuthStoreImpl):
         try:
             users = int(conn.execute("SELECT COUNT(*) AS count FROM users").fetchone()["count"])
             active_users = int(conn.execute("SELECT COUNT(*) AS count FROM user_profiles WHERE status = 'active'").fetchone()["count"])
+            study_users = int(
+                conn.execute(
+                    "SELECT COUNT(DISTINCT user_id) AS count FROM user_project_daily_study_stats WHERE effective_ms > 0"
+                ).fetchone()["count"]
+            )
+            study_users_7d = int(
+                conn.execute(
+                    """
+                    SELECT COUNT(DISTINCT user_id) AS count
+                    FROM user_project_daily_study_stats
+                    WHERE effective_ms > 0 AND updated_at >= ?
+                    """,
+                    ((_utc_now() - timedelta(days=7)).isoformat(),),
+                ).fetchone()["count"]
+            )
+            study_totals_row = conn.execute(
+                """
+                SELECT
+                    COALESCE(SUM(effective_ms), 0) AS effective_ms,
+                    COALESCE(SUM(watch_ms), 0) AS watch_ms,
+                    COALESCE(SUM(compose_ms), 0) AS compose_ms,
+                    COALESCE(SUM(review_ms), 0) AS review_ms,
+                    COALESCE(SUM(qa_ms), 0) AS qa_ms
+                FROM user_project_daily_study_stats
+                """
+            ).fetchone()
         finally:
             conn.close()
         return {
             "users": users,
             "activeUsers": active_users,
+            "studyUsers": study_users,
+            "studyUsers7d": study_users_7d,
+            "effectiveStudyMs": int(study_totals_row["effective_ms"]) if study_totals_row is not None else 0,
+            "watchMs": int(study_totals_row["watch_ms"]) if study_totals_row is not None else 0,
+            "composeMs": int(study_totals_row["compose_ms"]) if study_totals_row is not None else 0,
+            "reviewMs": int(study_totals_row["review_ms"]) if study_totals_row is not None else 0,
+            "qaMs": int(study_totals_row["qa_ms"]) if study_totals_row is not None else 0,
         }
 
     def record_admin_action(
@@ -2061,30 +2972,17 @@ class SQLiteAuthStore(_AuthStoreImpl):
                     """
                 ).fetchall()
             ]
-            cloud_accounts = [
+            user_global_settings = [
                 {
-                    "accountId": str(row["account_id"]),
                     "userId": str(row["user_id"]),
-                    "provider": str(row["provider"]),
-                    "providerUserId": str(row["provider_user_id"]),
-                    "displayName": str(row["display_name"]),
-                    "avatarUrl": None if row["avatar_url"] is None else str(row["avatar_url"]),
-                    "accessTokenCiphertext": str(row["access_token_ciphertext"]),
-                    "refreshTokenCiphertext": str(row["refresh_token_ciphertext"]),
-                    "expiresAt": None if row["expires_at"] is None else str(row["expires_at"]),
-                    "scope": str(row["scope"]),
-                    "meta": json.loads(str(row["meta_json"]) if row["meta_json"] is not None else "{}"),
-                    "createdAt": str(row["created_at"]),
+                    "payloadJson": str(row["payload_json"]),
                     "updatedAt": str(row["updated_at"]),
-                    "disabledAt": None if row["disabled_at"] is None else str(row["disabled_at"]),
                 }
                 for row in conn.execute(
                     """
-                    SELECT account_id, user_id, provider, provider_user_id, display_name, avatar_url,
-                           access_token_ciphertext, refresh_token_ciphertext, expires_at, scope,
-                           meta_json, created_at, updated_at, disabled_at
-                    FROM user_cloud_accounts
-                    ORDER BY user_id ASC, provider ASC, updated_at DESC, account_id ASC
+                    SELECT user_id, payload_json, updated_at
+                    FROM user_global_settings
+                    ORDER BY user_id ASC
                     """
                 ).fetchall()
             ]
@@ -2157,6 +3055,7 @@ class SQLiteAuthStore(_AuthStoreImpl):
                 memberships=memberships,
                 profiles=profiles,
                 user_service_configs=user_service_configs,
+                user_global_settings=user_global_settings,
                 roles=roles,
                 cloud_accounts=cloud_accounts,
                 friend_requests=friend_requests,
@@ -2172,6 +3071,7 @@ class SQLiteAuthStore(_AuthStoreImpl):
         memberships = list(snapshot.get("projectMemberships", []))
         profiles = list(snapshot.get("userProfiles", []))
         user_service_configs = list(snapshot.get("userServiceConfigs", []))
+        user_global_settings = list(snapshot.get("userGlobalSettings", []))
         roles = list(snapshot.get("userGlobalRoles", []))
         cloud_accounts = list(snapshot.get("userCloudAccounts", []))
         friend_requests = list(snapshot.get("friendRequests", []))
@@ -2186,6 +3086,7 @@ class SQLiteAuthStore(_AuthStoreImpl):
                     conn.execute("DELETE FROM friend_requests")
                     conn.execute("DELETE FROM user_global_roles")
                     conn.execute("DELETE FROM user_cloud_accounts")
+                    conn.execute("DELETE FROM user_global_settings")
                     conn.execute("DELETE FROM user_service_configs")
                     conn.execute("DELETE FROM project_memberships")
                     conn.execute("DELETE FROM sessions")
@@ -2243,6 +3144,19 @@ class SQLiteAuthStore(_AuthStoreImpl):
                             _normalize_service_model_name(row.get("modelName")),
                             _normalize_service_api_key(row.get("apiKey")),
                             _normalize_service_prompt_assembly_mode(row.get("promptAssemblyMode")),
+                            str(row.get("updatedAt", "")),
+                        ),
+                    )
+                for item in user_global_settings:
+                    row = dict(item)
+                    conn.execute(
+                        """
+                        INSERT OR REPLACE INTO user_global_settings (user_id, payload_json, updated_at)
+                        VALUES (?, ?, ?)
+                        """,
+                        (
+                            str(row.get("userId", "")),
+                            str(row.get("payloadJson", "{}") or "{}"),
                             str(row.get("updatedAt", "")),
                         ),
                     )
@@ -3073,6 +3987,75 @@ class PostgresAuthStore(_AuthStoreImpl):
             raise NotFound("user_service_config")
         return saved
 
+    def get_user_global_settings(self, user_id: str) -> UserGlobalSettings:
+        with self._connect() as conn:
+            user_row = conn.execute("SELECT 1 FROM users WHERE user_id = %s LIMIT 1", (str(user_id),)).fetchone()
+            if user_row is None:
+                raise NotFound("user")
+            row = conn.execute(
+                """
+                SELECT user_id, payload_json, updated_at
+                FROM user_global_settings
+                WHERE user_id = %s
+                """,
+                (str(user_id),),
+            ).fetchone()
+        if row is None:
+            return self._default_user_global_settings(str(user_id))
+        return self._row_to_user_global_settings(row)
+
+    def upsert_user_global_settings(
+        self,
+        user_id: str,
+        *,
+        theme: str | None,
+        pomodoro_enabled: bool,
+        pomodoro_transition_sound_enabled: bool,
+        pomodoro_weekly_schedule: dict[str, Any],
+        default_project_review_template: Iterable[dict[str, Any] | tuple[str, int | None] | list[Any]],
+        learning_plans: dict[str, Any] | None = None,
+    ) -> UserGlobalSettings:
+        current = self.get_user_global_settings(user_id)
+        normalized_theme = _normalize_user_theme(theme)
+        normalized_template = _normalize_review_chain_template(default_project_review_template)
+        normalized_weekly_schedule = _normalize_pomodoro_weekly_schedule(pomodoro_weekly_schedule)
+        normalized_learning_plans = (
+            current.learning_plans if learning_plans is None else _normalize_learning_plans_payload(learning_plans)
+        )
+        payload_json = json.dumps(
+            {
+                "theme": normalized_theme,
+                "pomodoro": {
+                    "enabled": bool(pomodoro_enabled),
+                    "transitionSoundEnabled": bool(pomodoro_transition_sound_enabled),
+                    "weeklySchedule": _pomodoro_weekly_schedule_to_json(normalized_weekly_schedule),
+                },
+                "defaultProjectReviewTemplate": _review_chain_template_to_json(normalized_template),
+                "learningPlans": normalized_learning_plans,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        now_text = _utc_now().isoformat()
+        with self._lock:
+            with self._connect() as conn:
+                user_row = conn.execute("SELECT 1 FROM users WHERE user_id = %s LIMIT 1", (str(user_id),)).fetchone()
+                if user_row is None:
+                    raise NotFound("user")
+                conn.execute(
+                    """
+                    INSERT INTO user_global_settings (user_id, payload_json, updated_at)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT(user_id) DO UPDATE SET
+                        payload_json = EXCLUDED.payload_json,
+                        updated_at = EXCLUDED.updated_at
+                    """,
+                    (str(user_id), payload_json, now_text),
+                )
+                conn.commit()
+        return self.get_user_global_settings(user_id)
+
     def list_user_cloud_accounts(
         self,
         user_id: str,
@@ -3329,6 +4312,165 @@ class PostgresAuthStore(_AuthStoreImpl):
             ).fetchone()
         return row is not None
 
+    def upsert_user_project_daily_study_stats(
+        self,
+        user_id: str,
+        *,
+        entries: Iterable[UserProjectDailyStudyStatInput],
+    ) -> tuple[UserProjectDailyStudyStat, ...]:
+        normalized_entries = tuple(entries)
+        if not normalized_entries:
+            return tuple()
+        now_text = _utc_now().isoformat()
+        saved: list[UserProjectDailyStudyStat] = []
+        with self._lock:
+            with self._connect() as conn:
+                for entry in normalized_entries:
+                    current_row = conn.execute(
+                        """
+                        SELECT
+                            user_id,
+                            project_id,
+                            date_key,
+                            effective_ms,
+                            watch_ms,
+                            compose_ms,
+                            review_ms,
+                            qa_ms,
+                            effective_ranges_json,
+                            watch_ranges_json,
+                            compose_ranges_json,
+                            review_ranges_json,
+                            qa_ranges_json,
+                            updated_at
+                        FROM user_project_daily_study_stats
+                        WHERE user_id = %s AND project_id = %s AND date_key = %s
+                        """,
+                        (str(user_id), entry.project_id, entry.date_key),
+                    ).fetchone()
+                    current = None if current_row is None else self._row_to_user_project_daily_study_stat(current_row)
+                    effective_ranges = _normalize_study_ranges(
+                        [*(current.effective_ranges if current else ()), *entry.effective_ranges]
+                    )
+                    watch_ranges = _normalize_study_ranges([*(current.watch_ranges if current else ()), *entry.watch_ranges])
+                    compose_ranges = _normalize_study_ranges([*(current.compose_ranges if current else ()), *entry.compose_ranges])
+                    review_ranges = _normalize_study_ranges([*(current.review_ranges if current else ()), *entry.review_ranges])
+                    qa_ranges = _normalize_study_ranges([*(current.qa_ranges if current else ()), *entry.qa_ranges])
+                    merged = UserProjectDailyStudyStat(
+                        user_id=str(user_id),
+                        project_id=entry.project_id,
+                        date_key=entry.date_key,
+                        effective_ms=_merge_study_metric_value(current.effective_ms if current else 0, entry.effective_ms, effective_ranges),
+                        watch_ms=_merge_study_metric_value(current.watch_ms if current else 0, entry.watch_ms, watch_ranges),
+                        compose_ms=_merge_study_metric_value(current.compose_ms if current else 0, entry.compose_ms, compose_ranges),
+                        review_ms=_merge_study_metric_value(current.review_ms if current else 0, entry.review_ms, review_ranges),
+                        qa_ms=_merge_study_metric_value(current.qa_ms if current else 0, entry.qa_ms, qa_ranges),
+                        effective_ranges=effective_ranges,
+                        watch_ranges=watch_ranges,
+                        compose_ranges=compose_ranges,
+                        review_ranges=review_ranges,
+                        qa_ranges=qa_ranges,
+                        updated_at=now_text,
+                    )
+                    conn.execute(
+                        """
+                        INSERT INTO user_project_daily_study_stats (
+                            user_id,
+                            project_id,
+                            date_key,
+                            effective_ms,
+                            watch_ms,
+                            compose_ms,
+                            review_ms,
+                            qa_ms,
+                            effective_ranges_json,
+                            watch_ranges_json,
+                            compose_ranges_json,
+                            review_ranges_json,
+                            qa_ranges_json,
+                            updated_at
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT(user_id, project_id, date_key) DO UPDATE SET
+                            effective_ms = EXCLUDED.effective_ms,
+                            watch_ms = EXCLUDED.watch_ms,
+                            compose_ms = EXCLUDED.compose_ms,
+                            review_ms = EXCLUDED.review_ms,
+                            qa_ms = EXCLUDED.qa_ms,
+                            effective_ranges_json = EXCLUDED.effective_ranges_json,
+                            watch_ranges_json = EXCLUDED.watch_ranges_json,
+                            compose_ranges_json = EXCLUDED.compose_ranges_json,
+                            review_ranges_json = EXCLUDED.review_ranges_json,
+                            qa_ranges_json = EXCLUDED.qa_ranges_json,
+                            updated_at = EXCLUDED.updated_at
+                        """,
+                        (
+                            merged.user_id,
+                            merged.project_id,
+                            merged.date_key,
+                            merged.effective_ms,
+                            merged.watch_ms,
+                            merged.compose_ms,
+                            merged.review_ms,
+                            merged.qa_ms,
+                            json.dumps(merged.effective_ranges, ensure_ascii=False, separators=(",", ":")),
+                            json.dumps(merged.watch_ranges, ensure_ascii=False, separators=(",", ":")),
+                            json.dumps(merged.compose_ranges, ensure_ascii=False, separators=(",", ":")),
+                            json.dumps(merged.review_ranges, ensure_ascii=False, separators=(",", ":")),
+                            json.dumps(merged.qa_ranges, ensure_ascii=False, separators=(",", ":")),
+                            merged.updated_at,
+                        ),
+                    )
+                    saved.append(merged)
+                conn.commit()
+        return tuple(saved)
+
+    def list_user_project_daily_study_stats(
+        self,
+        user_id: str,
+        *,
+        project_ids: Iterable[str],
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> tuple[UserProjectDailyStudyStat, ...]:
+        normalized_project_ids = tuple(dict.fromkeys(_normalize_project_id(project_id) for project_id in project_ids))
+        if not normalized_project_ids:
+            return tuple()
+        normalized_date_from = None if date_from is None else _normalize_study_date_key(date_from)
+        normalized_date_to = None if date_to is None else _normalize_study_date_key(date_to)
+        if normalized_date_from and normalized_date_to and normalized_date_from > normalized_date_to:
+            raise PreconditionFailure("date_from must be less than or equal to date_to")
+        sql = """
+            SELECT
+                user_id,
+                project_id,
+                date_key,
+                effective_ms,
+                watch_ms,
+                compose_ms,
+                review_ms,
+                qa_ms,
+                effective_ranges_json,
+                watch_ranges_json,
+                compose_ranges_json,
+                review_ranges_json,
+                qa_ranges_json,
+                updated_at
+            FROM user_project_daily_study_stats
+            WHERE user_id = %s AND project_id = ANY(%s)
+        """
+        params: list[Any] = [str(user_id), list(normalized_project_ids)]
+        if normalized_date_from is not None:
+            sql += " AND date_key >= %s"
+            params.append(normalized_date_from)
+        if normalized_date_to is not None:
+            sql += " AND date_key <= %s"
+            params.append(normalized_date_to)
+        sql += " ORDER BY date_key ASC, project_id ASC"
+        with self._connect() as conn:
+            rows = conn.execute(sql, tuple(params)).fetchall()
+        return tuple(self._row_to_user_project_daily_study_stat(row) for row in rows)
+
     def list_user_roles(self, user_id: str) -> tuple[str, ...]:
         with self._connect() as conn:
             rows = conn.execute(
@@ -3463,9 +4605,42 @@ class PostgresAuthStore(_AuthStoreImpl):
         with self._connect() as conn:
             users = int(conn.execute("SELECT COUNT(*) AS count FROM users").fetchone()["count"])
             active_users = int(conn.execute("SELECT COUNT(*) AS count FROM user_profiles WHERE status = 'active'").fetchone()["count"])
+            study_users = int(
+                conn.execute(
+                    "SELECT COUNT(DISTINCT user_id) AS count FROM user_project_daily_study_stats WHERE effective_ms > 0"
+                ).fetchone()["count"]
+            )
+            study_users_7d = int(
+                conn.execute(
+                    """
+                    SELECT COUNT(DISTINCT user_id) AS count
+                    FROM user_project_daily_study_stats
+                    WHERE effective_ms > 0 AND updated_at >= %s
+                    """,
+                    ((_utc_now() - timedelta(days=7)).isoformat(),),
+                ).fetchone()["count"]
+            )
+            study_totals_row = conn.execute(
+                """
+                SELECT
+                    COALESCE(SUM(effective_ms), 0) AS effective_ms,
+                    COALESCE(SUM(watch_ms), 0) AS watch_ms,
+                    COALESCE(SUM(compose_ms), 0) AS compose_ms,
+                    COALESCE(SUM(review_ms), 0) AS review_ms,
+                    COALESCE(SUM(qa_ms), 0) AS qa_ms
+                FROM user_project_daily_study_stats
+                """
+            ).fetchone()
         return {
             "users": users,
             "activeUsers": active_users,
+            "studyUsers": study_users,
+            "studyUsers7d": study_users_7d,
+            "effectiveStudyMs": int(study_totals_row["effective_ms"]) if study_totals_row is not None else 0,
+            "watchMs": int(study_totals_row["watch_ms"]) if study_totals_row is not None else 0,
+            "composeMs": int(study_totals_row["compose_ms"]) if study_totals_row is not None else 0,
+            "reviewMs": int(study_totals_row["review_ms"]) if study_totals_row is not None else 0,
+            "qaMs": int(study_totals_row["qa_ms"]) if study_totals_row is not None else 0,
         }
 
     def record_admin_action(
@@ -3610,6 +4785,47 @@ class PostgresAuthStore(_AuthStoreImpl):
                     """
                 ).fetchall()
             ]
+            user_global_settings = [
+                {
+                    "userId": str(row["user_id"]),
+                    "payloadJson": str(row["payload_json"]),
+                    "updatedAt": str(row["updated_at"]),
+                }
+                for row in conn.execute(
+                    """
+                    SELECT user_id, payload_json, updated_at
+                    FROM user_global_settings
+                    ORDER BY user_id ASC
+                    """
+                ).fetchall()
+            ]
+            cloud_accounts = [
+                {
+                    "accountId": str(row["account_id"]),
+                    "userId": str(row["user_id"]),
+                    "provider": str(row["provider"]),
+                    "providerUserId": str(row["provider_user_id"]),
+                    "displayName": str(row["display_name"]),
+                    "avatarUrl": None if row["avatar_url"] is None else str(row["avatar_url"]),
+                    "accessTokenCiphertext": str(row["access_token_ciphertext"]),
+                    "refreshTokenCiphertext": str(row["refresh_token_ciphertext"]),
+                    "expiresAt": None if row["expires_at"] is None else str(row["expires_at"]),
+                    "scope": str(row["scope"]),
+                    "meta": json.loads(str(row["meta_json"]) if row["meta_json"] is not None else "{}"),
+                    "createdAt": str(row["created_at"]),
+                    "updatedAt": str(row["updated_at"]),
+                    "disabledAt": None if row["disabled_at"] is None else str(row["disabled_at"]),
+                }
+                for row in conn.execute(
+                    """
+                    SELECT account_id, user_id, provider, provider_user_id, display_name, avatar_url,
+                           access_token_ciphertext, refresh_token_ciphertext, expires_at, scope,
+                           meta_json, created_at, updated_at, disabled_at
+                    FROM user_cloud_accounts
+                    ORDER BY user_id ASC, provider ASC, updated_at DESC, account_id ASC
+                    """
+                ).fetchall()
+            ]
             roles = [
                 {
                     "userId": str(row["user_id"]),
@@ -3679,6 +4895,7 @@ class PostgresAuthStore(_AuthStoreImpl):
             memberships=memberships,
             profiles=profiles,
             user_service_configs=user_service_configs,
+            user_global_settings=user_global_settings,
             roles=roles,
             cloud_accounts=cloud_accounts,
             friend_requests=friend_requests,
@@ -3692,6 +4909,7 @@ class PostgresAuthStore(_AuthStoreImpl):
         memberships = list(snapshot.get("projectMemberships", []))
         profiles = list(snapshot.get("userProfiles", []))
         user_service_configs = list(snapshot.get("userServiceConfigs", []))
+        user_global_settings = list(snapshot.get("userGlobalSettings", []))
         roles = list(snapshot.get("userGlobalRoles", []))
         cloud_accounts = list(snapshot.get("userCloudAccounts", []))
         friend_requests = list(snapshot.get("friendRequests", []))
@@ -3705,6 +4923,7 @@ class PostgresAuthStore(_AuthStoreImpl):
                     conn.execute("DELETE FROM friend_requests")
                     conn.execute("DELETE FROM user_global_roles")
                     conn.execute("DELETE FROM user_cloud_accounts")
+                    conn.execute("DELETE FROM user_global_settings")
                     conn.execute("DELETE FROM user_service_configs")
                     conn.execute("DELETE FROM project_memberships")
                     conn.execute("DELETE FROM sessions")
@@ -3783,6 +5002,22 @@ class PostgresAuthStore(_AuthStoreImpl):
                             _normalize_service_model_name(row.get("modelName")),
                             _normalize_service_api_key(row.get("apiKey")),
                             _normalize_service_prompt_assembly_mode(row.get("promptAssemblyMode")),
+                            str(row.get("updatedAt", "")),
+                        ),
+                    )
+                for item in user_global_settings:
+                    row = dict(item)
+                    conn.execute(
+                        """
+                        INSERT INTO user_global_settings (user_id, payload_json, updated_at)
+                        VALUES (%s, %s, %s)
+                        ON CONFLICT(user_id) DO UPDATE SET
+                            payload_json = EXCLUDED.payload_json,
+                            updated_at = EXCLUDED.updated_at
+                        """,
+                        (
+                            str(row.get("userId", "")),
+                            str(row.get("payloadJson", "{}") or "{}"),
                             str(row.get("updatedAt", "")),
                         ),
                     )
@@ -3976,6 +5211,7 @@ class PostgresAuthStore(_AuthStoreImpl):
                     ]
                     optional_targets = [
                         "user_service_configs",
+                        "user_global_settings",
                         "user_cloud_accounts",
                         "friend_requests",
                         "friendships",
@@ -4047,6 +5283,29 @@ class AuthStore:
 
     def user_has_project_access(self, user_id: str, project_id: str) -> bool:
         return self._impl.user_has_project_access(user_id, project_id)
+
+    def upsert_user_project_daily_study_stats(
+        self,
+        user_id: str,
+        *,
+        entries: Iterable[UserProjectDailyStudyStatInput],
+    ) -> tuple[UserProjectDailyStudyStat, ...]:
+        return self._impl.upsert_user_project_daily_study_stats(user_id, entries=entries)
+
+    def list_user_project_daily_study_stats(
+        self,
+        user_id: str,
+        *,
+        project_ids: Iterable[str],
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> tuple[UserProjectDailyStudyStat, ...]:
+        return self._impl.list_user_project_daily_study_stats(
+            user_id,
+            project_ids=project_ids,
+            date_from=date_from,
+            date_to=date_to,
+        )
 
     def get_user_by_id(self, user_id: str) -> AuthUser:
         return self._impl.get_user_by_id(user_id)
@@ -4120,6 +5379,48 @@ class AuthStore:
             prompt_assembly_mode=prompt_assembly_mode,
             clear_api_key=clear_api_key,
         )
+
+    def get_user_global_settings(self, user_id: str) -> UserGlobalSettings:
+        return self._impl.get_user_global_settings(user_id)
+
+    def upsert_user_global_settings(
+        self,
+        user_id: str,
+        *,
+        theme: str | None,
+        pomodoro_enabled: bool,
+        pomodoro_transition_sound_enabled: bool,
+        pomodoro_weekly_schedule: dict[str, Any],
+        default_project_review_template: Iterable[dict[str, Any] | tuple[str, int | None] | list[Any]],
+        learning_plans: dict[str, Any] | None = None,
+    ) -> UserGlobalSettings:
+        return self._impl.upsert_user_global_settings(
+            user_id,
+            theme=theme,
+            pomodoro_enabled=pomodoro_enabled,
+            pomodoro_transition_sound_enabled=pomodoro_transition_sound_enabled,
+            pomodoro_weekly_schedule=pomodoro_weekly_schedule,
+            default_project_review_template=default_project_review_template,
+            learning_plans=learning_plans,
+        )
+
+    def get_user_learning_plans(self, user_id: str) -> dict[str, Any]:
+        return self.get_user_global_settings(user_id).learning_plans
+
+    def upsert_user_learning_plans(self, user_id: str, *, learning_plans: dict[str, Any]) -> dict[str, Any]:
+        current = self.get_user_global_settings(user_id)
+        updated = self.upsert_user_global_settings(
+            user_id,
+            theme=current.theme,
+            pomodoro_enabled=current.pomodoro_enabled,
+            pomodoro_transition_sound_enabled=current.pomodoro_transition_sound_enabled,
+            pomodoro_weekly_schedule=_pomodoro_weekly_schedule_to_json(current.pomodoro_weekly_schedule),
+            default_project_review_template=_review_chain_template_to_json(
+                ((step.kind, step.count) for step in current.default_project_review_template)
+            ),
+            learning_plans=learning_plans,
+        )
+        return updated.learning_plans
 
     def list_user_cloud_accounts(
         self,

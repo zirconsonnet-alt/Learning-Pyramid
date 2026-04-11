@@ -43,6 +43,7 @@ AUTH_TABLE_ORDER: tuple[str, ...] = (
     "users",
     "user_profiles",
     "user_service_configs",
+    "user_global_settings",
     "user_cloud_accounts",
     "user_global_roles",
     "sessions",
@@ -355,6 +356,20 @@ def _store_instance_media_binding_index_sql() -> str:
     )
 
 
+def _store_learning_task_node_object_mirror_sql() -> str:
+    return "\n".join(
+        (
+            "-- Add learning task node object mirror metadata",
+            "ALTER TABLE learning_task_node_index",
+            "ADD COLUMN IF NOT EXISTS node_origin TEXT NOT NULL DEFAULT 'AGGREGATION';",
+            "ALTER TABLE learning_task_node_index",
+            "ADD COLUMN IF NOT EXISTS bound_learning_object_node_id TEXT NULL;",
+            "ALTER TABLE learning_task_node_index",
+            "ADD COLUMN IF NOT EXISTS object_mirror_status TEXT NULL;",
+        )
+    )
+
+
 def _auth_user_profiles_sql() -> str:
     return "\n".join(
         (
@@ -607,6 +622,22 @@ def _auth_user_service_configs_sql() -> str:
     )
 
 
+def _auth_user_global_settings_sql() -> str:
+    return "\n".join(
+        (
+            "-- Add per-user global client settings table",
+            "CREATE TABLE IF NOT EXISTS user_global_settings (",
+            "    user_id TEXT PRIMARY KEY,",
+            "    payload_json TEXT NOT NULL DEFAULT '{}',",
+            "    updated_at TEXT NOT NULL,",
+            "    FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE",
+            ");",
+            "CREATE INDEX IF NOT EXISTS idx_user_global_settings_updated_at",
+            "ON user_global_settings (updated_at DESC);",
+        )
+    )
+
+
 def _auth_user_service_prompt_mode_sql() -> str:
     return "\n".join(
         (
@@ -652,6 +683,36 @@ def _auth_user_cloud_accounts_sql() -> str:
     )
 
 
+def _auth_user_project_daily_study_stats_sql() -> str:
+    return "\n".join(
+        (
+            "-- Add per-user per-project daily study metric snapshots",
+            "CREATE TABLE IF NOT EXISTS user_project_daily_study_stats (",
+            "    user_id TEXT NOT NULL,",
+            "    project_id TEXT NOT NULL,",
+            "    date_key TEXT NOT NULL,",
+            "    effective_ms BIGINT NOT NULL DEFAULT 0,",
+            "    watch_ms BIGINT NOT NULL DEFAULT 0,",
+            "    compose_ms BIGINT NOT NULL DEFAULT 0,",
+            "    review_ms BIGINT NOT NULL DEFAULT 0,",
+            "    qa_ms BIGINT NOT NULL DEFAULT 0,",
+            "    effective_ranges_json TEXT NOT NULL DEFAULT '[]',",
+            "    watch_ranges_json TEXT NOT NULL DEFAULT '[]',",
+            "    compose_ranges_json TEXT NOT NULL DEFAULT '[]',",
+            "    review_ranges_json TEXT NOT NULL DEFAULT '[]',",
+            "    qa_ranges_json TEXT NOT NULL DEFAULT '[]',",
+            "    updated_at TEXT NOT NULL,",
+            "    PRIMARY KEY(user_id, project_id, date_key),",
+            "    FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE",
+            ");",
+            "CREATE INDEX IF NOT EXISTS idx_user_project_daily_study_stats_user_project_date",
+            "ON user_project_daily_study_stats (user_id, project_id, date_key DESC);",
+            "CREATE INDEX IF NOT EXISTS idx_user_project_daily_study_stats_user_date",
+            "ON user_project_daily_study_stats (user_id, date_key DESC);",
+        )
+    )
+
+
 POSTGRES_MIGRATIONS: tuple[PostgresMigration, ...] = (
     PostgresMigration(scope="store", version=1, name="initial_store_schema", sql_factory=_bootstrap_store_schema_sql),
     PostgresMigration(scope="store", version=2, name="store_hot_indexes", sql_factory=_store_hot_index_sql),
@@ -662,6 +723,12 @@ POSTGRES_MIGRATIONS: tuple[PostgresMigration, ...] = (
         version=5,
         name="instance_media_binding_index",
         sql_factory=_store_instance_media_binding_index_sql,
+    ),
+    PostgresMigration(
+        scope="store",
+        version=6,
+        name="learning_task_node_object_mirror",
+        sql_factory=_store_learning_task_node_object_mirror_sql,
     ),
     PostgresMigration(scope="auth", version=1, name="initial_auth_schema", sql_factory=_bootstrap_auth_schema_sql),
     PostgresMigration(scope="auth", version=2, name="auth_user_profiles", sql_factory=_auth_user_profiles_sql),
@@ -675,6 +742,8 @@ POSTGRES_MIGRATIONS: tuple[PostgresMigration, ...] = (
     PostgresMigration(scope="auth", version=10, name="auth_friendships", sql_factory=_auth_friendships_sql),
     PostgresMigration(scope="auth", version=11, name="auth_remove_study_group_tables", sql_factory=_auth_remove_study_group_tables_sql),
     PostgresMigration(scope="auth", version=12, name="auth_user_cloud_accounts", sql_factory=_auth_user_cloud_accounts_sql),
+    PostgresMigration(scope="auth", version=13, name="auth_user_project_daily_study_stats", sql_factory=_auth_user_project_daily_study_stats_sql),
+    PostgresMigration(scope="auth", version=14, name="auth_user_global_settings", sql_factory=_auth_user_global_settings_sql),
 )
 
 

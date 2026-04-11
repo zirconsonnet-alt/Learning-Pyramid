@@ -95,6 +95,7 @@ class LearningItem:
     question: RichContent
     answer: RichContent
     anchor: Optional[Anchor] = None
+    references: Tuple[RecallPointId, ...] = tuple()
 
 
 @dataclass(frozen=True, slots=True)

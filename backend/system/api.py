@@ -43,8 +43,11 @@ from backend.models.enums import (
     FsSyncPolicy,
     InstancePresence,
     LayerMode,
+    LearningTaskNodeOrigin,
     MediaAssetKind,
     MaterialSourceKind,
+    MistakeStatus,
+    ObjectMirrorStatus,
     ProjectState,
     ProjectType,
     RecallPointState,
@@ -52,6 +55,7 @@ from backend.models.enums import (
     ReviewChainTemplateItemKind,
     ReviewChainState,
     ReviewTaskState,
+    RollUpStrategy,
     RuntimeCapability,
     SessionMode,
 )
@@ -86,6 +90,8 @@ from backend.models.rich_content import RichContent, validate_rich_content_write
 from backend.models.review_chain import ReviewChain, ReviewChainItem, ReviewChainItemKind
 from backend.models.review_task import ReviewTask
 from backend.models.review_task_queue import ReviewTaskQueue
+from backend.models.study_material import StudyMaterial, StudyMaterialType
+from backend.models.subject_material_link import SubjectMaterialLink
 from backend.models.types import (
     AsrArtifactId,
     ConvergenceId,
@@ -293,6 +299,16 @@ class SystemAPI:
                 raise PreconditionFailure(f"{prefix}.instance_id not resolvable")
             return project_type
 
+        if project_type == ProjectType.MISTAKE_BOOK:
+            if anchor is None:
+                raise PreconditionFailure(f"{prefix} must be provided for MISTAKE_BOOK projects")
+            anchor.validate_write_time()
+            try:
+                self.sys.instance_repo.get(session, anchor.instance_id)
+            except NotFound:
+                raise PreconditionFailure(f"{prefix}.instance_id not resolvable")
+            return project_type
+
         if project_type == ProjectType.LOOSE_POINTS:
             if anchor is not None:
                 raise PreconditionFailure(f"{prefix} must be omitted for LOOSE_POINTS projects")
@@ -332,8 +348,8 @@ class SystemAPI:
             raise PreconditionFailure("create_project.initial_source_kind must be MaterialSourceKind")
         if not isinstance(initial_project_type, ProjectType):
             raise PreconditionFailure("create_project.initial_project_type must be ProjectType")
-        if initial_project_type in {ProjectType.BOOK, ProjectType.LOOSE_POINTS} and initial_source_kind != MaterialSourceKind.MANUAL:
-            raise PreconditionFailure("create_project for BOOK/LOOSE_POINTS must use MANUAL source kind")
+        if initial_project_type in {ProjectType.BOOK, ProjectType.MISTAKE_BOOK, ProjectType.LOOSE_POINTS} and initial_source_kind != MaterialSourceKind.MANUAL:
+            raise PreconditionFailure("create_project for BOOK/MISTAKE_BOOK/LOOSE_POINTS must use MANUAL source kind")
         pid = self.idgen.new_project_id()
         resolved_project_root = project_root
         if resolved_project_root is None:
@@ -1869,6 +1885,127 @@ class SystemAPI:
         finally:
             self.sys.rollback(s)
 
+    def _get_active_project_metadata(self, project_id: ProjectId) -> Project:
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            for project in sql_store.list_projects_metadata(active_only=True):
+                if id_canonical_text(project.project_id) == id_canonical_text(project_id):
+                    return project
+            raise NotFound(project_id)
+
+        project_store = self.sys.g.projects.get(id_canonical_text(project_id))
+        if project_store is None or project_store.project is None or project_store.project.state != ProjectState.ACTIVE:
+            raise NotFound(project_id)
+        return project_store.project
+
+    def _get_project_store(self, project_id: ProjectId):
+        project_store = self.sys.g.projects.get(id_canonical_text(project_id))
+        if project_store is None or project_store.project is None:
+            raise NotFound(project_id)
+        return project_store
+
+    def _get_subject_material_link(self, project_id: ProjectId) -> SubjectMaterialLink | None:
+        project_store = self._get_project_store(project_id)
+        return getattr(project_store, "subject_material_link", None)
+
+    def _resolve_subject_project_id(self, project_id: ProjectId) -> ProjectId:
+        link = self._get_subject_material_link(project_id)
+        return link.subject_id if link is not None else project_id
+
+    def _list_subject_materials_from_store(self, subject_id: ProjectId) -> Tuple[StudyMaterial, ...]:
+        project_store = self._get_project_store(subject_id)
+        study_materials = tuple(getattr(project_store, "study_materials", {}).values())
+        if study_materials:
+            return tuple(
+                sorted(
+                    study_materials,
+                    key=lambda item: (
+                        0 if item.material_id == "legacy_main" else 1,
+                        item.created_at,
+                        item.material_id,
+                    ),
+                )
+            )
+
+        subject = self._get_active_project_metadata(subject_id)
+        cfg = self.get_project_config(subject_id)
+
+        if cfg.project_type == ProjectType.BOOK:
+            material_type = StudyMaterialType.BOOK
+            material_title = "旧书本材料"
+        elif cfg.project_type == ProjectType.MISTAKE_BOOK:
+            material_type = StudyMaterialType.MISTAKE_BOOK
+            material_title = "旧错题材料"
+        elif cfg.project_type == ProjectType.LOOSE_POINTS:
+            material_type = StudyMaterialType.LOOSE_POINTS
+            material_title = "零散知识入口"
+        else:
+            material_type = StudyMaterialType.COURSE
+            material_title = "默认网课材料"
+
+        return (
+            StudyMaterial(
+                subject_id=subject.project_id,
+                material_id="legacy_main",
+                material_type=material_type,
+                title=material_title,
+                created_at=subject.created_at,
+                compatibility_project_id=subject.project_id,
+            ),
+        )
+
+    def _find_subject_material(self, subject_id: ProjectId, material_id: str) -> StudyMaterial:
+        normalized_material_id = str(material_id or "").strip()
+        if not normalized_material_id:
+            raise NotFound("material")
+        for item in self._list_subject_materials_from_store(subject_id):
+            if item.material_id == normalized_material_id:
+                return item
+        raise NotFound("material")
+
+    def _resolve_current_material_for_project(self, project_id: ProjectId, subject_id: ProjectId) -> StudyMaterial:
+        material_link = self._get_subject_material_link(project_id)
+        materials = self._list_subject_materials_from_store(subject_id)
+        if material_link is not None:
+            for item in materials:
+                if item.material_id == material_link.material_id:
+                    return item
+        for item in materials:
+            if item.compatibility_project_id is not None and id_canonical_text(item.compatibility_project_id) == id_canonical_text(project_id):
+                return item
+        for item in materials:
+            if item.compatibility_project_id is not None and id_canonical_text(item.compatibility_project_id) == id_canonical_text(subject_id):
+                return item
+        if materials:
+            return materials[0]
+        raise NotFound("subject material")
+
+    @staticmethod
+    def _default_material_title_for_type(material_type: StudyMaterialType) -> str:
+        if material_type == StudyMaterialType.BOOK:
+            return "书本材料"
+        if material_type == StudyMaterialType.LOOSE_POINTS:
+            return "零散知识"
+        if material_type == StudyMaterialType.MISTAKE_BOOK:
+            return "错题材料"
+        return "网课材料"
+
+    @staticmethod
+    def _compatibility_project_options_for_material_type(
+        material_type: StudyMaterialType,
+    ) -> tuple[MaterialSourceKind, ProjectType]:
+        if material_type == StudyMaterialType.BOOK:
+            return MaterialSourceKind.MANUAL, ProjectType.BOOK
+        if material_type == StudyMaterialType.LOOSE_POINTS:
+            return MaterialSourceKind.MANUAL, ProjectType.LOOSE_POINTS
+        if material_type == StudyMaterialType.MISTAKE_BOOK:
+            return MaterialSourceKind.MANUAL, ProjectType.MISTAKE_BOOK
+        return MaterialSourceKind.SERVER_FS, ProjectType.COURSE
+
+    @staticmethod
+    def _new_study_material_id(material_type: StudyMaterialType) -> str:
+        return f"{material_type.value.lower()}_{secrets.token_hex(4)}"
+
     def _format_recall_point_for_llm_context(self, recall_point: RecallPoint, *, index: int | None = None) -> str:
         header = f"Recall Point {index}" if index is not None else "Recall Point"
         anchor_line = (
@@ -2770,12 +2907,14 @@ class SystemAPI:
                 },
             )
             self.sys.commit(s)
-            return {
+            result = {
                 "created_instances_count": int(created_instances),
                 "reused_instances_count": int(reused_instances),
                 "created_learning_object_nodes_count": int(created_nodes),
                 "imported_count": int(len(normalized_items)),
             }
+            self._best_effort_drive_idle_orchestration(project_id)
+            return result
         except Exception:
             if s.state == SessionState.OPEN:
                 self.sys.rollback(s)
@@ -3308,6 +3447,7 @@ class SystemAPI:
 
             self.sys.commit(s)
             self._startup_fs_sync_done.add(id_canonical_text(project_id))
+            self._best_effort_drive_idle_orchestration(project_id)
             return report
         except Exception:
             if s.state == SessionState.OPEN:
@@ -3389,8 +3529,298 @@ class SystemAPI:
             suffix += 1
         return f"{base_title}-{suffix}"
 
+    def _roll_up_strategy(self, s: MutationSession) -> RollUpStrategy:
+        return self.sys.project_config_repo.get(s).roll_up_strategy
+
+    def _is_learning_object_isomorphic_roll_up_enabled(self, s: MutationSession) -> bool:
+        cfg = self.sys.project_config_repo.get(s)
+        return (
+            cfg.roll_up_strategy == RollUpStrategy.LEARNING_OBJECT_ISOMORPHIC
+            and cfg.project_type in {ProjectType.COURSE, ProjectType.BOOK, ProjectType.MISTAKE_BOOK}
+        )
+
+    @staticmethod
+    def _is_synthetic_files_container_node(node: LearningObjectContainer) -> bool:
+        relative_path = node.relative_path.as_posix().strip()
+        return str(node.title).strip() == "Files" and (
+            relative_path == "__files__" or relative_path.endswith("/__files__")
+        )
+
+    def _actionable_missing_instance_ids(self, s: MutationSession) -> Tuple[InstanceId, ...]:
+        missing_keys = {
+            id_canonical_text(instance.instance_id)
+            for instance in self.sys.instance_repo.all(s)
+            if instance.presence == InstancePresence.MISSING
+        }
+        if not missing_keys:
+            return tuple()
+        actionable_keys = {
+            id_canonical_text(rp.anchor.instance_id)
+            for rp in self.sys.recall_point_repo.all(s)
+            if rp.state == RecallPointState.ACTIVE
+            and rp.anchor is not None
+            and id_canonical_text(rp.anchor.instance_id) in missing_keys
+        }
+        ordered = sorted(actionable_keys, key=id_canonical_text)
+        return tuple(InstanceId(item) for item in ordered)
+
+    def _raise_if_actionable_missing_instances(self, s: MutationSession) -> None:
+        if self._actionable_missing_instance_ids(s):
+            raise PreconditionFailure("Gate: actionable missing instances exist; fix missing instance mappings before progressing")
+
+    def _ensure_layers_through(self, s: MutationSession, target_layer_index: int) -> None:
+        if int(target_layer_index) < 0:
+            raise PreconditionFailure("target_layer_index must be >= 0")
+        cfg = self.sys.project_config_repo.get(s)
+        existing_layers = list(self.sys.layer_repo.all(s))
+        last_mode = existing_layers[-1].layer_mode if existing_layers else LayerMode.AUTO
+        for layer_index in range(0, int(target_layer_index) + 1):
+            current = self.sys.layer_repo.maybe_get_by_index(s, layer_index)
+            if current is not None:
+                last_mode = current.layer_mode
+                continue
+            layer_cfg = cfg.layer_configs.get(int(layer_index), default_layer_config())
+            layer = Layer(
+                project_id=s.project_id,
+                layer_id=self.idgen.new_layer_id(s.project_id),
+                layer_index=int(layer_index),
+                layer_mode=last_mode,
+                orchestrator_managed_review_chain_ids=tuple(),
+                aggregation_k_node=int(layer_cfg.aggregation_k_node),
+                aggregation_k_point=int(layer_cfg.aggregation_k_point),
+            )
+            layer.validate_local_invariants()
+            self.sys.layer_repo.add(s, layer)
+            last_mode = layer.layer_mode
+
+    def _scan_learning_object_isomorphic_roll_up_once(self, s: MutationSession) -> Optional[LearningTaskNodeId]:
+        if not self._is_learning_object_isomorphic_roll_up_enabled(s):
+            return None
+        if not self.sys.queue_repo.is_empty(s):
+            return None
+        if self._actionable_missing_instance_ids(s):
+            return None
+
+        object_nodes = {
+            id_canonical_text(node.node_id): node
+            for node in self.sys.learning_object_repo.all(s)
+        }
+        if not object_nodes:
+            return None
+
+        active_instance_keys = {
+            id_canonical_text(rp.anchor.instance_id)
+            for rp in self.sys.recall_point_repo.all(s)
+            if rp.state == RecallPointState.ACTIVE and rp.anchor is not None
+        }
+
+        covered_instance_cache: dict[str, Tuple[str, ...]] = {}
+        logical_level_cache: dict[str, int] = {}
+        eligible_cache: dict[str, bool] = {}
+
+        def covered_instance_keys(node_key: str) -> Tuple[str, ...]:
+            cached = covered_instance_cache.get(node_key)
+            if cached is not None:
+                return cached
+            node = object_nodes[node_key]
+            if isinstance(node, LearningObjectLeaf):
+                result = (id_canonical_text(node.instance_id),)
+            else:
+                items: list[str] = []
+                for child_id in node.children:
+                    child_key = id_canonical_text(child_id)
+                    if child_key in object_nodes:
+                        items.extend(covered_instance_keys(child_key))
+                result = tuple(items)
+            covered_instance_cache[node_key] = result
+            return result
+
+        def logical_level(node_key: str) -> int:
+            cached = logical_level_cache.get(node_key)
+            if cached is not None:
+                return cached
+            node = object_nodes[node_key]
+            if isinstance(node, LearningObjectLeaf):
+                logical_level_cache[node_key] = 0
+                return 0
+            child_levels = [
+                logical_level(id_canonical_text(child_id))
+                for child_id in node.children
+                if id_canonical_text(child_id) in object_nodes
+            ]
+            if self._is_synthetic_files_container_node(node):
+                result = max(child_levels, default=0)
+            else:
+                result = 1 + max(child_levels, default=0) if covered_instance_keys(node_key) else 0
+            logical_level_cache[node_key] = result
+            return result
+
+        def is_eligible(node_key: str) -> bool:
+            cached = eligible_cache.get(node_key)
+            if cached is not None:
+                return cached
+            node = object_nodes[node_key]
+            if isinstance(node, LearningObjectLeaf):
+                eligible_cache[node_key] = False
+                return False
+            if self._is_synthetic_files_container_node(node):
+                eligible_cache[node_key] = False
+                return False
+            inst_keys = covered_instance_keys(node_key)
+            result = bool(inst_keys) and all(item in active_instance_keys for item in inst_keys)
+            eligible_cache[node_key] = result
+            return result
+
+        mirror_nodes = sorted(
+            (
+                node
+                for node in self.sys.learning_task_node_repo.all(s)
+                if isinstance(node, LearningTaskContainer)
+                and node.node_origin == LearningTaskNodeOrigin.OBJECT_MIRROR
+                and node.bound_learning_object_node_id is not None
+            ),
+            key=lambda item: id_canonical_text(item.node_id),
+        )
+        mirror_by_object_key: dict[str, LearningTaskContainer] = {}
+        for node in mirror_nodes:
+            mirror_by_object_key.setdefault(id_canonical_text(node.bound_learning_object_node_id), node)  # type: ignore[arg-type]
+
+        for node in mirror_nodes:
+            bound_key = id_canonical_text(node.bound_learning_object_node_id)  # type: ignore[arg-type]
+            if bound_key in object_nodes:
+                continue
+            if node.object_mirror_status == ObjectMirrorStatus.ORPHANED:
+                continue
+            updated = LearningTaskContainer(
+                project_id=node.project_id,
+                node_id=node.node_id,
+                parent_id=node.parent_id,
+                children=tuple(node.children),
+                title=node.title,
+                node_origin=node.node_origin,
+                bound_learning_object_node_id=node.bound_learning_object_node_id,
+                object_mirror_status=ObjectMirrorStatus.ORPHANED,
+            )
+            updated.validate_write_time()
+            self.sys.learning_task_node_repo.update(s, updated)
+            mirror_by_object_key[bound_key] = updated
+
+        eligible_object_keys = sorted(
+            [
+                node_key
+                for node_key, node in object_nodes.items()
+                if isinstance(node, LearningObjectContainer) and is_eligible(node_key)
+            ],
+            key=lambda node_key: (logical_level(node_key), str(object_nodes[node_key].relative_path), node_key),
+        )
+
+        for node_key in eligible_object_keys:
+            node = object_nodes[node_key]
+            existing = mirror_by_object_key.get(node_key)
+            if existing is not None:
+                continue
+            created = LearningTaskContainer(
+                project_id=s.project_id,
+                node_id=self.idgen.new_learning_task_node_id(s.project_id),
+                parent_id=None,
+                children=tuple(),
+                title=node.title,
+                node_origin=LearningTaskNodeOrigin.OBJECT_MIRROR,
+                bound_learning_object_node_id=node.node_id,
+                object_mirror_status=ObjectMirrorStatus.ACTIVE,
+            )
+            created.validate_write_time()
+            self.sys.learning_task_node_repo.add(s, created)
+            mirror_by_object_key[node_key] = created
+
+        current_mirror_keys = {
+            node_key
+            for node_key, mirror in mirror_by_object_key.items()
+            if mirror.bound_learning_object_node_id is not None and node_key in object_nodes
+        }
+
+        def direct_child_mirror_keys(node_key: str) -> Tuple[str, ...]:
+            node = object_nodes[node_key]
+            if not isinstance(node, LearningObjectContainer):
+                return tuple()
+            out: list[str] = []
+            seen: set[str] = set()
+            for child_id in node.children:
+                child_key = id_canonical_text(child_id)
+                child = object_nodes.get(child_key)
+                if child is None or isinstance(child, LearningObjectLeaf):
+                    continue
+                if self._is_synthetic_files_container_node(child):
+                    for nested_key in direct_child_mirror_keys(child_key):
+                        if nested_key not in seen:
+                            out.append(nested_key)
+                            seen.add(nested_key)
+                    continue
+                if child_key in current_mirror_keys:
+                    if child_key not in seen:
+                        out.append(child_key)
+                        seen.add(child_key)
+                    continue
+                for nested_key in direct_child_mirror_keys(child_key):
+                    if nested_key not in seen:
+                        out.append(nested_key)
+                        seen.add(nested_key)
+            return tuple(out)
+
+        def parent_mirror_key(node_key: str) -> Optional[str]:
+            current = object_nodes[node_key]
+            parent_id = current.parent_id
+            while parent_id is not None:
+                current_key = id_canonical_text(parent_id)
+                parent = object_nodes.get(current_key)
+                if parent is None:
+                    return None
+                if isinstance(parent, LearningObjectContainer) and self._is_synthetic_files_container_node(parent):
+                    parent_id = parent.parent_id
+                    continue
+                if current_key in current_mirror_keys:
+                    return current_key
+                parent_id = parent.parent_id
+            return None
+
+        for node_key in sorted(current_mirror_keys, key=lambda item: (logical_level(item), str(object_nodes[item].relative_path), item)):
+            node = object_nodes[node_key]
+            mirror = mirror_by_object_key[node_key]
+            parent_key = parent_mirror_key(node_key)
+            parent_node_id = None if parent_key is None else mirror_by_object_key[parent_key].node_id
+            child_node_ids = tuple(mirror_by_object_key[item].node_id for item in direct_child_mirror_keys(node_key))
+            updated = LearningTaskContainer(
+                project_id=mirror.project_id,
+                node_id=mirror.node_id,
+                parent_id=parent_node_id,
+                children=child_node_ids,
+                title=node.title,
+                node_origin=LearningTaskNodeOrigin.OBJECT_MIRROR,
+                bound_learning_object_node_id=mirror.bound_learning_object_node_id,
+                object_mirror_status=ObjectMirrorStatus.ACTIVE,
+            )
+            if updated != mirror:
+                updated.validate_write_time()
+                self.sys.learning_task_node_repo.update(s, updated)
+                mirror_by_object_key[node_key] = updated
+
+        for node_key in eligible_object_keys:
+            mirror = mirror_by_object_key[node_key]
+            if self.sys.entry_repo.maybe_get(s, mirror.node_id) is not None:
+                continue
+            target_layer_index = logical_level(node_key)
+            if int(target_layer_index) <= 0:
+                continue
+            self._ensure_layers_through(s, int(target_layer_index))
+            self._task_register(s, mirror.node_id, int(target_layer_index))
+            return mirror.node_id
+
+        return None
+
     def _threshold_roll_up_enabled(self, s: MutationSession, layer_index: int) -> bool:
         cfg = self.sys.project_config_repo.get(s)
+        if cfg.roll_up_strategy != RollUpStrategy.THRESHOLD_AUTO:
+            return False
         layer_cfg = cfg.layer_configs.get(int(layer_index), default_layer_config())
         return bool(layer_cfg.threshold_roll_up_enabled)
 
@@ -3399,6 +3829,8 @@ class SystemAPI:
         Spec 4.4.2 T1: if thresholds are met, enter/keep CLEARING.
         """
         if not self.sys.queue_repo.is_empty(s):
+            return False
+        if self._actionable_missing_instance_ids(s):
             return False
         if not self._threshold_roll_up_enabled(s, layer_index):
             return False
@@ -3478,6 +3910,57 @@ class SystemAPI:
             initial_project_type=initial_project_type,
         )
 
+    def create_subject(self, title: str) -> ProjectId:
+        subject_id = self.create_project(
+            title,
+            initial_source_kind=MaterialSourceKind.SERVER_FS,
+            initial_project_type=ProjectType.COURSE,
+        )
+        s = self.sys.begin_session(subject_id, SessionMode.READ_WRITE)
+        try:
+            subject = self.sys.project_repo.get(s, subject_id)
+            s._staged.study_materials = {
+                "legacy_main": StudyMaterial(
+                    subject_id=subject.project_id,
+                    material_id="legacy_main",
+                    material_type=StudyMaterialType.COURSE,
+                    title="默认网课材料",
+                    created_at=subject.created_at,
+                    compatibility_project_id=subject.project_id,
+                )
+            }
+            s._staged.study_materials_replaced = True
+            self.sys.commit(s)
+        except Exception:
+            if s.state == SessionState.OPEN:
+                self.sys.rollback(s)
+            try:
+                self.delete_project(subject_id)
+            except Exception:
+                pass
+            raise
+        return subject_id
+
+    def get_subject_context(self, project_id: ProjectId) -> dict[str, object]:
+        resolved_subject_id = self._resolve_subject_project_id(project_id)
+        subject = self._get_active_project_metadata(resolved_subject_id)
+        materials = self._list_subject_materials_from_store(resolved_subject_id)
+        current_material = self._resolve_current_material_for_project(project_id, resolved_subject_id)
+        return {
+            "subject": subject,
+            "current_material": current_material,
+            "materials": materials,
+            "is_subject_root": id_canonical_text(project_id) == id_canonical_text(resolved_subject_id),
+            "current_project_id": project_id,
+            "subject_project_id": resolved_subject_id,
+        }
+
+    def edit_subject(self, subject_id: ProjectId, title: str) -> None:
+        self.edit_project(self._resolve_subject_project_id(subject_id), title)
+
+    def delete_subject(self, subject_id: ProjectId) -> None:
+        self.delete_project(self._resolve_subject_project_id(subject_id))
+
     def list_projects(self) -> Tuple:
         sql_store = self._sql_store()
         if sql_store is not None:
@@ -3487,8 +3970,108 @@ class SystemAPI:
         projects.sort(key=lambda p: id_canonical_text(p.project_id))
         return tuple(projects)
 
+    def list_subjects(self) -> Tuple[Project, ...]:
+        return tuple(
+            project
+            for project in self.list_projects()
+            if self._get_subject_material_link(project.project_id) is None
+        )
+
+    def list_subject_materials(self, subject_id: ProjectId) -> Tuple[StudyMaterial, ...]:
+        resolved_subject_id = self._resolve_subject_project_id(subject_id)
+        self._get_active_project_metadata(resolved_subject_id)
+        return self._list_subject_materials_from_store(resolved_subject_id)
+
+    def create_subject_material(
+        self,
+        subject_id: ProjectId,
+        *,
+        material_type: StudyMaterialType,
+        title: str | None = None,
+    ) -> StudyMaterial:
+        resolved_subject_id = self._resolve_subject_project_id(subject_id)
+        subject = self._get_active_project_metadata(resolved_subject_id)
+        normalized_title = str(title or "").strip() or self._default_material_title_for_type(material_type)
+        material_id = self._new_study_material_id(material_type)
+        source_kind, project_type = self._compatibility_project_options_for_material_type(material_type)
+        compatibility_project_id = self.create_project(
+            normalized_title if normalized_title else f"{subject.title}·{self._default_material_title_for_type(material_type)}",
+            initial_source_kind=source_kind,
+            initial_project_type=project_type,
+        )
+        material = StudyMaterial(
+            subject_id=subject.project_id,
+            material_id=material_id,
+            material_type=material_type,
+            title=normalized_title,
+            created_at=now_utc_ms(),
+            compatibility_project_id=compatibility_project_id,
+        )
+        try:
+            subject_session = self.sys.begin_session(resolved_subject_id, SessionMode.READ_WRITE)
+            try:
+                next_materials = {item.material_id: item for item in self._list_subject_materials_from_store(resolved_subject_id)}
+                next_materials[material.material_id] = material
+                subject_session._staged.study_materials = next_materials
+                subject_session._staged.study_materials_replaced = True
+                self.sys.commit(subject_session)
+            except Exception:
+                if subject_session.state == SessionState.OPEN:
+                    self.sys.rollback(subject_session)
+                raise
+
+            child_session = self.sys.begin_session(compatibility_project_id, SessionMode.READ_WRITE)
+            try:
+                child_session._staged.subject_material_link = SubjectMaterialLink(
+                    subject_id=resolved_subject_id,
+                    material_id=material.material_id,
+                    material_type=material.material_type,
+                )
+                child_session._staged.subject_material_link_replaced = True
+                self.sys.commit(child_session)
+            except Exception:
+                if child_session.state == SessionState.OPEN:
+                    self.sys.rollback(child_session)
+                raise
+        except Exception:
+            try:
+                self.delete_project(compatibility_project_id)
+            except Exception:
+                pass
+            raise
+        return material
+
+    def edit_subject_material(self, subject_id: ProjectId, material_id: str, *, title: str) -> StudyMaterial:
+        resolved_subject_id = self._resolve_subject_project_id(subject_id)
+        material = self._find_subject_material(resolved_subject_id, material_id)
+        compatibility_project_id = material.compatibility_project_id
+        if compatibility_project_id is None or id_canonical_text(compatibility_project_id) == id_canonical_text(resolved_subject_id):
+            raise PreconditionFailure("当前默认材料仍与学科根绑定，暂不支持单独重命名")
+        self.edit_project(compatibility_project_id, title)
+        return self._find_subject_material(resolved_subject_id, material_id)
+
+    def delete_subject_material(self, subject_id: ProjectId, material_id: str) -> None:
+        resolved_subject_id = self._resolve_subject_project_id(subject_id)
+        material = self._find_subject_material(resolved_subject_id, material_id)
+        compatibility_project_id = material.compatibility_project_id
+        if compatibility_project_id is None or id_canonical_text(compatibility_project_id) == id_canonical_text(resolved_subject_id):
+            raise PreconditionFailure("当前默认材料仍与学科根绑定，暂不支持删除")
+        self.delete_project(compatibility_project_id)
+
+    def list_membership_cleanup_project_ids(self, project_id: ProjectId) -> Tuple[ProjectId, ...]:
+        material_link = self._get_subject_material_link(project_id)
+        if material_link is not None:
+            return (project_id,)
+        related_project_ids = {id_canonical_text(project_id): project_id}
+        for material in self._list_subject_materials_from_store(project_id):
+            if material.compatibility_project_id is None:
+                continue
+            related_project_ids[id_canonical_text(material.compatibility_project_id)] = material.compatibility_project_id
+        return tuple(related_project_ids[key] for key in sorted(related_project_ids.keys()))
+
     def edit_project(self, project_id: ProjectId, title: str) -> None:
         self._ensure_startup_fs_sync_done(project_id)
+        material_link = self._get_subject_material_link(project_id)
         s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
         try:
             if title is None or not str(title).strip():
@@ -3515,8 +4098,54 @@ class SystemAPI:
             if s.state == SessionState.OPEN:
                 self.sys.rollback(s)
             raise
+        if material_link is not None:
+            subject_session = self.sys.begin_session(material_link.subject_id, SessionMode.READ_WRITE)
+            try:
+                next_materials = {
+                    item.material_id: item for item in self._list_subject_materials_from_store(material_link.subject_id)
+                }
+                current = next_materials.get(material_link.material_id)
+                if current is not None:
+                    next_materials[material_link.material_id] = StudyMaterial(
+                        subject_id=current.subject_id,
+                        material_id=current.material_id,
+                        material_type=current.material_type,
+                        title=str(title).strip(),
+                        created_at=current.created_at,
+                        compatibility_project_id=current.compatibility_project_id,
+                    )
+                    subject_session._staged.study_materials = next_materials
+                    subject_session._staged.study_materials_replaced = True
+                    self.sys.commit(subject_session)
+                else:
+                    self.sys.rollback(subject_session)
+            except Exception:
+                if subject_session.state == SessionState.OPEN:
+                    self.sys.rollback(subject_session)
+                raise
 
     def delete_project(self, project_id: ProjectId) -> None:
+        material_link = self._get_subject_material_link(project_id)
+        if material_link is not None:
+            subject_session = self.sys.begin_session(material_link.subject_id, SessionMode.READ_WRITE)
+            try:
+                next_materials = {
+                    item.material_id: item for item in self._list_subject_materials_from_store(material_link.subject_id)
+                }
+                next_materials.pop(material_link.material_id, None)
+                subject_session._staged.study_materials = next_materials
+                subject_session._staged.study_materials_replaced = True
+                self.sys.commit(subject_session)
+            except Exception:
+                if subject_session.state == SessionState.OPEN:
+                    self.sys.rollback(subject_session)
+                raise
+        else:
+            for material in self._list_subject_materials_from_store(project_id):
+                compatibility_project_id = material.compatibility_project_id
+                if compatibility_project_id is None or id_canonical_text(compatibility_project_id) == id_canonical_text(project_id):
+                    continue
+                self.delete_project(compatibility_project_id)
         sql_store = self._sql_store()
         if sql_store is not None:
             self._delete_project_sql_direct(sql_store, project_id)
@@ -3664,12 +4293,13 @@ class SystemAPI:
         project_id: ProjectId,
         *,
         outline_items: Sequence[tuple[int, str]],
+        api_name: str = "initialize_book_learning_objects",
     ) -> dict[str, object]:
         self._ensure_startup_fs_sync_done(project_id)
         s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
         try:
-            if self._project_type_in_session(s) != ProjectType.BOOK:
-                raise PreconditionFailure("initialize_book_learning_objects is only available for BOOK projects")
+            if self._project_type_in_session(s) not in {ProjectType.BOOK, ProjectType.MISTAKE_BOOK}:
+                raise PreconditionFailure("initialize_book_learning_objects is only available for BOOK/MISTAKE_BOOK projects")
             binding = self.sys.project_material_source_binding_repo.get(s)
             if binding.source_kind != MaterialSourceKind.MANUAL:
                 raise PreconditionFailure("initialize_book_learning_objects requires MANUAL source kind")
@@ -3799,7 +4429,7 @@ class SystemAPI:
             self._append_audit_event(
                 s,
                 kind=AuditEventKind.ADD_LEARNING_OBJECT_CONTAINER,
-                api_name="initialize_book_learning_objects",
+                api_name=api_name,
                 payload={
                     "createdInstancesCount": created_instances,
                     "createdLearningObjectNodesCount": created_nodes,
@@ -3807,14 +4437,366 @@ class SystemAPI:
                 },
             )
             self.sys.commit(s)
-            return {
+            result = {
                 "created_instances_count": int(created_instances),
                 "created_learning_object_nodes_count": int(created_nodes),
                 "root_count": int(root_count),
             }
+            self._best_effort_drive_idle_orchestration(project_id)
+            return result
         except Exception:
             if s.state == SessionState.OPEN:
                 self.sys.rollback(s)
+            raise
+
+    def _build_outline_items_from_learning_object_tree(self, project_id: ProjectId) -> Tuple[tuple[int, str], ...]:
+        self._ensure_startup_fs_sync_done(project_id)
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            nodes = tuple(sql_store.list_learning_object_nodes(str(project_id)))
+        else:
+            s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
+            try:
+                nodes = tuple(self.sys.learning_object_repo.all(s))
+            finally:
+                self.sys.rollback(s)
+
+        if not nodes:
+            raise PreconditionFailure("source material has no learning object tree")
+
+        node_by_id = {id_canonical_text(node.node_id): node for node in nodes}
+        root_ids = [
+            node.node_id
+            for node in nodes
+            if getattr(node, "parent_id", None) is None
+        ]
+        if not root_ids:
+            raise PreconditionFailure("source learning object tree has no roots")
+
+        def sort_key(node_id: LearningObjectNodeId) -> tuple[int, str, str, str]:
+            node = node_by_id[id_canonical_text(node_id)]
+            kind_rank = 0 if isinstance(node, LearningObjectContainer) else 1
+            relative_path = getattr(node, "relative_path", PurePosixPath(".")).as_posix()
+            return (
+                kind_rank,
+                relative_path,
+                str(getattr(node, "title", "")).strip(),
+                id_canonical_text(node_id),
+            )
+
+        outline_items: list[tuple[int, str]] = []
+        visiting: set[str] = set()
+        visited: set[str] = set()
+
+        def visit(node_id: LearningObjectNodeId, depth: int) -> None:
+            key = id_canonical_text(node_id)
+            node = node_by_id.get(key)
+            if node is None:
+                raise PreconditionFailure("source learning object tree contains a missing child reference")
+            if key in visiting:
+                raise PreconditionFailure("source learning object tree contains a cycle")
+            visiting.add(key)
+            try:
+                if isinstance(node, LearningObjectContainer) and self._is_synthetic_files_container_node(node):
+                    for child_id in node.children:
+                        visit(child_id, depth)
+                    return
+
+                title = str(getattr(node, "title", "") or "").strip()
+                if not title:
+                    raise PreconditionFailure("source learning object tree contains an untitled node")
+                outline_items.append((depth, title))
+
+                if isinstance(node, LearningObjectContainer):
+                    for child_id in node.children:
+                        visit(child_id, depth + 1)
+            finally:
+                visiting.discard(key)
+                visited.add(key)
+
+        for root_id in sorted(root_ids, key=sort_key):
+            visit(root_id, 0)
+
+        unvisited = [
+            node.node_id
+            for node in nodes
+            if id_canonical_text(node.node_id) not in visited
+        ]
+        if unvisited:
+            raise PreconditionFailure("source learning object tree contains orphaned nodes")
+
+        if not outline_items:
+            raise PreconditionFailure("source material has no reusable learning object nodes")
+        return tuple(outline_items)
+
+    def initialize_book_learning_objects_from_subject_material(
+        self,
+        project_id: ProjectId,
+        *,
+        source_material_id: str,
+    ) -> dict[str, object]:
+        resolved_subject_id = self._resolve_subject_project_id(project_id)
+        target_material_link = self._get_subject_material_link(project_id)
+        if target_material_link is None:
+            raise PreconditionFailure(
+                "initialize_book_learning_objects_from_subject_material requires a subject-bound book material"
+            )
+        target_material = self._find_subject_material(resolved_subject_id, target_material_link.material_id)
+        if target_material.material_type not in {StudyMaterialType.BOOK, StudyMaterialType.MISTAKE_BOOK}:
+            raise PreconditionFailure(
+                "initialize_book_learning_objects_from_subject_material is only available for BOOK/MISTAKE_BOOK materials"
+            )
+
+        source_material = self._find_subject_material(resolved_subject_id, source_material_id)
+        allowed_source_types = (
+            {StudyMaterialType.COURSE}
+            if target_material.material_type == StudyMaterialType.BOOK
+            else {StudyMaterialType.COURSE, StudyMaterialType.BOOK}
+        )
+        if source_material.material_type not in allowed_source_types:
+            raise PreconditionFailure(
+                "initialize_book_learning_objects_from_subject_material source material type is unsupported"
+            )
+        source_project_id = source_material.compatibility_project_id
+        if source_project_id is None:
+            raise PreconditionFailure("source material has no compatibility project")
+
+        outline_items = self._build_outline_items_from_learning_object_tree(source_project_id)
+        return self.initialize_book_learning_objects(
+            project_id,
+            outline_items=outline_items,
+            api_name="initialize_book_learning_objects_from_subject_material",
+        )
+
+    def _sorted_manual_leaf_nodes(self, s: MutationSession) -> list[LearningObjectLeaf]:
+        leaves = [node for node in self.sys.learning_object_repo.all(s) if isinstance(node, LearningObjectLeaf)]
+        leaves.sort(key=lambda node: (node.relative_path.as_posix(), str(node.title).strip(), id_canonical_text(node.node_id)))
+        return leaves
+
+    def _ensure_mistake_inbox_leaf_in_session(self, s: MutationSession) -> tuple[LearningObjectLeaf, bool]:
+        if self._project_type_in_session(s) != ProjectType.MISTAKE_BOOK:
+            raise PreconditionFailure("_ensure_mistake_inbox_leaf_in_session requires MISTAKE_BOOK project")
+
+        for leaf in self._sorted_manual_leaf_nodes(s):
+            if str(leaf.title).strip() == "待整理":
+                return leaf, False
+
+        instance_id = self.idgen.new_instance_id(s.project_id)
+        material_id = PurePosixPath(f"mistake_inbox/{instance_id}")
+        instance = Instance.create(s.project_id, instance_id, material_id, presence=InstancePresence.PRESENT, last_seen_at=None)
+        self.sys.instance_repo.add(s, instance)
+
+        node_id = self.idgen.new_learning_object_node_id(s.project_id)
+        leaf = LearningObjectLeaf(
+            source="MANUAL",
+            project_id=s.project_id,
+            node_id=node_id,
+            relative_path=material_id,
+            parent_id=None,
+            instance_id=instance_id,
+            title="待整理",
+        )
+        leaf.validate_write_time()
+        self.sys.learning_object_repo.add(s, leaf)
+        return leaf, True
+
+    def ensure_mistake_material_inbox(self, project_id: ProjectId) -> dict[str, object]:
+        self._ensure_startup_fs_sync_done(project_id)
+        s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
+        try:
+            if self._project_type_in_session(s) != ProjectType.MISTAKE_BOOK:
+                raise PreconditionFailure("ensure_mistake_material_inbox is only available for MISTAKE_BOOK projects")
+            binding = self.sys.project_material_source_binding_repo.get(s)
+            if binding.source_kind != MaterialSourceKind.MANUAL:
+                raise PreconditionFailure("ensure_mistake_material_inbox requires MANUAL source kind")
+
+            leaf, created = self._ensure_mistake_inbox_leaf_in_session(s)
+            self._append_audit_event(
+                s,
+                kind=AuditEventKind.ADD_LEARNING_OBJECT_LEAF,
+                api_name="ensure_mistake_material_inbox",
+                payload={"nodeId": str(leaf.node_id), "instanceId": str(leaf.instance_id), "created": bool(created)},
+            )
+            self.sys.commit(s)
+            return {
+                "created": bool(created),
+                "node_id": str(leaf.node_id),
+                "instance_id": str(leaf.instance_id),
+            }
+        except Exception:
+            if s.state == SessionState.OPEN:
+                self.sys.rollback(s)
+            raise
+
+    def _format_mistake_source_anchor_label(
+        self,
+        s: MutationSession,
+        *,
+        source_material_title: str,
+        recall_point: RecallPoint,
+    ) -> str:
+        parts: list[str] = [str(source_material_title or "").strip() or "来源材料"]
+        if recall_point.anchor is not None:
+            try:
+                instance = self.sys.instance_repo.get(s, recall_point.anchor.instance_id)
+                instance_title = str(instance.material_display_name).strip()
+                if instance_title:
+                    parts.append(instance_title)
+            except Exception:
+                pass
+            position = str(recall_point.anchor.position or "").strip()
+            if position:
+                parts.append(position)
+        else:
+            parts.append("未记录来源定位")
+        return self._truncate_for_llm_context(" · ".join([part for part in parts if part]), max_chars=240)
+
+    def collect_recall_point_to_subject_mistake_material(
+        self,
+        project_id: ProjectId,
+        recall_point_id: RecallPointId,
+        *,
+        target_material_id: str,
+        target_node_id: LearningObjectNodeId | None = None,
+        mistake_note: str | None = None,
+    ) -> dict[str, object]:
+        self._ensure_startup_fs_sync_done(project_id)
+        resolved_subject_id = self._resolve_subject_project_id(project_id)
+        source_material = self._resolve_current_material_for_project(project_id, resolved_subject_id)
+        target_material = self._find_subject_material(resolved_subject_id, target_material_id)
+        if target_material.material_type != StudyMaterialType.MISTAKE_BOOK:
+            raise PreconditionFailure("collect_recall_point_to_subject_mistake_material target material must be MISTAKE_BOOK")
+        target_project_id = target_material.compatibility_project_id
+        if target_project_id is None:
+            raise PreconditionFailure("target mistake material has no compatibility project")
+        if id_canonical_text(target_project_id) == id_canonical_text(project_id):
+            raise PreconditionFailure("collect_recall_point_to_subject_mistake_material target must differ from source project")
+
+        source_session = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
+        try:
+            source_recall_point = self.sys.recall_point_repo.get(source_session, recall_point_id)
+            if source_recall_point.state != RecallPointState.ACTIVE:
+                raise PreconditionFailure("collect_recall_point_to_subject_mistake_material source recall point must be ACTIVE")
+            source_anchor_label = self._format_mistake_source_anchor_label(
+                source_session,
+                source_material_title=source_material.title,
+                recall_point=source_recall_point,
+            )
+            source_question_text = self._truncate_for_llm_context(
+                self._rich_content_to_plain_text(source_recall_point.question),
+                max_chars=48,
+            )
+        finally:
+            self.sys.rollback(source_session)
+
+        target_session = self.sys.begin_session(target_project_id, SessionMode.READ_WRITE)
+        try:
+            if self._project_type_in_session(target_session) != ProjectType.MISTAKE_BOOK:
+                raise PreconditionFailure("collect_recall_point_to_subject_mistake_material target project must be MISTAKE_BOOK")
+
+            existing_duplicate = next(
+                (
+                    item
+                    for item in self.sys.recall_point_repo.all(target_session)
+                    if item.state == RecallPointState.ACTIVE
+                    and item.source_project_id is not None
+                    and item.source_recall_point_id is not None
+                    and id_canonical_text(item.source_project_id) == id_canonical_text(project_id)
+                    and id_canonical_text(item.source_recall_point_id) == id_canonical_text(recall_point_id)
+                ),
+                None,
+            )
+            if existing_duplicate is not None:
+                raise PreconditionFailure("collect_recall_point_to_subject_mistake_material source recall point already exists in target material")
+
+            created_inbox = False
+            if target_node_id is not None:
+                target_node = self.sys.learning_object_repo.get(target_session, target_node_id)
+                if not isinstance(target_node, LearningObjectLeaf):
+                    raise PreconditionFailure("collect_recall_point_to_subject_mistake_material target_node_id must resolve to leaf")
+                target_leaf = target_node
+            else:
+                leaves = self._sorted_manual_leaf_nodes(target_session)
+                if leaves:
+                    target_leaf = leaves[0]
+                else:
+                    target_leaf, created_inbox = self._ensure_mistake_inbox_leaf_in_session(target_session)
+
+            anchor = Anchor(instance_id=target_leaf.instance_id, position=source_anchor_label)
+            item_title = source_question_text or "错题记录"
+            learning_items = [
+                LearningItem(
+                    question=source_recall_point.question,
+                    answer=source_recall_point.answer,
+                    anchor=anchor,
+                    references=tuple(source_recall_point.references),
+                )
+            ]
+            res = learning_task_submit(
+                session=target_session,
+                id_gen=self.idgen,
+                instance_repo=self.sys.instance_repo,
+                recall_point_repo=self.sys.recall_point_repo,
+                learning_task_repo=self.sys.learning_task_repo,
+                learning_task_node_repo=self.sys.learning_task_node_repo,
+                items=learning_items,
+                title=f"错题 · {item_title}",
+                entry_node_title=f"错题 · {item_title}",
+            )
+            new_recall_point_id = res.recall_point_ids[0]
+            created_recall_point = self.sys.recall_point_repo.get(target_session, new_recall_point_id)
+            note_text = None if mistake_note is None or not str(mistake_note).strip() else str(mistake_note).strip()
+            updated_recall_point = RecallPoint(
+                project_id=created_recall_point.project_id,
+                recall_point_id=created_recall_point.recall_point_id,
+                created_at=created_recall_point.created_at,
+                question=created_recall_point.question,
+                answer=created_recall_point.answer,
+                anchor=created_recall_point.anchor,
+                references=tuple(created_recall_point.references),
+                insights=tuple(created_recall_point.insights),
+                source_project_id=project_id,
+                source_recall_point_id=recall_point_id,
+                source_material_id=source_material.material_id,
+                source_material_title=source_material.title,
+                source_anchor_label=source_anchor_label,
+                mistake_status=MistakeStatus.OPEN,
+                mistake_note=note_text,
+                state=created_recall_point.state,
+                deleted_at=created_recall_point.deleted_at,
+            )
+            self.sys.recall_point_repo.update(target_session, updated_recall_point)
+
+            target_layer_index = 0
+            self.sys.layer_repo.get_by_index(target_session, target_layer_index)
+            self._task_register(target_session, res.entry_node_id, target_layer_index)
+            self._enter_clearing_if_threshold_met(target_session, target_layer_index)
+
+            self._append_audit_event(
+                target_session,
+                kind=AuditEventKind.COLLECT_RECALL_POINT_TO_MISTAKE_BOOK,
+                api_name="collect_recall_point_to_subject_mistake_material",
+                payload={
+                    "sourceProjectId": str(project_id),
+                    "sourceRecallPointId": str(recall_point_id),
+                    "targetMaterialId": target_material.material_id,
+                    "targetNodeId": str(target_leaf.node_id),
+                    "targetRecallPointId": str(new_recall_point_id),
+                    "createdInbox": bool(created_inbox),
+                },
+            )
+            self.sys.commit(target_session)
+            self._best_effort_drive_idle_orchestration(target_project_id)
+            return {
+                "target_project_id": str(target_project_id),
+                "target_material_id": target_material.material_id,
+                "target_node_id": str(target_leaf.node_id),
+                "target_recall_point_id": str(new_recall_point_id),
+                "created_inbox": bool(created_inbox),
+            }
+        except Exception:
+            if target_session.state == SessionState.OPEN:
+                self.sys.rollback(target_session)
             raise
 
     def add_learning_object_leaf(
@@ -4047,6 +5029,7 @@ class SystemAPI:
     def sync_learning_objects_from_fs(self, project_id: ProjectId) -> dict[str, object]:
         report = self._run_sync_learning_objects_from_fs(project_id)
         self._startup_fs_sync_done.add(id_canonical_text(project_id))
+        self._best_effort_drive_idle_orchestration(project_id)
         return report
 
     # 4.5 3a
@@ -4143,7 +5126,17 @@ class SystemAPI:
                     question=rp.question,
                     answer=rp.answer,
                     anchor=Anchor(instance_id=to_instance_id, position=rp.anchor.position),
+                    references=tuple(rp.references),
                     insights=tuple(rp.insights),
+                    source_project_id=rp.source_project_id,
+                    source_recall_point_id=rp.source_recall_point_id,
+                    source_material_id=rp.source_material_id,
+                    source_material_title=rp.source_material_title,
+                    source_anchor_label=rp.source_anchor_label,
+                    mistake_status=rp.mistake_status,
+                    mistake_note=rp.mistake_note,
+                    state=rp.state,
+                    deleted_at=rp.deleted_at,
                 )
                 updated.validate_write_time()
                 self.sys.recall_point_repo.update(s, updated)
@@ -4184,6 +5177,7 @@ class SystemAPI:
             )
 
             self.sys.commit(s)
+            self._best_effort_drive_idle_orchestration(project_id)
             return changed
         except Exception:
             if s.state == SessionState.OPEN:
@@ -4402,6 +5396,17 @@ class SystemAPI:
                         question=rp.question,
                         answer=rp.answer,
                         anchor=Anchor(instance_id=InstanceId(new_key), position=rp.anchor.position),
+                        references=tuple(rp.references),
+                        insights=tuple(rp.insights),
+                        source_project_id=rp.source_project_id,
+                        source_recall_point_id=rp.source_recall_point_id,
+                        source_material_id=rp.source_material_id,
+                        source_material_title=rp.source_material_title,
+                        source_anchor_label=rp.source_anchor_label,
+                        mistake_status=rp.mistake_status,
+                        mistake_note=rp.mistake_note,
+                        state=rp.state,
+                        deleted_at=rp.deleted_at,
                     )
                     self.sys.recall_point_repo.update(s, updated)
 
@@ -4939,6 +5944,11 @@ class SystemAPI:
                     self.sys.commit(s)
                     continue
 
+                did_object_scan = self._scan_learning_object_isomorphic_roll_up_once(s)
+                if did_object_scan is not None:
+                    self.sys.commit(s)
+                    continue
+
                 did_trigger_a = self._trigger_a_tick_once(s)
                 if did_trigger_a:
                     self.sys.commit(s)
@@ -4965,7 +5975,10 @@ class SystemAPI:
     def submit_learning_task(
         self,
         project_id: ProjectId,
-        items: Sequence[tuple[RichContent, RichContent, Anchor | None]],
+        items: Sequence[
+            tuple[RichContent, RichContent, Anchor | None]
+            | tuple[RichContent, RichContent, Anchor | None, tuple[RecallPointId, ...]]
+        ],
         title: str,
     ) -> LearningTaskNodeId:
         self._ensure_startup_fs_sync_done(project_id)
@@ -4973,9 +5986,19 @@ class SystemAPI:
         try:
             if not self.sys.queue_repo.is_empty(s):
                 raise PreconditionFailure("Gate: queue not empty; submit_learning_task forbidden")
+            self._raise_if_actionable_missing_instances(s)
             target_layer_index = 0
 
-            for index, (_, _, anchor) in enumerate(items):
+            normalized_items: list[tuple[RichContent, RichContent, Anchor | None, tuple[RecallPointId, ...]]] = []
+            for raw_item in items:
+                if len(raw_item) == 3:
+                    question, answer, anchor = raw_item
+                    references = tuple()
+                else:
+                    question, answer, anchor, references = raw_item
+                normalized_items.append((question, answer, anchor, tuple(references)))
+
+            for index, (_, _, anchor, _) in enumerate(normalized_items):
                 self._validate_anchor_for_project_type(
                     s,
                     anchor=anchor,
@@ -4983,7 +6006,10 @@ class SystemAPI:
                     field_name=f"items[{index}].anchor",
                 )
 
-            li = [LearningItem(question=q, answer=a, anchor=anc) for (q, a, anc) in items]
+            li = [
+                LearningItem(question=q, answer=a, anchor=anc, references=references)
+                for (q, a, anc, references) in normalized_items
+            ]
             res = learning_task_submit(
                 session=s,
                 id_gen=self.idgen,
@@ -5007,7 +6033,7 @@ class SystemAPI:
                 s,
                 kind=AuditEventKind.SUBMIT_LEARNING_TASK,
                 api_name="submit_learning_task",
-                payload={"itemsCount": len(items), "entryNodeId": str(entry_node_id)},
+                payload={"itemsCount": len(normalized_items), "entryNodeId": str(entry_node_id)},
             )
             self.sys.commit(s)
             self._best_effort_drive_idle_orchestration(project_id)
@@ -5088,12 +6114,27 @@ class SystemAPI:
         question: RichContent,
         answer: RichContent,
         anchor: Anchor | None,
+        *,
+        mistake_status: MistakeStatus | None = None,
+        mistake_note: str | None = None,
     ) -> None:
         self._ensure_startup_fs_sync_done(project_id)
         s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
         try:
             cur = self.sys.recall_point_repo.get(s, recall_point_id)
-            self._validate_anchor_for_project_type(s, anchor=anchor, api_name="edit_recall_point")
+            project_type = self._validate_anchor_for_project_type(s, anchor=anchor, api_name="edit_recall_point")
+            if project_type != ProjectType.MISTAKE_BOOK and (mistake_status is not None or mistake_note is not None):
+                raise PreconditionFailure("edit_recall_point mistake fields are only available for MISTAKE_BOOK projects")
+            next_mistake_status = cur.mistake_status
+            next_mistake_note = cur.mistake_note
+            if project_type == ProjectType.MISTAKE_BOOK:
+                if mistake_status is not None:
+                    next_mistake_status = mistake_status
+                if mistake_note is not None:
+                    trimmed_note = str(mistake_note).strip()
+                    next_mistake_note = trimmed_note or None
+                if next_mistake_status is None:
+                    next_mistake_status = MistakeStatus.OPEN
             rp = RecallPoint(
                 project_id=project_id,
                 recall_point_id=recall_point_id,
@@ -5101,6 +6142,17 @@ class SystemAPI:
                 question=question,
                 answer=answer,
                 anchor=anchor,
+                references=tuple(cur.references),
+                insights=tuple(cur.insights),
+                source_project_id=cur.source_project_id,
+                source_recall_point_id=cur.source_recall_point_id,
+                source_material_id=cur.source_material_id,
+                source_material_title=cur.source_material_title,
+                source_anchor_label=cur.source_anchor_label,
+                mistake_status=next_mistake_status,
+                mistake_note=next_mistake_note,
+                state=cur.state,
+                deleted_at=cur.deleted_at,
             )
             self.sys.recall_point_repo.update(s, rp)
             self._append_audit_event(
@@ -5110,6 +6162,7 @@ class SystemAPI:
                 payload={"recallPointId": str(recall_point_id)},
             )
             self.sys.commit(s)
+            self._best_effort_drive_idle_orchestration(project_id)
         except Exception:
             if s.state == SessionState.OPEN:
                 self.sys.rollback(s)
@@ -5128,6 +6181,7 @@ class SystemAPI:
                 payload={"recallPointId": str(recall_point_id)},
             )
             self.sys.commit(s)
+            self._best_effort_drive_idle_orchestration(project_id)
         except Exception:
             if s.state == SessionState.OPEN:
                 self.sys.rollback(s)
@@ -5208,6 +6262,9 @@ class SystemAPI:
                 parent_id=node.parent_id,
                 children=tuple(node.children),
                 title=str(title).strip(),
+                node_origin=node.node_origin,
+                bound_learning_object_node_id=node.bound_learning_object_node_id,
+                object_mirror_status=node.object_mirror_status,
             )
             updated_node.validate_write_time()
 
@@ -5268,6 +6325,7 @@ class SystemAPI:
                 project_type=cfg.project_type,
                 layer_configs=layer_configs,
                 push_config=cfg.push_config,
+                roll_up_strategy=cfg.roll_up_strategy,
                 updated_at=now_utc_ms(),
             )
             next_cfg.validate_write_time()
@@ -5289,6 +6347,34 @@ class SystemAPI:
             )
 
             self.sys.commit(s)
+        except Exception:
+            if s.state == SessionState.OPEN:
+                self.sys.rollback(s)
+            raise
+
+    def set_project_roll_up_strategy(self, project_id: ProjectId, roll_up_strategy: RollUpStrategy) -> None:
+        self._ensure_startup_fs_sync_done(project_id)
+        s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
+        try:
+            cfg = self.sys.project_config_repo.get(s)
+            next_cfg = ProjectConfig(
+                project_id=cfg.project_id,
+                project_type=cfg.project_type,
+                layer_configs=dict(cfg.layer_configs),
+                push_config=cfg.push_config,
+                roll_up_strategy=roll_up_strategy,
+                updated_at=now_utc_ms(),
+            )
+            next_cfg.validate_write_time()
+            self.sys.project_config_repo.set(s, next_cfg)
+            self._append_audit_event(
+                s,
+                kind=AuditEventKind.EDIT_PROJECT_CONFIG,
+                api_name="set_project_roll_up_strategy",
+                payload={"rollUpStrategy": roll_up_strategy.value},
+            )
+            self.sys.commit(s)
+            self._best_effort_drive_idle_orchestration(project_id)
         except Exception:
             if s.state == SessionState.OPEN:
                 self.sys.rollback(s)
@@ -5333,6 +6419,7 @@ class SystemAPI:
                 project_type=cfg.project_type,
                 layer_configs=dict(cfg.layer_configs),
                 push_config=next_push_cfg,
+                roll_up_strategy=cfg.roll_up_strategy,
                 updated_at=now_utc_ms(),
             )
             next_cfg.validate_write_time()
@@ -5512,6 +6599,24 @@ class SystemAPI:
         try:
             if not self.sys.queue_repo.is_empty(s):
                 raise PreconditionFailure("manual_roll_up gate: queue not empty")
+            self._raise_if_actionable_missing_instances(s)
+            if self._is_learning_object_isomorphic_roll_up_enabled(s):
+                entry_node_id = self._scan_learning_object_isomorphic_roll_up_once(s)
+                if entry_node_id is None:
+                    self.sys.rollback(s)
+                    return None
+                self._append_audit_event(
+                    s,
+                    kind=AuditEventKind.MANUAL_ROLL_UP,
+                    api_name="manual_roll_up",
+                    payload={
+                        "strategy": RollUpStrategy.LEARNING_OBJECT_ISOMORPHIC.value,
+                        "entryNodeId": str(entry_node_id),
+                    },
+                )
+                self.sys.commit(s)
+                self._best_effort_drive_idle_orchestration(project_id)
+                return entry_node_id
 
             try:
                 parent_node_id, candidates, created = self._roll_up_phase_a(
@@ -6750,6 +7855,53 @@ class SystemAPI:
         finally:
             self.sys.rollback(s)
 
+    def list_recall_points(self, project_id: ProjectId) -> Tuple[RecallPoint, ...]:
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            items = sql_store.list_recall_points(str(project_id))
+        else:
+            s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
+            try:
+                items = self.sys.recall_point_repo.all(s)
+            finally:
+                self.sys.rollback(s)
+        return tuple(
+            sorted(
+                (item for item in items if item.state == RecallPointState.ACTIVE),
+                key=lambda item: (
+                    int(item.created_at.timestamp() * 1000) if item.created_at is not None else 0,
+                    id_canonical_text(item.recall_point_id),
+                ),
+            )
+        )
+
+    def search_recall_points(
+        self,
+        project_id: ProjectId,
+        *,
+        query: str | None = None,
+        limit: int = 20,
+    ) -> Tuple[RecallPoint, ...]:
+        normalized_query = str(query or "").strip().lower()
+        resolved_limit = max(1, min(int(limit), 50))
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            return sql_store.search_recall_points(str(project_id), query=normalized_query or None, limit=resolved_limit)
+        out: list[RecallPoint] = []
+        for item in reversed(self.list_recall_points(project_id)):
+            if normalized_query:
+                search_text = (
+                    f"{item.recall_point_id} "
+                    f"{self._rich_content_to_plain_text(item.question)} "
+                    f"{self._rich_content_to_plain_text(item.answer)}"
+                ).lower()
+                if normalized_query not in search_text:
+                    continue
+            out.append(item)
+            if len(out) >= resolved_limit:
+                break
+        return tuple(out)
+
     def list_layers(self, project_id: ProjectId) -> Tuple[Layer, ...]:
         sql_store = self._sql_store()
         if sql_store is not None:
@@ -6848,6 +8000,9 @@ API_WHITELIST: dict[str, SchedulingEffect] = {
     "delete_project": SchedulingEffect.NONE,
     "add_instance": SchedulingEffect.NONE,
     "initialize_book_learning_objects": SchedulingEffect.NONE,
+    "initialize_book_learning_objects_from_subject_material": SchedulingEffect.NONE,
+    "ensure_mistake_material_inbox": SchedulingEffect.NONE,
+    "collect_recall_point_to_subject_mistake_material": SchedulingEffect.ORCHESTRATION_MUTATING,
     "add_learning_object_leaf": SchedulingEffect.NONE,
     "add_learning_object_container": SchedulingEffect.NONE,
     "sync_learning_objects_from_fs": SchedulingEffect.NONE,
@@ -6872,10 +8027,13 @@ API_WHITELIST: dict[str, SchedulingEffect] = {
     "get_convergence": SchedulingEffect.NONE,
     "get_review_chain": SchedulingEffect.NONE,
     "get_review_chain_entry_registration": SchedulingEffect.NONE,
+    "list_recall_points": SchedulingEffect.NONE,
+    "search_recall_points": SchedulingEffect.NONE,
     "edit_recall_point": SchedulingEffect.NONE,
     "delete_recall_point": SchedulingEffect.NONE,
     "edit_learning_task": SchedulingEffect.NONE,
     "set_layer_config": SchedulingEffect.NONE,
+    "set_project_roll_up_strategy": SchedulingEffect.ORCHESTRATION_MUTATING,
     "set_review_recommendation_config": SchedulingEffect.NONE,
     "executor_commit_review_task": SchedulingEffect.ORCHESTRATION_MUTATING,
     "manual_roll_up": SchedulingEffect.ORCHESTRATION_MUTATING,

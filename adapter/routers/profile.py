@@ -7,10 +7,23 @@ from fastapi.responses import FileResponse
 
 from adapter.auth import SESSION_COOKIE_NAME, require_request_auth_user
 from adapter.deps import get_api, get_auth_store
-from adapter.schemas import ChangePasswordRequest, UpdateProfileRequest, UpdateUserServiceSettingsRequest
+from adapter.schemas import (
+    ChangePasswordRequest,
+    LearningPlansPayloadDTO,
+    SyncStudyMetricsRequest,
+    UpdateProfileRequest,
+    UpdateUserGlobalSettingsRequest,
+    UpdateUserServiceSettingsRequest,
+)
 from backend.system.api import SystemAPI
 from backend.system.app_paths import default_data_dir
-from backend.system.auth_store import AuthStore, AuthUser
+from backend.system.auth_store import (
+    AuthStore,
+    AuthUser,
+    UserGlobalSettings,
+    UserProjectDailyStudyStat,
+    UserProjectDailyStudyStatInput,
+)
 from backend.system.baidu_netdisk_client import BAIDU_NETDISK_PROVIDER
 
 router = APIRouter()
@@ -61,6 +74,75 @@ def _public_user_to_dto(user: AuthUser) -> dict[str, str | None]:
         "bio": user.bio,
         "avatarUrl": _avatar_url_for_user(user),
     }
+
+
+def _study_stat_to_dto(item: UserProjectDailyStudyStat) -> dict:
+    def map_ranges(ranges: tuple[tuple[int, int], ...]) -> list[dict[str, int]]:
+        return [{"startMs": int(start_ms), "endMs": int(end_ms)} for start_ms, end_ms in ranges]
+
+    return {
+        "projectId": item.project_id,
+        "dateKey": item.date_key,
+        "effectiveMs": item.effective_ms,
+        "watchMs": item.watch_ms,
+        "composeMs": item.compose_ms,
+        "reviewMs": item.review_ms,
+        "qaMs": item.qa_ms,
+        "effectiveRanges": map_ranges(item.effective_ranges),
+        "watchRanges": map_ranges(item.watch_ranges),
+        "composeRanges": map_ranges(item.compose_ranges),
+        "reviewRanges": map_ranges(item.review_ranges),
+        "qaRanges": map_ranges(item.qa_ranges),
+        "updatedAt": item.updated_at,
+    }
+
+
+def _global_settings_to_dto(item: UserGlobalSettings) -> dict:
+    template = []
+    for step in item.default_project_review_template:
+        if step.kind == "REVIEW_TASK" and int(step.count or 1) > 1:
+            template.append({"kind": "REVIEW_TASK", "count": int(step.count or 1)})
+        else:
+            template.append({"kind": step.kind})
+    weekly_schedule = {}
+    for day in item.pomodoro_weekly_schedule:
+        weekly_schedule[day.day_key] = {
+            "enabled": day.enabled,
+            "startTime": day.start_time,
+            "focusMinutes": day.focus_minutes,
+            "breakMinutes": day.break_minutes,
+            "pomodoroCount": day.pomodoro_count,
+            "projectIds": list(day.project_ids),
+            "breakPrompt": day.break_prompt,
+            "focusPrompts": list(day.focus_prompts),
+        }
+    return {
+        "theme": item.theme,
+        "pomodoro": {
+            "enabled": item.pomodoro_enabled,
+            "transitionSoundEnabled": item.pomodoro_transition_sound_enabled,
+            "weeklySchedule": weekly_schedule,
+        },
+        "defaultProjectReviewTemplate": template,
+        "learningPlans": item.learning_plans,
+        "updatedAt": item.updated_at,
+    }
+
+
+def _learning_plans_to_dto(payload: dict) -> dict:
+    dto = LearningPlansPayloadDTO(**payload)
+    return dto.dict()
+
+
+def _require_owned_project_ids(user_id: str, project_ids: list[str], auth_store: AuthStore) -> list[str]:
+    normalized = list(dict.fromkeys(str(project_id).strip() for project_id in project_ids if str(project_id).strip()))
+    if not normalized:
+        return []
+    allowed = set(auth_store.list_project_ids_for_user(user_id))
+    forbidden = [project_id for project_id in normalized if project_id not in allowed]
+    if forbidden:
+        raise HTTPException(status_code=403, detail=f"Project access denied: {forbidden[0]}")
+    return normalized
 
 
 @router.get("/profile/me")
@@ -156,6 +238,55 @@ def update_my_asr_settings(
     }
 
 
+@router.get("/profile/me/global-settings")
+def get_my_global_settings(
+    request: Request,
+    auth_store: AuthStore = Depends(get_auth_store),
+) -> dict:
+    user = require_request_auth_user(request)
+    return {"ok": True, "data": _global_settings_to_dto(auth_store.get_user_global_settings(user.user_id))}
+
+
+@router.put("/profile/me/global-settings")
+def update_my_global_settings(
+    req: UpdateUserGlobalSettingsRequest,
+    request: Request,
+    auth_store: AuthStore = Depends(get_auth_store),
+) -> dict:
+    user = require_request_auth_user(request)
+    updated = auth_store.upsert_user_global_settings(
+        user.user_id,
+        theme=req.theme,
+        pomodoro_enabled=bool(req.pomodoro.enabled),
+        pomodoro_transition_sound_enabled=bool(req.pomodoro.transitionSoundEnabled),
+        pomodoro_weekly_schedule=req.pomodoro.weeklySchedule.dict(),
+        default_project_review_template=(
+            {"kind": item.kind, "count": item.count} for item in req.defaultProjectReviewTemplate
+        ),
+    )
+    return {"ok": True, "data": _global_settings_to_dto(updated)}
+
+
+@router.get("/profile/me/learning-plans")
+def get_my_learning_plans(
+    request: Request,
+    auth_store: AuthStore = Depends(get_auth_store),
+) -> dict:
+    user = require_request_auth_user(request)
+    return {"ok": True, "data": _learning_plans_to_dto(auth_store.get_user_learning_plans(user.user_id))}
+
+
+@router.put("/profile/me/learning-plans")
+def update_my_learning_plans(
+    req: LearningPlansPayloadDTO,
+    request: Request,
+    auth_store: AuthStore = Depends(get_auth_store),
+) -> dict:
+    user = require_request_auth_user(request)
+    updated = auth_store.upsert_user_learning_plans(user.user_id, learning_plans=req.dict())
+    return {"ok": True, "data": _learning_plans_to_dto(updated)}
+
+
 @router.get("/profile/me/cloud-accounts/baidu-netdisk")
 def list_my_baidu_netdisk_accounts(
     request: Request,
@@ -237,3 +368,43 @@ def find_user_by_public_uid(publicUid: str, auth_store: AuthStore = Depends(get_
     if user.status != "active":
         raise HTTPException(status_code=404, detail="User not found")
     return {"ok": True, "data": _public_user_to_dto(user)}
+
+
+@router.post("/profile/me/study-metrics/sync")
+def sync_my_study_metrics(
+    req: SyncStudyMetricsRequest,
+    request: Request,
+    auth_store: AuthStore = Depends(get_auth_store),
+) -> dict:
+    user = require_request_auth_user(request)
+    entry_project_ids = [entry.projectId for entry in req.entries]
+    requested_project_ids = _require_owned_project_ids(user.user_id, [*req.projectIds, *entry_project_ids], auth_store)
+    if not requested_project_ids:
+        return {"ok": True, "data": []}
+
+    entries = tuple(
+        UserProjectDailyStudyStatInput.create(
+            project_id=entry.projectId,
+            date_key=entry.dateKey,
+            effective_ms=entry.effectiveMs,
+            watch_ms=entry.watchMs,
+            compose_ms=entry.composeMs,
+            review_ms=entry.reviewMs,
+            qa_ms=entry.qaMs,
+            effective_ranges=((item.startMs, item.endMs) for item in entry.effectiveRanges),
+            watch_ranges=((item.startMs, item.endMs) for item in entry.watchRanges),
+            compose_ranges=((item.startMs, item.endMs) for item in entry.composeRanges),
+            review_ranges=((item.startMs, item.endMs) for item in entry.reviewRanges),
+            qa_ranges=((item.startMs, item.endMs) for item in entry.qaRanges),
+        )
+        for entry in req.entries
+    )
+    if entries:
+        auth_store.upsert_user_project_daily_study_stats(user.user_id, entries=entries)
+    items = auth_store.list_user_project_daily_study_stats(
+        user.user_id,
+        project_ids=requested_project_ids,
+        date_from=req.dateFrom,
+        date_to=req.dateTo,
+    )
+    return {"ok": True, "data": [_study_stat_to_dto(item) for item in items]}

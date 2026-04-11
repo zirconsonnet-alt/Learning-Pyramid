@@ -55,8 +55,11 @@ export function RollupPane({
   learningTaskNodesById,
   learningTaskNodesLoading,
   queueHasGate,
+  actionableMissingGate,
+  actionableMissingInstanceCount,
   isRollingUp,
   isThresholdRollUpUpdating,
+  rollUpStrategy,
   onRollUp,
   onToggleThresholdRollUp,
   rollUpError,
@@ -69,8 +72,11 @@ export function RollupPane({
   learningTaskNodesById: Record<string, LearningTaskNode>
   learningTaskNodesLoading: boolean
   queueHasGate: boolean
+  actionableMissingGate: boolean
+  actionableMissingInstanceCount: number
   isRollingUp: boolean
   isThresholdRollUpUpdating: boolean
+  rollUpStrategy: "MANUAL" | "THRESHOLD_AUTO" | "LEARNING_OBJECT_ISOMORPHIC"
   onRollUp: (layerIndex: number) => void
   onToggleThresholdRollUp: (layerIndex: number, enabled: boolean) => void
   rollUpError: unknown
@@ -112,6 +118,16 @@ export function RollupPane({
   const selectedCandidateCount = selectedNodeIds.length
   const selectedSourceLayerIndex = selectedLayer ? Math.max(0, selectedLayer.layerIndex - 1) : 0
   const selectedThresholdRollUpEnabled = selectedLayer ? (thresholdRollUpEnabledByLayerIndex[selectedLayer.layerIndex] ?? true) : true
+  const isThresholdStrategy = rollUpStrategy === "THRESHOLD_AUTO"
+  const isIsomorphicStrategy = rollUpStrategy === "LEARNING_OBJECT_ISOMORPHIC"
+  const actionLayerIndex = selectedLayer?.layerIndex ?? 0
+  const strategyBannerTone = isIsomorphicStrategy
+    ? "border-sky-200 bg-sky-50/80 text-sky-900"
+    : !isThresholdStrategy
+      ? "border-slate-200 bg-slate-50/80 text-slate-900"
+      : selectedThresholdRollUpEnabled
+        ? "border-emerald-200 bg-emerald-50/70 text-emerald-800"
+        : "border-amber-200 bg-amber-50/80 text-amber-900"
 
   function goToLayer(position: number) {
     const nextLayer = layers[position]
@@ -132,25 +148,32 @@ export function RollupPane({
         </div>
 
         <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row">
+          {isThresholdStrategy ? (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                if (selectedLayer) onToggleThresholdRollUp(selectedLayer.layerIndex, !selectedThresholdRollUpEnabled)
+              }}
+              disabled={isThresholdRollUpUpdating || !selectedLayer}
+              className="w-full whitespace-nowrap md:w-auto"
+            >
+              {isThresholdRollUpUpdating ? "保存中..." : selectedThresholdRollUpEnabled ? "禁止阈值上推" : "恢复阈值上推"}
+            </Button>
+          ) : null}
           <Button
-            type="button"
-            variant="outline"
             onClick={() => {
-              if (selectedLayer) onToggleThresholdRollUp(selectedLayer.layerIndex, !selectedThresholdRollUpEnabled)
+              if (isIsomorphicStrategy || selectedLayer) onRollUp(actionLayerIndex)
             }}
-            disabled={isThresholdRollUpUpdating || !selectedLayer}
+            disabled={
+              queueHasGate ||
+              actionableMissingGate ||
+              isRollingUp ||
+              (isIsomorphicStrategy ? false : !selectedLayer || selectedAggregationQueueQ?.isLoading || selectedCandidateCount === 0)
+            }
             className="w-full whitespace-nowrap md:w-auto"
           >
-            {isThresholdRollUpUpdating ? "保存中..." : selectedThresholdRollUpEnabled ? "禁止阈值上推" : "恢复阈值上推"}
-          </Button>
-          <Button
-            onClick={() => {
-              if (selectedLayer) onRollUp(selectedLayer.layerIndex)
-            }}
-            disabled={queueHasGate || isRollingUp || !selectedLayer || selectedAggregationQueueQ?.isLoading || selectedCandidateCount === 0}
-            className="w-full whitespace-nowrap md:w-auto"
-          >
-            {isRollingUp ? "上推中..." : "上推"}
+            {isRollingUp ? "处理中..." : isIsomorphicStrategy ? "重新扫描对象树推进" : "上推"}
           </Button>
         </div>
       </CardHeader>
@@ -160,10 +183,14 @@ export function RollupPane({
           <div
             className={cn(
               "rounded-2xl border p-4 text-sm",
-              selectedThresholdRollUpEnabled ? "border-emerald-200 bg-emerald-50/70 text-emerald-800" : "border-amber-200 bg-amber-50/80 text-amber-900",
+              strategyBannerTone,
             )}
           >
-            {selectedThresholdRollUpEnabled
+            {isIsomorphicStrategy
+              ? "当前项目使用学习对象树同构上推。只要某个对象节点下的实例都已有活跃复述点，系统就会把它推进到对应层级。"
+              : !isThresholdStrategy
+                ? "当前项目使用手动上推模式。系统不会自动按阈值推进，你可以在合适的时候手动触发。"
+                : selectedThresholdRollUpEnabled
               ? `L${selectedLayer.layerIndex} 当前已开启阈值自动上推。达到节点数或复述点阈值后，系统会自动进入聚合周期。`
               : `L${selectedLayer.layerIndex} 当前已关闭阈值自动上推。达到阈值后不会自动上推，你仍然可以手动点击“上推”。`}
           </div>
@@ -174,12 +201,21 @@ export function RollupPane({
             门禁：队列非空时暂不能上推。请先完成当前复习任务，再继续层级推进。
           </div>
         ) : null}
+        {actionableMissingGate ? (
+          <div className="rounded-2xl border border-amber-300/70 bg-amber-50 p-4 text-sm text-amber-900">
+            门禁：当前还有 {actionableMissingInstanceCount} 个待迁移的缺失实例。请先去项目设置完成修复，再继续推进结构。
+          </div>
+        ) : null}
 
         {layersLoading ? <div className="theme-subtle-surface px-4 py-4 text-sm">正在加载层级任务...</div> : null}
         {layersError ? <p className="text-sm text-destructive">{formatApiError(layersError)}</p> : null}
 
         {!layersLoading && !layersError && layers.length === 0 ? (
-          <ContentEmptyState icon={Sparkles} title="当前还没有层配置" message="等学习任务逐步形成层级结构后，这里就会出现可推进的层。" />
+          <ContentEmptyState
+            icon={Sparkles}
+            title={isIsomorphicStrategy ? "当前还没有对象镜像层" : "当前还没有层配置"}
+            message={isIsomorphicStrategy ? "继续学习后，系统会按学习对象树自动生成对应层级；你也可以点击上方按钮重新扫描。" : "等学习任务逐步形成层级结构后，这里就会出现可推进的层。"}
+          />
         ) : null}
 
         {!layersLoading && !layersError && layers.length > 0 ? (

@@ -4,9 +4,13 @@ import {
   changeMyPassword,
   findUserByUid,
   getMyAsrSettings,
+  getMyGlobalSettings,
+  getMyLearningPlans,
   getMyLlmSettings,
   getMyProfile,
   updateMyAsrSettings,
+  updateMyGlobalSettings,
+  updateMyLearningPlans,
   updateMyLlmSettings,
   updateMyProfile,
   uploadMyAvatar,
@@ -87,6 +91,47 @@ export function useUpdateMyAsrSettings() {
     mutationFn: updateMyAsrSettings,
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["profile", "me", "asrSettings"] })
+    },
+  })
+}
+
+export function useMyGlobalSettings(enabled = true) {
+  return useQuery({
+    queryKey: ["profile", "me", "globalSettings"],
+    queryFn: getMyGlobalSettings,
+    enabled,
+    staleTime: 30_000,
+  })
+}
+
+export function useUpdateMyGlobalSettings() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: updateMyGlobalSettings,
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["profile", "me", "globalSettings"] })
+    },
+  })
+}
+
+export function useMyLearningPlans(enabled = true) {
+  return useQuery({
+    queryKey: ["profile", "me", "learningPlans"],
+    queryFn: getMyLearningPlans,
+    enabled,
+    staleTime: 30_000,
+  })
+}
+
+export function useUpdateMyLearningPlans() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: updateMyLearningPlans,
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["profile", "me", "learningPlans"] }),
+        qc.invalidateQueries({ queryKey: ["profile", "me", "globalSettings"] }),
+      ])
     },
   })
 }

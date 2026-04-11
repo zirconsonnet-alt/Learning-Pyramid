@@ -93,6 +93,49 @@ def _commit_review(client: TestClient, project_id: str, review_task_id: str, can
     assert response.status_code == 200
 
 
+def _sync_study_metrics(
+    client: TestClient,
+    project_id: str,
+    *,
+    date_key: str,
+    effective_ms: int,
+    watch_ms: int,
+    compose_ms: int,
+    review_ms: int,
+    qa_ms: int,
+    effective_ranges: list[dict[str, int]],
+    watch_ranges: list[dict[str, int]],
+    compose_ranges: list[dict[str, int]],
+    review_ranges: list[dict[str, int]],
+    qa_ranges: list[dict[str, int]],
+) -> None:
+    response = client.post(
+        "/api/profile/me/study-metrics/sync",
+        json={
+            "projectIds": [project_id],
+            "dateFrom": date_key,
+            "dateTo": date_key,
+            "entries": [
+                {
+                    "projectId": project_id,
+                    "dateKey": date_key,
+                    "effectiveMs": effective_ms,
+                    "watchMs": watch_ms,
+                    "composeMs": compose_ms,
+                    "reviewMs": review_ms,
+                    "qaMs": qa_ms,
+                    "effectiveRanges": effective_ranges,
+                    "watchRanges": watch_ranges,
+                    "composeRanges": compose_ranges,
+                    "reviewRanges": review_ranges,
+                    "qaRanges": qa_ranges,
+                }
+            ],
+        },
+    )
+    assert response.status_code == 200
+
+
 def test_friend_request_accept_list_and_delete_flow(auth_env: None) -> None:
     app = create_app()
     alice_client = TestClient(app)
@@ -247,9 +290,41 @@ def test_friend_profile_and_leaderboard_include_learning_stats(auth_env: None) -
     alice_project_id = _create_project(alice_client, "Alice Stats Project")
     _submit_single_item_learning_task(alice_client, alice_project_id, "Alice Task")
     _commit_review(alice_client, alice_project_id, _queue_head(alice_client, alice_project_id), [1])
+    _sync_study_metrics(
+        alice_client,
+        alice_project_id,
+        date_key="2026-04-09",
+        effective_ms=45_000,
+        watch_ms=20_000,
+        compose_ms=15_000,
+        review_ms=10_000,
+        qa_ms=0,
+        effective_ranges=[{"startMs": 0, "endMs": 45_000}],
+        watch_ranges=[{"startMs": 0, "endMs": 20_000}],
+        compose_ranges=[{"startMs": 20_000, "endMs": 35_000}],
+        review_ranges=[{"startMs": 35_000, "endMs": 45_000}],
+        qa_ranges=[],
+    )
 
     bob_project_id = _create_project(bob_client, "Bob Stats Project")
     _submit_single_item_learning_task(bob_client, bob_project_id, "Bob Task")
+    _commit_review(bob_client, bob_project_id, _queue_head(bob_client, bob_project_id), [1])
+    _submit_single_item_learning_task(bob_client, bob_project_id, "Bob Task 2")
+    _sync_study_metrics(
+        bob_client,
+        bob_project_id,
+        date_key="2026-04-09",
+        effective_ms=30_000,
+        watch_ms=18_000,
+        compose_ms=12_000,
+        review_ms=0,
+        qa_ms=0,
+        effective_ranges=[{"startMs": 0, "endMs": 30_000}],
+        watch_ranges=[{"startMs": 0, "endMs": 18_000}],
+        compose_ranges=[{"startMs": 18_000, "endMs": 30_000}],
+        review_ranges=[],
+        qa_ranges=[],
+    )
 
     friend_profile = alice_client.get(f"/api/friends/{bob['userId']}/profile")
     assert friend_profile.status_code == 200
@@ -257,9 +332,14 @@ def test_friend_profile_and_leaderboard_include_learning_stats(auth_env: None) -
     assert friend_profile_data["userId"] == bob["userId"]
     assert friend_profile_data["publicUid"] == bob["publicUid"]
     assert friend_profile_data["stats"]["projectCount"] == 1
-    assert friend_profile_data["stats"]["learningCount"] == 1
-    assert friend_profile_data["stats"]["reviewCount"] == 0
-    assert friend_profile_data["stats"]["totalActions"] == 1
+    assert friend_profile_data["stats"]["effectiveMs"] == 30_000
+    assert friend_profile_data["stats"]["watchMs"] == 18_000
+    assert friend_profile_data["stats"]["composeMs"] == 12_000
+    assert friend_profile_data["stats"]["reviewMs"] == 0
+    assert friend_profile_data["stats"]["qaMs"] == 0
+    assert friend_profile_data["stats"]["learningCount"] == 2
+    assert friend_profile_data["stats"]["reviewCount"] == 1
+    assert friend_profile_data["stats"]["totalActions"] == 3
     assert friend_profile_data["stats"]["studyDays"] == 1
     assert friend_profile_data["stats"]["lastStudyAt"] is not None
 
@@ -268,6 +348,7 @@ def test_friend_profile_and_leaderboard_include_learning_stats(auth_env: None) -
     leaderboard_data = leaderboard.json()["data"]
     assert leaderboard_data[0]["user"]["userId"] == alice["userId"]
     assert leaderboard_data[0]["isSelf"] is True
+    assert leaderboard_data[0]["stats"]["effectiveMs"] == 45_000
     assert leaderboard_data[0]["stats"]["learningCount"] == 1
     assert leaderboard_data[0]["stats"]["reviewCount"] == 1
     assert leaderboard_data[0]["stats"]["totalActions"] == 2
@@ -275,9 +356,10 @@ def test_friend_profile_and_leaderboard_include_learning_stats(auth_env: None) -
     bob_entry = next(item for item in leaderboard_data if item["user"]["userId"] == bob["userId"])
     assert bob_entry["isSelf"] is False
     assert bob_entry["friendedAt"] is not None
-    assert bob_entry["stats"]["learningCount"] == 1
-    assert bob_entry["stats"]["reviewCount"] == 0
-    assert bob_entry["stats"]["totalActions"] == 1
+    assert bob_entry["stats"]["effectiveMs"] == 30_000
+    assert bob_entry["stats"]["learningCount"] == 2
+    assert bob_entry["stats"]["reviewCount"] == 1
+    assert bob_entry["stats"]["totalActions"] == 3
 
     denied = charlie_client.get(f"/api/friends/{bob['userId']}/profile")
     assert denied.status_code == 404

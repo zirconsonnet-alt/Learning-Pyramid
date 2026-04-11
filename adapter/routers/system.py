@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from adapter.auth import get_request_auth_user
@@ -11,6 +11,7 @@ from adapter.schemas import (
     AskLlmRequest,
     AskProjectLlmRawChatCompletionRequest,
     AskProjectLlmRequest,
+    PomodoroTtsPreviewRequest,
     UpdateGlobalLlmSettingsRequest,
 )
 from adapter.runtime_status import collect_runtime_status
@@ -19,6 +20,7 @@ from backend.models.errors import ExternalServiceError, NotFound, PreconditionFa
 from backend.system.runtime_features import current_runtime_features
 from backend.system.api import SystemAPI
 from backend.system.auth_store import AuthStore
+from backend.system.pomodoro_tts import PomodoroTtsUnavailable, synthesize_pomodoro_prompt_audio
 from backend.system.public_downloads import list_public_downloads
 
 
@@ -85,6 +87,22 @@ def get_system_runtime(
 @router.get("/system/public-downloads")
 def get_public_download_catalog() -> dict:
     return {"ok": True, "data": list_public_downloads()}
+
+
+@router.post("/system/pomodoro/tts-preview")
+async def synthesize_pomodoro_tts_preview(req: PomodoroTtsPreviewRequest) -> Response:
+    try:
+        audio_bytes = await synthesize_pomodoro_prompt_audio(req.text)
+    except PomodoroTtsUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return Response(
+        content=audio_bytes,
+        media_type="audio/mpeg",
+        headers={
+            "Cache-Control": "no-store",
+            "Content-Disposition": 'inline; filename="pomodoro-preview.mp3"',
+        },
+    )
 
 
 @router.get("/system/global-llm-settings")

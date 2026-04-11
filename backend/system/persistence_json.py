@@ -23,12 +23,16 @@ from backend.models.enums import (
     FsSyncPolicy,
     InstancePresence,
     LayerMode,
+    LearningTaskNodeOrigin,
     MaterialSourceKind,
     MediaAssetKind,
+    MistakeStatus,
+    ObjectMirrorStatus,
     ProjectState,
     ProjectType,
     RecallPointState,
     RecallPointReviewResult,
+    RollUpStrategy,
     ReviewChainTemplateItemKind,
     ReviewChainState,
     ReviewTaskState,
@@ -59,6 +63,8 @@ from backend.models.rich_content import ContentBlock, RichContent
 from backend.models.review_chain import ReviewChain, ReviewChainItem, ReviewChainItemKind
 from backend.models.review_task import ReviewTask
 from backend.models.review_task_queue import ReviewTaskQueue
+from backend.models.study_material import StudyMaterial, StudyMaterialType
+from backend.models.subject_material_link import SubjectMaterialLink
 from backend.models.types import (
     AggregationEventId,
     AsrArtifactId,
@@ -151,6 +157,46 @@ def encode_project_shell_payload(
     }
 
 
+def _encode_study_material(item: StudyMaterial) -> dict[str, Any]:
+    return {
+        "subjectId": str(item.subject_id),
+        "materialId": str(item.material_id),
+        "materialType": item.material_type.value,
+        "title": item.title,
+        "createdAtMs": _ts_to_ms(item.created_at),
+        "compatibilityProjectId": None if item.compatibility_project_id is None else str(item.compatibility_project_id),
+    }
+
+
+def _decode_study_material(data: dict[str, Any]) -> StudyMaterial:
+    return StudyMaterial(
+        subject_id=ProjectId(str(data["subjectId"])),
+        material_id=str(data["materialId"]),
+        material_type=StudyMaterialType(str(data["materialType"])),
+        title=str(data["title"]),
+        created_at=_ms_to_ts(int(data["createdAtMs"])),
+        compatibility_project_id=(
+            None if data.get("compatibilityProjectId") is None else ProjectId(str(data["compatibilityProjectId"]))
+        ),
+    )
+
+
+def _encode_subject_material_link(link: SubjectMaterialLink) -> dict[str, Any]:
+    return {
+        "subjectId": str(link.subject_id),
+        "materialId": link.material_id,
+        "materialType": link.material_type.value,
+    }
+
+
+def _decode_subject_material_link(data: dict[str, Any]) -> SubjectMaterialLink:
+    return SubjectMaterialLink(
+        subject_id=ProjectId(str(data["subjectId"])),
+        material_id=str(data["materialId"]),
+        material_type=StudyMaterialType(str(data["materialType"])),
+    )
+
+
 def _encode_review_chain_template_item(it: ReviewChainTemplateItem) -> dict[str, Any]:
     out: dict[str, Any] = {"kind": it.kind.value}
     if it.count is not None:
@@ -221,6 +267,7 @@ def _encode_project_config(c: ProjectConfig) -> dict[str, Any]:
     return {
         "projectId": str(c.project_id),
         "projectType": c.project_type.value,
+        "rollUpStrategy": c.roll_up_strategy.value,
         "layerConfigs": {str(int(k)): _encode_layer_config(v) for k, v in c.layer_configs.items()},
         "pushConfig": _encode_push_config(c.push_config),
         "updatedAtMs": _ts_to_ms(c.updated_at),
@@ -237,6 +284,7 @@ def _decode_project_config(d: dict[str, Any]) -> ProjectConfig:
         project_type=ProjectType(str(d.get("projectType") or ProjectType.COURSE.value)),
         layer_configs=layer_cfgs,
         push_config=_decode_push_config(dict(d.get("pushConfig", {}))),
+        roll_up_strategy=RollUpStrategy(str(d.get("rollUpStrategy") or RollUpStrategy.THRESHOLD_AUTO.value)),
         updated_at=_ms_to_ts(int(d["updatedAtMs"])),
     )
 
@@ -558,7 +606,15 @@ def _encode_recall_point(rp: RecallPoint) -> dict[str, Any]:
         "question": _encode_rich_content(rp.question),
         "answer": _encode_rich_content(rp.answer),
         "anchor": _encode_anchor(rp.anchor),
+        "references": [str(x) for x in rp.references],
         "insights": [_encode_rich_content(x) for x in rp.insights],
+        "sourceProjectId": None if rp.source_project_id is None else str(rp.source_project_id),
+        "sourceRecallPointId": None if rp.source_recall_point_id is None else str(rp.source_recall_point_id),
+        "sourceMaterialId": rp.source_material_id,
+        "sourceMaterialTitle": rp.source_material_title,
+        "sourceAnchorLabel": rp.source_anchor_label,
+        "mistakeStatus": None if rp.mistake_status is None else rp.mistake_status.value,
+        "mistakeNote": rp.mistake_note,
     }
 
 
@@ -584,7 +640,17 @@ def _decode_recall_point(d: dict[str, Any]) -> RecallPoint:
         question=question,
         answer=answer,
         anchor=_decode_anchor(None if d.get("anchor") is None else dict(d["anchor"])),
+        references=tuple(RecallPointId(str(x)) for x in d.get("references", [])),
         insights=tuple(_decode_rich_content(x) for x in d.get("insights", [])),
+        source_project_id=None if d.get("sourceProjectId") is None else ProjectId(str(d["sourceProjectId"])),
+        source_recall_point_id=(
+            None if d.get("sourceRecallPointId") is None else RecallPointId(str(d["sourceRecallPointId"]))
+        ),
+        source_material_id=None if d.get("sourceMaterialId") is None else str(d["sourceMaterialId"]),
+        source_material_title=None if d.get("sourceMaterialTitle") is None else str(d["sourceMaterialTitle"]),
+        source_anchor_label=None if d.get("sourceAnchorLabel") is None else str(d["sourceAnchorLabel"]),
+        mistake_status=None if d.get("mistakeStatus") is None else MistakeStatus(str(d["mistakeStatus"])),
+        mistake_note=None if d.get("mistakeNote") is None else str(d["mistakeNote"]),
         state=RecallPointState(str(d.get("state", RecallPointState.ACTIVE.value))),
         deleted_at=None if d.get("deletedAtMs") is None else _ms_to_ts(int(d["deletedAtMs"])),
     )
@@ -701,6 +767,9 @@ def _encode_learning_task_node(n: LearningTaskNode) -> dict[str, Any]:
         "parentId": None if n.parent_id is None else str(n.parent_id),
         "children": [str(x) for x in n.children],
         "title": n.title,
+        "nodeOrigin": n.node_origin.value,
+        "boundLearningObjectNodeId": None if n.bound_learning_object_node_id is None else str(n.bound_learning_object_node_id),
+        "objectMirrorStatus": None if n.object_mirror_status is None else n.object_mirror_status.value,
     }
 
 
@@ -721,6 +790,17 @@ def _decode_learning_task_node(d: dict[str, Any]) -> LearningTaskNode:
             parent_id=None if d.get("parentId") is None else LearningTaskNodeId(d["parentId"]),
             children=tuple(LearningTaskNodeId(x) for x in d.get("children", [])),
             title=d["title"],
+            node_origin=LearningTaskNodeOrigin(str(d.get("nodeOrigin") or LearningTaskNodeOrigin.AGGREGATION.value)),
+            bound_learning_object_node_id=(
+                None
+                if d.get("boundLearningObjectNodeId") is None
+                else LearningObjectNodeId(str(d["boundLearningObjectNodeId"]))
+            ),
+            object_mirror_status=(
+                None
+                if d.get("objectMirrorStatus") is None
+                else ObjectMirrorStatus(str(d["objectMirrorStatus"]))
+            ),
         )
     raise ValueError(f"Unknown LearningTaskNode kind: {kind}")
 
@@ -959,6 +1039,12 @@ def encode_project_payload(project_store: Any) -> dict[str, Any]:
         "materialAllowlist": None
         if getattr(project_store, "material_allowlist", None) is None
         else _encode_material_allowlist(project_store.material_allowlist),
+        "studyMaterials": {
+            k: _encode_study_material(v) for k, v in getattr(project_store, "study_materials", {}).items()
+        },
+        "subjectMaterialLink": None
+        if getattr(project_store, "subject_material_link", None) is None
+        else _encode_subject_material_link(project_store.subject_material_link),
         "auditLogEvents": {
             k: _encode_audit_log_event(v) for k, v in getattr(project_store, "audit_log_events", {}).items()
         },
@@ -1019,6 +1105,12 @@ def decode_project_payload(project_id: str, raw: dict[str, Any]) -> dict[str, An
         "material_allowlist": None
         if d.get("materialAllowlist") is None
         else _decode_material_allowlist(dict(d["materialAllowlist"])),
+        "study_materials": {
+            k: _decode_study_material(v) for k, v in dict(d.get("studyMaterials", {})).items()
+        },
+        "subject_material_link": None
+        if d.get("subjectMaterialLink") is None
+        else _decode_subject_material_link(dict(d["subjectMaterialLink"])),
         "audit_log_events": {k: _decode_audit_log_event(v) for k, v in dict(d.get("auditLogEvents", {})).items()},
         "instances": {k: _decode_instance(v) for k, v in dict(d.get("instances", {})).items()},
         "instance_media_bindings": {

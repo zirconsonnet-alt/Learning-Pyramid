@@ -96,15 +96,16 @@
 
 * ID 类（`xxxId` 或同类标识符）：`ProjectId`、`InstanceId`、`LearningObjectNodeId`、`RecallPointId`、`LearningTaskId`、`LearningTaskNodeId`、`RangeId`（实现可复用旧 `FocusSetId` 的底层类型）、`ReviewTaskId`、`ConvergenceId`、`ConvergenceRuleId`、`ReviewChainId`、`ReviewTaskQueueId`、`LayerId`、`DimensionId`、`JudgementOptionId`、`AggregationEventId`（4.4.5）、`MediaAssetId`、`AsrArtifactId`、`TempContextFragmentId`、`QASessionId`、`CandidateRecallPointId`、`MemoryCanvasId`、`MemoryCanvasVersionId`、`CanvasEdgeId`、`StoryArtifactId`。
 * 枚举类（`Enum`）：`ProjectState`、`ProjectType`、`RecallPointState`、`LayerMode`、`ContentBlockKind`、`ReviewChainTemplateItemKind`。
-  * 增补：`InstancePresence`、`FsSyncPolicy`、`MaterialSourceKind`、`ClientRuntimeKind`、`RuntimeCapability`、`CandidateRecallPointState`。
+  * 增补：`InstancePresence`、`FsSyncPolicy`、`MaterialSourceKind`、`ClientRuntimeKind`、`RuntimeCapability`、`CandidateRecallPointState`、`MistakeStatus`。
 * 标量/值域类（`Scalar`）：`PurePath`、`Timestamp`、`LabelVector = {0,1}^{|D|}`（判别映射的值域；等价表示为长度为 `|D|` 的 0/1 向量）、`RichContent`、`ContentBlock`、`ReviewChainTemplate`、`ReviewChainTemplateItem`、`LayerConfig`。
 * 校验结果类（`Result`）：`ValidationResult`、`ValidationCode`（0b.7.2/0b.7.3）。
 
 枚举/常量取值清单：
 
 * `ProjectState = {ACTIVE, DELETED}`
-* `ProjectType = {COURSE, BOOK, LOOSE_POINTS}`
+* `ProjectType = {COURSE, BOOK, LOOSE_POINTS, MISTAKE_BOOK}`
 * `RecallPointState = {ACTIVE, DELETED}`
+* `MistakeStatus = {OPEN, RESOLVING, RESOLVED}`
 * `ReviewTaskState = {PENDING, DONE}`（3.1）
 * `ConvergenceState = {IN_PROGRESS, TERMINATED}`（3.2）
 * `ReviewChainState = {IN_PROGRESS, TERMINATED}`（3.3）
@@ -114,7 +115,7 @@
 * `ValidationCode = {OK, NOT_FOUND, UNREACHABLE, INVALID_INPUT}`（0b.7.2/0b.7.3）
 * `ContentBlockKind = {TEXT, IMAGE}`（0a.12）
 * `ReviewChainTemplateItemKind = {CONVERGENCE, REVIEW_TASK}`（1.0.5 / 4.3.2）
-* `AuditEventKind = {PROJECT_CREATED, PROJECT_DELETED, EDIT_PROJECT, ADD_INSTANCE, ADD_LEARNING_OBJECT_LEAF, ADD_LEARNING_OBJECT_CONTAINER, SYNC_LEARNING_OBJECTS_FROM_FS, SET_PROJECT_MATERIAL_SOURCE_BINDING, BIND_NATIVE_LOCAL_ROOT, BULK_REMAP_RECALL_POINTS_INSTANCE, SUBMIT_LEARNING_TASK, EDIT_RECALL_POINT, DELETE_RECALL_POINT, EDIT_LEARNING_TASK, EDIT_PROJECT_CONFIG, EXECUTOR_COMMIT_REVIEW_TASK, MANUAL_ROLL_UP, REQUEST_ASR, EXTRACT_TEMP_CONTEXT_FRAGMENT, REQUEST_LOCAL_LLM, CREATE_QA_SESSION, GENERATE_CANDIDATE_RECALL_POINT, ACCEPT_CANDIDATE_RECALL_POINT, REJECT_CANDIDATE_RECALL_POINT, CREATE_MEMORY_CANVAS, SAVE_MEMORY_CANVAS_VERSION, SET_CANVAS_EDGES, GENERATE_STORY_ARTIFACT}`（4.6；最小集合；实现可在保持兼容前提下增补，但不得改变既有值语义）
+* `AuditEventKind = {PROJECT_CREATED, PROJECT_DELETED, EDIT_PROJECT, ADD_INSTANCE, ADD_LEARNING_OBJECT_LEAF, ADD_LEARNING_OBJECT_CONTAINER, SYNC_LEARNING_OBJECTS_FROM_FS, SET_PROJECT_MATERIAL_SOURCE_BINDING, BIND_NATIVE_LOCAL_ROOT, BULK_REMAP_RECALL_POINTS_INSTANCE, SUBMIT_LEARNING_TASK, EDIT_RECALL_POINT, DELETE_RECALL_POINT, EDIT_LEARNING_TASK, EDIT_PROJECT_CONFIG, EXECUTOR_COMMIT_REVIEW_TASK, MANUAL_ROLL_UP, REQUEST_ASR, EXTRACT_TEMP_CONTEXT_FRAGMENT, REQUEST_LOCAL_LLM, CREATE_QA_SESSION, GENERATE_CANDIDATE_RECALL_POINT, ACCEPT_CANDIDATE_RECALL_POINT, REJECT_CANDIDATE_RECALL_POINT, CREATE_MEMORY_CANVAS, SAVE_MEMORY_CANVAS_VERSION, SET_CANVAS_EDGES, GENERATE_STORY_ARTIFACT, COLLECT_RECALL_POINT_TO_MISTAKE_BOOK}`（4.6；最小集合；实现可在保持兼容前提下增补，但不得改变既有值语义）
 * `AuditResultCode = {OK}`（1.8 / 4.6；本规格仅强制记录成功提交的审计事件）
 * `SessionMode = {READ_ONLY, READ_WRITE}`（0b.1.6）
 
@@ -218,7 +219,8 @@
 * 在 `project_id` 作用域内持久化且仅持久化一条 `ProjectConfig` 记录（见 1.0.5）；其默认值必须写死为：  
   - `project_type == COURSE`，但若 `create_project(...)` 显式指定 `initial_project_type`，则必须写入该显式值；并且：
     - 当 `project_type == BOOK` 时，`ProjectMaterialSourceBinding.source_kind` 必须为 `MANUAL`；
-    - 当 `project_type == LOOSE_POINTS` 时，`ProjectMaterialSourceBinding.source_kind` 必须为 `MANUAL`。
+    - 当 `project_type == LOOSE_POINTS` 时，`ProjectMaterialSourceBinding.source_kind` 必须为 `MANUAL`；
+    - 当 `project_type == MISTAKE_BOOK` 时，`ProjectMaterialSourceBinding.source_kind` 必须为 `MANUAL`。
   - `layer_index = 0` 的 `review_chain_template == [CONVERGENCE]`（等价于 4.3.2 的默认行为）；  
   - `layer_index = 0` 的 `aggregation_threshold == (K_node=10, K_point=200)`（用于初始化 Layer 的控制字段；聚合时读取 Layer 当前值，见 4.4.2）。  
   - `layer_index = 0` 的 `threshold_roll_up_enabled == true`（达到阈值时默认允许自动上推，见 4.4.2）。  
@@ -747,6 +749,7 @@ READ_ONLY（只读会话；强约束）
 - `project_type` 是项目级业务规则源（强约束；写死）：
   - `COURSE`：项目必须使用学习对象树与实例；复述点必须绑定可解析锚点。
   - `BOOK`：项目必须使用学习对象树与实例；复述点必须绑定不可解析的文本锚点。
+  - `MISTAKE_BOOK`：项目必须使用学习对象树与实例；复述点必须绑定不可解析的文本锚点，并允许额外记录来源复述点、错题状态与整理备注。
   - `LOOSE_POINTS`：项目不得使用学习对象树与实例；复述点不得绑定锚点。
 
 存储字段（最小）
@@ -789,7 +792,7 @@ ReviewChainTemplateItem（值对象；最小）
 
 写前条件（强约束；写死以避免实现分叉）
 - `config.project_id == session.project_id`（不得跨项目写入）。
-- `config.project_type ∈ {COURSE, BOOK, LOOSE_POINTS}`。
+- `config.project_type ∈ {COURSE, BOOK, LOOSE_POINTS, MISTAKE_BOOK}`。
 - 对任一 `layer_index, layer_cfg in layer_configs`：`layer_index >= 0`。
 - 对任一 `layer_cfg.review_chain_template`：
   - `items` 非空。
@@ -1127,6 +1130,9 @@ Queries 失败语义（强约束；用于实现一致性）
 * 当 `ProjectConfig.project_type == BOOK` 时：
   - `Anchor` 必须存在；
   - `position` 必须是不可解析的人类文本锚点；最小实现中不得接受 `t=<...>` 这种 COURSE 时间编码。
+* 当 `ProjectConfig.project_type == MISTAKE_BOOK` 时：
+  - `Anchor` 必须存在；
+  - `position` 必须是不可解析的人类文本锚点；最小实现中允许写入来源章节、题号、页码或整理说明等文本，不得接受 `t=<...>` 这种 COURSE 时间编码。
 * 当 `ProjectConfig.project_type == LOOSE_POINTS` 时：
   - `Anchor` 不得出现；宿主对象必须以“无锚点”形式写入。
 
@@ -1159,10 +1165,27 @@ Queries 失败语义（强约束；用于实现一致性）
   - 语义：逻辑删除（墓碑删除）时间戳；`state == ACTIVE` 时必须为 `None`，`state == DELETED` 时必须非空。
 - `question: RichContent`  
 - `answer: RichContent`  
+- `references: Tuple[RecallPointId, ...]`
+  - 语义：该复述点指向其他复述点的有序引用列表；表示一组独立于 `question/answer` 文本之外的关系边。允许为空 Tuple。
+  - 约束：每个被引用 ID 必须指向同项目内可解析且 `state == ACTIVE` 的既有 RecallPoint；不得包含重复 ID；不得包含自身 ID。
 - `insights: Tuple[RichContent, ...]`
   - 语义：感悟列表（append-only；顺序稳定）；允许为空 Tuple。
 - `anchor: Optional[Anchor]`
   - 语义：仅当项目类型要求绑定锚点时存在；是否允许为空由 1.4.3 的项目类型规则决定。
+- `source_project_id: Optional[ProjectId]`
+  - 语义：仅当该复述点属于 `MISTAKE_BOOK` 且由其他材料收集而来时存在；表示原始复述点所属项目。
+- `source_recall_point_id: Optional[RecallPointId]`
+  - 语义：仅当该复述点属于 `MISTAKE_BOOK` 且由其他材料收集而来时存在；表示原始复述点 ID。
+- `source_material_id: Optional[str]`
+  - 语义：来源材料在学科材料层中的稳定标识；允许为空。
+- `source_material_title: Optional[str]`
+  - 语义：来源材料标题的快照；允许为空。
+- `source_anchor_label: Optional[str]`
+  - 语义：来源定位的展示文本快照，例如“第 3 章 例 2”或“导数 12:34”；允许为空。
+- `mistake_status: Optional[MistakeStatus]`
+  - 语义：仅当该复述点属于 `MISTAKE_BOOK` 时使用；表示错题当前处理状态。
+- `mistake_note: Optional[str]`
+  - 语义：仅当该复述点属于 `MISTAKE_BOOK` 时使用；表示整理备注；允许为空。
 
 派生字段  
 - `str(recall_point)`：简单的 Q/A 可读表示
@@ -1181,7 +1204,7 @@ Queries 失败语义（强约束；用于实现一致性）
   - 新增；若 `recall_point_id` 已存在，必须抛 `PreconditionFailure`（0b.5）。  
   - 写前检查：必须满足 1.4.3 的 Write-time preconditions（其中 Anchor 的前置条件见 1.3.1）；若 `anchor != None`，则额外写前条件（强引用）：`InstanceRepository` 可解析 `anchor.instance_id`；失败为 `PreconditionFailure` 且不产生任何写入（0b.5）。  
 - `update(session: MutationSession, rp: RecallPoint) -> None`
-  - 允许更新既有 RecallPoint。可更新字段为 `question`、`answer`、`anchor`；`insights` 不可通过 `update` 覆盖、删除或重排（只允许通过 `append_insight` 追加，既有顺序保持稳定）。`recall_point_id` 不可变。  
+  - 允许更新既有 RecallPoint。可更新字段为 `question`、`answer`、`anchor`；当 `project_type == MISTAKE_BOOK` 时，还允许更新 `mistake_status` 与 `mistake_note`；`references` 在本最小规格中视为创建时确定，`update` 不得改写其内容；`insights` 不可通过 `update` 覆盖、删除或重排（只允许通过 `append_insight` 追加，既有顺序保持稳定）。`recall_point_id` 不可变；若对象带有来源字段，则 `source_*` 字段必须保持不变。  
   - 强约束：`state/deleted_at` 不可通过 `update` 修改；墓碑删除只能通过 `mark_deleted(...)` 发生。  
   - NotFound：若 `recall_point_id` 不存在，必须抛 `NotFound`。
   - 写前检查：必须满足 1.4.3 的 Write-time preconditions（其中 Anchor 的前置条件见 1.3.1）；若 `anchor != None`，则额外写前条件（强引用）：`InstanceRepository` 可解析 `anchor.instance_id`，且目标 RecallPoint 当前 `state == ACTIVE`；失败为 `PreconditionFailure` 且不产生任何写入（0b.5）。
@@ -1221,9 +1244,11 @@ Queries 失败语义（强约束；用于实现一致性）
 - `deleted_at is None`。  
 - `question` 必须为合法 RichContent（0a.12；不得为空）。  
 - `answer` 必须为合法 RichContent（0a.12；不得为空）。  
+- `references` 中每个 `RecallPointId` 都必须非空、不得重复、不得等于自身 `recall_point_id`。
 - 项目类型规则（强约束；写死）：
   - 当 `ProjectConfig.project_type == COURSE` 时：`anchor` 必须存在，且必须满足 1.3.1 的 COURSE 锚点规则。
   - 当 `ProjectConfig.project_type == BOOK` 时：`anchor` 必须存在，且必须满足 1.3.1 的 BOOK 锚点规则。
+  - 当 `ProjectConfig.project_type == MISTAKE_BOOK` 时：`anchor` 必须存在，且必须满足 1.3.1 的 MISTAKE_BOOK 锚点规则。
   - 当 `ProjectConfig.project_type == LOOSE_POINTS` 时：`anchor is None`。
 
 提交期强制校验  
@@ -1239,9 +1264,11 @@ Queries 失败语义（强约束；用于实现一致性）
 跨仓库可解析性（强引用；提交生效必须可解析）
 
 - 强约束：若 `RecallPoint.anchor != None`，则 `RecallPoint.anchor.instance_id` 为强引用。任何已提交状态中，该 `anchor.instance_id` 都必须能在 `InstanceRepository` 中解析到。
+- 强约束：`RecallPoint.references` 中每个 `RecallPointId` 都是对同项目既有 RecallPoint 的强引用；任何写入成功后的已提交状态中，这些 ID 都必须能在 `RecallPointRepository` 中解析到，且目标 `state == ACTIVE`。
 - Enforcement 点（强约束）：该可解析性必须作为 `RecallPointRepository.add/update` 的写前条件检查（precondition failure，0b.5）执行：
   - 仅当 `anchor != None` 时，在 mutation session 内、在产生任何 staged 写入之前，调用 `InstanceRepository.get(session, anchor.instance_id)`；若 `NotFound`，对外统一映射为 `PreconditionFailure`。
   - 该检查必须在 `session.project_id` 作用域内执行；不得解析到其他项目的 `Instance`。
+  - 对 `references` 中的每个 ID，必须在 mutation session 内、在产生任何 staged 写入之前调用 `RecallPointRepository.get(session, reference_id)`；若 `NotFound` 或目标 `state != ACTIVE`，对外统一映射为 `PreconditionFailure`。
 - 非目标：不在系统级 `commit()`（0b.7.1）追加额外强制校验；该约束仅由写接口前置条件保证。
 
 更新语义（强约束）  
@@ -2045,7 +2072,8 @@ Queries
 在一次原子提交中创建：学习任务（LearningTask）及其入口学习任务节点（LearningTaskNode）。
 
 Request（输入载荷）
-- `items: Sequence[(question: RichContent, answer: RichContent, anchor: Optional[Anchor])]`，非空
+- `items: Sequence[(question: RichContent, answer: RichContent, anchor: Optional[Anchor], references: Sequence[RecallPointId])]`，非空
+  - 每个 item 的 `references` 允许为空序列；其语义与 1.4 `RecallPoint.references` 一致。
 - `title: str`，非空（强约束）
 
 Read-set（读取项）
@@ -2057,7 +2085,7 @@ Write-set（写入产物；同一 commit 原子生效）
   - `created_at`：由系统时钟生成的 UTC 时间戳（ms 语义；0a.10）。
   - `state = ACTIVE`
   - `deleted_at = None`
-  - `question, answer, anchor`
+  - `question, answer, anchor, references`
 
 2) LearningTask
 - 分配新 `LearningTaskId`
@@ -2090,7 +2118,9 @@ Failure 语义
   - 输入为空（items 为空）。 
   - 当 `project_type == COURSE` 时：任一 item 的 `anchor` 缺失、格式不是 `t=<毫秒>`，或其 `anchor.instance_id` 在 `InstanceRepository` 不可解析（`NotFound` 对外统一映射为 `PreconditionFailure`）。
   - 当 `project_type == BOOK` 时：任一 item 的 `anchor` 缺失、`anchor.position` 为空、`anchor.position` 误用 `t=<毫秒>` 格式，或其 `anchor.instance_id` 在 `InstanceRepository` 不可解析（`NotFound` 对外统一映射为 `PreconditionFailure`）。
+  - 当 `project_type == MISTAKE_BOOK` 时：任一 item 的 `anchor` 缺失、`anchor.position` 为空、`anchor.position` 误用 `t=<毫秒>` 格式，或其 `anchor.instance_id` 在 `InstanceRepository` 不可解析（`NotFound` 对外统一映射为 `PreconditionFailure`）。
   - 当 `project_type == LOOSE_POINTS` 时：任一 item 的 `anchor != None`。
+  - 任一 item 的 `references` 含空值、重复值、自引用，或引用到同项目内不可解析 / 非 `ACTIVE` 的既有 RecallPoint。
   - 以上任一失败都不得产生任何写入（0b.5）。
 
 备注
@@ -3478,8 +3508,8 @@ Failure 语义
     - 必须初始化 `layer_index = 0` 的 `AggregationQueue`（字段默认值见 0b.1.5a）  
   - 写前条件补充（强约束；0b.5）：
     - `initial_source_kind ∈ {SERVER_FS, BROWSER_LOCAL, NATIVE_LOCAL, MANUAL}`。
-    - `initial_project_type ∈ {COURSE, BOOK, LOOSE_POINTS}`。
-    - 当 `initial_project_type ∈ {BOOK, LOOSE_POINTS}` 时，`initial_source_kind` 必须为 `MANUAL`。
+    - `initial_project_type ∈ {COURSE, BOOK, LOOSE_POINTS, MISTAKE_BOOK}`。
+    - 当 `initial_project_type ∈ {BOOK, LOOSE_POINTS, MISTAKE_BOOK}` 时，`initial_source_kind` 必须为 `MANUAL`。
   - `SCHEDULING_EFFECT = NONE`
 - `list_projects() -> Sequence[Project]`
   - `SCHEDULING_EFFECT = NONE`
@@ -3525,12 +3555,27 @@ Failure 语义
   - 额外约束（强约束）：当项目启用 0b.1.5b 的同步/导入协议时，本入口必须抛 `PreconditionFailure`（`LearningObject` 树由材料源协议唯一维护，0b.1.5b）。
   - `SCHEDULING_EFFECT = NONE`
 - `initialize_book_learning_objects(project_id: ProjectId, outline_items: Sequence[(depth: int, title: str)]) -> {created_instances_count: int, created_learning_object_nodes_count: int, root_count: int}`
-  - 语义：当且仅当 `project_type == BOOK` 且当前项目仍为空手工树时，按用户提供的目录层级文本一次性初始化书本学习对象树：非末级目录项创建 `LearningObjectContainer`，末级目录项创建 `LearningObjectLeaf`，并自动为每个末级目录项创建一个手工 `Instance`。
+  - 语义：当且仅当 `project_type ∈ {BOOK, MISTAKE_BOOK}` 且当前项目仍为空手工树时，按用户提供的目录层级文本一次性初始化手工学习对象树：非末级目录项创建 `LearningObjectContainer`，末级目录项创建 `LearningObjectLeaf`，并自动为每个末级目录项创建一个手工 `Instance`。
   - 写前条件（强约束；0b.5）：
-    - `project_type == BOOK`。
+    - `project_type ∈ {BOOK, MISTAKE_BOOK}`。
     - 当前 `ProjectMaterialSourceBinding.source_kind == MANUAL`。
     - 当前项目内 `Instance` 集合与 `LearningObjectNode` 树都为空。
     - `outline_items` 非空，首项 `depth == 0`，且层级每次最多只允许向下增加一级。
+  - `SCHEDULING_EFFECT = NONE`
+- `initialize_book_learning_objects_from_subject_material(project_id: ProjectId, source_material_id: str) -> {created_instances_count: int, created_learning_object_nodes_count: int, root_count: int}`
+  - 语义：当 `project_type ∈ {BOOK, MISTAKE_BOOK}` 且当前项目仍为空手工树时，从同一学科下的来源材料复制学习对象结构来初始化当前项目。
+  - 写前条件（强约束；0b.5）：
+    - `project_type ∈ {BOOK, MISTAKE_BOOK}`。
+    - 当前 `ProjectMaterialSourceBinding.source_kind == MANUAL`。
+    - 当前项目内 `Instance` 集合与 `LearningObjectNode` 树都为空。
+    - 当 `project_type == BOOK` 时，`source_material_id` 对应材料类型必须为 `COURSE`。
+    - 当 `project_type == MISTAKE_BOOK` 时，`source_material_id` 对应材料类型必须为 `COURSE` 或 `BOOK`。
+  - `SCHEDULING_EFFECT = NONE`
+- `ensure_mistake_material_inbox(project_id: ProjectId) -> {created: bool, node_id: LearningObjectNodeId, instance_id: InstanceId}`
+  - 语义：当且仅当 `project_type == MISTAKE_BOOK` 且当前材料仍为空时，确保存在一个名为“待整理”的根叶子节点，并返回其节点与实例标识；若已存在则幂等返回既有入口。
+  - 写前条件（强约束；0b.5）：
+    - `project_type == MISTAKE_BOOK`。
+    - 当前 `ProjectMaterialSourceBinding.source_kind == MANUAL`。
   - `SCHEDULING_EFFECT = NONE`
 
 4) 材料源同步与缺失迁移辅助（不产生调度副作用）
@@ -3584,21 +3629,32 @@ Failure 语义
 
 5) 学习提交（会产生调度副作用）
 
-- `submit_learning_task(project_id: ProjectId, items: Sequence[(question: RichContent, answer: RichContent, anchor: Optional[Anchor])], title: str) -> LearningTaskNodeId`
+- `submit_learning_task(project_id: ProjectId, items: Sequence[(question: RichContent, answer: RichContent, anchor: Optional[Anchor], references: Sequence[RecallPointId])], title: str) -> LearningTaskNodeId`
   - 语义：执行 2.1（学习任务提交）并在同一提交中完成该入口节点的登记（4.3.2）；是否触发 Tick 由 Layer 的 `layer_mode` 决定（4.2.4）。
   - 项目类型约束（强约束；写死）：
     - `COURSE`：每个 item 的 `anchor` 必须存在，且必须满足 1.3.1 的 COURSE 锚点规则。
     - `BOOK`：每个 item 的 `anchor` 必须存在，且必须满足 1.3.1 的 BOOK 锚点规则。
+    - `MISTAKE_BOOK`：每个 item 的 `anchor` 必须存在，且必须满足 1.3.1 的 MISTAKE_BOOK 锚点规则。
     - `LOOSE_POINTS`：每个 item 的 `anchor` 必须为 `None`。
   - `SCHEDULING_EFFECT = ORCHESTRATION_MUTATING`
   - 门禁：受 4.1.3(a) 约束（项目内全局 ReviewTaskQueue 非空时必须拒绝）。
 
 6) 编辑/删除类写入（不产生调度副作用）
-- `edit_recall_point(project_id: ProjectId, recall_point_id: RecallPointId, question: RichContent, answer: RichContent, anchor: Optional[Anchor]) -> None`
+- `edit_recall_point(project_id: ProjectId, recall_point_id: RecallPointId, question: RichContent, answer: RichContent, anchor: Optional[Anchor], mistake_status: Optional[MistakeStatus] = None, mistake_note: Optional[str] = None) -> None`
   - 语义：只调用 `RecallPointRepository.update(...)` 产生业务事实更新；不得调用任一 4.3.x 推进协议；不得创建/入队 ReviewTask。
-  - 项目类型约束：同 `submit_learning_task(...)`。
+  - 项目类型约束：同 `submit_learning_task(...)`；其中 `mistake_status / mistake_note` 仅允许在 `project_type == MISTAKE_BOOK` 时写入。
   - `SCHEDULING_EFFECT = NONE`
   - 门禁：允许在队列非空时执行（4.1.3(b)）。
+- `collect_recall_point_to_subject_mistake_material(project_id: ProjectId, recall_point_id: RecallPointId, target_material_id: str, target_node_id: Optional[LearningObjectNodeId] = None, mistake_note: Optional[str] = None) -> {target_project_id: ProjectId, target_material_id: str, target_node_id: LearningObjectNodeId, target_recall_point_id: RecallPointId, created_inbox: bool}`
+  - 语义：把同一学科下其他材料中的 ACTIVE `RecallPoint` 收集到指定 `MISTAKE_BOOK` 材料中；系统必须保留来源项目、来源复述点、来源材料标题与来源定位文本，并在目标材料中创建一个新的学习任务与复述点。
+  - 写前条件（强约束；0b.5）：
+    - `target_material_id` 必须解析到与源项目同学科的 `MISTAKE_BOOK` 材料。
+    - 目标材料对应项目必须不同于源项目。
+    - `recall_point_id` 必须可解析，且其 `state == ACTIVE`。
+    - 若提供 `target_node_id`，则其必须在目标材料中可解析为叶子节点。
+    - 目标材料内不得已存在 `source_project_id/source_recall_point_id` 与本次来源完全相同且 `state == ACTIVE` 的复述点。
+  - 额外语义（强约束）：若目标错题材料当前为空，系统必须先隐式执行 `ensure_mistake_material_inbox(...)`，并将 `created_inbox` 置为 `true`。
+  - `SCHEDULING_EFFECT = ORCHESTRATION_MUTATING`
 - `delete_recall_point(project_id: ProjectId, recall_point_id: RecallPointId) -> None`
   - 语义：在一次系统事务内调用 `RecallPointRepository.mark_deleted(...)` 对目标复述点执行墓碑删除；不得物理删除对象，不得隐式级联改写既有 `LearningTask`、`LearningTaskNode`、`RangeSnapshot`、`ReviewTask`、`Convergence`、`ReviewChain`、`RecallPointReviewRecord` 或 `AsrArtifact`。
   - 约束：不得调用任一 4.3.x 推进协议；不得创建/入队新的 ReviewTask。

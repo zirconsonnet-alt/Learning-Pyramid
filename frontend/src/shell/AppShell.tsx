@@ -1,20 +1,36 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
-import { House, Menu, Sparkles } from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { House, Menu, Settings2, Sparkles, TimerReset } from "lucide-react"
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate, useParams } from "react-router-dom"
 
 import { MainNav, getGlobalNavItems, getProjectNavItems } from "@/shell/MainNav"
+import { PomodoroPreTransitionNotice, PomodoroTransitionEffect } from "@/shell/PomodoroTransitionEffect"
 import { ApiError } from "@/ui/api/http"
+import { useBootstrapGlobalSettings } from "@/ui/globalSettingsSync"
+import { useLearningPlanRemoteSync } from "@/ui/learningPlans/learningPlanRemoteSync"
+import { useSubjectContext } from "@/ui/queries/subjects"
 import { ErrorNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { projectTypeRequiresLearningObjectTree } from "@/ui/projectTypes"
 import { useCurrentUser, useLogout } from "@/ui/queries/auth"
-import { useProject } from "@/ui/queries/projects"
+import { useProject, useProjects } from "@/ui/queries/projects"
 import { useSystemCapabilities } from "@/ui/queries/system"
 import { useProjectConfig } from "@/ui/queries/workbench"
+import { usePomodoroPreTransitionSpeech, usePomodoroTransitionSound } from "@/ui/pomodoroAudio"
 import { useAppStore } from "@/ui/store/appStore"
+import { useGlobalConfigStore } from "@/ui/store/globalConfigStore"
+import { formatStudyMaterialTypeLabel } from "@/ui/subjects/studyMaterials"
+import {
+  formatPomodoroCountdown,
+  getPomodoroSnapshot,
+  getPomodoroUpcomingSegmentPreview,
+  usePomodoroNow,
+  usePomodoroStore,
+} from "@/ui/store/pomodoroStore"
 import { useThemeStore } from "@/ui/store/themeStore"
 import { THEME_PRESETS } from "@/ui/theme/themePresets"
 import { cn } from "@/ui/utils"
+import { buildPomodoroPath } from "@/views/pomodoro/pomodoroRouting"
+import { buildGlobalSettingsPath } from "@/views/settings/globalSettingsRouting"
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -22,11 +38,34 @@ function formatApiError(err: unknown) {
   return "未知错误"
 }
 
-function describeArea(pathname: string, projectTitle: string, hasProject: boolean) {
+function describeArea(
+  pathname: string,
+  params: {
+    hasProject: boolean
+    subjectTitle: string
+    materialTitle: string
+    isSubjectRoot: boolean
+  },
+) {
+  const { hasProject, isSubjectRoot, materialTitle, subjectTitle } = params
   if (pathname.startsWith("/projects")) {
     return {
-      title: "项目中心",
-      context: "浏览与切换项目",
+      title: "学科中心",
+      context: "浏览与切换学科",
+    }
+  }
+
+  if (pathname.startsWith("/pomodoro")) {
+    return {
+      title: "番茄钟",
+      context: "全局学习节奏控制",
+    }
+  }
+
+  if (pathname.startsWith("/settings/global")) {
+    return {
+      title: "全局配置",
+      context: "主题与默认模板",
     }
   }
 
@@ -68,36 +107,36 @@ function describeArea(pathname: string, projectTitle: string, hasProject: boolea
   if (hasProject) {
     if (pathname.includes("/workbench")) {
       return {
-        title: "项目工作台",
-        context: projectTitle,
+        title: "学科工作台",
+        context: isSubjectRoot ? subjectTitle : `${subjectTitle} / ${materialTitle}`,
       }
     }
 
     if (pathname.includes("/ai-chat")) {
       return {
         title: "AI问答",
-        context: projectTitle,
+        context: isSubjectRoot ? subjectTitle : `${subjectTitle} / ${materialTitle}`,
       }
     }
 
     if (pathname.includes("/task-tree")) {
       return {
         title: "学习任务树",
-        context: projectTitle,
+        context: materialTitle,
       }
     }
 
     if (pathname.includes("/object-tree")) {
       return {
         title: "学习对象树",
-        context: projectTitle,
+        context: materialTitle,
       }
     }
 
     if (pathname.includes("/settings")) {
       return {
-        title: "项目设置",
-        context: projectTitle,
+        title: isSubjectRoot ? "学科设置" : "材料设置",
+        context: isSubjectRoot ? subjectTitle : `${subjectTitle} / ${materialTitle}`,
       }
     }
   }
@@ -107,12 +146,6 @@ function describeArea(pathname: string, projectTitle: string, hasProject: boolea
     context: "系统总览",
   }
 }
-
-const THEME_PRESET_ACTIVE_BORDER = "#b7a4f6"
-const THEME_PRESET_ACTIVE_RING = "0 0 0 1px rgba(183, 164, 246, 0.96)"
-const THEME_PRESET_ACTIVE_GLOW = "0 22px 40px -28px rgba(111, 90, 204, 0.54)"
-const THEME_PRESET_CURRENT_BADGE_BG = "linear-gradient(135deg, #4b68d8 0%, #2f50b9 100%)"
-const THEME_PRESET_CURRENT_BADGE_SHADOW = "0 14px 28px -22px rgba(47, 80, 185, 0.7)"
 
 export function AppShell() {
   const nav = useNavigate()
@@ -127,31 +160,130 @@ export function AppShell() {
   const authEnabled = capabilitiesQ.data?.authEnabled ?? false
   const currentUserQ = useCurrentUser(authEnabled)
   const canAccessApp = !authEnabled || Boolean(currentUserQ.data)
+  useBootstrapGlobalSettings(authEnabled && Boolean(currentUserQ.data?.userId), currentUserQ.data?.userId)
+  useLearningPlanRemoteSync(authEnabled && Boolean(currentUserQ.data?.userId), currentUserQ.data?.userId)
+  const subjectContextQ = useSubjectContext(effectiveProjectId, canAccessApp && Boolean(effectiveProjectId))
   const { projectTitle } = useProject(effectiveProjectId, { enabled: canAccessApp && Boolean(effectiveProjectId) })
+  const projectsQ = useProjects(canAccessApp)
   const projectConfigQ = useProjectConfig(canAccessApp && effectiveProjectId ? effectiveProjectId : "")
   const logout = useLogout()
+  const pomodoroEnabled = usePomodoroStore((state) => state.enabled)
+  const pomodoroWeeklySchedule = usePomodoroStore((state) => state.weeklySchedule)
+  const pomodoroTransitionSoundEnabled = usePomodoroStore((state) => state.transitionSoundEnabled)
   const selectedTheme = useThemeStore((state) => state.theme)
-  const setTheme = useThemeStore((state) => state.setTheme)
-  const area = describeArea(location.pathname, projectTitle || pid || "当前项目", Boolean(pid))
+  const defaultProjectReviewTemplate = useGlobalConfigStore((state) => state.defaultProjectReviewTemplate)
+  const pomodoroNow = usePomodoroNow(pomodoroEnabled)
+  const fallbackProjectTitle = projectTitle || pid || "当前学科"
+  const subjectTitle = subjectContextQ.data?.subject.title ?? fallbackProjectTitle
+  const fallbackMaterialTitle = projectTitle || pid || "当前材料"
+  const currentMaterialTitle = subjectContextQ.data?.currentMaterial.title ?? fallbackMaterialTitle
+  const isSubjectRoot = subjectContextQ.data?.isSubjectRoot ?? true
+  const area = describeArea(location.pathname, {
+    hasProject: Boolean(pid),
+    subjectTitle,
+    materialTitle: currentMaterialTitle,
+    isSubjectRoot,
+  })
   const capabilitiesUnavailableError = capabilitiesQ.error && !capabilitiesQ.data ? formatApiError(capabilitiesQ.error) : null
   const currentUserUnavailableError =
     authEnabled && currentUserQ.error && currentUserQ.data === undefined ? formatApiError(currentUserQ.error) : null
   const locationToken = `${location.pathname}${location.search}${location.hash}`
   const menuRef = useRef<HTMLDivElement | null>(null)
   const menuButtonRef = useRef<HTMLButtonElement | null>(null)
+  const pomodoroAutoJumpKeyRef = useRef("")
   const previousLocationRef = useRef(locationToken)
   const includeObjectTree = projectTypeRequiresLearningObjectTree(projectConfigQ.data?.projectType ?? "COURSE")
   const projectNavItems = useMemo(
-    () => getProjectNavItems(effectiveProjectId, { includeObjectTree }),
-    [effectiveProjectId, includeObjectTree],
+    () => getProjectNavItems(effectiveProjectId, { includeObjectTree, settingsLabel: isSubjectRoot ? "学科设置" : "材料设置" }),
+    [effectiveProjectId, includeObjectTree, isSubjectRoot],
   )
   const hasProjectContext = Boolean(pid)
   const hasRememberedProjectContext = Boolean(effectiveProjectId)
   const isAdmin = Boolean(currentUserQ.data?.roles.some((role) => role === "super_admin" || role === "admin"))
   const globalNavItems = useMemo(() => getGlobalNavItems({ includeAdmin: isAdmin, includeMembership: authEnabled }), [authEnabled, isAdmin])
-  const inlineNavItems = globalNavItems
+  const inlineNavItems = hasProjectContext ? projectNavItems : globalNavItems
   const menuProjectNavItems = hasRememberedProjectContext ? projectNavItems : []
-  const menuGlobalNavItems = hasProjectContext ? [] : globalNavItems
+  const menuGlobalNavItems = globalNavItems
+  const subjectMaterials = subjectContextQ.data?.materials ?? []
+  const pomodoroSnapshot = useMemo(
+    () => getPomodoroSnapshot({ enabled: pomodoroEnabled, weeklySchedule: pomodoroWeeklySchedule }, pomodoroNow),
+    [pomodoroEnabled, pomodoroNow, pomodoroWeeklySchedule],
+  )
+  const pomodoroUpcomingSegment = useMemo(
+    () =>
+      getPomodoroUpcomingSegmentPreview(
+        { enabled: pomodoroEnabled, weeklySchedule: pomodoroWeeklySchedule },
+        pomodoroNow,
+      ),
+    [pomodoroEnabled, pomodoroNow, pomodoroWeeklySchedule],
+  )
+  const accessibleProjectIds = useMemo(
+    () => new Set((projectsQ.data ?? []).map((project) => project.projectId)),
+    [projectsQ.data],
+  )
+  const pomodoroFocusProjectId =
+    pomodoroSnapshot.currentProjectId && accessibleProjectIds.has(pomodoroSnapshot.currentProjectId)
+      ? pomodoroSnapshot.currentProjectId
+      : ""
+  const focusProjectTitle =
+    pomodoroFocusProjectId && projectsQ.data
+      ? projectsQ.data.find((project) => project.projectId === pomodoroFocusProjectId)?.title ?? ""
+      : ""
+  const upcomingJumpProjectId =
+    pomodoroUpcomingSegment?.phase === "focus" &&
+    pomodoroUpcomingSegment.projectId &&
+    accessibleProjectIds.has(pomodoroUpcomingSegment.projectId)
+      ? pomodoroUpcomingSegment.projectId
+      : ""
+  const upcomingJumpProjectTitle =
+    upcomingJumpProjectId && projectsQ.data
+      ? projectsQ.data.find((project) => project.projectId === upcomingJumpProjectId)?.title ?? ""
+      : ""
+  const upcomingJumpPath = upcomingJumpProjectId ? `/p/${upcomingJumpProjectId}/workbench` : ""
+  const shouldShowPomodoroPreJumpNotice =
+    pomodoroUpcomingSegment?.phase === "focus" &&
+    Boolean(upcomingJumpPath) &&
+    location.pathname !== upcomingJumpPath &&
+    (pomodoroUpcomingSegment?.startsInMs ?? 0) > 0 &&
+    (pomodoroUpcomingSegment?.startsInMs ?? 0) <= 10_000
+  const shouldShowPomodoroPreBreakNotice =
+    pomodoroUpcomingSegment?.phase === "break" &&
+    (pomodoroUpcomingSegment?.startsInMs ?? 0) > 0 &&
+    (pomodoroUpcomingSegment?.startsInMs ?? 0) <= 10_000
+  const pomodoroAutoJumpKey =
+    pomodoroSnapshot.status === "running" &&
+    pomodoroSnapshot.phase === "focus" &&
+    pomodoroFocusProjectId
+      ? `${pomodoroSnapshot.weekday}:${pomodoroSnapshot.segmentIndex}:${pomodoroFocusProjectId}:${pomodoroSnapshot.startAtMs ?? 0}`
+      : ""
+  usePomodoroTransitionSound(pomodoroSnapshot, pomodoroTransitionSoundEnabled)
+  usePomodoroPreTransitionSpeech(
+    pomodoroUpcomingSegment &&
+      pomodoroUpcomingSegment.startsInMs > 0 &&
+      pomodoroUpcomingSegment.startsInMs <= 10_000 &&
+      pomodoroUpcomingSegment.promptText.trim()
+      ? {
+          key: `${pomodoroUpcomingSegment.weekday}:${pomodoroUpcomingSegment.phase}:${pomodoroUpcomingSegment.pomodoroIndex}:${pomodoroUpcomingSegment.startAtMs}:${pomodoroUpcomingSegment.promptText}`,
+          promptText: pomodoroUpcomingSegment.promptText,
+          startsInMs: pomodoroUpcomingSegment.startsInMs,
+        }
+      : null,
+  )
+  const showPomodoroShortcut = pomodoroEnabled
+  const pomodoroShortcutText =
+    pomodoroSnapshot.status === "running"
+      ? `${pomodoroSnapshot.phase === "focus" ? "学习" : "间歇"} ${formatPomodoroCountdown(pomodoroSnapshot.segmentRemainingMs)}`
+      : pomodoroSnapshot.status === "completed"
+        ? "今日已完成"
+        : pomodoroSnapshot.idleReason === "not_configured"
+          ? "待配置"
+          : pomodoroSnapshot.idleReason === "day_off"
+            ? "今日未排程"
+            : pomodoroSnapshot.idleReason === "waiting"
+              ? `距离开始 ${formatPomodoroCountdown(pomodoroSnapshot.untilStartMs)}`
+              : "已关闭"
+  const selectedThemeLabel = THEME_PRESETS.find((theme) => theme.id === selectedTheme)?.label ?? "雾蓝"
+  const reviewTemplateSummary = `${defaultProjectReviewTemplate.length} 个默认步骤`
 
   useEffect(() => {
     if (!pid || selectedProjectId === pid) return
@@ -163,6 +295,38 @@ export function AppShell() {
     previousLocationRef.current = locationToken
     setNavMenuOpen(false)
   }, [locationToken])
+
+  useEffect(() => {
+    if (!pomodoroAutoJumpKey || !pomodoroFocusProjectId) return
+    if (pomodoroAutoJumpKeyRef.current === pomodoroAutoJumpKey) return
+    pomodoroAutoJumpKeyRef.current = pomodoroAutoJumpKey
+    const targetPath = `/p/${pomodoroFocusProjectId}/workbench`
+    if (location.pathname === targetPath) return
+    let cancelled = false
+
+    async function jumpToFocusWorkbench() {
+      if (typeof document !== "undefined" && document.fullscreenElement) {
+        try {
+          await document.exitFullscreen()
+        } catch {
+          // Ignore exit failure and continue with navigation.
+        }
+      }
+      if (cancelled) return
+      nav(targetPath, {
+        replace: true,
+        state: {
+          pomodoroAutoJump: true,
+          targetProjectId: pomodoroFocusProjectId,
+        },
+      })
+    }
+
+    void jumpToFocusWorkbench()
+    return () => {
+      cancelled = true
+    }
+  }, [location.pathname, nav, pomodoroAutoJumpKey, pomodoroFocusProjectId])
 
   useEffect(() => {
     if (!navMenuOpen) return
@@ -267,6 +431,28 @@ export function AppShell() {
   return (
     <div className="min-h-dvh">
       <div className="theme-shell-glow pointer-events-none fixed inset-x-0 top-0 z-0 h-72" />
+      <PomodoroTransitionEffect
+        snapshot={pomodoroSnapshot}
+        enabled={pomodoroEnabled}
+        currentProjectTitle={focusProjectTitle || null}
+      />
+      {shouldShowPomodoroPreJumpNotice && pomodoroUpcomingSegment ? (
+        <PomodoroPreTransitionNotice
+          phase="focus"
+          countdownMs={pomodoroUpcomingSegment.startsInMs}
+          currentPomodoro={pomodoroUpcomingSegment.pomodoroIndex}
+          totalPomodoros={pomodoroUpcomingSegment.totalPomodoros}
+          projectTitle={upcomingJumpProjectTitle || null}
+        />
+      ) : null}
+      {shouldShowPomodoroPreBreakNotice && pomodoroUpcomingSegment ? (
+        <PomodoroPreTransitionNotice
+          phase="break"
+          countdownMs={pomodoroUpcomingSegment.startsInMs}
+          currentPomodoro={pomodoroUpcomingSegment.pomodoroIndex}
+          totalPomodoros={pomodoroUpcomingSegment.totalPomodoros}
+        />
+      ) : null}
       <header className="theme-shell-header sticky top-0 z-20 backdrop-blur-2xl">
         <div className="container py-2.5">
           <div className="relative flex w-full items-center gap-3 sm:gap-4">
@@ -280,15 +466,33 @@ export function AppShell() {
             </Link>
 
             <div className="min-w-0 flex-1">
-              <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                <span className="text-[13px] font-semibold tracking-[0.04em] text-[color:var(--theme-soft-text-strong)]">LearningPyramid</span>
-                <span className="text-xs text-muted-foreground">/</span>
-                <div className="min-w-0 truncate text-sm font-medium tracking-tight text-foreground sm:text-[15px]">{area.title}</div>
+              <div className="min-w-0">
+                <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="text-[13px] font-semibold tracking-[0.04em] text-[color:var(--theme-soft-text-strong)]">LearningPyramid</span>
+                  <span className="text-xs text-muted-foreground">/</span>
+                  <div className="min-w-0 truncate text-sm font-medium tracking-tight text-foreground sm:text-[15px]">{area.title}</div>
+                </div>
+                <div className="mt-0.5 min-w-0 truncate text-xs text-muted-foreground">{area.context}</div>
               </div>
             </div>
 
             <div className="flex shrink-0 items-center gap-2">
-              <div className="hidden items-center gap-2 sm:flex">
+              {showPomodoroShortcut ? (
+                <Link
+                  to={buildPomodoroPath()}
+                  className={cn(
+                    "hidden h-10 items-center gap-2 rounded-xl border px-3 text-[13px] [box-shadow:var(--theme-soft-shadow)] sm:inline-flex",
+                    pomodoroSnapshot.phase === "break"
+                      ? "border-amber-200 bg-amber-50 text-amber-900"
+                      : "border-primary/15 bg-[hsl(var(--primary)/0.08)] text-foreground",
+                  )}
+                >
+                  <TimerReset className={cn("h-4 w-4", pomodoroSnapshot.phase === "break" ? "text-amber-700" : "text-primary")} />
+                  <span>{pomodoroShortcutText}</span>
+                </Link>
+              ) : null}
+
+              <div className={cn("hidden items-center gap-2", hasProjectContext ? "lg:flex" : "sm:flex")}>
                 {inlineNavItems.map((item) => {
                   const Icon = item.icon
                   return (
@@ -373,11 +577,55 @@ export function AppShell() {
                   {menuProjectNavItems.length > 0 ? (
                     <div className="theme-soft-surface mt-3 p-3">
                       <div className="flex min-w-0 items-center gap-2">
-                        <div className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">当前项目</div>
-                        <div className="min-w-0 truncate text-sm font-medium text-foreground">{projectTitle || "当前项目"}</div>
+                        <div className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                          {isSubjectRoot ? "当前学科" : "当前材料"}
+                        </div>
+                        <div className="min-w-0 truncate text-sm font-medium text-foreground">
+                          {isSubjectRoot ? subjectTitle : currentMaterialTitle}
+                        </div>
                       </div>
+                      {!isSubjectRoot ? <div className="mt-1 text-xs text-muted-foreground">{subjectTitle}</div> : null}
                       <div className="mt-3">
                         <MainNav items={menuProjectNavItems} onNavigate={() => setNavMenuOpen(false)} />
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {hasRememberedProjectContext && subjectMaterials.length > 0 ? (
+                    <div className="theme-soft-surface mt-3 p-3">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">学科材料</div>
+                      <div className="mt-3 grid gap-2">
+                        {subjectMaterials.map((material) => {
+                          const compatibilityProjectId = material.compatibilityProjectId
+                          const active = compatibilityProjectId === effectiveProjectId
+                          return (
+                            <button
+                              key={material.materialId}
+                              type="button"
+                              disabled={!compatibilityProjectId}
+                              onClick={() => {
+                                if (!compatibilityProjectId) return
+                                setNavMenuOpen(false)
+                                nav(`/p/${compatibilityProjectId}/workbench`)
+                              }}
+                              className={cn(
+                                "rounded-xl border px-3 py-2 text-left transition-colors",
+                                active
+                                  ? "border-primary/20 bg-[hsl(var(--primary)/0.08)]"
+                                  : "border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] hover:border-primary/15",
+                                !compatibilityProjectId && "cursor-not-allowed opacity-60",
+                              )}
+                            >
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="truncate text-sm font-medium text-foreground">{material.title}</div>
+                                  <div className="mt-1 text-[11px] text-muted-foreground">{formatStudyMaterialTypeLabel(material.materialType)}</div>
+                                </div>
+                                {active ? <span className="theme-meta-strong">当前</span> : null}
+                              </div>
+                            </button>
+                          )
+                        })}
                       </div>
                     </div>
                   ) : null}
@@ -392,65 +640,29 @@ export function AppShell() {
                   ) : null}
 
                   <div className="theme-status-surface mt-3 p-3">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">界面主题</div>
-                    <div className="mt-3 space-y-2">
-                      {THEME_PRESETS.map((theme) => {
-                        const isActive = selectedTheme === theme.id
-                        const previewCardStyle: CSSProperties = {
-                          background: theme.surface.background,
-                          borderColor: isActive ? THEME_PRESET_ACTIVE_BORDER : theme.surface.border,
-                          boxShadow: isActive
-                            ? `${THEME_PRESET_ACTIVE_RING}, ${THEME_PRESET_ACTIVE_GLOW}, ${theme.surface.shadow}`
-                            : theme.surface.shadow,
-                        }
-                        return (
-                          <button
-                            key={theme.id}
-                            type="button"
-                            className={cn(
-                              "flex w-full items-center justify-between gap-3 rounded-2xl border px-3 py-2.5 text-left transition-all duration-200 hover:-translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b7a4f6]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent",
-                            )}
-                            style={previewCardStyle}
-                            onClick={() => {
-                              setTheme(theme.id)
-                              setNavMenuOpen(false)
-                            }}
-                          >
-                            <div className="min-w-0">
-                              <div className="text-sm font-medium" style={{ color: theme.surface.title }}>
-                                {theme.label}
-                              </div>
-                              <div className="mt-0.5 text-xs" style={{ color: theme.surface.description }}>
-                                {theme.description}
-                              </div>
-                            </div>
-                            <div className="flex shrink-0 items-center gap-2">
-                              <div className="flex items-center gap-1.5">
-                                {theme.preview.map((color) => (
-                                  <span
-                                    key={`${theme.id}-${color}`}
-                                    className="h-4 w-4 rounded-full shadow-inner"
-                                    style={{ backgroundColor: color, border: `1px solid ${theme.surface.swatchBorder}` }}
-                                  />
-                                ))}
-                              </div>
-                              {isActive ? (
-                                <span
-                                  className="inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold text-white"
-                                  style={{
-                                    borderColor: "rgba(255, 255, 255, 0.22)",
-                                    background: THEME_PRESET_CURRENT_BADGE_BG,
-                                    boxShadow: THEME_PRESET_CURRENT_BADGE_SHADOW,
-                                  }}
-                                >
-                                  当前
-                                </span>
-                              ) : null}
-                            </div>
-                          </button>
-                        )
-                      })}
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">全局配置</div>
+                        <div className="mt-1 text-sm font-medium text-foreground">主题与默认模板</div>
+                        <div className="mt-1 text-xs leading-5 text-muted-foreground">这里保留真正的全局偏好。番茄钟已经独立成固定功能页，在顶栏里随时可进。</div>
+                      </div>
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border [border-color:var(--theme-icon-border)] [background:var(--theme-icon-bg)] [color:var(--theme-icon-text)]">
+                        <Settings2 className="h-4.5 w-4.5" />
+                      </div>
                     </div>
+                    <div className="mt-3 grid gap-2">
+                      <div className="rounded-xl border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-3 py-2 text-xs text-muted-foreground">
+                        当前主题：<span className="font-medium text-foreground">{selectedThemeLabel}</span>
+                      </div>
+                      <div className="rounded-xl border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-3 py-2 text-xs text-muted-foreground">
+                        默认模板：<span className="font-medium text-foreground">{reviewTemplateSummary}</span>
+                      </div>
+                    </div>
+                    <Button asChild className="mt-3 w-full rounded-xl">
+                      <Link to={buildGlobalSettingsPath()} onClick={() => setNavMenuOpen(false)}>
+                        前往全局配置
+                      </Link>
+                    </Button>
                   </div>
                 </div>
               </div>

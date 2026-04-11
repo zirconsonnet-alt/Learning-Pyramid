@@ -24,8 +24,11 @@ from backend.models.enums import (
     ConvergenceState,
     InstancePresence,
     LayerMode,
+    LearningTaskNodeOrigin,
     MaterialSourceKind,
     MediaAssetKind,
+    MistakeStatus,
+    ObjectMirrorStatus,
     ProjectState,
     RecallPointState,
     RecallPointReviewResult,
@@ -156,6 +159,10 @@ class SqlStore(SnapshotStore, Protocol):
     def get_range_snapshot(self, project_id: str, range_id: str) -> RangeSnapshot | None: ...
 
     def get_recall_point(self, project_id: str, recall_point_id: str) -> RecallPoint | None: ...
+
+    def list_recall_points(self, project_id: str) -> tuple[RecallPoint, ...]: ...
+
+    def search_recall_points(self, project_id: str, query: str | None = None, limit: int = 20) -> tuple[RecallPoint, ...]: ...
 
     def list_layers(self, project_id: str) -> tuple[Layer, ...]: ...
 
@@ -474,6 +481,9 @@ class SQLiteSnapshotStore:
                         node_kind TEXT NOT NULL,
                         parent_id TEXT NULL,
                         bound_learning_task_id TEXT NULL,
+                        node_origin TEXT NOT NULL DEFAULT 'AGGREGATION',
+                        bound_learning_object_node_id TEXT NULL,
+                        object_mirror_status TEXT NULL,
                         title TEXT NOT NULL,
                         child_count INTEGER NOT NULL,
                         children_json TEXT NULL,
@@ -784,6 +794,14 @@ class SQLiteSnapshotStore:
                 self._ensure_column(conn, "layer_state_index", "aggregation_k_point", "INTEGER NOT NULL DEFAULT 64")
                 self._ensure_column(
                     conn,
+                    "learning_task_node_index",
+                    "node_origin",
+                    "TEXT NOT NULL DEFAULT 'AGGREGATION'",
+                )
+                self._ensure_column(conn, "learning_task_node_index", "bound_learning_object_node_id", "TEXT NULL")
+                self._ensure_column(conn, "learning_task_node_index", "object_mirror_status", "TEXT NULL")
+                self._ensure_column(
+                    conn,
                     "layer_state_index",
                     "aggregation_cycle_state",
                     "TEXT NOT NULL DEFAULT 'DONE'",
@@ -868,7 +886,23 @@ class SQLiteSnapshotStore:
                 instance_id=InstanceId(str(anchor_payload.get("instanceId", ""))),
                 position=str(anchor_payload.get("position", "")),
             ),
+            references=tuple(RecallPointId(str(item)) for item in list(raw.get("references", []))),
             insights=tuple(cls._decode_rich_content(item) for item in list(raw.get("insights", []))),
+            source_project_id=(
+                None if raw.get("sourceProjectId") is None else ProjectId(str(raw.get("sourceProjectId")))
+            ),
+            source_recall_point_id=(
+                None if raw.get("sourceRecallPointId") is None else RecallPointId(str(raw.get("sourceRecallPointId")))
+            ),
+            source_material_id=None if raw.get("sourceMaterialId") is None else str(raw.get("sourceMaterialId")),
+            source_material_title=(
+                None if raw.get("sourceMaterialTitle") is None else str(raw.get("sourceMaterialTitle"))
+            ),
+            source_anchor_label=(
+                None if raw.get("sourceAnchorLabel") is None else str(raw.get("sourceAnchorLabel"))
+            ),
+            mistake_status=None if raw.get("mistakeStatus") is None else MistakeStatus(str(raw.get("mistakeStatus"))),
+            mistake_note=None if raw.get("mistakeNote") is None else str(raw.get("mistakeNote")),
             state=RecallPointState(str(raw.get("state", RecallPointState.ACTIVE.value))),
             deleted_at=cls._ms_to_ts(None if raw.get("deletedAtMs") is None else int(raw.get("deletedAtMs"))),
         )
@@ -1125,11 +1159,14 @@ class SQLiteSnapshotStore:
                     node_kind,
                     parent_id,
                     bound_learning_task_id,
+                    node_origin,
+                    bound_learning_object_node_id,
+                    object_mirror_status,
                     title,
                     child_count,
                     children_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     project_id,
@@ -1139,6 +1176,11 @@ class SQLiteSnapshotStore:
                     None
                     if node_payload.get("boundLearningTaskId") is None
                     else str(node_payload.get("boundLearningTaskId")),
+                    str(node_payload.get("nodeOrigin", LearningTaskNodeOrigin.AGGREGATION.value)),
+                    None
+                    if node_payload.get("boundLearningObjectNodeId") is None
+                    else str(node_payload.get("boundLearningObjectNodeId")),
+                    None if node_payload.get("objectMirrorStatus") is None else str(node_payload.get("objectMirrorStatus")),
                     str(node_payload.get("title", "")),
                     len(children),
                     None if not children else json.dumps(children, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
@@ -1630,6 +1672,7 @@ class SQLiteSnapshotStore:
                 "instanceId": str(row["anchor_instance_id"]),
                 "position": str(row["anchor_position"]),
             },
+            "references": [],
             "insights": [],
         }
 
@@ -1658,6 +1701,11 @@ class SQLiteSnapshotStore:
         else:
             children_raw = str(row["children_json"]) if row["children_json"] is not None else "[]"
             payload["children"] = list(json.loads(children_raw))
+            payload["nodeOrigin"] = str(row["node_origin"] or LearningTaskNodeOrigin.AGGREGATION.value)
+            payload["boundLearningObjectNodeId"] = (
+                None if row["bound_learning_object_node_id"] is None else str(row["bound_learning_object_node_id"])
+            )
+            payload["objectMirrorStatus"] = None if row["object_mirror_status"] is None else str(row["object_mirror_status"])
         return payload
 
     @staticmethod
@@ -1857,6 +1905,17 @@ class SQLiteSnapshotStore:
             parent_id=None if payload.get("parentId") is None else LearningTaskNodeId(str(payload["parentId"])),
             children=tuple(LearningTaskNodeId(str(item)) for item in list(payload.get("children", []))),
             title=str(payload["title"]),
+            node_origin=LearningTaskNodeOrigin(str(payload.get("nodeOrigin") or LearningTaskNodeOrigin.AGGREGATION.value)),
+            bound_learning_object_node_id=(
+                None
+                if payload.get("boundLearningObjectNodeId") is None
+                else LearningObjectNodeId(str(payload["boundLearningObjectNodeId"]))
+            ),
+            object_mirror_status=(
+                None
+                if payload.get("objectMirrorStatus") is None
+                else ObjectMirrorStatus(str(payload["objectMirrorStatus"]))
+            ),
         )
 
     @classmethod
@@ -2198,7 +2257,7 @@ class SQLiteSnapshotStore:
 
         learning_task_node_rows = conn.execute(
             """
-            SELECT node_id, node_kind, parent_id, bound_learning_task_id, title, children_json
+            SELECT node_id, node_kind, parent_id, bound_learning_task_id, node_origin, bound_learning_object_node_id, object_mirror_status, title, children_json
             FROM learning_task_node_index
             WHERE project_id = ?
             ORDER BY node_id ASC
@@ -2998,6 +3057,69 @@ class SQLiteSnapshotStore:
         raw = self._recall_point_payload_from_index_row(project_id=str(project_id), row=row, legacy_payloads={})
         return self._decode_recall_point(project_id=str(project_id), raw=raw)
 
+    def list_recall_points(self, project_id: str) -> tuple[RecallPoint, ...]:
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT recall_point_id, created_at_ms, anchor_instance_id, anchor_position, question_plain_text,
+                       answer_plain_text, insights_count, payload_json
+                FROM recall_point_index
+                WHERE project_id = ?
+                ORDER BY created_at_ms ASC, recall_point_id ASC
+                """,
+                (str(project_id),),
+            ).fetchall()
+        finally:
+            conn.close()
+        return tuple(
+            self._decode_recall_point(
+                project_id=str(project_id),
+                raw=self._recall_point_payload_from_index_row(project_id=str(project_id), row=row, legacy_payloads={}),
+            )
+            for row in rows
+        )
+
+    def search_recall_points(self, project_id: str, query: str | None = None, limit: int = 20) -> tuple[RecallPoint, ...]:
+        normalized_query = str(query or "").strip().lower()
+        resolved_limit = max(1, min(int(limit), 50))
+        fetch_limit = min(max(resolved_limit * 5, resolved_limit + 20), 200)
+        where_clause = "WHERE project_id = ?"
+        params: list[Any] = [str(project_id)]
+        if normalized_query:
+            like = f"%{normalized_query}%"
+            where_clause += (
+                " AND (LOWER(recall_point_id) LIKE ? OR LOWER(question_plain_text) LIKE ? OR LOWER(answer_plain_text) LIKE ?)"
+            )
+            params.extend([like, like, like])
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                f"""
+                SELECT recall_point_id, created_at_ms, anchor_instance_id, anchor_position, question_plain_text,
+                       answer_plain_text, insights_count, payload_json
+                FROM recall_point_index
+                {where_clause}
+                ORDER BY created_at_ms DESC, recall_point_id DESC
+                LIMIT ?
+                """,
+                (*params, fetch_limit),
+            ).fetchall()
+        finally:
+            conn.close()
+        items: list[RecallPoint] = []
+        for row in rows:
+            item = self._decode_recall_point(
+                project_id=str(project_id),
+                raw=self._recall_point_payload_from_index_row(project_id=str(project_id), row=row, legacy_payloads={}),
+            )
+            if item.state != RecallPointState.ACTIVE:
+                continue
+            items.append(item)
+            if len(items) >= resolved_limit:
+                break
+        return tuple(items)
+
     def list_recall_points_by_learning_object_node(self, project_id: str, node_id: str) -> tuple[RecallPoint, ...]:
         conn = self._connect()
         try:
@@ -3196,11 +3318,11 @@ class SQLiteSnapshotStore:
         try:
             rows = conn.execute(
                 """
-                SELECT node_id, node_kind, parent_id, bound_learning_task_id, title, children_json
-                FROM learning_task_node_index
-                WHERE project_id = ?
-                ORDER BY node_id ASC
-                """,
+            SELECT node_id, node_kind, parent_id, bound_learning_task_id, node_origin, bound_learning_object_node_id, object_mirror_status, title, children_json
+            FROM learning_task_node_index
+            WHERE project_id = ?
+            ORDER BY node_id ASC
+            """,
                 (str(project_id),),
             ).fetchall()
         finally:
@@ -3212,10 +3334,10 @@ class SQLiteSnapshotStore:
         try:
             row = conn.execute(
                 """
-                SELECT node_id, node_kind, parent_id, bound_learning_task_id, title, children_json
-                FROM learning_task_node_index
-                WHERE project_id = ? AND node_id = ?
-                """,
+            SELECT node_id, node_kind, parent_id, bound_learning_task_id, node_origin, bound_learning_object_node_id, object_mirror_status, title, children_json
+            FROM learning_task_node_index
+            WHERE project_id = ? AND node_id = ?
+            """,
                 (str(project_id), str(node_id)),
             ).fetchone()
         finally:
@@ -3284,7 +3406,7 @@ class SQLiteSnapshotStore:
         try:
             node_rows = conn.execute(
                 """
-                SELECT node_id, node_kind, bound_learning_task_id, children_json
+                SELECT node_id, node_kind, bound_learning_task_id, children_json, node_origin, bound_learning_object_node_id
                 FROM learning_task_node_index
                 WHERE project_id = ?
                 """,
@@ -3308,11 +3430,23 @@ class SQLiteSnapshotStore:
                 if row["bound_learning_task_id"] is None
                 else str(row["bound_learning_task_id"]),
                 "children": tuple(json.loads(str(row["children_json"]))) if row["children_json"] is not None else tuple(),
+                "node_origin": str(row["node_origin"] or LearningTaskNodeOrigin.AGGREGATION.value),
+                "bound_learning_object_node_id": None
+                if row["bound_learning_object_node_id"] is None
+                else str(row["bound_learning_object_node_id"]),
             }
             for row in node_rows
         }
         if str(node_id) not in node_map:
             return tuple()
+
+        selected = node_map[str(node_id)]
+        if (
+            selected.get("kind") == "CONTAINER"
+            and selected.get("node_origin") == LearningTaskNodeOrigin.OBJECT_MIRROR.value
+            and selected.get("bound_learning_object_node_id")
+        ):
+            return self.list_recall_points_by_learning_object_node(project_id, str(selected["bound_learning_object_node_id"]))
 
         task_map = {
             str(row["learning_task_id"]): tuple(

@@ -20,6 +20,7 @@ from backend.models.project_material_source_binding import ProjectMaterialSource
 from backend.models.project_storage_config import ProjectStorageConfig
 from backend.models.range_snapshot import RangeSnapshot
 from backend.models.recall_point import RecallPoint
+from backend.models.study_material import StudyMaterial
 from backend.models.review_recommendation import (
     RecallPointReviewProjection,
     RecallPointReviewRecommendation,
@@ -62,6 +63,42 @@ def project_to_dto(p: Project) -> Dict[str, Any]:
         "state": _jsonable(p.state),
         "createdAt": _jsonable(p.created_at),
         "deletedAt": _jsonable(p.deleted_at),
+    }
+
+
+def subject_to_dto(p: Project) -> Dict[str, Any]:
+    return {
+        "subjectId": str(p.project_id),
+        "title": p.title,
+        "state": _jsonable(p.state),
+        "createdAt": _jsonable(p.created_at),
+        "deletedAt": _jsonable(p.deleted_at),
+        "compatibilityProjectId": str(p.project_id),
+    }
+
+
+def study_material_to_dto(m: StudyMaterial) -> Dict[str, Any]:
+    return {
+        "subjectId": str(m.subject_id),
+        "materialId": m.material_id,
+        "materialType": _jsonable(m.material_type),
+        "title": m.title,
+        "createdAt": _jsonable(m.created_at),
+        "compatibilityProjectId": None if m.compatibility_project_id is None else str(m.compatibility_project_id),
+    }
+
+
+def subject_context_to_dto(payload: Dict[str, Any]) -> Dict[str, Any]:
+    subject = payload["subject"]
+    current_material = payload["current_material"]
+    materials = payload["materials"]
+    return {
+        "subject": subject_to_dto(subject),
+        "currentMaterial": study_material_to_dto(current_material),
+        "materials": [study_material_to_dto(item) for item in materials],
+        "isSubjectRoot": bool(payload["is_subject_root"]),
+        "currentProjectId": str(payload["current_project_id"]),
+        "subjectProjectId": str(payload["subject_project_id"]),
     }
 
 
@@ -126,7 +163,15 @@ def recall_point_to_dto(rp: RecallPoint) -> Dict[str, Any]:
         "question": _rich_content_to_dto(rp.question),
         "answer": _rich_content_to_dto(rp.answer),
         "anchor": None if rp.anchor is None else {"instanceId": str(rp.anchor.instance_id), "position": rp.anchor.position},
+        "references": [str(x) for x in rp.references],
         "insights": [_rich_content_to_dto(x) for x in rp.insights],
+        "sourceProjectId": None if rp.source_project_id is None else str(rp.source_project_id),
+        "sourceRecallPointId": None if rp.source_recall_point_id is None else str(rp.source_recall_point_id),
+        "sourceMaterialId": rp.source_material_id,
+        "sourceMaterialTitle": rp.source_material_title,
+        "sourceAnchorLabel": rp.source_anchor_label,
+        "mistakeStatus": _jsonable(rp.mistake_status),
+        "mistakeNote": rp.mistake_note,
     }
 
 
@@ -248,6 +293,7 @@ def project_config_to_dto(c: ProjectConfig) -> Dict[str, Any]:
     return {
         "projectId": str(c.project_id),
         "projectType": _jsonable(c.project_type),
+        "rollUpStrategy": _jsonable(c.roll_up_strategy),
         "updatedAt": _jsonable(c.updated_at),
         "layerConfigs": {str(int(k)): _layer_config_to_dto(v) for k, v in c.layer_configs.items()},
         "pushConfig": None
@@ -330,6 +376,9 @@ def learning_task_node_to_dto(n: LearningTaskNode) -> Dict[str, Any]:
             "parentId": None if n.parent_id is None else str(n.parent_id),
             "children": [str(x) for x in n.children],
             "title": n.title,
+            "nodeOrigin": _jsonable(n.node_origin),
+            "boundLearningObjectNodeId": None if n.bound_learning_object_node_id is None else str(n.bound_learning_object_node_id),
+            "objectMirrorStatus": _jsonable(n.object_mirror_status),
         }
     raise TypeError(f"Unknown LearningTaskNode type: {type(n)}")
 

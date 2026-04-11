@@ -5,7 +5,11 @@ export type DailyStatPoint = {
   dateKey: string
   shortLabel: string
   weekdayLabel: string
-  playbackMs: number
+  effectiveMs: number
+  watchMs: number
+  composeMs: number
+  reviewMs: number
+  qaMs: number
   learningCount: number
   reviewCount: number
   totalActions: number

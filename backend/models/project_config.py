@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, FrozenSet, Optional, Tuple, TypeAlias
 
-from backend.models.enums import ClientRuntimeKind, ProjectType, ReviewChainTemplateItemKind, RuntimeCapability
+from backend.models.enums import ClientRuntimeKind, ProjectType, ReviewChainTemplateItemKind, RollUpStrategy, RuntimeCapability
 from backend.models.errors import PreconditionFailure
 from backend.models.types import ProjectId, Timestamp
 
@@ -181,6 +181,7 @@ class ProjectConfig:
     layer_configs: Dict[int, LayerConfig]
     push_config: RecallPointPushConfig
     updated_at: Timestamp
+    roll_up_strategy: RollUpStrategy = RollUpStrategy.THRESHOLD_AUTO
 
     def validate_write_time(self) -> None:
         if not str(self.project_id).strip():
@@ -191,6 +192,8 @@ class ProjectConfig:
             raise PreconditionFailure("ProjectConfig.layer_configs must not be null")
         if self.push_config is None:
             raise PreconditionFailure("ProjectConfig.push_config must not be null")
+        if not isinstance(self.roll_up_strategy, RollUpStrategy):
+            raise PreconditionFailure("ProjectConfig.roll_up_strategy must be RollUpStrategy")
         if 0 not in self.layer_configs:
             raise PreconditionFailure("ProjectConfig.layer_configs must include layer_index=0")
 
@@ -205,11 +208,11 @@ class ProjectConfig:
 
 
 def project_type_requires_learning_object_tree(project_type: ProjectType) -> bool:
-    return project_type in {ProjectType.COURSE, ProjectType.BOOK}
+    return project_type in {ProjectType.COURSE, ProjectType.BOOK, ProjectType.MISTAKE_BOOK}
 
 
 def project_type_requires_anchor(project_type: ProjectType) -> bool:
-    return project_type in {ProjectType.COURSE, ProjectType.BOOK}
+    return project_type in {ProjectType.COURSE, ProjectType.BOOK, ProjectType.MISTAKE_BOOK}
 
 
 def project_type_allows_anchor(project_type: ProjectType) -> bool:
@@ -227,5 +230,6 @@ def default_project_config(
         project_type=project_type,
         layer_configs={0: default_layer_config()},
         push_config=default_push_config(),
+        roll_up_strategy=RollUpStrategy.THRESHOLD_AUTO,
         updated_at=updated_at,
     )

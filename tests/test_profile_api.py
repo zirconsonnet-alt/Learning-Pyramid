@@ -101,6 +101,110 @@ def test_profile_avatar_upload(auth_env: None) -> None:
     assert avatar.headers["content-type"].startswith("image/png")
 
 
+def test_profile_study_metrics_sync_merges_ranges(auth_env: None) -> None:
+    client = TestClient(create_app())
+    client.post("/api/auth/register", json={"email": "owner@example.com", "password": "password123"})
+
+    created = client.post("/api/projects", json={"title": "Metrics Project"})
+    assert created.status_code == 200
+    project_id = created.json()["data"]["projectId"]
+
+    first_sync = client.post(
+        "/api/profile/me/study-metrics/sync",
+        json={
+            "projectIds": [project_id],
+            "dateFrom": "2026-04-08",
+            "dateTo": "2026-04-08",
+            "entries": [
+                {
+                    "projectId": project_id,
+                    "dateKey": "2026-04-08",
+                    "effectiveMs": 30000,
+                    "watchMs": 30000,
+                    "composeMs": 0,
+                    "reviewMs": 0,
+                    "qaMs": 0,
+                    "effectiveRanges": [{"startMs": 0, "endMs": 30000}],
+                    "watchRanges": [{"startMs": 0, "endMs": 30000}],
+                    "composeRanges": [],
+                    "reviewRanges": [],
+                    "qaRanges": [],
+                }
+            ],
+        },
+    )
+    assert first_sync.status_code == 200
+    first_entry = first_sync.json()["data"][0]
+    assert first_entry["effectiveMs"] == 30000
+    assert first_entry["watchMs"] == 30000
+
+    second_sync = client.post(
+        "/api/profile/me/study-metrics/sync",
+        json={
+            "projectIds": [project_id],
+            "dateFrom": "2026-04-08",
+            "dateTo": "2026-04-08",
+            "entries": [
+                {
+                    "projectId": project_id,
+                    "dateKey": "2026-04-08",
+                    "effectiveMs": 45000,
+                    "watchMs": 30000,
+                    "composeMs": 15000,
+                    "reviewMs": 0,
+                    "qaMs": 0,
+                    "effectiveRanges": [{"startMs": 20000, "endMs": 45000}],
+                    "watchRanges": [{"startMs": 20000, "endMs": 30000}],
+                    "composeRanges": [{"startMs": 30000, "endMs": 45000}],
+                    "reviewRanges": [],
+                    "qaRanges": [],
+                }
+            ],
+        },
+    )
+    assert second_sync.status_code == 200
+    second_entry = second_sync.json()["data"][0]
+    assert second_entry["effectiveMs"] == 45000
+    assert second_entry["watchMs"] == 30000
+    assert second_entry["composeMs"] == 15000
+    assert second_entry["effectiveRanges"] == [{"startMs": 0, "endMs": 45000}]
+    assert second_entry["watchRanges"] == [{"startMs": 0, "endMs": 30000}]
+    assert second_entry["composeRanges"] == [{"startMs": 30000, "endMs": 45000}]
+
+    fetched = client.post(
+        "/api/profile/me/study-metrics/sync",
+        json={
+            "projectIds": [project_id],
+            "dateFrom": "2026-04-08",
+            "dateTo": "2026-04-08",
+            "entries": [],
+        },
+    )
+    assert fetched.status_code == 200
+    assert fetched.json()["data"][0]["effectiveMs"] == 45000
+
+
+def test_profile_study_metrics_sync_rejects_unowned_project(auth_env: None) -> None:
+    owner_client = TestClient(create_app())
+    owner_client.post("/api/auth/register", json={"email": "owner@example.com", "password": "password123"})
+    created = owner_client.post("/api/projects", json={"title": "Owner Project"})
+    assert created.status_code == 200
+    project_id = created.json()["data"]["projectId"]
+
+    stranger_client = TestClient(create_app())
+    stranger_client.post("/api/auth/register", json={"email": "stranger@example.com", "password": "password123"})
+    denied = stranger_client.post(
+        "/api/profile/me/study-metrics/sync",
+        json={
+            "projectIds": [project_id],
+            "dateFrom": "2026-04-08",
+            "dateTo": "2026-04-08",
+            "entries": [],
+        },
+    )
+    assert denied.status_code == 403
+
+
 def test_profile_service_settings_persist_across_relogin(auth_env: None) -> None:
     client = TestClient(create_app())
     registered = client.post("/api/auth/register", json={"email": "owner@example.com", "password": "password123"})
@@ -166,6 +270,194 @@ def test_profile_service_settings_persist_across_relogin(auth_env: None) -> None
     assert asr_after.json()["data"]["savedApiKeyPreview"] == "sk-a...1234"
 
 
+def test_profile_global_settings_persist_across_relogin(auth_env: None) -> None:
+    client = TestClient(create_app())
+    registered = client.post("/api/auth/register", json={"email": "owner@example.com", "password": "password123"})
+    assert registered.status_code == 200
+
+    default_schedule = {
+        day: {
+            "enabled": False,
+            "startTime": "19:00",
+            "focusMinutes": 25,
+            "breakMinutes": 5,
+            "pomodoroCount": 4,
+            "projectIds": [None, None, None, None],
+            "breakPrompt": "",
+            "focusPrompts": ["", "", "", ""],
+        }
+        for day in ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+    }
+    updated_schedule = {
+        "mon": {
+            "enabled": True,
+            "startTime": "08:30",
+            "focusMinutes": 40,
+            "breakMinutes": 8,
+            "pomodoroCount": 3,
+            "projectIds": ["project-a", "project-b", None],
+        },
+        "tue": {
+            "enabled": True,
+            "startTime": "08:30",
+            "focusMinutes": 40,
+            "breakMinutes": 8,
+            "pomodoroCount": 3,
+            "projectIds": ["project-a", "project-b", "project-c"],
+        },
+        "wed": {
+            "enabled": True,
+            "startTime": "08:30",
+            "focusMinutes": 40,
+            "breakMinutes": 8,
+            "pomodoroCount": 3,
+            "projectIds": [None, None, None],
+        },
+        "thu": {
+            "enabled": True,
+            "startTime": "08:30",
+            "focusMinutes": 40,
+            "breakMinutes": 8,
+            "pomodoroCount": 3,
+            "projectIds": ["project-d", None, None],
+        },
+        "fri": {
+            "enabled": True,
+            "startTime": "08:30",
+            "focusMinutes": 40,
+            "breakMinutes": 8,
+            "pomodoroCount": 3,
+            "projectIds": ["project-d", "project-e", "project-f"],
+        },
+        "sat": {
+            "enabled": False,
+            "startTime": "10:00",
+            "focusMinutes": 30,
+            "breakMinutes": 10,
+            "pomodoroCount": 2,
+            "projectIds": [None, None],
+        },
+        "sun": {
+            "enabled": False,
+            "startTime": "10:00",
+            "focusMinutes": 30,
+            "breakMinutes": 10,
+            "pomodoroCount": 2,
+            "projectIds": [None, "project-z"],
+        },
+    }
+    for day, payload in updated_schedule.items():
+        count = int(payload["pomodoroCount"])
+        payload["breakPrompt"] = f"{day} rest in ten seconds"
+        payload["focusPrompts"] = [f"{day} focus {index + 1}" for index in range(count)]
+
+    before = client.get("/api/profile/me/global-settings")
+    assert before.status_code == 200
+    assert before.json()["data"]["theme"] == "mist"
+    assert before.json()["data"]["pomodoro"] == {
+        "enabled": False,
+        "transitionSoundEnabled": False,
+        "weeklySchedule": default_schedule,
+    }
+    assert before.json()["data"]["defaultProjectReviewTemplate"] == [{"kind": "CONVERGENCE"}]
+
+    updated = client.put(
+        "/api/profile/me/global-settings",
+        json={
+            "theme": "paper",
+            "pomodoro": {
+                "enabled": True,
+                "transitionSoundEnabled": True,
+                "weeklySchedule": updated_schedule,
+            },
+            "defaultProjectReviewTemplate": [{"kind": "REVIEW_TASK", "count": 2}],
+        },
+    )
+    assert updated.status_code == 200
+    updated_body = updated.json()["data"]
+    assert updated_body["theme"] == "paper"
+    assert updated_body["pomodoro"] == {
+        "enabled": True,
+        "transitionSoundEnabled": True,
+        "weeklySchedule": updated_schedule,
+    }
+    assert updated_body["defaultProjectReviewTemplate"] == [
+        {"kind": "CONVERGENCE"},
+        {"kind": "REVIEW_TASK", "count": 2},
+    ]
+    assert updated_body["updatedAt"]
+
+    client.post("/api/auth/logout")
+    relogin = client.post("/api/auth/login", json={"email": "owner@example.com", "password": "password123"})
+    assert relogin.status_code == 200
+
+    after = client.get("/api/profile/me/global-settings")
+    assert after.status_code == 200
+    after_body = after.json()["data"]
+    assert after_body["theme"] == "paper"
+    assert after_body["pomodoro"] == {
+        "enabled": True,
+        "transitionSoundEnabled": True,
+        "weeklySchedule": updated_schedule,
+    }
+    assert after_body["defaultProjectReviewTemplate"] == [
+        {"kind": "CONVERGENCE"},
+        {"kind": "REVIEW_TASK", "count": 2},
+    ]
+
+
+def test_profile_learning_plans_sync_and_survive_global_settings_update(auth_env: None) -> None:
+    client = TestClient(create_app())
+    registered = client.post("/api/auth/register", json={"email": "owner@example.com", "password": "password123"})
+    assert registered.status_code == 200
+
+    empty = client.get("/api/profile/me/learning-plans")
+    assert empty.status_code == 200
+    assert empty.json()["data"] == {"plans": [], "progressSnapshots": []}
+
+    learning_plans = {
+        "plans": [
+            {
+                "planId": "plan:calculus:one",
+                "projectId": "calculus",
+                "title": "两周冲完极限",
+                "targetKind": "LEARNING_OBJECT_NODES",
+                "learningObjectNodeIds": ["node-a", "node-b"],
+                "targetDays": 14,
+                "createdDateKey": "2026-04-10",
+                "dueDateKey": "2026-04-23",
+                "archivedAt": None,
+                "updatedAt": 1775779200000,
+            }
+        ],
+        "progressSnapshots": [
+            {
+                "planId": "plan:calculus:one",
+                "dateKey": "2026-04-10",
+                "progressRatio": 0.25,
+                "updatedAt": 1775779200001,
+            }
+        ],
+    }
+    synced = client.put("/api/profile/me/learning-plans", json=learning_plans)
+    assert synced.status_code == 200
+    assert synced.json()["data"] == learning_plans
+    assert client.get("/api/profile/me/global-settings").json()["data"]["learningPlans"] == learning_plans
+
+    settings = client.get("/api/profile/me/global-settings").json()["data"]
+    updated_settings = client.put(
+        "/api/profile/me/global-settings",
+        json={
+            "theme": "paper",
+            "pomodoro": settings["pomodoro"],
+            "defaultProjectReviewTemplate": settings["defaultProjectReviewTemplate"],
+        },
+    )
+    assert updated_settings.status_code == 200
+    assert updated_settings.json()["data"]["learningPlans"] == learning_plans
+    assert client.get("/api/profile/me/learning-plans").json()["data"] == learning_plans
+
+
 def test_auth_mode_does_not_fallback_to_deployment_llm_settings(
     auth_env: None,
     monkeypatch: pytest.MonkeyPatch,
@@ -214,3 +506,27 @@ def test_auth_mode_disables_global_llm_settings_endpoint(auth_env: None) -> None
     )
     assert updated.status_code == 400
     assert updated.json()["error"]["message"] == "Global LLM settings are disabled when auth is enabled"
+
+
+def test_system_pomodoro_tts_preview_returns_audio_when_auth_enabled(
+    auth_env: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from adapter.routers import system as system_router
+
+    async def fake_synthesize_pomodoro_prompt_audio(text: str) -> bytes:
+        assert text == "十秒后开始学习"
+        return b"fake-mp3"
+
+    monkeypatch.setattr(
+        system_router,
+        "synthesize_pomodoro_prompt_audio",
+        fake_synthesize_pomodoro_prompt_audio,
+    )
+
+    client = TestClient(create_app())
+    response = client.post("/api/system/pomodoro/tts-preview", json={"text": "十秒后开始学习"})
+
+    assert response.status_code == 200
+    assert response.content == b"fake-mp3"
+    assert response.headers["content-type"].startswith("audio/mpeg")

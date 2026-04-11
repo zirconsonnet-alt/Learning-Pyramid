@@ -5,6 +5,13 @@ import { apiRequest } from "@/ui/api/http"
 export const AdminOverviewSchema = z.object({
   users: z.number(),
   activeUsers: z.number(),
+  studyUsers: z.number(),
+  studyUsers7d: z.number(),
+  effectiveStudyMs: z.number(),
+  watchMs: z.number(),
+  composeMs: z.number(),
+  reviewMs: z.number(),
+  qaMs: z.number(),
 })
 
 export type AdminOverview = z.infer<typeof AdminOverviewSchema>

@@ -1,6 +1,18 @@
 import { z } from "zod"
 
 import { apiRequest } from "@/ui/api/http"
+import { ReviewChainTemplateItemSchema } from "@/ui/api/projectConfig"
+
+const UserPomodoroDaySchema = z.object({
+  enabled: z.boolean(),
+  startTime: z.string(),
+  focusMinutes: z.number().int().min(1).max(180),
+  breakMinutes: z.number().int().min(1).max(60),
+  pomodoroCount: z.number().int().min(1).max(12),
+  projectIds: z.array(z.string().nullable()).max(12).default([]),
+  breakPrompt: z.string().max(200).optional().default(""),
+  focusPrompts: z.array(z.string().max(200)).max(12).default([]),
+})
 
 export const UserProfileSchema = z.object({
   userId: z.string(),
@@ -49,6 +61,79 @@ export const UserAsrSettingsSchema = z.object({
 })
 
 export type UserAsrSettings = z.infer<typeof UserAsrSettingsSchema>
+
+export const SyncedLearningPlanSchema = z.object({
+  planId: z.string(),
+  projectId: z.string(),
+  title: z.string(),
+  targetKind: z.enum(["PROJECT", "LEARNING_OBJECT_NODES"]),
+  learningObjectNodeIds: z.array(z.string()).default([]),
+  targetDays: z.number().int().min(1).max(3650),
+  createdDateKey: z.string(),
+  dueDateKey: z.string(),
+  archivedAt: z.number().int().nonnegative().nullable().default(null),
+  updatedAt: z.number().int().nonnegative(),
+})
+
+export const SyncedLearningPlanProgressSnapshotSchema = z.object({
+  planId: z.string(),
+  dateKey: z.string(),
+  progressRatio: z.number().min(0).max(1),
+  updatedAt: z.number().int().nonnegative(),
+})
+
+export const SyncedLearningPlansSchema = z.object({
+  plans: z.array(SyncedLearningPlanSchema).default([]),
+  progressSnapshots: z.array(SyncedLearningPlanProgressSnapshotSchema).default([]),
+})
+
+export type SyncedLearningPlans = z.infer<typeof SyncedLearningPlansSchema>
+
+export const UserGlobalSettingsSchema = z.object({
+  theme: z.string(),
+  pomodoro: z.object({
+    enabled: z.boolean(),
+    transitionSoundEnabled: z.boolean().optional().default(false),
+    weeklySchedule: z.object({
+      mon: UserPomodoroDaySchema,
+      tue: UserPomodoroDaySchema,
+      wed: UserPomodoroDaySchema,
+      thu: UserPomodoroDaySchema,
+      fri: UserPomodoroDaySchema,
+      sat: UserPomodoroDaySchema,
+      sun: UserPomodoroDaySchema,
+    }),
+  }),
+  defaultProjectReviewTemplate: z.array(ReviewChainTemplateItemSchema).min(1),
+  learningPlans: SyncedLearningPlansSchema.optional().default({ plans: [], progressSnapshots: [] }),
+  updatedAt: z.string().nullable().optional(),
+})
+
+export type UserGlobalSettings = z.infer<typeof UserGlobalSettingsSchema>
+
+export const StudyMetricRangeSchema = z.object({
+  startMs: z.number().int().nonnegative(),
+  endMs: z.number().int().positive(),
+})
+
+export const DailyStudyMetricEntrySchema = z.object({
+  projectId: z.string(),
+  dateKey: z.string(),
+  effectiveMs: z.number().int().nonnegative(),
+  watchMs: z.number().int().nonnegative(),
+  composeMs: z.number().int().nonnegative(),
+  reviewMs: z.number().int().nonnegative(),
+  qaMs: z.number().int().nonnegative(),
+  effectiveRanges: z.array(StudyMetricRangeSchema),
+  watchRanges: z.array(StudyMetricRangeSchema),
+  composeRanges: z.array(StudyMetricRangeSchema),
+  reviewRanges: z.array(StudyMetricRangeSchema),
+  qaRanges: z.array(StudyMetricRangeSchema),
+  updatedAt: z.string().optional(),
+})
+
+export type StudyMetricRange = z.infer<typeof StudyMetricRangeSchema>
+export type DailyStudyMetricEntry = z.infer<typeof DailyStudyMetricEntrySchema>
 
 export function getMyProfile() {
   return apiRequest({
@@ -114,6 +199,13 @@ export function getMyAsrSettings() {
   })
 }
 
+export function getMyGlobalSettings() {
+  return apiRequest({
+    path: "/profile/me/global-settings",
+    responseSchema: UserGlobalSettingsSchema,
+  })
+}
+
 export function updateMyAsrSettings(params: {
   baseUrl?: string
   modelName?: string
@@ -128,9 +220,64 @@ export function updateMyAsrSettings(params: {
   })
 }
 
+export function updateMyGlobalSettings(params: {
+  theme?: string | null
+  pomodoro: {
+    enabled: boolean
+    transitionSoundEnabled?: boolean
+    weeklySchedule: {
+      mon: z.input<typeof UserPomodoroDaySchema>
+      tue: z.input<typeof UserPomodoroDaySchema>
+      wed: z.input<typeof UserPomodoroDaySchema>
+      thu: z.input<typeof UserPomodoroDaySchema>
+      fri: z.input<typeof UserPomodoroDaySchema>
+      sat: z.input<typeof UserPomodoroDaySchema>
+      sun: z.input<typeof UserPomodoroDaySchema>
+    }
+  }
+  defaultProjectReviewTemplate: Array<{ kind: "CONVERGENCE" | "REVIEW_TASK"; count?: number }>
+}) {
+  return apiRequest({
+    path: "/profile/me/global-settings",
+    method: "PUT",
+    body: params,
+    responseSchema: UserGlobalSettingsSchema,
+  })
+}
+
+export function getMyLearningPlans() {
+  return apiRequest({
+    path: "/profile/me/learning-plans",
+    responseSchema: SyncedLearningPlansSchema,
+  })
+}
+
+export function updateMyLearningPlans(params: SyncedLearningPlans) {
+  return apiRequest({
+    path: "/profile/me/learning-plans",
+    method: "PUT",
+    body: params,
+    responseSchema: SyncedLearningPlansSchema,
+  })
+}
+
 export function findUserByUid(publicUid: string) {
   return apiRequest({
     path: `/users/by-uid/${encodeURIComponent(publicUid)}`,
     responseSchema: PublicUserLookupSchema,
+  })
+}
+
+export function syncMyStudyMetrics(params: {
+  projectIds: string[]
+  dateFrom?: string
+  dateTo?: string
+  entries: DailyStudyMetricEntry[]
+}) {
+  return apiRequest({
+    path: "/profile/me/study-metrics/sync",
+    method: "POST",
+    body: params,
+    responseSchema: z.array(DailyStudyMetricEntrySchema),
   })
 }

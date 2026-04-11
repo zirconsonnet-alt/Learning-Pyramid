@@ -1,4 +1,4 @@
-import { type ChangeEvent, type KeyboardEvent, useMemo, useRef, useState } from "react"
+import { type ChangeEvent, type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react"
 import { useQueries } from "@tanstack/react-query"
 import { Activity, ArrowRight, Camera, ChevronDown, Cloud, KeyRound, Link2Off, Mail, RefreshCw, Save } from "lucide-react"
 import { Link } from "react-router-dom"
@@ -14,8 +14,9 @@ import { useProjects } from "@/ui/queries/projects"
 import { useBaiduNetdiskCloudAccounts, useBeginBaiduNetdiskConnect, useDisconnectBaiduNetdiskAccount } from "@/ui/queries/cloudAccounts"
 import { useChangeMyPassword, useMyProfile, useUpdateMyProfile, useUploadMyAvatar } from "@/ui/queries/profile"
 import { useSystemCapabilities } from "@/ui/queries/system"
-import { getLocalDateKey, loadDailyPlaybackTotalsByDate } from "@/ui/store/workbenchDailyStats"
+import { getLocalDateKey, loadDailyStudyTotalsByDate } from "@/ui/store/workbenchDailyStats"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
+import { syncStudyMetricsSnapshot } from "@/ui/studyMetricsSync"
 import { cn } from "@/ui/utils"
 
 import {
@@ -37,7 +38,7 @@ type ProfileDraft = {
   bio: string
 }
 
-type LearningMetric = "playback" | "learning" | "review"
+type LearningMetric = "effective" | "watch" | "compose" | "review" | "qa"
 type LearningRange = "week" | "month" | "history"
 
 type LearningMetricOption = {
@@ -51,16 +52,24 @@ type LearningMetricOption = {
 
 const learningMetricOptions: LearningMetricOption[] = [
   {
-    value: "playback",
-    label: "学习时长",
+    value: "effective",
+    label: "有效学习",
     stroke: "#2563eb",
     surface: "#eff6ff",
     fillStart: "rgba(37,99,235,0.22)",
     fillEnd: "rgba(37,99,235,0.03)",
   },
   {
-    value: "learning",
-    label: "复述点录入",
+    value: "watch",
+    label: "材料接触",
+    stroke: "#0f766e",
+    surface: "#ecfeff",
+    fillStart: "rgba(15,118,110,0.18)",
+    fillEnd: "rgba(15,118,110,0.03)",
+  },
+  {
+    value: "compose",
+    label: "复述点构建",
     stroke: "#ef4444",
     surface: "#fef2f2",
     fillStart: "rgba(239,68,68,0.2)",
@@ -68,11 +77,19 @@ const learningMetricOptions: LearningMetricOption[] = [
   },
   {
     value: "review",
-    label: "复述点复习",
+    label: "复习时长",
     stroke: "#14b8a6",
     surface: "#ecfeff",
     fillStart: "rgba(20,184,166,0.2)",
     fillEnd: "rgba(20,184,166,0.03)",
+  },
+  {
+    value: "qa",
+    label: "AI 问答",
+    stroke: "#7c3aed",
+    surface: "#f5f3ff",
+    fillStart: "rgba(124,58,237,0.18)",
+    fillEnd: "rgba(124,58,237,0.03)",
   },
 ]
 
@@ -89,34 +106,31 @@ function formatApiError(err: unknown) {
 }
 
 function getLearningMetricValue(point: DailyStatPoint, metric: LearningMetric) {
-  if (metric === "learning") return point.learningCount
-  if (metric === "review") return point.reviewCount
-  return point.playbackMs
+  if (metric === "watch") return point.watchMs
+  if (metric === "compose") return point.composeMs
+  if (metric === "review") return point.reviewMs
+  if (metric === "qa") return point.qaMs
+  return point.effectiveMs
 }
 
 function getLearningMetricOption(metric: LearningMetric) {
   return learningMetricOptions.find((option) => option.value === metric) ?? learningMetricOptions[0]
 }
 
-function formatLearningMetricValue(metric: LearningMetric, value: number) {
-  if (metric === "playback") return formatDurationCompact(value)
-  return `${value} 次`
+function formatLearningMetricValue(_metric: LearningMetric, value: number) {
+  return formatDurationCompact(value)
 }
 
-function formatLearningMetricAverage(metric: LearningMetric, value: number) {
-  if (metric === "playback") {
-    const minutes = value / 60_000
-    if (minutes <= 0) return "0m"
-    if (minutes < 60) {
-      const roundedMinutes = Math.round(minutes * 10) / 10
-      return `${Number.isInteger(roundedMinutes) ? roundedMinutes : roundedMinutes.toFixed(1)}m`
-    }
-    const hours = minutes / 60
-    const roundedHours = Math.round(hours * 10) / 10
-    return `${Number.isInteger(roundedHours) ? roundedHours : roundedHours.toFixed(1)}h`
+function formatLearningMetricAverage(_metric: LearningMetric, value: number) {
+  const minutes = value / 60_000
+  if (minutes <= 0) return "0m"
+  if (minutes < 60) {
+    const roundedMinutes = Math.round(minutes * 10) / 10
+    return `${Number.isInteger(roundedMinutes) ? roundedMinutes : roundedMinutes.toFixed(1)}m`
   }
-  const roundedValue = Math.round(value * 10) / 10
-  return `${Number.isInteger(roundedValue) ? roundedValue : roundedValue.toFixed(1)} 次`
+  const hours = minutes / 60
+  const roundedHours = Math.round(hours * 10) / 10
+  return `${Number.isInteger(roundedHours) ? roundedHours : roundedHours.toFixed(1)}h`
 }
 
 function formatLearningMetricVariance(value: number) {
@@ -170,11 +184,7 @@ function waitForBaiduNetdiskConnectPopup(popup: Window | null): Promise<CloudAcc
 }
 
 function formatLearningMetricAxisLabel(metric: LearningMetric, value: number) {
-  if (metric === "playback") {
-    return formatLearningMetricAverage(metric, value)
-  }
-  const roundedValue = Math.round(value * 10) / 10
-  return `${Number.isInteger(roundedValue) ? roundedValue : roundedValue.toFixed(1)}`
+  return formatLearningMetricAverage(metric, value)
 }
 
 function getLearningMetricStats(points: DailyStatPoint[], metric: LearningMetric) {
@@ -191,7 +201,7 @@ function getLearningMetricStats(points: DailyStatPoint[], metric: LearningMetric
     (best, entry) => (best === null || entry.value > best.value ? entry : best),
     null,
   )
-  const normalizedActiveValues = activePoints.map((entry) => (metric === "playback" ? entry.value / 60_000 : entry.value))
+  const normalizedActiveValues = activePoints.map((entry) => entry.value / 60_000)
   const activeMean =
     normalizedActiveValues.length > 0
       ? normalizedActiveValues.reduce((sum, value) => sum + value, 0) / normalizedActiveValues.length
@@ -398,13 +408,14 @@ export function ProfilePage() {
   const disconnectBaiduNetdiskAccount = useDisconnectBaiduNetdiskAccount()
 
   const [selectedLearningProjectId, setSelectedLearningProjectId] = useState("all")
-  const [selectedLearningMetric, setSelectedLearningMetric] = useState<LearningMetric>("playback")
+  const [selectedLearningMetric, setSelectedLearningMetric] = useState<LearningMetric>("effective")
   const [selectedLearningRange, setSelectedLearningRange] = useState<LearningRange>("week")
   const [isProfileEditing, setIsProfileEditing] = useState(false)
   const [profileDraft, setProfileDraft] = useState<ProfileDraft | null>(null)
   const [isPasswordEditing, setIsPasswordEditing] = useState(false)
   const [currentPassword, setCurrentPassword] = useState("")
   const [newPassword, setNewPassword] = useState("")
+  const [studyMetricSyncRevision, setStudyMetricSyncRevision] = useState(0)
 
   const profile = profileQ.data ?? null
   const baiduNetdiskEnabled = capabilitiesQ.data?.baiduNetdiskEnabled ?? false
@@ -447,14 +458,53 @@ export function ProfilePage() {
     [activeProjects, effectiveSelectedLearningProjectId],
   )
 
+  const selectedStudyMetricWindow = useMemo(() => {
+    if (selectedLearningRange === "week") {
+      const dateKeys = buildRecentDateKeys(7)
+      return { dateFrom: dateKeys[0], dateTo: dateKeys[dateKeys.length - 1] }
+    }
+    if (selectedLearningRange === "month") {
+      const dateKeys = buildRecentDateKeys(30)
+      return { dateFrom: dateKeys[0], dateTo: dateKeys[dateKeys.length - 1] }
+    }
+    return { dateFrom: undefined, dateTo: undefined }
+  }, [selectedLearningRange])
+
+  useEffect(() => {
+    if (!capabilitiesQ.data?.authEnabled) return
+    if (selectedLearningProjectIds.length === 0) return
+
+    let cancelled = false
+
+    async function runStudyMetricsSync() {
+      try {
+        await syncStudyMetricsSnapshot({
+          projectIds: selectedLearningProjectIds,
+          dateFrom: selectedStudyMetricWindow.dateFrom,
+          dateTo: selectedStudyMetricWindow.dateTo,
+        })
+        if (!cancelled) {
+          setStudyMetricSyncRevision((current) => current + 1)
+        }
+      } catch {
+        // Keep the profile page readable when hosted sync is temporarily unavailable.
+      }
+    }
+
+    void runStudyMetricsSync()
+    return () => {
+      cancelled = true
+    }
+  }, [capabilitiesQ.data?.authEnabled, selectedLearningProjectIds, selectedStudyMetricWindow])
+
   const selectedStudyEvents = useMemo(
     () => selectedLearningProjectIds.flatMap((projectId) => successfulStudyEventsByProjectId[projectId] ?? []),
     [selectedLearningProjectIds, successfulStudyEventsByProjectId],
   )
 
-  const selectedPlaybackTotalsByDate = useMemo(
-    () => loadDailyPlaybackTotalsByDate(selectedLearningProjectIds),
-    [selectedLearningProjectIds],
+  const selectedStudyTotalsByDate = useMemo(
+    () => loadDailyStudyTotalsByDate(selectedLearningProjectIds),
+    [selectedLearningProjectIds, studyMetricSyncRevision],
   )
 
   const selectedActionCountsByDate = useMemo(() => {
@@ -478,7 +528,7 @@ export function ProfilePage() {
     if (selectedLearningRange === "month") return buildRecentDateKeys(30)
 
     const earliestDateKey = [
-      ...Object.keys(selectedPlaybackTotalsByDate),
+      ...Object.keys(selectedStudyTotalsByDate),
       ...Object.keys(selectedActionCountsByDate.learningByDate),
       ...Object.keys(selectedActionCountsByDate.reviewByDate),
     ]
@@ -486,7 +536,7 @@ export function ProfilePage() {
       .sort()[0]
 
     return buildDateKeySpan(earliestDateKey ?? getLocalDateKey())
-  }, [selectedActionCountsByDate, selectedLearningRange, selectedPlaybackTotalsByDate])
+  }, [selectedActionCountsByDate, selectedLearningRange, selectedStudyTotalsByDate])
 
   const recentSeries = useMemo<DailyStatPoint[]>(
     () =>
@@ -497,13 +547,17 @@ export function ProfilePage() {
           dateKey,
           shortLabel: formatDateKeyShortLabel(dateKey),
           weekdayLabel: formatDateKeyWeekdayLabel(dateKey),
-          playbackMs: selectedPlaybackTotalsByDate[dateKey] ?? 0,
+          effectiveMs: selectedStudyTotalsByDate[dateKey]?.effectiveMs ?? 0,
+          watchMs: selectedStudyTotalsByDate[dateKey]?.watchMs ?? 0,
+          composeMs: selectedStudyTotalsByDate[dateKey]?.composeMs ?? 0,
+          reviewMs: selectedStudyTotalsByDate[dateKey]?.reviewMs ?? 0,
+          qaMs: selectedStudyTotalsByDate[dateKey]?.qaMs ?? 0,
           learningCount,
           reviewCount,
           totalActions: learningCount + reviewCount,
         }
       }),
-    [selectedActionCountsByDate, selectedPlaybackTotalsByDate, visibleDateKeys],
+    [selectedActionCountsByDate, selectedStudyTotalsByDate, visibleDateKeys],
   )
 
   const learningViewLoading = projectsQ.isLoading || auditLogQs.some((query) => query.isLoading)

@@ -168,6 +168,116 @@ export async function getSystemRuntime(options?: ApiRequestExecutionOptions): Pr
   }
 }
 
+export async function requestPomodoroTtsPreviewAudio(
+  body: { text: string },
+  options?: ApiRequestExecutionOptions,
+): Promise<Blob> {
+  const controller = new AbortController()
+  const listeners: Array<() => void> = []
+  const timeoutMs = options?.timeoutMs ?? 25_000
+  let timedOut = false
+  let timeoutId: ReturnType<typeof globalThis.setTimeout> | null = null
+
+  if (options?.signal) {
+    if (options.signal.aborted) {
+      controller.abort()
+    } else {
+      const onAbort = () => controller.abort()
+      options.signal.addEventListener("abort", onAbort, { once: true })
+      listeners.push(() => options.signal?.removeEventListener("abort", onAbort))
+    }
+  }
+
+  if (timeoutMs > 0) {
+    timeoutId = globalThis.setTimeout(() => {
+      timedOut = true
+      controller.abort()
+    }, timeoutMs)
+  }
+
+  try {
+    const response = await fetch(`${getBaseUrl()}/system/pomodoro/tts-preview`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    })
+
+    if (!response.ok) {
+      const text = await response.text()
+      try {
+        const json = JSON.parse(text)
+        const errorEnvelope = z
+          .object({
+            ok: z.literal(false),
+            error: z.object({
+              code: z.string(),
+              message: z.string(),
+              details: z.unknown().optional(),
+            }),
+          })
+          .safeParse(json)
+        if (errorEnvelope.success) {
+          throw new ApiError(errorEnvelope.data.error.message, {
+            code: errorEnvelope.data.error.code,
+            status: response.status,
+            details: errorEnvelope.data.error.details,
+          })
+        }
+      } catch (error) {
+        if (error instanceof ApiError) throw error
+      }
+      throw new ApiError(`HTTP ${response.status}`, {
+        code: "HTTP_ERROR",
+        status: response.status,
+        details: { path: "/system/pomodoro/tts-preview", body: text.slice(0, 500) },
+      })
+    }
+
+    const blob = await response.blob()
+    if (!blob.size) {
+      throw new ApiError("Empty audio response", {
+        code: "EMPTY_RESPONSE",
+        status: response.status,
+        details: { path: "/system/pomodoro/tts-preview" },
+      })
+    }
+    return blob
+  } catch (error) {
+    if (options?.signal?.aborted) throw error
+    if (timedOut) {
+      throw new ApiError(buildRequestTimeoutMessage(timeoutMs), {
+        code: "REQUEST_TIMEOUT",
+        status: 0,
+        details: { path: "/system/pomodoro/tts-preview", timeoutMs },
+      })
+    }
+    if (error instanceof ApiError) throw error
+    if (error instanceof DOMException && error.name === "AbortError") throw error
+    if (error instanceof TypeError) {
+      throw new ApiError("网络连接已中断，暂时无法连接服务器。请检查 VPN、Wi-Fi 或移动网络后重试。", {
+        code: "NETWORK_ERROR",
+        status: 0,
+        details: { path: "/system/pomodoro/tts-preview", cause: { name: error.name, message: error.message } },
+      })
+    }
+    throw new ApiError("请求失败，请稍后重试。", {
+      code: "REQUEST_FAILED",
+      status: 0,
+      details: {
+        path: "/system/pomodoro/tts-preview",
+        cause: error instanceof Error ? { name: error.name, message: error.message } : { message: String(error) },
+      },
+    })
+  } finally {
+    if (timeoutId !== null) globalThis.clearTimeout(timeoutId)
+    listeners.forEach((cleanup) => cleanup())
+  }
+}
+
 export const GlobalLlmSettingsSchema = z.object({
   baseUrl: z.string(),
   modelName: z.string(),

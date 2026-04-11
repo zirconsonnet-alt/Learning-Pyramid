@@ -32,6 +32,11 @@ export type FriendRequest = z.infer<typeof FriendRequestSchema>
 
 export const FriendLearningStatsSchema = z.object({
   projectCount: z.number(),
+  effectiveMs: z.number(),
+  watchMs: z.number(),
+  composeMs: z.number(),
+  reviewMs: z.number(),
+  qaMs: z.number(),
   learningCount: z.number(),
   reviewCount: z.number(),
   totalActions: z.number(),

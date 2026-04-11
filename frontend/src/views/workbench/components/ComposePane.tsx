@@ -1,19 +1,20 @@
-import { useEffect, useMemo, useRef, useState } from "react"
-import { useQueries } from "@tanstack/react-query"
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react"
+import { useQueries, useQuery } from "@tanstack/react-query"
 import { BookPlus, ChevronLeft, ChevronRight } from "lucide-react"
 
 import { ApiError } from "@/ui/api/http"
 import { listRecallPointsByLearningTaskNode } from "@/ui/api/learningTaskNodes"
 import type { Instance } from "@/ui/api/instances"
 import type { ProjectType } from "@/ui/api/projects"
-import { richContentHasMeaning, richText } from "@/ui/api/richContent"
+import { searchRecallPoints, type RecallPoint } from "@/ui/api/review"
+import { richContentHasMeaning, richContentToPlainText, richText } from "@/ui/api/richContent"
 import { RichContentEditor } from "@/ui/components/RichContentEditor"
 import { ContentEmptyState } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
-import { formatInstanceReference, simplifyMaterialDisplayName } from "@/ui/displayIdentifiers"
+import { formatInstanceReference, formatRecallPointReference, simplifyMaterialDisplayName } from "@/ui/displayIdentifiers"
 import {
   projectTypeRequiresAnchor,
   projectTypeRequiresLearningObjectTree,
@@ -22,6 +23,7 @@ import {
 import { useLearningTaskNodes } from "@/ui/queries/learningTasks"
 import { useSubmitLearningTask } from "@/ui/queries/workbench"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
+import { touchDailyStudyActivity } from "@/ui/store/workbenchDailyStats"
 import { getWorkbenchTaskScopeKey, useWorkbenchStore, type DraftRecallPoint } from "@/ui/store/workbenchStore"
 import { cn } from "@/ui/utils"
 
@@ -44,7 +46,7 @@ function buildRecommendedTaskTitle(instanceDisplayName: string, previousLearning
 }
 
 function createDraft(projectType: ProjectType, instanceId: string | null, ms: number): DraftRecallPoint {
-  const position = projectType === "COURSE" ? `t=${ms}` : projectType === "BOOK" ? "" : null
+  const position = projectType === "COURSE" ? `t=${ms}` : projectType === "BOOK" ? "" : projectType === "MISTAKE_BOOK" ? "手动录入" : null
   const now = Date.now()
   return {
     localId: newLocalId(),
@@ -52,9 +54,21 @@ function createDraft(projectType: ProjectType, instanceId: string | null, ms: nu
     position,
     question: richText(""),
     answer: richText(""),
+    references: [],
     createdAt: now,
     updatedAt: now,
   }
+}
+
+const COMPOSE_ACTIVITY_WINDOW_MS = 60_000
+const MAX_REFERENCE_PICKER_ITEMS = 12
+
+type ReferencePickerField = "question" | "answer"
+
+type ReferenceCandidate = {
+  recallPointId: string
+  questionPreview: string
+  answerPreview: string
 }
 
 export function ComposePane({
@@ -64,6 +78,8 @@ export function ComposePane({
   instance,
   currentMs,
   queueHasGate,
+  actionableMissingGate,
+  actionableMissingInstanceCount,
 }: {
   projectId: string
   projectType: ProjectType
@@ -71,6 +87,8 @@ export function ComposePane({
   instance: Instance | null
   currentMs: number
   queueHasGate: boolean
+  actionableMissingGate: boolean
+  actionableMissingInstanceCount: number
 }) {
   const ps = useWorkbenchStore((s) => s.byProjectId[projectId])
   const addDraft = useWorkbenchStore((s) => s.addDraft)
@@ -78,6 +96,8 @@ export function ComposePane({
   const updateDraftText = useWorkbenchStore((s) => s.updateDraftText)
   const appendDraftImage = useWorkbenchStore((s) => s.appendDraftImage)
   const removeDraftImage = useWorkbenchStore((s) => s.removeDraftImage)
+  const addDraftReference = useWorkbenchStore((s) => s.addDraftReference)
+  const removeDraftReference = useWorkbenchStore((s) => s.removeDraftReference)
   const removeDraft = useWorkbenchStore((s) => s.removeDraft)
   const clearDraftsForInstance = useWorkbenchStore((s) => s.clearDraftsForInstance)
   const setTaskTitle = useWorkbenchStore((s) => s.setTaskTitle)
@@ -86,6 +106,11 @@ export function ComposePane({
   const answerRefs = useRef<Record<string, HTMLTextAreaElement | null>>({})
   const lastRecommendedTitleRef = useRef("")
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null)
+  const [referencePicker, setReferencePicker] = useState<{
+    field: ReferencePickerField
+    query: string
+    highlightedIndex: number
+  } | null>(null)
 
   const submit = useSubmitLearningTask(projectId)
   const learningTaskNodesQ = useLearningTaskNodes(projectId)
@@ -126,6 +151,9 @@ export function ComposePane({
     if (projectType === "LOOSE_POINTS") {
       return buildRecommendedTaskTitle("零散知识点", previousLearningCountForInstance)
     }
+    if (projectType === "MISTAKE_BOOK") {
+      return buildRecommendedTaskTitle(instance?.materialDisplayName ?? "错题条目", previousLearningCountForInstance)
+    }
     if (!instance) return ""
     const instanceTitle = simplifyMaterialDisplayName(
       formatInstanceReference(instance.instanceId, instance.materialDisplayName),
@@ -133,6 +161,10 @@ export function ComposePane({
     )
     return buildRecommendedTaskTitle(instanceTitle, previousLearningCountForInstance)
   }, [instance, previousLearningCountForInstance, projectType])
+
+  function touchComposeActivity() {
+    touchDailyStudyActivity(projectId, "compose", COMPOSE_ACTIVITY_WINDOW_MS)
+  }
 
   useEffect(() => {
     const previousRecommendedTitle = lastRecommendedTitleRef.current
@@ -150,6 +182,7 @@ export function ComposePane({
 
   function onAdd() {
     if (requiresLearningObjectTree && !selectedInstanceId) return
+    touchComposeActivity()
     const draft = createDraft(projectType, activeScopeInstanceId, currentMs)
     addDraft(projectId, draft)
     setActiveDraftId(draft.localId)
@@ -157,7 +190,7 @@ export function ComposePane({
   }
 
   async function onSubmit() {
-    if (queueHasGate) return
+    if (queueHasGate || actionableMissingGate) return
     const title = taskTitle.trim()
     if (!title) return
     if (
@@ -174,9 +207,11 @@ export function ComposePane({
       question: d.question,
       answer: d.answer,
       anchor: requiresAnchor && d.instanceId && d.position ? { instanceId: d.instanceId, position: d.position } : null,
+      references: d.references,
     }))
     if (items.length === 0) return
     try {
+      touchComposeActivity()
       await submit.mutateAsync({ title, items })
       clearDraftsForInstance(projectId, activeScopeInstanceId)
       showSuccessFeedback("学习任务已提交", `“${title}” 已提交，共包含 ${items.length} 个复述点。`)
@@ -188,6 +223,7 @@ export function ComposePane({
   const hasIncompleteAnchor = requiresAnchor && drafts.some((d) => !d.instanceId || !(d.position ?? "").trim())
   const canSubmit =
     !queueHasGate &&
+    !actionableMissingGate &&
     !submit.isPending &&
     !!taskTitle.trim() &&
     drafts.length > 0 &&
@@ -199,6 +235,53 @@ export function ComposePane({
   const resolvedActiveDraftId = drafts.some((draft) => draft.localId === activeDraftId) ? activeDraftId : (drafts[0]?.localId ?? null)
   const activeDraftIndex = resolvedActiveDraftId ? drafts.findIndex((draft) => draft.localId === resolvedActiveDraftId) : -1
   const activeDraft = activeDraftIndex >= 0 ? drafts[activeDraftIndex] : null
+  const deferredReferenceQuery = useDeferredValue(referencePicker?.query.trim() ?? "")
+  const referenceSearchQ = useQuery({
+    queryKey: ["recallPointSearch", projectId, deferredReferenceQuery],
+    queryFn: ({ signal }) =>
+      searchRecallPoints(
+        projectId,
+        { q: deferredReferenceQuery || undefined, limit: MAX_REFERENCE_PICKER_ITEMS * 4 },
+        { signal },
+      ),
+    enabled: !!projectId && !!referencePicker,
+    placeholderData: (previous) => previous,
+    staleTime: 30_000,
+  })
+  const allReferenceCandidates = useMemo<ReferenceCandidate[]>(
+    () =>
+      (referenceSearchQ.data ?? []).map((item: RecallPoint) => {
+        const questionPreview = richContentToPlainText(item.question).trim() || "题面为空"
+        const answerPreview = richContentToPlainText(item.answer).trim() || "答案为空"
+        return {
+          recallPointId: item.recallPointId,
+          questionPreview,
+          answerPreview,
+        }
+      }),
+    [referenceSearchQ.data],
+  )
+  const selectedReferenceIds = activeDraft?.references ?? []
+  const referencePickerCandidates = useMemo(() => {
+    if (!referencePicker || !activeDraft) return []
+    return allReferenceCandidates
+      .filter((candidate) => !activeDraft.references.includes(candidate.recallPointId))
+      .slice(0, MAX_REFERENCE_PICKER_ITEMS)
+  }, [activeDraft, allReferenceCandidates, referencePicker])
+
+  useEffect(() => {
+    setReferencePicker((current) => {
+      if (!current) return current
+      if (!activeDraft) return null
+      const maxIndex = Math.max(referencePickerCandidates.length - 1, 0)
+      if (current.highlightedIndex <= maxIndex) return current
+      return { ...current, highlightedIndex: maxIndex }
+    })
+  }, [activeDraft, referencePickerCandidates.length])
+
+  useEffect(() => {
+    setReferencePicker(null)
+  }, [resolvedActiveDraftId])
 
   function focusDraftFields(draft: DraftRecallPoint) {
     const questionFilled = richContentHasMeaning(draft.question)
@@ -218,13 +301,44 @@ export function ComposePane({
   }
 
   function focusDraft(draft: DraftRecallPoint) {
+    touchComposeActivity()
     setActiveDraftId(draft.localId)
     window.setTimeout(() => focusDraftFields(draft), 80)
+  }
+
+  function focusEditorField(field: ReferencePickerField) {
+    const target = field === "question" ? questionRefs.current[resolvedActiveDraftId ?? ""] : answerRefs.current[resolvedActiveDraftId ?? ""]
+    target?.focus()
+  }
+
+  function openReferencePicker(field: ReferencePickerField) {
+    if (!activeDraft) return
+    touchComposeActivity()
+    setReferencePicker({ field, query: "", highlightedIndex: 0 })
+  }
+
+  function closeReferencePicker(field?: ReferencePickerField) {
+    setReferencePicker(null)
+    if (field) {
+      window.setTimeout(() => focusEditorField(field), 0)
+    }
+  }
+
+  function confirmReferencePickerSelection(field: ReferencePickerField) {
+    const selected = referencePickerCandidates[referencePicker?.highlightedIndex ?? 0]
+    if (!selected || !activeDraft) {
+      closeReferencePicker(field)
+      return
+    }
+    touchComposeActivity()
+    addDraftReference(projectId, activeDraft.localId, selected.recallPointId)
+    closeReferencePicker(field)
   }
 
   function goToDraft(index: number) {
     const nextDraft = drafts[index]
     if (!nextDraft) return
+    touchComposeActivity()
     setActiveDraftId(nextDraft.localId)
   }
 
@@ -243,7 +357,11 @@ export function ComposePane({
               <div className="mt-1 truncate text-xs text-muted-foreground">{instance.materialDisplayName}</div>
             ) : (
               <div className="mt-1 text-xs text-muted-foreground">
-                {projectType === "BOOK" ? "请先从左侧目录中选择一个章节、小节或条目。" : "请先从左侧目录中选择一个视频实例。"}
+                {projectType === "BOOK"
+                  ? "请先从左侧目录中选择一个章节、小节或条目。"
+                  : projectType === "MISTAKE_BOOK"
+                    ? "请先从左侧目录中选择一个错题条目或章节。"
+                    : "请先从左侧目录中选择一个视频实例。"}
               </div>
             )}
           </div>
@@ -271,7 +389,10 @@ export function ComposePane({
             {activeDraft ? (
               <Button
                 variant="ghost"
-                onClick={() => removeDraft(projectId, activeDraft.localId)}
+                onClick={() => {
+                  touchComposeActivity()
+                  removeDraft(projectId, activeDraft.localId)
+                }}
                 className="flex-1 whitespace-nowrap text-muted-foreground md:flex-none"
               >
                 删除
@@ -284,6 +405,11 @@ export function ComposePane({
         {queueHasGate ? (
           <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4 text-sm">
             门禁：队列非空时禁止提交学习。请先完成“复习”。
+          </div>
+        ) : null}
+        {actionableMissingGate ? (
+          <div className="rounded-2xl border border-amber-300/60 bg-amber-50 p-4 text-sm text-amber-900">
+            门禁：当前还有 {actionableMissingInstanceCount} 个待迁移的缺失实例。请先去项目设置完成修复，再继续提交学习任务。
           </div>
         ) : null}
 
@@ -325,11 +451,19 @@ export function ComposePane({
           requiresLearningObjectTree ? (
             <ContentEmptyState
               icon={BookPlus}
-              title={projectType === "BOOK" ? "先选择一个书本目录节点" : "先选择一个视频再开始录入"}
+              title={
+                projectType === "BOOK"
+                  ? "先选择一个书本目录节点"
+                  : projectType === "MISTAKE_BOOK"
+                    ? "先选择一个错题目录节点"
+                    : "先选择一个视频再开始录入"
+              }
               message={
                 projectType === "BOOK"
                   ? "请先从左侧内容目录里选择一个章节、小节或条目，随后就能录入带文本锚点的复述点。"
-                  : "请先从左侧内容目录里选择一个视频，随后就能开始录入复述点。"
+                  : projectType === "MISTAKE_BOOK"
+                    ? "请先从左侧内容目录里选择一个错题条目或章节，随后就能把错题录进去并继续复习。"
+                    : "请先从左侧内容目录里选择一个视频，随后就能开始录入复述点。"
               }
             />
           ) : null
@@ -389,7 +523,11 @@ export function ComposePane({
                     <Input
                       id={`draft-anchor-${activeDraft.localId}`}
                       value={activeDraft.position ?? ""}
-                      onChange={(event) => updateDraftPosition(projectId, activeDraft.localId, event.target.value)}
+                      onChange={(event) => {
+                        touchComposeActivity()
+                        updateDraftPosition(projectId, activeDraft.localId, event.target.value)
+                      }}
+                      onFocus={touchComposeActivity}
                       disabled={usesResolvableCourseAnchor}
                       placeholder={
                         usesResolvableCourseAnchor ? "添加时会自动记录当前视频时间" : "例如：第 45 页 例 2 / 第 3 章 1.2 节 / 习题 7"
@@ -399,10 +537,50 @@ export function ComposePane({
                     <p className="text-xs text-muted-foreground">
                       {usesResolvableCourseAnchor
                         ? "网课项目会把复述点绑定到添加时的视频时间点。"
-                        : "书本项目必须填写文本锚点，例如页码、章节、小节、题号或段落说明。"}
+                        : projectType === "MISTAKE_BOOK"
+                          ? "错题材料会把当前条目当作归档位置；这里可以写来源章节、题号或你自己的整理说明。"
+                          : "书本项目必须填写文本锚点，例如页码、章节、小节、题号或段落说明。"}
                     </p>
                   </div>
                 ) : null}
+
+                <div className="mb-4 space-y-3 border-b border-[color:var(--theme-soft-border)] pb-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">引用关系</div>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        在问题或答案输入框里按 `Tab` 打开候选列表，继续输入关键字，方向键选择后再按一次 `Tab` 完成引用。
+                      </p>
+                    </div>
+                    <div className="rounded-full border border-border/70 px-2.5 py-1 text-xs text-muted-foreground">
+                      已引用 {selectedReferenceIds.length} 条
+                    </div>
+                  </div>
+                  {selectedReferenceIds.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {selectedReferenceIds.map((referenceId) => (
+                        <button
+                          key={`selected-reference-${referenceId}`}
+                          type="button"
+                          className="inline-flex max-w-full items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-3 py-1.5 text-left text-xs text-foreground"
+                          onClick={() => {
+                            touchComposeActivity()
+                            removeDraftReference(projectId, activeDraft.localId, referenceId)
+                          }}
+                          title={`移除 ${referenceId}`}
+                        >
+                          <span className="truncate">{formatRecallPointReference(referenceId)}</span>
+                          <span className="text-muted-foreground">移除</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-dashed border-border/70 bg-muted/10 px-3 py-3 text-sm text-muted-foreground">
+                      这条复述点还没有引用其他复述点。
+                    </div>
+                  )}
+                  {referenceSearchQ.error ? <p className="text-xs text-destructive">候选复述点加载失败：{formatApiError(referenceSearchQ.error)}</p> : null}
+                </div>
 
                 <div className="grid gap-3 xl:grid-cols-2">
                   <div className="space-y-2">
@@ -413,8 +591,41 @@ export function ComposePane({
                       value={activeDraft.question}
                       placeholder="请输入问题/提示语"
                       onTextChange={(text) => updateDraftText(projectId, activeDraft.localId, "question", text)}
-                      onAppendImage={(assetId) => appendDraftImage(projectId, activeDraft.localId, "question", assetId)}
-                      onRemoveImage={(imageIndex) => removeDraftImage(projectId, activeDraft.localId, "question", imageIndex)}
+                      onAppendImage={(assetId) => {
+                        touchComposeActivity()
+                        appendDraftImage(projectId, activeDraft.localId, "question", assetId)
+                      }}
+                      onRemoveImage={(imageIndex) => {
+                        touchComposeActivity()
+                        removeDraftImage(projectId, activeDraft.localId, "question", imageIndex)
+                      }}
+                      onUserActivity={touchComposeActivity}
+                      onTextKeyDown={(event) => {
+                        if (event.key !== "Tab" || event.shiftKey || event.nativeEvent.isComposing) return
+                        event.preventDefault()
+                        openReferencePicker("question")
+                      }}
+                      referencePicker={
+                        referencePicker?.field === "question"
+                          ? {
+                              isOpen: true,
+                              isLoading: referenceSearchQ.isLoading || (referenceSearchQ.isFetching && !referenceSearchQ.data),
+                              query: referencePicker.query,
+                              highlightedIndex: referencePicker.highlightedIndex,
+                              candidates: referencePickerCandidates,
+                              onQueryChange: (query) => setReferencePicker((current) => (current ? { ...current, query, highlightedIndex: 0 } : current)),
+                              onHighlightChange: (index) =>
+                                setReferencePicker((current) => (current ? { ...current, highlightedIndex: index } : current)),
+                              onConfirm: () => confirmReferencePickerSelection("question"),
+                              onSelect: (recallPointId) => {
+                                touchComposeActivity()
+                                addDraftReference(projectId, activeDraft.localId, recallPointId)
+                                closeReferencePicker("question")
+                              },
+                              onClose: () => closeReferencePicker("question"),
+                            }
+                          : undefined
+                      }
                       textareaRef={(node) => {
                         questionRefs.current[activeDraft.localId] = node
                       }}
@@ -431,8 +642,41 @@ export function ComposePane({
                       value={activeDraft.answer}
                       placeholder="请输入答案/复述内容"
                       onTextChange={(text) => updateDraftText(projectId, activeDraft.localId, "answer", text)}
-                      onAppendImage={(assetId) => appendDraftImage(projectId, activeDraft.localId, "answer", assetId)}
-                      onRemoveImage={(imageIndex) => removeDraftImage(projectId, activeDraft.localId, "answer", imageIndex)}
+                      onAppendImage={(assetId) => {
+                        touchComposeActivity()
+                        appendDraftImage(projectId, activeDraft.localId, "answer", assetId)
+                      }}
+                      onRemoveImage={(imageIndex) => {
+                        touchComposeActivity()
+                        removeDraftImage(projectId, activeDraft.localId, "answer", imageIndex)
+                      }}
+                      onUserActivity={touchComposeActivity}
+                      onTextKeyDown={(event) => {
+                        if (event.key !== "Tab" || event.shiftKey || event.nativeEvent.isComposing) return
+                        event.preventDefault()
+                        openReferencePicker("answer")
+                      }}
+                      referencePicker={
+                        referencePicker?.field === "answer"
+                          ? {
+                              isOpen: true,
+                              isLoading: referenceSearchQ.isLoading || (referenceSearchQ.isFetching && !referenceSearchQ.data),
+                              query: referencePicker.query,
+                              highlightedIndex: referencePicker.highlightedIndex,
+                              candidates: referencePickerCandidates,
+                              onQueryChange: (query) => setReferencePicker((current) => (current ? { ...current, query, highlightedIndex: 0 } : current)),
+                              onHighlightChange: (index) =>
+                                setReferencePicker((current) => (current ? { ...current, highlightedIndex: index } : current)),
+                              onConfirm: () => confirmReferencePickerSelection("answer"),
+                              onSelect: (recallPointId) => {
+                                touchComposeActivity()
+                                addDraftReference(projectId, activeDraft.localId, recallPointId)
+                                closeReferencePicker("answer")
+                              },
+                              onClose: () => closeReferencePicker("answer"),
+                            }
+                          : undefined
+                      }
                       textareaRef={(node) => {
                         answerRefs.current[activeDraft.localId] = node
                       }}
@@ -456,8 +700,10 @@ export function ComposePane({
               value={taskTitle}
               onChange={(e) => {
                 if (requiresLearningObjectTree && !selectedInstanceId) return
+                touchComposeActivity()
                 setTaskTitle(projectId, activeScopeInstanceId, e.target.value)
               }}
+              onFocus={touchComposeActivity}
               onKeyDown={(e) => {
                 if (e.key !== "Enter" || e.nativeEvent.isComposing) return
                 e.preventDefault()
@@ -468,7 +714,15 @@ export function ComposePane({
                 }
               }}
               className="h-11 flex-1"
-              placeholder={projectType === "LOOSE_POINTS" ? recommendedTaskTitle || "例如：离散数学零散练习" : instance ? recommendedTaskTitle : "例如：第一节"}
+              placeholder={
+                projectType === "LOOSE_POINTS"
+                  ? recommendedTaskTitle || "例如：离散数学零散练习"
+                  : projectType === "MISTAKE_BOOK"
+                    ? recommendedTaskTitle || "例如：导数应用错题"
+                    : instance
+                      ? recommendedTaskTitle
+                      : "例如：第一节"
+              }
             />
             <Button
               className="h-11 shrink-0 rounded-xl px-5 md:min-w-[7rem]"
@@ -479,6 +733,9 @@ export function ComposePane({
             </Button>
           </div>
           {submit.error ? <p className="mt-2 text-sm text-destructive">{formatApiError(submit.error)}</p> : null}
+          {!submit.isPending && !submit.error && actionableMissingGate ? (
+            <p className="mt-2 text-xs text-muted-foreground">当前提交已被缺失实例门禁拦住，完成实例迁移后会自动恢复。</p>
+          ) : null}
           {!submit.isPending && !submit.error && hasIncompleteAnchor ? (
             <p className="mt-2 text-xs text-muted-foreground">提交前还需要把每条复述点的锚点位置补完整。</p>
           ) : null}

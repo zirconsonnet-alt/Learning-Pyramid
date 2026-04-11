@@ -5,6 +5,7 @@ import { createBrowserRouter, Navigate } from "react-router-dom"
 import { AppShell } from "@/shell/AppShell"
 import { RouteErrorPage } from "@/views/system/RouteErrorPage"
 import { RoutePendingPage } from "@/views/system/RoutePendingPage"
+import { PomodoroWorkbenchGate } from "@/views/pomodoro/PomodoroWorkbenchGate"
 
 const AuthPage = lazy(async () => ({ default: (await import("@/views/auth/AuthPage")).AuthPage }))
 const HomePage = lazy(async () => ({ default: (await import("@/views/home/HomePage")).HomePage }))
@@ -33,10 +34,12 @@ const ReviewRecommendationsPage = lazy(async () => ({
 const ReviewChainPage = lazy(async () => ({ default: (await import("@/views/reviewChains/ReviewChainPage")).ReviewChainPage }))
 const ReviewTaskPage = lazy(async () => ({ default: (await import("@/views/reviewTasks/ReviewTaskPage")).ReviewTaskPage }))
 const ProjectSettingsPage = lazy(async () => ({ default: (await import("@/views/settings/ProjectSettingsPage")).ProjectSettingsPage }))
+const GlobalSettingsPage = lazy(async () => ({ default: (await import("@/views/settings/GlobalSettingsPage")).GlobalSettingsPage }))
 const SubtitleToolPage = lazy(async () => ({ default: (await import("@/views/subtitleTool/SubtitleToolPage")).SubtitleToolPage }))
 const ObjectTreePage = lazy(async () => ({ default: (await import("@/views/trees/ObjectTreePage")).ObjectTreePage }))
 const TaskTreePage = lazy(async () => ({ default: (await import("@/views/trees/TaskTreePage")).TaskTreePage }))
 const WorkbenchPage = lazy(async () => ({ default: (await import("@/views/workbench/WorkbenchPage")).WorkbenchPage }))
+const PomodoroPage = lazy(async () => ({ default: (await import("@/views/pomodoro/PomodoroPage")).PomodoroPage }))
 
 function lazyElement(element: ReactNode) {
   return <Suspense fallback={<RoutePendingPage />}>{element}</Suspense>
@@ -75,13 +78,23 @@ export const router = createBrowserRouter([
       { path: "/groups/:groupId", element: <Navigate to="/friends" replace /> },
       { path: "/membership", element: lazyElement(<MembershipPage />) },
       { path: "/profile", element: lazyElement(<ProfilePage />) },
+      { path: "/settings/global", element: lazyElement(<GlobalSettingsPage />) },
       { path: "/admin", element: lazyElement(<AdminPage />) },
       { path: "/admin/membership", element: lazyElement(<AdminMembershipPage />) },
       { path: "/admin/users", element: lazyElement(<AdminUsersPage />) },
       { path: "/admin/groups", element: <Navigate to="/admin" replace /> },
       { path: "/admin/groups/:groupId", element: <Navigate to="/admin" replace /> },
       { path: "/admin/users/:userId", element: lazyElement(<AdminUserDetailPage />) },
-      { path: "/p/:projectId/workbench", element: lazyElement(<WorkbenchPage />) },
+      {
+        path: "/p/:projectId/workbench",
+        element: lazyElement(
+          <PomodoroWorkbenchGate>
+            <WorkbenchPage />
+          </PomodoroWorkbenchGate>,
+        ),
+      },
+      { path: "/pomodoro", element: lazyElement(<PomodoroPage />) },
+      { path: "/p/:projectId/pomodoro", element: <Navigate to="/pomodoro" replace /> },
       { path: "/p/:projectId/recommended-reviews", element: lazyElement(<ReviewRecommendationsPage />) },
       { path: "/p/:projectId/settings", element: lazyElement(<ProjectSettingsPage />) },
       { path: "/p/:projectId/ai-chat", element: lazyElement(<AiChatPage />) },

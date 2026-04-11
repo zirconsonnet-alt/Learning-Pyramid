@@ -14,10 +14,13 @@ from backend.models.enums import (
     FsSyncPolicy,
     InstancePresence,
     LayerMode,
+    LearningTaskNodeOrigin,
     MaterialSourceKind,
+    ObjectMirrorStatus,
     ProjectType,
     RecallPointReviewResult,
     RecallPointState,
+    RollUpStrategy,
     ReviewTaskState,
     ReviewChainTemplateItemKind,
     SessionMode,
@@ -320,6 +323,124 @@ class _SpecAlignmentBackendMixin:
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0].reason, AggregationEventReason.MANUAL_DRAIN)
         self.assertEqual(events[0].title, "Manual aggregation")
+
+    def test_set_project_roll_up_strategy_survives_layer_config_updates(self) -> None:
+        api, root = self._new_api()
+        project_root, _ = self._make_project_dirs(root, "videos")
+
+        project_id = api.create_project("ml", project_root.as_posix())
+        api.set_project_roll_up_strategy(project_id, RollUpStrategy.LEARNING_OBJECT_ISOMORPHIC)
+        api.set_layer_config(project_id, 0, None, 5, 50, False)
+
+        cfg = api.get_project_config(project_id)
+        self.assertEqual(cfg.roll_up_strategy, RollUpStrategy.LEARNING_OBJECT_ISOMORPHIC)
+        self.assertEqual(cfg.layer_configs[0].aggregation_k_node, 5)
+        self.assertEqual(cfg.layer_configs[0].aggregation_k_point, 50)
+        self.assertFalse(cfg.layer_configs[0].threshold_roll_up_enabled)
+
+    def test_actionable_missing_instances_block_submit_learning_task(self) -> None:
+        api, root = self._new_api()
+        project_root, _ = self._make_project_dirs(root, "missing-gate")
+        project_id = api.create_project("ml", project_root.as_posix())
+
+        session = api.sys.begin_session(project_id, SessionMode.READ_WRITE)
+        try:
+            missing_instance = Instance.create(
+                project_id,
+                InstanceId("inst_missing_gate_1"),
+                "lesson.mp4",
+                presence=InstancePresence.MISSING,
+                last_seen_at=None,
+            )
+            api.sys.instance_repo.add(session, missing_instance)
+            api.sys.recall_point_repo.add(
+                session,
+                RecallPoint(
+                    project_id=project_id,
+                    recall_point_id=RecallPointId("rp_missing_gate_1"),
+                    created_at=now_utc_ms(),
+                    question=rich_text("Q"),
+                    answer=rich_text("A"),
+                    anchor=Anchor(instance_id=missing_instance.instance_id, position="t=1000"),
+                ),
+            )
+            api.sys.commit(session)
+        except Exception:
+            if session.state == "OPEN":
+                api.sys.rollback(session)
+            raise
+
+        with self.assertRaisesRegex(PreconditionFailure, "actionable missing instances exist"):
+            api.submit_learning_task(
+                project_id,
+                items=[(rich_text("Q1"), rich_text("A1"), Anchor(missing_instance.instance_id, position="t=2000"))],
+                title="Blocked task",
+            )
+
+    def test_learning_object_isomorphic_roll_up_creates_object_mirror_layers(self) -> None:
+        api, root = self._new_api()
+        project_root, _ = self._make_project_dirs(root, "manual-tree")
+        project_id = api.create_project("manual", project_root.as_posix(), initial_source_kind=MaterialSourceKind.MANUAL)
+
+        root_node_id = api.add_learning_object_container(project_id, parent_id=None, children=tuple(), title="课程")
+        chapter_node_id = api.add_learning_object_container(project_id, parent_id=root_node_id, children=tuple(), title="第一章")
+        lesson_a = api.add_instance(project_id, "course/chapter-1/lesson-a.mp4")
+        lesson_b = api.add_instance(project_id, "course/chapter-1/lesson-b.mp4")
+        api.add_learning_object_leaf(project_id, parent_id=chapter_node_id, instance_id=lesson_a, title="视频 A")
+        api.add_learning_object_leaf(project_id, parent_id=chapter_node_id, instance_id=lesson_b, title="视频 B")
+
+        session = api.sys.begin_session(project_id, SessionMode.READ_WRITE)
+        try:
+            api.sys.recall_point_repo.add(
+                session,
+                RecallPoint(
+                    project_id=project_id,
+                    recall_point_id=RecallPointId("rp_iso_1"),
+                    created_at=now_utc_ms(),
+                    question=rich_text("Q1"),
+                    answer=rich_text("A1"),
+                    anchor=Anchor(instance_id=lesson_a, position="t=1000"),
+                ),
+            )
+            api.sys.recall_point_repo.add(
+                session,
+                RecallPoint(
+                    project_id=project_id,
+                    recall_point_id=RecallPointId("rp_iso_2"),
+                    created_at=now_utc_ms(),
+                    question=rich_text("Q2"),
+                    answer=rich_text("A2"),
+                    anchor=Anchor(instance_id=lesson_b, position="t=2000"),
+                ),
+            )
+            api.sys.commit(session)
+        except Exception:
+            if session.state == "OPEN":
+                api.sys.rollback(session)
+            raise
+
+        api.set_project_roll_up_strategy(project_id, RollUpStrategy.LEARNING_OBJECT_ISOMORPHIC)
+
+        mirror_nodes = [
+            node
+            for node in api.list_learning_task_nodes(project_id)
+            if isinstance(node, LearningTaskContainer) and node.node_origin == LearningTaskNodeOrigin.OBJECT_MIRROR
+        ]
+        self.assertEqual(len(mirror_nodes), 2)
+
+        mirror_by_object = {
+            str(node.bound_learning_object_node_id): node
+            for node in mirror_nodes
+        }
+        self.assertEqual(mirror_by_object[str(chapter_node_id)].object_mirror_status, ObjectMirrorStatus.ACTIVE)
+        self.assertEqual(mirror_by_object[str(root_node_id)].object_mirror_status, ObjectMirrorStatus.ACTIVE)
+        self.assertEqual(mirror_by_object[str(chapter_node_id)].parent_id, mirror_by_object[str(root_node_id)].node_id)
+        self.assertEqual(mirror_by_object[str(root_node_id)].children, (mirror_by_object[str(chapter_node_id)].node_id,))
+
+        chapter_reg = api.get_learning_task_node_entry_registration(project_id, mirror_by_object[str(chapter_node_id)].node_id)
+        root_reg = api.get_learning_task_node_entry_registration(project_id, mirror_by_object[str(root_node_id)].node_id)
+        self.assertEqual(chapter_reg.target_layer_index, 1)
+        self.assertEqual(root_reg.target_layer_index, 2)
 
     def test_create_project_auto_creates_project_dir_under_workspace_data_root(self) -> None:
         api, root = self._new_api()

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from adapter.deps import get_api
 from adapter.mappers import (
@@ -12,13 +12,13 @@ from adapter.mappers import (
     review_chain_to_dto,
     review_task_to_dto,
 )
-from adapter.schemas import CommitReviewTaskRequest, EditRecallPointRequest
-from backend.models.enums import ContentBlockKind
+from adapter.schemas import CommitReviewTaskRequest, CollectRecallPointToMistakeMaterialRequest, EditRecallPointRequest
+from backend.models.enums import ContentBlockKind, MistakeStatus
 from backend.models.errors import PreconditionFailure
 from backend.models.learning_task_node import LearningTaskLeaf
 from backend.models.recall_point import Anchor
 from backend.models.rich_content import ContentBlock, RichContent
-from backend.models.types import ConvergenceId, InstanceId, MediaAssetId, RecallPointId, ReviewChainId
+from backend.models.types import ConvergenceId, InstanceId, LearningObjectNodeId, MediaAssetId, RecallPointId, ReviewChainId
 from backend.system.api import SystemAPI
 
 
@@ -86,6 +86,23 @@ def get_range(projectId: str, rangeId: str, api: SystemAPI = Depends(get_api)) -
     return {"ok": True, "data": range_snapshot_to_dto(snap)}
 
 
+@router.get("/projects/{projectId}/recall-points")
+def list_recall_points(projectId: str, api: SystemAPI = Depends(get_api)) -> dict:
+    items = [recall_point_to_dto(rp) for rp in api.list_recall_points(projectId)]  # type: ignore[arg-type]
+    return {"ok": True, "data": items}
+
+
+@router.get("/projects/{projectId}/recall-points/search")
+def search_recall_points(
+    projectId: str,
+    q: str | None = Query(default=None, min_length=0, max_length=200),
+    limit: int = Query(default=20, ge=1, le=50),
+    api: SystemAPI = Depends(get_api),
+) -> dict:
+    items = [recall_point_to_dto(rp) for rp in api.search_recall_points(projectId, query=q, limit=limit)]  # type: ignore[arg-type]
+    return {"ok": True, "data": items}
+
+
 @router.get("/projects/{projectId}/recall-points/{recallPointId}")
 def get_recall_point(projectId: str, recallPointId: str, api: SystemAPI = Depends(get_api)) -> dict:
     rp = api.get_recall_point(projectId, recallPointId)  # type: ignore[arg-type]
@@ -102,10 +119,37 @@ def edit_recall_point(
     projectId: str, recallPointId: str, req: EditRecallPointRequest, api: SystemAPI = Depends(get_api)
 ) -> dict:
     anc = None if req.anchor is None else Anchor(instance_id=InstanceId(req.anchor.instanceId), position=req.anchor.position)
+    try:
+        mistake_status = None if req.mistakeStatus is None else MistakeStatus(req.mistakeStatus)
+    except ValueError as exc:
+        raise PreconditionFailure("mistakeStatus must be one of OPEN, RESOLVING, RESOLVED") from exc
     api.edit_recall_point(  # type: ignore[arg-type]
-        projectId, recallPointId, _to_rich_content(req.question), _to_rich_content(req.answer), anc
+        projectId,
+        recallPointId,
+        _to_rich_content(req.question),
+        _to_rich_content(req.answer),
+        anc,
+        mistake_status=mistake_status,
+        mistake_note=req.mistakeNote,
     )
     return {"ok": True, "data": None}
+
+
+@router.post("/projects/{projectId}/recall-points/{recallPointId}/collect-to-mistake-material")
+def collect_recall_point_to_mistake_material(
+    projectId: str,
+    recallPointId: str,
+    req: CollectRecallPointToMistakeMaterialRequest,
+    api: SystemAPI = Depends(get_api),
+) -> dict:
+    result = api.collect_recall_point_to_subject_mistake_material(  # type: ignore[arg-type]
+        projectId,
+        RecallPointId(recallPointId),
+        target_material_id=req.targetMaterialId,
+        target_node_id=None if req.targetNodeId is None else LearningObjectNodeId(req.targetNodeId),
+        mistake_note=req.mistakeNote,
+    )
+    return {"ok": True, "data": result}
 
 
 @router.delete("/projects/{projectId}/recall-points/{recallPointId}")

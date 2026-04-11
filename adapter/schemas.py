@@ -13,6 +13,23 @@ class CreateProjectRequest(BaseModel):
     initialProjectType: Optional[str] = None
 
 
+class CreateSubjectRequest(BaseModel):
+    title: str = Field(min_length=1)
+
+
+class CreateStudyMaterialRequest(BaseModel):
+    materialType: str = Field(min_length=1)
+    title: Optional[str] = Field(default=None, min_length=1, max_length=120)
+
+
+class EditSubjectRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+
+
+class EditStudyMaterialRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+
+
 class EditProjectRequest(BaseModel):
     title: str = Field(min_length=1)
 
@@ -76,6 +93,33 @@ class ChangePasswordRequest(BaseModel):
     newPassword: str = Field(min_length=8)
 
 
+class StudyRangeRequest(BaseModel):
+    startMs: int = Field(ge=0)
+    endMs: int = Field(gt=0)
+
+
+class DailyStudyMetricEntryRequest(BaseModel):
+    projectId: str = Field(min_length=1, max_length=200)
+    dateKey: str = Field(min_length=10, max_length=10)
+    effectiveMs: int = Field(default=0, ge=0)
+    watchMs: int = Field(default=0, ge=0)
+    composeMs: int = Field(default=0, ge=0)
+    reviewMs: int = Field(default=0, ge=0)
+    qaMs: int = Field(default=0, ge=0)
+    effectiveRanges: List[StudyRangeRequest] = Field(default_factory=list)
+    watchRanges: List[StudyRangeRequest] = Field(default_factory=list)
+    composeRanges: List[StudyRangeRequest] = Field(default_factory=list)
+    reviewRanges: List[StudyRangeRequest] = Field(default_factory=list)
+    qaRanges: List[StudyRangeRequest] = Field(default_factory=list)
+
+
+class SyncStudyMetricsRequest(BaseModel):
+    projectIds: List[str] = Field(default_factory=list)
+    dateFrom: Optional[str] = Field(default=None, min_length=10, max_length=10)
+    dateTo: Optional[str] = Field(default=None, min_length=10, max_length=10)
+    entries: List[DailyStudyMetricEntryRequest] = Field(default_factory=list)
+
+
 class CreateFriendRequestRequest(BaseModel):
     publicUid: str = Field(min_length=1)
     message: Optional[str] = Field(default="", max_length=200)
@@ -135,6 +179,10 @@ class InitializeBookLearningObjectsRequest(BaseModel):
     items: conlist(BookOutlineItemDTO, min_items=1)
 
 
+class InitializeBookLearningObjectsFromMaterialRequest(BaseModel):
+    sourceMaterialId: str = Field(min_length=1)
+
+
 class AnchorDTO(BaseModel):
     instanceId: str = Field(min_length=1)
     position: str = Field(min_length=1)
@@ -149,6 +197,7 @@ class LearningItemDTO(BaseModel):
     question: conlist(ContentBlockDTO, min_items=1)
     answer: conlist(ContentBlockDTO, min_items=1)
     anchor: Optional[AnchorDTO] = None
+    references: List[str] = Field(default_factory=list)
 
 
 class SubmitLearningTaskRequest(BaseModel):
@@ -168,6 +217,14 @@ class EditRecallPointRequest(BaseModel):
     question: conlist(ContentBlockDTO, min_items=1)
     answer: conlist(ContentBlockDTO, min_items=1)
     anchor: Optional[AnchorDTO] = None
+    mistakeStatus: Optional[str] = Field(default=None, min_length=1)
+    mistakeNote: Optional[str] = Field(default=None, max_length=2000)
+
+
+class CollectRecallPointToMistakeMaterialRequest(BaseModel):
+    targetMaterialId: str = Field(min_length=1)
+    targetNodeId: Optional[str] = Field(default=None, min_length=1)
+    mistakeNote: Optional[str] = Field(default=None, max_length=2000)
 
 class AppendedInsightDTO(BaseModel):
     recallPointId: str = Field(min_length=1)
@@ -199,6 +256,10 @@ class SetLayerConfigRequest(BaseModel):
     kNode: Optional[int] = None
     kPoint: Optional[int] = None
     thresholdRollUpEnabled: Optional[bool] = None
+
+
+class SetProjectRollUpStrategyRequest(BaseModel):
+    rollUpStrategy: str = Field(min_length=1)
 
 
 class SetReviewRecommendationConfigRequest(BaseModel):
@@ -244,6 +305,68 @@ class UpdateUserServiceSettingsRequest(BaseModel):
     apiKey: Optional[str] = None
     promptAssemblyMode: Optional[str] = None
     clearApiKey: bool = False
+
+
+class UserPomodoroSettingsRequest(BaseModel):
+    enabled: bool = False
+    startTime: str = Field(default="19:00", min_length=4, max_length=5)
+    focusMinutes: int = Field(ge=1, le=180)
+    breakMinutes: int = Field(ge=1, le=60)
+    pomodoroCount: int = Field(ge=1, le=12)
+    projectIds: List[Optional[str]] = Field(default_factory=list)
+    breakPrompt: str = Field(default="", max_length=200)
+    focusPrompts: List[str] = Field(default_factory=list)
+
+
+class UserPomodoroWeeklyScheduleRequest(BaseModel):
+    mon: UserPomodoroSettingsRequest
+    tue: UserPomodoroSettingsRequest
+    wed: UserPomodoroSettingsRequest
+    thu: UserPomodoroSettingsRequest
+    fri: UserPomodoroSettingsRequest
+    sat: UserPomodoroSettingsRequest
+    sun: UserPomodoroSettingsRequest
+
+
+class UserPomodoroConfigRequest(BaseModel):
+    enabled: bool = False
+    transitionSoundEnabled: bool = False
+    weeklySchedule: UserPomodoroWeeklyScheduleRequest
+
+
+class PomodoroTtsPreviewRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=200)
+
+
+class UpdateUserGlobalSettingsRequest(BaseModel):
+    theme: Optional[str] = Field(default=None, max_length=40)
+    pomodoro: UserPomodoroConfigRequest
+    defaultProjectReviewTemplate: conlist(ReviewChainTemplateItemDTO, min_items=1)
+
+
+class LearningPlanDTO(BaseModel):
+    planId: str = Field(min_length=1, max_length=240)
+    projectId: str = Field(min_length=1, max_length=200)
+    title: str = Field(default="学习计划", max_length=120)
+    targetKind: str = Field(default="PROJECT")
+    learningObjectNodeIds: List[str] = Field(default_factory=list, max_items=500)
+    targetDays: int = Field(default=1, ge=1, le=3650)
+    createdDateKey: str = Field(min_length=10, max_length=10)
+    dueDateKey: str = Field(min_length=10, max_length=10)
+    archivedAt: Optional[int] = Field(default=None, ge=0)
+    updatedAt: int = Field(default=0, ge=0)
+
+
+class LearningPlanProgressSnapshotDTO(BaseModel):
+    planId: str = Field(min_length=1, max_length=240)
+    dateKey: str = Field(min_length=10, max_length=10)
+    progressRatio: float = Field(default=0, ge=0, le=1)
+    updatedAt: int = Field(default=0, ge=0)
+
+
+class LearningPlansPayloadDTO(BaseModel):
+    plans: List[LearningPlanDTO] = Field(default_factory=list, max_items=500)
+    progressSnapshots: List[LearningPlanProgressSnapshotDTO] = Field(default_factory=list, max_items=5000)
 
 
 class AskLlmRequest(BaseModel):

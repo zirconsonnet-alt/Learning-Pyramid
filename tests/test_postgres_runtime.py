@@ -237,6 +237,8 @@ def test_postgres_runtime_records_schema_migrations_and_uses_hot_indexes() -> No
             ("auth", 10, "auth_friendships"),
             ("auth", 11, "auth_remove_study_group_tables"),
             ("auth", 12, "auth_user_cloud_accounts"),
+            ("auth", 13, "auth_user_project_daily_study_stats"),
+            ("auth", 14, "auth_user_global_settings"),
             ("store", 1, "initial_store_schema"),
             ("store", 2, "store_hot_indexes"),
             ("store", 3, "entry_registration_seq"),
@@ -471,7 +473,7 @@ def test_apply_postgres_migrations_status_and_check_commands() -> None:
     assert status_body["pending"] == []
     assert status_body["conflicts"] == []
     assert status_body["scopes"]["store"]["version"] == 5
-    assert status_body["scopes"]["auth"]["version"] == 12
+    assert status_body["scopes"]["auth"]["version"] == 14
 
 
 def test_postgres_auth_conflicts_fail_check_and_startup() -> None:

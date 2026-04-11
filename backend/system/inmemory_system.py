@@ -23,6 +23,7 @@ from backend.models.enums import (
     FsSyncPolicy,
     InstancePresence,
     LayerMode,
+    LearningTaskNodeOrigin,
     MaterialSourceKind,
     ProjectState,
     ProjectType,
@@ -69,6 +70,8 @@ from backend.models.rich_content import RichContent, validate_rich_content_write
 from backend.models.review_chain import ReviewChain
 from backend.models.review_task import ReviewTask
 from backend.models.review_task_queue import ReviewTaskQueue
+from backend.models.study_material import StudyMaterial
+from backend.models.subject_material_link import SubjectMaterialLink
 from backend.system.persistence_json import SCHEMA_VERSION, decode_snapshot, encode_project_payload, encode_snapshot
 from backend.system.persistence_store import JsonSnapshotStore, SnapshotStore
 from backend.system.project_paths import allocate_project_root
@@ -102,6 +105,8 @@ class ProjectStore:
     project_material_source_binding: Optional[ProjectMaterialSourceBinding] = None
     project_config: Optional[ProjectConfig] = None
     material_allowlist: Optional[MaterialAllowlist] = None
+    study_materials: Dict[str, StudyMaterial] = field(default_factory=dict)
+    subject_material_link: Optional[SubjectMaterialLink] = None
     media_assets: Dict[str, MediaAsset] = field(default_factory=dict)
     audit_log_events: Dict[str, AuditLogEvent] = field(default_factory=dict)
 
@@ -136,6 +141,10 @@ class ProjectStaged:
     project_material_source_binding: Optional[ProjectMaterialSourceBinding] = None
     project_config: Optional[ProjectConfig] = None
     material_allowlist: Optional[MaterialAllowlist] = None
+    study_materials: Dict[str, StudyMaterial] = field(default_factory=dict)
+    study_materials_replaced: bool = False
+    subject_material_link: Optional[SubjectMaterialLink] = None
+    subject_material_link_replaced: bool = False
     media_assets: Dict[str, MediaAsset] = field(default_factory=dict)
     audit_log_events: Dict[str, AuditLogEvent] = field(default_factory=dict)
 
@@ -262,6 +271,12 @@ def _overlay_learning_object_nodes(ps: ProjectStore, st: ProjectStaged) -> Dict[
     if getattr(st, "learning_object_nodes_replaced", False):
         return dict(st.learning_object_nodes)
     return _merge_dict(ps.learning_object_nodes, st.learning_object_nodes)
+
+
+def _overlay_study_materials(ps: ProjectStore, st: ProjectStaged) -> Dict[str, StudyMaterial]:
+    if getattr(st, "study_materials_replaced", False):
+        return dict(st.study_materials)
+    return _merge_dict(getattr(ps, "study_materials", {}), getattr(st, "study_materials", {}))
 
 
 def _overlay_queue(ps: ProjectStore, st: ProjectStaged) -> ReviewTaskQueue:
@@ -834,6 +849,29 @@ class RecallPointRepository:
             except NotFound:
                 raise PreconditionFailure("RichContent IMAGE asset_id not resolvable")
 
+    def _assert_references_resolvable(
+        self,
+        session: MutationSession,
+        references: tuple[RecallPointId, ...],
+        *,
+        self_recall_point_id: RecallPointId | None = None,
+    ) -> None:
+        seen: set[str] = set()
+        self_key = None if self_recall_point_id is None else id_canonical_text(self_recall_point_id)
+        for reference in references:
+            ref_key = id_canonical_text(reference)
+            if ref_key in seen:
+                raise PreconditionFailure("RecallPoint.references must not contain duplicates")
+            if self_key is not None and ref_key == self_key:
+                raise PreconditionFailure("RecallPoint.references must not contain self")
+            seen.add(ref_key)
+            try:
+                target = self.get(session, reference)
+            except NotFound:
+                raise PreconditionFailure("RecallPoint.references recall_point_id not resolvable")
+            if target.state != RecallPointState.ACTIVE:
+                raise PreconditionFailure("RecallPoint.references recall_point_id must resolve to ACTIVE RecallPoint")
+
     def add(self, session: MutationSession, rp: RecallPoint) -> None:
         session.assert_open()
         if session.mode != SessionMode.READ_WRITE:
@@ -854,6 +892,7 @@ class RecallPointRepository:
         # RichContent IMAGE blocks must be resolvable (0a.12)
         self._assert_rich_content_assets_resolvable(session, rp.question)
         self._assert_rich_content_assets_resolvable(session, rp.answer)
+        self._assert_references_resolvable(session, tuple(rp.references))
         for ins in rp.insights:
             self._assert_rich_content_assets_resolvable(session, ins)
 
@@ -882,6 +921,7 @@ class RecallPointRepository:
         # RichContent IMAGE blocks must be resolvable (0a.12)
         self._assert_rich_content_assets_resolvable(session, rp.question)
         self._assert_rich_content_assets_resolvable(session, rp.answer)
+        self._assert_references_resolvable(session, tuple(rp.references), self_recall_point_id=rp.recall_point_id)
 
         # Strong constraint: insights are append-only; update must not overwrite/rollback them.
         updated = RecallPoint(
@@ -891,7 +931,15 @@ class RecallPointRepository:
             question=rp.question,
             answer=rp.answer,
             anchor=rp.anchor,
+            references=tuple(rp.references),
             insights=tuple(existed.insights),
+            source_project_id=rp.source_project_id,
+            source_recall_point_id=rp.source_recall_point_id,
+            source_material_id=rp.source_material_id,
+            source_material_title=rp.source_material_title,
+            source_anchor_label=rp.source_anchor_label,
+            mistake_status=rp.mistake_status,
+            mistake_note=rp.mistake_note,
             state=existed.state,
             deleted_at=existed.deleted_at,
         )
@@ -915,7 +963,15 @@ class RecallPointRepository:
             question=rp.question,
             answer=rp.answer,
             anchor=rp.anchor,
+            references=tuple(rp.references),
             insights=tuple(rp.insights) + (insight,),
+            source_project_id=rp.source_project_id,
+            source_recall_point_id=rp.source_recall_point_id,
+            source_material_id=rp.source_material_id,
+            source_material_title=rp.source_material_title,
+            source_anchor_label=rp.source_anchor_label,
+            mistake_status=rp.mistake_status,
+            mistake_note=rp.mistake_note,
             state=rp.state,
             deleted_at=rp.deleted_at,
         )
@@ -935,7 +991,15 @@ class RecallPointRepository:
             question=rp.question,
             answer=rp.answer,
             anchor=rp.anchor,
+            references=tuple(rp.references),
             insights=tuple(rp.insights),
+            source_project_id=rp.source_project_id,
+            source_recall_point_id=rp.source_recall_point_id,
+            source_material_id=rp.source_material_id,
+            source_material_title=rp.source_material_title,
+            source_anchor_label=rp.source_anchor_label,
+            mistake_status=rp.mistake_status,
+            mistake_note=rp.mistake_note,
             state=RecallPointState.DELETED,
             deleted_at=deleted_at,
         )
@@ -1121,10 +1185,12 @@ class LearningTaskNodeRepository:
         g: GlobalStore,
         learning_task_repo: LearningTaskRepository,
         recall_point_repo: RecallPointRepository,
+        learning_object_repo: LearningObjectRepository,
     ) -> None:
         self.g = g
         self.learning_task_repo = learning_task_repo
         self.recall_point_repo = recall_point_repo
+        self.learning_object_repo = learning_object_repo
 
     def _assert_tree_consistent_for_query(self, session: MutationSession) -> None:
         ps = session._baseline
@@ -1246,6 +1312,24 @@ class LearningTaskNodeRepository:
                 if rp.state == RecallPointState.ACTIVE:
                     out.append(rp_id)
             return tuple(out)
+        if (
+            n.node_origin == LearningTaskNodeOrigin.OBJECT_MIRROR
+            and n.bound_learning_object_node_id is not None
+            and self.learning_object_repo.maybe_get(session, n.bound_learning_object_node_id) is not None
+        ):
+            inst_ids = self.learning_object_repo.covered_instance_id_sequence(session, n.bound_learning_object_node_id)
+            inst_keys = {id_canonical_text(item) for item in inst_ids}
+            if not inst_keys:
+                return tuple()
+            out = [
+                rp.recall_point_id
+                for rp in self.recall_point_repo.all(session)
+                if rp.state == RecallPointState.ACTIVE
+                and rp.anchor is not None
+                and id_canonical_text(rp.anchor.instance_id) in inst_keys
+            ]
+            out.sort(key=id_canonical_text)
+            return tuple(out)
         out: list[RecallPointId] = []
         for cid in n.children:
             out.extend(self._covered_rp_ids_no_validate(session, cid))
@@ -1301,6 +1385,9 @@ class LearningTaskNodeRepository:
                 parent_id=gp.parent_id,
                 children=tuple(next_children),
                 title=gp.title,
+                node_origin=gp.node_origin,
+                bound_learning_object_node_id=gp.bound_learning_object_node_id,
+                object_mirror_status=gp.object_mirror_status,
             )
 
         parent = LearningTaskContainer(
@@ -1329,6 +1416,9 @@ class LearningTaskNodeRepository:
                     parent_id=parent_id,
                     children=ch.children,
                     title=ch.title,
+                    node_origin=ch.node_origin,
+                    bound_learning_object_node_id=ch.bound_learning_object_node_id,
+                    object_mirror_status=ch.object_mirror_status,
                 )
             updated_children.append(updated)
 
@@ -2243,7 +2333,12 @@ class InMemorySystem:
         self.learning_object_repo = LearningObjectNodeRepository(self.g)
         self.recall_point_repo = RecallPointRepository(self.g, self.instance_repo, self.media_asset_repo)
         self.learning_task_repo = LearningTaskRepository(self.g, self.recall_point_repo)
-        self.learning_task_node_repo = LearningTaskNodeRepository(self.g, self.learning_task_repo, self.recall_point_repo)
+        self.learning_task_node_repo = LearningTaskNodeRepository(
+            self.g,
+            self.learning_task_repo,
+            self.recall_point_repo,
+            self.learning_object_repo,
+        )
         self.range_repo = RangeSnapshotRepository(self.g)
 
         self.review_task_repo = ReviewTaskRepository(self.g)
@@ -2326,6 +2421,8 @@ class InMemorySystem:
                 ps.project_material_source_binding = d.get("project_material_source_binding")
                 ps.project_config = d.get("project_config")
                 ps.material_allowlist = d.get("material_allowlist")
+                ps.study_materials = d.get("study_materials", {})
+                ps.subject_material_link = d.get("subject_material_link")
                 ps.audit_log_events = d.get("audit_log_events", {})
                 ps.instances = d["instances"]
                 ps.instance_media_bindings = d.get("instance_media_bindings", {})
@@ -2413,6 +2510,8 @@ class InMemorySystem:
                 ps.project_material_source_binding = raw_binding
             ps.project_config = d.get("project_config")
             ps.material_allowlist = d.get("material_allowlist")
+            ps.study_materials = d.get("study_materials", {})
+            ps.subject_material_link = d.get("subject_material_link")
             ps.audit_log_events = d.get("audit_log_events", {})
             ps.instances = d["instances"]
             ps.instance_media_bindings = d.get("instance_media_bindings", {})
@@ -2728,6 +2827,10 @@ class InMemorySystem:
             )
             next_ps.project_config = st.project_config if st.project_config is not None else ps.project_config
             next_ps.material_allowlist = st.material_allowlist if st.material_allowlist is not None else ps.material_allowlist
+            next_ps.study_materials = dict(_overlay_study_materials(ps, st))
+            next_ps.subject_material_link = (
+                st.subject_material_link if st.subject_material_link_replaced else ps.subject_material_link
+            )
             next_ps.media_assets = dict(_overlay_media_assets(ps, st))
             next_ps.audit_log_events = dict(_overlay_audit_log_events(ps, st))
 
@@ -2803,8 +2906,8 @@ class InMemorySystem:
                 raise PreconditionFailure("create_project.initial_source_kind must be MaterialSourceKind")
             if not isinstance(initial_project_type, ProjectType):
                 raise PreconditionFailure("create_project.initial_project_type must be ProjectType")
-            if initial_project_type in {ProjectType.BOOK, ProjectType.LOOSE_POINTS} and initial_source_kind != MaterialSourceKind.MANUAL:
-                raise PreconditionFailure("create_project for BOOK/LOOSE_POINTS must use MANUAL source kind")
+            if initial_project_type in {ProjectType.BOOK, ProjectType.MISTAKE_BOOK, ProjectType.LOOSE_POINTS} and initial_source_kind != MaterialSourceKind.MANUAL:
+                raise PreconditionFailure("create_project for BOOK/MISTAKE_BOOK/LOOSE_POINTS must use MANUAL source kind")
             resolved_project_root = project_root
             if resolved_project_root is None:
                 auto_project_root, _ = allocate_project_root(title)

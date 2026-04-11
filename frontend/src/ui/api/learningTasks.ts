@@ -22,6 +22,7 @@ export type SubmitLearningTaskItem = {
   question: RichContent
   answer: RichContent
   anchor: { instanceId: string; position: string } | null
+  references: string[]
 }
 
 export function submitLearningTask(params: {
@@ -38,6 +39,7 @@ export function submitLearningTask(params: {
         question: RichContentSchema.parse(normalizeRichContent(it.question)),
         answer: RichContentSchema.parse(normalizeRichContent(it.answer)),
         anchor: it.anchor,
+        references: it.references,
       })),
     },
     responseSchema: SubmitLearningTaskResultSchema,

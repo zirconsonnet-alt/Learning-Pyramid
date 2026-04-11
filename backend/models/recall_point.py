@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Optional
 
-from .enums import RecallPointState
+from .enums import MistakeStatus, RecallPointState
 from .errors import PreconditionFailure
 from .rich_content import RichContent, validate_rich_content_write_time
 from .types import InstanceId, ProjectId, RecallPointId, Timestamp
@@ -32,7 +32,15 @@ class RecallPoint:
     question: RichContent
     answer: RichContent
     anchor: Optional[Anchor] = None
+    references: tuple[RecallPointId, ...] = tuple()
     insights: tuple[RichContent, ...] = tuple()
+    source_project_id: Optional[ProjectId] = None
+    source_recall_point_id: Optional[RecallPointId] = None
+    source_material_id: Optional[str] = None
+    source_material_title: Optional[str] = None
+    source_anchor_label: Optional[str] = None
+    mistake_status: Optional[MistakeStatus] = None
+    mistake_note: Optional[str] = None
     state: RecallPointState = RecallPointState.ACTIVE
     deleted_at: Optional[Timestamp] = None
 
@@ -50,8 +58,32 @@ class RecallPoint:
         validate_rich_content_write_time(self.answer)
         if self.anchor is not None:
             self.anchor.validate_write_time()
+        seen_references: set[str] = set()
+        for reference in self.references:
+            key = str(reference).strip()
+            if not key:
+                raise PreconditionFailure("RecallPoint.references must contain non-empty RecallPointId")
+            if key == str(self.recall_point_id):
+                raise PreconditionFailure("RecallPoint.references must not contain self")
+            if key in seen_references:
+                raise PreconditionFailure("RecallPoint.references must not contain duplicates")
+            seen_references.add(key)
         for ins in self.insights:
             validate_rich_content_write_time(ins)
+        if (self.source_project_id is None) != (self.source_recall_point_id is None):
+            raise PreconditionFailure(
+                "RecallPoint.source_project_id and RecallPoint.source_recall_point_id must be provided together"
+            )
+        if self.source_material_id is not None and not str(self.source_material_id).strip():
+            raise PreconditionFailure("RecallPoint.source_material_id must be non-empty when provided")
+        if self.source_material_title is not None and not str(self.source_material_title).strip():
+            raise PreconditionFailure("RecallPoint.source_material_title must be non-empty when provided")
+        if self.source_anchor_label is not None and not str(self.source_anchor_label).strip():
+            raise PreconditionFailure("RecallPoint.source_anchor_label must be non-empty when provided")
+        if self.mistake_status is not None and not isinstance(self.mistake_status, MistakeStatus):
+            raise PreconditionFailure("RecallPoint.mistake_status must be MistakeStatus when provided")
+        if self.mistake_note is not None and len(str(self.mistake_note)) > 2000:
+            raise PreconditionFailure("RecallPoint.mistake_note must be <= 2000 chars")
 
     def __str__(self) -> str:
         # 1.4.1 派生字段：简单 Q/A 可读表示

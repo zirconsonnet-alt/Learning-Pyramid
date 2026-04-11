@@ -45,6 +45,9 @@ import { useInstances } from "@/ui/queries/workbench"
 import { isSyntheticFilesContainer, sortLearningObjectNodeIdsForDisplay } from "@/ui/learningObjectDisplayOrder"
 import { type AiChatConversation, type AiChatCourseEvidence, type AiChatMessage, useAiChatStore } from "@/ui/store/aiChatStore"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
+import { createStudyPresenceTracker } from "@/ui/store/studyPresenceStore"
+import { getLocalDateKey, touchDailyStudyActivity } from "@/ui/store/workbenchDailyStats"
+import { syncStudyMetricsSnapshot } from "@/ui/studyMetricsSync"
 import { buildSubtitleContextText, loadSubtitleDocumentForInstance } from "@/ui/subtitles/subtitleSupport"
 import { cn } from "@/ui/utils"
 import { formatLearningTaskNodeDisplayTitle } from "@/views/learningTasks/displayTitle"
@@ -82,6 +85,8 @@ const QUICK_CHAT_ACTIONS = [
     prompt: "请基于当前节点内容，帮我设计几个助记方法，尽量包含关键词、联想、口诀、类比或记忆钩子。",
   },
 ] as const
+
+const QA_ACTIVITY_WINDOW_MS = 30_000
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -952,6 +957,10 @@ export function AiChatPage() {
   const [searchParams] = useSearchParams()
   const pid = projectId ?? ""
 
+  function touchQaActivity() {
+    touchDailyStudyActivity(pid, "qa", QA_ACTIVITY_WINDOW_MS)
+  }
+
   const kindParam = searchParams.get("kind")
   const nodeIdParam = searchParams.get("nodeId")?.trim() ?? ""
   const conversationIdParam = searchParams.get("conversation")?.trim() ?? ""
@@ -1047,6 +1056,7 @@ export function AiChatPage() {
         ? activeTaskRecallPointsQ.data ?? []
         : activeObjectRecallPointsQ.data ?? []
   const llmConfigured = capabilitiesQ.data?.llmConfigured ?? false
+  const todayDateKey = getLocalDateKey()
   const interactionDisabled = !pid || !activeNodeId || !llmConfigured
   const persistedMessages = selectedConversation?.messages ?? []
   const latestAssistantIndex = useMemo(() => {
@@ -1068,6 +1078,52 @@ export function AiChatPage() {
     },
     [],
   )
+
+  useEffect(() => {
+    if (!pid) return
+    const tracker = createStudyPresenceTracker(pid)
+    const touch = () => tracker.touch()
+    tracker.start()
+    window.addEventListener("pointerdown", touch, { passive: true })
+    window.addEventListener("keydown", touch)
+    window.addEventListener("wheel", touch, { passive: true })
+    window.addEventListener("scroll", touch, { passive: true })
+    return () => {
+      window.removeEventListener("pointerdown", touch)
+      window.removeEventListener("keydown", touch)
+      window.removeEventListener("wheel", touch)
+      window.removeEventListener("scroll", touch)
+      tracker.stop()
+    }
+  }, [pid])
+
+  useEffect(() => {
+    if (!pid) return
+    if (!capabilitiesQ.data?.authEnabled) return
+
+    let cancelled = false
+
+    async function runStudyMetricsSync() {
+      try {
+        await syncStudyMetricsSnapshot({
+          projectIds: [pid],
+          dateFrom: todayDateKey,
+          dateTo: todayDateKey,
+        })
+      } catch {
+        if (cancelled) return
+      }
+    }
+
+    void runStudyMetricsSync()
+    const timer = window.setInterval(() => {
+      void runStudyMetricsSync()
+    }, 30_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [capabilitiesQ.data?.authEnabled, pid, todayDateKey])
 
   useEffect(() => {
     if (!activeTree) return
@@ -1112,6 +1168,13 @@ export function AiChatPage() {
     }
     return persistedMessages
   }, [pendingUserMessage, persistedMessages, replaceBaseMessages, streamingAssistantMessage, streamingMode])
+
+  useEffect(() => {
+    const latestMessage = visibleMessages.at(-1)
+    if (latestMessage?.role === "assistant") {
+      touchQaActivity()
+    }
+  }, [visibleMessages])
 
   function resolveActiveCourseAgentContext():
     | {
@@ -1214,10 +1277,12 @@ export function AiChatPage() {
           signal: controller.signal,
           timeoutMs: 90_000,
           onStatus: (status) => {
+            touchQaActivity()
             setStreamingAssistantMessage((current) => (current ? { ...current, content: status } : { ...assistantDraft, content: status }))
           },
         })
 
+        touchQaActivity()
         streamingContentRef.current = result.content
         setStreamingAssistantMessage((current) => (current ? { ...current, content: result.content } : { ...assistantDraft, content: result.content }))
 
@@ -1256,12 +1321,14 @@ export function AiChatPage() {
         timeoutMs: 90_000,
         signal: controller.signal,
         onDelta: (_chunk, accumulated) => {
+          touchQaActivity()
           streamingContentRef.current = accumulated
           setStreamingAssistantMessage((current) => (current ? { ...current, content: accumulated } : { ...assistantDraft, content: accumulated }))
         },
       },
     )
 
+    touchQaActivity()
     const hasNodeContentContext = activeNodeRecallPoints.some((item) => item.state === "ACTIVE")
     const missingContext = hasNodeContentContext ? responseLooksLikeMissingContext(result.content) : false
     const offTopic = hasNodeContentContext
@@ -1285,6 +1352,7 @@ export function AiChatPage() {
 
   function handleJumpToEvidence(evidence: AiChatCourseEvidence) {
     if (!pid) return
+    touchQaActivity()
     const search = new URLSearchParams()
     search.set("instanceId", evidence.instanceId)
     search.set("position", `t=${Math.max(0, Math.floor((evidence.startMs + evidence.endMs) / 2))}`)
@@ -1388,6 +1456,7 @@ export function AiChatPage() {
 
   async function handleCopyResponse(content: string) {
     try {
+      touchQaActivity()
       await copyText(content)
       showSuccessFeedback("回答已复制", "这条回答已经复制到剪贴板。")
     } catch (err) {
@@ -1406,10 +1475,12 @@ export function AiChatPage() {
   }
 
   function handleStopStreaming() {
+    touchQaActivity()
     streamAbortRef.current?.abort()
   }
 
   function handleApplyQuickAction(prompt: string) {
+    touchQaActivity()
     setComposerValue(prompt)
     if (typeof window !== "undefined") {
       window.requestAnimationFrame(() => {
@@ -1424,6 +1495,7 @@ export function AiChatPage() {
     const trimmed = composerValue.trim()
     if (!trimmed || !pid || !activeNodeId || !llmConfigured || isStreaming) return
 
+    touchQaActivity()
     const userMessage = createMessage("user", trimmed)
     const assistantDraft = createMessage("assistant", "")
     const controller = new AbortController()
@@ -1487,6 +1559,7 @@ export function AiChatPage() {
     const latestUserMessage = persistedMessages[latestAssistantIndex - 1]
     if (!latestUserMessage || latestUserMessage.role !== "user") return
 
+    touchQaActivity()
     const messagesBeforeLatestTurn = persistedMessages.slice(0, latestAssistantIndex - 1)
     const baseMessagesForReplace = [...messagesBeforeLatestTurn, latestUserMessage]
     const assistantDraft = createMessage("assistant", "")
@@ -1653,7 +1726,7 @@ export function AiChatPage() {
             </div>
           </div>
 
-          <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-6 sm:px-7">
+          <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-6 sm:px-7" onScroll={touchQaActivity}>
             {capabilitiesQ.isLoading && !capabilitiesQ.data ? (
               <LoadingNotice title="正在准备 AI 问答" message="正在确认当前账号是否已经接通可用的大模型能力。" />
             ) : null}
@@ -1731,8 +1804,14 @@ export function AiChatPage() {
                 <textarea
                   ref={composerRef}
                   value={composerValue}
-                  onChange={(event) => setComposerValue(event.target.value)}
+                  onChange={(event) => {
+                    touchQaActivity()
+                    setComposerValue(event.target.value)
+                  }}
+                  onFocus={touchQaActivity}
+                  onClick={touchQaActivity}
                   onKeyDown={(event) => {
+                    touchQaActivity()
                     if (event.key === "Enter" && !event.shiftKey) {
                       event.preventDefault()
                       void handleSend()

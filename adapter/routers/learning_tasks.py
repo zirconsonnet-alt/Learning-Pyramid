@@ -10,7 +10,7 @@ from backend.models.errors import PreconditionFailure
 from backend.models.learning_task_node import LearningTaskLeaf
 from backend.models.recall_point import Anchor
 from backend.models.rich_content import ContentBlock, RichContent
-from backend.models.types import InstanceId, LearningTaskId, MediaAssetId
+from backend.models.types import InstanceId, LearningTaskId, MediaAssetId, RecallPointId
 from backend.system.api import SystemAPI
 
 
@@ -37,7 +37,14 @@ def submit_learning_task(projectId: str, req: SubmitLearningTaskRequest, api: Sy
     items = []
     for it in req.items:
         anc = None if it.anchor is None else Anchor(instance_id=InstanceId(it.anchor.instanceId), position=it.anchor.position)
-        items.append((_to_rich_content(it.question), _to_rich_content(it.answer), anc))
+        items.append(
+            (
+                _to_rich_content(it.question),
+                _to_rich_content(it.answer),
+                anc,
+                tuple(RecallPointId(reference) for reference in it.references),
+            )
+        )
     entry_node_id = api.submit_learning_task(projectId, items=items, title=req.title)  # type: ignore[arg-type]
     return {"ok": True, "data": {"entryNodeId": str(entry_node_id)}}
 

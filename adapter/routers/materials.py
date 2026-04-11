@@ -13,6 +13,7 @@ from adapter.schemas import (
     ImportLearningObjectsFromBaiduNetdiskRequest,
     ImportBrowserDirectoryRequest,
     InitializeBookLearningObjectsRequest,
+    InitializeBookLearningObjectsFromMaterialRequest,
 )
 from backend.models.types import InstanceId, LearningObjectNodeId
 from backend.models.types import RecallPointId
@@ -60,6 +61,26 @@ def initialize_book_learning_objects(
         outline_items=tuple((int(item.depth), item.title) for item in req.items),
     )
     return {"ok": True, "data": result}
+
+
+@router.post("/projects/{projectId}/initialize-book-learning-objects-from-material")
+def initialize_book_learning_objects_from_material(
+    projectId: str,
+    req: InitializeBookLearningObjectsFromMaterialRequest,
+    api: SystemAPI = Depends(get_api),
+) -> dict:
+    result = api.initialize_book_learning_objects_from_subject_material(  # type: ignore[arg-type]
+        projectId,
+        source_material_id=req.sourceMaterialId,
+    )
+    return {"ok": True, "data": result}
+
+
+@router.post("/projects/{projectId}/ensure-mistake-inbox")
+def ensure_mistake_inbox(projectId: str, api: SystemAPI = Depends(get_api)) -> dict:
+    result = api.ensure_mistake_material_inbox(projectId)  # type: ignore[arg-type]
+    return {"ok": True, "data": result}
+
 
 @router.post("/projects/{projectId}/sync-learning-objects-from-fs")
 def sync_learning_objects_from_fs(projectId: str, api: SystemAPI = Depends(get_api)) -> dict:

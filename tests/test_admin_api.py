@@ -95,6 +95,35 @@ def test_admin_can_manage_users_and_activity_logs(auth_env: None) -> None:
     assert granted.status_code == 200
     assert "admin" in granted.json()["data"]["roles"]
 
+    created_project = member_client.post("/api/projects", json={"title": "Member Study Project"})
+    assert created_project.status_code == 200
+    project_id = created_project.json()["data"]["projectId"]
+    synced = member_client.post(
+        "/api/profile/me/study-metrics/sync",
+        json={
+            "projectIds": [project_id],
+            "dateFrom": "2026-04-09",
+            "dateTo": "2026-04-09",
+            "entries": [
+                {
+                    "projectId": project_id,
+                    "dateKey": "2026-04-09",
+                    "effectiveMs": 36_000,
+                    "watchMs": 12_000,
+                    "composeMs": 8_000,
+                    "reviewMs": 10_000,
+                    "qaMs": 6_000,
+                    "effectiveRanges": [{"startMs": 0, "endMs": 36_000}],
+                    "watchRanges": [{"startMs": 0, "endMs": 12_000}],
+                    "composeRanges": [{"startMs": 12_000, "endMs": 20_000}],
+                    "reviewRanges": [{"startMs": 20_000, "endMs": 30_000}],
+                    "qaRanges": [{"startMs": 30_000, "endMs": 36_000}],
+                }
+            ],
+        },
+    )
+    assert synced.status_code == 200
+
     member_overview = member_client.get("/api/admin/overview")
     assert member_overview.status_code == 200
 
@@ -109,6 +138,13 @@ def test_admin_can_manage_users_and_activity_logs(auth_env: None) -> None:
     assert overview.status_code == 200
     assert overview.json()["data"]["users"] == 2
     assert overview.json()["data"]["activeUsers"] == 2
+    assert overview.json()["data"]["studyUsers"] == 1
+    assert overview.json()["data"]["studyUsers7d"] == 1
+    assert overview.json()["data"]["effectiveStudyMs"] == 36_000
+    assert overview.json()["data"]["watchMs"] == 12_000
+    assert overview.json()["data"]["composeMs"] == 8_000
+    assert overview.json()["data"]["reviewMs"] == 10_000
+    assert overview.json()["data"]["qaMs"] == 6_000
 
     users = admin_client.get("/api/admin/users")
     assert users.status_code == 200

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
   ArrowUpRight,
   CheckCircle2,
@@ -23,6 +23,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/car
 import { formatInstanceReference } from "@/ui/displayIdentifiers"
 import { useCommitReviewTask, useReviewBundle } from "@/ui/queries/workbench"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
+import { touchDailyStudyActivity } from "@/ui/store/workbenchDailyStats"
 import { cn } from "@/ui/utils"
 
 function formatApiError(err: unknown) {
@@ -78,6 +79,8 @@ const EMPTY_REVIEW_SESSION: ReviewSessionState = {
   activeRecallPointId: null,
 }
 
+const REVIEW_ACTIVITY_WINDOW_MS = 75_000
+
 function isRecallPoint(value: RecallPoint | undefined): value is RecallPoint {
   return Boolean(value)
 }
@@ -95,6 +98,10 @@ export function ReviewPane({
 }) {
   const { reviewTaskQ, rangeQ, recallPointQs } = useReviewBundle(projectId, headId)
   const commit = useCommitReviewTask(projectId)
+
+  function touchReviewActivity() {
+    touchDailyStudyActivity(projectId, "review", REVIEW_ACTIVITY_WINDOW_MS)
+  }
 
   const [sessionStateByHeadId, setSessionStateByHeadId] = useState<Record<string, ReviewSessionState>>({})
   const sessionState = sessionStateByHeadId[headId] ?? EMPTY_REVIEW_SESSION
@@ -144,7 +151,13 @@ export function ReviewPane({
   const activeRecallPointIndex = resolvedActiveRecallPointId ? recallPointIds.findIndex((id) => id === resolvedActiveRecallPointId) : -1
   const activeRecallPoint = resolvedActiveRecallPointId ? recallPointById[resolvedActiveRecallPointId] ?? null : null
 
+  useEffect(() => {
+    if (!resolvedActiveRecallPointId || totalCount <= 0 || loading || error) return
+    touchReviewActivity()
+  }, [error, loading, resolvedActiveRecallPointId, totalCount])
+
   function chooseAnswer(rpId: string, nextValue: 0 | 1) {
+    touchReviewActivity()
     updateSessionState((current) => ({
       ...current,
       answers: { ...current.answers, [rpId]: nextValue },
@@ -152,6 +165,7 @@ export function ReviewPane({
   }
 
   function setActiveRecallPoint(rpId: string) {
+    touchReviewActivity()
     updateSessionState((current) => ({
       ...current,
       activeRecallPointId: rpId,
@@ -172,6 +186,7 @@ export function ReviewPane({
   }
 
   function toggleAnswerVisibility(rpId: string) {
+    touchReviewActivity()
     updateSessionState((current) => ({
       ...current,
       showAnswer: {
@@ -182,6 +197,7 @@ export function ReviewPane({
   }
 
   function toggleInsightEditor(rpId: string, hasDraftInsight: boolean) {
+    touchReviewActivity()
     updateSessionState((current) => ({
       ...current,
       showInsightEditor: {
@@ -192,6 +208,7 @@ export function ReviewPane({
   }
 
   function updateInsightDraft(rpId: string, value: string) {
+    touchReviewActivity()
     updateSessionState((current) => ({
       ...current,
       insightDrafts: {
@@ -202,6 +219,7 @@ export function ReviewPane({
   }
 
   function clearAnswer(rpId: string) {
+    touchReviewActivity()
     updateSessionState((current) => {
       const nextAnswers = { ...current.answers }
       delete nextAnswers[rpId]
@@ -222,6 +240,7 @@ export function ReviewPane({
     })
 
     try {
+      touchReviewActivity()
       await commit.mutateAsync({
         reviewTaskId: headId,
         canRecall: canRecall as number[],
@@ -404,7 +423,15 @@ export function ReviewPane({
 
                       <div className="mt-3 flex flex-wrap gap-2">
                         {onOpenAnchor && activeAnchor ? (
-                          <Button variant="outline" size="sm" className="rounded-full" onClick={() => onOpenAnchor(activeAnchor)}>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="rounded-full"
+                            onClick={() => {
+                              touchReviewActivity()
+                              onOpenAnchor(activeAnchor)
+                            }}
+                          >
                             <PlayCircle className="h-4 w-4" />
                             回到锚点
                           </Button>
@@ -443,6 +470,7 @@ export function ReviewPane({
                           <textarea
                             value={draftInsight}
                             onChange={(event) => updateInsightDraft(rpId, event.target.value)}
+                            onFocus={touchReviewActivity}
                             rows={3}
                             placeholder="补充这道复习点的新理解、易错点、联想线索或自己的话解释。"
                             className="w-full resize-y rounded-2xl border [border-color:var(--theme-subtle-border)] [background:var(--theme-subtle-bg)] px-3 py-2 text-sm text-foreground outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15"

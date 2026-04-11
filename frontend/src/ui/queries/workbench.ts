@@ -3,16 +3,18 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 import { ApiError } from "@/ui/api/http"
 import { getAggregationQueue, listAggregationEvents, listLayers, manualRollUp } from "@/ui/api/layers"
 import {
+  ensureMistakeInbox,
   getLearningObjectNode,
   importLearningObjectsFromBaiduNetdisk,
   importLearningObjectsFromBrowser,
   initializeBookLearningObjects,
+  initializeBookLearningObjectsFromSubjectMaterial,
 } from "@/ui/api/learningObjects"
 import { getInstancePlaybackDescriptor } from "@/ui/api/media"
 import { addInstance, bulkRemapRecallPointsInstance, listInstances, listMissingInstances, listRecallPointsByInstance } from "@/ui/api/instances"
 import { submitLearningTask } from "@/ui/api/learningTasks"
-import { getProjectConfig, setLayerConfig, setReviewRecommendationConfig } from "@/ui/api/projectConfig"
-import type { ReviewChainTemplateItem } from "@/ui/api/projectConfig"
+import { getProjectConfig, setLayerConfig, setProjectRollUpStrategy, setReviewRecommendationConfig } from "@/ui/api/projectConfig"
+import type { ReviewChainTemplateItem, RollUpStrategy } from "@/ui/api/projectConfig"
 import { getProjectStorageConfig } from "@/ui/api/projectStorageConfig"
 import { getQueue } from "@/ui/api/queue"
 import { commitReviewTask, getRangeSnapshot, getRecallPoint, getReviewTask } from "@/ui/api/review"
@@ -157,6 +159,22 @@ export function useSetLayerConfig(projectId: string) {
   })
 }
 
+export function useSetProjectRollUpStrategy(projectId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (rollUpStrategy: RollUpStrategy) => setProjectRollUpStrategy(projectId, rollUpStrategy),
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["projectConfig", projectId] }),
+        qc.invalidateQueries({ queryKey: ["layers", projectId] }),
+        qc.invalidateQueries({ queryKey: ["learningTaskNodes", projectId] }),
+        qc.invalidateQueries({ queryKey: ["aggregationEvents", projectId] }),
+        qc.invalidateQueries({ queryKey: ["aggQueue", projectId] }),
+      ])
+    },
+  })
+}
+
 export function useSetReviewRecommendationConfig(projectId: string) {
   const qc = useQueryClient()
   return useMutation({
@@ -195,7 +213,7 @@ export function useSubmitLearningTask(projectId: string) {
   return useMutation({
     mutationFn: (p: {
       title: string
-      items: { question: RichContent; answer: RichContent; anchor: { instanceId: string; position: string } | null }[]
+      items: { question: RichContent; answer: RichContent; anchor: { instanceId: string; position: string } | null; references: string[] }[]
     }) => submitLearningTask({ projectId, ...p }),
     onSuccess: async () => {
       await Promise.all([
@@ -204,6 +222,8 @@ export function useSubmitLearningTask(projectId: string) {
         qc.invalidateQueries({ queryKey: ["aggQueue", projectId] }),
         qc.invalidateQueries({ queryKey: ["aggregationEvents", projectId] }),
         qc.invalidateQueries({ queryKey: ["learningTaskNodes", projectId] }),
+        qc.invalidateQueries({ queryKey: ["recallPoints", projectId] }),
+        qc.invalidateQueries({ queryKey: ["recallPointSearch", projectId] }),
         qc.invalidateQueries({ queryKey: ["recallPointsByTaskNode", projectId] }),
       ])
     },
@@ -214,6 +234,32 @@ export function useInitializeBookLearningObjects(projectId: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (params: { items: { depth: number; title: string }[] }) => initializeBookLearningObjects(projectId, params),
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["instances", projectId] }),
+        qc.invalidateQueries({ queryKey: ["learningObjectNodes", projectId] }),
+      ])
+    },
+  })
+}
+
+export function useInitializeBookLearningObjectsFromSubjectMaterial(projectId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (params: { sourceMaterialId: string }) => initializeBookLearningObjectsFromSubjectMaterial(projectId, params),
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["instances", projectId] }),
+        qc.invalidateQueries({ queryKey: ["learningObjectNodes", projectId] }),
+      ])
+    },
+  })
+}
+
+export function useEnsureMistakeInbox(projectId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => ensureMistakeInbox(projectId),
     onSuccess: async () => {
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["instances", projectId] }),

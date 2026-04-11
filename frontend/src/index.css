@@ -382,6 +382,76 @@
     }
   }
 
+  @keyframes plmPomodoroOverlay {
+    0% {
+      opacity: 0;
+      transform: scale(1.03);
+    }
+
+    16% {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    82% {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    100% {
+      opacity: 0;
+      transform: scale(0.99);
+    }
+  }
+
+  @keyframes plmPomodoroCard {
+    0% {
+      opacity: 0;
+      transform: translate3d(0, 26px, 0) scale(0.94);
+    }
+
+    18% {
+      opacity: 1;
+      transform: translate3d(0, 0, 0) scale(1);
+    }
+
+    80% {
+      opacity: 1;
+      transform: translate3d(0, 0, 0) scale(1);
+    }
+
+    100% {
+      opacity: 0;
+      transform: translate3d(0, -10px, 0) scale(0.985);
+    }
+  }
+
+  @keyframes plmPomodoroPulse {
+    0% {
+      opacity: 0;
+      transform: scale(0.74);
+    }
+
+    24% {
+      opacity: 0.42;
+    }
+
+    100% {
+      opacity: 0;
+      transform: scale(1.36);
+    }
+  }
+
+  @keyframes plmPomodoroSweep {
+    0% {
+      transform: translate3d(-130%, 0, 0);
+    }
+
+    100% {
+      transform: translate3d(180%, 0, 0);
+    }
+  }
+
   .dark {
     --background: 222.2 84% 4.9%;
     --foreground: 210 40% 98%;
@@ -637,6 +707,25 @@
     border-color: var(--theme-icon-border);
     background: var(--theme-icon-bg);
     color: var(--theme-icon-text);
+  }
+
+  .pomodoro-transition-overlay {
+    animation: plmPomodoroOverlay 2200ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+    backdrop-filter: blur(10px);
+  }
+
+  .pomodoro-transition-card {
+    animation: plmPomodoroCard 2200ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+    backdrop-filter: blur(18px);
+  }
+
+  .pomodoro-transition-pulse {
+    animation: plmPomodoroPulse 1500ms ease-out infinite;
+    filter: blur(4px);
+  }
+
+  .pomodoro-transition-sweep {
+    animation: plmPomodoroSweep 1280ms ease-out 120ms both;
   }
 
   .theme-progress-track {

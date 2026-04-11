@@ -9,6 +9,7 @@ export type DraftRecallPoint = {
   position: string | null
   question: RichContent
   answer: RichContent
+  references: string[]
   createdAt: number
   updatedAt: number
 }
@@ -38,6 +39,8 @@ type WorkbenchState = {
   updateDraftText: (projectId: string, localId: string, field: "question" | "answer", text: string) => void
   appendDraftImage: (projectId: string, localId: string, field: "question" | "answer", assetId: string) => void
   removeDraftImage: (projectId: string, localId: string, field: "question" | "answer", imageIndex: number) => void
+  addDraftReference: (projectId: string, localId: string, recallPointId: string) => void
+  removeDraftReference: (projectId: string, localId: string, recallPointId: string) => void
   removeDraft: (projectId: string, localId: string) => void
   clearDraftsForInstance: (projectId: string, instanceId: string | null) => void
   setTaskTitle: (projectId: string, instanceId: string | null, title: string) => void
@@ -114,6 +117,26 @@ export const useWorkbenchStore = create<WorkbenchState>()(
           )
           return { byProjectId: { ...s.byProjectId, [projectId]: { ...ps, drafts } } }
         }),
+      addDraftReference: (projectId, localId, recallPointId) =>
+        set((s) => {
+          const ps = s.byProjectId[projectId] ?? emptyProjectState()
+          const drafts = ps.drafts.map((d) =>
+            d.localId === localId && !d.references.includes(recallPointId)
+              ? { ...d, references: [...d.references, recallPointId], updatedAt: Date.now() }
+              : d,
+          )
+          return { byProjectId: { ...s.byProjectId, [projectId]: { ...ps, drafts } } }
+        }),
+      removeDraftReference: (projectId, localId, recallPointId) =>
+        set((s) => {
+          const ps = s.byProjectId[projectId] ?? emptyProjectState()
+          const drafts = ps.drafts.map((d) =>
+            d.localId === localId
+              ? { ...d, references: d.references.filter((id) => id !== recallPointId), updatedAt: Date.now() }
+              : d,
+          )
+          return { byProjectId: { ...s.byProjectId, [projectId]: { ...ps, drafts } } }
+        }),
       removeDraft: (projectId, localId) =>
         set((s) => {
           const ps = s.byProjectId[projectId] ?? emptyProjectState()
@@ -155,9 +178,9 @@ export const useWorkbenchStore = create<WorkbenchState>()(
     }),
     {
       name: "plm-workbench",
-      version: 4,
+      version: 5,
       migrate: (persistedState: unknown, version) => {
-        if (!persistedState || typeof persistedState !== "object" || version >= 4) return persistedState as WorkbenchState
+        if (!persistedState || typeof persistedState !== "object" || version >= 5) return persistedState as WorkbenchState
         const raw = persistedState as {
           byProjectId?: Record<
             string,
@@ -203,6 +226,9 @@ export const useWorkbenchStore = create<WorkbenchState>()(
                     Array.isArray(draft.answer)
                       ? (draft.answer as RichContent)
                       : richText(typeof draft.answerText === "string" ? draft.answerText : ""),
+                  references: Array.isArray(draft.references)
+                    ? draft.references.filter((item): item is string => typeof item === "string")
+                    : [],
                   createdAt: typeof draft.createdAt === "number" ? draft.createdAt : Date.now(),
                   updatedAt: typeof draft.updatedAt === "number" ? draft.updatedAt : Date.now(),
                 }))
@@ -217,6 +243,7 @@ export const useWorkbenchStore = create<WorkbenchState>()(
             ...draft,
             instanceId: draft.instanceId || null,
             position: draft.position || null,
+            references: Array.isArray(draft.references) ? draft.references : [],
           }))
         }
         return { byProjectId } as WorkbenchState

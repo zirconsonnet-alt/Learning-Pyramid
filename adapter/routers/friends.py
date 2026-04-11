@@ -86,7 +86,24 @@ def _build_learning_stats_for_user(user_id: str, *, auth_store: AuthStore, api: 
     learning_count = 0
     review_count = 0
     last_study_at: str | None = None
-    study_days: set[str] = set()
+    study_days_from_metrics: set[str] = set()
+    study_days_from_audit: set[str] = set()
+    effective_ms = 0
+    watch_ms = 0
+    compose_ms = 0
+    review_ms = 0
+    qa_ms = 0
+
+    for item in auth_store.list_user_project_daily_study_stats(user_id, project_ids=project_ids):
+        effective_ms += item.effective_ms
+        watch_ms += item.watch_ms
+        compose_ms += item.compose_ms
+        review_ms += item.review_ms
+        qa_ms += item.qa_ms
+        if item.effective_ms > 0 or item.watch_ms > 0 or item.compose_ms > 0 or item.review_ms > 0 or item.qa_ms > 0:
+            study_days_from_metrics.add(item.date_key)
+            if last_study_at is None or item.updated_at > last_study_at:
+                last_study_at = item.updated_at
 
     for project_id in project_ids:
         try:
@@ -105,10 +122,20 @@ def _build_learning_stats_for_user(user_id: str, *, auth_store: AuthStore, api: 
             if occurred_at and (last_study_at is None or occurred_at > last_study_at):
                 last_study_at = occurred_at
             if occurred_at:
-                study_days.add(occurred_at[:10])
+                study_days_from_audit.add(occurred_at[:10])
+
+    # Prefer synced day buckets for user-facing day counts because date_key follows
+    # the frontend's local-day semantics; audit timestamps are kept as a fallback for
+    # historical records that predate study-metrics sync.
+    study_days = study_days_from_metrics or study_days_from_audit
 
     return {
         "projectCount": len(project_ids),
+        "effectiveMs": effective_ms,
+        "watchMs": watch_ms,
+        "composeMs": compose_ms,
+        "reviewMs": review_ms,
+        "qaMs": qa_ms,
         "learningCount": learning_count,
         "reviewCount": review_count,
         "totalActions": learning_count + review_count,
@@ -117,12 +144,13 @@ def _build_learning_stats_for_user(user_id: str, *, auth_store: AuthStore, api: 
     }
 
 
-def _leaderboard_entry_sort_key(item: dict[str, object]) -> tuple[int, int, int, str, str]:
+def _leaderboard_entry_sort_key(item: dict[str, object]) -> tuple[int, int, int, int, str, str]:
     stats = item["stats"]
     user = item["user"]
     if not isinstance(stats, dict) or not isinstance(user, dict):
-        return (0, 0, 0, "", "")
+        return (0, 0, 0, 0, "", "")
     return (
+        int(stats.get("effectiveMs", 0)),
         int(stats.get("totalActions", 0)),
         int(stats.get("studyDays", 0)),
         int(stats.get("learningCount", 0)),

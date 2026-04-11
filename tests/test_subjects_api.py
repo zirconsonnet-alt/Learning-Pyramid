@@ -1,0 +1,425 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+from adapter.deps import (
+    get_api,
+    get_auth_rate_limit_store,
+    get_auth_store,
+    get_membership_marketing_store,
+    get_membership_payment_service,
+    get_membership_store,
+)
+from adapter.main import create_app
+
+
+def _reset_caches() -> None:
+    get_api.cache_clear()
+    get_auth_rate_limit_store.cache_clear()
+    get_auth_store.cache_clear()
+    get_membership_marketing_store.cache_clear()
+    get_membership_payment_service.cache_clear()
+    get_membership_store.cache_clear()
+
+
+def _flatten_outline_from_learning_object_nodes(nodes: list[dict]) -> list[tuple[int, str]]:
+    node_by_id = {item["nodeId"]: item for item in nodes}
+    root_ids = sorted(
+        [item["nodeId"] for item in nodes if item.get("parentId") is None],
+        key=lambda node_id: (
+            0 if node_by_id[node_id]["kind"] == "container" else 1,
+            node_by_id[node_id].get("relativePath") or "",
+            node_by_id[node_id]["title"],
+            node_id,
+        ),
+    )
+
+    outline: list[tuple[int, str]] = []
+
+    def visit(node_id: str, depth: int) -> None:
+        node = node_by_id[node_id]
+        outline.append((depth, node["title"]))
+        if node["kind"] == "container":
+            for child_id in node.get("children", []):
+                visit(child_id, depth + 1)
+
+    for root_id in root_ids:
+        visit(root_id, 0)
+
+    return outline
+
+
+def test_subject_alias_creates_course_compatible_project(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PLM_APP_MODE", "local")
+    monkeypatch.setenv("PLM_ENABLE_AUTH", "false")
+    monkeypatch.setenv("PLM_STORE_PATH", "")
+    monkeypatch.setenv("PLM_LEGACY_STORE_PATH", "")
+    monkeypatch.setenv("PLM_STORE_DB_PATH", str(tmp_path / "plm_store.sqlite3"))
+    monkeypatch.setenv("PLM_AUTH_DB_PATH", str(tmp_path / "plm_auth.sqlite3"))
+    _reset_caches()
+
+    client = TestClient(create_app())
+
+    create_resp = client.post("/api/subjects", json={"title": "高等数学"})
+    assert create_resp.status_code == 200
+    create_data = create_resp.json()["data"]
+    subject_id = create_data["subjectId"]
+    assert create_data["compatibilityProjectId"] == subject_id
+
+    subject_resp = client.get("/api/subjects")
+    assert subject_resp.status_code == 200
+    subjects = subject_resp.json()["data"]
+    assert subjects == [
+        {
+            "subjectId": subject_id,
+            "title": "高等数学",
+            "state": "ACTIVE",
+            "createdAt": subjects[0]["createdAt"],
+            "deletedAt": None,
+            "compatibilityProjectId": subject_id,
+        }
+    ]
+
+    config_resp = client.get(f"/api/projects/{subject_id}/project-config")
+    assert config_resp.status_code == 200
+    assert config_resp.json()["data"]["projectType"] == "COURSE"
+
+    materials_resp = client.get(f"/api/subjects/{subject_id}/materials")
+    assert materials_resp.status_code == 200
+    materials = materials_resp.json()["data"]
+    assert len(materials) == 1
+    assert materials[0]["subjectId"] == subject_id
+    assert materials[0]["materialId"] == "legacy_main"
+    assert materials[0]["materialType"] == "COURSE"
+    assert materials[0]["title"] == "默认网课材料"
+    assert materials[0]["compatibilityProjectId"] == subject_id
+
+    create_book_resp = client.post(
+        f"/api/subjects/{subject_id}/materials",
+        json={"materialType": "BOOK", "title": "高等数学教材"},
+    )
+    assert create_book_resp.status_code == 200
+    book_material = create_book_resp.json()["data"]
+    book_project_id = book_material["compatibilityProjectId"]
+    assert book_material["subjectId"] == subject_id
+    assert book_material["materialType"] == "BOOK"
+    assert book_material["title"] == "高等数学教材"
+    assert book_project_id
+    assert book_project_id != subject_id
+
+    subject_resp_after_material = client.get("/api/subjects")
+    assert subject_resp_after_material.status_code == 200
+    subjects_after_material = subject_resp_after_material.json()["data"]
+    assert len(subjects_after_material) == 1
+    assert subjects_after_material[0]["subjectId"] == subject_id
+
+    projects_resp = client.get("/api/projects")
+    assert projects_resp.status_code == 200
+    project_ids = {item["projectId"] for item in projects_resp.json()["data"]}
+    assert {subject_id, book_project_id}.issubset(project_ids)
+
+    materials_after_create = client.get(f"/api/subjects/{subject_id}/materials")
+    assert materials_after_create.status_code == 200
+    material_ids = {item["materialId"] for item in materials_after_create.json()["data"]}
+    assert "legacy_main" in material_ids
+    assert book_material["materialId"] in material_ids
+
+    child_view = client.get(f"/api/subjects/{book_project_id}/materials")
+    assert child_view.status_code == 200
+    child_view_materials = child_view.json()["data"]
+    assert len(child_view_materials) == 2
+    assert {item["materialId"] for item in child_view_materials} == material_ids
+
+    edit_child_resp = client.patch(f"/api/projects/{book_project_id}", json={"title": "高数教材精读"})
+    assert edit_child_resp.status_code == 200
+    materials_after_edit = client.get(f"/api/subjects/{subject_id}/materials")
+    assert materials_after_edit.status_code == 200
+    edited_book_material = next(item for item in materials_after_edit.json()["data"] if item["materialId"] == book_material["materialId"])
+    assert edited_book_material["title"] == "高数教材精读"
+
+    delete_subject_resp = client.delete(f"/api/projects/{subject_id}")
+    assert delete_subject_resp.status_code == 200
+    remaining_projects_resp = client.get("/api/projects")
+    assert remaining_projects_resp.status_code == 200
+    remaining_project_ids = {item["projectId"] for item in remaining_projects_resp.json()["data"]}
+    assert subject_id not in remaining_project_ids
+    assert book_project_id not in remaining_project_ids
+    remaining_subjects_resp = client.get("/api/subjects")
+    assert remaining_subjects_resp.status_code == 200
+    assert remaining_subjects_resp.json()["data"] == []
+
+    _reset_caches()
+
+
+def test_subject_context_and_material_management_endpoints(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PLM_APP_MODE", "local")
+    monkeypatch.setenv("PLM_ENABLE_AUTH", "false")
+    monkeypatch.setenv("PLM_STORE_PATH", "")
+    monkeypatch.setenv("PLM_LEGACY_STORE_PATH", "")
+    monkeypatch.setenv("PLM_STORE_DB_PATH", str(tmp_path / "plm_store.sqlite3"))
+    monkeypatch.setenv("PLM_AUTH_DB_PATH", str(tmp_path / "plm_auth.sqlite3"))
+    _reset_caches()
+
+    client = TestClient(create_app())
+
+    create_subject_resp = client.post("/api/subjects", json={"title": "高等数学"})
+    assert create_subject_resp.status_code == 200
+    subject_id = create_subject_resp.json()["data"]["subjectId"]
+
+    create_book_resp = client.post(
+        f"/api/subjects/{subject_id}/materials",
+        json={"materialType": "BOOK", "title": "高等数学教材"},
+    )
+    assert create_book_resp.status_code == 200
+    book_material = create_book_resp.json()["data"]
+    book_material_id = book_material["materialId"]
+    book_project_id = book_material["compatibilityProjectId"]
+    assert book_project_id
+
+    root_context_resp = client.get(f"/api/projects/{subject_id}/subject-context")
+    assert root_context_resp.status_code == 200
+    root_context = root_context_resp.json()["data"]
+    assert root_context["isSubjectRoot"] is True
+    assert root_context["subject"]["subjectId"] == subject_id
+    assert root_context["subjectProjectId"] == subject_id
+    assert root_context["currentProjectId"] == subject_id
+    assert root_context["currentMaterial"]["materialId"] == "legacy_main"
+    assert {item["materialId"] for item in root_context["materials"]} == {"legacy_main", book_material_id}
+
+    child_context_resp = client.get(f"/api/projects/{book_project_id}/subject-context")
+    assert child_context_resp.status_code == 200
+    child_context = child_context_resp.json()["data"]
+    assert child_context["isSubjectRoot"] is False
+    assert child_context["subject"]["subjectId"] == subject_id
+    assert child_context["subjectProjectId"] == subject_id
+    assert child_context["currentProjectId"] == book_project_id
+    assert child_context["currentMaterial"]["materialId"] == book_material_id
+    assert child_context["currentMaterial"]["title"] == "高等数学教材"
+
+    rename_subject_resp = client.patch(f"/api/subjects/{subject_id}", json={"title": "高等数学进阶"})
+    assert rename_subject_resp.status_code == 200
+    renamed_subjects_resp = client.get("/api/subjects")
+    assert renamed_subjects_resp.status_code == 200
+    renamed_subject = renamed_subjects_resp.json()["data"][0]
+    assert renamed_subject["title"] == "高等数学进阶"
+
+    renamed_child_context_resp = client.get(f"/api/projects/{book_project_id}/subject-context")
+    assert renamed_child_context_resp.status_code == 200
+    assert renamed_child_context_resp.json()["data"]["subject"]["title"] == "高等数学进阶"
+
+    rename_material_resp = client.patch(
+        f"/api/subjects/{subject_id}/materials/{book_material_id}",
+        json={"title": "教材精读"},
+    )
+    assert rename_material_resp.status_code == 200
+    assert rename_material_resp.json()["data"]["title"] == "教材精读"
+
+    materials_after_rename_resp = client.get(f"/api/subjects/{subject_id}/materials")
+    assert materials_after_rename_resp.status_code == 200
+    renamed_book_material = next(
+        item for item in materials_after_rename_resp.json()["data"] if item["materialId"] == book_material_id
+    )
+    assert renamed_book_material["title"] == "教材精读"
+
+    delete_material_resp = client.delete(f"/api/subjects/{subject_id}/materials/{book_material_id}")
+    assert delete_material_resp.status_code == 200
+    remaining_materials_resp = client.get(f"/api/subjects/{subject_id}/materials")
+    assert remaining_materials_resp.status_code == 200
+    remaining_materials = remaining_materials_resp.json()["data"]
+    assert [item["materialId"] for item in remaining_materials] == ["legacy_main"]
+
+    remaining_projects_resp = client.get("/api/projects")
+    assert remaining_projects_resp.status_code == 200
+    remaining_project_ids = {item["projectId"] for item in remaining_projects_resp.json()["data"]}
+    assert subject_id in remaining_project_ids
+    assert book_project_id not in remaining_project_ids
+
+    delete_subject_resp = client.delete(f"/api/subjects/{subject_id}")
+    assert delete_subject_resp.status_code == 200
+    final_subjects_resp = client.get("/api/subjects")
+    assert final_subjects_resp.status_code == 200
+    assert final_subjects_resp.json()["data"] == []
+
+    _reset_caches()
+
+
+def test_initialize_book_from_course_material_tree(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PLM_APP_MODE", "local")
+    monkeypatch.setenv("PLM_ENABLE_AUTH", "false")
+    monkeypatch.setenv("PLM_STORE_PATH", "")
+    monkeypatch.setenv("PLM_LEGACY_STORE_PATH", "")
+    monkeypatch.setenv("PLM_STORE_DB_PATH", str(tmp_path / "plm_store.sqlite3"))
+    monkeypatch.setenv("PLM_AUTH_DB_PATH", str(tmp_path / "plm_auth.sqlite3"))
+    _reset_caches()
+
+    client = TestClient(create_app())
+
+    create_subject_resp = client.post("/api/subjects", json={"title": "高等数学"})
+    assert create_subject_resp.status_code == 200
+    subject_id = create_subject_resp.json()["data"]["subjectId"]
+
+    import_course_resp = client.post(
+        f"/api/projects/{subject_id}/import-learning-objects-from-browser",
+        json={
+            "rootTitle": "高数网课",
+            "relativeFilePaths": [
+                "第一章/1.1 极限.mp4",
+                "第一章/1.2 连续.mp4",
+                "第二章/2.1 导数.mp4",
+            ],
+        },
+    )
+    assert import_course_resp.status_code == 200
+
+    create_book_resp = client.post(
+        f"/api/subjects/{subject_id}/materials",
+        json={"materialType": "BOOK", "title": "高数教材"},
+    )
+    assert create_book_resp.status_code == 200
+    book_project_id = create_book_resp.json()["data"]["compatibilityProjectId"]
+    assert book_project_id
+
+    initialize_from_course_resp = client.post(
+        f"/api/projects/{book_project_id}/initialize-book-learning-objects-from-material",
+        json={"sourceMaterialId": "legacy_main"},
+    )
+    assert initialize_from_course_resp.status_code == 200
+    init_data = initialize_from_course_resp.json()["data"]
+    assert init_data["created_instances_count"] == 3
+    assert init_data["created_learning_object_nodes_count"] == 6
+    assert init_data["root_count"] == 1
+
+    source_nodes_resp = client.get(f"/api/projects/{subject_id}/learning-object-nodes")
+    assert source_nodes_resp.status_code == 200
+    target_nodes_resp = client.get(f"/api/projects/{book_project_id}/learning-object-nodes")
+    assert target_nodes_resp.status_code == 200
+
+    source_outline = _flatten_outline_from_learning_object_nodes(source_nodes_resp.json()["data"])
+    target_outline = _flatten_outline_from_learning_object_nodes(target_nodes_resp.json()["data"])
+    assert target_outline == source_outline
+
+    target_instances_resp = client.get(f"/api/projects/{book_project_id}/instances")
+    assert target_instances_resp.status_code == 200
+    target_instances = target_instances_resp.json()["data"]
+    assert len(target_instances) == 3
+    assert all(item["presence"] == "PRESENT" for item in target_instances)
+
+    _reset_caches()
+
+
+def test_collect_recall_point_into_mistake_material(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PLM_APP_MODE", "local")
+    monkeypatch.setenv("PLM_ENABLE_AUTH", "false")
+    monkeypatch.setenv("PLM_STORE_PATH", "")
+    monkeypatch.setenv("PLM_LEGACY_STORE_PATH", "")
+    monkeypatch.setenv("PLM_STORE_DB_PATH", str(tmp_path / "plm_store.sqlite3"))
+    monkeypatch.setenv("PLM_AUTH_DB_PATH", str(tmp_path / "plm_auth.sqlite3"))
+    _reset_caches()
+
+    client = TestClient(create_app())
+
+    create_subject_resp = client.post("/api/subjects", json={"title": "高等数学"})
+    assert create_subject_resp.status_code == 200
+    subject_id = create_subject_resp.json()["data"]["subjectId"]
+
+    import_course_resp = client.post(
+        f"/api/projects/{subject_id}/import-learning-objects-from-browser",
+        json={
+            "rootTitle": "高数网课",
+            "relativeFilePaths": ["第一章/1.1 极限.mp4"],
+        },
+    )
+    assert import_course_resp.status_code == 200
+
+    instances_resp = client.get(f"/api/projects/{subject_id}/instances")
+    assert instances_resp.status_code == 200
+    source_instance_id = instances_resp.json()["data"][0]["instanceId"]
+
+    submit_task_resp = client.post(
+        f"/api/projects/{subject_id}/learning-tasks",
+        json={
+            "title": "极限入门",
+            "items": [
+                {
+                    "question": [{"kind": "TEXT", "text": "什么时候要用夹逼定理？"}],
+                    "answer": [{"kind": "TEXT", "text": "当目标极限难直接求，但能找到上下界且它们极限相同时。"}],
+                    "anchor": {"instanceId": source_instance_id, "position": "t=1200"},
+                }
+            ],
+        },
+    )
+    assert submit_task_resp.status_code == 200
+
+    source_recall_points_resp = client.get(f"/api/projects/{subject_id}/instances/{source_instance_id}/recall-points")
+    assert source_recall_points_resp.status_code == 200
+    source_recall_point_id = source_recall_points_resp.json()["data"]["recallPointIds"][0]
+
+    create_mistake_resp = client.post(
+        f"/api/subjects/{subject_id}/materials",
+        json={"materialType": "MISTAKE_BOOK", "title": "高数错题"},
+    )
+    assert create_mistake_resp.status_code == 200
+    mistake_material = create_mistake_resp.json()["data"]
+    mistake_project_id = mistake_material["compatibilityProjectId"]
+    assert mistake_project_id
+
+    mistake_config_resp = client.get(f"/api/projects/{mistake_project_id}/project-config")
+    assert mistake_config_resp.status_code == 200
+    assert mistake_config_resp.json()["data"]["projectType"] == "MISTAKE_BOOK"
+
+    collect_resp = client.post(
+        f"/api/projects/{subject_id}/recall-points/{source_recall_point_id}/collect-to-mistake-material",
+        json={
+            "targetMaterialId": mistake_material["materialId"],
+            "mistakeNote": "总是在这里忘记先构造上下界。",
+        },
+    )
+    assert collect_resp.status_code == 200
+    collect_data = collect_resp.json()["data"]
+    assert collect_data["target_project_id"] == mistake_project_id
+    assert collect_data["created_inbox"] is True
+
+    mistake_nodes_resp = client.get(f"/api/projects/{mistake_project_id}/learning-object-nodes")
+    assert mistake_nodes_resp.status_code == 200
+    mistake_nodes = mistake_nodes_resp.json()["data"]
+    assert len(mistake_nodes) == 1
+    assert mistake_nodes[0]["kind"] == "leaf"
+    assert mistake_nodes[0]["title"] == "待整理"
+
+    target_recall_point_resp = client.get(
+        f"/api/projects/{mistake_project_id}/recall-points/{collect_data['target_recall_point_id']}"
+    )
+    assert target_recall_point_resp.status_code == 200
+    target_recall_point = target_recall_point_resp.json()["data"]
+    assert target_recall_point["sourceProjectId"] == subject_id
+    assert target_recall_point["sourceRecallPointId"] == source_recall_point_id
+    assert target_recall_point["sourceMaterialId"] == "legacy_main"
+    assert target_recall_point["sourceMaterialTitle"] == "默认网课材料"
+    assert target_recall_point["mistakeStatus"] == "OPEN"
+    assert target_recall_point["mistakeNote"] == "总是在这里忘记先构造上下界。"
+    assert target_recall_point["anchor"]["instanceId"]
+    assert "默认网课材料" in target_recall_point["anchor"]["position"]
+
+    edit_resp = client.put(
+        f"/api/projects/{mistake_project_id}/recall-points/{collect_data['target_recall_point_id']}",
+        json={
+            "question": target_recall_point["question"],
+            "answer": target_recall_point["answer"],
+            "anchor": target_recall_point["anchor"],
+            "mistakeStatus": "RESOLVING",
+            "mistakeNote": "已经知道要先找一对可比较的上下界。",
+        },
+    )
+    assert edit_resp.status_code == 200
+
+    edited_target_recall_point_resp = client.get(
+        f"/api/projects/{mistake_project_id}/recall-points/{collect_data['target_recall_point_id']}"
+    )
+    assert edited_target_recall_point_resp.status_code == 200
+    edited_target_recall_point = edited_target_recall_point_resp.json()["data"]
+    assert edited_target_recall_point["mistakeStatus"] == "RESOLVING"
+    assert edited_target_recall_point["mistakeNote"] == "已经知道要先找一对可比较的上下界。"
+
+    _reset_caches()

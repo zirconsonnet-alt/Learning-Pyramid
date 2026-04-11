@@ -55,12 +55,12 @@ const featureCards = [
 const onboardingSteps = [
   {
     index: "1",
-    title: "创建项目",
-    body: "先在项目页新建一个主题，例如机器学习、英语听力或操作系统。创建完成后直接进入项目，而不是停在列表页。",
+    title: "创建学科",
+    body: "先在项目页新建一门学科，例如机器学习、英语听力或操作系统。创建完成后直接进入项目，而不是停在列表页。",
   },
   {
     index: "2",
-    title: "绑定目录",
+    title: "绑定并授权目录",
     body: "到项目设置里选择并授权本地素材目录。一个项目可以理解为绑定到一个你自己管理的视频目录。",
   },
   {
@@ -70,9 +70,15 @@ const onboardingSteps = [
   },
   {
     index: "4",
-    title: "开始录入与复习",
-    body: "回到工作台，选择视频，添加复述点并提交学习；之后按系统排出的复习链完成“会 / 不会”判断，形成最小闭环。",
+    title: "回工作台选内容开始学习",
+    body: "回到工作台，先从左侧选中当前视频，再添加复述点并提交学习；之后按系统排出的复习链完成“会 / 不会”判断，先跑通最小闭环。",
   },
+] as const
+
+const quickStartHighlights = [
+  { value: "4 步", label: "创建、授权、导入、开始" },
+  { value: "1 门", label: "先挑一门最焦虑的科目跑通" },
+  { value: "先闭环", label: "先选内容学习，再让系统接上复习" },
 ] as const
 
 const inviteBullets = [
@@ -255,6 +261,7 @@ export function HomePage() {
 
   const membershipEntryHref = isLoggedIn || !authEnabled ? "/profile" : registerHref
   const membershipEntryLabel = isLoggedIn || !authEnabled ? "去个人中心查看" : "登录后在个人中心查看"
+  const quickStartEntryLabel = isLoggedIn || !authEnabled ? "进入项目" : registerLabel
   const [activeReasonIndex, setActiveReasonIndex] = useState(0)
   const [isReasonCarouselPaused, setIsReasonCarouselPaused] = useState(false)
 
@@ -283,6 +290,50 @@ export function HomePage() {
       <ShowcaseSiteHeader />
 
       <main id="top">
+        <section className="lp-showcase-hero">
+          <div className="lp-showcase-container lp-showcase-hero-grid">
+            <div className="lp-showcase-hero-copy">
+              <div className="lp-showcase-mini-title">第一次使用先跑通最小闭环</div>
+              <h1>先学会开始，再决定要不要继续往下看。</h1>
+              <p className="lp-showcase-lead">
+                第一次用 LearningPyramid，不用先理解全部方法。先创建学科，绑定并授权目录，导入内容，再回工作台选一个视频开始学习，最快能看出系统有没有帮你减负。
+              </p>
+              <div className="lp-showcase-hero-actions">
+                <Link className="lp-showcase-btn lp-showcase-btn-primary" to={registerHref}>
+                  {quickStartEntryLabel}
+                </Link>
+                <a className="lp-showcase-btn lp-showcase-btn-secondary" href="#onboarding">
+                  查看 4 步上手
+                </a>
+              </div>
+              <div className="lp-showcase-hero-meta">
+                {quickStartHighlights.map((item) => (
+                  <div key={item.value} className="lp-showcase-meta-box">
+                    <strong>{item.value}</strong>
+                    <span>{item.label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="lp-showcase-hero-panel">
+              <div className="lp-showcase-mini-title">快速开始</div>
+              <ul className="lp-showcase-flow-list">
+                {onboardingSteps.map((item) => (
+                  <li key={item.index}>
+                    <div className="lp-showcase-flow-index">{item.index}</div>
+                    <div className="lp-showcase-flow-copy">
+                      <strong>{item.title}</strong>
+                      <span>{item.body}</span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+              <div className="lp-showcase-panel-note">先拿一门最容易遗忘、最需要减负的科目做样板，不要一上来把全部资料一起搬进来。</div>
+            </div>
+          </div>
+        </section>
+
         <section className="lp-showcase-section lp-showcase-carousel-section">
           <div className="lp-showcase-container">
             <div className="lp-showcase-carousel-shell">
@@ -392,6 +443,7 @@ export function HomePage() {
           <div className="lp-showcase-container">
             <div className="lp-showcase-section-head">
               <h2>上手路径</h2>
+              <p>第一次使用先照着这 4 步走：创建学科，绑定并授权目录，导入内容，再回工作台选内容开始学习。</p>
             </div>
             <div className="lp-showcase-steps-grid">
               {onboardingSteps.map((item) => (

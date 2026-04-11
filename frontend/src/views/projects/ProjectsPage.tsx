@@ -5,7 +5,8 @@ import { useNavigate } from "react-router-dom"
 
 import { listAuditLogEvents, type AuditLogEvent } from "@/ui/api/auditLog"
 import { ApiError } from "@/ui/api/http"
-import type { Project } from "@/ui/api/projects"
+import { setLayerConfig } from "@/ui/api/projectConfig"
+import type { Subject } from "@/ui/api/subjects"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import {
@@ -18,11 +19,10 @@ import {
 } from "@/ui/components/ui/dialog"
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
-import type { ProjectType } from "@/ui/api/projects"
-import { useCreateProject, useDeleteProject, useProjects } from "@/ui/queries/projects"
-import { formatProjectTypeLabel } from "@/ui/projectTypes"
+import { useCreateSubject, useDeleteSubject, useSubjects } from "@/ui/queries/subjects"
 import { useAppStore } from "@/ui/store/appStore"
-import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
+import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
+import { useGlobalConfigStore } from "@/ui/store/globalConfigStore"
 import { useWorkbenchStore } from "@/ui/store/workbenchStore"
 import { cn } from "@/ui/utils"
 
@@ -107,29 +107,29 @@ function getProjectLastStudyAt(events: AuditLogEvent[] | undefined) {
 
 export function ProjectsPage() {
   const nav = useNavigate()
-  const { data, isLoading, error } = useProjects()
-  const create = useCreateProject()
-  const del = useDeleteProject()
+  const { data, isLoading, error } = useSubjects()
+  const create = useCreateSubject()
+  const del = useDeleteSubject()
 
   const selectedProjectId = useAppStore((s) => s.selectedProjectId)
   const recentProjectIds = useAppStore((s) => s.recentProjectIds)
   const setSelectedProjectId = useAppStore((s) => s.setSelectedProjectId)
   const removeRecentProjectId = useAppStore((s) => s.removeRecentProjectId)
+  const defaultProjectReviewTemplate = useGlobalConfigStore((s) => s.defaultProjectReviewTemplate)
 
-  const projects = data ?? []
+  const subjects = data ?? []
 
   const [title, setTitle] = useState("")
-  const [projectType, setProjectType] = useState<ProjectType>("COURSE")
   const [createOpen, setCreateOpen] = useState(false)
   const [sortMode, setSortMode] = useState<ProjectSortMode>("recent")
-  const [deleteTarget, setDeleteTarget] = useState<Project | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<Subject | null>(null)
   const [deleteConfirmation, setDeleteConfirmation] = useState("")
   const deleteExpectedText = deleteTarget?.title ?? ""
   const deleteMatches = deleteConfirmation.trim() === deleteExpectedText
   const projectActivityQs = useQueries({
-    queries: projects.map((project) => ({
-      queryKey: ["auditLogEvents", project.projectId],
-      queryFn: () => listAuditLogEvents(project.projectId),
+    queries: subjects.map((subject) => ({
+      queryKey: ["auditLogEvents", subject.compatibilityProjectId],
+      queryFn: () => listAuditLogEvents(subject.compatibilityProjectId),
       enabled: !isLoading && !error,
       staleTime: 60_000,
       refetchInterval: 60_000,
@@ -137,16 +137,16 @@ export function ProjectsPage() {
   })
 
   const lastStudyByProjectId = useMemo(() => {
-    const entries = projects.map((project, index) => [project.projectId, getProjectLastStudyAt(projectActivityQs[index]?.data)] as const)
+    const entries = subjects.map((subject, index) => [subject.subjectId, getProjectLastStudyAt(projectActivityQs[index]?.data)] as const)
     return Object.fromEntries(entries)
-  }, [projectActivityQs, projects])
+  }, [projectActivityQs, subjects])
   const activityLoadingByProjectId = useMemo(() => {
-    const entries = projects.map((project, index) => [project.projectId, Boolean(projectActivityQs[index]?.isLoading)] as const)
+    const entries = subjects.map((subject, index) => [subject.subjectId, Boolean(projectActivityQs[index]?.isLoading)] as const)
     return Object.fromEntries(entries)
-  }, [projectActivityQs, projects])
+  }, [projectActivityQs, subjects])
 
-  const sortedProjects = useMemo(() => {
-    const items = [...projects]
+  const sortedSubjects = useMemo(() => {
+    const items = [...subjects]
     if (sortMode === "created") {
       return items.sort((a, b) => {
         const aTime = Date.parse(a.createdAt)
@@ -157,8 +157,8 @@ export function ProjectsPage() {
 
     const recentRank = new Map(recentProjectIds.map((projectId, index) => [projectId, index]))
     return items.sort((a, b) => {
-      const aRank = recentRank.get(a.projectId)
-      const bRank = recentRank.get(b.projectId)
+      const aRank = recentRank.get(a.subjectId)
+      const bRank = recentRank.get(b.subjectId)
       if (aRank !== undefined || bRank !== undefined) {
         if (aRank === undefined) return 1
         if (bRank === undefined) return -1
@@ -168,9 +168,9 @@ export function ProjectsPage() {
       const bTime = Date.parse(b.createdAt)
       return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0)
     })
-  }, [projects, recentProjectIds, sortMode])
+  }, [subjects, recentProjectIds, sortMode])
 
-  function openDeleteDialog(project: Project) {
+  function openDeleteDialog(project: Subject) {
     del.reset()
     setDeleteTarget(project)
     setDeleteConfirmation("")
@@ -189,17 +189,19 @@ export function ProjectsPage() {
     try {
       const res = await create.mutateAsync({
         title: t,
-        initialProjectType: projectType,
-        initialSourceKind: projectType === "COURSE" ? undefined : "MANUAL",
       })
+      try {
+        await setLayerConfig(res.compatibilityProjectId, 0, { reviewChainTemplate: defaultProjectReviewTemplate })
+      } catch (templateErr) {
+        showInfoFeedback("学科已创建，但默认复习模板未自动套用", formatApiError(templateErr))
+      }
       setTitle("")
-      setProjectType("COURSE")
-      setSelectedProjectId(res.projectId)
+      setSelectedProjectId(res.compatibilityProjectId)
       setCreateOpen(false)
-      showSuccessFeedback("项目已创建", `“${t}” 已按${formatProjectTypeLabel(projectType)}模式准备好，正在进入工作台。`)
-      nav(`/p/${res.projectId}/workbench`)
+      showSuccessFeedback("学科已创建", `“${t}” 已准备好。先从默认网课材料开始；书本、错题和零散入口会在这个学科下继续收拢。`)
+      nav(`/p/${res.compatibilityProjectId}/workbench`)
     } catch (err) {
-      showErrorFeedback("创建项目失败", formatApiError(err))
+      showErrorFeedback("创建学科失败", formatApiError(err))
     }
   }
 
@@ -207,13 +209,13 @@ export function ProjectsPage() {
     if (!deleteTarget || !deleteMatches) return
     const deletedTitle = deleteTarget.title
     try {
-      await del.mutateAsync(deleteTarget.projectId)
-      useWorkbenchStore.getState().resetProject(deleteTarget.projectId)
-      removeRecentProjectId(deleteTarget.projectId)
+      await del.mutateAsync(deleteTarget.subjectId)
+      useWorkbenchStore.getState().resetProject(deleteTarget.subjectId)
+      removeRecentProjectId(deleteTarget.subjectId)
       closeDeleteDialog()
-      showSuccessFeedback("项目已删除", `“${deletedTitle}” 已从当前工作区移除。`)
+      showSuccessFeedback("学科已删除", `“${deletedTitle}” 已从当前工作区移除。`)
     } catch (err) {
-      showErrorFeedback("删除项目失败", formatApiError(err))
+      showErrorFeedback("删除学科失败", formatApiError(err))
     }
   }
 
@@ -228,8 +230,8 @@ export function ProjectsPage() {
         <section className="space-y-4">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div className="flex items-center gap-3">
-              <h2 className="text-2xl font-semibold tracking-tight text-foreground">所有项目</h2>
-              <span className="theme-meta px-3 py-1 text-sm">{projects.length} 个项目</span>
+              <h2 className="text-2xl font-semibold tracking-tight text-foreground">所有学科</h2>
+              <span className="theme-meta px-3 py-1 text-sm">{subjects.length} 个学科</span>
             </div>
             <div className="relative">
               <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-muted-foreground">
@@ -251,22 +253,22 @@ export function ProjectsPage() {
           </div>
 
           {isLoading ? (
-            <div className="theme-status-surface px-5 py-4 text-sm text-muted-foreground">正在加载项目列表...</div>
+            <div className="theme-status-surface px-5 py-4 text-sm text-muted-foreground">正在加载学科列表...</div>
           ) : null}
           {error ? <div className="rounded-2xl border border-destructive/20 bg-destructive/5 px-5 py-4 text-sm text-destructive">{formatApiError(error)}</div> : null}
 
           {!isLoading && !error ? (
             <div className="grid gap-4 xl:grid-cols-2">
-              {sortedProjects.map((p) => (
+              {sortedSubjects.map((p) => (
                 (() => {
-                  const lastStudyDisplay = formatLastStudyText(lastStudyByProjectId[p.projectId] ?? null)
-                  const activityLoading = activityLoadingByProjectId[p.projectId]
+                  const lastStudyDisplay = formatLastStudyText(lastStudyByProjectId[p.subjectId] ?? null)
+                  const activityLoading = activityLoadingByProjectId[p.subjectId]
                   return (
                     <Card
-                      key={p.projectId}
+                      key={p.subjectId}
                       className={cn(
                         "h-full border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] shadow-[var(--theme-soft-shadow)] transition-all duration-200",
-                        selectedProjectId === p.projectId && "border-primary/20 shadow-[0_24px_60px_-38px_rgba(30,58,95,0.34)] ring-1 ring-primary/10",
+                        selectedProjectId === p.subjectId && "border-primary/20 shadow-[0_24px_60px_-38px_rgba(30,58,95,0.34)] ring-1 ring-primary/10",
                       )}
                     >
                       <CardHeader className="space-y-4">
@@ -281,7 +283,7 @@ export function ProjectsPage() {
                             </CardDescription>
                           </div>
                           <div className="flex flex-wrap items-center gap-2">
-                            {selectedProjectId === p.projectId ? <span className="theme-meta-strong">当前工作项目</span> : null}
+                            {selectedProjectId === p.subjectId ? <span className="theme-meta-strong">当前学科</span> : null}
                           </div>
                         </div>
                       </CardHeader>
@@ -289,7 +291,7 @@ export function ProjectsPage() {
                         <div className="flex flex-wrap gap-2">
                           <Button
                             onClick={() => {
-                              openProject(p.projectId, "workbench")
+                              openProject(p.subjectId, "workbench")
                             }}
                           >
                             <ArrowRight className="h-4 w-4" />
@@ -298,11 +300,11 @@ export function ProjectsPage() {
                           <Button
                             variant="outline"
                             onClick={() => {
-                              openProject(p.projectId, "settings")
+                              openProject(p.subjectId, "settings")
                             }}
                           >
                             <Settings2 className="h-4 w-4" />
-                            项目设置
+                            学科设置
                           </Button>
                           <Button
                             variant="destructive"
@@ -328,7 +330,7 @@ export function ProjectsPage() {
                 <div className="theme-icon-surface h-14 w-14 rounded-3xl transition-transform duration-200 group-hover:scale-105">
                   <Plus className="h-6 w-6" />
                 </div>
-                <div className="text-xl font-semibold text-foreground">新建项目</div>
+                <div className="text-xl font-semibold text-foreground">新建学科</div>
               </button>
             </div>
           ) : null}
@@ -338,66 +340,29 @@ export function ProjectsPage() {
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="p-4">
           <DialogHeader>
-            <DialogTitle>创建新项目</DialogTitle>
+            <DialogTitle>创建新学科</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="grid gap-2">
-              <Label htmlFor="title">项目标题</Label>
+              <Label htmlFor="title">学科标题</Label>
               <Input
                 id="title"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder="例如：机器学习 / 医学解剖 / 英语听力"
+                placeholder="例如：高等数学 / 机器学习 / 英语听力"
                 autoFocus
               />
             </div>
-            <div className="grid gap-2">
-              <Label>项目类型</Label>
-              <div className="grid gap-2">
-                {[
-                  {
-                    value: "COURSE" as const,
-                    title: "网课",
-                    description: "保留当前视频学习流，复述点需要绑定可解析时间锚点。",
-                  },
-                  {
-                    value: "BOOK" as const,
-                    title: "书本",
-                    description: "保留学习对象树，但目录由手工初始化，复述点绑定文本锚点。",
-                  },
-                  {
-                    value: "LOOSE_POINTS" as const,
-                    title: "零散知识点",
-                    description: "不使用学习对象树，复述点也不需要绑定锚点。",
-                  },
-                ].map((option) => {
-                  const active = projectType === option.value
-                  return (
-                    <button
-                      key={option.value}
-                      type="button"
-                      onClick={() => setProjectType(option.value)}
-                      className={cn(
-                        "rounded-2xl border px-4 py-3 text-left transition",
-                        active
-                          ? "border-primary/30 bg-primary/5 shadow-[0_16px_32px_-24px_hsl(var(--primary)/0.4)]"
-                          : "border-border/70 bg-background hover:border-primary/20 hover:bg-primary/5",
-                      )}
-                    >
-                      <div className="text-sm font-semibold text-foreground">{option.title}</div>
-                      <div className="mt-1 text-xs leading-5 text-muted-foreground">{option.description}</div>
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
+            <DialogDescription className="rounded-xl border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-4 py-3 text-sm leading-6 text-muted-foreground">
+              学科是复习、复述点、层推进和统计的共享空间。网课、书本、错题和零散知识会作为材料挂在学科下面；当前版本会先创建一个默认网课材料。
+            </DialogDescription>
           </div>
           <DialogFooter>
             <Button variant="secondary" onClick={() => setCreateOpen(false)}>
               取消
             </Button>
             <Button onClick={onCreate} disabled={create.isPending || !title.trim()}>
-              {create.isPending ? "创建中..." : "创建并进入"}
+              {create.isPending ? "创建中..." : "创建学科并进入"}
             </Button>
           </DialogFooter>
           {create.error ? <p className="text-sm text-destructive">{formatApiError(create.error)}</p> : null}
@@ -407,11 +372,11 @@ export function ProjectsPage() {
       <Dialog open={Boolean(deleteTarget)} onOpenChange={(open) => (!open ? closeDeleteDialog() : null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>删除项目</DialogTitle>
+            <DialogTitle>删除学科</DialogTitle>
             <DialogDescription>
               {deleteTarget
-                ? `这会移除“${deleteTarget.title}”的当前项目入口，并清掉本浏览器里与该项目相关的已选状态和草稿缓存。`
-                : "确认是否删除当前项目。"}
+                ? `这会移除“${deleteTarget.title}”的当前学科入口，并清掉本浏览器里与该学科相关的已选状态和草稿缓存。`
+                : "确认是否删除当前学科。"}
             </DialogDescription>
           </DialogHeader>
           {deleteTarget ? (
@@ -427,16 +392,16 @@ export function ProjectsPage() {
               </div>
 
               <div className="theme-status-surface px-4 py-4 text-sm text-muted-foreground">
-                删除前建议确认是否还有未处理的素材绑定、草稿或工作流入口需要保留。该操作完成后，当前浏览器会同步清掉这个项目的本地上下文。
+                删除前建议确认是否还有未处理的材料绑定、草稿或工作流入口需要保留。该操作完成后，当前浏览器会同步清掉这个学科的本地上下文。
               </div>
 
               <div className="grid gap-2">
-                <Label htmlFor="delete-project-confirmation">输入项目标题以确认删除</Label>
+                <Label htmlFor="delete-project-confirmation">输入学科标题以确认删除</Label>
                 <Input
                   id="delete-project-confirmation"
                   value={deleteConfirmation}
                   onChange={(event) => setDeleteConfirmation(event.target.value)}
-                  placeholder={deleteExpectedText || "输入项目标题"}
+                  placeholder={deleteExpectedText || "输入学科标题"}
                   autoFocus
                 />
                 <p className="text-xs text-muted-foreground">
