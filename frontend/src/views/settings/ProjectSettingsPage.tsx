@@ -98,10 +98,10 @@ function describeDirectoryPermission(permission: "unsupported" | "missing" | "pr
 }
 
 function describeDirectoryPermissionTone(permission: "unsupported" | "missing" | "prompt" | "granted" | "denied") {
-  if (permission === "granted") return "border-emerald-200 bg-emerald-50 text-emerald-700"
-  if (permission === "prompt") return "border-amber-200 bg-amber-50 text-amber-700"
-  if (permission === "denied") return "border-rose-200 bg-rose-50 text-rose-700"
-  return "border-slate-200 bg-slate-50 text-slate-600"
+  if (permission === "granted") return "theme-pill-accent"
+  if (permission === "prompt") return "theme-pill-warm"
+  if (permission === "denied") return "theme-pill-danger"
+  return "theme-pill-default"
 }
 
 function describeLlmSource(source: "user" | "global" | "env" | "none") {
@@ -112,10 +112,10 @@ function describeLlmSource(source: "user" | "global" | "env" | "none") {
 }
 
 function describeLlmSourceTone(source: "user" | "global" | "env" | "none") {
-  if (source === "user") return "border-emerald-200 bg-emerald-50 text-emerald-700"
-  if (source === "global") return "border-emerald-200 bg-emerald-50 text-emerald-700"
-  if (source === "env") return "border-sky-200 bg-sky-50 text-sky-700"
-  return "border-slate-200 bg-slate-50 text-slate-600"
+  if (source === "user") return "theme-pill-accent"
+  if (source === "global") return "theme-pill-accent"
+  if (source === "env") return "theme-pill-warm"
+  return "theme-pill-default"
 }
 
 function getRollUpStrategyLabel(strategy: RollUpStrategy) {
@@ -133,9 +133,9 @@ function getRollUpStrategyDescription(strategy: RollUpStrategy) {
 }
 
 function describeQuickStartTone(tone: "default" | "success" | "warning") {
-  if (tone === "success") return "border-emerald-200 bg-emerald-50 text-emerald-700"
-  if (tone === "warning") return "border-amber-200 bg-amber-50 text-amber-700"
-  return "border-slate-200 bg-slate-50 text-slate-600"
+  if (tone === "success") return "theme-pill-accent"
+  if (tone === "warning") return "theme-pill-warm"
+  return "theme-pill-default"
 }
 
 type SettingsQuickStartStep = {
@@ -465,7 +465,7 @@ function PromptAssemblyModeSelector({
               <span
                 className={cn(
                   "inline-flex h-5 min-w-5 items-center justify-center rounded-full border px-1.5 text-[11px] font-semibold",
-                  active ? "border-sky-400 bg-sky-500 text-white" : "border-border/60 text-muted-foreground",
+                  active ? "theme-pill-accent" : "theme-pill-default",
                 )}
               >
                 {active ? "当前" : "可选"}
@@ -514,10 +514,10 @@ function SettingsPanelSwitchCard(props: {
   const { title, status, icon: Icon, active, tone = "default", onClick } = props
   const toneClass =
     tone === "success"
-      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+      ? "theme-pill-accent"
       : tone === "warning"
-        ? "border-amber-200 bg-amber-50 text-amber-700"
-        : "border-slate-200 bg-slate-50 text-slate-600"
+        ? "theme-pill-warm"
+        : "theme-pill-default"
 
   return (
     <button
@@ -2046,7 +2046,7 @@ function BasicInfoCard({
                     <div className="space-y-2">
                       <div className="flex flex-wrap items-center gap-3">
                         <span className="theme-meta-strong">百度网盘视频</span>
-                        <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-700">
+                        <span className="theme-pill-accent inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold">
                           已启用
                         </span>
                       </div>
@@ -2759,7 +2759,7 @@ function LayerConfigEditor({
               >
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                   <div className="flex items-start gap-3">
-                    <span className="inline-flex items-center rounded-full border border-[#d8e3ee] bg-[#f6f9fc] px-2.5 py-1 text-xs font-semibold text-[#5f7790]">
+                    <span className="theme-pill-default inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold">
                         第 {index + 1} 步
                     </span>
                     <div className="space-y-1">
@@ -2796,7 +2796,7 @@ function LayerConfigEditor({
                         />
                       </div>
                     ) : (
-                      <div className="rounded-full border border-border/60 bg-muted/20 px-3 py-1.5 text-xs text-muted-foreground">这个步骤没有额外参数</div>
+                      <div className="theme-pill-default rounded-full border px-3 py-1.5 text-xs font-medium">这个步骤没有额外参数</div>
                     )}
 
                     <Button

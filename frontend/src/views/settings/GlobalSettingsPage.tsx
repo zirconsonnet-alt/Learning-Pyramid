@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react"
+import { useEffect, useState, type CSSProperties } from "react"
 import type { CloudAccount } from "@/ui/api/cloudAccounts"
-import { Clock3, Cloud, FolderOpen, Link2Off, Music2, Palette, RefreshCw, RotateCcw, Save, Settings2, TimerReset, Trash2 } from "lucide-react"
-import { Link } from "react-router-dom"
+import { Clock3, Cloud, FolderOpen, Link2Off, Music2, Palette, RefreshCw, RotateCcw, Save, Trash2 } from "lucide-react"
 
 import { ApiError } from "@/ui/api/http"
 import type { ReviewChainTemplateItem } from "@/ui/api/projectConfig"
@@ -22,16 +21,9 @@ import {
   useGlobalConfigStore,
 } from "@/ui/store/globalConfigStore"
 import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
-import {
-  describePomodoroPhase,
-  formatPomodoroCountdown,
-  getPomodoroSnapshot,
-  usePomodoroNow,
-  usePomodoroStore,
-} from "@/ui/store/pomodoroStore"
+import { usePomodoroStore } from "@/ui/store/pomodoroStore"
 import { useThemeStore } from "@/ui/store/themeStore"
 import { THEME_PRESETS } from "@/ui/theme/themePresets"
-import { buildPomodoroPath } from "@/views/pomodoro/pomodoroRouting"
 import { buildGlobalSettingsPath } from "@/views/settings/globalSettingsRouting"
 
 type TemplateEditorItem = {
@@ -42,11 +34,9 @@ type TemplateEditorItem = {
 
 let nextTemplateItemId = 1
 
-const THEME_PRESET_ACTIVE_BORDER = "#b7a4f6"
-const THEME_PRESET_ACTIVE_RING = "0 0 0 1px rgba(183, 164, 246, 0.96)"
-const THEME_PRESET_ACTIVE_GLOW = "0 22px 40px -28px rgba(111, 90, 204, 0.54)"
-const THEME_PRESET_CURRENT_BADGE_BG = "linear-gradient(135deg, #4b68d8 0%, #2f50b9 100%)"
-const THEME_PRESET_CURRENT_BADGE_SHADOW = "0 14px 28px -22px rgba(47, 80, 185, 0.7)"
+const THEME_PRESET_ACTIVE_BORDER = "hsl(var(--primary) / 0.46)"
+const THEME_PRESET_ACTIVE_RING = "0 0 0 1px hsl(var(--primary) / 0.42)"
+const THEME_PRESET_ACTIVE_GLOW = "0 22px 40px -28px hsl(var(--primary) / 0.46)"
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -63,10 +53,10 @@ function describeLocalDirectoryPermission(permission: DirectoryBindingPermission
 }
 
 function describeLocalDirectoryPermissionTone(permission: DirectoryBindingPermission) {
-  if (permission === "granted") return "border-emerald-200 bg-emerald-50 text-emerald-700"
-  if (permission === "prompt") return "border-amber-200 bg-amber-50 text-amber-700"
-  if (permission === "denied") return "border-rose-200 bg-rose-50 text-rose-700"
-  return "border-slate-200 bg-slate-50 text-slate-600"
+  if (permission === "granted") return "theme-pill-accent"
+  if (permission === "prompt") return "theme-pill-warm"
+  if (permission === "denied") return "theme-pill-danger"
+  return "theme-pill-default"
 }
 
 function createTemplateEditorItem(kind: "CONVERGENCE" | "REVIEW_TASK", count = 1): TemplateEditorItem {
@@ -122,52 +112,6 @@ function waitForBaiduNetdiskConnectPopup(popup: Window | null): Promise<CloudAcc
   })
 }
 
-function PhaseBadge(props: {
-  enabled: boolean
-  status: "idle" | "running" | "completed"
-  phase: "focus" | "break" | null
-  idleReason: "disabled" | "not_configured" | "waiting" | "day_off" | null
-  hasEnabledSchedule: boolean
-}) {
-  const label = describePomodoroPhase(
-    props.phase,
-    props.status,
-    props.idleReason,
-    props.enabled,
-    props.hasEnabledSchedule,
-  )
-  const className =
-    props.status === "completed"
-      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-      : props.phase === "focus"
-        ? "border-primary/15 bg-[hsl(var(--primary)/0.08)] text-primary"
-        : props.phase === "break"
-          ? "border-amber-200 bg-amber-50 text-amber-800"
-          : "border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] text-[color:var(--theme-subtle-text)]"
-  return <span className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium ${className}`}>{label}</span>
-}
-
-function MetricTile(props: { label: string; value: string; hint?: string }) {
-  return (
-    <div className="rounded-[1.15rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] px-4 py-4">
-      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">{props.label}</div>
-      <div className="mt-2 text-lg font-semibold tracking-[-0.02em] text-foreground">{props.value}</div>
-      {props.hint ? <div className="mt-1 text-xs leading-5 text-muted-foreground">{props.hint}</div> : null}
-    </div>
-  )
-}
-
-function formatDateTime(ms: number | null) {
-  if (ms === null) return "未设置"
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "numeric",
-    day: "numeric",
-    weekday: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(ms)
-}
-
 export function GlobalSettingsPage() {
   const selectedTheme = useThemeStore((state) => state.theme)
   const setTheme = useThemeStore((state) => state.setTheme)
@@ -177,8 +121,6 @@ export function GlobalSettingsPage() {
   const defaultProjectReviewTemplate = useGlobalConfigStore((state) => state.defaultProjectReviewTemplate)
   const setDefaultProjectReviewTemplate = useGlobalConfigStore((state) => state.setDefaultProjectReviewTemplate)
   const resetDefaultProjectReviewTemplate = useGlobalConfigStore((state) => state.resetDefaultProjectReviewTemplate)
-  const now = usePomodoroNow(enabled)
-  const snapshot = useMemo(() => getPomodoroSnapshot({ enabled, weeklySchedule }, now), [enabled, now, weeklySchedule])
   const [templateItems, setTemplateItems] = useState<TemplateEditorItem[]>(() => toTemplateEditorItems(defaultProjectReviewTemplate))
   const [templateError, setTemplateError] = useState<string | null>(null)
   const [pendingTemplateKind, setPendingTemplateKind] = useState<"" | "CONVERGENCE" | "REVIEW_TASK">("")
@@ -297,34 +239,12 @@ export function GlobalSettingsPage() {
     }
   }
 
-  const templateSummary =
-    templateItems.length === 0
-      ? "还没有步骤"
-      : templateItems
-          .map((item) => (item.kind === "CONVERGENCE" ? "收敛" : `复习任务${Number(item.count || 1) > 1 ? `×${item.count}` : ""}`))
-          .join(" -> ")
-
-  const pomodoroSummary =
-    snapshot.status === "running"
-      ? snapshot.phase === "focus"
-        ? "学习中"
-        : "休息中"
-      : snapshot.status === "completed"
-        ? "今日已完成"
-        : snapshot.idleReason === "waiting"
-          ? "等待开始"
-          : snapshot.idleReason === "day_off"
-            ? "今日未排程"
-            : enabled
-              ? "待配置"
-              : "已关闭"
-  const enabledIntegrationCount = baiduNetdiskEnabled ? 1 : 0
   const baiduIntegrationStatusLabel = !baiduNetdiskEnabled ? "未启用" : baiduAccounts.length > 0 ? "已连接" : "待连接"
   const baiduIntegrationStatusClass = !baiduNetdiskEnabled
-    ? "border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] text-[color:var(--theme-subtle-text)]"
+    ? "theme-pill-default"
     : baiduAccounts.length > 0
-      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-      : "border-primary/15 bg-[hsl(var(--primary)/0.08)] text-primary"
+      ? "theme-pill-accent"
+      : "theme-pill-accent"
 
   async function onConnectBaiduNetdisk() {
     const popup = window.open("", "plm-baidu-netdisk-connect", "popup=yes,width=720,height=820")
@@ -403,168 +323,6 @@ export function GlobalSettingsPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-      <section className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
-        <Card className="theme-card-main overflow-hidden">
-          <CardHeader className="theme-card-header">
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-[1.1rem] border [border-color:var(--theme-icon-border)] [background:var(--theme-icon-bg)] [color:var(--theme-icon-text)]">
-                <Settings2 className="h-5 w-5" />
-              </div>
-              <div className="min-w-0">
-                <CardTitle>全局配置</CardTitle>
-                <CardDescription className="mt-1">这里保留真正的全局偏好：界面主题和新建项目默认复习模板。番茄钟已经独立到固定功能页。</CardDescription>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4 pt-5">
-            <ContentNotice
-              title="这一层级和项目设置不同"
-              message="全局配置影响整个工作空间或未来新建项目；项目设置只影响当前项目。两者不会互相覆盖。"
-              icon={Settings2}
-              tone="info"
-            />
-            <div className="grid gap-4 md:grid-cols-3">
-              <MetricTile label="当前主题" value={THEME_PRESETS.find((theme) => theme.id === selectedTheme)?.label ?? "雾蓝"} hint="会立即影响整个界面。" />
-              <MetricTile label="番茄钟" value={pomodoroSummary} hint="排程、铃声和状态查看都已迁到顶栏里的番茄钟页面。" />
-              <MetricTile label="默认复习模板" value={`${templateItems.length} 个步骤`} hint="只影响之后新建的项目。" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="theme-card-main">
-          <CardHeader className="theme-card-header">
-            <CardTitle>番茄钟入口</CardTitle>
-            <CardDescription>番茄钟现在是固定功能页，不再在这里编辑排程和铃声。</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4 pt-5">
-            <div className="rounded-[1.25rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] p-4">
-              <div className="flex flex-wrap items-center gap-3">
-                <PhaseBadge
-                  enabled={snapshot.enabled}
-                  status={snapshot.status}
-                  phase={snapshot.phase}
-                  idleReason={snapshot.idleReason}
-                  hasEnabledSchedule={snapshot.hasEnabledSchedule}
-                />
-                <span className="text-sm text-muted-foreground">
-                  {snapshot.status === "running"
-                    ? formatPomodoroCountdown(snapshot.segmentRemainingMs)
-                    : snapshot.idleReason === "waiting"
-                      ? formatPomodoroCountdown(snapshot.untilStartMs)
-                      : "按排程自动运行"}
-                </span>
-              </div>
-              <p className="mt-3 text-sm leading-6 text-muted-foreground">
-                {!enabled
-                  ? "番茄钟当前关闭，工作台不会被限制。"
-                  : !snapshot.hasEnabledSchedule
-                    ? "番茄钟已开启，但还没有启用任何日期排程。"
-                    : snapshot.status === "running"
-                      ? snapshot.phase === "focus"
-                        ? "当前是学习时段，任意项目工作台都可以进入。"
-                        : "当前是间歇时段，任意项目工作台都会被统一拦回番茄钟页。"
-                      : snapshot.status === "completed"
-                        ? `今天的番茄计划已经结束，下次会在 ${formatDateTime(snapshot.nextStartAtMs)} 自动开始。`
-                        : snapshot.idleReason === "waiting"
-                          ? `今天会在 ${snapshot.startTime} 自动开始。`
-                          : "今天没有排程，工作台会整天保持锁定。"}
-              </p>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <MetricTile label="阶段切换铃声" value={transitionSoundEnabled ? "已开启" : "已关闭"} hint="切换提示音的开关也已经迁到番茄钟页。" />
-              <MetricTile label="下次自动开始" value={formatDateTime(snapshot.nextStartAtMs)} hint="按当前设备本地时间解释。" />
-            </div>
-            <div className="rounded-[1.25rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] p-4">
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Music2 className="h-4 w-4 text-[color:var(--theme-soft-text-strong)]" />
-                    <span className="text-sm font-semibold text-foreground">休息音乐目录</span>
-                    <span
-                      className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${describeLocalDirectoryPermissionTone(restMusicDirectory.permission)}`}
-                    >
-                      {describeLocalDirectoryPermission(restMusicDirectory.permission)}
-                    </span>
-                  </div>
-                  <div className="mt-2 break-all text-sm text-muted-foreground">
-                    {restMusicDirectory.handleName || "还没有绑定本地音乐目录。"}
-                  </div>
-                  <div className="mt-1 text-xs leading-6 text-[color:var(--theme-subtle-text)]">
-                    这个目录授权只保存在当前浏览器里，音乐文件不会上传到服务端。
-                  </div>
-                  {restMusicDirectory.error ? (
-                    <div className="mt-2 text-sm text-destructive">{restMusicDirectory.error}</div>
-                  ) : null}
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {restMusicDirectory.permission === "granted" ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => void onAuthorizeRestMusicDirectory()}
-                      disabled={!canChooseRestMusicDirectory}
-                    >
-                      <FolderOpen className="h-4 w-4" />
-                      更换音乐目录
-                    </Button>
-                  ) : null}
-                  {(restMusicDirectory.permission === "missing" || restMusicDirectory.permission === "unsupported") ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => void onAuthorizeRestMusicDirectory()}
-                      disabled={!canChooseRestMusicDirectory}
-                    >
-                      <FolderOpen className="h-4 w-4" />
-                      {restMusicDirectoryAction === "authorize" ? "打开目录选择器..." : "选择音乐目录"}
-                    </Button>
-                  ) : null}
-                  {(restMusicDirectory.permission === "prompt" || restMusicDirectory.permission === "denied") ? (
-                    <>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => void onRequestRestMusicDirectoryPermission()}
-                        disabled={!canRequestRestMusicDirectoryPermission}
-                      >
-                        <FolderOpen className="h-4 w-4" />
-                        {restMusicDirectoryAction === "request" ? "请求中..." : "继续授权"}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => void onAuthorizeRestMusicDirectory()}
-                        disabled={!canChooseRestMusicDirectory}
-                      >
-                        <FolderOpen className="h-4 w-4" />
-                        {restMusicDirectoryAction === "authorize" ? "打开目录选择器..." : "更换音乐目录"}
-                      </Button>
-                    </>
-                  ) : null}
-                  {restMusicDirectory.permission !== "missing" && restMusicDirectory.permission !== "unsupported" ? (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      onClick={() => void onClearRestMusicDirectory()}
-                      disabled={!canClearRestMusicDirectory}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                      {restMusicDirectoryAction === "clear" ? "清除中..." : "清除音乐目录"}
-                    </Button>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-            <Button asChild variant="outline">
-              <Link to={buildPomodoroPath()}>
-                <TimerReset className="h-4 w-4" />
-                打开番茄钟页面
-              </Link>
-            </Button>
-          </CardContent>
-        </Card>
-      </section>
-
       <Card className="theme-card-main overflow-hidden">
         <CardHeader className="theme-card-header">
           <div className="flex flex-wrap items-center gap-3">
@@ -585,10 +343,86 @@ export function GlobalSettingsPage() {
             tone="info"
           />
 
-          <div className="grid gap-3 md:grid-cols-3">
-            <MetricTile label="已启用接入" value={`${enabledIntegrationCount}/1`} hint="当前系统只接入了百度网盘。" />
-            <MetricTile label="已绑定账号" value={`${baiduAccounts.length}`} hint="这里只统计当前账号可直接使用的绑定结果。" />
-            <MetricTile label="百度网盘状态" value={baiduIntegrationStatusLabel} hint="连接完成后，就能在项目设置里导入视频。" />
+          <div className="rounded-[1.25rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] p-4">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Music2 className="h-4 w-4 text-[color:var(--theme-soft-text-strong)]" />
+                  <span className="text-sm font-semibold text-foreground">休息音乐目录</span>
+                  <span
+                    className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${describeLocalDirectoryPermissionTone(restMusicDirectory.permission)}`}
+                  >
+                    {describeLocalDirectoryPermission(restMusicDirectory.permission)}
+                  </span>
+                </div>
+                <div className="mt-2 break-all text-sm text-muted-foreground">
+                  {restMusicDirectory.handleName || "还没有绑定本地音乐目录。"}
+                </div>
+                <div className="mt-1 text-xs leading-6 text-[color:var(--theme-subtle-text)]">
+                  这个目录授权只保存在当前浏览器里，音乐文件不会上传到服务端。
+                </div>
+                {restMusicDirectory.error ? (
+                  <div className="mt-2 text-sm text-destructive">{restMusicDirectory.error}</div>
+                ) : null}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {restMusicDirectory.permission === "granted" ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void onAuthorizeRestMusicDirectory()}
+                    disabled={!canChooseRestMusicDirectory}
+                  >
+                    <FolderOpen className="h-4 w-4" />
+                    更换音乐目录
+                  </Button>
+                ) : null}
+                {(restMusicDirectory.permission === "missing" || restMusicDirectory.permission === "unsupported") ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void onAuthorizeRestMusicDirectory()}
+                    disabled={!canChooseRestMusicDirectory}
+                  >
+                    <FolderOpen className="h-4 w-4" />
+                    {restMusicDirectoryAction === "authorize" ? "打开目录选择器..." : "选择音乐目录"}
+                  </Button>
+                ) : null}
+                {(restMusicDirectory.permission === "prompt" || restMusicDirectory.permission === "denied") ? (
+                  <>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => void onRequestRestMusicDirectoryPermission()}
+                      disabled={!canRequestRestMusicDirectoryPermission}
+                    >
+                      <FolderOpen className="h-4 w-4" />
+                      {restMusicDirectoryAction === "request" ? "请求中..." : "继续授权"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => void onAuthorizeRestMusicDirectory()}
+                      disabled={!canChooseRestMusicDirectory}
+                    >
+                      <FolderOpen className="h-4 w-4" />
+                      {restMusicDirectoryAction === "authorize" ? "打开目录选择器..." : "更换音乐目录"}
+                    </Button>
+                  </>
+                ) : null}
+                {restMusicDirectory.permission !== "missing" && restMusicDirectory.permission !== "unsupported" ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => void onClearRestMusicDirectory()}
+                    disabled={!canClearRestMusicDirectory}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    {restMusicDirectoryAction === "clear" ? "清除中..." : "清除音乐目录"}
+                  </Button>
+                ) : null}
+              </div>
+            </div>
           </div>
 
           <div className="rounded-[1.25rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] p-4">
@@ -696,7 +530,7 @@ export function GlobalSettingsPage() {
               <button
                 key={theme.id}
                 type="button"
-                className="flex w-full items-center justify-between gap-3 rounded-[1.4rem] border px-4 py-4 text-left transition-all duration-200 hover:-translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b7a4f6]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent"
+                className="flex w-full items-center justify-between gap-3 rounded-[1.4rem] border px-4 py-4 text-left transition-all duration-200 hover:-translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-transparent"
                 style={previewCardStyle}
                 disabled={updateGlobalSettings.isPending}
                 onClick={async () => {
@@ -720,12 +554,7 @@ export function GlobalSettingsPage() {
                     ))}
                   </div>
                   {isActive ? (
-                    <span
-                      className="inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold text-white"
-                      style={{ borderColor: "rgba(255, 255, 255, 0.22)", background: THEME_PRESET_CURRENT_BADGE_BG, boxShadow: THEME_PRESET_CURRENT_BADGE_SHADOW }}
-                    >
-                      当前
-                    </span>
+                    <span className="theme-meta-strong font-semibold">当前</span>
                   ) : null}
                 </div>
               </button>
@@ -747,18 +576,6 @@ export function GlobalSettingsPage() {
           </div>
         </CardHeader>
         <CardContent className="space-y-4 pt-5">
-          <ContentNotice
-            title="只作用于未来新项目"
-            message="保存后，只会影响接下来新建的项目；已经存在的项目不会被强行覆盖。要修改现有项目，请进入对应项目设置。"
-            icon={Clock3}
-            tone="info"
-          />
-
-          <div className="rounded-[1.2rem] border border-border/70 bg-muted/15 p-4">
-            <div className="text-sm font-medium text-foreground">当前模板摘要</div>
-            <div className="mt-2 text-sm leading-6 text-muted-foreground">{templateSummary}</div>
-          </div>
-
           <div className="overflow-hidden rounded-[1.1rem] border border-border/70 bg-background/90">
             {templateItems.length === 0 ? <div className="px-4 py-6 text-sm text-muted-foreground">还没有模板步骤，请在下方选择步骤类型后点击加号。</div> : null}
 
@@ -766,7 +583,7 @@ export function GlobalSettingsPage() {
               <div key={item.id} className="border-t border-border/70 p-4 first:border-t-0">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                   <div className="flex items-start gap-3">
-                    <span className="inline-flex items-center rounded-full border border-[#d8e3ee] bg-[#f6f9fc] px-2.5 py-1 text-xs font-semibold text-[#5f7790]">第 {index + 1} 步</span>
+                    <span className="theme-pill-default inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold">第 {index + 1} 步</span>
                     <div className="space-y-1">
                       <div className="text-sm font-medium text-foreground">{item.kind === "CONVERGENCE" ? "收敛" : "复习任务"}</div>
                       <div className="text-xs text-muted-foreground">{item.kind === "CONVERGENCE" ? "完成一轮后决定是否继续生成复习任务。" : "在当前范围上直接生成待执行复习任务。"}</div>
@@ -789,7 +606,7 @@ export function GlobalSettingsPage() {
                         />
                       </div>
                     ) : (
-                      <div className="rounded-full border border-border/60 bg-muted/20 px-3 py-1.5 text-xs text-muted-foreground">这个步骤没有额外参数</div>
+                      <div className="theme-pill-default rounded-full border px-3 py-1.5 text-xs font-medium">这个步骤没有额外参数</div>
                     )}
 
                     <Button type="button" variant="ghost" size="sm" onClick={() => setTemplateItems((prev) => prev.filter((current) => current.id !== item.id))}>
