@@ -1,16 +1,13 @@
 import { useEffect, useState, type CSSProperties } from "react"
-import type { CloudAccount } from "@/ui/api/cloudAccounts"
-import { Clock3, Cloud, FolderOpen, Link2Off, Music2, Palette, RefreshCw, RotateCcw, Save, Trash2 } from "lucide-react"
+import { Clock3, Cloud, FolderOpen, Music2, Palette, RotateCcw, Save, Trash2 } from "lucide-react"
 
 import { ApiError } from "@/ui/api/http"
 import type { ReviewChainTemplateItem } from "@/ui/api/projectConfig"
-import { ContentNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
 import { useCurrentUser } from "@/ui/queries/auth"
-import { useBaiduNetdiskCloudAccounts, useBeginBaiduNetdiskConnect, useDisconnectBaiduNetdiskAccount } from "@/ui/queries/cloudAccounts"
 import { useUpdateMyGlobalSettings } from "@/ui/queries/profile"
 import { useSystemCapabilities } from "@/ui/queries/system"
 import { usePageMeta } from "@/ui/seo/usePageMeta"
@@ -67,51 +64,6 @@ function toTemplateEditorItems(items: ReviewChainTemplateItem[]) {
   return items.map((item) => createTemplateEditorItem(item.kind, item.count ?? 1))
 }
 
-function formatAccountExpiresAt(value: string | null | undefined) {
-  if (!value) return "未返回到期时间"
-  const dt = new Date(value)
-  return Number.isNaN(dt.getTime()) ? value : dt.toLocaleString()
-}
-
-function waitForBaiduNetdiskConnectPopup(popup: Window | null): Promise<CloudAccount> {
-  if (!popup) {
-    return Promise.reject(new Error("浏览器拦截了授权弹窗，请允许弹窗后重试"))
-  }
-  return new Promise((resolve, reject) => {
-    let settled = false
-    const timerId = window.setInterval(() => {
-      if (!popup.closed) return
-      if (settled) return
-      settled = true
-      window.clearInterval(timerId)
-      window.removeEventListener("message", onMessage)
-      reject(new Error("授权窗口已关闭，绑定没有完成"))
-    }, 400)
-
-    function cleanup() {
-      window.clearInterval(timerId)
-      window.removeEventListener("message", onMessage)
-    }
-
-    function onMessage(event: MessageEvent) {
-      const data = event.data
-      if (!data || typeof data !== "object") return
-      const payload = data as { type?: unknown; ok?: unknown; message?: unknown; account?: unknown }
-      if (payload.type !== "plm:baidu-netdisk-connect") return
-      if (settled) return
-      settled = true
-      cleanup()
-      if (payload.ok !== true) {
-        reject(new Error(typeof payload.message === "string" && payload.message.trim() ? payload.message : "百度网盘授权失败"))
-        return
-      }
-      resolve(payload.account as CloudAccount)
-    }
-
-    window.addEventListener("message", onMessage)
-  })
-}
-
 export function GlobalSettingsPage() {
   const selectedTheme = useThemeStore((state) => state.theme)
   const setTheme = useThemeStore((state) => state.setTheme)
@@ -133,13 +85,8 @@ export function GlobalSettingsPage() {
 
   const capabilitiesQ = useSystemCapabilities()
   const authEnabled = capabilitiesQ.data?.authEnabled ?? false
-  const baiduNetdiskEnabled = capabilitiesQ.data?.baiduNetdiskEnabled ?? false
   const currentUserQ = useCurrentUser(authEnabled)
   const updateGlobalSettings = useUpdateMyGlobalSettings()
-  const beginBaiduNetdiskConnect = useBeginBaiduNetdiskConnect()
-  const disconnectBaiduNetdiskAccount = useDisconnectBaiduNetdiskAccount()
-  const baiduAccountsQ = useBaiduNetdiskCloudAccounts(Boolean(currentUserQ.data) && baiduNetdiskEnabled)
-  const baiduAccounts = baiduAccountsQ.data ?? []
   const shouldSyncRemotely = authEnabled && Boolean(currentUserQ.data?.userId)
   const restMusicDirectory = usePomodoroRestMusicDirectoryBinding()
   const [restMusicDirectoryAction, setRestMusicDirectoryAction] = useState<"authorize" | "request" | "clear" | null>(null)
@@ -239,41 +186,6 @@ export function GlobalSettingsPage() {
     }
   }
 
-  const baiduIntegrationStatusLabel = !baiduNetdiskEnabled ? "未启用" : baiduAccounts.length > 0 ? "已连接" : "待连接"
-  const baiduIntegrationStatusClass = !baiduNetdiskEnabled
-    ? "theme-pill-default"
-    : baiduAccounts.length > 0
-      ? "theme-pill-accent"
-      : "theme-pill-accent"
-
-  async function onConnectBaiduNetdisk() {
-    const popup = window.open("", "plm-baidu-netdisk-connect", "popup=yes,width=720,height=820")
-    if (!popup) {
-      showErrorFeedback("无法打开授权窗口", "浏览器拦截了弹窗，请允许当前站点打开弹窗后重试。")
-      return
-    }
-    try {
-      const result = await beginBaiduNetdiskConnect.mutateAsync()
-      popup.location.href = result.authorizeUrl
-      const account = await waitForBaiduNetdiskConnectPopup(popup)
-      await baiduAccountsQ.refetch()
-      showSuccessFeedback("百度网盘已连接", `账号“${account.displayName}”已经绑定完成，现在可以去项目设置里导入视频。`)
-    } catch (err) {
-      popup.close()
-      showErrorFeedback("连接百度网盘失败", formatApiError(err))
-    }
-  }
-
-  async function onDisconnectCloudAccount(account: CloudAccount) {
-    try {
-      await disconnectBaiduNetdiskAccount.mutateAsync(account.accountId)
-      await baiduAccountsQ.refetch()
-      showSuccessFeedback("百度网盘已断开", `账号“${account.displayName}”已经从当前用户解绑。`)
-    } catch (err) {
-      showErrorFeedback("断开百度网盘失败", formatApiError(err))
-    }
-  }
-
   async function onAuthorizeRestMusicDirectory() {
     if (!canChooseRestMusicDirectory) return
     try {
@@ -331,18 +243,11 @@ export function GlobalSettingsPage() {
             </div>
             <div className="min-w-0">
               <CardTitle>系统接入中心</CardTitle>
-              <CardDescription className="mt-1">系统级第三方资源接入统一收口在这里。完成绑定后，就可以在项目设置里直接使用这些外部资源能力。</CardDescription>
+              <CardDescription className="mt-1">本地资源接入统一收口在这里。完成绑定后，就可以在番茄钟休息阶段使用。</CardDescription>
             </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-4 pt-5">
-          <ContentNotice
-            title="这类接入属于全局能力"
-            message="云盘授权不属于个人资料展示，而是整个工作空间可复用的资源接入能力，所以统一收在全局设置里。"
-            icon={Cloud}
-            tone="info"
-          />
-
           <div className="rounded-[1.25rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] p-4">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="min-w-0">
@@ -424,85 +329,6 @@ export function GlobalSettingsPage() {
               </div>
             </div>
           </div>
-
-          <div className="rounded-[1.25rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] p-4">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="text-xs uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">接入模块</div>
-                  <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${baiduIntegrationStatusClass}`}>
-                    {baiduIntegrationStatusLabel}
-                  </span>
-                </div>
-                <div className="mt-2 text-base font-semibold text-foreground">百度网盘</div>
-                <div className="mt-1 text-sm leading-6 text-muted-foreground">
-                  把自己的百度网盘绑定到当前账号后，就可以在项目设置里直接浏览目录并导入视频。
-                </div>
-                <div className="mt-2 text-xs leading-6 text-[color:var(--theme-subtle-text)]">
-                  使用位置：项目设置里的“百度网盘视频”导入入口。
-                </div>
-              </div>
-              {baiduNetdiskEnabled ? (
-                <Button type="button" variant="outline" className="shrink-0" onClick={() => void onConnectBaiduNetdisk()} disabled={beginBaiduNetdiskConnect.isPending}>
-                  {beginBaiduNetdiskConnect.isPending ? (
-                    <>
-                      <RefreshCw className="h-4 w-4 animate-spin" />
-                      连接中...
-                    </>
-                  ) : (
-                    <>
-                      <Cloud className="h-4 w-4" />
-                      连接百度网盘
-                    </>
-                  )}
-                </Button>
-              ) : (
-                <span className="theme-meta shrink-0">当前部署未启用</span>
-              )}
-            </div>
-          </div>
-
-          {!baiduNetdiskEnabled ? (
-            <div className="rounded-[1.2rem] border border-dashed border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-4 py-4 text-sm text-[color:var(--theme-subtle-text)]">
-              当前部署还没有开启百度网盘接入能力。
-            </div>
-          ) : baiduAccountsQ.isLoading ? (
-            <div className="rounded-[1.2rem] border border-dashed border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-4 py-4 text-sm text-[color:var(--theme-subtle-text)]">
-              正在加载已绑定的百度网盘账号。
-            </div>
-          ) : baiduAccountsQ.error ? (
-            <div className="theme-warm-surface rounded-[1.2rem] px-4 py-4 text-sm leading-6">
-              百度网盘账号加载失败：{formatApiError(baiduAccountsQ.error)}
-            </div>
-          ) : baiduAccounts.length <= 0 ? (
-            <div className="rounded-[1.2rem] border border-dashed border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-4 py-4 text-sm text-[color:var(--theme-subtle-text)]">
-              还没有绑定百度网盘账号。完成连接后，这里会显示账号信息和授权状态。
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {baiduAccounts.map((account) => (
-                <div key={account.accountId} className="rounded-[1.2rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] px-4 py-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <div className="text-sm font-semibold text-foreground">{account.displayName}</div>
-                      <div className="mt-1 text-xs text-[color:var(--theme-subtle-text)]">百度用户 ID：{account.providerUserId}</div>
-                      <div className="mt-1 text-xs text-[color:var(--theme-subtle-text)]">授权到期：{formatAccountExpiresAt(account.expiresAt)}</div>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      className="shrink-0 text-muted-foreground"
-                      onClick={() => void onDisconnectCloudAccount(account)}
-                      disabled={disconnectBaiduNetdiskAccount.isPending}
-                    >
-                      <Link2Off className="h-4 w-4" />
-                      断开
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
         </CardContent>
       </Card>
 

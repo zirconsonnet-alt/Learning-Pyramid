@@ -39,6 +39,10 @@ def test_global_settings_layout_moves_music_directory_into_access_center() -> No
 
     assert "<CardTitle>全局配置</CardTitle>" not in source
     assert "<CardTitle>番茄钟入口</CardTitle>" not in source
+    assert "这类接入属于全局能力" not in source
+    assert "云盘授权不属于个人资料展示" not in source
+    assert "百度网盘" not in source
+    assert "接入模块" not in source
     assert "只作用于未来新项目" not in source
     assert "当前模板摘要" not in source
     assert source.index("<CardTitle>系统接入中心</CardTitle>") < source.index(">休息音乐目录</span>")
