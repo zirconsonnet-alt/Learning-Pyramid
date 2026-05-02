@@ -4,6 +4,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 POMODORO_STORE = REPO_ROOT / "frontend" / "src" / "ui" / "store" / "pomodoroStore.ts"
 POMODORO_PAGE = REPO_ROOT / "frontend" / "src" / "views" / "pomodoro" / "PomodoroPage.tsx"
+POMODORO_ROUTING = REPO_ROOT / "frontend" / "src" / "views" / "pomodoro" / "pomodoroRouting.ts"
+FRONTEND_ROUTER = REPO_ROOT / "frontend" / "src" / "router.tsx"
 LOCAL_MEDIA = REPO_ROOT / "frontend" / "src" / "ui" / "localMedia" / "projectDirectory.ts"
 GLOBAL_SETTINGS_PAGE = REPO_ROOT / "frontend" / "src" / "views" / "settings" / "GlobalSettingsPage.tsx"
 USER_MANUAL = REPO_ROOT / "docs" / "learningpyramid-user-manual.md"
@@ -29,6 +31,19 @@ def test_pomodoro_page_can_edit_multiple_plans_and_warn_conflicts() -> None:
     assert "新增计划" in source
     assert "删除计划" in source
     assert "计划时间冲突" in source
+
+
+def test_pomodoro_plan_editing_uses_dedicated_route() -> None:
+    routing_source = POMODORO_ROUTING.read_text(encoding="utf-8")
+    router_source = FRONTEND_ROUTER.read_text(encoding="utf-8")
+    page_source = POMODORO_PAGE.read_text(encoding="utf-8")
+
+    assert "buildPomodoroEditPath" in routing_source
+    assert 'return "/pomodoro/edit"' in routing_source
+    assert 'path: "/pomodoro/edit"' in router_source
+    assert "to={buildPomodoroEditPath({ addPlan: true })}" in page_source
+    assert "to={buildPomodoroEditPath()}" in page_source
+    assert "setIsScheduleDetailOpen" not in page_source
 
 
 def test_pomodoro_preview_warns_before_last_focus_enters_rest() -> None:

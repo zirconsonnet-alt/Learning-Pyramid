@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { BellRing, FolderOpen, Music2, PanelsTopLeft, Pause, Play, Plus, RefreshCw, RotateCcw, Save, SkipForward, TimerReset, Trash2, Volume2 } from "lucide-react"
-import { Link, useLocation } from "react-router-dom"
+import { Link, useLocation, useNavigate } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
 import type { ReviewChainTemplateItem } from "@/ui/api/projectConfig"
@@ -40,7 +40,7 @@ import {
 } from "@/ui/store/pomodoroStore"
 import { useThemeStore } from "@/ui/store/themeStore"
 import { cn } from "@/ui/utils"
-import { buildPomodoroPath } from "@/views/pomodoro/pomodoroRouting"
+import { buildPomodoroEditPath, buildPomodoroPath } from "@/views/pomodoro/pomodoroRouting"
 import { buildGlobalSettingsPath } from "@/views/settings/globalSettingsRouting"
 
 type PomodoroPlanDraft = {
@@ -129,6 +129,16 @@ function createDefaultPomodoroPlanDraft(overrides?: Partial<PomodoroPlanDraft>):
     breakPrompt: normalizeDraftPromptText(overrides?.breakPrompt),
     focusPrompts: normalizeDraftFocusPrompts(overrides?.focusPrompts, pomodoroCount),
   }
+}
+
+function appendDefaultPomodoroPlanDraft(prev: PomodoroPlanDraft[]) {
+  const draftStartTimes = [...new Set(prev.map((draft) => normalizePomodoroStartTime(draft.startTime)))].sort()
+  return [
+    ...prev,
+    createDefaultPomodoroPlanDraft({
+      startTime: draftStartTimes.at(-1) ?? "20:00",
+    }),
+  ]
 }
 
 function getPomodoroPlanDraftKey(plan: PomodoroPlanSchedule) {
@@ -488,6 +498,9 @@ function RestMusicPlayer(props: { isRestPhase: boolean }) {
 
 export function PomodoroPage() {
   const location = useLocation()
+  const nav = useNavigate()
+  const isScheduleEditRoute = location.pathname === buildPomodoroEditPath()
+  const isAddPlanRouteRequest = useMemo(() => new URLSearchParams(location.search).get("addPlan") === "1", [location.search])
   const selectedProjectId = useAppStore((state) => state.selectedProjectId)
   const { projectTitle: selectedProjectTitle } = useProject(selectedProjectId ?? "", { enabled: Boolean(selectedProjectId) })
   const projectsQ = useProjects(true)
@@ -502,13 +515,13 @@ export function PomodoroPage() {
   const now = usePomodoroNow(enabled)
   const { fromPath } = useMemo(() => readLocationState(location.state), [location.state])
   const [pomodoroDrafts, setPomodoroDrafts] = useState<PomodoroPlanDraft[]>(() => toPomodoroPlanDrafts(weeklySchedule))
-  const [isScheduleDetailOpen, setIsScheduleDetailOpen] = useState(false)
   const [testingPromptKey, setTestingPromptKey] = useState("")
+  const addPlanRouteRequestKeyRef = useRef("")
 
   usePageMeta({
-    title: "番茄钟 | LearningPyramid",
-    description: "番茄钟",
-    path: buildPomodoroPath(),
+    title: isScheduleEditRoute ? "编辑番茄计划 | LearningPyramid" : "番茄钟 | LearningPyramid",
+    description: isScheduleEditRoute ? "编辑番茄计划" : "番茄钟",
+    path: isScheduleEditRoute ? buildPomodoroEditPath() : buildPomodoroPath(),
   })
 
   const capabilitiesQ = useSystemCapabilities()
@@ -543,6 +556,15 @@ export function PomodoroPage() {
     setPomodoroDrafts(toPomodoroPlanDrafts(weeklySchedule))
   }, [weeklySchedule])
 
+  useEffect(() => {
+    if (!isScheduleEditRoute || !isAddPlanRouteRequest) return
+    const requestKey = `${location.key}:${location.search}`
+    if (addPlanRouteRequestKeyRef.current === requestKey) return
+    addPlanRouteRequestKeyRef.current = requestKey
+    setPomodoroDrafts(appendDefaultPomodoroPlanDraft)
+    nav(buildPomodoroEditPath(), { replace: true, state: location.state })
+  }, [isAddPlanRouteRequest, isScheduleEditRoute, location.key, location.search, location.state, nav])
+
   const draftSchedule = useMemo(
     () => buildPomodoroScheduleFromPlanDrafts(pomodoroDrafts),
     [pomodoroDrafts],
@@ -576,12 +598,7 @@ export function PomodoroPage() {
   }
 
   function addPomodoroDraftPlan() {
-    setPomodoroDrafts((prev) => [
-      ...prev,
-      createDefaultPomodoroPlanDraft({
-        startTime: draftStartTimes.at(-1) ?? "20:00",
-      }),
-    ])
+    setPomodoroDrafts(appendDefaultPomodoroPlanDraft)
   }
 
   function removePomodoroDraftPlan(draftId: string) {
@@ -760,7 +777,7 @@ export function PomodoroPage() {
       <RestMusicPlayer isRestPhase={isRestPhase} />
 
       <section className="space-y-4 border-t border-border/60 pt-6">
-        {isScheduleDetailOpen ? (
+        {isScheduleEditRoute ? (
           <>
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
@@ -1124,13 +1141,21 @@ export function PomodoroPage() {
                     {enabledUnassignedPomodoros > 0 ? `${enabledUnassignedPomodoros} 个番茄未绑定项目` : "项目已配置"} · {activeDaySummary}
                   </div>
                 </div>
-                <Button onClick={() => setIsScheduleDetailOpen(true)}>
-                  编辑
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button asChild variant="outline">
+                    <Link to={buildPomodoroEditPath({ addPlan: true })}>
+                      <Plus className="h-4 w-4" />
+                      新增计划
+                    </Link>
+                  </Button>
+                  <Button asChild>
+                    <Link to={buildPomodoroEditPath()}>编辑</Link>
+                  </Button>
+                </div>
               </div>
         )}
 
-        {isScheduleDetailOpen ? (
+        {isScheduleEditRoute ? (
             <div className="flex flex-wrap gap-3">
               <Button onClick={savePomodoroConfig} disabled={updateGlobalSettings.isPending || planConflictMessages.length > 0}>
                 <Save className="h-4 w-4" />
@@ -1140,8 +1165,8 @@ export function PomodoroPage() {
                 <RotateCcw className="h-4 w-4" />
                 恢复
               </Button>
-              <Button variant="ghost" onClick={() => setIsScheduleDetailOpen(false)}>
-                返回
+              <Button asChild variant="ghost">
+                <Link to={buildPomodoroPath()}>返回</Link>
               </Button>
             </div>
         ) : null}

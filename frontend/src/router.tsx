@@ -120,6 +120,7 @@ export const router = createBrowserRouter([
         ),
       },
       { path: "/pomodoro", element: lazyElement(<PomodoroPage />) },
+      { path: "/pomodoro/edit", element: lazyElement(<PomodoroPage />) },
       { path: "/p/:projectId/pomodoro", element: <Navigate to="/pomodoro" replace /> },
       { path: "/p/:projectId/recommended-reviews", element: lazyElement(<ReviewRecommendationsPage />) },
       { path: "/p/:projectId/settings", element: lazyElement(<ProjectSettingsPage />) },
