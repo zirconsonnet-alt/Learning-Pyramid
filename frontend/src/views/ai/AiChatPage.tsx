@@ -39,9 +39,7 @@ import { Input } from "@/ui/components/ui/input"
 import { formatRecallPointReference } from "@/ui/displayIdentifiers"
 import { askCourseAgent } from "@/ui/llm/courseAgent"
 import { useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
-import { buildProjectSettingsPath } from "@/ui/projectPaths"
 import { useProjectMaterialSourceBinding } from "@/ui/queries/projects"
-import { useSubjectContext } from "@/ui/queries/subjects"
 import { useSystemCapabilities } from "@/ui/queries/system"
 import { useInstances } from "@/ui/queries/workbench"
 import { isSyntheticFilesContainer, sortLearningObjectNodeIdsForDisplay } from "@/ui/learningObjectDisplayOrder"
@@ -54,6 +52,7 @@ import { buildSubtitleContextText, loadSubtitleDocumentForInstance } from "@/ui/
 import { cn } from "@/ui/utils"
 import { formatLearningTaskNodeDisplayTitle } from "@/views/learningTasks/displayTitle"
 import { buildAiChatPath, describeAiChatContextKind, isAiChatContextKind, type AiChatContextKind } from "@/views/ai/chatRouting"
+import { buildGlobalSettingsPath } from "@/views/settings/globalSettingsRouting"
 
 type SidebarNode = {
   nodeId: string
@@ -958,10 +957,7 @@ export function AiChatPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const pid = projectId ?? ""
-  const subjectContextQ = useSubjectContext(pid, !!pid)
-  const projectSettingsPath = buildProjectSettingsPath(subjectContextQ.data?.currentMaterial.compatibilityProjectId ?? pid, {
-    subjectProjectId: subjectContextQ.data?.subjectProjectId,
-  })
+  const globalSettingsPath = buildGlobalSettingsPath()
 
   function touchQaActivity() {
     touchDailyStudyActivity(pid, "qa", QA_ACTIVITY_WINDOW_MS)
@@ -1745,12 +1741,12 @@ export function AiChatPage() {
                 title="当前还没有接通可用的 LLM"
                 message={
                   capabilitiesQ.data?.authEnabled
-                    ? "请先到项目设置里的“我的 LLM 设置”保存 Base URL、模型名和 API Key，然后再回来提问。"
-                    : "请先到项目设置里的“全局 LLM 设置”填写 Base URL、模型名和 API Key，然后再回来提问。"
+                    ? "请先到全局设置里的“大模型配置”保存 Base URL、模型名和 API Key，然后再回来提问。"
+                    : "请先到全局设置里的“大模型配置”填写 Base URL、模型名和 API Key，然后再回来提问。"
                 }
                 action={
                   <Button asChild>
-                    <Link to={projectSettingsPath}>前往项目设置</Link>
+                    <Link to={globalSettingsPath}>前往全局设置</Link>
                   </Button>
                 }
               />

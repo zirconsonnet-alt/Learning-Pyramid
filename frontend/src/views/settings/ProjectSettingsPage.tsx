@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useMemo, useState } from "react"
 import { useQueries } from "@tanstack/react-query"
-import { Settings2, Sparkles, TriangleAlert } from "lucide-react"
+import { Settings2, TriangleAlert } from "lucide-react"
 import { useLocation, useNavigate, useParams } from "react-router-dom"
 
 import { listRecallPointsByInstance, type Instance } from "@/ui/api/instances"
@@ -17,7 +17,6 @@ import { Label } from "@/ui/components/ui/label"
 import { scanProjectDirectoryMedia, useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
 import { buildProjectSettingsPath, buildProjectWorkbenchPath } from "@/ui/projectPaths"
 import { formatProjectTypeLabel } from "@/ui/projectTypes"
-import { useMyLlmSettings, useUpdateMyLlmSettings } from "@/ui/queries/profile"
 import { useProject } from "@/ui/queries/projects"
 import {
   useCreateSubjectMaterial,
@@ -27,7 +26,7 @@ import {
   useEditSubjectMaterial,
   useSubjectContext,
 } from "@/ui/queries/subjects"
-import { useGlobalLlmSettings, useSystemCapabilities, useUpdateGlobalLlmSettings } from "@/ui/queries/system"
+import { useSystemCapabilities } from "@/ui/queries/system"
 import { useAppStore } from "@/ui/store/appStore"
 import {
   useBulkRemapRecallPointsInstance,
@@ -54,8 +53,7 @@ type TemplateEditorItem = {
   count: string
 }
 
-type SettingsPanelKey = "basic" | "ai" | "missing"
-type LlmPromptAssemblyMode = "system" | "user_concat"
+type SettingsPanelKey = "basic" | "missing"
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -101,20 +99,6 @@ function describeDirectoryPermissionTone(permission: "unsupported" | "missing" |
   if (permission === "granted") return "theme-pill-accent"
   if (permission === "prompt") return "theme-pill-warm"
   if (permission === "denied") return "theme-pill-danger"
-  return "theme-pill-default"
-}
-
-function describeLlmSource(source: "user" | "global" | "env" | "none") {
-  if (source === "user") return "我的密钥"
-  if (source === "global") return "全局密钥"
-  if (source === "env") return "部署环境"
-  return "未配置"
-}
-
-function describeLlmSourceTone(source: "user" | "global" | "env" | "none") {
-  if (source === "user") return "theme-pill-accent"
-  if (source === "global") return "theme-pill-accent"
-  if (source === "env") return "theme-pill-warm"
   return "theme-pill-default"
 }
 
@@ -416,69 +400,6 @@ function SettingsQuickStartCard(props: {
   )
 }
 
-function PromptAssemblyModeSelector({
-  value,
-  onChange,
-  disabled,
-}: {
-  value: LlmPromptAssemblyMode
-  onChange: (value: LlmPromptAssemblyMode) => void
-  disabled: boolean
-}) {
-  const options: Array<{
-    value: LlmPromptAssemblyMode
-    title: string
-    description: string
-  }> = [
-    {
-      value: "system",
-      title: "系统信息",
-      description: "优先让兼容 OpenAI 的主流 chat 模型按 system/context 角色理解规则与上下文。",
-    },
-    {
-      value: "user_concat",
-      title: "拼接到用户信息",
-      description: "把系统规则和节点上下文一并拼进用户消息，适合 qvq 这类对 system 遵循较弱的模型。",
-    },
-  ]
-
-  return (
-    <div className="grid gap-2 md:grid-cols-2">
-      {options.map((option) => {
-        const active = option.value === value
-        return (
-          <button
-            key={option.value}
-            type="button"
-            disabled={disabled}
-            onClick={() => onChange(option.value)}
-            className={cn(
-              "rounded-[1rem] border px-4 py-3 text-left transition",
-              active
-                ? "border-sky-400 bg-sky-50/80 shadow-[0_10px_30px_rgba(14,116,144,0.12)]"
-                : "border-border/70 bg-background hover:border-sky-200 hover:bg-sky-50/40",
-              disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer",
-            )}
-          >
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-sm font-semibold text-foreground">{option.title}</span>
-              <span
-                className={cn(
-                  "inline-flex h-5 min-w-5 items-center justify-center rounded-full border px-1.5 text-[11px] font-semibold",
-                  active ? "theme-pill-accent" : "theme-pill-default",
-                )}
-              >
-                {active ? "当前" : "可选"}
-              </span>
-            </div>
-            <p className="mt-2 text-xs leading-5 text-muted-foreground">{option.description}</p>
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
 function isDirectoryPickerAbort(err: unknown) {
   return err instanceof DOMException && err.name === "AbortError"
 }
@@ -554,11 +475,6 @@ export function ProjectSettingsPage() {
   const editSubjectMaterialM = useEditSubjectMaterial()
   const deleteSubjectMaterialM = useDeleteSubjectMaterial()
   const capabilitiesQ = useSystemCapabilities()
-  const authEnabled = capabilitiesQ.data?.authEnabled ?? false
-  const globalLlmSettingsQ = useGlobalLlmSettings(capabilitiesQ.data !== undefined && !authEnabled)
-  const updateGlobalLlmSettingsM = useUpdateGlobalLlmSettings()
-  const myLlmSettingsQ = useMyLlmSettings(authEnabled)
-  const updateMyLlmSettingsM = useUpdateMyLlmSettings()
   const directoryBinding = useProjectDirectoryBinding(pid)
   const directoryPermission = directoryBinding.permission
   const browserLocalMediaEnabled = capabilitiesQ.data?.browserLocalMediaEnabled ?? false
@@ -689,7 +605,6 @@ export function ProjectSettingsPage() {
                 ? "等待授权"
                 : "待配置"
           : "基础配置"
-  const aiStatusText = capabilitiesQ.data?.llmConfigured ? "LLM 已可用" : "LLM 未接通"
   const missingStatusText =
     projectType === "LOOSE_POINTS"
       ? "不适用"
@@ -893,7 +808,7 @@ export function ProjectSettingsPage() {
           <CardHeader className="pb-4">
             <CardTitle>设置分区</CardTitle>
           </CardHeader>
-          <CardContent className={cn("grid gap-3", supportsMissingInstanceRepair ? "md:grid-cols-3" : "md:grid-cols-2")}>
+          <CardContent className={cn("grid gap-3", supportsMissingInstanceRepair ? "md:grid-cols-2" : "md:grid-cols-1")}>
             <SettingsPanelSwitchCard
               title="基本设置"
               status={directoryStatusText}
@@ -901,14 +816,6 @@ export function ProjectSettingsPage() {
               active={activePanel === "basic"}
               tone={directoryPermission === "granted" ? "success" : "default"}
               onClick={() => setActivePanel("basic")}
-            />
-            <SettingsPanelSwitchCard
-              title="AI 设置"
-              status={aiStatusText}
-              icon={Sparkles}
-              active={activePanel === "ai"}
-              tone={capabilitiesQ.data?.llmConfigured ? "success" : "default"}
-              onClick={() => setActivePanel("ai")}
             />
             {supportsMissingInstanceRepair ? (
               <SettingsPanelSwitchCard
@@ -1206,66 +1113,6 @@ export function ProjectSettingsPage() {
         </>
       ) : null}
 
-      {!isSubjectSettingsScope && activePanel === "ai" ? (
-        <div className="space-y-5">
-          {authEnabled ? (
-            <>
-              <UserLlmSettingsCard
-                queryError={myLlmSettingsQ.error}
-                saveError={updateMyLlmSettingsM.error}
-                settings={myLlmSettingsQ.data}
-                isLoading={myLlmSettingsQ.isLoading}
-                isPending={updateMyLlmSettingsM.isPending}
-                onClearApiKey={async ({ baseUrl, modelName, promptAssemblyMode }) => {
-                  try {
-                    await updateMyLlmSettingsM.mutateAsync({ baseUrl, modelName, promptAssemblyMode, clearApiKey: true })
-                    showSuccessFeedback("我的 LLM 密钥已清除", "当前账号会停止使用已保存密钥；未重新保存前，这个账号的 LLM 能力视为未接通。")
-                  } catch (err) {
-                    showErrorFeedback("清除我的 LLM 密钥失败", formatApiError(err))
-                  }
-                }}
-                onSave={async ({ baseUrl, modelName, promptAssemblyMode, apiKey }) => {
-                  try {
-                    await updateMyLlmSettingsM.mutateAsync({ baseUrl, modelName, promptAssemblyMode, apiKey })
-                    showSuccessFeedback("我的 LLM 设置已保存", "当前账号之后在任意设备登录时都会复用这份 LLM 服务配置。")
-                  } catch (err) {
-                    showErrorFeedback("保存我的 LLM 设置失败", formatApiError(err))
-                  }
-                }}
-              />
-            </>
-          ) : (
-            <>
-              <GlobalLlmSettingsCard
-                title="全局 LLM 设置"
-                saveLabel="保存全局设置"
-                queryError={globalLlmSettingsQ.error}
-                saveError={updateGlobalLlmSettingsM.error}
-                settings={globalLlmSettingsQ.data}
-                isLoading={globalLlmSettingsQ.isLoading}
-                isPending={updateGlobalLlmSettingsM.isPending}
-                onClearApiKey={async ({ baseUrl, modelName, promptAssemblyMode }) => {
-                  try {
-                    await updateGlobalLlmSettingsM.mutateAsync({ baseUrl, modelName, promptAssemblyMode, clearApiKey: true })
-                    showSuccessFeedback("全局 LLM 密钥已清除", "系统会停止使用已保存的全局密钥。")
-                  } catch (err) {
-                    showErrorFeedback("清除全局 LLM 密钥失败", formatApiError(err))
-                  }
-                }}
-                onSave={async ({ baseUrl, modelName, promptAssemblyMode, apiKey }) => {
-                  try {
-                    await updateGlobalLlmSettingsM.mutateAsync({ baseUrl, modelName, promptAssemblyMode, apiKey })
-                    showSuccessFeedback("全局 LLM 设置已保存", "后端现在会通过已配置服务代理后续的大模型能力请求。")
-                  } catch (err) {
-                    showErrorFeedback("保存全局 LLM 设置失败", formatApiError(err))
-                  }
-                }}
-              />
-            </>
-          )}
-        </div>
-      ) : null}
-
       {!isSubjectSettingsScope && supportsMissingInstanceRepair && activePanel === "missing" ? (
       <Card className="theme-card">
         <CardHeader>
@@ -1391,16 +1238,9 @@ function BookOutlineSetupCard({
   validationMessage: string | null
 }) {
   const [selectedSourceMaterialId, setSelectedSourceMaterialId] = useState("")
-
-  useEffect(() => {
-    if (courseMaterials.length === 0) {
-      setSelectedSourceMaterialId("")
-      return
-    }
-    setSelectedSourceMaterialId((current) =>
-      courseMaterials.some((item) => item.materialId === current) ? current : courseMaterials[0]?.materialId ?? "",
-    )
-  }, [courseMaterials])
+  const effectiveSourceMaterialId = courseMaterials.some((item) => item.materialId === selectedSourceMaterialId)
+    ? selectedSourceMaterialId
+    : courseMaterials[0]?.materialId ?? ""
 
   return (
     <Card className="theme-card">
@@ -1431,7 +1271,7 @@ function BookOutlineSetupCard({
                     <select
                       id="bookOutlineSourceMaterial"
                       className="h-11 w-full rounded-xl border bg-background px-4 text-sm"
-                      value={selectedSourceMaterialId}
+                      value={effectiveSourceMaterialId}
                       onChange={(event) => setSelectedSourceMaterialId(event.target.value)}
                       disabled={initializeFromMaterialPending}
                     >
@@ -1447,8 +1287,8 @@ function BookOutlineSetupCard({
                     <Button
                       type="button"
                       variant="outline"
-                      onClick={() => void onInitializeFromMaterial(selectedSourceMaterialId)}
-                      disabled={initializeFromMaterialPending || !selectedSourceMaterialId}
+                      onClick={() => void onInitializeFromMaterial(effectiveSourceMaterialId)}
+                      disabled={initializeFromMaterialPending || !effectiveSourceMaterialId}
                     >
                       {initializeFromMaterialPending ? "复用中..." : "一键复用网课树"}
                     </Button>
@@ -2140,11 +1980,8 @@ function DangerZoneCard(props: {
   targetTitle: string
 }) {
   const { actionLabel, actionPendingLabel, confirmationLabel, deleteError, description, isPending, onDelete, targetTitle } = props
-  const [confirmation, setConfirmation] = useState("")
-
-  useEffect(() => {
-    setConfirmation("")
-  }, [targetTitle])
+  const [confirmationDraft, setConfirmationDraft] = useState({ targetTitle, value: "" })
+  const confirmation = confirmationDraft.targetTitle === targetTitle ? confirmationDraft.value : ""
 
   const matches = confirmation.trim() === targetTitle.trim()
 
@@ -2161,7 +1998,7 @@ function DangerZoneCard(props: {
           <Input
             id="danger-zone-confirmation"
             value={confirmation}
-            onChange={(event) => setConfirmation(event.target.value)}
+            onChange={(event) => setConfirmationDraft({ targetTitle, value: event.target.value })}
             placeholder={targetTitle || confirmationLabel}
             disabled={isPending}
           />
@@ -2177,383 +2014,6 @@ function DangerZoneCard(props: {
         </div>
 
         {deleteError ? <p className="text-sm text-destructive">{formatApiError(deleteError)}</p> : null}
-      </CardContent>
-    </Card>
-  )
-}
-
-const SAVED_API_KEY_MASK = "********"
-
-function SavedApiKeyInput({
-  id,
-  draftValue,
-  onDraftChange,
-  savedApiKeyConfigured,
-  disabled,
-  emptyPlaceholder,
-  savedPlaceholder,
-}: {
-  id: string
-  draftValue: string
-  onDraftChange: (value: string) => void
-  savedApiKeyConfigured: boolean
-  disabled: boolean
-  emptyPlaceholder: string
-  savedPlaceholder: string
-}) {
-  const [isEditingSavedKey, setIsEditingSavedKey] = useState(false)
-
-  useEffect(() => {
-    setIsEditingSavedKey(false)
-  }, [id, savedApiKeyConfigured])
-
-  const showSavedMask = savedApiKeyConfigured && !isEditingSavedKey && !draftValue.trim()
-
-  return (
-    <Input
-      id={id}
-      type="password"
-      value={showSavedMask ? SAVED_API_KEY_MASK : draftValue}
-      onFocus={() => {
-        if (showSavedMask && !disabled) {
-          setIsEditingSavedKey(true)
-          onDraftChange("")
-        }
-      }}
-      onBlur={() => {
-        if (!draftValue.trim()) {
-          setIsEditingSavedKey(false)
-        }
-      }}
-      onChange={(event) => onDraftChange(event.target.value)}
-      placeholder={savedApiKeyConfigured ? savedPlaceholder : emptyPlaceholder}
-      disabled={disabled}
-      autoComplete="off"
-    />
-  )
-}
-
-function GlobalLlmSettingsCard({
-  title,
-  saveLabel,
-  settings,
-  isLoading,
-  isPending,
-  queryError,
-  saveError,
-  onSave,
-  onClearApiKey,
-}: {
-  title: string
-  saveLabel: string
-  settings:
-    | {
-        baseUrl: string
-        modelName: string
-        promptAssemblyMode: LlmPromptAssemblyMode
-        savedApiKeyConfigured: boolean
-        savedApiKeyPreview: string | null
-        llmConfigured: boolean
-        storyGenerationConfigured: boolean
-        llmSource: "user" | "global" | "env" | "none"
-      }
-    | undefined
-  isLoading: boolean
-  isPending: boolean
-  queryError: unknown
-  saveError: unknown
-  onSave: (payload: { baseUrl: string; modelName: string; promptAssemblyMode: LlmPromptAssemblyMode; apiKey?: string }) => Promise<void>
-  onClearApiKey: (payload: { baseUrl: string; modelName: string; promptAssemblyMode: LlmPromptAssemblyMode }) => Promise<void>
-}) {
-  const [baseUrlDraft, setBaseUrlDraft] = useState("")
-  const [modelDraft, setModelDraft] = useState("")
-  const [apiKeyDraft, setApiKeyDraft] = useState("")
-  const [promptAssemblyModeDraft, setPromptAssemblyModeDraft] = useState<LlmPromptAssemblyMode>("system")
-
-  useEffect(() => {
-    setBaseUrlDraft(settings?.baseUrl ?? "")
-    setModelDraft(settings?.modelName ?? "")
-    setApiKeyDraft("")
-    setPromptAssemblyModeDraft(settings?.promptAssemblyMode ?? "system")
-  }, [settings?.baseUrl, settings?.modelName, settings?.promptAssemblyMode])
-
-  const trimmedBaseUrl = baseUrlDraft.trim()
-  const trimmedModel = modelDraft.trim()
-  const trimmedApiKey = apiKeyDraft.trim()
-  const canSave =
-    !isLoading &&
-    !isPending &&
-    !!trimmedBaseUrl &&
-    !!trimmedModel &&
-    (
-      trimmedBaseUrl !== (settings?.baseUrl ?? "") ||
-      trimmedModel !== (settings?.modelName ?? "") ||
-      promptAssemblyModeDraft !== (settings?.promptAssemblyMode ?? "system") ||
-      !!trimmedApiKey
-    )
-  const canClearApiKey = !isLoading && !isPending && !!settings?.savedApiKeyConfigured
-
-  return (
-    <Card className="theme-card">
-      <CardHeader>
-        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-          <div className="space-y-1">
-            <CardTitle>{title}</CardTitle>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <span
-              className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${describeLlmSourceTone(settings?.llmSource ?? "none")}`}
-            >
-              {describeLlmSource(settings?.llmSource ?? "none")}
-            </span>
-            <span className="theme-meta px-3 py-1.5 text-xs">
-              {settings?.llmConfigured ? "LLM 已可用" : "LLM 未可用"}
-            </span>
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4 text-sm">
-        <div className="theme-status-surface space-y-3 rounded-[1.2rem] border border-border/70 p-4">
-          <div className="grid gap-3">
-            <div className="space-y-2">
-              <Label htmlFor="globalLlmBaseUrl">Base URL</Label>
-              <Input
-                id="globalLlmBaseUrl"
-                value={baseUrlDraft}
-                onChange={(event) => setBaseUrlDraft(event.target.value)}
-                placeholder="https://api.openai.com/v1"
-                disabled={isLoading || isPending}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="globalLlmModel">模型名</Label>
-              <Input
-                id="globalLlmModel"
-                value={modelDraft}
-                onChange={(event) => setModelDraft(event.target.value)}
-                placeholder="gpt-4o-mini"
-                disabled={isLoading || isPending}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="globalLlmApiKey">API 密钥</Label>
-              <SavedApiKeyInput
-                id="globalLlmApiKey"
-                draftValue={apiKeyDraft}
-                onDraftChange={setApiKeyDraft}
-                savedApiKeyConfigured={!!settings?.savedApiKeyConfigured}
-                emptyPlaceholder="输入新的 API Key"
-                savedPlaceholder="输入新的 API Key"
-                disabled={isLoading || isPending}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>提示拼接模式</Label>
-              <PromptAssemblyModeSelector
-                value={promptAssemblyModeDraft}
-                onChange={setPromptAssemblyModeDraft}
-                disabled={isLoading || isPending}
-              />
-            </div>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              disabled={!canSave}
-              onClick={() =>
-                void onSave({
-                  baseUrl: trimmedBaseUrl,
-                  modelName: trimmedModel,
-                  promptAssemblyMode: promptAssemblyModeDraft,
-                  apiKey: trimmedApiKey || undefined,
-                })
-              }
-            >
-              {isPending ? "保存中..." : saveLabel}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={!canClearApiKey}
-              onClick={() =>
-                void onClearApiKey({
-                  baseUrl: trimmedBaseUrl || settings?.baseUrl || "",
-                  modelName: trimmedModel || settings?.modelName || "",
-                  promptAssemblyMode: promptAssemblyModeDraft,
-                })
-              }
-            >
-              清除已保存密钥
-            </Button>
-          </div>
-        </div>
-
-        {isLoading ? <p className="text-sm text-muted-foreground">加载{title}中...</p> : null}
-        {queryError ? <p className="text-sm text-destructive">{formatApiError(queryError)}</p> : null}
-        {saveError ? <p className="text-sm text-destructive">{formatApiError(saveError)}</p> : null}
-      </CardContent>
-    </Card>
-  )
-}
-
-function UserLlmSettingsCard({
-  settings,
-  isLoading,
-  isPending,
-  queryError,
-  saveError,
-  onSave,
-  onClearApiKey,
-}: {
-  settings:
-    | {
-        baseUrl: string
-        modelName: string
-        promptAssemblyMode: LlmPromptAssemblyMode
-        savedApiKeyConfigured: boolean
-        savedApiKeyPreview: string | null
-        llmConfigured: boolean
-        storyGenerationConfigured: boolean
-        llmSource: "user" | "global" | "env" | "none"
-      }
-    | undefined
-  isLoading: boolean
-  isPending: boolean
-  queryError: unknown
-  saveError: unknown
-  onSave: (payload: { baseUrl: string; modelName: string; promptAssemblyMode: LlmPromptAssemblyMode; apiKey?: string }) => Promise<void>
-  onClearApiKey: (payload: { baseUrl: string; modelName: string; promptAssemblyMode: LlmPromptAssemblyMode }) => Promise<void>
-}) {
-  const [baseUrlDraft, setBaseUrlDraft] = useState("")
-  const [modelDraft, setModelDraft] = useState("")
-  const [apiKeyDraft, setApiKeyDraft] = useState("")
-  const [promptAssemblyModeDraft, setPromptAssemblyModeDraft] = useState<LlmPromptAssemblyMode>("system")
-
-  useEffect(() => {
-    setBaseUrlDraft(settings?.baseUrl ?? "")
-    setModelDraft(settings?.modelName ?? "")
-    setApiKeyDraft("")
-    setPromptAssemblyModeDraft(settings?.promptAssemblyMode ?? "system")
-  }, [settings?.baseUrl, settings?.modelName, settings?.promptAssemblyMode])
-
-  const trimmedBaseUrl = baseUrlDraft.trim()
-  const trimmedModel = modelDraft.trim()
-  const trimmedApiKey = apiKeyDraft.trim()
-  const canSave =
-    !isLoading &&
-    !isPending &&
-    !!trimmedBaseUrl &&
-    !!trimmedModel &&
-    (
-      trimmedBaseUrl !== (settings?.baseUrl ?? "") ||
-      trimmedModel !== (settings?.modelName ?? "") ||
-      promptAssemblyModeDraft !== (settings?.promptAssemblyMode ?? "system") ||
-      !!trimmedApiKey
-    )
-  const canClearApiKey = !isLoading && !isPending && !!settings?.savedApiKeyConfigured
-
-  return (
-    <Card className="theme-card">
-      <CardHeader>
-        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-          <div className="space-y-1">
-            <CardTitle>我的 LLM 设置</CardTitle>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <span
-              className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${describeLlmSourceTone(settings?.llmSource ?? "none")}`}
-            >
-              {describeLlmSource(settings?.llmSource ?? "none")}
-            </span>
-            <span className="theme-meta px-3 py-1.5 text-xs">
-              {settings?.llmConfigured ? "当前账号已就绪" : "当前账号未配置"}
-            </span>
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4 text-sm">
-        <div className="theme-status-surface space-y-3 rounded-[1.2rem] border border-border/70 p-4">
-          <div className="grid gap-3">
-            <div className="space-y-2">
-              <Label htmlFor="userLlmBaseUrl">Base URL</Label>
-              <Input
-                id="userLlmBaseUrl"
-                value={baseUrlDraft}
-                onChange={(event) => setBaseUrlDraft(event.target.value)}
-                placeholder="https://api.openai.com/v1"
-                disabled={isLoading || isPending}
-                autoComplete="off"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="userLlmModel">模型名</Label>
-              <Input
-                id="userLlmModel"
-                value={modelDraft}
-                onChange={(event) => setModelDraft(event.target.value)}
-                placeholder="gpt-4o-mini"
-                disabled={isLoading || isPending}
-                autoComplete="off"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="userLlmApiKey">API 密钥</Label>
-              <SavedApiKeyInput
-                id="userLlmApiKey"
-                draftValue={apiKeyDraft}
-                onDraftChange={setApiKeyDraft}
-                savedApiKeyConfigured={!!settings?.savedApiKeyConfigured}
-                emptyPlaceholder="输入你的 API Key"
-                savedPlaceholder="输入你的 API Key"
-                disabled={isLoading || isPending}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>提示拼接模式</Label>
-              <PromptAssemblyModeSelector
-                value={promptAssemblyModeDraft}
-                onChange={setPromptAssemblyModeDraft}
-                disabled={isLoading || isPending}
-              />
-            </div>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              disabled={!canSave}
-              onClick={() =>
-                void onSave({
-                  baseUrl: trimmedBaseUrl,
-                  modelName: trimmedModel,
-                  promptAssemblyMode: promptAssemblyModeDraft,
-                  apiKey: trimmedApiKey || undefined,
-                })
-              }
-            >
-              {isPending ? "保存中..." : "保存到我的账号"}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={!canClearApiKey}
-              onClick={() =>
-                void onClearApiKey({
-                  baseUrl: trimmedBaseUrl || settings?.baseUrl || "",
-                  modelName: trimmedModel || settings?.modelName || "",
-                  promptAssemblyMode: promptAssemblyModeDraft,
-                })
-              }
-            >
-              清除我的密钥
-            </Button>
-          </div>
-        </div>
-
-        {isLoading ? <p className="text-sm text-muted-foreground">加载我的 LLM 设置中...</p> : null}
-        {queryError ? <p className="text-sm text-destructive">{formatApiError(queryError)}</p> : null}
-        {saveError ? <p className="text-sm text-destructive">{formatApiError(saveError)}</p> : null}
       </CardContent>
     </Card>
   )

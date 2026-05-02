@@ -8,8 +8,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
 import { useCurrentUser } from "@/ui/queries/auth"
-import { useUpdateMyGlobalSettings } from "@/ui/queries/profile"
-import { useSystemCapabilities } from "@/ui/queries/system"
+import { useMyLlmSettings, useUpdateMyGlobalSettings, useUpdateMyLlmSettings } from "@/ui/queries/profile"
+import { useGlobalLlmSettings, useSystemCapabilities, useUpdateGlobalLlmSettings } from "@/ui/queries/system"
 import { usePageMeta } from "@/ui/seo/usePageMeta"
 import { type DirectoryBindingPermission, usePomodoroRestMusicDirectoryBinding } from "@/ui/localMedia/projectDirectory"
 import {
@@ -21,6 +21,7 @@ import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/s
 import { usePomodoroStore } from "@/ui/store/pomodoroStore"
 import { useThemeStore } from "@/ui/store/themeStore"
 import { THEME_PRESETS } from "@/ui/theme/themePresets"
+import { GlobalLlmSettingsCard, UserLlmSettingsCard } from "@/views/settings/components/LlmSettingsCards"
 import { buildGlobalSettingsPath } from "@/views/settings/globalSettingsRouting"
 
 type TemplateEditorItem = {
@@ -87,6 +88,10 @@ export function GlobalSettingsPage() {
   const authEnabled = capabilitiesQ.data?.authEnabled ?? false
   const currentUserQ = useCurrentUser(authEnabled)
   const updateGlobalSettings = useUpdateMyGlobalSettings()
+  const globalLlmSettingsQ = useGlobalLlmSettings(capabilitiesQ.data !== undefined && !authEnabled)
+  const updateGlobalLlmSettingsM = useUpdateGlobalLlmSettings()
+  const myLlmSettingsQ = useMyLlmSettings(authEnabled)
+  const updateMyLlmSettingsM = useUpdateMyLlmSettings()
   const shouldSyncRemotely = authEnabled && Boolean(currentUserQ.data?.userId)
   const restMusicDirectory = usePomodoroRestMusicDirectoryBinding()
   const [restMusicDirectoryAction, setRestMusicDirectoryAction] = useState<"authorize" | "request" | "clear" | null>(null)
@@ -331,6 +336,56 @@ export function GlobalSettingsPage() {
           </div>
         </CardContent>
       </Card>
+
+      {authEnabled ? (
+        <UserLlmSettingsCard
+          queryError={myLlmSettingsQ.error}
+          saveError={updateMyLlmSettingsM.error}
+          settings={myLlmSettingsQ.data}
+          isLoading={myLlmSettingsQ.isLoading}
+          isPending={updateMyLlmSettingsM.isPending}
+          onClearApiKey={async ({ baseUrl, modelName, promptAssemblyMode }) => {
+            try {
+              await updateMyLlmSettingsM.mutateAsync({ baseUrl, modelName, promptAssemblyMode, clearApiKey: true })
+              showSuccessFeedback("大模型密钥已清除", "当前账号会停止使用已保存密钥；未重新保存前，这个账号的大模型能力视为未接通。")
+            } catch (err) {
+              showErrorFeedback("清除大模型密钥失败", formatApiError(err))
+            }
+          }}
+          onSave={async ({ baseUrl, modelName, promptAssemblyMode, apiKey }) => {
+            try {
+              await updateMyLlmSettingsM.mutateAsync({ baseUrl, modelName, promptAssemblyMode, apiKey })
+              showSuccessFeedback("大模型配置已保存", "当前账号之后在任意设备登录时都会复用这份大模型服务配置。")
+            } catch (err) {
+              showErrorFeedback("保存大模型配置失败", formatApiError(err))
+            }
+          }}
+        />
+      ) : (
+        <GlobalLlmSettingsCard
+          queryError={globalLlmSettingsQ.error}
+          saveError={updateGlobalLlmSettingsM.error}
+          settings={globalLlmSettingsQ.data}
+          isLoading={globalLlmSettingsQ.isLoading}
+          isPending={updateGlobalLlmSettingsM.isPending}
+          onClearApiKey={async ({ baseUrl, modelName, promptAssemblyMode }) => {
+            try {
+              await updateGlobalLlmSettingsM.mutateAsync({ baseUrl, modelName, promptAssemblyMode, clearApiKey: true })
+              showSuccessFeedback("大模型密钥已清除", "系统会停止使用已保存的全局密钥。")
+            } catch (err) {
+              showErrorFeedback("清除大模型密钥失败", formatApiError(err))
+            }
+          }}
+          onSave={async ({ baseUrl, modelName, promptAssemblyMode, apiKey }) => {
+            try {
+              await updateGlobalLlmSettingsM.mutateAsync({ baseUrl, modelName, promptAssemblyMode, apiKey })
+              showSuccessFeedback("大模型配置已保存", "后端现在会通过已配置服务代理后续的大模型能力请求。")
+            } catch (err) {
+              showErrorFeedback("保存大模型配置失败", formatApiError(err))
+            }
+          }}
+        />
+      )}
 
       <Card className="theme-card-main overflow-hidden">
         <CardHeader className="theme-card-header">
