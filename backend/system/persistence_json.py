@@ -26,7 +26,6 @@ from backend.models.enums import (
     LearningTaskNodeOrigin,
     MaterialSourceKind,
     MediaAssetKind,
-    MistakeStatus,
     ObjectMirrorStatus,
     ProjectState,
     ProjectType,
@@ -608,13 +607,6 @@ def _encode_recall_point(rp: RecallPoint) -> dict[str, Any]:
         "anchor": _encode_anchor(rp.anchor),
         "references": [str(x) for x in rp.references],
         "insights": [_encode_rich_content(x) for x in rp.insights],
-        "sourceProjectId": None if rp.source_project_id is None else str(rp.source_project_id),
-        "sourceRecallPointId": None if rp.source_recall_point_id is None else str(rp.source_recall_point_id),
-        "sourceMaterialId": rp.source_material_id,
-        "sourceMaterialTitle": rp.source_material_title,
-        "sourceAnchorLabel": rp.source_anchor_label,
-        "mistakeStatus": None if rp.mistake_status is None else rp.mistake_status.value,
-        "mistakeNote": rp.mistake_note,
     }
 
 
@@ -642,15 +634,6 @@ def _decode_recall_point(d: dict[str, Any]) -> RecallPoint:
         anchor=_decode_anchor(None if d.get("anchor") is None else dict(d["anchor"])),
         references=tuple(RecallPointId(str(x)) for x in d.get("references", [])),
         insights=tuple(_decode_rich_content(x) for x in d.get("insights", [])),
-        source_project_id=None if d.get("sourceProjectId") is None else ProjectId(str(d["sourceProjectId"])),
-        source_recall_point_id=(
-            None if d.get("sourceRecallPointId") is None else RecallPointId(str(d["sourceRecallPointId"]))
-        ),
-        source_material_id=None if d.get("sourceMaterialId") is None else str(d["sourceMaterialId"]),
-        source_material_title=None if d.get("sourceMaterialTitle") is None else str(d["sourceMaterialTitle"]),
-        source_anchor_label=None if d.get("sourceAnchorLabel") is None else str(d["sourceAnchorLabel"]),
-        mistake_status=None if d.get("mistakeStatus") is None else MistakeStatus(str(d["mistakeStatus"])),
-        mistake_note=None if d.get("mistakeNote") is None else str(d["mistakeNote"]),
         state=RecallPointState(str(d.get("state", RecallPointState.ACTIVE.value))),
         deleted_at=None if d.get("deletedAtMs") is None else _ms_to_ts(int(d["deletedAtMs"])),
     )

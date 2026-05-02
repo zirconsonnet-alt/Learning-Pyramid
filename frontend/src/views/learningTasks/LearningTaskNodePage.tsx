@@ -65,9 +65,9 @@ export function LearningTaskNodePage() {
   const instanceTitleById = Object.fromEntries((instancesQ.data ?? []).map((instance) => [instance.instanceId, instance.materialDisplayName])) as Record<string, string>
   const relatedInstanceLabel = (() => {
     const ids = Array.from(new Set((recallPointsQ.data ?? []).flatMap((item) => (item.anchor?.instanceId ? [item.anchor.instanceId] : []))))
-    if (ids.length === 0) return "未绑定材料锚点"
-    if (ids.length === 1) return instanceTitleById[ids[0]] ?? "关联材料"
-    return `${ids.length} 个关联材料`
+    if (ids.length === 0) return "未绑定内容锚点"
+    if (ids.length === 1) return instanceTitleById[ids[0]] ?? "关联内容"
+    return `${ids.length} 个关联内容`
   })()
   const backToTaskTreeAction = (
     <Button
@@ -210,7 +210,7 @@ function LeafLearningTaskCard(props: {
           label: "层级",
           value: learningTaskQ.data?.targetLayerIndex === null || learningTaskQ.data == null ? "-" : `L${learningTaskQ.data.targetLayerIndex}`,
         },
-        { label: "关联材料", value: relatedInstanceLabel },
+        { label: "关联内容", value: relatedInstanceLabel },
         {
           label: "复习关系",
           value: reviewChainId ? (

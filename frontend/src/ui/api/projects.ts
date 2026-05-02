@@ -15,7 +15,7 @@ const ProjectListSchema = z.array(ProjectSchema)
 const CreateProjectResultSchema = z.object({ projectId: z.string() })
 export const MaterialSourceKindSchema = z.enum(["SERVER_FS", "BROWSER_LOCAL", "NATIVE_LOCAL", "MANUAL", "BAIDU_NETDISK"])
 export type MaterialSourceKind = z.infer<typeof MaterialSourceKindSchema>
-export const ProjectTypeSchema = z.enum(["COURSE", "BOOK", "MISTAKE_BOOK", "LOOSE_POINTS"])
+export const ProjectTypeSchema = z.enum(["COURSE", "BOOK", "LOOSE_POINTS"])
 export type ProjectType = z.infer<typeof ProjectTypeSchema>
 export const ProjectMaterialSourceBindingSchema = z.object({
   projectId: z.string(),

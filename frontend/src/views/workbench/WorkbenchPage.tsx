@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { useQueries, useQuery } from "@tanstack/react-query"
+import { useQueries } from "@tanstack/react-query"
 import { FolderTree, RadioTower } from "lucide-react"
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 
@@ -7,15 +7,14 @@ import { getBaseUrl } from "@/ui/api/http"
 import { ApiError } from "@/ui/api/http"
 import { listRecallPointsByInstance } from "@/ui/api/instances"
 import type { Instance } from "@/ui/api/instances"
-import { listLearningObjectNodes, type LearningObjectNode } from "@/ui/api/learningObjects"
 import { getInstancePlaybackDescriptor } from "@/ui/api/media"
 import type { LearningTaskNode } from "@/ui/api/learningTaskNodes"
 import type { ProjectType } from "@/ui/api/projects"
-import type { SubjectContext } from "@/ui/api/subjects"
 import { ContentNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import { projectTypeRequiresLearningObjectTree, projectTypeUsesResolvableCourseAnchor } from "@/ui/projectTypes"
+import { buildProjectSettingsPath } from "@/ui/projectPaths"
 import { resolveProjectFile, useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
 import { useAuditLogEvents } from "@/ui/queries/auditLog"
 import { useLearningTaskNodes } from "@/ui/queries/learningTasks"
@@ -30,19 +29,15 @@ import {
   useSetLayerConfig,
 } from "@/ui/queries/workbench"
 import { useAppStore } from "@/ui/store/appStore"
-import { evaluateLearningPlan } from "@/ui/learningPlans/learningPlanEvaluation"
-import { selectActiveLearningPlans, useLearningPlanStore } from "@/ui/store/learningPlanStore"
 import { getLocalDateKey, listDailyStudyMetricEntries, loadDailyWorkbenchStats } from "@/ui/store/workbenchDailyStats"
 import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { syncStudyMetricsSnapshot } from "@/ui/studyMetricsSync"
 import { createStudyPresenceTracker, loadDailyProjectStudyPresence } from "@/ui/store/studyPresenceStore"
 import { loadVideoDurationMap, saveVideoDurationMs } from "@/ui/store/videoDurations"
 import { loadVideoWatchCoverageMap } from "@/ui/store/videoWatchCoverage"
-import { formatStudyMaterialTypeLabel } from "@/ui/subjects/studyMaterials"
 import { useWorkbenchStore } from "@/ui/store/workbenchStore"
 import { cn } from "@/ui/utils"
 import { ComposePane } from "@/views/workbench/components/ComposePane"
-import { LearningPlanCard } from "@/views/workbench/components/LearningPlanCard"
 import { LearningObjectTree } from "@/views/workbench/components/LearningObjectTree"
 import { ReviewPane } from "@/views/workbench/components/ReviewPane"
 import { RollupPane } from "@/views/workbench/components/RollupPane"
@@ -185,77 +180,14 @@ function StatusMetricRow(props: { label: string; value: string; emphasize?: bool
   )
 }
 
-function SidebarSectionTitle(props: { title: string; note?: string }) {
-  const { title, note } = props
+function SidebarSectionTitle(props: { title: string }) {
+  const { title } = props
   return (
     <div className="flex items-start justify-between gap-3">
       <div>
         <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">{title}</div>
-        {note ? <div className="mt-1 text-[12px] leading-5 text-muted-foreground">{note}</div> : null}
       </div>
     </div>
-  )
-}
-
-function SubjectContextCard(props: { context: SubjectContext; onOpenMaterial: (projectId: string, target: "workbench" | "settings") => void }) {
-  const { context, onOpenMaterial } = props
-  const [materialsExpanded, setMaterialsExpanded] = useState(false)
-  const hasMultipleMaterials = context.materials.length > 1
-  const shouldCollapseMaterials = context.materials.length > 3
-  const visibleMaterials = shouldCollapseMaterials && !materialsExpanded ? context.materials.slice(0, 3) : context.materials
-  const hiddenMaterialCount = Math.max(0, context.materials.length - visibleMaterials.length)
-
-  return (
-    <section className="rounded-[1.15rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-4 py-3.5">
-      <div className="text-[12px] font-medium text-muted-foreground">{context.isSubjectRoot ? "当前学科" : "当前材料"}</div>
-      <div className="mt-1 text-[17px] font-semibold tracking-[-0.02em] text-[color:var(--theme-soft-text-strong)]">
-        {context.isSubjectRoot ? context.subject.title : context.currentMaterial.title}
-      </div>
-      {!context.isSubjectRoot ? <div className="mt-1 text-[12px] text-muted-foreground">所属学科：{context.subject.title}</div> : null}
-      {hasMultipleMaterials ? (
-        <div className="mt-3 space-y-2">
-          <div className="flex items-center justify-between gap-3">
-            <div className="text-[12px] font-medium text-muted-foreground">同学科材料</div>
-            {shouldCollapseMaterials ? (
-              <button
-                type="button"
-                className="text-xs font-medium text-primary transition-colors hover:text-primary/80"
-                onClick={() => setMaterialsExpanded((current) => !current)}
-              >
-                {materialsExpanded ? "收起" : `查看其余 ${hiddenMaterialCount} 个`}
-              </button>
-            ) : null}
-          </div>
-          <div className="grid gap-2">
-            {visibleMaterials.map((material) => {
-              const compatibilityProjectId = material.compatibilityProjectId
-              const active = compatibilityProjectId === context.currentProjectId
-              return (
-                <div key={material.materialId} className="rounded-xl border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] px-3 py-2.5">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-medium text-foreground">{material.title}</div>
-                      <div className="mt-1 text-[11px] text-muted-foreground">{formatStudyMaterialTypeLabel(material.materialType)}</div>
-                    </div>
-                    {active ? <span className="theme-meta-strong">当前</span> : null}
-                  </div>
-                  {compatibilityProjectId ? (
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      <Button type="button" size="sm" variant={active ? "secondary" : "outline"} onClick={() => onOpenMaterial(compatibilityProjectId, "workbench")}>
-                        工作台
-                      </Button>
-                      <Button type="button" size="sm" variant="outline" onClick={() => onOpenMaterial(compatibilityProjectId, "settings")}>
-                        设置
-                      </Button>
-                    </div>
-                  ) : null}
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      ) : null}
-    </section>
   )
 }
 
@@ -269,7 +201,7 @@ function StudyModePane({
   return (
     <Card className="theme-card-main">
       <CardHeader className="theme-card-header">
-        <CardTitle>{projectType === "BOOK" ? "书本定位" : projectType === "MISTAKE_BOOK" ? "错题整理模式" : "零散知识点模式"}</CardTitle>
+        <CardTitle>{projectType === "BOOK" ? "书本定位" : "零散知识点模式"}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3 pt-5">
         <div className="rounded-[1.15rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] px-4 py-4 text-sm leading-6 text-[color:var(--theme-soft-text-strong)]">
@@ -277,10 +209,6 @@ function StudyModePane({
             ? instance
               ? `当前正在“${instance.materialDisplayName}”下录入复述点。请为每条复述点填写页码、章节、小节、题号或段落说明等文本锚点。`
               : "请先从左侧目录中选择一个章节、小节或条目，再开始录入书本复述点。"
-            : projectType === "MISTAKE_BOOK"
-              ? instance
-                ? `当前正在“${instance.materialDisplayName}”下整理错题。你可以继续补充题面、答案、来源说明，并把它们纳入后续复习。`
-                : "请先从左侧目录中选择一个错题条目或章节，再开始整理错题。"
             : "当前项目按零散知识点模式运行。你可以直接录入复述点，不需要选择学习对象，也不需要绑定锚点。"}
         </div>
       </CardContent>
@@ -329,15 +257,10 @@ export function WorkbenchPage() {
   const capabilitiesQ = useSystemCapabilities()
   const directoryBinding = useProjectDirectoryBinding(pid)
   const projectType = projectConfigQ.data?.projectType ?? "COURSE"
+  const projectSettingsPath = buildProjectSettingsPath(pid, { subjectProjectId: subjectContextQ.data?.subjectProjectId })
   const currentRollUpStrategy = projectConfigQ.data?.rollUpStrategy ?? "THRESHOLD_AUTO"
   const requiresLearningObjectTree = projectTypeRequiresLearningObjectTree(projectType)
   const usesResolvableCourseAnchor = projectTypeUsesResolvableCourseAnchor(projectType)
-  const learningObjectNodesQ = useQuery({
-    queryKey: ["learningObjectNodes", pid],
-    queryFn: () => listLearningObjectNodes(pid),
-    enabled: !!pid && requiresLearningObjectTree,
-  })
-
   const selectedInstanceId = ps?.selectedInstanceId ?? null
   const queueHasGate = !!queueQ.data?.headId
   const queueLength = queueQ.data?.ids.length ?? 0
@@ -387,13 +310,6 @@ export function WorkbenchPage() {
   const [recallPointProbeInFlightByInstanceId, setRecallPointProbeInFlightByInstanceId] = useState<Record<string, true>>({})
   const durationProbeSessionRef = useRef(0)
   const recallPointProbeSessionRef = useRef(0)
-  const plansById = useLearningPlanStore((state) => state.plansById)
-  const progressSnapshotsByPlanId = useLearningPlanStore((state) => state.progressSnapshotsByPlanId)
-  const upsertLearningPlan = useLearningPlanStore((state) => state.upsertPlan)
-  const archiveLearningPlan = useLearningPlanStore((state) => state.archivePlan)
-  const recordLearningPlanProgressSnapshot = useLearningPlanStore((state) => state.recordProgressSnapshot)
-  const activeLearningPlans = useMemo(() => selectActiveLearningPlans(plansById, pid), [pid, plansById])
-  const activeLearningPlan = activeLearningPlans[0] ?? null
 
   useEffect(() => {
     if (!pid) return
@@ -733,22 +649,6 @@ export function WorkbenchPage() {
   }, [instancesQ.data, videoDurationByInstanceId, videoWatchedMsByInstanceId])
 
   const videoProgressPercent = videoProgress.totalMs > 0 ? Math.min(100, Math.max(0, (videoProgress.watchedMs / videoProgress.totalMs) * 100)) : 0
-  const remainingDurationProbeCount = useMemo(
-    () =>
-      (instancesQ.data ?? []).filter(
-        (item) =>
-          !videoDurationByInstanceId[item.instanceId] &&
-          (!durationProbeAttemptedByInstanceId[item.instanceId] || durationProbeInFlightByInstanceId[item.instanceId]),
-      ).length,
-    [durationProbeAttemptedByInstanceId, durationProbeInFlightByInstanceId, instancesQ.data, videoDurationByInstanceId],
-  )
-  const remainingRecallPointProbeCount = useMemo(
-    () =>
-      (instancesQ.data ?? []).filter(
-        (item) => !recallPointProbeStatusByInstanceId[item.instanceId] || recallPointProbeInFlightByInstanceId[item.instanceId],
-      ).length,
-    [instancesQ.data, recallPointProbeInFlightByInstanceId, recallPointProbeStatusByInstanceId],
-  )
   const projectStudyMetricEntries = useMemo(
     () => listDailyStudyMetricEntries([pid]),
     [pid, studyEstimateRevision, todayStats],
@@ -770,77 +670,27 @@ export function WorkbenchPage() {
       }),
     [projectCoveredVideoMs, projectRecallPointCount, projectStudyMetricEntries, videoProgress.totalMs],
   )
-  const learningPlanEvaluation = useMemo(() => {
-    if (!activeLearningPlan) return null
-    return evaluateLearningPlan({
-      plan: activeLearningPlan,
-      todayDateKey,
-      nodes: learningObjectNodesQ.data ?? [],
-      instances: instancesQ.data ?? [],
-      videoDurationByInstanceId,
-      videoWatchedMsByInstanceId,
-      recallPointCountByInstanceId,
-      entries: projectStudyMetricEntries,
-      progressSnapshots: progressSnapshotsByPlanId[activeLearningPlan.planId],
-    })
-  }, [
-    activeLearningPlan,
-    instancesQ.data,
-    learningObjectNodesQ.data,
-    pid,
-    progressSnapshotsByPlanId,
-    projectStudyMetricEntries,
-    recallPointCountByInstanceId,
-    todayDateKey,
-    videoDurationByInstanceId,
-    videoWatchedMsByInstanceId,
-  ])
-
-  useEffect(() => {
-    if (!learningPlanEvaluation) return
-    recordLearningPlanProgressSnapshot(learningPlanEvaluation.plan.planId, todayDateKey, learningPlanEvaluation.progressRatio)
-  }, [learningPlanEvaluation, recordLearningPlanProgressSnapshot, todayDateKey])
-
   const studyEstimatePresentation = useMemo(() => {
     if (!usesResolvableCourseAnchor) return null
-
-    const pendingNotes: string[] = []
-    if (remainingDurationProbeCount > 0) pendingNotes.push(`还有 ${remainingDurationProbeCount} 个视频时长在统计`)
-    if (remainingRecallPointProbeCount > 0) pendingNotes.push(`还有 ${remainingRecallPointProbeCount} 个视频的复述点在扫描`)
-    const pendingHint = pendingNotes.length > 0 ? `${pendingNotes.join("，")}，结果会继续修正。` : ""
 
     if (!studyEstimate) {
       return {
         value: "等待统计",
-        detail: pendingHint || "当前项目的视频总时长还在建立中，完成后会开始推算剩余学习时长。",
       }
     }
 
     if (studyEstimate.status === "insufficient_data") {
-      const sampleBits = [
-        `已采样看 ${formatDurationCompact(studyEstimate.sampleWatchMs)}`,
-        `构 ${studyEstimate.sampleRecallPointCount} 个复述点`,
-      ]
-      if (studyEstimate.sampleQaMs > 0) sampleBits.push(`问 ${formatDurationCompact(studyEstimate.sampleQaMs)}`)
-      const reasonBits: string[] = []
-      if (studyEstimate.sampleCompletedMs <= 0) reasonBits.push("历史有效学习区间还没累计起来")
-      else if (studyEstimate.sampleWatchCoverageRatio < 0.35) reasonBits.push("观看样本偏低，暂时不足以代表当前项目节奏")
-      const detail = `${sampleBits.join(" · ")}。${reasonBits[0] ?? "继续学习一段时间后，这里会给出更稳定的预计剩余时长。"}`
       return {
         value: "继续学习后生成",
-        detail: pendingHint ? `${detail} ${pendingHint}` : detail,
       }
     }
 
     const completionPercent = Math.round(studyEstimate.completionRatio * 100)
-    const confidenceLabel = studyEstimate.confidence === "high" ? "把握较高" : "持续修正中"
     const value = studyEstimate.remainingMs <= 60_000 && completionPercent >= 95 ? "接近完成" : formatDurationCompact(studyEstimate.remainingMs)
-    const detail = `按当前节奏，完整学完约 ${formatDurationCompact(studyEstimate.predictedTotalMs)}，约 ${studyEstimate.predictedRecallPointCount} 个复述点，已完成约 ${completionPercent}%（${confidenceLabel}）。`
     return {
       value,
-      detail: pendingHint ? `${detail} ${pendingHint}` : detail,
     }
-  }, [remainingDurationProbeCount, remainingRecallPointProbeCount, studyEstimate, usesResolvableCourseAnchor])
+  }, [studyEstimate, usesResolvableCourseAnchor])
   const todayStudyPresenceMs = Math.max(todayPresenceStats.presenceMs, todayStats.effectiveMs)
   const blankPresenceMs = Math.max(0, todayStudyPresenceMs - todayStats.effectiveMs)
   const focusRatio = todayStudyPresenceMs > 0 ? todayStats.effectiveMs / todayStudyPresenceMs : 0
@@ -915,15 +765,7 @@ export function WorkbenchPage() {
         ? "正在学习"
         : projectType === "LOOSE_POINTS"
           ? "可直接录入"
-          : projectType === "MISTAKE_BOOK"
-            ? "等待整理"
           : "等待开始"
-
-  function scrollToWorkbenchSection(sectionId: string) {
-    const target = document.getElementById(sectionId)
-    if (!target) return
-    target.scrollIntoView({ behavior: "smooth", block: "start" })
-  }
 
   if (!pid) {
     return (
@@ -962,20 +804,17 @@ export function WorkbenchPage() {
         tone="info"
         action={
           <div className="flex flex-wrap gap-2">
-            <Button onClick={() => navigate(`/p/${pid}/settings`)}>去项目设置</Button>
+            <Button onClick={() => navigate(projectSettingsPath)}>去项目设置</Button>
           </div>
         }
       />
     )
   } else if (requiresLearningObjectTree && !instancesQ.isLoading && (instancesQ.data?.length ?? 0) === 0) {
-    const noContentTitle =
-      projectType === "BOOK" ? "先初始化书本目录" : projectType === "MISTAKE_BOOK" ? "先准备错题入口" : courseContentPrepTitle
+    const noContentTitle = projectType === "BOOK" ? "先初始化书本目录" : courseContentPrepTitle
     const noContentMessage =
       projectType === "BOOK"
         ? "还没有可用章节。先去项目设置初始化目录结构，完成后回工作台选章节开始学习。"
-        : projectType === "MISTAKE_BOOK"
-          ? "还没有可用错题条目。先去项目设置准备错题入口，完成后回工作台选条目开始整理。"
-          : courseContentPrepMessage
+        : courseContentPrepMessage
 
     workbenchGuideNotice = (
       <ContentNotice
@@ -984,31 +823,7 @@ export function WorkbenchPage() {
         tone="info"
         action={
           <div className="flex flex-wrap gap-2">
-            <Button onClick={() => navigate(`/p/${pid}/settings`)}>去项目设置</Button>
-          </div>
-        }
-      />
-    )
-  } else if (requiresLearningObjectTree && !instancesQ.isLoading && (instancesQ.data?.length ?? 0) > 0 && !selectedInstanceId) {
-    const selectContentTitle =
-      projectType === "BOOK" ? "先从左侧选一个章节开始学习" : projectType === "MISTAKE_BOOK" ? "先从左侧选一个错题条目开始整理" : "先从左侧选一个视频开始学习"
-    const selectContentMessage =
-      projectType === "BOOK"
-        ? "内容已准备好。先选中章节、小节或条目，再开始录入和回看。"
-        : projectType === "MISTAKE_BOOK"
-          ? "内容已准备好。先选中当前要整理的条目或章节，再继续录入和整理。"
-          : "内容已准备好。先从左侧选中当前视频，再开始录入和复习。"
-
-    workbenchGuideNotice = (
-      <ContentNotice
-        title={selectContentTitle}
-        message={selectContentMessage}
-        tone="info"
-        action={
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={() => scrollToWorkbenchSection("workbench-content-tree")}>
-              去左侧选内容
-            </Button>
+            <Button onClick={() => navigate(projectSettingsPath)}>去项目设置</Button>
           </div>
         }
       />
@@ -1044,6 +859,7 @@ export function WorkbenchPage() {
                 <LearningObjectTree
                   projectId={pid}
                   projectType={projectType}
+                  subjectProjectId={subjectContextQ.data?.subjectProjectId}
                   selectedInstanceId={selectedInstanceId}
                   onSelectInstance={(instanceId) => {
                     setSelectedInstanceId(pid, instanceId)
@@ -1166,10 +982,10 @@ export function WorkbenchPage() {
             </CardHeader>
             <CardContent className="space-y-5 pt-4 text-sm xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:overscroll-contain xl:pr-3">
               <section className="space-y-3">
-                <SidebarSectionTitle title="推进判断" note="先看剩余量、计划节奏和覆盖情况，再决定今天往哪推进。" />
+                <SidebarSectionTitle title="推进判断" />
 
                 {studyEstimatePresentation ? (
-                  <section className="rounded-[1.15rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-4 py-3.5">
+                  <section>
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <div className="text-[12px] font-medium text-muted-foreground">预计剩余学习时长</div>
@@ -1178,22 +994,11 @@ export function WorkbenchPage() {
                         </div>
                       </div>
                     </div>
-                    <p className="mt-2 text-[12px] leading-6 text-muted-foreground">{studyEstimatePresentation.detail}</p>
                   </section>
                 ) : null}
 
-                <LearningPlanCard
-                  projectId={pid}
-                  todayDateKey={todayDateKey}
-                  plan={activeLearningPlan}
-                  evaluation={learningPlanEvaluation}
-                  nodes={(learningObjectNodesQ.data ?? []) as LearningObjectNode[]}
-                  onArchive={archiveLearningPlan}
-                  onSave={upsertLearningPlan}
-                />
-
                 {usesResolvableCourseAnchor ? (
-                  <section className="rounded-[1.15rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-4 py-3.5">
+                  <section>
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <div className="text-[12px] font-medium text-muted-foreground">观看覆盖</div>
@@ -1203,39 +1008,14 @@ export function WorkbenchPage() {
                       </div>
                       <div className="text-[13px] font-semibold text-[color:var(--theme-soft-text-strong)]">{Math.round(videoProgressPercent)}%</div>
                     </div>
-                    <div className="theme-progress-track mt-3 h-2 overflow-hidden rounded-full">
-                      <div
-                        className="theme-progress-fill h-full rounded-full transition-[width] duration-500"
-                        style={{ width: `${videoProgressPercent}%` }}
-                      />
-                    </div>
-                    <div className="mt-2 text-[12px] text-muted-foreground">
-                      {remainingDurationProbeCount > 0 ? `正在统计 ${remainingDurationProbeCount} 个视频时长` : "按当前设备实际观看过的片段估算"}
-                    </div>
                   </section>
                 ) : null}
               </section>
 
-              <section className="space-y-3">
-                <SidebarSectionTitle title="当前上下文" note="需要切换材料、确认所在位置时，再看这里。" />
-                {subjectContextQ.isLoading ? (
-                  <div className="rounded-[1rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-4 py-3 text-[12px] text-muted-foreground">
-                    正在同步当前学科和材料位置...
-                  </div>
-                ) : null}
-                {subjectContextQ.data ? (
-                  <SubjectContextCard
-                    context={subjectContextQ.data}
-                    onOpenMaterial={(projectId, target) => navigate(target === "settings" ? `/p/${projectId}/settings` : `/p/${projectId}/workbench`)}
-                  />
-                ) : null}
-                {subjectContextQ.error ? <p className="text-sm text-destructive">{formatApiError(subjectContextQ.error)}</p> : null}
-              </section>
-
-              <section className="theme-subtle-surface overflow-hidden">
+              <section>
                 <button
                   type="button"
-                  className="flex w-full items-start justify-between gap-4 px-4 py-3 text-left"
+                  className="flex w-full items-start justify-between gap-4 text-left"
                   onClick={() => setSidebarStatsExpanded((current) => !current)}
                 >
                   <div>
@@ -1243,20 +1023,17 @@ export function WorkbenchPage() {
                     <div className="mt-1 text-[15px] font-semibold text-[color:var(--theme-soft-text-strong)]">
                       有效学习 {formatDurationCompact(todayStats.effectiveMs)}
                     </div>
-                    <div className="mt-1 text-[12px] text-muted-foreground">
-                      {todayStudyPresenceMs > 0 ? `专注率 ${formatPercent(focusRatio)} · 复习 ${formatDurationCompact(todayStats.reviewMs)}` : "展开后查看今天的完整统计"}
-                    </div>
                   </div>
                   <span className="text-xs font-medium text-primary">{sidebarStatsExpanded ? "收起" : "展开"}</span>
                 </button>
                 {sidebarStatsExpanded ? (
-                  <div className="border-t border-border/60 px-4 pb-3">
+                  <div className="mt-3 border-t border-border/60 pt-2">
                     <div className="divide-y divide-border/60">
                       <StatusMetricRow label="有效学习时长" value={formatDurationCompact(todayStats.effectiveMs)} emphasize />
                       <StatusMetricRow label="学习驻留" value={formatDurationCompact(todayStudyPresenceMs)} />
                       <StatusMetricRow label="走神时长" value={formatDurationCompact(blankPresenceMs)} />
                       <StatusMetricRow label="客观专注率" value={todayStudyPresenceMs > 0 ? formatPercent(focusRatio) : "继续学习后生成"} emphasize={todayStudyPresenceMs > 0} />
-                      <StatusMetricRow label="材料接触" value={formatDurationCompact(todayStats.watchMs)} />
+                      <StatusMetricRow label="内容接触" value={formatDurationCompact(todayStats.watchMs)} />
                       <StatusMetricRow label="复述点构建" value={formatDurationCompact(todayStats.composeMs)} />
                       <StatusMetricRow label="复习时长" value={formatDurationCompact(todayStats.reviewMs)} />
                       <StatusMetricRow label="AI 问答" value={formatDurationCompact(todayStats.qaMs)} />

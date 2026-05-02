@@ -4,7 +4,9 @@ from typing import Any
 
 from adapter.deps import get_api, get_auth_store
 from backend.system.auth_store import AuthStore
+from backend.system.email_verification_delivery import email_verification_enabled
 from backend.system.runtime_features import current_runtime_features
+from backend.system.signup_human_check import signup_human_check_enabled
 from backend.system.sql_backend import current_sql_runtime_config
 
 
@@ -18,6 +20,9 @@ def collect_runtime_status(*, user_id: str | None = None, auth_store: AuthStore 
         "baiduNetdiskEnabled": features.baidu_netdisk_enabled,
         "authEnabled": features.auth_enabled,
         "allowSignup": features.allow_signup,
+        "signupInviteRequired": features.signup_invite_required,
+        "emailVerificationEnabled": email_verification_enabled(),
+        "signupHumanCheckEnabled": signup_human_check_enabled(),
     }
 
     try:

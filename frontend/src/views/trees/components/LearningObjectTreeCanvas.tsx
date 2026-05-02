@@ -83,7 +83,7 @@ function getVisual(uiType?: ObjectTreeVisualType): {
   return {
     width: 186,
     Icon: File,
-    label: "材料",
+    label: "内容",
     cardClass:
       "border-[#d3dde8] bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(251,253,255,0.96))] shadow-[0_20px_42px_-36px_rgba(15,23,42,0.34)]",
     pillClass: "border-[#d8e1ea] bg-white text-[#56718b]",
@@ -113,9 +113,9 @@ function getRowCaption(depth: number, rowNodeIds: string[], nodeById: Record<str
   )
 
   if (depth === 0) return "根层"
-  if (types.size === 1 && types.has("material")) return "材料层"
+  if (types.size === 1 && types.has("material")) return "内容层"
   if (types.size === 1 && types.has("group")) return "目录层"
-  return "目录 / 材料"
+  return "目录 / 内容"
 }
 
 function buildLayout(
@@ -274,7 +274,7 @@ export function LearningObjectTreeCanvas({
       <ContentEmptyState
         icon={HardDrive}
         title="当前对象树还没有根节点"
-        message="内容目录导入完成后，学习对象的根目录与分组结构会显示在这里。"
+        message="内容目录导入完成后，项目内容的根目录与分组结构会显示在这里。"
       />
     )
   }
@@ -335,7 +335,7 @@ export function LearningObjectTreeCanvas({
           const isActive = !!focusNodeId && activeNodeIds.has(rect.nodeId)
           const isMuted = !!focusNodeId && !isActive
           const displayTitle = node.displayTitle ?? node.title
-          const metaText = node.metaText ?? (node.kind === "container" ? `${node.children?.length ?? 0} 个子节点` : "学习材料")
+          const metaText = node.metaText ?? (node.kind === "container" ? `${node.children?.length ?? 0} 个子节点` : "项目内容")
           const Icon = visual.Icon
 
           return (

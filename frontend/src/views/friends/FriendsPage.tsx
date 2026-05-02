@@ -74,31 +74,20 @@ function StatCard(props: { label: string; value: ReactNode; detail?: string }) {
   )
 }
 
-function formatFriendRequestStatus(status: string) {
-  if (status === "accepted") return "已同意"
-  if (status === "rejected") return "已拒绝"
-  if (status === "cancelled") return "已撤回"
-  return "待处理"
-}
-
-function getFriendRequestStatusTone(status: string): "default" | "accent" | "danger" {
-  if (status === "accepted") return "accent"
-  if (status === "rejected" || status === "cancelled") return "danger"
-  return "default"
-}
-
-function describeFriendRequestStatus(item: FriendRequest, box: "incoming" | "outgoing") {
-  const handledAt = item.handledAt ? formatDateTimeLabel(item.handledAt) : null
-  if (item.status === "accepted") {
-    return box === "incoming" ? `你已在 ${handledAt ?? "稍早前"} 同意这条申请。` : `对方已在 ${handledAt ?? "稍早前"} 同意你的申请。`
-  }
-  if (item.status === "rejected") {
-    return box === "incoming" ? `你已在 ${handledAt ?? "稍早前"} 拒绝这条申请。` : `对方已在 ${handledAt ?? "稍早前"} 拒绝你的申请。`
-  }
-  if (item.status === "cancelled") {
-    return box === "incoming" ? "对方已经撤回这条好友申请。" : "你已经撤回这条好友申请。"
-  }
-  return "这条申请正在等待处理。"
+function SummaryChip(props: { label: string; value: ReactNode; tone?: "default" | "accent" }) {
+  return (
+    <div
+      className={cn(
+        "inline-flex items-center gap-2 rounded-full border px-3 py-2",
+        props.tone === "accent"
+          ? "border-primary/20 bg-primary/10 text-primary"
+          : "border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] text-[color:var(--theme-subtle-text)]",
+      )}
+    >
+      <span className="text-[11px] uppercase tracking-[0.12em]">{props.label}</span>
+      <span className="text-sm font-semibold tracking-tight text-foreground">{props.value}</span>
+    </div>
+  )
 }
 
 type FriendRequestAction =
@@ -130,8 +119,10 @@ export function FriendsPage() {
   const friends = friendsQ.data ?? []
   const incomingRequests = incomingRequestsQ.data ?? []
   const outgoingRequests = outgoingRequestsQ.data ?? []
-  const incomingPendingCount = incomingRequests.filter((item) => item.status === "pending").length
-  const outgoingPendingCount = outgoingRequests.filter((item) => item.status === "pending").length
+  const incomingPendingRequests = incomingRequests.filter((item) => item.status === "pending")
+  const outgoingPendingRequests = outgoingRequests.filter((item) => item.status === "pending")
+  const incomingPendingCount = incomingPendingRequests.length
+  const outgoingPendingCount = outgoingPendingRequests.length
   const filteredFriends = useMemo(() => {
     if (!filterText.trim()) return friends
     const needle = filterText.trim().toLowerCase()
@@ -140,6 +131,14 @@ export function FriendsPage() {
       return text.includes(needle)
     })
   }, [filterText, friends])
+  const hasFilterText = filterText.trim().length > 0
+  const showPendingRequestsPanel =
+    incomingRequestsQ.isLoading ||
+    outgoingRequestsQ.isLoading ||
+    Boolean(incomingRequestsQ.error) ||
+    Boolean(outgoingRequestsQ.error) ||
+    incomingPendingCount > 0 ||
+    outgoingPendingCount > 0
 
   async function onCopyMyUid() {
     const publicUid = currentUserQ.data?.publicUid?.trim()
@@ -214,13 +213,13 @@ export function FriendsPage() {
 
   return (
     <>
-      <div className="grid gap-6">
-        <Card>
-          <CardHeader className="gap-3">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-              <div>
-                <CardTitle>好友中心</CardTitle>
-                <CardDescription>发送好友申请、同意好友申请、查看学习排行和好友资料都集中在这里。</CardDescription>
+      <div className="grid gap-4">
+        <Card className="theme-card-main overflow-hidden">
+          <CardHeader className="theme-card-header gap-4 pb-4">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+              <div className="space-y-1">
+                <CardTitle className="text-2xl">好友中心</CardTitle>
+                <CardDescription className="max-w-2xl">发送申请、处理申请和查看好友资料都在这里，保留最常用的入口就够了。</CardDescription>
               </div>
               <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto">
                 <div className="w-full sm:w-72">
@@ -228,129 +227,162 @@ export function FriendsPage() {
                     value={filterText}
                     onChange={(event) => setFilterText(event.target.value)}
                     placeholder="按昵称 / UID / 简介搜索好友"
+                    className="border-[color:var(--theme-soft-border)] [background:white] [box-shadow:none]"
                   />
                 </div>
-                <Button type="button" onClick={() => setAddOpen(true)} className="sm:self-end">
+                <Button type="button" onClick={() => setAddOpen(true)} className="sm:self-end [box-shadow:none]">
                   <UserPlus className="h-4 w-4" />
                   添加好友
                 </Button>
               </div>
             </div>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(22rem,25rem)]">
-              <div className="grid gap-3 sm:grid-cols-3">
-                <StatCard label="好友总数" value={friends.length} detail={friends.length > 0 ? "已经建立的双向好友关系" : "还没有添加任何好友"} />
-                <StatCard label="收到申请" value={incomingPendingCount} detail={incomingPendingCount > 0 ? "等待你处理" : "当前没有待处理申请"} />
-                <StatCard label="发出申请" value={outgoingPendingCount} detail={outgoingPendingCount > 0 ? "等待对方处理" : "当前没有待确认申请"} />
-              </div>
-
-              <div className="rounded-[1.1rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] p-4">
-                <div className="text-xs uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">我的好友 UID</div>
-                <div className="mt-2 text-xl font-semibold tracking-tight text-foreground">{currentUserQ.data?.publicUid ?? "正在加载..."}</div>
-                <p className="mt-2 text-sm leading-6 text-[color:var(--theme-subtle-text)]">把这个 UID 发给朋友，对方就能在好友中心直接搜索并发送申请。</p>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <Button type="button" size="sm" variant="outline" onClick={() => void onCopyMyUid()} disabled={!currentUserQ.data?.publicUid}>
-                    <Copy className="h-4 w-4" />
-                    复制 UID
-                  </Button>
-                  <Button asChild size="sm">
-                    <Link to="/profile">
-                      完善个人资料
-                      <ArrowRight className="h-4 w-4" />
-                    </Link>
-                  </Button>
+          <CardContent className="space-y-5">
+            <div className="rounded-[1.2rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-4 py-4 sm:px-5">
+              <div className="flex flex-col gap-4">
+                <div className="flex flex-wrap gap-2">
+                  <SummaryChip label="好友" value={friendsQ.isLoading ? "..." : friends.length} />
+                  <SummaryChip label="待我处理" value={incomingRequestsQ.isLoading ? "..." : incomingPendingCount} tone={incomingPendingCount > 0 ? "accent" : "default"} />
+                  <SummaryChip label="等待对方" value={outgoingRequestsQ.isLoading ? "..." : outgoingPendingCount} />
+                </div>
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <div className="text-xs uppercase tracking-[0.12em] text-[color:var(--theme-subtle-text)]">我的好友 UID</div>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <div className="text-2xl font-semibold tracking-tight text-foreground">{currentUserQ.data?.publicUid ?? "正在加载..."}</div>
+                      <p className="text-sm leading-6 text-muted-foreground">把这个 UID 发给朋友，对方就能直接搜索并发送好友申请。</p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2 lg:justify-end">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void onCopyMyUid()}
+                      disabled={!currentUserQ.data?.publicUid}
+                      className="[box-shadow:none]"
+                    >
+                      <Copy className="h-4 w-4" />
+                      复制 UID
+                    </Button>
+                    <Button asChild size="sm" className="[box-shadow:none]">
+                      <Link to="/profile">
+                        完善个人资料
+                        <ArrowRight className="h-4 w-4" />
+                      </Link>
+                    </Button>
+                  </div>
                 </div>
               </div>
             </div>
 
-            {friendsQ.isLoading ? <LoadingNotice title="正在加载好友列表" message="请稍候，正在同步你的好友关系。" /> : null}
-            {friendsQ.error ? <ErrorNotice title="好友列表加载失败" message={formatApiError(friendsQ.error)} /> : null}
-
-            {!friendsQ.isLoading && !friendsQ.error && filteredFriends.length === 0 ? (
-              <ContentEmptyState
-                title="暂时还没有好友"
-                message="使用上方按钮发送好友申请，或把自己的 UID 发给朋友。"
-                icon={Sparkles}
-              />
-            ) : null}
-
-            {filteredFriends.map((friend) => (
-              <div
-                key={friend.userId}
-                className="rounded-[1rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] p-4 shadow-[var(--theme-soft-shadow)]"
-              >
-                <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                  <div className="flex min-w-0 flex-1 items-center gap-4">
-                    <FriendAvatar user={friend} />
-                    <div className="min-w-0 space-y-1">
-                      <div className="text-base font-semibold text-foreground">{friend.nickname}</div>
-                      <div className="text-sm text-muted-foreground">UID {friend.publicUid}</div>
-                      <p className="text-sm leading-6 text-[color:var(--theme-subtle-text)]">{friend.bio?.trim() || "暂未填写个人简介"}</p>
-                      <div className="flex flex-wrap gap-2 pt-1">
-                        <MetaTag>成为好友：{new Date(friend.friendedAt).toLocaleDateString()}</MetaTag>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 flex-wrap gap-2">
-                    <Button type="button" size="sm" variant="outline" onClick={() => setProfileFriend(friend)}>
-                      查看资料
-                    </Button>
-                    <Button type="button" size="sm" variant="outline" onClick={onShowLeaderboard}>
-                      <Sparkles className="h-4 w-4" />
-                      学习排行
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => onDeleteFriend(friend)}
-                      disabled={deleteFriend.isPending}
-                    >
-                      <UserMinus className="h-4 w-4" />
-                      解除好友
-                    </Button>
-                  </div>
+            {showPendingRequestsPanel ? (
+              <div className="rounded-[1.2rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-4 py-4 sm:px-5">
+                <div className="space-y-1">
+                  <div className="text-base font-semibold tracking-tight text-foreground">待处理申请</div>
+                  <div className="text-sm text-muted-foreground">这里只展示还没处理完的申请，避免把页面拆成几张大卡片。</div>
+                </div>
+                <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                  <PendingRequestColumn
+                    title="待我处理"
+                    description="收到的申请"
+                    requests={incomingPendingRequests}
+                    loading={incomingRequestsQ.isLoading}
+                    error={incomingRequestsQ.error}
+                    emptyTitle="暂无需要处理的申请"
+                    emptyMessage="朋友给你发来好友申请后，会直接出现在这里。"
+                    primaryActionLabel="同意"
+                    secondaryActionLabel="拒绝"
+                    actionsDisabled={acceptRequest.isPending || rejectRequest.isPending}
+                    onPrimaryAction={(item) => onRequestAction({ kind: "accept", requestId: item.requestId, nickname: item.user.nickname })}
+                    onSecondaryAction={(item) => onRequestAction({ kind: "reject", requestId: item.requestId, nickname: item.user.nickname })}
+                  />
+                  <PendingRequestColumn
+                    title="等待对方"
+                    description="我发出的申请"
+                    requests={outgoingPendingRequests}
+                    loading={outgoingRequestsQ.isLoading}
+                    error={outgoingRequestsQ.error}
+                    emptyTitle="暂无等待中的申请"
+                    emptyMessage="发送好友申请后，只要对方还没处理，就会显示在这里。"
+                    primaryActionLabel="撤回申请"
+                    actionsDisabled={cancelRequest.isPending}
+                    onPrimaryAction={(item) => onRequestAction({ kind: "cancel", requestId: item.requestId, nickname: item.user.nickname })}
+                  />
                 </div>
               </div>
-            ))}
+            ) : null}
+
+            <div className="space-y-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="space-y-1">
+                  <div className="text-base font-semibold tracking-tight text-foreground">好友列表</div>
+                  <div className="text-sm text-muted-foreground">{hasFilterText ? "按当前关键词筛选匹配到的好友。" : "已经互加成功的好友都会显示在这里。"}</div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {hasFilterText ? <MetaTag>结果 {filteredFriends.length}</MetaTag> : null}
+                  <Button type="button" size="sm" variant="ghost" onClick={onShowLeaderboard}>
+                    <Sparkles className="h-4 w-4" />
+                    学习排行
+                  </Button>
+                </div>
+              </div>
+
+              {friendsQ.isLoading ? <LoadingNotice title="正在加载好友列表" message="请稍候，正在同步你的好友关系。" /> : null}
+              {friendsQ.error ? <ErrorNotice title="好友列表加载失败" message={formatApiError(friendsQ.error)} /> : null}
+
+              {!friendsQ.isLoading && !friendsQ.error && filteredFriends.length === 0 ? (
+                <ContentEmptyState
+                  title={friends.length === 0 ? "暂时还没有好友" : "没有找到匹配的好友"}
+                  message={friends.length === 0 ? "使用上方按钮发送好友申请，或把自己的 UID 发给朋友。" : hasFilterText ? "换个更短的关键词，或者直接按 UID 搜索试试。" : "当前列表为空。"}
+                  icon={Sparkles}
+                  className="rounded-[1.1rem] border-[color:var(--theme-soft-border)] bg-transparent"
+                />
+              ) : null}
+
+              {filteredFriends.length > 0 ? (
+                <div className="overflow-hidden rounded-[1.15rem] border border-[color:var(--theme-soft-border)]">
+                  {filteredFriends.map((friend) => (
+                    <div key={friend.userId} className="border-b border-[color:var(--theme-soft-border)] px-4 py-4 last:border-b-0 sm:px-5">
+                      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                        <div className="flex min-w-0 flex-1 items-start gap-4">
+                          <FriendAvatar user={friend} />
+                          <div className="min-w-0 space-y-1.5">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <div className="text-base font-semibold text-foreground">{friend.nickname}</div>
+                              <MetaTag>好友于 {new Date(friend.friendedAt).toLocaleDateString()}</MetaTag>
+                            </div>
+                            <div className="text-sm text-muted-foreground">UID {friend.publicUid}</div>
+                            <p className="text-sm leading-6 text-[color:var(--theme-subtle-text)]">{friend.bio?.trim() || "这个朋友还没有填写简介。"}</p>
+                          </div>
+                        </div>
+                        <div className="flex shrink-0 flex-wrap gap-2">
+                          <Button type="button" size="sm" variant="outline" onClick={() => setProfileFriend(friend)} className="[box-shadow:none]">
+                            查看资料
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => onDeleteFriend(friend)}
+                            disabled={deleteFriend.isPending}
+                            className="text-muted-foreground hover:text-destructive"
+                          >
+                            <UserMinus className="h-4 w-4" />
+                            解除好友
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           </CardContent>
         </Card>
-
-        <div className="grid gap-6 lg:grid-cols-2">
-          <FriendRequestSection
-            title="收到的好友申请"
-            description="同意后即可互相查看学习情况。"
-            box="incoming"
-            requests={incomingRequests}
-            loading={incomingRequestsQ.isLoading}
-            error={incomingRequestsQ.error}
-            emptyTitle="暂无收到申请"
-            emptyMessage="邀请朋友输入你的 UID，就能在这里看到好友申请。"
-            primaryActionLabel="同意"
-            secondaryActionLabel="拒绝"
-            actionsDisabled={acceptRequest.isPending || rejectRequest.isPending}
-            onPrimaryAction={(item) => onRequestAction({ kind: "accept", requestId: item.requestId, nickname: item.user.nickname })}
-            onSecondaryAction={(item) => onRequestAction({ kind: "reject", requestId: item.requestId, nickname: item.user.nickname })}
-          />
-
-          <FriendRequestSection
-            title="我发起的好友申请"
-            description="对方还没处理之前，可以在这里撤回。"
-            box="outgoing"
-            requests={outgoingRequests}
-            loading={outgoingRequestsQ.isLoading}
-            error={outgoingRequestsQ.error}
-            emptyTitle="暂无发出的申请"
-            emptyMessage="发送好友申请后，这里会显示当前状态。"
-            primaryActionLabel="撤回申请"
-            actionsDisabled={cancelRequest.isPending}
-            onPrimaryAction={(item) => onRequestAction({ kind: "cancel", requestId: item.requestId, nickname: item.user.nickname })}
-          />
-        </div>
       </div>
 
-      <div ref={leaderboardRef}>
+      <div ref={leaderboardRef} className="mt-4">
         <FriendLeaderboard entries={leaderboardQ.data ?? []} loading={leaderboardQ.isLoading} error={leaderboardQ.error} pulse={leaderboardPulse} />
       </div>
 
@@ -429,7 +461,7 @@ export function FriendsPage() {
                 <>
                   <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                     <StatCard label="有效学习" value={formatDurationCompact(friendProfileQ.data.stats.effectiveMs)} detail="去重后的学习时长" />
-                    <StatCard label="材料接触" value={formatDurationCompact(friendProfileQ.data.stats.watchMs)} />
+                    <StatCard label="内容接触" value={formatDurationCompact(friendProfileQ.data.stats.watchMs)} />
                     <StatCard label="复述点构建" value={formatDurationCompact(friendProfileQ.data.stats.composeMs)} />
                     <StatCard label="复习时长" value={formatDurationCompact(friendProfileQ.data.stats.reviewMs)} />
                   </div>
@@ -460,10 +492,9 @@ export function FriendsPage() {
   )
 }
 
-function FriendRequestSection(props: {
+function PendingRequestColumn(props: {
   title: string
   description: string
-  box: "incoming" | "outgoing"
   requests: FriendRequest[]
   loading: boolean
   error: unknown
@@ -478,7 +509,6 @@ function FriendRequestSection(props: {
   const {
     title,
     description,
-    box,
     requests,
     loading,
     error,
@@ -492,53 +522,52 @@ function FriendRequestSection(props: {
   } = props
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{title}</CardTitle>
-        <CardDescription>{description}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {loading ? <LoadingNotice title="正在加载好友申请" message="请稍候..." /> : null}
-        {error ? <ErrorNotice title="好友申请加载失败" message={formatApiError(error)} /> : null}
+    <section className="space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="space-y-1">
+          <div className="text-sm font-semibold text-foreground">{title}</div>
+          <div className="text-xs text-muted-foreground">{description}</div>
+        </div>
+        <MetaTag tone={requests.length > 0 ? "accent" : "default"}>{requests.length}</MetaTag>
+      </div>
 
-        {!loading && !error && requests.length === 0 ? <ContentEmptyState title={emptyTitle} message={emptyMessage} icon={Mail} /> : null}
+      {loading ? <LoadingNotice title="正在加载好友申请" message="请稍候..." className="rounded-[1rem]" /> : null}
+      {error ? <ErrorNotice title="好友申请加载失败" message={formatApiError(error)} className="rounded-[1rem]" /> : null}
 
-        {requests.map((item) => (
-          <div key={item.requestId} className="rounded-[1rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] p-4">
-            <div className="flex flex-col gap-3">
+      {!loading && !error && requests.length === 0 ? (
+        <ContentEmptyState title={emptyTitle} message={emptyMessage} icon={Mail} className="rounded-[1rem] border-[color:var(--theme-soft-border)] bg-transparent" />
+      ) : null}
+
+      {requests.length > 0 ? (
+        <div className="space-y-2">
+          {requests.map((item) => (
+            <div key={item.requestId} className="rounded-[1rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] px-3 py-3">
               <div className="flex items-start gap-3">
                 <FriendAvatar user={item.user} size="md" />
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm font-semibold text-foreground">{item.user.nickname}</div>
-                  <div className="text-xs text-muted-foreground">UID {item.user.publicUid}</div>
-                  <div className="mt-1 text-xs text-muted-foreground">{new Date(item.createdAt).toLocaleString()}</div>
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="text-sm font-semibold text-foreground">{item.user.nickname}</div>
+                    <div className="text-xs text-muted-foreground">UID {item.user.publicUid}</div>
+                  </div>
+                  <div className="text-xs text-muted-foreground">{new Date(item.createdAt).toLocaleString()}</div>
+                  {item.message?.trim() ? <p className="text-sm leading-6 text-[color:var(--theme-subtle-text)]">“{item.message.trim()}”</p> : null}
                 </div>
-                <MetaTag tone={getFriendRequestStatusTone(item.status)}>{formatFriendRequestStatus(item.status)}</MetaTag>
               </div>
-              {item.message?.trim() ? (
-                <p className="rounded-xl bg-[color:var(--theme-soft-bg)] px-3 py-2 text-sm leading-6 text-[color:var(--theme-subtle-text)]">“{item.message.trim()}”</p>
-              ) : null}
-              <div className="flex flex-wrap gap-2">
-                {item.status === "pending" ? (
-                  <>
-                    <Button size="sm" onClick={() => onPrimaryAction(item)} disabled={actionsDisabled}>
-                      {primaryActionLabel}
-                    </Button>
-                    {onSecondaryAction && secondaryActionLabel ? (
-                      <Button size="sm" variant="secondary" onClick={() => onSecondaryAction(item)} disabled={actionsDisabled}>
-                        {secondaryActionLabel}
-                      </Button>
-                    ) : null}
-                  </>
-                ) : (
-                  <div className="text-xs leading-6 text-muted-foreground">{describeFriendRequestStatus(item, box)}</div>
-                )}
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button size="sm" onClick={() => onPrimaryAction(item)} disabled={actionsDisabled} className="[box-shadow:none]">
+                  {primaryActionLabel}
+                </Button>
+                {onSecondaryAction && secondaryActionLabel ? (
+                  <Button size="sm" variant="outline" onClick={() => onSecondaryAction(item)} disabled={actionsDisabled} className="[box-shadow:none]">
+                    {secondaryActionLabel}
+                  </Button>
+                ) : null}
               </div>
             </div>
-          </div>
-        ))}
-      </CardContent>
-    </Card>
+          ))}
+        </div>
+      ) : null}
+    </section>
   )
 }
 
@@ -553,11 +582,11 @@ function FriendLeaderboard(props: {
   return (
     <Card
       className={cn(
-        "mt-6 border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)]",
+        "theme-card-main overflow-hidden",
         pulse && "ring-2 ring-primary/30 ring-offset-2 ring-offset-background transition shadow-[0_0_0_4px_hsl(var(--primary)/0.15)]",
       )}
     >
-      <CardHeader>
+      <CardHeader className="theme-card-header">
         <CardTitle className="flex items-center gap-2">
           <Trophy className="h-5 w-5 text-amber-500" />
           好友学习排行榜
@@ -567,7 +596,14 @@ function FriendLeaderboard(props: {
       <CardContent className="space-y-4">
         {loading ? <LoadingNotice title="正在计算排行榜" message="请稍候..." /> : null}
         {error ? <ErrorNotice title="排行榜加载失败" message={formatApiError(error)} /> : null}
-        {!loading && !error && entries.length === 0 ? <ContentEmptyState title="暂时没有榜单" message="结交几个好友后，这里会自动出现学习排行。" icon={Sparkles} /> : null}
+        {!loading && !error && entries.length === 0 ? (
+          <ContentEmptyState
+            title="暂时没有榜单"
+            message="结交几个好友后，这里会自动出现学习排行。"
+            icon={Sparkles}
+            className="rounded-[1.25rem] border-[color:var(--theme-soft-border)] bg-transparent"
+          />
+        ) : null}
 
         {entries.length > 0 ? (
           <div className="overflow-x-auto">

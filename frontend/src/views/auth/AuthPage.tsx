@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
@@ -7,13 +7,22 @@ import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent } from "@/ui/components/ui/card"
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
-import { useCurrentUser, useLogin, useRegister } from "@/ui/queries/auth"
+import {
+  useConfirmEmailVerification,
+  useConfirmPasswordReset,
+  useCurrentUser,
+  useLogin,
+  useRegister,
+  useRequestEmailVerification,
+  useRequestPasswordReset,
+} from "@/ui/queries/auth"
 import { useSystemCapabilities } from "@/ui/queries/system"
 import { usePageMeta } from "@/ui/seo/usePageMeta"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { cn } from "@/ui/utils"
+import { TurnstileWidget } from "@/views/auth/TurnstileWidget"
 
-type AuthMode = "login" | "register"
+type AuthMode = "login" | "register" | "reset" | "verify"
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -34,20 +43,82 @@ export function AuthPage() {
   const capabilitiesQ = useSystemCapabilities()
   const authEnabled = capabilitiesQ.data?.authEnabled ?? false
   const allowSignup = capabilitiesQ.data?.allowSignup ?? false
+  const signupInviteRequired = capabilitiesQ.data?.signupInviteRequired ?? true
+  const passwordResetEnabled = capabilitiesQ.data?.passwordResetEnabled ?? false
+  const emailVerificationEnabled = capabilitiesQ.data?.emailVerificationEnabled ?? false
+  const signupHumanCheckEnabled = capabilitiesQ.data?.signupHumanCheckEnabled ?? false
+  const signupHumanCheckSiteKey = capabilitiesQ.data?.signupHumanCheckSiteKey ?? null
   const currentUserQ = useCurrentUser(authEnabled)
   const login = useLogin()
   const register = useRegister()
-  const requestedMode = searchParams.get("mode") === "register" ? "register" : "login"
-  const effectiveMode: AuthMode = allowSignup ? requestedMode : "login"
-  const [email, setEmail] = useState("")
+  const requestEmailVerification = useRequestEmailVerification()
+  const confirmEmailVerification = useConfirmEmailVerification()
+  const requestPasswordReset = useRequestPasswordReset()
+  const confirmPasswordReset = useConfirmPasswordReset()
+  const requestedModeParam = searchParams.get("mode")
+  const requestedMode: AuthMode =
+    requestedModeParam === "register"
+      ? "register"
+      : requestedModeParam === "reset"
+        ? "reset"
+        : requestedModeParam === "verify"
+          ? "verify"
+          : "login"
+  const effectiveMode: AuthMode =
+    requestedMode === "register"
+      ? allowSignup
+        ? "register"
+        : "login"
+      : requestedMode === "reset"
+        ? passwordResetEnabled
+          ? "reset"
+          : "login"
+        : requestedMode === "verify"
+          ? "verify"
+          : "login"
+  const actionToken = searchParams.get("token")?.trim() || ""
+  const resetToken = effectiveMode === "reset" ? actionToken : ""
+  const verifyToken = effectiveMode === "verify" ? actionToken : ""
+  const resetTokenPresent = effectiveMode === "reset" && Boolean(resetToken)
+  const verifyTokenPresent = effectiveMode === "verify" && Boolean(verifyToken)
+  const [email, setEmail] = useState(searchParams.get("email")?.trim() || "")
   const [password, setPassword] = useState("")
   const [inviteCode, setInviteCode] = useState("")
+  const [humanCheckToken, setHumanCheckToken] = useState<string | null>(null)
+  const [humanCheckResetSignal, setHumanCheckResetSignal] = useState(0)
   const returnTo = useMemo(() => resolveReturnTo(location.state), [location.state])
-  const passwordValid = effectiveMode === "register" ? password.length >= 8 : password.length > 0
+  const passwordValid =
+    effectiveMode === "register" || resetTokenPresent ? password.length >= 8 : effectiveMode === "login" ? password.length > 0 : true
+  const registerRequiresHumanCheck = effectiveMode === "register" && signupHumanCheckEnabled && Boolean(signupHumanCheckSiteKey)
+
+  useEffect(() => {
+    const emailParam = searchParams.get("email")?.trim() || ""
+    if (effectiveMode === "verify" && emailParam && emailParam !== email) {
+      setEmail(emailParam)
+    }
+  }, [effectiveMode, email, searchParams])
 
   usePageMeta({
-    title: effectiveMode === "register" ? "注册 | LearningPyramid" : "登录 | LearningPyramid",
-    description: effectiveMode === "register" ? "创建 LearningPyramid 账号。" : "登录 LearningPyramid。",
+    title:
+      effectiveMode === "register"
+        ? "注册 | LearningPyramid"
+        : effectiveMode === "reset"
+          ? resetTokenPresent
+            ? "重置密码 | LearningPyramid"
+            : "找回密码 | LearningPyramid"
+          : effectiveMode === "verify"
+            ? verifyTokenPresent
+              ? "验证邮箱 | LearningPyramid"
+              : "重新发送验证邮件 | LearningPyramid"
+          : "登录 | LearningPyramid",
+    description:
+      effectiveMode === "register"
+        ? "创建 LearningPyramid 账号。"
+        : effectiveMode === "reset"
+          ? "找回或重置 LearningPyramid 密码。"
+          : effectiveMode === "verify"
+            ? "验证 LearningPyramid 注册邮箱。"
+          : "登录 LearningPyramid。",
     path: "/login",
   })
 
@@ -97,43 +168,174 @@ export function AuthPage() {
     return <Navigate to="/projects" replace />
   }
 
-  if (currentUserQ.data) {
+  if (currentUserQ.data && effectiveMode !== "reset" && effectiveMode !== "verify") {
     return <Navigate to={returnTo} replace />
   }
 
   function switchMode(nextMode: AuthMode) {
     if (nextMode === "register" && !allowSignup) return
+    if (nextMode === "reset" && !passwordResetEnabled) return
     const nextParams = new URLSearchParams(searchParams)
-    if (nextMode === "register") nextParams.set("mode", "register")
-    else nextParams.delete("mode")
+    if (nextMode === "register") {
+      nextParams.set("mode", "register")
+      nextParams.delete("token")
+      nextParams.delete("email")
+    } else if (nextMode === "reset") {
+      nextParams.set("mode", "reset")
+      if (!resetTokenPresent) nextParams.delete("token")
+      nextParams.delete("email")
+    } else if (nextMode === "verify") {
+      nextParams.set("mode", "verify")
+      nextParams.delete("token")
+      if (email.trim()) nextParams.set("email", email.trim())
+      else nextParams.delete("email")
+    } else {
+      nextParams.delete("mode")
+      nextParams.delete("token")
+      nextParams.delete("email")
+    }
     setSearchParams(nextParams, { replace: true })
   }
 
   async function onSubmit() {
-    const payload = { email: email.trim(), password, inviteCode: inviteCode.trim() || undefined }
-    if (!payload.email || !payload.password) return
+    const payload = {
+      email: email.trim(),
+      password,
+      inviteCode: inviteCode.trim() || undefined,
+      humanCheckToken: humanCheckToken?.trim() || undefined,
+    }
     try {
-      if (effectiveMode === "register") {
-        await register.mutateAsync(payload)
-        showSuccessFeedback("账号已创建", "正在进入工作区。")
+      if (effectiveMode === "reset") {
+        if (resetTokenPresent) {
+          if (!passwordValid) return
+          await confirmPasswordReset.mutateAsync({ token: resetToken, newPassword: password })
+          await currentUserQ.refetch()
+          showSuccessFeedback("密码已重置", "请使用新密码登录。")
+          setPassword("")
+          switchMode("login")
+        } else {
+          if (!payload.email) return
+          await requestPasswordReset.mutateAsync({ email: payload.email })
+          showSuccessFeedback("重置邮件已发送", "如果账号存在，我们已经发送密码重置链接。")
+          switchMode("login")
+        }
+      } else if (effectiveMode === "verify") {
+        if (verifyTokenPresent) {
+          const verified = await confirmEmailVerification.mutateAsync({ token: verifyToken })
+          showSuccessFeedback("邮箱验证成功", "正在进入工作区。")
+          nav(returnTo, { replace: true, state: { verifiedUserId: verified.userId } })
+        } else {
+          if (!payload.email) return
+          await requestEmailVerification.mutateAsync({ email: payload.email })
+          showSuccessFeedback("验证邮件已发送", "如果账号存在且尚未验证，我们已经重新发送激活链接。")
+        }
+      } else if (effectiveMode === "register") {
+        if (!payload.email || !payload.password) return
+        const created = await register.mutateAsync(payload)
+        if (created.emailVerificationRequired) {
+          showSuccessFeedback(
+            created.verificationEmailSent ? "账号已创建，请验证邮箱" : "账号已创建",
+            created.verificationEmailSent ? "我们已经向你的邮箱发送了激活链接。" : "请稍后在验证页重新发送激活链接。",
+          )
+          setPassword("")
+          setHumanCheckToken(null)
+          setHumanCheckResetSignal((value) => value + 1)
+          const nextParams = new URLSearchParams(searchParams)
+          nextParams.set("mode", "verify")
+          nextParams.set("email", payload.email)
+          nextParams.delete("token")
+          setSearchParams(nextParams, { replace: true })
+        } else {
+          showSuccessFeedback("账号已创建", "正在进入工作区。")
+          nav(returnTo, { replace: true })
+        }
       } else {
+        if (!payload.email || !payload.password) return
         await login.mutateAsync(payload)
         showSuccessFeedback("登录成功", "正在进入工作区。")
+        nav(returnTo, { replace: true })
       }
-      nav(returnTo, { replace: true })
     } catch (err) {
-      showErrorFeedback(effectiveMode === "register" ? "注册失败" : "登录失败", formatApiError(err))
+      if (effectiveMode === "register" && registerRequiresHumanCheck) {
+        setHumanCheckToken(null)
+        setHumanCheckResetSignal((value) => value + 1)
+      }
+      showErrorFeedback(
+        effectiveMode === "register"
+          ? "注册失败"
+          : effectiveMode === "reset"
+            ? "密码重置失败"
+            : effectiveMode === "verify"
+              ? verifyTokenPresent
+                ? "邮箱验证失败"
+                : "验证邮件发送失败"
+              : "登录失败",
+        formatApiError(err),
+      )
     }
   }
 
-  const submitError = effectiveMode === "register" ? register.error : login.error
-  const pending = effectiveMode === "register" ? register.isPending : login.isPending
+  const submitError =
+    effectiveMode === "register"
+      ? register.error
+      : effectiveMode === "reset"
+        ? resetTokenPresent
+          ? confirmPasswordReset.error
+          : requestPasswordReset.error
+        : effectiveMode === "verify"
+          ? verifyTokenPresent
+            ? confirmEmailVerification.error
+            : requestEmailVerification.error
+          : login.error
+  const pending =
+    effectiveMode === "register"
+      ? register.isPending
+      : effectiveMode === "reset"
+        ? resetTokenPresent
+          ? confirmPasswordReset.isPending
+          : requestPasswordReset.isPending
+        : effectiveMode === "verify"
+          ? verifyTokenPresent
+            ? confirmEmailVerification.isPending
+            : requestEmailVerification.isPending
+          : login.isPending
+  const title =
+    effectiveMode === "register"
+      ? "创建账号"
+      : effectiveMode === "reset"
+        ? resetTokenPresent
+          ? "重置密码"
+          : "找回密码"
+        : effectiveMode === "verify"
+          ? verifyTokenPresent
+            ? "验证邮箱"
+            : "重新发送验证邮件"
+          : "欢迎回来"
+  const description =
+    effectiveMode === "register"
+      ? emailVerificationEnabled
+        ? "注册后需要先完成邮箱验证，再进入工作区。"
+        : "创建账号后即可进入工作区。"
+      : effectiveMode === "reset"
+        ? resetTokenPresent
+          ? "设置一个新的登录密码。"
+          : "输入注册邮箱，我们会发送一次性重置链接。"
+        : effectiveMode === "verify"
+          ? verifyTokenPresent
+            ? "点击下方按钮完成邮箱验证并自动登录。"
+            : "输入注册邮箱，我们会重新发送一封验证邮件。"
+        : "使用邮箱和密码登录。"
 
   return (
     <div className="relative flex min-h-dvh items-center justify-center overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(197,214,239,0.58),_transparent_42%),linear-gradient(180deg,_#f7f5f1_0%,_#eef2f8_100%)] px-6 py-10">
       <Card className="w-full max-w-md border-white/85 bg-white/92 shadow-[0_30px_90px_-42px_rgba(15,23,42,0.28)]">
         <CardContent className="p-6 sm:p-8">
-          {allowSignup ? (
+          <div className="mb-6 space-y-2">
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">{title}</h1>
+            <p className="text-sm leading-6 text-muted-foreground">{description}</p>
+          </div>
+
+          {allowSignup && effectiveMode !== "reset" && effectiveMode !== "verify" ? (
             <div className="mb-6 grid grid-cols-2 gap-2 rounded-2xl border border-border/70 bg-[#f4f7fb] p-1">
               <Button variant={effectiveMode === "login" ? "default" : "ghost"} onClick={() => switchMode("login")} className="w-full">
                 登录
@@ -151,66 +353,159 @@ export function AuthPage() {
               void onSubmit()
             }}
           >
-            <div className="grid gap-2">
-              <Label htmlFor="email">邮箱</Label>
-              <Input
-                id="email"
-                type="email"
-                autoComplete="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                placeholder="you@example.com"
-              />
-            </div>
-
-            <div className="grid gap-2">
-              <div className="flex items-center justify-between gap-3">
-                <Label htmlFor="password">密码</Label>
-                {effectiveMode === "register" ? <span className="text-xs text-muted-foreground">至少 8 位</span> : null}
+            {(effectiveMode !== "reset" || !resetTokenPresent) && (effectiveMode !== "verify" || !verifyTokenPresent) ? (
+              <div className="grid gap-2">
+                <Label htmlFor="email">邮箱</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  autoComplete="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="you@example.com"
+                />
               </div>
-              <Input
-                id="password"
-                type="password"
-                autoComplete={effectiveMode === "register" ? "new-password" : "current-password"}
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder={effectiveMode === "register" ? "至少 8 位" : "输入密码"}
-              />
-            </div>
+            ) : null}
+
+            {effectiveMode === "register" || effectiveMode === "login" || resetTokenPresent ? (
+              <div className="grid gap-2">
+                <div className="flex items-center justify-between gap-3">
+                  <Label htmlFor="password">{resetTokenPresent ? "新密码" : "密码"}</Label>
+                  {effectiveMode === "register" || resetTokenPresent ? <span className="text-xs text-muted-foreground">至少 8 位</span> : null}
+                </div>
+                <Input
+                  id="password"
+                  type="password"
+                  autoComplete={effectiveMode === "login" ? "current-password" : "new-password"}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder={effectiveMode === "login" ? "输入密码" : "至少 8 位"}
+                />
+              </div>
+            ) : null}
 
             {effectiveMode === "register" ? (
               <div className="grid gap-2">
                 <div className="flex items-center justify-between gap-3">
                   <Label htmlFor="inviteCode">邀请码</Label>
-                  <span className="text-xs text-muted-foreground">选填</span>
+                  <span className="text-xs text-muted-foreground">{signupInviteRequired ? "当前注册策略下必填" : "可选，填写后可绑定邀请关系"}</span>
                 </div>
                 <Input
                   id="inviteCode"
                   autoComplete="off"
                   value={inviteCode}
                   onChange={(event) => setInviteCode(event.target.value.toUpperCase())}
-                  placeholder="输入邀请码"
+                  placeholder={signupInviteRequired ? "输入邀请码；仅引导管理员邮箱可留空" : "可选填写邀请码"}
                 />
+                <p className="text-xs leading-5 text-muted-foreground">
+                  {signupInviteRequired
+                    ? "当前部署仍要求邀请码注册；只有部署时配置的引导管理员邮箱可以留空完成初始化。"
+                    : "当前允许自由注册；如果填写邀请码，会额外绑定邀请关系。"}
+                </p>
               </div>
             ) : null}
 
-            <Button type="submit" disabled={pending || !email.trim() || !passwordValid} className="mt-2 h-12 w-full text-base">
-              {pending ? (effectiveMode === "register" ? "注册中..." : "登录中...") : effectiveMode === "register" ? "注册并进入" : "登录并进入"}
+            {registerRequiresHumanCheck && signupHumanCheckSiteKey ? (
+              <TurnstileWidget siteKey={signupHumanCheckSiteKey} resetSignal={humanCheckResetSignal} onTokenChange={setHumanCheckToken} />
+            ) : null}
+
+            <Button
+              type="submit"
+              disabled={
+                pending ||
+                (((effectiveMode !== "reset" || !resetTokenPresent) && (effectiveMode !== "verify" || !verifyTokenPresent)) && !email.trim()) ||
+                !passwordValid ||
+                (registerRequiresHumanCheck && !humanCheckToken)
+              }
+              className="mt-2 h-12 w-full text-base"
+            >
+              {pending
+                ? effectiveMode === "register"
+                  ? "注册中..."
+                  : effectiveMode === "reset"
+                    ? resetTokenPresent
+                      ? "重置中..."
+                      : "发送中..."
+                    : effectiveMode === "verify"
+                      ? verifyTokenPresent
+                        ? "验证中..."
+                        : "发送中..."
+                      : "登录中..."
+                : effectiveMode === "register"
+                  ? emailVerificationEnabled
+                    ? "注册并发送验证邮件"
+                    : "注册并进入"
+                  : effectiveMode === "reset"
+                    ? resetTokenPresent
+                      ? "重置密码"
+                      : "发送重置邮件"
+                    : effectiveMode === "verify"
+                      ? verifyTokenPresent
+                        ? "验证邮箱并进入"
+                        : "重新发送验证邮件"
+                      : "登录并进入"}
             </Button>
 
             {submitError ? <p className="text-sm text-destructive">{formatApiError(submitError)}</p> : null}
 
-            {allowSignup ? (
-              <div className="flex items-center justify-center pt-2 text-sm text-muted-foreground">
+            {effectiveMode === "login" &&
+            submitError instanceof ApiError &&
+            submitError.message.toLowerCase().includes("email verification") &&
+            email.trim() ? (
+              <div className="flex items-center justify-center pt-1 text-sm text-muted-foreground">
                 <button
                   type="button"
-                  onClick={() => switchMode(effectiveMode === "register" ? "login" : "register")}
+                  onClick={() => {
+                    const nextParams = new URLSearchParams(searchParams)
+                    nextParams.set("mode", "verify")
+                    nextParams.set("email", email.trim())
+                    nextParams.delete("token")
+                    setSearchParams(nextParams, { replace: true })
+                  }}
                   className={cn("transition hover:text-foreground", pending && "pointer-events-none opacity-60")}
                 >
-                  {effectiveMode === "register" ? "已有账号，去登录" : "没有账号，去注册"}
+                  去验证邮箱
                 </button>
               </div>
             ) : null}
+
+            {effectiveMode === "reset" || effectiveMode === "verify" ? (
+              <div className="flex items-center justify-center pt-2 text-sm text-muted-foreground">
+                <button
+                  type="button"
+                  onClick={() => switchMode("login")}
+                  className={cn("transition hover:text-foreground", pending && "pointer-events-none opacity-60")}
+                >
+                  返回登录
+                </button>
+              </div>
+            ) : (
+              <>
+                {passwordResetEnabled && effectiveMode === "login" ? (
+                  <div className="flex items-center justify-center pt-1 text-sm text-muted-foreground">
+                    <button
+                      type="button"
+                      onClick={() => switchMode("reset")}
+                      className={cn("transition hover:text-foreground", pending && "pointer-events-none opacity-60")}
+                    >
+                      忘记密码
+                    </button>
+                  </div>
+                ) : null}
+
+                {allowSignup ? (
+                  <div className="flex items-center justify-center pt-2 text-sm text-muted-foreground">
+                    <button
+                      type="button"
+                      onClick={() => switchMode(effectiveMode === "register" ? "login" : "register")}
+                      className={cn("transition hover:text-foreground", pending && "pointer-events-none opacity-60")}
+                    >
+                      {effectiveMode === "register" ? "已有账号，去登录" : "没有账号，去注册"}
+                    </button>
+                  </div>
+                ) : null}
+              </>
+            )}
           </form>
         </CardContent>
       </Card>

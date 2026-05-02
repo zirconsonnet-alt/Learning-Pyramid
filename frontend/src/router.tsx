@@ -1,5 +1,5 @@
 import { Suspense, lazy } from "react"
-import type { ReactNode } from "react"
+import type { ComponentType, ReactNode } from "react"
 import { createBrowserRouter, Navigate } from "react-router-dom"
 
 import { AppShell } from "@/shell/AppShell"
@@ -7,40 +7,64 @@ import { RouteErrorPage } from "@/views/system/RouteErrorPage"
 import { RoutePendingPage } from "@/views/system/RoutePendingPage"
 import { PomodoroWorkbenchGate } from "@/views/pomodoro/PomodoroWorkbenchGate"
 
-const AuthPage = lazy(async () => ({ default: (await import("@/views/auth/AuthPage")).AuthPage }))
-const HomePage = lazy(async () => ({ default: (await import("@/views/home/HomePage")).HomePage }))
-const GuidePage = lazy(async () => ({ default: (await import("@/views/guide/GuidePage")).GuidePage }))
-const InstancePage = lazy(async () => ({ default: (await import("@/views/instances/InstancePage")).InstancePage }))
-const ConvergencePage = lazy(async () => ({ default: (await import("@/views/convergences/ConvergencePage")).ConvergencePage }))
-const AdminPage = lazy(async () => ({ default: (await import("@/views/admin/AdminPage")).AdminPage }))
-const AdminMembershipPage = lazy(async () => ({ default: (await import("@/views/admin/AdminMembershipPage")).AdminMembershipPage }))
-const AdminUserDetailPage = lazy(async () => ({ default: (await import("@/views/admin/AdminUserDetailPage")).AdminUserDetailPage }))
-const AdminUsersPage = lazy(async () => ({ default: (await import("@/views/admin/AdminUsersPage")).AdminUsersPage }))
-const FriendsPage = lazy(async () => ({ default: (await import("@/views/friends/FriendsPage")).FriendsPage }))
-const AiChatPage = lazy(async () => ({ default: (await import("@/views/ai/AiChatPage")).AiChatPage }))
-const LearningObjectNodePage = lazy(async () => ({
-  default: (await import("@/views/learningObjects/LearningObjectNodePage")).LearningObjectNodePage,
-}))
-const LearningTaskNodePage = lazy(async () => ({
-  default: (await import("@/views/learningTasks/LearningTaskNodePage")).LearningTaskNodePage,
-}))
-const MembershipPage = lazy(async () => ({ default: (await import("@/views/membership/MembershipPage")).MembershipPage }))
-const ProjectsPage = lazy(async () => ({ default: (await import("@/views/projects/ProjectsPage")).ProjectsPage }))
-const ProfilePage = lazy(async () => ({ default: (await import("@/views/profile/ProfilePage")).ProfilePage }))
-const RecallPointPage = lazy(async () => ({ default: (await import("@/views/recallPoints/RecallPointPage")).RecallPointPage }))
-const ReviewRecommendationsPage = lazy(async () => ({
-  default: (await import("@/views/recommendations/ReviewRecommendationsPage")).ReviewRecommendationsPage,
-}))
-const ReviewChainPage = lazy(async () => ({ default: (await import("@/views/reviewChains/ReviewChainPage")).ReviewChainPage }))
-const ReviewTaskPage = lazy(async () => ({ default: (await import("@/views/reviewTasks/ReviewTaskPage")).ReviewTaskPage }))
-const ProjectSettingsPage = lazy(async () => ({ default: (await import("@/views/settings/ProjectSettingsPage")).ProjectSettingsPage }))
-const GlobalSettingsPage = lazy(async () => ({ default: (await import("@/views/settings/GlobalSettingsPage")).GlobalSettingsPage }))
-const SubtitleToolPage = lazy(async () => ({ default: (await import("@/views/subtitleTool/SubtitleToolPage")).SubtitleToolPage }))
-const SubjectDashboardPage = lazy(async () => ({ default: (await import("@/views/subjects/SubjectDashboardPage")).SubjectDashboardPage }))
-const ObjectTreePage = lazy(async () => ({ default: (await import("@/views/trees/ObjectTreePage")).ObjectTreePage }))
-const TaskTreePage = lazy(async () => ({ default: (await import("@/views/trees/TaskTreePage")).TaskTreePage }))
-const WorkbenchPage = lazy(async () => ({ default: (await import("@/views/workbench/WorkbenchPage")).WorkbenchPage }))
-const PomodoroPage = lazy(async () => ({ default: (await import("@/views/pomodoro/PomodoroPage")).PomodoroPage }))
+const CHUNK_RELOAD_MARKER = "lp:chunk-reload-attempted"
+
+function isStaleDynamicImportError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error)
+  return (
+    message.includes("Failed to fetch dynamically imported module") ||
+    message.includes("Importing a module script failed") ||
+    message.includes("error loading dynamically imported module")
+  )
+}
+
+async function importRouteModule<T>(loader: () => Promise<T>) {
+  try {
+    const mod = await loader()
+    globalThis.sessionStorage?.removeItem(CHUNK_RELOAD_MARKER)
+    return mod
+  } catch (error) {
+    if (isStaleDynamicImportError(error) && globalThis.sessionStorage?.getItem(CHUNK_RELOAD_MARKER) !== "1") {
+      globalThis.sessionStorage?.setItem(CHUNK_RELOAD_MARKER, "1")
+      window.location.reload()
+      return new Promise<T>(() => undefined)
+    }
+    throw error
+  }
+}
+
+function lazyRoute<TModule>(loader: () => Promise<TModule>, pick: (mod: TModule) => ComponentType) {
+  return lazy(async () => ({ default: pick(await importRouteModule(loader)) }))
+}
+
+const AuthPage = lazyRoute(() => import("@/views/auth/AuthPage"), (mod) => mod.AuthPage)
+const HomePage = lazyRoute(() => import("@/views/home/HomePage"), (mod) => mod.HomePage)
+const GuidePage = lazyRoute(() => import("@/views/guide/GuidePage"), (mod) => mod.GuidePage)
+const InstancePage = lazyRoute(() => import("@/views/instances/InstancePage"), (mod) => mod.InstancePage)
+const ConvergencePage = lazyRoute(() => import("@/views/convergences/ConvergencePage"), (mod) => mod.ConvergencePage)
+const AdminPage = lazyRoute(() => import("@/views/admin/AdminPage"), (mod) => mod.AdminPage)
+const AdminMembershipPage = lazyRoute(() => import("@/views/admin/AdminMembershipPage"), (mod) => mod.AdminMembershipPage)
+const AdminUserDetailPage = lazyRoute(() => import("@/views/admin/AdminUserDetailPage"), (mod) => mod.AdminUserDetailPage)
+const AdminUsersPage = lazyRoute(() => import("@/views/admin/AdminUsersPage"), (mod) => mod.AdminUsersPage)
+const FriendsPage = lazyRoute(() => import("@/views/friends/FriendsPage"), (mod) => mod.FriendsPage)
+const AiChatPage = lazyRoute(() => import("@/views/ai/AiChatPage"), (mod) => mod.AiChatPage)
+const LearningObjectNodePage = lazyRoute(() => import("@/views/learningObjects/LearningObjectNodePage"), (mod) => mod.LearningObjectNodePage)
+const LearningTaskNodePage = lazyRoute(() => import("@/views/learningTasks/LearningTaskNodePage"), (mod) => mod.LearningTaskNodePage)
+const MembershipPage = lazyRoute(() => import("@/views/membership/MembershipPage"), (mod) => mod.MembershipPage)
+const ProjectsPage = lazyRoute(() => import("@/views/projects/ProjectsPage"), (mod) => mod.ProjectsPage)
+const ProfilePage = lazyRoute(() => import("@/views/profile/ProfilePage"), (mod) => mod.ProfilePage)
+const RecallPointPage = lazyRoute(() => import("@/views/recallPoints/RecallPointPage"), (mod) => mod.RecallPointPage)
+const ReviewRecommendationsPage = lazyRoute(() => import("@/views/recommendations/ReviewRecommendationsPage"), (mod) => mod.ReviewRecommendationsPage)
+const ReviewChainPage = lazyRoute(() => import("@/views/reviewChains/ReviewChainPage"), (mod) => mod.ReviewChainPage)
+const ReviewTaskPage = lazyRoute(() => import("@/views/reviewTasks/ReviewTaskPage"), (mod) => mod.ReviewTaskPage)
+const ProjectSettingsPage = lazyRoute(() => import("@/views/settings/ProjectSettingsPage"), (mod) => mod.ProjectSettingsPage)
+const GlobalSettingsPage = lazyRoute(() => import("@/views/settings/GlobalSettingsPage"), (mod) => mod.GlobalSettingsPage)
+const SubtitleToolPage = lazyRoute(() => import("@/views/subtitleTool/SubtitleToolPage"), (mod) => mod.SubtitleToolPage)
+const SubjectDashboardPage = lazyRoute(() => import("@/views/subjects/SubjectDashboardPage"), (mod) => mod.SubjectDashboardPage)
+const ObjectTreePage = lazyRoute(() => import("@/views/trees/ObjectTreePage"), (mod) => mod.ObjectTreePage)
+const TaskTreePage = lazyRoute(() => import("@/views/trees/TaskTreePage"), (mod) => mod.TaskTreePage)
+const WorkbenchPage = lazyRoute(() => import("@/views/workbench/WorkbenchPage"), (mod) => mod.WorkbenchPage)
+const PomodoroPage = lazyRoute(() => import("@/views/pomodoro/PomodoroPage"), (mod) => mod.PomodoroPage)
 
 function lazyElement(element: ReactNode) {
   return <Suspense fallback={<RoutePendingPage />}>{element}</Suspense>
@@ -99,6 +123,7 @@ export const router = createBrowserRouter([
       { path: "/p/:projectId/pomodoro", element: <Navigate to="/pomodoro" replace /> },
       { path: "/p/:projectId/recommended-reviews", element: lazyElement(<ReviewRecommendationsPage />) },
       { path: "/p/:projectId/settings", element: lazyElement(<ProjectSettingsPage />) },
+      { path: "/p/:projectId/project-settings", element: lazyElement(<ProjectSettingsPage />) },
       { path: "/p/:projectId/ai-chat", element: lazyElement(<AiChatPage />) },
       { path: "/p/:projectId/task-tree", element: lazyElement(<TaskTreePage />) },
       { path: "/p/:projectId/learning-task-nodes/:nodeId", element: lazyElement(<LearningTaskNodePage />) },

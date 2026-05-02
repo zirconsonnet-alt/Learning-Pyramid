@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
-import { useQueries } from "@tanstack/react-query"
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
+import { useQueries, useQuery } from "@tanstack/react-query"
 import Hls from "hls.js"
 import {
   Captions,
@@ -22,12 +22,14 @@ import {
 
 import type { Instance } from "@/ui/api/instances"
 import { ApiError } from "@/ui/api/http"
+import { uploadMediaAsset } from "@/ui/api/mediaAssets"
 import { resolvePlaybackDescriptorUrl } from "@/ui/api/media"
-import { getRecallPoint, type RecallPoint } from "@/ui/api/review"
+import { getRecallPoint, searchRecallPoints, type RecallPoint } from "@/ui/api/review"
 import {
   appendImageBlock,
   removeImageBlockAt,
   richContentHasMeaning,
+  richContentToPlainText,
   richText,
   setRichContentText,
   type RichContent,
@@ -45,6 +47,7 @@ import { formatPomodoroCountdown, getPomodoroUpcomingSegmentPreview, usePomodoro
 import { useRecallPointsByInstance } from "@/ui/queries/workbench"
 import { useInstancePlaybackDescriptor } from "@/ui/queries/workbench"
 import { showInfoFeedback } from "@/ui/store/feedbackStore"
+import { formatRecallPointReference } from "@/ui/displayIdentifiers"
 import { SUPPORTED_SUBTITLE_EXTENSIONS_LABEL } from "@/ui/subtitles/subtitleSupport"
 import { recordStudyActivity, touchDailyStudyActivity } from "@/ui/store/workbenchDailyStats"
 import { clearPlaybackResumeMs, loadPlaybackResumeMs, savePlaybackResumeMs } from "@/ui/store/playbackResume"
@@ -75,12 +78,14 @@ const PLAYBACK_RATE_OPTIONS = [0.75, 1, 1.25, 1.5, 2]
 const WATCH_TRACKING_MAX_CHUNK_MS = 5000
 const COMPOSE_ACTIVITY_WINDOW_MS = 60_000
 const QA_ACTIVITY_WINDOW_MS = 30_000
+const MAX_CAPTURE_REFERENCE_PICKER_ITEMS = 12
 
 type FullscreenCapableVideo = HTMLVideoElement & {
   webkitDisplayingFullscreen?: boolean
 }
 
 type CapturePanelMode = "capture" | "assistant"
+type CaptureReferencePickerField = "question" | "answer"
 
 type CourseAssistantTurn = {
   id: string
@@ -93,6 +98,11 @@ type CourseAssistantTurn = {
 type CapturedVideoFrame = {
   timeMs: number
   imageDataUrl: string
+}
+
+type CapturedVideoFrameFile = {
+  timeMs: number
+  file: File
 }
 
 function isRelativeMaterialId(materialId: string) {
@@ -192,7 +202,7 @@ async function copyText(text: string) {
   throw new Error("当前环境不支持剪贴板")
 }
 
-async function captureDisplayedVideoFrame(video: HTMLVideoElement, timeMs: number): Promise<CapturedVideoFrame> {
+async function captureDisplayedVideoFrameBlob(video: HTMLVideoElement, timeMs: number): Promise<{ timeMs: number; blob: Blob }> {
   const width = video.videoWidth || 0
   const height = video.videoHeight || 0
   if (width <= 0 || height <= 0) {
@@ -209,6 +219,14 @@ async function captureDisplayedVideoFrame(video: HTMLVideoElement, timeMs: numbe
 
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.78))
   if (!blob) throw new Error("当前画面编码失败")
+  return {
+    timeMs: Math.max(0, Math.floor(timeMs)),
+    blob,
+  }
+}
+
+async function captureDisplayedVideoFrame(video: HTMLVideoElement, timeMs: number): Promise<CapturedVideoFrame> {
+  const captured = await captureDisplayedVideoFrameBlob(video, timeMs)
   const imageDataUrl = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => {
@@ -219,12 +237,23 @@ async function captureDisplayedVideoFrame(video: HTMLVideoElement, timeMs: numbe
       reject(new Error("当前画面读取失败"))
     }
     reader.onerror = () => reject(reader.error ?? new Error("当前画面读取失败"))
-    reader.readAsDataURL(blob)
+    reader.readAsDataURL(captured.blob)
   })
 
   return {
-    timeMs: Math.max(0, Math.floor(timeMs)),
+    timeMs: captured.timeMs,
     imageDataUrl,
+  }
+}
+
+async function captureDisplayedVideoFrameFile(video: HTMLVideoElement, timeMs: number): Promise<CapturedVideoFrameFile> {
+  const captured = await captureDisplayedVideoFrameBlob(video, timeMs)
+  return {
+    timeMs: captured.timeMs,
+    file: new File([captured.blob], `video-frame-${Math.floor(captured.timeMs / 1000)}s.jpg`, {
+      type: captured.blob.type || "image/jpeg",
+      lastModified: Date.now(),
+    }),
   }
 }
 
@@ -263,6 +292,7 @@ export function VideoPane({
   const lastPlaybackTrackedPositionClockRef = useRef<number | null>(null)
   const assistantAbortRef = useRef<AbortController | null>(null)
   const hlsRef = useRef<Hls | null>(null)
+  const lastPrintScreenShortcutAtRef = useRef(0)
 
   const [playbackMs, setPlaybackMs] = useState(0)
   const [durationMs, setDurationMs] = useState(0)
@@ -280,7 +310,14 @@ export function VideoPane({
   const [captureAnchorMs, setCaptureAnchorMs] = useState(0)
   const [questionContent, setQuestionContent] = useState<RichContent>(() => richText(""))
   const [answerContent, setAnswerContent] = useState<RichContent>(() => richText(""))
+  const [captureReferenceIds, setCaptureReferenceIds] = useState<string[]>([])
+  const [captureReferencePicker, setCaptureReferencePicker] = useState<{
+    field: CaptureReferencePickerField
+    query: string
+    highlightedIndex: number
+  } | null>(null)
   const [captureError, setCaptureError] = useState<string | null>(null)
+  const [isFrameCaptureUploading, setIsFrameCaptureUploading] = useState(false)
   const [assistantComposer, setAssistantComposer] = useState("")
   const [assistantTurns, setAssistantTurns] = useState<CourseAssistantTurn[]>([])
   const [assistantStatus, setAssistantStatus] = useState<string | null>(null)
@@ -361,6 +398,75 @@ export function VideoPane({
     !!subtitleSourceKind &&
     llmConfigured &&
     (subtitleSourceKind !== "BROWSER_LOCAL" || directoryBinding.permission === "granted")
+  const deferredCaptureReferenceQuery = useDeferredValue(captureReferencePicker?.query.trim() ?? "")
+  const captureReferenceSearchQ = useQuery({
+    queryKey: ["recallPointSearch", projectId, deferredCaptureReferenceQuery],
+    queryFn: ({ signal }) =>
+      searchRecallPoints(
+        projectId,
+        { q: deferredCaptureReferenceQuery || undefined, limit: MAX_CAPTURE_REFERENCE_PICKER_ITEMS * 4 },
+        { signal },
+      ),
+    enabled: !!projectId && isCapturePanelOpen && capturePanelMode === "capture" && !!captureReferencePicker,
+    placeholderData: (previous) => previous,
+    staleTime: 30_000,
+  })
+  const captureReferenceCandidates = useMemo(
+    () =>
+      (captureReferenceSearchQ.data ?? [])
+        .map((item: RecallPoint) => {
+          const questionPreview = richContentToPlainText(item.question).trim() || "题面为空"
+          const answerPreview = richContentToPlainText(item.answer).trim() || "答案为空"
+          return {
+            recallPointId: item.recallPointId,
+            questionPreview,
+            answerPreview,
+          }
+        })
+        .filter((candidate) => !captureReferenceIds.includes(candidate.recallPointId))
+        .slice(0, MAX_CAPTURE_REFERENCE_PICKER_ITEMS),
+    [captureReferenceIds, captureReferenceSearchQ.data],
+  )
+
+  useEffect(() => {
+    setCaptureReferencePicker((current) => {
+      if (!current) return current
+      const maxIndex = Math.max(captureReferenceCandidates.length - 1, 0)
+      if (current.highlightedIndex <= maxIndex) return current
+      return { ...current, highlightedIndex: maxIndex }
+    })
+  }, [captureReferenceCandidates.length])
+
+  function focusCaptureField(field: CaptureReferencePickerField) {
+    const target = field === "question" ? questionInputRef.current : answerTextareaRef.current
+    target?.focus()
+  }
+
+  function openCaptureReferencePicker(field: CaptureReferencePickerField) {
+    if (capturePanelMode !== "capture") return
+    touchComposeActivity()
+    setCaptureReferencePicker({ field, query: "", highlightedIndex: 0 })
+  }
+
+  function closeCaptureReferencePicker(field?: CaptureReferencePickerField) {
+    setCaptureReferencePicker(null)
+    if (field) {
+      window.setTimeout(() => focusCaptureField(field), 0)
+    }
+  }
+
+  function addCaptureReference(recallPointId: string) {
+    touchComposeActivity()
+    setCaptureReferenceIds((current) => (current.includes(recallPointId) ? current : [...current, recallPointId]))
+  }
+
+  function confirmCaptureReferencePickerSelection(field: CaptureReferencePickerField) {
+    const selected = captureReferenceCandidates[captureReferencePicker?.highlightedIndex ?? 0]
+    if (selected) {
+      addCaptureReference(selected.recallPointId)
+    }
+    closeCaptureReferencePicker(field)
+  }
 
   const touchComposeActivity = useCallback(() => {
     touchDailyStudyActivity(projectId, "compose", COMPOSE_ACTIVITY_WINDOW_MS)
@@ -655,6 +761,9 @@ export function VideoPane({
     setCaptureError(null)
     setQuestionContent(richText(""))
     setAnswerContent(richText(""))
+    setCaptureReferenceIds([])
+    setCaptureReferencePicker(null)
+    setIsFrameCaptureUploading(false)
     setAssistantStatus(null)
     setAssistantError(null)
     setIsAssistantAsking(false)
@@ -686,6 +795,9 @@ export function VideoPane({
       setCapturePanelMode(mode)
       setQuestionContent(richText(""))
       setAnswerContent(richText(""))
+      setCaptureReferenceIds([])
+      setCaptureReferencePicker(null)
+      setIsFrameCaptureUploading(false)
       setCaptureError(null)
       setAssistantFrame(null)
       setAssistantStatus(null)
@@ -821,6 +933,30 @@ export function VideoPane({
     subtitleSourceKind,
   ])
 
+  const captureCurrentFrameIntoAnswer = useCallback(async () => {
+    if (capturePanelMode !== "capture" || !isCapturePanelOpen || isFrameCaptureUploading) return
+    const video = videoRef.current
+    if (!video || video.readyState < 2) {
+      setCaptureError("当前视频帧尚未就绪，稍等一秒再截取。")
+      return
+    }
+
+    touchComposeActivity()
+    setCaptureError(null)
+    setIsFrameCaptureUploading(true)
+    try {
+      const currentMs = clampPlaybackMs(video, Math.floor(video.currentTime * 1000))
+      const captured = await captureDisplayedVideoFrameFile(video, currentMs)
+      const uploaded = await uploadMediaAsset(projectId, captured.file)
+      setAnswerContent((prev) => appendImageBlock(prev, uploaded.assetId))
+      showInfoFeedback("已插入视频帧", `来自 ${formatPlaybackClock(captured.timeMs)} 的当前画面。`)
+    } catch (error) {
+      setCaptureError(error instanceof Error ? error.message : "当前视频帧插入失败。")
+    } finally {
+      setIsFrameCaptureUploading(false)
+    }
+  }, [capturePanelMode, isCapturePanelOpen, isFrameCaptureUploading, projectId, touchComposeActivity])
+
   const saveCaptureDraft = useCallback(() => {
     if (!instanceId) {
       setCaptureError("当前还没有选中视频实例。")
@@ -845,7 +981,7 @@ export function VideoPane({
       position: `t=${captureAnchorMs}`,
       question: questionContent,
       answer: answerContent,
-      references: [],
+      references: captureReferenceIds,
       createdAt: now,
       updatedAt: now,
     })
@@ -854,6 +990,7 @@ export function VideoPane({
     addDraft,
     answerContent,
     captureAnchorMs,
+    captureReferenceIds,
     closeCapturePanel,
     instanceId,
     projectId,
@@ -1334,6 +1471,23 @@ export function VideoPane({
   }
 
   useEffect(() => {
+    function handleFullscreenPrintScreen(event: KeyboardEvent) {
+      const isPrintScreenKey = event.key === "PrintScreen" || event.code === "PrintScreen"
+      if (!isPrintScreenKey) return false
+      if (!isCapturePanelOpen || capturePanelMode !== "capture") return false
+      const video = videoRef.current
+      if (!video || video.readyState < 1) return false
+      if (!isVideoInFullscreen(video) && !isElementInFullscreen(playerShellRef.current)) return false
+
+      event.preventDefault()
+      event.stopPropagation()
+      const now = Date.now()
+      if (now - lastPrintScreenShortcutAtRef.current < 350) return true
+      lastPrintScreenShortcutAtRef.current = now
+      void captureCurrentFrameIntoAnswer()
+      return true
+    }
+
     function handleFullscreenKeyDown(event: KeyboardEvent) {
       const video = videoRef.current
       if (!video || video.readyState < 1) return
@@ -1347,6 +1501,8 @@ export function VideoPane({
         }
         return
       }
+
+      if (handleFullscreenPrintScreen(event)) return
 
       if (event.altKey || event.ctrlKey || event.metaKey) return
       if (isShortcutBlockedTarget(event.target)) return
@@ -1408,11 +1564,20 @@ export function VideoPane({
       seekByDelta(deltaMs)
     }
 
+    function handleFullscreenKeyUp(event: KeyboardEvent) {
+      if (event.defaultPrevented || event.isComposing) return
+      handleFullscreenPrintScreen(event)
+    }
+
     document.addEventListener("keydown", handleFullscreenKeyDown, true)
+    document.addEventListener("keyup", handleFullscreenKeyUp, true)
     return () => {
       document.removeEventListener("keydown", handleFullscreenKeyDown, true)
+      document.removeEventListener("keyup", handleFullscreenKeyUp, true)
     }
   }, [
+    captureCurrentFrameIntoAnswer,
+    capturePanelMode,
     closeCapturePanel,
     instanceId,
     isCapturePanelOpen,
@@ -2056,8 +2221,8 @@ export function VideoPane({
                       </div>
                     </div>
                   ) : (
-                    <>
-                      <div className="mt-3 space-y-3">
+                    <div className="mt-3 min-h-0 overflow-y-auto pr-1">
+                      <div className="space-y-3">
                         <label className="block">
                           <div className="mb-1 text-xs text-white/62">问题</div>
                           <RichContentEditor
@@ -2092,11 +2257,39 @@ export function VideoPane({
                                 return
                               }
                               if (event.nativeEvent.isComposing) return
+                              if (event.key === "Tab" && !event.shiftKey) {
+                                event.preventDefault()
+                                openCaptureReferencePicker("question")
+                                return
+                              }
                               if (event.key === "Enter" && !(event.ctrlKey || event.metaKey)) {
                                 event.preventDefault()
                                 answerTextareaRef.current?.focus()
                               }
                             }}
+                            referencePicker={
+                              captureReferencePicker?.field === "question"
+                                ? {
+                                    isOpen: true,
+                                    isLoading:
+                                      captureReferenceSearchQ.isLoading ||
+                                      (captureReferenceSearchQ.isFetching && !captureReferenceSearchQ.data),
+                                    query: captureReferencePicker.query,
+                                    highlightedIndex: captureReferencePicker.highlightedIndex,
+                                    candidates: captureReferenceCandidates,
+                                    onQueryChange: (query) =>
+                                      setCaptureReferencePicker((current) => (current ? { ...current, query, highlightedIndex: 0 } : current)),
+                                    onHighlightChange: (index) =>
+                                      setCaptureReferencePicker((current) => (current ? { ...current, highlightedIndex: index } : current)),
+                                    onConfirm: () => confirmCaptureReferencePickerSelection("question"),
+                                    onSelect: (recallPointId) => {
+                                      addCaptureReference(recallPointId)
+                                      closeCaptureReferencePicker("question")
+                                    },
+                                    onClose: () => closeCaptureReferencePicker("question"),
+                                  }
+                                : undefined
+                            }
                           />
                         </label>
 
@@ -2134,17 +2327,81 @@ export function VideoPane({
                                 return
                               }
                               if (event.nativeEvent.isComposing) return
+                              if (event.key === "Tab" && !event.shiftKey) {
+                                event.preventDefault()
+                                openCaptureReferencePicker("answer")
+                                return
+                              }
                               if (event.key === "Enter" && !(event.ctrlKey || event.metaKey)) {
                                 event.preventDefault()
                                 void saveCaptureDraft()
                               }
                             }}
+                            referencePicker={
+                              captureReferencePicker?.field === "answer"
+                                ? {
+                                    isOpen: true,
+                                    isLoading:
+                                      captureReferenceSearchQ.isLoading ||
+                                      (captureReferenceSearchQ.isFetching && !captureReferenceSearchQ.data),
+                                    query: captureReferencePicker.query,
+                                    highlightedIndex: captureReferencePicker.highlightedIndex,
+                                    candidates: captureReferenceCandidates,
+                                    onQueryChange: (query) =>
+                                      setCaptureReferencePicker((current) => (current ? { ...current, query, highlightedIndex: 0 } : current)),
+                                    onHighlightChange: (index) =>
+                                      setCaptureReferencePicker((current) => (current ? { ...current, highlightedIndex: index } : current)),
+                                    onConfirm: () => confirmCaptureReferencePickerSelection("answer"),
+                                    onSelect: (recallPointId) => {
+                                      addCaptureReference(recallPointId)
+                                      closeCaptureReferencePicker("answer")
+                                    },
+                                    onClose: () => closeCaptureReferencePicker("answer"),
+                                  }
+                                : undefined
+                            }
                           />
                         </label>
                       </div>
 
+                      <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.045] px-3 py-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-[11px] uppercase tracking-[0.16em] text-white/44">引用关系</div>
+                          <div className="rounded-full border border-white/10 px-2 py-0.5 text-[11px] text-white/54">
+                            已引用 {captureReferenceIds.length} 条
+                          </div>
+                        </div>
+                        {captureReferenceIds.length > 0 ? (
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {captureReferenceIds.map((referenceId) => (
+                              <button
+                                key={`capture-reference-${referenceId}`}
+                                type="button"
+                                className="inline-flex max-w-full items-center gap-2 rounded-full border border-cyan-200/18 bg-cyan-200/10 px-2.5 py-1 text-left text-[11px] text-cyan-50"
+                                onClick={() => {
+                                  touchComposeActivity()
+                                  setCaptureReferenceIds((current) => current.filter((id) => id !== referenceId))
+                                }}
+                                title={`移除 ${referenceId}`}
+                              >
+                                <span className="truncate">{formatRecallPointReference(referenceId)}</span>
+                                <span className="text-white/44">移除</span>
+                              </button>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="mt-2 text-xs text-white/42">还没有引用其他复述点。</div>
+                        )}
+                        {captureReferenceSearchQ.error ? (
+                          <div className="mt-2 text-xs text-rose-200">候选复述点加载失败：{formatCourseAssistantError(captureReferenceSearchQ.error)}</div>
+                        ) : null}
+                      </div>
+
                       <div className={cn("mt-2 text-xs", captureError ? "text-rose-200" : "text-white/44")}>
-                        {captureError ?? "全屏时 Enter 可打开录入；问题中 Enter 切到答案，答案中 Enter 保存，Ctrl+Enter 换行，Ctrl+V 粘贴图片会先上传到服务器。"}
+                        {captureError ??
+                          (isFrameCaptureUploading
+                            ? "正在截取并插入当前视频帧..."
+                            : "全屏时 Enter 可打开录入；问题/答案中 Tab 引用复述点，PrtScSysRq 截当前视频帧到答案，Ctrl+V 粘贴图片会先上传到服务器。")}
                       </div>
 
                       <div className="mt-3 flex items-center justify-end gap-2">
@@ -2160,7 +2417,7 @@ export function VideoPane({
                           保存复述点
                         </Button>
                       </div>
-                    </>
+                    </div>
                   )}
                 </div>
               </div>

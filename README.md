@@ -116,7 +116,7 @@ docker compose \
   up --build
 ```
 
-The hosted stack now expects `PLM_MEDIA_ACCESS_TOKEN_SECRET` to be set to a real secret in `.env`. The shipped self-host example also defaults to `PLM_ALLOW_SIGNUP=false` and `PLM_SECURE_COOKIES=true`; flip those only when you intentionally need a less strict local test setup.
+The hosted stack now expects `PLM_MEDIA_ACCESS_TOKEN_SECRET` to be set to a real secret in `.env`. Hosted runtime defaults to `PLM_ALLOW_SIGNUP=false`, `PLM_REQUIRE_SIGNUP_INVITE=true`, and the shipped self-host example also defaults to `PLM_SECURE_COOKIES=true`; if you intentionally enable sign-up, fresh deployments should set `PLM_BOOTSTRAP_SUPER_ADMIN_EMAILS` first so the initial admin can register without an invite, clear that allowlist afterward if you do not want it to remain a break-glass `super_admin` mapping, and truly free public registration should also turn on `PLM_ENABLE_PASSWORD_RESET=true`, `PLM_ENABLE_EMAIL_VERIFICATION=true`, and `PLM_ENABLE_SIGNUP_HUMAN_CHECK=true` with `PLM_SMTP_*`, `PLM_PUBLIC_ORIGIN`, and `PLM_TURNSTILE_*` configured.
 
 For Windows server sync, the normal helper flow is just:
 
@@ -155,6 +155,26 @@ Overrides:
 - `PLM_SQL_BACKEND`: `sqlite` or `postgres`
 - `PLM_STORE_DB_PATH`: full path to the SQLite store file
 - `PLM_AUTH_DB_PATH`: full path to the SQLite auth file
+- `PLM_REQUIRE_SIGNUP_INVITE`: keep hosted sign-up invite-only unless you intentionally want free public registration
+- `PLM_BOOTSTRAP_SUPER_ADMIN_EMAILS`: comma-separated bootstrap admin emails that may register without an invite code and will retain `super_admin` on startup while listed
+- `PLM_ENABLE_PASSWORD_RESET`: enables SMTP-backed password recovery for hosted auth
+- `PLM_PASSWORD_RESET_TOKEN_TTL_MINUTES`: password reset link lifetime in minutes
+- `PLM_ENABLE_EMAIL_VERIFICATION`: sends a verification email after sign-up and blocks login until the mailbox is confirmed
+- `PLM_EMAIL_VERIFICATION_TOKEN_TTL_MINUTES`: email verification link lifetime in minutes
+- `PLM_ENABLE_SIGNUP_HUMAN_CHECK`: requires a Turnstile challenge before hosted sign-up
+- `PLM_TURNSTILE_SITE_KEY`: Cloudflare Turnstile site key exposed to the sign-up page
+- `PLM_TURNSTILE_SECRET_KEY`: Cloudflare Turnstile server-side secret used to validate the sign-up challenge
+- `PLM_TURNSTILE_EXPECTED_HOSTNAME`: optional expected hostname override for Turnstile validation
+- `PLM_TURNSTILE_TIMEOUT_SECONDS`: Turnstile validation timeout in seconds
+- `PLM_SMTP_HOST`: SMTP host used for password reset and email verification mail
+- `PLM_SMTP_PORT`: SMTP port used for password reset mail
+- `PLM_SMTP_USERNAME`: optional SMTP username
+- `PLM_SMTP_PASSWORD`: optional SMTP password
+- `PLM_SMTP_USE_SSL`: connect with implicit SSL
+- `PLM_SMTP_USE_STARTTLS`: upgrade plaintext SMTP with STARTTLS
+- `PLM_SMTP_FROM_EMAIL`: sender address for password reset and email verification mail
+- `PLM_SMTP_FROM_NAME`: optional sender display name for password reset and email verification mail
+- `PLM_SMTP_TIMEOUT_SECONDS`: SMTP connect/send timeout in seconds
 - `PLM_POSTGRES_DSN`: PostgreSQL DSN used when `PLM_SQL_BACKEND=postgres`
 - `PLM_STORE_POSTGRES_DSN`: optional override for the core store DSN
 - `PLM_AUTH_POSTGRES_DSN`: optional override for the auth store DSN
@@ -169,6 +189,7 @@ Overrides:
 - `PLM_LEGACY_STORE_PATH`: optional legacy JSON import source; `PLM_STORE_PATH` is still accepted as a legacy alias
 - `PLM_DATA_DIR`: base directory for LearningPyramid runtime data
 - `PLM_PROJECTS_ROOT`: root directory used when creating new projects; default is `LearningPyramid/data`
+- Self-host compose mounts `./data/selfhost` at both `/data` and `/app/data` so runtime databases, existing project roots, and uploaded recall-point images stay persistent across container rebuilds.
 - `PLM3_WHISPER_PYTHON`: legacy override for the Python interpreter used by the local Whisper runtime
 
 When `PLM_SQL_BACKEND=sqlite`, an older repo-local `.plm_store.json`, `%LOCALAPPDATA%\LearningPyramid\plm_store.json`, `%LOCALAPPDATA%\PLM3\plm_store.json`, or `%LOCALAPPDATA%\学习金字塔\plm_store.json` is imported on first start and then archived as `*.imported.bak`. The same legacy import path also works when the runtime backend is PostgreSQL.
@@ -227,13 +248,14 @@ Every API response now includes `X-Request-ID`, and request logs include request
 Before switching a runtime to PostgreSQL or doing a risky migration, capture a runtime bundle:
 
 ```powershell
-python tools/backup_runtime_bundle.py runtime-backup.json
+python tools/backup_runtime_bundle.py runtime-backup.json --include-media --media-root ./data/selfhost --verify
 ```
 
 To restore that bundle into the currently configured runtime:
 
 ```powershell
-python tools/restore_runtime_bundle.py runtime-backup.json
+python tools/restore_runtime_bundle.py runtime-backup.json --dry-run
+python tools/restore_runtime_bundle.py runtime-backup.json --confirm-replace --target-media-root ./data/selfhost
 ```
 
 Recommended rollback flow:

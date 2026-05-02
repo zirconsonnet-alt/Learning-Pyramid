@@ -10,7 +10,6 @@ class StudyMaterialType(str, Enum):
     COURSE = "COURSE"
     BOOK = "BOOK"
     LOOSE_POINTS = "LOOSE_POINTS"
-    MISTAKE_BOOK = "MISTAKE_BOOK"
 
 
 @dataclass(frozen=True, slots=True)

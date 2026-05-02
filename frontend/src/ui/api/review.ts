@@ -70,23 +70,8 @@ export const RecallPointSchema = z.object({
   anchor: z.object({ instanceId: z.string(), position: z.string() }).nullable(),
   references: z.array(z.string()).default([]),
   insights: z.array(RichContentSchema),
-  sourceProjectId: z.string().nullable().optional(),
-  sourceRecallPointId: z.string().nullable().optional(),
-  sourceMaterialId: z.string().nullable().optional(),
-  sourceMaterialTitle: z.string().nullable().optional(),
-  sourceAnchorLabel: z.string().nullable().optional(),
-  mistakeStatus: z.enum(["OPEN", "RESOLVING", "RESOLVED"]).nullable().optional(),
-  mistakeNote: z.string().nullable().optional(),
 })
 export type RecallPoint = z.infer<typeof RecallPointSchema>
-
-const CollectRecallPointToMistakeMaterialResultSchema = z.object({
-  target_project_id: z.string(),
-  target_material_id: z.string(),
-  target_node_id: z.string(),
-  target_recall_point_id: z.string(),
-  created_inbox: z.boolean(),
-})
 
 export const ReviewRecommendationItemSchema = z.object({
   recallPoint: RecallPointSchema,
@@ -205,8 +190,6 @@ export function editRecallPoint(
     question: z.infer<typeof RichContentSchema>
     answer: z.infer<typeof RichContentSchema>
     anchor: { instanceId: string; position: string } | null
-    mistakeStatus?: "OPEN" | "RESOLVING" | "RESOLVED" | null
-    mistakeNote?: string | null
   },
 ) {
   return apiRequest({
@@ -216,31 +199,8 @@ export function editRecallPoint(
       question: RichContentSchema.parse(normalizeRichContent(params.question)),
       answer: RichContentSchema.parse(normalizeRichContent(params.answer)),
       anchor: params.anchor,
-      mistakeStatus: params.mistakeStatus ?? undefined,
-      mistakeNote: params.mistakeNote ?? undefined,
     },
     responseSchema: z.null(),
-  })
-}
-
-export function collectRecallPointToMistakeMaterial(
-  projectId: string,
-  recallPointId: string,
-  params: {
-    targetMaterialId: string
-    targetNodeId?: string | null
-    mistakeNote?: string | null
-  },
-) {
-  return apiRequest({
-    path: `/projects/${projectId}/recall-points/${recallPointId}/collect-to-mistake-material`,
-    method: "POST",
-    body: {
-      targetMaterialId: params.targetMaterialId,
-      targetNodeId: params.targetNodeId ?? undefined,
-      mistakeNote: params.mistakeNote ?? undefined,
-    },
-    responseSchema: CollectRecallPointToMistakeMaterialResultSchema,
   })
 }
 

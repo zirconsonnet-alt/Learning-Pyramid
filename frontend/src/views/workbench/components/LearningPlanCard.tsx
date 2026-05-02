@@ -38,8 +38,8 @@ function formatPercent(value: number) {
 }
 
 function formatMaterialCount(evaluation: LearningPlanEvaluation) {
-  if (evaluation.totalLeafCount <= 0) return "范围还没有可统计的末级材料"
-  return `${evaluation.completedLeafCount}/${evaluation.totalLeafCount} 个末级材料已有学习痕迹`
+  if (evaluation.totalLeafCount <= 0) return "范围还没有可统计的末级内容"
+  return `${evaluation.completedLeafCount}/${evaluation.totalLeafCount} 个末级内容已有学习痕迹`
 }
 
 function feasibilityLabel(feasibility: LearningPlanEvaluation["feasibility"]) {
@@ -167,7 +167,7 @@ function PlanEditorDialog({
                 )}
               >
                 <div className="font-semibold">学习对象节点集合</div>
-                <div className="mt-1 text-xs leading-5">勾选章节、目录或节点；系统会把它们下面的末级材料纳入计划。</div>
+                <div className="mt-1 text-xs leading-5">勾选章节、目录或节点；系统会把它们下面的末级内容纳入计划。</div>
               </button>
             </div>
           </div>
@@ -187,7 +187,7 @@ function PlanEditorDialog({
                   />
                   <span>
                     <span className="font-medium text-foreground">{node.title}</span>
-                    <span className="mt-1 block text-xs text-muted-foreground">{node.kind === "container" ? "目录节点" : "末级材料"}</span>
+                    <span className="mt-1 block text-xs text-muted-foreground">{node.kind === "container" ? "目录节点" : "末级内容"}</span>
                   </span>
                 </label>
               ))}

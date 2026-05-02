@@ -39,7 +39,9 @@ import { Input } from "@/ui/components/ui/input"
 import { formatRecallPointReference } from "@/ui/displayIdentifiers"
 import { askCourseAgent } from "@/ui/llm/courseAgent"
 import { useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
+import { buildProjectSettingsPath } from "@/ui/projectPaths"
 import { useProjectMaterialSourceBinding } from "@/ui/queries/projects"
+import { useSubjectContext } from "@/ui/queries/subjects"
 import { useSystemCapabilities } from "@/ui/queries/system"
 import { useInstances } from "@/ui/queries/workbench"
 import { isSyntheticFilesContainer, sortLearningObjectNodeIdsForDisplay } from "@/ui/learningObjectDisplayOrder"
@@ -356,7 +358,7 @@ function buildTaskSidebarTree(nodes: LearningTaskNode[]): SidebarTreeData {
 
 function formatLearningObjectSidebarTitle(node: LearningObjectNode, depth: number) {
   const rawTitle = node.title.trim()
-  if (!rawTitle && node.kind === "leaf") return "未命名材料"
+  if (!rawTitle && node.kind === "leaf") return "未命名内容"
   if (!rawTitle && node.kind === "container") return depth === 0 ? "学习对象根" : "未命名分组"
   if (depth === 0 && rawTitle === "Files") return "学习对象根"
   return rawTitle
@@ -956,6 +958,10 @@ export function AiChatPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const pid = projectId ?? ""
+  const subjectContextQ = useSubjectContext(pid, !!pid)
+  const projectSettingsPath = buildProjectSettingsPath(subjectContextQ.data?.currentMaterial.compatibilityProjectId ?? pid, {
+    subjectProjectId: subjectContextQ.data?.subjectProjectId,
+  })
 
   function touchQaActivity() {
     touchDailyStudyActivity(pid, "qa", QA_ACTIVITY_WINDOW_MS)
@@ -1744,7 +1750,7 @@ export function AiChatPage() {
                 }
                 action={
                   <Button asChild>
-                    <Link to={`/p/${pid}/settings`}>前往项目设置</Link>
+                    <Link to={projectSettingsPath}>前往项目设置</Link>
                   </Button>
                 }
               />

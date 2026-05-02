@@ -1,11 +1,12 @@
 import { useMemo, useState } from "react"
-import { useQueries } from "@tanstack/react-query"
-import { ArrowRight, ArrowUpDown, ChevronDown, Plus, Settings2, Trash2 } from "lucide-react"
+import { useQueries, useQuery } from "@tanstack/react-query"
+import { AlertTriangle, ArrowRight, ArrowUpDown, ChevronDown, Plus, Settings2, Trash2 } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 
 import { listAuditLogEvents, type AuditLogEvent } from "@/ui/api/auditLog"
 import { ApiError } from "@/ui/api/http"
 import { setLayerConfig } from "@/ui/api/projectConfig"
+import { getSystemDataSafetyStatus } from "@/ui/api/system"
 import type { Subject } from "@/ui/api/subjects"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
@@ -38,13 +39,6 @@ function formatTs(iso: string) {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
   return d.toLocaleString()
-}
-
-function formatProjectState(state: string) {
-  if (state === "ACTIVE") return "运行中"
-  if (state === "READY") return "已就绪"
-  if (state === "DELETED") return "已删除"
-  return state
 }
 
 function formatLastStudyText(occurredAt: string | null) {
@@ -118,6 +112,13 @@ export function ProjectsPage() {
   const defaultProjectReviewTemplate = useGlobalConfigStore((s) => s.defaultProjectReviewTemplate)
 
   const subjects = data ?? []
+  const dataSafety = useQuery({
+    queryKey: ["systemDataSafety"],
+    queryFn: () => getSystemDataSafetyStatus(),
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+  })
+  const dataSafetyStatus = dataSafety.data
 
   const [title, setTitle] = useState("")
   const [createOpen, setCreateOpen] = useState(false)
@@ -198,7 +199,7 @@ export function ProjectsPage() {
       setTitle("")
       setSelectedProjectId(res.compatibilityProjectId)
       setCreateOpen(false)
-      showSuccessFeedback("学科已创建", `“${t}” 已准备好。先在学科总面板里选择或创建材料项目。`)
+      showSuccessFeedback("学科已创建", `“${t}” 已准备好。先在项目中心里选择或创建项目。`)
       nav(`/subjects/${res.subjectId}`)
     } catch (err) {
       showErrorFeedback("创建学科失败", formatApiError(err))
@@ -258,6 +259,18 @@ export function ProjectsPage() {
           ) : null}
           {error ? <div className="rounded-2xl border border-destructive/20 bg-destructive/5 px-5 py-4 text-sm text-destructive">{formatApiError(error)}</div> : null}
 
+          {dataSafetyStatus && (dataSafetyStatus.state === "blocked" || dataSafetyStatus.state === "unknown") ? (
+            <div className="flex items-start gap-3 rounded-2xl border border-destructive/25 bg-destructive/5 px-5 py-4 text-sm text-destructive">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div className="space-y-1">
+                <div className="font-semibold">数据安全检查未通过</div>
+                <div className="text-destructive/80">
+                  当前服务器报告用户数据可能不可达。为避免把异常误认为空项目，请先联系运维处理数据安全状态。
+                </div>
+              </div>
+            </div>
+          ) : null}
+
           {!isLoading && !error ? (
             <div className="grid gap-4 xl:grid-cols-2">
               {sortedSubjects.map((p) => (
@@ -277,7 +290,6 @@ export function ProjectsPage() {
                           <div className="min-w-0 space-y-2">
                             <CardTitle className="truncate text-xl">{p.title}</CardTitle>
                             <CardDescription className="flex flex-wrap items-center gap-2 text-xs">
-                              <span className="theme-meta">{formatProjectState(p.state)}</span>
                               <span className={cn("font-medium", activityLoading ? "text-muted-foreground" : lastStudyDisplay.className)}>
                                 {activityLoading ? "学习记录载入中" : lastStudyDisplay.text}
                               </span>
@@ -355,7 +367,7 @@ export function ProjectsPage() {
               />
             </div>
             <DialogDescription className="rounded-xl border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-4 py-3 text-sm leading-6 text-muted-foreground">
-              学科是复习、复述点、层推进和统计的共享空间。网课、书本、错题和零散知识会作为材料挂在学科下面；当前版本会先创建一个默认网课材料。
+              学科是复习、复述点、层推进和统计的共享空间。网课、书本和零散知识会作为项目挂在学科下面；当前版本会先创建一个默认项目。
             </DialogDescription>
           </div>
           <DialogFooter>
@@ -385,15 +397,12 @@ export function ProjectsPage() {
               <div className="rounded-2xl border border-destructive/15 bg-destructive/5 px-4 py-4">
                 <div className="space-y-1.5">
                   <div className="text-sm font-semibold text-foreground">{deleteTarget.title}</div>
-                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <span className="theme-meta">{formatProjectState(deleteTarget.state)}</span>
-                    <span>创建于 {formatTs(deleteTarget.createdAt)}</span>
-                  </div>
+                  <div className="text-xs text-muted-foreground">创建于 {formatTs(deleteTarget.createdAt)}</div>
                 </div>
               </div>
 
               <div className="theme-status-surface px-4 py-4 text-sm text-muted-foreground">
-                删除前建议确认是否还有未处理的材料绑定、草稿或工作流入口需要保留。该操作完成后，当前浏览器会同步清掉这个学科的本地上下文。
+                删除前建议确认是否还有未处理的内容绑定、草稿或工作流入口需要保留。该操作完成后，当前浏览器会同步清掉这个学科的本地上下文。
               </div>
 
               <div className="grid gap-2">

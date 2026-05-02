@@ -268,7 +268,7 @@ class MembershipPaymentService:
     def __init__(self) -> None:
         self._session = requests.Session()
         self._private_key = None
-        self._wechat_public_key = None
+        self._wechat_public_key_cache = None
 
     def supported_providers(self) -> tuple[str, ...]:
         return list_supported_membership_payment_providers()
@@ -703,7 +703,7 @@ class MembershipPaymentService:
         )
         signature = base64.b64decode(signature_b64)
         try:
-            self._wechat_public_key().verify(signature, message, padding.PKCS1v15(), hashes.SHA256())
+            self._get_wechat_public_key().verify(signature, message, padding.PKCS1v15(), hashes.SHA256())
         except Exception as exc:
             raise PreconditionFailure("wechat payment signature verification failed") from exc
 
@@ -742,14 +742,14 @@ class MembershipPaymentService:
         )
         return self._private_key
 
-    def _wechat_public_key(self):
-        if self._wechat_public_key is not None:
-            return self._wechat_public_key
+    def _get_wechat_public_key(self):
+        if self._wechat_public_key_cache is not None:
+            return self._wechat_public_key_cache
         config = current_wechat_native_payment_config()
         if config.wechatpay_public_key_pem_path is None or not config.wechatpay_public_key_pem_path.exists():
             raise PreconditionFailure("PLM_WECHAT_PAY_PUBLIC_KEY_PEM_PATH does not point to an existing PEM file")
-        self._wechat_public_key = serialization.load_pem_public_key(config.wechatpay_public_key_pem_path.read_bytes())
-        return self._wechat_public_key
+        self._wechat_public_key_cache = serialization.load_pem_public_key(config.wechatpay_public_key_pem_path.read_bytes())
+        return self._wechat_public_key_cache
 
     @staticmethod
     def _build_qr_image_data_url(code_url: str) -> str:

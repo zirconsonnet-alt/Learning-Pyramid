@@ -30,6 +30,7 @@ def auth_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("PLM_APP_MODE", "hosted")
     monkeypatch.setenv("PLM_ENABLE_AUTH", "true")
     monkeypatch.setenv("PLM_ALLOW_SIGNUP", "true")
+    monkeypatch.setenv("PLM_BOOTSTRAP_SUPER_ADMIN_EMAILS", "owner@example.com,stranger@example.com")
     monkeypatch.setenv("PLM_ENABLE_ASR", "false")
     monkeypatch.setenv("PLM_ENABLE_SERVER_MEDIA_STREAM", "false")
     monkeypatch.setenv("PLM_PROJECTS_ROOT", str(tmp_path / "projects"))
@@ -275,81 +276,90 @@ def test_profile_global_settings_persist_across_relogin(auth_env: None) -> None:
     registered = client.post("/api/auth/register", json={"email": "owner@example.com", "password": "password123"})
     assert registered.status_code == 200
 
-    default_schedule = {
-        day: {
-            "enabled": False,
-            "startTime": "19:00",
-            "focusMinutes": 25,
-            "breakMinutes": 5,
-            "pomodoroCount": 4,
-            "projectIds": [None, None, None, None],
-            "breakPrompt": "",
-            "focusPrompts": ["", "", "", ""],
-        }
-        for day in ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
-    }
+    default_schedule = {day: {"plans": []} for day in ("mon", "tue", "wed", "thu", "fri", "sat", "sun")}
     updated_schedule = {
         "mon": {
-            "enabled": True,
-            "startTime": "08:30",
-            "focusMinutes": 40,
-            "breakMinutes": 8,
-            "pomodoroCount": 3,
-            "projectIds": ["project-a", "project-b", None],
+            "plans": [
+                {
+                    "id": "mon-morning",
+                    "enabled": True,
+                    "startTime": "08:30",
+                    "focusMinutes": 40,
+                    "breakMinutes": 8,
+                    "pomodoroCount": 3,
+                    "projectIds": ["project-a", "project-b", None],
+                },
+                {
+                    "id": "mon-evening",
+                    "enabled": True,
+                    "startTime": "20:00",
+                    "focusMinutes": 30,
+                    "breakMinutes": 10,
+                    "pomodoroCount": 2,
+                    "projectIds": ["project-c", None],
+                },
+            ]
         },
         "tue": {
-            "enabled": True,
-            "startTime": "08:30",
-            "focusMinutes": 40,
-            "breakMinutes": 8,
-            "pomodoroCount": 3,
-            "projectIds": ["project-a", "project-b", "project-c"],
+            "plans": [
+                {
+                    "id": "tue-morning",
+                    "enabled": True,
+                    "startTime": "08:30",
+                    "focusMinutes": 40,
+                    "breakMinutes": 8,
+                    "pomodoroCount": 3,
+                    "projectIds": ["project-a", "project-b", "project-c"],
+                }
+            ]
         },
         "wed": {
-            "enabled": True,
-            "startTime": "08:30",
-            "focusMinutes": 40,
-            "breakMinutes": 8,
-            "pomodoroCount": 3,
-            "projectIds": [None, None, None],
+            "plans": [
+                {
+                    "id": "wed-morning",
+                    "enabled": True,
+                    "startTime": "08:30",
+                    "focusMinutes": 40,
+                    "breakMinutes": 8,
+                    "pomodoroCount": 3,
+                    "projectIds": [None, None, None],
+                }
+            ]
         },
         "thu": {
-            "enabled": True,
-            "startTime": "08:30",
-            "focusMinutes": 40,
-            "breakMinutes": 8,
-            "pomodoroCount": 3,
-            "projectIds": ["project-d", None, None],
+            "plans": [
+                {
+                    "id": "thu-morning",
+                    "enabled": True,
+                    "startTime": "08:30",
+                    "focusMinutes": 40,
+                    "breakMinutes": 8,
+                    "pomodoroCount": 3,
+                    "projectIds": ["project-d", None, None],
+                }
+            ]
         },
         "fri": {
-            "enabled": True,
-            "startTime": "08:30",
-            "focusMinutes": 40,
-            "breakMinutes": 8,
-            "pomodoroCount": 3,
-            "projectIds": ["project-d", "project-e", "project-f"],
+            "plans": [
+                {
+                    "id": "fri-morning",
+                    "enabled": True,
+                    "startTime": "08:30",
+                    "focusMinutes": 40,
+                    "breakMinutes": 8,
+                    "pomodoroCount": 3,
+                    "projectIds": ["project-d", "project-e", "project-f"],
+                }
+            ]
         },
-        "sat": {
-            "enabled": False,
-            "startTime": "10:00",
-            "focusMinutes": 30,
-            "breakMinutes": 10,
-            "pomodoroCount": 2,
-            "projectIds": [None, None],
-        },
-        "sun": {
-            "enabled": False,
-            "startTime": "10:00",
-            "focusMinutes": 30,
-            "breakMinutes": 10,
-            "pomodoroCount": 2,
-            "projectIds": [None, "project-z"],
-        },
+        "sat": {"plans": []},
+        "sun": {"plans": []},
     }
     for day, payload in updated_schedule.items():
-        count = int(payload["pomodoroCount"])
-        payload["breakPrompt"] = f"{day} rest in ten seconds"
-        payload["focusPrompts"] = [f"{day} focus {index + 1}" for index in range(count)]
+        for plan_index, plan in enumerate(payload["plans"]):
+            count = int(plan["pomodoroCount"])
+            plan["breakPrompt"] = f"{day} plan {plan_index + 1} rest in ten seconds"
+            plan["focusPrompts"] = [f"{day} plan {plan_index + 1} focus {index + 1}" for index in range(count)]
 
     before = client.get("/api/profile/me/global-settings")
     assert before.status_code == 200
@@ -404,6 +414,56 @@ def test_profile_global_settings_persist_across_relogin(auth_env: None) -> None:
         {"kind": "CONVERGENCE"},
         {"kind": "REVIEW_TASK", "count": 2},
     ]
+
+
+def test_profile_global_settings_reject_overlapping_pomodoro_plans(auth_env: None) -> None:
+    client = TestClient(create_app())
+    registered = client.post("/api/auth/register", json={"email": "owner@example.com", "password": "password123"})
+    assert registered.status_code == 200
+
+    weekly_schedule = {day: {"plans": []} for day in ("mon", "tue", "wed", "thu", "fri", "sat", "sun")}
+    weekly_schedule["mon"] = {
+        "plans": [
+            {
+                "id": "early",
+                "enabled": True,
+                "startTime": "09:00",
+                "focusMinutes": 25,
+                "breakMinutes": 5,
+                "pomodoroCount": 2,
+                "projectIds": [None, None],
+                "breakPrompt": "",
+                "focusPrompts": ["", ""],
+            },
+            {
+                "id": "overlap",
+                "enabled": True,
+                "startTime": "09:30",
+                "focusMinutes": 25,
+                "breakMinutes": 5,
+                "pomodoroCount": 1,
+                "projectIds": [None],
+                "breakPrompt": "",
+                "focusPrompts": [""],
+            },
+        ]
+    }
+
+    response = client.put(
+        "/api/profile/me/global-settings",
+        json={
+            "theme": "mist",
+            "pomodoro": {
+                "enabled": True,
+                "transitionSoundEnabled": False,
+                "weeklySchedule": weekly_schedule,
+            },
+            "defaultProjectReviewTemplate": [{"kind": "CONVERGENCE"}],
+        },
+    )
+
+    assert response.status_code == 400
+    assert "overlap" in response.json()["error"]["message"]
 
 
 def test_profile_learning_plans_sync_and_survive_global_settings_update(auth_env: None) -> None:
@@ -530,3 +590,26 @@ def test_system_pomodoro_tts_preview_returns_audio_when_auth_enabled(
     assert response.status_code == 200
     assert response.content == b"fake-mp3"
     assert response.headers["content-type"].startswith("audio/mpeg")
+
+
+def test_system_pomodoro_tts_preview_returns_unavailable_for_tts_failure(
+    auth_env: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from adapter.routers import system as system_router
+    from backend.system.pomodoro_tts import PomodoroTtsUnavailable
+
+    async def fake_synthesize_pomodoro_prompt_audio(text: str) -> bytes:
+        raise PomodoroTtsUnavailable("pomodoro TTS service is unavailable")
+
+    monkeypatch.setattr(
+        system_router,
+        "synthesize_pomodoro_prompt_audio",
+        fake_synthesize_pomodoro_prompt_audio,
+    )
+
+    client = TestClient(create_app())
+    response = client.post("/api/system/pomodoro/tts-preview", json={"text": "十秒后开始学习"})
+
+    assert response.status_code == 503
+    assert response.json()["error"]["message"] == "pomodoro TTS service is unavailable"

@@ -30,6 +30,27 @@ def auth_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("PLM_APP_MODE", "hosted")
     monkeypatch.setenv("PLM_ENABLE_AUTH", "true")
     monkeypatch.setenv("PLM_ALLOW_SIGNUP", "true")
+    monkeypatch.setenv(
+        "PLM_BOOTSTRAP_SUPER_ADMIN_EMAILS",
+        ",".join(
+            (
+                "alice@example.com",
+                "bob@example.com",
+                "self-alice@example.com",
+                "self-bob@example.com",
+                "reverse-alice@example.com",
+                "reverse-bob@example.com",
+                "cancel-alice@example.com",
+                "cancel-bob@example.com",
+                "permission-alice@example.com",
+                "permission-bob@example.com",
+                "permission-charlie@example.com",
+                "stats-alice@example.com",
+                "stats-bob@example.com",
+                "stats-charlie@example.com",
+            )
+        ),
+    )
     monkeypatch.setenv("PLM_ENABLE_ASR", "false")
     monkeypatch.setenv("PLM_ENABLE_SERVER_MEDIA_STREAM", "false")
     monkeypatch.setenv("PLM_PROJECTS_ROOT", str(tmp_path / "projects"))

@@ -46,7 +46,7 @@ function buildRecommendedTaskTitle(instanceDisplayName: string, previousLearning
 }
 
 function createDraft(projectType: ProjectType, instanceId: string | null, ms: number): DraftRecallPoint {
-  const position = projectType === "COURSE" ? `t=${ms}` : projectType === "BOOK" ? "" : projectType === "MISTAKE_BOOK" ? "手动录入" : null
+  const position = projectType === "COURSE" ? `t=${ms}` : projectType === "BOOK" ? "" : null
   const now = Date.now()
   return {
     localId: newLocalId(),
@@ -58,6 +58,47 @@ function createDraft(projectType: ProjectType, instanceId: string | null, ms: nu
     createdAt: now,
     updatedAt: now,
   }
+}
+
+function formatCourseAnchorMs(ms: number) {
+  const totalSec = Math.max(0, Math.floor(ms / 1000))
+  const h = Math.floor(totalSec / 3600)
+  const m = Math.floor((totalSec % 3600) / 60)
+  const s = totalSec % 60
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
+  return `${m}:${String(s).padStart(2, "0")}`
+}
+
+function parseCourseAnchorTime(value: string): number | null {
+  const trimmed = value.trim()
+  const rawMs = trimmed.match(/^t=(\d+)$/i)
+  if (rawMs) return Number(rawMs[1])
+
+  const parts = trimmed.split(":")
+  if (parts.length < 2 || parts.length > 3 || parts.some((part) => !/^\d+$/.test(part))) return null
+  const values = parts.map(Number)
+  const [h, m, s] = parts.length === 3 ? values : [0, values[0], values[1]]
+  if (m > 59 || s > 59) return null
+  return ((h * 3600) + (m * 60) + s) * 1000
+}
+
+function formatCourseAnchorPositionForInput(position: string | null) {
+  if (!position) return ""
+  const ms = parseCourseAnchorTime(position)
+  return ms === null ? position : formatCourseAnchorMs(ms)
+}
+
+function normalizeCourseAnchorPositionForSubmit(position: string | null) {
+  const trimmed = position?.trim() ?? ""
+  if (!trimmed) return null
+  const ms = parseCourseAnchorTime(trimmed) ?? (/^\d+$/.test(trimmed) ? Number(trimmed) : null)
+  return ms === null ? trimmed : `t=${ms}`
+}
+
+function normalizeAnchorPositionForSubmit(position: string | null, projectType: ProjectType) {
+  if (projectTypeUsesResolvableCourseAnchor(projectType)) return normalizeCourseAnchorPositionForSubmit(position)
+  const trimmed = position?.trim() ?? ""
+  return trimmed || null
 }
 
 const COMPOSE_ACTIVITY_WINDOW_MS = 60_000
@@ -151,13 +192,10 @@ export function ComposePane({
     if (projectType === "LOOSE_POINTS") {
       return buildRecommendedTaskTitle("零散知识点", previousLearningCountForInstance)
     }
-    if (projectType === "MISTAKE_BOOK") {
-      return buildRecommendedTaskTitle(instance?.materialDisplayName ?? "错题条目", previousLearningCountForInstance)
-    }
     if (!instance) return ""
     const instanceTitle = simplifyMaterialDisplayName(
       formatInstanceReference(instance.instanceId, instance.materialDisplayName),
-      "未命名材料",
+      "未命名内容",
     )
     return buildRecommendedTaskTitle(instanceTitle, previousLearningCountForInstance)
   }, [instance, previousLearningCountForInstance, projectType])
@@ -203,12 +241,15 @@ export function ComposePane({
     ) {
       return
     }
-    const items = drafts.map((d) => ({
-      question: d.question,
-      answer: d.answer,
-      anchor: requiresAnchor && d.instanceId && d.position ? { instanceId: d.instanceId, position: d.position } : null,
-      references: d.references,
-    }))
+    const items = drafts.map((d) => {
+      const anchorPosition = normalizeAnchorPositionForSubmit(d.position, projectType)
+      return {
+        question: d.question,
+        answer: d.answer,
+        anchor: requiresAnchor && d.instanceId && anchorPosition ? { instanceId: d.instanceId, position: anchorPosition } : null,
+        references: d.references,
+      }
+    })
     if (items.length === 0) return
     try {
       touchComposeActivity()
@@ -352,16 +393,12 @@ export function ComposePane({
           <div className="min-w-0">
             <CardTitle>复述点录入</CardTitle>
             {projectType === "LOOSE_POINTS" ? (
-              <div className="mt-1 text-xs text-muted-foreground">当前项目按零散知识点模式录入，不需要选择材料实例或绑定锚点。</div>
+              <div className="mt-1 text-xs text-muted-foreground">当前项目按零散知识点模式录入，不需要选择内容实例或绑定锚点。</div>
             ) : instance ? (
               <div className="mt-1 truncate text-xs text-muted-foreground">{instance.materialDisplayName}</div>
             ) : (
               <div className="mt-1 text-xs text-muted-foreground">
-                {projectType === "BOOK"
-                  ? "请先从左侧目录中选择一个章节、小节或条目。"
-                  : projectType === "MISTAKE_BOOK"
-                    ? "请先从左侧目录中选择一个错题条目或章节。"
-                    : "请先从左侧目录中选择一个视频实例。"}
+                {projectType === "BOOK" ? "请先从左侧目录中选择一个章节、小节或条目。" : "请先从左侧目录中选择一个视频实例。"}
               </div>
             )}
           </div>
@@ -452,18 +489,12 @@ export function ComposePane({
             <ContentEmptyState
               icon={BookPlus}
               title={
-                projectType === "BOOK"
-                  ? "先选择一个书本目录节点"
-                  : projectType === "MISTAKE_BOOK"
-                    ? "先选择一个错题目录节点"
-                    : "先选择一个视频再开始录入"
+                projectType === "BOOK" ? "先选择一个书本目录节点" : "先选择一个视频再开始录入"
               }
               message={
                 projectType === "BOOK"
                   ? "请先从左侧内容目录里选择一个章节、小节或条目，随后就能录入带文本锚点的复述点。"
-                  : projectType === "MISTAKE_BOOK"
-                    ? "请先从左侧内容目录里选择一个错题条目或章节，随后就能把错题录进去并继续复习。"
-                    : "请先从左侧内容目录里选择一个视频，随后就能开始录入复述点。"
+                  : "请先从左侧内容目录里选择一个视频，随后就能开始录入复述点。"
               }
             />
           ) : null
@@ -522,65 +553,28 @@ export function ComposePane({
                     </Label>
                     <Input
                       id={`draft-anchor-${activeDraft.localId}`}
-                      value={activeDraft.position ?? ""}
+                      value={
+                        usesResolvableCourseAnchor
+                          ? formatCourseAnchorPositionForInput(activeDraft.position)
+                          : activeDraft.position ?? ""
+                      }
                       onChange={(event) => {
                         touchComposeActivity()
                         updateDraftPosition(projectId, activeDraft.localId, event.target.value)
                       }}
                       onFocus={touchComposeActivity}
-                      disabled={usesResolvableCourseAnchor}
                       placeholder={
-                        usesResolvableCourseAnchor ? "添加时会自动记录当前视频时间" : "例如：第 45 页 例 2 / 第 3 章 1.2 节 / 习题 7"
+                        usesResolvableCourseAnchor ? "例如：17:57 / 1:02:03 / t=1077104" : "例如：第 45 页 例 2 / 第 3 章 1.2 节 / 习题 7"
                       }
                       className="h-11 rounded-xl border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)]"
                     />
                     <p className="text-xs text-muted-foreground">
                       {usesResolvableCourseAnchor
-                        ? "网课项目会把复述点绑定到添加时的视频时间点。"
-                        : projectType === "MISTAKE_BOOK"
-                          ? "错题材料会把当前条目当作归档位置；这里可以写来源章节、题号或你自己的整理说明。"
-                          : "书本项目必须填写文本锚点，例如页码、章节、小节、题号或段落说明。"}
+                        ? "网课锚点可编辑，提交时会保存为可跳转的视频时间点。"
+                        : "书本项目必须填写文本锚点，例如页码、章节、小节、题号或段落说明。"}
                     </p>
                   </div>
                 ) : null}
-
-                <div className="mb-4 space-y-3 border-b border-[color:var(--theme-soft-border)] pb-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">引用关系</div>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        在问题或答案输入框里按 `Tab` 打开候选列表，继续输入关键字，方向键选择后再按一次 `Tab` 完成引用。
-                      </p>
-                    </div>
-                    <div className="rounded-full border border-border/70 px-2.5 py-1 text-xs text-muted-foreground">
-                      已引用 {selectedReferenceIds.length} 条
-                    </div>
-                  </div>
-                  {selectedReferenceIds.length > 0 ? (
-                    <div className="flex flex-wrap gap-2">
-                      {selectedReferenceIds.map((referenceId) => (
-                        <button
-                          key={`selected-reference-${referenceId}`}
-                          type="button"
-                          className="inline-flex max-w-full items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-3 py-1.5 text-left text-xs text-foreground"
-                          onClick={() => {
-                            touchComposeActivity()
-                            removeDraftReference(projectId, activeDraft.localId, referenceId)
-                          }}
-                          title={`移除 ${referenceId}`}
-                        >
-                          <span className="truncate">{formatRecallPointReference(referenceId)}</span>
-                          <span className="text-muted-foreground">移除</span>
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="rounded-xl border border-dashed border-border/70 bg-muted/10 px-3 py-3 text-sm text-muted-foreground">
-                      这条复述点还没有引用其他复述点。
-                    </div>
-                  )}
-                  {referenceSearchQ.error ? <p className="text-xs text-destructive">候选复述点加载失败：{formatApiError(referenceSearchQ.error)}</p> : null}
-                </div>
 
                 <div className="grid gap-3 xl:grid-cols-2">
                   <div className="space-y-2">
@@ -683,6 +677,26 @@ export function ComposePane({
                       textareaClassName="min-h-[180px] resize-y rounded-2xl [border-color:var(--theme-subtle-border)] [background:var(--theme-subtle-bg)] text-foreground outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15"
                       imageClassName="h-28 w-full max-w-[220px] rounded-2xl border [border-color:var(--theme-subtle-border)] [background:var(--theme-subtle-bg)] object-cover"
                     />
+                    {selectedReferenceIds.length > 0 ? (
+                      <div className="flex flex-wrap gap-2" aria-label="答案引用">
+                        {selectedReferenceIds.map((referenceId) => (
+                          <button
+                            key={`selected-reference-link-${referenceId}`}
+                            type="button"
+                            className="selected-reference-link inline-flex max-w-full items-center rounded-md px-1 text-left text-sm font-medium text-primary underline underline-offset-4 transition hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                            onClick={() => {
+                              touchComposeActivity()
+                              removeDraftReference(projectId, activeDraft.localId, referenceId)
+                            }}
+                            title={`删除引用 ${referenceId}`}
+                            aria-label={`删除答案引用 ${referenceId}`}
+                          >
+                            <span className="truncate">{formatRecallPointReference(referenceId)}</span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                    {referenceSearchQ.error ? <p className="text-xs text-destructive">候选复述点加载失败：{formatApiError(referenceSearchQ.error)}</p> : null}
                   </div>
                 </div>
               </div>
@@ -717,11 +731,9 @@ export function ComposePane({
               placeholder={
                 projectType === "LOOSE_POINTS"
                   ? recommendedTaskTitle || "例如：离散数学零散练习"
-                  : projectType === "MISTAKE_BOOK"
-                    ? recommendedTaskTitle || "例如：导数应用错题"
-                    : instance
-                      ? recommendedTaskTitle
-                      : "例如：第一节"
+                  : instance
+                    ? recommendedTaskTitle
+                    : "例如：第一节"
               }
             />
             <Button

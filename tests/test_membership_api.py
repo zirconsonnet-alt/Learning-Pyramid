@@ -34,6 +34,10 @@ def auth_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("PLM_APP_MODE", "hosted")
     monkeypatch.setenv("PLM_ENABLE_AUTH", "true")
     monkeypatch.setenv("PLM_ALLOW_SIGNUP", "true")
+    monkeypatch.setenv(
+        "PLM_BOOTSTRAP_SUPER_ADMIN_EMAILS",
+        "admin@example.com,member@example.com,inviter@example.com,invitee@example.com",
+    )
     monkeypatch.setenv("PLM_ENABLE_MANUAL_TEST_PAYMENT", "true")
     monkeypatch.setenv("PLM_ENABLE_ASR", "false")
     monkeypatch.setenv("PLM_ENABLE_SERVER_MEDIA_STREAM", "false")
@@ -168,6 +172,10 @@ def test_hosted_mode_disables_manual_test_payment_by_default(monkeypatch: pytest
     monkeypatch.setenv("PLM_APP_MODE", "hosted")
     monkeypatch.setenv("PLM_ENABLE_AUTH", "true")
     monkeypatch.setenv("PLM_ALLOW_SIGNUP", "true")
+    monkeypatch.setenv(
+        "PLM_BOOTSTRAP_SUPER_ADMIN_EMAILS",
+        "admin@example.com,member@example.com,inviter@example.com,invitee@example.com",
+    )
     monkeypatch.setenv("PLM_ENABLE_ASR", "false")
     monkeypatch.setenv("PLM_ENABLE_SERVER_MEDIA_STREAM", "false")
     monkeypatch.setenv("PLM_PROJECTS_ROOT", str(tmp_path / "projects"))

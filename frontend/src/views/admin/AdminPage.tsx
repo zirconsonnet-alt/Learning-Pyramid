@@ -1,7 +1,9 @@
 import { type ReactNode, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import { Link } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
+import { getSystemDataSafetyStatus } from "@/ui/api/system"
 import { ContentEmptyState, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
@@ -49,6 +51,12 @@ export function AdminPage() {
     role: userRole === "all" ? undefined : userRole,
   })
   const activityQ = useAdminActionLogs({ limit: 20 })
+  const dataSafetyQ = useQuery({
+    queryKey: ["adminDataSafetyStatus"],
+    queryFn: () => getSystemDataSafetyStatus(),
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+  })
   const updateUserStatus = useUpdateAdminUserStatus()
   const updateUserRole = useUpdateAdminUserRole()
   const isSuperAdmin = Boolean(currentUserQ.data?.roles.includes("super_admin"))
@@ -86,7 +94,7 @@ export function AdminPage() {
         { label: "学习用户", value: overviewQ.data.studyUsers, help: "至少同步过一次学习时长" },
         { label: "近 7 日学习用户", value: overviewQ.data.studyUsers7d, help: "最近 7 天有学习同步记录" },
         { label: "累计有效学习", value: formatDurationCompact(overviewQ.data.effectiveStudyMs), help: "去重后的累计学习时长" },
-        { label: "材料接触", value: formatDurationCompact(overviewQ.data.watchMs), help: "累计材料播放/阅读时长" },
+        { label: "内容接触", value: formatDurationCompact(overviewQ.data.watchMs), help: "累计内容播放/阅读时长" },
         { label: "复述点构建", value: formatDurationCompact(overviewQ.data.composeMs), help: "累计编辑与构建时长" },
         { label: "复习时长", value: formatDurationCompact(overviewQ.data.reviewMs), help: "累计复习交互时长" },
         { label: "AI 问答", value: formatDurationCompact(overviewQ.data.qaMs), help: "累计 AI 问答交互时长" },
@@ -148,6 +156,24 @@ export function AdminPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-lg">数据安全状态</CardTitle>
+          <CardDescription>
+            {dataSafetyQ.data
+              ? `当前状态：${dataSafetyQ.data.state}，阻断发布：${dataSafetyQ.data.releaseBlocked ? "是" : "否"}`
+              : dataSafetyQ.isLoading
+                ? "正在读取数据安全状态"
+                : "暂时无法读取数据安全状态"}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="text-sm leading-6 text-muted-foreground">
+          {dataSafetyQ.data?.findings.length
+            ? dataSafetyQ.data.findings.slice(0, 3).map((finding) => <div key={`${finding.code}-${finding.expectedLocation}`}>{finding.code}：{finding.message}</div>)
+            : "暂无阻断级数据安全发现。"}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

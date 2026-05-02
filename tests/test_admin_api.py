@@ -32,6 +32,7 @@ def auth_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("PLM_APP_MODE", "hosted")
     monkeypatch.setenv("PLM_ENABLE_AUTH", "true")
     monkeypatch.setenv("PLM_ALLOW_SIGNUP", "true")
+    monkeypatch.setenv("PLM_BOOTSTRAP_SUPER_ADMIN_EMAILS", "admin@example.com,inviter@example.com")
     monkeypatch.setenv("PLM_ENABLE_MANUAL_TEST_PAYMENT", "true")
     monkeypatch.setenv("PLM_ENABLE_ASR", "false")
     monkeypatch.setenv("PLM_ENABLE_SERVER_MEDIA_STREAM", "false")
@@ -45,6 +46,15 @@ def auth_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _reset_caches()
     yield
     _reset_caches()
+
+
+def _register_user(client: TestClient, email: str, *, invite_code: str | None = None) -> dict:
+    payload: dict[str, str] = {"email": email, "password": "password123"}
+    if invite_code:
+        payload["inviteCode"] = invite_code
+    response = client.post("/api/auth/register", json=payload)
+    assert response.status_code == 200
+    return response.json()["data"]
 
 
 def _enable_wechat_native(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -80,13 +90,11 @@ def test_admin_can_manage_users_and_activity_logs(auth_env: None) -> None:
     admin_client = TestClient(app)
     member_client = TestClient(app)
 
-    admin_register = admin_client.post("/api/auth/register", json={"email": "admin@example.com", "password": "password123"})
-    assert admin_register.status_code == 200
-    assert admin_register.json()["data"]["roles"] == ["super_admin"]
+    admin_register = _register_user(admin_client, "admin@example.com")
+    assert admin_register["roles"] == ["super_admin"]
 
-    member_register = member_client.post("/api/auth/register", json={"email": "member@example.com", "password": "password123"})
-    assert member_register.status_code == 200
-    member_user_id = member_register.json()["data"]["userId"]
+    member_register = _register_user(member_client, "member@example.com", invite_code=admin_register["publicUid"])
+    member_user_id = member_register["userId"]
 
     granted = admin_client.patch(
         f"/api/admin/users/{member_user_id}/roles",
@@ -175,8 +183,8 @@ def test_non_admin_cannot_access_admin_endpoints(auth_env: None) -> None:
     admin_client = TestClient(app)
     normal_client = TestClient(app)
 
-    admin_client.post("/api/auth/register", json={"email": "admin@example.com", "password": "password123"})
-    normal_client.post("/api/auth/register", json={"email": "normal@example.com", "password": "password123"})
+    admin_register = _register_user(admin_client, "admin@example.com")
+    _register_user(normal_client, "normal@example.com", invite_code=admin_register["publicUid"])
 
     denied = normal_client.get("/api/admin/overview")
     assert denied.status_code == 403
@@ -189,17 +197,14 @@ def test_admin_user_role_filter(auth_env: None) -> None:
     role_client = TestClient(app)
     member_client = TestClient(app)
 
-    admin_register = admin_client.post("/api/auth/register", json={"email": "admin@example.com", "password": "password123"})
-    assert admin_register.status_code == 200
-    admin_user_id = admin_register.json()["data"]["userId"]
+    admin_register = _register_user(admin_client, "admin@example.com")
+    admin_user_id = admin_register["userId"]
 
-    role_register = role_client.post("/api/auth/register", json={"email": "role@example.com", "password": "password123"})
-    assert role_register.status_code == 200
-    role_user_id = role_register.json()["data"]["userId"]
+    role_register = _register_user(role_client, "role@example.com", invite_code=admin_register["publicUid"])
+    role_user_id = role_register["userId"]
 
-    member_register = member_client.post("/api/auth/register", json={"email": "member@example.com", "password": "password123"})
-    assert member_register.status_code == 200
-    member_user_id = member_register.json()["data"]["userId"]
+    member_register = _register_user(member_client, "member@example.com", invite_code=admin_register["publicUid"])
+    member_user_id = member_register["userId"]
 
     granted = admin_client.patch(f"/api/admin/users/{role_user_id}/roles", json={"role": "admin", "enabled": True})
     assert granted.status_code == 200
@@ -223,20 +228,12 @@ def test_admin_can_manage_membership_operations(auth_env: None) -> None:
     inviter_client = TestClient(app)
     invitee_client = TestClient(app)
 
-    admin_register = admin_client.post("/api/auth/register", json={"email": "admin@example.com", "password": "password123"})
-    assert admin_register.status_code == 200
+    admin_register = _register_user(admin_client, "admin@example.com")
 
-    inviter_register = inviter_client.post("/api/auth/register", json={"email": "inviter@example.com", "password": "password123"})
-    assert inviter_register.status_code == 200
-    inviter_payload = inviter_register.json()["data"]
+    inviter_payload = _register_user(inviter_client, "inviter@example.com")
     inviter_public_uid = inviter_payload["publicUid"]
 
-    invitee_register = invitee_client.post(
-        "/api/auth/register",
-        json={"email": "invitee@example.com", "password": "password123", "inviteCode": inviter_public_uid},
-    )
-    assert invitee_register.status_code == 200
-    invitee_payload = invitee_register.json()["data"]
+    invitee_payload = _register_user(invitee_client, "invitee@example.com", invite_code=inviter_public_uid)
     invitee_public_uid = invitee_payload["publicUid"]
 
     invitee_order = invitee_client.post("/api/membership/orders", json={"provider": "manual_test"})
@@ -344,11 +341,8 @@ def test_admin_can_close_pending_membership_order(auth_env: None) -> None:
     admin_client = TestClient(app)
     member_client = TestClient(app)
 
-    admin_register = admin_client.post("/api/auth/register", json={"email": "admin@example.com", "password": "password123"})
-    assert admin_register.status_code == 200
-
-    member_register = member_client.post("/api/auth/register", json={"email": "member@example.com", "password": "password123"})
-    assert member_register.status_code == 200
+    admin_register = _register_user(admin_client, "admin@example.com")
+    _register_user(member_client, "member@example.com", invite_code=admin_register["publicUid"])
 
     created = member_client.post("/api/membership/orders", json={"provider": "manual_test"})
     assert created.status_code == 200
@@ -405,11 +399,8 @@ def test_admin_can_sync_wechat_membership_payment_and_view_detail(
 
     monkeypatch.setattr(payment_service, "_wechat_request_json", fake_wechat_request_json)
 
-    admin_register = admin_client.post("/api/auth/register", json={"email": "admin@example.com", "password": "password123"})
-    assert admin_register.status_code == 200
-
-    member_register = member_client.post("/api/auth/register", json={"email": "member@example.com", "password": "password123"})
-    assert member_register.status_code == 200
+    admin_register = _register_user(admin_client, "admin@example.com")
+    _register_user(member_client, "member@example.com", invite_code=admin_register["publicUid"])
 
     created = member_client.post("/api/membership/orders", json={"provider": "wechat_native"})
     assert created.status_code == 200
@@ -466,11 +457,8 @@ def test_admin_can_sync_closed_wechat_order_and_view_failure_detail(
 
     monkeypatch.setattr(payment_service, "_wechat_request_json", fake_wechat_request_json)
 
-    admin_register = admin_client.post("/api/auth/register", json={"email": "admin@example.com", "password": "password123"})
-    assert admin_register.status_code == 200
-
-    member_register = member_client.post("/api/auth/register", json={"email": "member@example.com", "password": "password123"})
-    assert member_register.status_code == 200
+    admin_register = _register_user(admin_client, "admin@example.com")
+    _register_user(member_client, "member@example.com", invite_code=admin_register["publicUid"])
 
     created = member_client.post("/api/membership/orders", json={"provider": "wechat_native"})
     assert created.status_code == 200

@@ -3,7 +3,8 @@ import { z } from "zod"
 import { apiRequest } from "@/ui/api/http"
 import { ReviewChainTemplateItemSchema } from "@/ui/api/projectConfig"
 
-const UserPomodoroDaySchema = z.object({
+const UserPomodoroPlanSchema = z.object({
+  id: z.string().optional().default(""),
   enabled: z.boolean(),
   startTime: z.string(),
   focusMinutes: z.number().int().min(1).max(180),
@@ -13,6 +14,17 @@ const UserPomodoroDaySchema = z.object({
   breakPrompt: z.string().max(200).optional().default(""),
   focusPrompts: z.array(z.string().max(200)).max(12).default([]),
 })
+
+const LegacyUserPomodoroDaySchema = UserPomodoroPlanSchema.transform((plan) => ({
+  plans: plan.enabled ? [plan] : [],
+}))
+
+const UserPomodoroDaySchema = z.union([
+  z.object({
+    plans: z.array(UserPomodoroPlanSchema).default([]),
+  }),
+  LegacyUserPomodoroDaySchema,
+])
 
 export const UserProfileSchema = z.object({
   userId: z.string(),

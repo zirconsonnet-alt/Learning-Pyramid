@@ -33,6 +33,7 @@ export type ApiRequestExecutionOptions = {
 
 const API_GET_TIMEOUT_MS = 25_000
 const API_MUTATION_TIMEOUT_MS = 25_000
+const DEFAULT_PAYLOAD_TOO_LARGE_MESSAGE = "上传内容过大，服务器或网关拒绝了这次请求。请压缩后重试；如果问题持续出现，需要调大站点上传限制。"
 
 export function getBaseUrl() {
   const v = import.meta.env.VITE_API_BASE_URL as string | undefined
@@ -62,10 +63,11 @@ function buildNonJsonResponseError(params: {
   body: string
   url: string
   cause: string
+  payloadTooLargeMessage?: string
 }) {
-  const { status, body, url, cause } = params
+  const { status, body, url, cause, payloadTooLargeMessage } = params
   if (status === 413) {
-    return new ApiError("上传的音频片段过大，服务器或网关拒绝了这次请求。请稍后重试；如果问题持续出现，需要调大站点上传限制。", {
+    return new ApiError(payloadTooLargeMessage ?? DEFAULT_PAYLOAD_TOO_LARGE_MESSAGE, {
       code: "PAYLOAD_TOO_LARGE",
       status,
       details: { url, body: body.slice(0, 500), cause },
@@ -94,6 +96,7 @@ export async function apiRequest<T>({
   responseSchema,
   signal,
   timeoutMs,
+  payloadTooLargeMessage,
 }: {
   path: string
   method?: ApiRequestMethod
@@ -102,6 +105,7 @@ export async function apiRequest<T>({
   responseSchema: z.ZodType<T>
   signal?: AbortSignal
   timeoutMs?: number
+  payloadTooLargeMessage?: string
 }): Promise<T> {
   const requestMethod = method ?? "GET"
   const url = `${getBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`
@@ -173,7 +177,7 @@ export async function apiRequest<T>({
   const raw = text.trim()
   if (!raw) {
     if (res.status === 413) {
-      throw new ApiError("上传的音频片段过大，服务器或网关拒绝了这次请求。请稍后重试；如果问题持续出现，需要调大站点上传限制。", {
+      throw new ApiError(payloadTooLargeMessage ?? DEFAULT_PAYLOAD_TOO_LARGE_MESSAGE, {
         code: "PAYLOAD_TOO_LARGE",
         status: res.status,
         details: { url },
@@ -191,6 +195,7 @@ export async function apiRequest<T>({
       body: text,
       url,
       cause: String(e),
+      payloadTooLargeMessage,
     })
   }
 

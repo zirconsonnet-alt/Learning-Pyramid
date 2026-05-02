@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react"
-import { Clock3, Palette, RotateCcw, Save, Settings2, TimerReset } from "lucide-react"
+import type { CloudAccount } from "@/ui/api/cloudAccounts"
+import { Clock3, Cloud, FolderOpen, Link2Off, Music2, Palette, RefreshCw, RotateCcw, Save, Settings2, TimerReset, Trash2 } from "lucide-react"
 import { Link } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
@@ -10,9 +11,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
 import { useCurrentUser } from "@/ui/queries/auth"
+import { useBaiduNetdiskCloudAccounts, useBeginBaiduNetdiskConnect, useDisconnectBaiduNetdiskAccount } from "@/ui/queries/cloudAccounts"
 import { useUpdateMyGlobalSettings } from "@/ui/queries/profile"
 import { useSystemCapabilities } from "@/ui/queries/system"
 import { usePageMeta } from "@/ui/seo/usePageMeta"
+import { type DirectoryBindingPermission, usePomodoroRestMusicDirectoryBinding } from "@/ui/localMedia/projectDirectory"
 import {
   DEFAULT_PROJECT_REVIEW_TEMPLATE,
   cloneReviewChainTemplate,
@@ -51,12 +54,72 @@ function formatApiError(err: unknown) {
   return "未知错误"
 }
 
+function describeLocalDirectoryPermission(permission: DirectoryBindingPermission) {
+  if (permission === "unsupported") return "当前浏览器不支持目录授权"
+  if (permission === "missing") return "未绑定目录"
+  if (permission === "prompt") return "待授权"
+  if (permission === "denied") return "已拒绝"
+  return "已授权"
+}
+
+function describeLocalDirectoryPermissionTone(permission: DirectoryBindingPermission) {
+  if (permission === "granted") return "border-emerald-200 bg-emerald-50 text-emerald-700"
+  if (permission === "prompt") return "border-amber-200 bg-amber-50 text-amber-700"
+  if (permission === "denied") return "border-rose-200 bg-rose-50 text-rose-700"
+  return "border-slate-200 bg-slate-50 text-slate-600"
+}
+
 function createTemplateEditorItem(kind: "CONVERGENCE" | "REVIEW_TASK", count = 1): TemplateEditorItem {
   return { id: nextTemplateItemId++, kind, count: String(count) }
 }
 
 function toTemplateEditorItems(items: ReviewChainTemplateItem[]) {
   return items.map((item) => createTemplateEditorItem(item.kind, item.count ?? 1))
+}
+
+function formatAccountExpiresAt(value: string | null | undefined) {
+  if (!value) return "未返回到期时间"
+  const dt = new Date(value)
+  return Number.isNaN(dt.getTime()) ? value : dt.toLocaleString()
+}
+
+function waitForBaiduNetdiskConnectPopup(popup: Window | null): Promise<CloudAccount> {
+  if (!popup) {
+    return Promise.reject(new Error("浏览器拦截了授权弹窗，请允许弹窗后重试"))
+  }
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const timerId = window.setInterval(() => {
+      if (!popup.closed) return
+      if (settled) return
+      settled = true
+      window.clearInterval(timerId)
+      window.removeEventListener("message", onMessage)
+      reject(new Error("授权窗口已关闭，绑定没有完成"))
+    }, 400)
+
+    function cleanup() {
+      window.clearInterval(timerId)
+      window.removeEventListener("message", onMessage)
+    }
+
+    function onMessage(event: MessageEvent) {
+      const data = event.data
+      if (!data || typeof data !== "object") return
+      const payload = data as { type?: unknown; ok?: unknown; message?: unknown; account?: unknown }
+      if (payload.type !== "plm:baidu-netdisk-connect") return
+      if (settled) return
+      settled = true
+      cleanup()
+      if (payload.ok !== true) {
+        reject(new Error(typeof payload.message === "string" && payload.message.trim() ? payload.message : "百度网盘授权失败"))
+        return
+      }
+      resolve(payload.account as CloudAccount)
+    }
+
+    window.addEventListener("message", onMessage)
+  })
 }
 
 function PhaseBadge(props: {
@@ -128,9 +191,29 @@ export function GlobalSettingsPage() {
 
   const capabilitiesQ = useSystemCapabilities()
   const authEnabled = capabilitiesQ.data?.authEnabled ?? false
+  const baiduNetdiskEnabled = capabilitiesQ.data?.baiduNetdiskEnabled ?? false
   const currentUserQ = useCurrentUser(authEnabled)
   const updateGlobalSettings = useUpdateMyGlobalSettings()
+  const beginBaiduNetdiskConnect = useBeginBaiduNetdiskConnect()
+  const disconnectBaiduNetdiskAccount = useDisconnectBaiduNetdiskAccount()
+  const baiduAccountsQ = useBaiduNetdiskCloudAccounts(Boolean(currentUserQ.data) && baiduNetdiskEnabled)
+  const baiduAccounts = baiduAccountsQ.data ?? []
   const shouldSyncRemotely = authEnabled && Boolean(currentUserQ.data?.userId)
+  const restMusicDirectory = usePomodoroRestMusicDirectoryBinding()
+  const [restMusicDirectoryAction, setRestMusicDirectoryAction] = useState<"authorize" | "request" | "clear" | null>(null)
+  const restMusicDirectoryBusy = restMusicDirectoryAction !== null
+  const canChooseRestMusicDirectory =
+    restMusicDirectory.supported && !restMusicDirectory.loading && !restMusicDirectoryBusy
+  const canRequestRestMusicDirectoryPermission =
+    restMusicDirectory.supported &&
+    !restMusicDirectory.loading &&
+    !restMusicDirectoryBusy &&
+    (restMusicDirectory.permission === "prompt" || restMusicDirectory.permission === "denied")
+  const canClearRestMusicDirectory =
+    restMusicDirectory.supported &&
+    !restMusicDirectory.loading &&
+    !restMusicDirectoryBusy &&
+    restMusicDirectory.permission !== "missing"
 
   useEffect(() => {
     setTemplateItems(toTemplateEditorItems(defaultProjectReviewTemplate))
@@ -235,6 +318,88 @@ export function GlobalSettingsPage() {
             : enabled
               ? "待配置"
               : "已关闭"
+  const enabledIntegrationCount = baiduNetdiskEnabled ? 1 : 0
+  const baiduIntegrationStatusLabel = !baiduNetdiskEnabled ? "未启用" : baiduAccounts.length > 0 ? "已连接" : "待连接"
+  const baiduIntegrationStatusClass = !baiduNetdiskEnabled
+    ? "border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] text-[color:var(--theme-subtle-text)]"
+    : baiduAccounts.length > 0
+      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+      : "border-primary/15 bg-[hsl(var(--primary)/0.08)] text-primary"
+
+  async function onConnectBaiduNetdisk() {
+    const popup = window.open("", "plm-baidu-netdisk-connect", "popup=yes,width=720,height=820")
+    if (!popup) {
+      showErrorFeedback("无法打开授权窗口", "浏览器拦截了弹窗，请允许当前站点打开弹窗后重试。")
+      return
+    }
+    try {
+      const result = await beginBaiduNetdiskConnect.mutateAsync()
+      popup.location.href = result.authorizeUrl
+      const account = await waitForBaiduNetdiskConnectPopup(popup)
+      await baiduAccountsQ.refetch()
+      showSuccessFeedback("百度网盘已连接", `账号“${account.displayName}”已经绑定完成，现在可以去项目设置里导入视频。`)
+    } catch (err) {
+      popup.close()
+      showErrorFeedback("连接百度网盘失败", formatApiError(err))
+    }
+  }
+
+  async function onDisconnectCloudAccount(account: CloudAccount) {
+    try {
+      await disconnectBaiduNetdiskAccount.mutateAsync(account.accountId)
+      await baiduAccountsQ.refetch()
+      showSuccessFeedback("百度网盘已断开", `账号“${account.displayName}”已经从当前用户解绑。`)
+    } catch (err) {
+      showErrorFeedback("断开百度网盘失败", formatApiError(err))
+    }
+  }
+
+  async function onAuthorizeRestMusicDirectory() {
+    if (!canChooseRestMusicDirectory) return
+    try {
+      setRestMusicDirectoryAction("authorize")
+      const permission = await restMusicDirectory.authorizeDirectory()
+      if (permission === "granted") {
+        showSuccessFeedback("休息音乐目录已绑定", "休息时可以在番茄钟页面选择并播放这个目录里的音乐。")
+      } else {
+        showInfoFeedback("休息音乐目录已记录", "浏览器还没有授予读取权限，需要继续授权后才能播放。")
+      }
+    } catch (err) {
+      showErrorFeedback("绑定休息音乐目录失败", formatApiError(err))
+    } finally {
+      setRestMusicDirectoryAction(null)
+    }
+  }
+
+  async function onRequestRestMusicDirectoryPermission() {
+    if (!canRequestRestMusicDirectoryPermission) return
+    try {
+      setRestMusicDirectoryAction("request")
+      const permission = await restMusicDirectory.requestPermission()
+      if (permission === "granted") {
+        showSuccessFeedback("休息音乐目录权限已恢复", "现在可以在番茄钟休息界面播放本地音乐。")
+      } else {
+        showInfoFeedback("休息音乐目录仍未授权", "浏览器没有放行读取权限，可以更换目录后重试。")
+      }
+    } catch (err) {
+      showErrorFeedback("授权休息音乐目录失败", formatApiError(err))
+    } finally {
+      setRestMusicDirectoryAction(null)
+    }
+  }
+
+  async function onClearRestMusicDirectory() {
+    if (!canClearRestMusicDirectory) return
+    try {
+      setRestMusicDirectoryAction("clear")
+      await restMusicDirectory.clearDirectory()
+      showSuccessFeedback("休息音乐目录已清除", "当前浏览器不再保留这个音乐目录授权记录。")
+    } catch (err) {
+      showErrorFeedback("清除休息音乐目录失败", formatApiError(err))
+    } finally {
+      setRestMusicDirectoryAction(null)
+    }
+  }
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
@@ -299,7 +464,7 @@ export function GlobalSettingsPage() {
                         ? "当前是学习时段，任意项目工作台都可以进入。"
                         : "当前是间歇时段，任意项目工作台都会被统一拦回番茄钟页。"
                       : snapshot.status === "completed"
-                        ? `今天的番茄组已经结束，下次会在 ${formatDateTime(snapshot.nextStartAtMs)} 自动开始。`
+                        ? `今天的番茄计划已经结束，下次会在 ${formatDateTime(snapshot.nextStartAtMs)} 自动开始。`
                         : snapshot.idleReason === "waiting"
                           ? `今天会在 ${snapshot.startTime} 自动开始。`
                           : "今天没有排程，工作台会整天保持锁定。"}
@@ -308,6 +473,87 @@ export function GlobalSettingsPage() {
             <div className="grid gap-3 sm:grid-cols-2">
               <MetricTile label="阶段切换铃声" value={transitionSoundEnabled ? "已开启" : "已关闭"} hint="切换提示音的开关也已经迁到番茄钟页。" />
               <MetricTile label="下次自动开始" value={formatDateTime(snapshot.nextStartAtMs)} hint="按当前设备本地时间解释。" />
+            </div>
+            <div className="rounded-[1.25rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] p-4">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Music2 className="h-4 w-4 text-[color:var(--theme-soft-text-strong)]" />
+                    <span className="text-sm font-semibold text-foreground">休息音乐目录</span>
+                    <span
+                      className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${describeLocalDirectoryPermissionTone(restMusicDirectory.permission)}`}
+                    >
+                      {describeLocalDirectoryPermission(restMusicDirectory.permission)}
+                    </span>
+                  </div>
+                  <div className="mt-2 break-all text-sm text-muted-foreground">
+                    {restMusicDirectory.handleName || "还没有绑定本地音乐目录。"}
+                  </div>
+                  <div className="mt-1 text-xs leading-6 text-[color:var(--theme-subtle-text)]">
+                    这个目录授权只保存在当前浏览器里，音乐文件不会上传到服务端。
+                  </div>
+                  {restMusicDirectory.error ? (
+                    <div className="mt-2 text-sm text-destructive">{restMusicDirectory.error}</div>
+                  ) : null}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {restMusicDirectory.permission === "granted" ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => void onAuthorizeRestMusicDirectory()}
+                      disabled={!canChooseRestMusicDirectory}
+                    >
+                      <FolderOpen className="h-4 w-4" />
+                      更换音乐目录
+                    </Button>
+                  ) : null}
+                  {(restMusicDirectory.permission === "missing" || restMusicDirectory.permission === "unsupported") ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => void onAuthorizeRestMusicDirectory()}
+                      disabled={!canChooseRestMusicDirectory}
+                    >
+                      <FolderOpen className="h-4 w-4" />
+                      {restMusicDirectoryAction === "authorize" ? "打开目录选择器..." : "选择音乐目录"}
+                    </Button>
+                  ) : null}
+                  {(restMusicDirectory.permission === "prompt" || restMusicDirectory.permission === "denied") ? (
+                    <>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => void onRequestRestMusicDirectoryPermission()}
+                        disabled={!canRequestRestMusicDirectoryPermission}
+                      >
+                        <FolderOpen className="h-4 w-4" />
+                        {restMusicDirectoryAction === "request" ? "请求中..." : "继续授权"}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => void onAuthorizeRestMusicDirectory()}
+                        disabled={!canChooseRestMusicDirectory}
+                      >
+                        <FolderOpen className="h-4 w-4" />
+                        {restMusicDirectoryAction === "authorize" ? "打开目录选择器..." : "更换音乐目录"}
+                      </Button>
+                    </>
+                  ) : null}
+                  {restMusicDirectory.permission !== "missing" && restMusicDirectory.permission !== "unsupported" ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => void onClearRestMusicDirectory()}
+                      disabled={!canClearRestMusicDirectory}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      {restMusicDirectoryAction === "clear" ? "清除中..." : "清除音乐目录"}
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
             </div>
             <Button asChild variant="outline">
               <Link to={buildPomodoroPath()}>
@@ -318,6 +564,113 @@ export function GlobalSettingsPage() {
           </CardContent>
         </Card>
       </section>
+
+      <Card className="theme-card-main overflow-hidden">
+        <CardHeader className="theme-card-header">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl border [border-color:var(--theme-icon-border)] [background:var(--theme-icon-bg)] [color:var(--theme-icon-text)]">
+              <Cloud className="h-5 w-5" />
+            </div>
+            <div className="min-w-0">
+              <CardTitle>系统接入中心</CardTitle>
+              <CardDescription className="mt-1">系统级第三方资源接入统一收口在这里。完成绑定后，就可以在项目设置里直接使用这些外部资源能力。</CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4 pt-5">
+          <ContentNotice
+            title="这类接入属于全局能力"
+            message="云盘授权不属于个人资料展示，而是整个工作空间可复用的资源接入能力，所以统一收在全局设置里。"
+            icon={Cloud}
+            tone="info"
+          />
+
+          <div className="grid gap-3 md:grid-cols-3">
+            <MetricTile label="已启用接入" value={`${enabledIntegrationCount}/1`} hint="当前系统只接入了百度网盘。" />
+            <MetricTile label="已绑定账号" value={`${baiduAccounts.length}`} hint="这里只统计当前账号可直接使用的绑定结果。" />
+            <MetricTile label="百度网盘状态" value={baiduIntegrationStatusLabel} hint="连接完成后，就能在项目设置里导入视频。" />
+          </div>
+
+          <div className="rounded-[1.25rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] p-4">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="text-xs uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">接入模块</div>
+                  <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${baiduIntegrationStatusClass}`}>
+                    {baiduIntegrationStatusLabel}
+                  </span>
+                </div>
+                <div className="mt-2 text-base font-semibold text-foreground">百度网盘</div>
+                <div className="mt-1 text-sm leading-6 text-muted-foreground">
+                  把自己的百度网盘绑定到当前账号后，就可以在项目设置里直接浏览目录并导入视频。
+                </div>
+                <div className="mt-2 text-xs leading-6 text-[color:var(--theme-subtle-text)]">
+                  使用位置：项目设置里的“百度网盘视频”导入入口。
+                </div>
+              </div>
+              {baiduNetdiskEnabled ? (
+                <Button type="button" variant="outline" className="shrink-0" onClick={() => void onConnectBaiduNetdisk()} disabled={beginBaiduNetdiskConnect.isPending}>
+                  {beginBaiduNetdiskConnect.isPending ? (
+                    <>
+                      <RefreshCw className="h-4 w-4 animate-spin" />
+                      连接中...
+                    </>
+                  ) : (
+                    <>
+                      <Cloud className="h-4 w-4" />
+                      连接百度网盘
+                    </>
+                  )}
+                </Button>
+              ) : (
+                <span className="theme-meta shrink-0">当前部署未启用</span>
+              )}
+            </div>
+          </div>
+
+          {!baiduNetdiskEnabled ? (
+            <div className="rounded-[1.2rem] border border-dashed border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-4 py-4 text-sm text-[color:var(--theme-subtle-text)]">
+              当前部署还没有开启百度网盘接入能力。
+            </div>
+          ) : baiduAccountsQ.isLoading ? (
+            <div className="rounded-[1.2rem] border border-dashed border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-4 py-4 text-sm text-[color:var(--theme-subtle-text)]">
+              正在加载已绑定的百度网盘账号。
+            </div>
+          ) : baiduAccountsQ.error ? (
+            <div className="theme-warm-surface rounded-[1.2rem] px-4 py-4 text-sm leading-6">
+              百度网盘账号加载失败：{formatApiError(baiduAccountsQ.error)}
+            </div>
+          ) : baiduAccounts.length <= 0 ? (
+            <div className="rounded-[1.2rem] border border-dashed border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-4 py-4 text-sm text-[color:var(--theme-subtle-text)]">
+              还没有绑定百度网盘账号。完成连接后，这里会显示账号信息和授权状态。
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {baiduAccounts.map((account) => (
+                <div key={account.accountId} className="rounded-[1.2rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] px-4 py-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-foreground">{account.displayName}</div>
+                      <div className="mt-1 text-xs text-[color:var(--theme-subtle-text)]">百度用户 ID：{account.providerUserId}</div>
+                      <div className="mt-1 text-xs text-[color:var(--theme-subtle-text)]">授权到期：{formatAccountExpiresAt(account.expiresAt)}</div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="shrink-0 text-muted-foreground"
+                      onClick={() => void onDisconnectCloudAccount(account)}
+                      disabled={disconnectBaiduNetdiskAccount.isPending}
+                    >
+                      <Link2Off className="h-4 w-4" />
+                      断开
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card className="theme-card-main overflow-hidden">
         <CardHeader className="theme-card-header">

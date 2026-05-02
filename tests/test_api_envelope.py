@@ -90,7 +90,12 @@ def test_system_capabilities_reflect_hosted_env(monkeypatch, tmp_path: Path) -> 
             "browserLocalMediaEnabled": True,
             "baiduNetdiskEnabled": False,
             "authEnabled": True,
-            "allowSignup": True,
+            "allowSignup": False,
+            "signupInviteRequired": True,
+            "passwordResetEnabled": False,
+            "emailVerificationEnabled": False,
+            "signupHumanCheckEnabled": False,
+            "signupHumanCheckSiteKey": None,
             "llmConfigured": False,
             "storyGenerationConfigured": False,
             "llmSource": "none",
@@ -98,6 +103,59 @@ def test_system_capabilities_reflect_hosted_env(monkeypatch, tmp_path: Path) -> 
             "sqlBackend": "sqlite",
         },
     }
+
+
+def test_system_capabilities_report_password_reset_when_configured(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PLM_APP_MODE", "hosted")
+    monkeypatch.setenv("PLM_ENABLE_AUTH", "true")
+    monkeypatch.setenv("PLM_ENABLE_PASSWORD_RESET", "true")
+    monkeypatch.setenv("PLM_PUBLIC_ORIGIN", "https://example.com")
+    monkeypatch.setenv("PLM_TRUSTED_HOSTS", "testserver,example.com")
+    monkeypatch.setenv("PLM_SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("PLM_SMTP_FROM_EMAIL", "noreply@example.com")
+    monkeypatch.setenv("PLM_MEDIA_ACCESS_TOKEN_SECRET", "real-secret")
+    monkeypatch.setenv("PLM_STORE_PATH", "")
+    monkeypatch.setenv("PLM_LEGACY_STORE_PATH", "")
+    monkeypatch.setenv("PLM_STORE_DB_PATH", str(tmp_path / "plm_store.sqlite3"))
+    monkeypatch.setenv("PLM_AUTH_DB_PATH", str(tmp_path / "plm_auth.sqlite3"))
+    _reset_caches()
+
+    client = TestClient(create_app())
+    resp = client.get("/api/system/capabilities")
+
+    assert resp.status_code == 200
+    assert resp.json()["data"]["passwordResetEnabled"] is True
+
+
+def test_system_capabilities_report_signup_protection_flags(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PLM_APP_MODE", "hosted")
+    monkeypatch.setenv("PLM_ENABLE_AUTH", "true")
+    monkeypatch.setenv("PLM_ALLOW_SIGNUP", "true")
+    monkeypatch.setenv("PLM_REQUIRE_SIGNUP_INVITE", "false")
+    monkeypatch.setenv("PLM_ENABLE_EMAIL_VERIFICATION", "true")
+    monkeypatch.setenv("PLM_ENABLE_SIGNUP_HUMAN_CHECK", "true")
+    monkeypatch.setenv("PLM_TURNSTILE_SITE_KEY", "turnstile-site-key")
+    monkeypatch.setenv("PLM_TURNSTILE_SECRET_KEY", "turnstile-secret-key")
+    monkeypatch.setenv("PLM_TURNSTILE_EXPECTED_HOSTNAME", "example.com")
+    monkeypatch.setenv("PLM_PUBLIC_ORIGIN", "https://example.com")
+    monkeypatch.setenv("PLM_TRUSTED_HOSTS", "testserver,example.com")
+    monkeypatch.setenv("PLM_SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("PLM_SMTP_FROM_EMAIL", "noreply@example.com")
+    monkeypatch.setenv("PLM_MEDIA_ACCESS_TOKEN_SECRET", "real-secret")
+    monkeypatch.setenv("PLM_STORE_PATH", "")
+    monkeypatch.setenv("PLM_LEGACY_STORE_PATH", "")
+    monkeypatch.setenv("PLM_STORE_DB_PATH", str(tmp_path / "plm_store.sqlite3"))
+    monkeypatch.setenv("PLM_AUTH_DB_PATH", str(tmp_path / "plm_auth.sqlite3"))
+    _reset_caches()
+
+    client = TestClient(create_app())
+    resp = client.get("/api/system/capabilities")
+
+    assert resp.status_code == 200
+    assert resp.json()["data"]["signupInviteRequired"] is False
+    assert resp.json()["data"]["emailVerificationEnabled"] is True
+    assert resp.json()["data"]["signupHumanCheckEnabled"] is True
+    assert resp.json()["data"]["signupHumanCheckSiteKey"] == "turnstile-site-key"
 
 
 def test_public_download_catalog_and_assets_are_public(monkeypatch, tmp_path: Path) -> None:
@@ -1003,6 +1061,8 @@ def test_health_endpoint_reports_runtime_readiness(monkeypatch, tmp_path: Path) 
 def test_system_runtime_requires_auth_when_auth_enabled(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("PLM_APP_MODE", "hosted")
     monkeypatch.setenv("PLM_ENABLE_AUTH", "true")
+    monkeypatch.setenv("PLM_ALLOW_SIGNUP", "true")
+    monkeypatch.setenv("PLM_BOOTSTRAP_SUPER_ADMIN_EMAILS", "runtime-auth@example.com")
     monkeypatch.setenv("PLM_ENABLE_ASR", "false")
     monkeypatch.setenv("PLM_ENABLE_SERVER_MEDIA_STREAM", "false")
     monkeypatch.setenv("PLM_STORE_PATH", "")
@@ -1027,6 +1087,8 @@ def test_system_runtime_requires_auth_when_auth_enabled(monkeypatch, tmp_path: P
 def test_hosted_mode_blocks_asr_and_server_media_routes(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("PLM_APP_MODE", "hosted")
     monkeypatch.setenv("PLM_ENABLE_AUTH", "true")
+    monkeypatch.setenv("PLM_ALLOW_SIGNUP", "true")
+    monkeypatch.setenv("PLM_BOOTSTRAP_SUPER_ADMIN_EMAILS", "tester@example.com")
     monkeypatch.setenv("PLM_ENABLE_ASR", "false")
     monkeypatch.setenv("PLM_ENABLE_SERVER_MEDIA_STREAM", "false")
     monkeypatch.setenv("PLM_STORE_PATH", "")

@@ -76,12 +76,6 @@ def initialize_book_learning_objects_from_material(
     return {"ok": True, "data": result}
 
 
-@router.post("/projects/{projectId}/ensure-mistake-inbox")
-def ensure_mistake_inbox(projectId: str, api: SystemAPI = Depends(get_api)) -> dict:
-    result = api.ensure_mistake_material_inbox(projectId)  # type: ignore[arg-type]
-    return {"ok": True, "data": result}
-
-
 @router.post("/projects/{projectId}/sync-learning-objects-from-fs")
 def sync_learning_objects_from_fs(projectId: str, api: SystemAPI = Depends(get_api)) -> dict:
     report = api.sync_learning_objects_from_fs(projectId)  # type: ignore[arg-type]

@@ -18,7 +18,7 @@ const mechanismCards = [
   {
     icon: "B",
     title: "分层复习",
-    body: "当材料范围扩大、时间间隔拉长，原来的重点会漂移。系统要求你回到更大范围重新筛选，用当前状态重定位重点，避免漏掉已经重新变生疏的内容。",
+    body: "当内容范围扩大、时间间隔拉长，原来的重点会漂移。系统要求你回到更大范围重新筛选，用当前状态重定位重点，避免漏掉已经重新变生疏的内容。",
     imageSrc: methodLayeredReview,
   },
   {
@@ -38,12 +38,12 @@ const featureCards = [
   {
     icon: "02",
     title: "学习结构化视图",
-    body: "左侧学习对象树来自目录扫描结果，学习任务树与时间线则帮助你回看项目运行过程。它们一起把材料结构、任务推进和层级位置展示清楚，而不是只给你一批零散卡片。",
+    body: "左侧学习对象树来自目录扫描结果，学习任务树与时间线则帮助你回看项目运行过程。它们一起把内容结构、任务推进和层级位置展示清楚，而不是只给你一批零散卡片。",
   },
   {
     icon: "03",
     title: "视频锚点式复述点",
-    body: "在工作台里暂停视频，点击添加复述点，系统自动记录当前时间锚点。随后填写问题与答案，逐步把材料里的关键记忆目标录进去。",
+    body: "在工作台里暂停视频，点击添加复述点，系统自动记录当前时间锚点。随后填写问题与答案，逐步把内容里的关键记忆目标录进去。",
   },
   {
     icon: "04",
@@ -66,19 +66,13 @@ const onboardingSteps = [
   {
     index: "3",
     title: "导入内容目录",
-    body: "授权之后再点击“导入内容目录”。系统会识别目录层级、重建学习对象树，并为材料实例建立索引。",
+    body: "授权之后再点击“导入内容目录”。系统会识别目录层级、重建学习对象树，并为内容实例建立索引。",
   },
   {
     index: "4",
     title: "回工作台选内容开始学习",
     body: "回到工作台，先从左侧选中当前视频，再添加复述点并提交学习；之后按系统排出的复习链完成“会 / 不会”判断，先跑通最小闭环。",
   },
-] as const
-
-const quickStartHighlights = [
-  { value: "4 步", label: "创建、授权、导入、开始" },
-  { value: "1 门", label: "先挑一门最焦虑的科目跑通" },
-  { value: "先闭环", label: "先选内容学习，再让系统接上复习" },
 ] as const
 
 const inviteBullets = [
@@ -103,7 +97,7 @@ const faqItems = [
   },
   {
     title: "它适合哪些学习内容？",
-    body: "专业课、概念体系、题型模板、论证骨架、听力材料都可以。只要你能给出明确的“会”标准，系统就能围绕它组织筛选和复习。",
+    body: "专业课、概念体系、题型模板、论证骨架、听力内容都可以。只要你能给出明确的“会”标准，系统就能围绕它组织筛选和复习。",
   },
 ] as const
 
@@ -261,7 +255,6 @@ export function HomePage() {
 
   const membershipEntryHref = isLoggedIn || !authEnabled ? "/profile" : registerHref
   const membershipEntryLabel = isLoggedIn || !authEnabled ? "去个人中心查看" : "登录后在个人中心查看"
-  const quickStartEntryLabel = isLoggedIn || !authEnabled ? "进入项目" : registerLabel
   const [activeReasonIndex, setActiveReasonIndex] = useState(0)
   const [isReasonCarouselPaused, setIsReasonCarouselPaused] = useState(false)
 
@@ -290,50 +283,6 @@ export function HomePage() {
       <ShowcaseSiteHeader />
 
       <main id="top">
-        <section className="lp-showcase-hero">
-          <div className="lp-showcase-container lp-showcase-hero-grid">
-            <div className="lp-showcase-hero-copy">
-              <div className="lp-showcase-mini-title">第一次使用先跑通最小闭环</div>
-              <h1>先学会开始，再决定要不要继续往下看。</h1>
-              <p className="lp-showcase-lead">
-                第一次用 LearningPyramid，不用先理解全部方法。先创建学科，绑定并授权目录，导入内容，再回工作台选一个视频开始学习，最快能看出系统有没有帮你减负。
-              </p>
-              <div className="lp-showcase-hero-actions">
-                <Link className="lp-showcase-btn lp-showcase-btn-primary" to={registerHref}>
-                  {quickStartEntryLabel}
-                </Link>
-                <a className="lp-showcase-btn lp-showcase-btn-secondary" href="#onboarding">
-                  查看 4 步上手
-                </a>
-              </div>
-              <div className="lp-showcase-hero-meta">
-                {quickStartHighlights.map((item) => (
-                  <div key={item.value} className="lp-showcase-meta-box">
-                    <strong>{item.value}</strong>
-                    <span>{item.label}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="lp-showcase-hero-panel">
-              <div className="lp-showcase-mini-title">快速开始</div>
-              <ul className="lp-showcase-flow-list">
-                {onboardingSteps.map((item) => (
-                  <li key={item.index}>
-                    <div className="lp-showcase-flow-index">{item.index}</div>
-                    <div className="lp-showcase-flow-copy">
-                      <strong>{item.title}</strong>
-                      <span>{item.body}</span>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-              <div className="lp-showcase-panel-note">先拿一门最容易遗忘、最需要减负的科目做样板，不要一上来把全部资料一起搬进来。</div>
-            </div>
-          </div>
-        </section>
-
         <section className="lp-showcase-section lp-showcase-carousel-section">
           <div className="lp-showcase-container">
             <div className="lp-showcase-carousel-shell">

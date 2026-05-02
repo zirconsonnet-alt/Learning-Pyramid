@@ -97,7 +97,7 @@ export function InstancePage() {
       <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="text-lg font-semibold">{instance?.materialDisplayName ?? formatInstanceReference(iid)}</h1>
-          <p className="text-sm text-muted-foreground">查看实例材料信息、对象树绑定与复述点引用。</p>
+          <p className="text-sm text-muted-foreground">查看内容实例信息、对象树绑定与复述点引用。</p>
         </div>
         <Button variant="outline" asChild>
           <Link to={`/p/${pid}/object-tree`}>返回学习对象树</Link>
@@ -107,10 +107,10 @@ export function InstancePage() {
       <Card>
         <CardHeader>
           <CardTitle>实例概览</CardTitle>
-          <CardDescription>实例是学习对象树叶子节点绑定到的具体材料。</CardDescription>
+          <CardDescription>实例是学习对象树叶子节点绑定到的具体内容实例。</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {instancesQ.isLoading ? <LoadingNotice title="正在加载实例详情" message="正在读取材料实例、对象树绑定和复述点引用情况。" /> : null}
+          {instancesQ.isLoading ? <LoadingNotice title="正在加载实例详情" message="正在读取内容实例、对象树绑定和复述点引用情况。" /> : null}
           {instancesQ.error ? <ErrorNotice title="实例详情加载失败" message={formatApiError(instancesQ.error)} /> : null}
           {objectNodesQ.error ? <ErrorNotice title="对象树绑定加载失败" message={formatApiError(objectNodesQ.error)} /> : null}
           {recallPointIdsQ.error ? <ErrorNotice title="复述点引用加载失败" message={formatApiError(recallPointIdsQ.error)} /> : null}
@@ -119,11 +119,11 @@ export function InstancePage() {
             <>
               <div className="grid gap-3 md:grid-cols-3">
                 <div className="rounded-md border bg-muted/30 p-3">
-                  <div className="text-xs text-muted-foreground">材料名</div>
+                  <div className="text-xs text-muted-foreground">内容名</div>
                   <div className="mt-1 font-medium text-foreground">{instance.materialDisplayName}</div>
                 </div>
                 <div className="rounded-md border bg-muted/30 p-3">
-                  <div className="text-xs text-muted-foreground">材料状态</div>
+                  <div className="text-xs text-muted-foreground">内容状态</div>
                   <div className="mt-1 font-medium text-foreground">{instance.presence === "MISSING" ? "缺失" : "正常"}</div>
                 </div>
                 <div className="rounded-md border bg-muted/30 p-3">
@@ -134,7 +134,7 @@ export function InstancePage() {
 
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="rounded-md border p-4">
-                  <div className="text-xs text-muted-foreground">材料引用</div>
+                  <div className="text-xs text-muted-foreground">内容引用</div>
                   <div className="mt-1 break-all text-sm font-medium text-foreground">{formatMaterialReference(instance.materialId)}</div>
                 </div>
                 <div className="rounded-md border p-4">

@@ -208,11 +208,11 @@ class ProjectConfig:
 
 
 def project_type_requires_learning_object_tree(project_type: ProjectType) -> bool:
-    return project_type in {ProjectType.COURSE, ProjectType.BOOK, ProjectType.MISTAKE_BOOK}
+    return project_type in {ProjectType.COURSE, ProjectType.BOOK}
 
 
 def project_type_requires_anchor(project_type: ProjectType) -> bool:
-    return project_type in {ProjectType.COURSE, ProjectType.BOOK, ProjectType.MISTAKE_BOOK}
+    return project_type in {ProjectType.COURSE, ProjectType.BOOK}
 
 
 def project_type_allows_anchor(project_type: ProjectType) -> bool:

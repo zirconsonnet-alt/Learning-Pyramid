@@ -100,3 +100,24 @@ def test_wechat_request_json_returns_payload_after_repeated_signature_verificati
 
     assert payload["code_url"] == "weixin://wxpay/bizpayurl?pr=test"
     assert attempts == {"request": 2, "verify": 2}
+
+
+def test_get_wechat_public_key_loads_once_and_caches(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _enable_wechat_native(monkeypatch, tmp_path)
+    service = MembershipPaymentService()
+    sentinel = object()
+    calls = {"count": 0}
+
+    def fake_load_pem_public_key(raw: bytes):
+        calls["count"] += 1
+        assert raw == b"test-public-key"
+        return sentinel
+
+    monkeypatch.setattr("backend.system.membership_payment_service.serialization.load_pem_public_key", fake_load_pem_public_key)
+
+    assert service._get_wechat_public_key() is sentinel
+    assert service._get_wechat_public_key() is sentinel
+    assert calls["count"] == 1

@@ -41,11 +41,6 @@ const InitializeBookLearningObjectsResultSchema = z.object({
   created_learning_object_nodes_count: z.number().int(),
   root_count: z.number().int(),
 })
-const EnsureMistakeInboxResultSchema = z.object({
-  created: z.boolean(),
-  node_id: z.string(),
-  instance_id: z.string(),
-})
 const ImportLearningObjectsFromBrowserResultSchema = z.object({
   unchanged: z.boolean(),
   created_instances_count: z.number().int(),
@@ -108,14 +103,6 @@ export function initializeBookLearningObjectsFromSubjectMaterial(projectId: stri
     method: "POST",
     body: { sourceMaterialId: params.sourceMaterialId },
     responseSchema: InitializeBookLearningObjectsResultSchema,
-  })
-}
-
-export function ensureMistakeInbox(projectId: string) {
-  return apiRequest({
-    path: `/projects/${projectId}/ensure-mistake-inbox`,
-    method: "POST",
-    responseSchema: EnsureMistakeInboxResultSchema,
   })
 }
 

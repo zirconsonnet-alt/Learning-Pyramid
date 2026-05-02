@@ -27,7 +27,6 @@ from backend.models.enums import (
     LearningTaskNodeOrigin,
     MaterialSourceKind,
     MediaAssetKind,
-    MistakeStatus,
     ObjectMirrorStatus,
     ProjectState,
     RecallPointState,
@@ -888,21 +887,6 @@ class SQLiteSnapshotStore:
             ),
             references=tuple(RecallPointId(str(item)) for item in list(raw.get("references", []))),
             insights=tuple(cls._decode_rich_content(item) for item in list(raw.get("insights", []))),
-            source_project_id=(
-                None if raw.get("sourceProjectId") is None else ProjectId(str(raw.get("sourceProjectId")))
-            ),
-            source_recall_point_id=(
-                None if raw.get("sourceRecallPointId") is None else RecallPointId(str(raw.get("sourceRecallPointId")))
-            ),
-            source_material_id=None if raw.get("sourceMaterialId") is None else str(raw.get("sourceMaterialId")),
-            source_material_title=(
-                None if raw.get("sourceMaterialTitle") is None else str(raw.get("sourceMaterialTitle"))
-            ),
-            source_anchor_label=(
-                None if raw.get("sourceAnchorLabel") is None else str(raw.get("sourceAnchorLabel"))
-            ),
-            mistake_status=None if raw.get("mistakeStatus") is None else MistakeStatus(str(raw.get("mistakeStatus"))),
-            mistake_note=None if raw.get("mistakeNote") is None else str(raw.get("mistakeNote")),
             state=RecallPointState(str(raw.get("state", RecallPointState.ACTIVE.value))),
             deleted_at=cls._ms_to_ts(None if raw.get("deletedAtMs") is None else int(raw.get("deletedAtMs"))),
         )

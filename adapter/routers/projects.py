@@ -73,7 +73,7 @@ def _parse_project_type(raw: str | None) -> ProjectType:
     try:
         return ProjectType(value)
     except ValueError as exc:
-        raise PreconditionFailure("projectType must be one of COURSE, BOOK, MISTAKE_BOOK, LOOSE_POINTS") from exc
+        raise PreconditionFailure("projectType must be one of COURSE, BOOK, LOOSE_POINTS") from exc
 
 
 def _parse_roll_up_strategy(raw: str | None) -> RollUpStrategy:
@@ -89,7 +89,7 @@ def _parse_study_material_type(raw: str | None) -> StudyMaterialType:
     try:
         return StudyMaterialType(value)
     except ValueError as exc:
-        raise PreconditionFailure("materialType must be one of COURSE, BOOK, LOOSE_POINTS, MISTAKE_BOOK") from exc
+        raise PreconditionFailure("materialType must be one of COURSE, BOOK, LOOSE_POINTS") from exc
 
 
 @router.get("/projects")

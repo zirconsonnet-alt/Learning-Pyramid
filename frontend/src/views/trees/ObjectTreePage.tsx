@@ -27,7 +27,7 @@ function formatApiError(err: unknown) {
 
 function formatObjectTitle(node: LearningObjectNode, depth: number) {
   const rawTitle = node.title.trim()
-  if (!rawTitle && node.kind === "leaf") return "未命名材料"
+  if (!rawTitle && node.kind === "leaf") return "未命名内容"
   if (!rawTitle && node.kind === "container") return depth === 0 ? "学习对象根" : "未命名分组"
   if (depth === 0 && rawTitle === "Files") return "学习对象根"
   return rawTitle
@@ -174,8 +174,8 @@ export function ObjectTreePage() {
         uiType,
         metaText:
           node.kind === "container"
-            ? `${materialSpan} 份材料 · ${childCount} 个子节点`
-            : instance?.materialDisplayName || instance?.materialId || "已绑定学习材料",
+            ? `${materialSpan} 份内容 · ${childCount} 个子节点`
+            : instance?.materialDisplayName || instance?.materialId || "已绑定内容实例",
         kind: node.kind,
         children: node.kind === "container" ? node.children : undefined,
         instanceId: node.kind === "leaf" ? node.instanceId : undefined,
@@ -199,7 +199,7 @@ export function ObjectTreePage() {
       </div>
 
       <div className="theme-canvas min-h-[36rem] p-4 md:p-5">
-        {isLoading ? <LoadingNotice title="正在加载学习对象树" message="正在整理目录结构、材料节点和层级布局。" /> : null}
+        {isLoading ? <LoadingNotice title="正在加载学习对象树" message="正在整理目录结构、内容节点和层级布局。" /> : null}
         {projectConfigQ.error ? <ErrorNotice title="项目配置加载失败" message={formatApiError(projectConfigQ.error)} /> : null}
         {nodesQ.error ? <ErrorNotice title="学习对象树加载失败" message={formatApiError(nodesQ.error)} /> : null}
         {instancesQ.error ? <ErrorNotice title="实例详情加载失败" message={formatApiError(instancesQ.error)} /> : null}

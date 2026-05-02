@@ -47,6 +47,24 @@ class RegisterAuthRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8)
     inviteCode: Optional[str] = Field(default=None, min_length=1, max_length=32)
+    humanCheckToken: Optional[str] = Field(default=None, min_length=1, max_length=2048)
+
+
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    token: str = Field(min_length=16, max_length=512)
+    newPassword: str = Field(min_length=8)
+
+
+class EmailVerificationRequest(BaseModel):
+    email: EmailStr
+
+
+class EmailVerificationConfirmRequest(BaseModel):
+    token: str = Field(min_length=16, max_length=512)
 
 
 class PreviewMembershipOrderRequest(BaseModel):
@@ -217,14 +235,6 @@ class EditRecallPointRequest(BaseModel):
     question: conlist(ContentBlockDTO, min_items=1)
     answer: conlist(ContentBlockDTO, min_items=1)
     anchor: Optional[AnchorDTO] = None
-    mistakeStatus: Optional[str] = Field(default=None, min_length=1)
-    mistakeNote: Optional[str] = Field(default=None, max_length=2000)
-
-
-class CollectRecallPointToMistakeMaterialRequest(BaseModel):
-    targetMaterialId: str = Field(min_length=1)
-    targetNodeId: Optional[str] = Field(default=None, min_length=1)
-    mistakeNote: Optional[str] = Field(default=None, max_length=2000)
 
 class AppendedInsightDTO(BaseModel):
     recallPointId: str = Field(min_length=1)
@@ -308,6 +318,7 @@ class UpdateUserServiceSettingsRequest(BaseModel):
 
 
 class UserPomodoroSettingsRequest(BaseModel):
+    id: Optional[str] = None
     enabled: bool = False
     startTime: str = Field(default="19:00", min_length=4, max_length=5)
     focusMinutes: int = Field(ge=1, le=180)
@@ -319,13 +330,13 @@ class UserPomodoroSettingsRequest(BaseModel):
 
 
 class UserPomodoroWeeklyScheduleRequest(BaseModel):
-    mon: UserPomodoroSettingsRequest
-    tue: UserPomodoroSettingsRequest
-    wed: UserPomodoroSettingsRequest
-    thu: UserPomodoroSettingsRequest
-    fri: UserPomodoroSettingsRequest
-    sat: UserPomodoroSettingsRequest
-    sun: UserPomodoroSettingsRequest
+    mon: dict[str, Any]
+    tue: dict[str, Any]
+    wed: dict[str, Any]
+    thu: dict[str, Any]
+    fri: dict[str, Any]
+    sat: dict[str, Any]
+    sun: dict[str, Any]
 
 
 class UserPomodoroConfigRequest(BaseModel):

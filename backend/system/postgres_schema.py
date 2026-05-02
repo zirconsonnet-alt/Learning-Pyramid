@@ -457,16 +457,6 @@ def _auth_roles_and_study_groups_sql() -> str:
             "CREATE INDEX IF NOT EXISTS idx_user_global_roles_role ON user_global_roles (role, created_at DESC);",
             "CREATE INDEX IF NOT EXISTS idx_study_group_members_user_id ON study_group_members (user_id, joined_at DESC);",
             "CREATE INDEX IF NOT EXISTS idx_study_group_posts_group_id ON study_group_posts (group_id, created_at DESC);",
-            "INSERT INTO user_global_roles (user_id, role, granted_by_user_id, created_at)",
-            "SELECT owner.user_id, 'super_admin', owner.user_id, owner.created_at",
-            "FROM (",
-            "    SELECT user_id, created_at",
-            "    FROM users",
-            "    ORDER BY created_at ASC, user_id ASC",
-            "    LIMIT 1",
-            ") owner",
-            "WHERE NOT EXISTS (SELECT 1 FROM user_global_roles)",
-            "ON CONFLICT (user_id, role) DO NOTHING;",
         )
     )
 
@@ -638,6 +628,45 @@ def _auth_user_global_settings_sql() -> str:
     )
 
 
+def _auth_password_reset_tokens_sql() -> str:
+    return "\n".join(
+        (
+            "-- Add password reset tokens for hosted account recovery",
+            "CREATE TABLE IF NOT EXISTS password_reset_tokens (",
+            "    token_hash TEXT PRIMARY KEY,",
+            "    user_id TEXT NOT NULL,",
+            "    created_at TEXT NOT NULL,",
+            "    expires_at TEXT NOT NULL,",
+            "    FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE",
+            ");",
+            "CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user_expires",
+            "ON password_reset_tokens (user_id, expires_at DESC);",
+        )
+    )
+
+
+def _auth_email_verification_sql() -> str:
+    return "\n".join(
+        (
+            "-- Add persistent email verification state and one-time verification tokens",
+            "ALTER TABLE users",
+            "ADD COLUMN IF NOT EXISTS email_verified_at TEXT;",
+            "UPDATE users",
+            "SET email_verified_at = created_at",
+            "WHERE email_verified_at IS NULL OR BTRIM(email_verified_at) = '';",
+            "CREATE TABLE IF NOT EXISTS email_verification_tokens (",
+            "    token_hash TEXT PRIMARY KEY,",
+            "    user_id TEXT NOT NULL,",
+            "    created_at TEXT NOT NULL,",
+            "    expires_at TEXT NOT NULL,",
+            "    FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE",
+            ");",
+            "CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_user_expires",
+            "ON email_verification_tokens (user_id, expires_at DESC);",
+        )
+    )
+
+
 def _auth_user_service_prompt_mode_sql() -> str:
     return "\n".join(
         (
@@ -744,6 +773,8 @@ POSTGRES_MIGRATIONS: tuple[PostgresMigration, ...] = (
     PostgresMigration(scope="auth", version=12, name="auth_user_cloud_accounts", sql_factory=_auth_user_cloud_accounts_sql),
     PostgresMigration(scope="auth", version=13, name="auth_user_project_daily_study_stats", sql_factory=_auth_user_project_daily_study_stats_sql),
     PostgresMigration(scope="auth", version=14, name="auth_user_global_settings", sql_factory=_auth_user_global_settings_sql),
+    PostgresMigration(scope="auth", version=15, name="auth_password_reset_tokens", sql_factory=_auth_password_reset_tokens_sql),
+    PostgresMigration(scope="auth", version=16, name="auth_email_verification", sql_factory=_auth_email_verification_sql),
 )
 
 

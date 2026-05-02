@@ -46,7 +46,6 @@ from backend.models.enums import (
     LearningTaskNodeOrigin,
     MediaAssetKind,
     MaterialSourceKind,
-    MistakeStatus,
     ObjectMirrorStatus,
     ProjectState,
     ProjectType,
@@ -134,6 +133,7 @@ from backend.system.runtime_features import (
     current_env_story_generator_service_config,
     current_runtime_features,
 )
+from backend.system.data_safety import collect_data_safety_status, collect_post_deploy_data_safety_status
 from backend.system.inmemory_system import (
     DEFAULT_AGGREGATION_K_NODE,
     DEFAULT_AGGREGATION_K_POINT,
@@ -224,6 +224,12 @@ class SystemAPI:
         self.sys._load_persisted()
         self.sys._ensure_system_project_id_seq()
 
+    def get_data_safety_status(self) -> dict[str, object]:
+        return collect_data_safety_status(environment=current_runtime_features().app_mode).to_api_dict()
+
+    def get_post_deploy_data_safety_status(self, *, validated: dict[str, int] | None = None) -> dict[str, object]:
+        return collect_post_deploy_data_safety_status(validated=validated, environment=current_runtime_features().app_mode)
+
     @staticmethod
     def _sql_updated_at_text() -> str:
         return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -299,16 +305,6 @@ class SystemAPI:
                 raise PreconditionFailure(f"{prefix}.instance_id not resolvable")
             return project_type
 
-        if project_type == ProjectType.MISTAKE_BOOK:
-            if anchor is None:
-                raise PreconditionFailure(f"{prefix} must be provided for MISTAKE_BOOK projects")
-            anchor.validate_write_time()
-            try:
-                self.sys.instance_repo.get(session, anchor.instance_id)
-            except NotFound:
-                raise PreconditionFailure(f"{prefix}.instance_id not resolvable")
-            return project_type
-
         if project_type == ProjectType.LOOSE_POINTS:
             if anchor is not None:
                 raise PreconditionFailure(f"{prefix} must be omitted for LOOSE_POINTS projects")
@@ -348,8 +344,8 @@ class SystemAPI:
             raise PreconditionFailure("create_project.initial_source_kind must be MaterialSourceKind")
         if not isinstance(initial_project_type, ProjectType):
             raise PreconditionFailure("create_project.initial_project_type must be ProjectType")
-        if initial_project_type in {ProjectType.BOOK, ProjectType.MISTAKE_BOOK, ProjectType.LOOSE_POINTS} and initial_source_kind != MaterialSourceKind.MANUAL:
-            raise PreconditionFailure("create_project for BOOK/MISTAKE_BOOK/LOOSE_POINTS must use MANUAL source kind")
+        if initial_project_type in {ProjectType.BOOK, ProjectType.LOOSE_POINTS} and initial_source_kind != MaterialSourceKind.MANUAL:
+            raise PreconditionFailure("create_project for BOOK/LOOSE_POINTS must use MANUAL source kind")
         pid = self.idgen.new_project_id()
         resolved_project_root = project_root
         if resolved_project_root is None:
@@ -1933,9 +1929,6 @@ class SystemAPI:
         if cfg.project_type == ProjectType.BOOK:
             material_type = StudyMaterialType.BOOK
             material_title = "旧书本材料"
-        elif cfg.project_type == ProjectType.MISTAKE_BOOK:
-            material_type = StudyMaterialType.MISTAKE_BOOK
-            material_title = "旧错题材料"
         elif cfg.project_type == ProjectType.LOOSE_POINTS:
             material_type = StudyMaterialType.LOOSE_POINTS
             material_title = "零散知识入口"
@@ -1986,8 +1979,6 @@ class SystemAPI:
             return "书本材料"
         if material_type == StudyMaterialType.LOOSE_POINTS:
             return "零散知识"
-        if material_type == StudyMaterialType.MISTAKE_BOOK:
-            return "错题材料"
         return "网课材料"
 
     @staticmethod
@@ -1998,8 +1989,6 @@ class SystemAPI:
             return MaterialSourceKind.MANUAL, ProjectType.BOOK
         if material_type == StudyMaterialType.LOOSE_POINTS:
             return MaterialSourceKind.MANUAL, ProjectType.LOOSE_POINTS
-        if material_type == StudyMaterialType.MISTAKE_BOOK:
-            return MaterialSourceKind.MANUAL, ProjectType.MISTAKE_BOOK
         return MaterialSourceKind.SERVER_FS, ProjectType.COURSE
 
     @staticmethod
@@ -3536,7 +3525,7 @@ class SystemAPI:
         cfg = self.sys.project_config_repo.get(s)
         return (
             cfg.roll_up_strategy == RollUpStrategy.LEARNING_OBJECT_ISOMORPHIC
-            and cfg.project_type in {ProjectType.COURSE, ProjectType.BOOK, ProjectType.MISTAKE_BOOK}
+            and cfg.project_type in {ProjectType.COURSE, ProjectType.BOOK}
         )
 
     @staticmethod
@@ -4298,8 +4287,8 @@ class SystemAPI:
         self._ensure_startup_fs_sync_done(project_id)
         s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
         try:
-            if self._project_type_in_session(s) not in {ProjectType.BOOK, ProjectType.MISTAKE_BOOK}:
-                raise PreconditionFailure("initialize_book_learning_objects is only available for BOOK/MISTAKE_BOOK projects")
+            if self._project_type_in_session(s) != ProjectType.BOOK:
+                raise PreconditionFailure("initialize_book_learning_objects is only available for BOOK projects")
             binding = self.sys.project_material_source_binding_repo.get(s)
             if binding.source_kind != MaterialSourceKind.MANUAL:
                 raise PreconditionFailure("initialize_book_learning_objects requires MANUAL source kind")
@@ -4542,17 +4531,11 @@ class SystemAPI:
                 "initialize_book_learning_objects_from_subject_material requires a subject-bound book material"
             )
         target_material = self._find_subject_material(resolved_subject_id, target_material_link.material_id)
-        if target_material.material_type not in {StudyMaterialType.BOOK, StudyMaterialType.MISTAKE_BOOK}:
-            raise PreconditionFailure(
-                "initialize_book_learning_objects_from_subject_material is only available for BOOK/MISTAKE_BOOK materials"
-            )
+        if target_material.material_type != StudyMaterialType.BOOK:
+            raise PreconditionFailure("initialize_book_learning_objects_from_subject_material is only available for BOOK materials")
 
         source_material = self._find_subject_material(resolved_subject_id, source_material_id)
-        allowed_source_types = (
-            {StudyMaterialType.COURSE}
-            if target_material.material_type == StudyMaterialType.BOOK
-            else {StudyMaterialType.COURSE, StudyMaterialType.BOOK}
-        )
+        allowed_source_types = {StudyMaterialType.COURSE}
         if source_material.material_type not in allowed_source_types:
             raise PreconditionFailure(
                 "initialize_book_learning_objects_from_subject_material source material type is unsupported"
@@ -4567,237 +4550,6 @@ class SystemAPI:
             outline_items=outline_items,
             api_name="initialize_book_learning_objects_from_subject_material",
         )
-
-    def _sorted_manual_leaf_nodes(self, s: MutationSession) -> list[LearningObjectLeaf]:
-        leaves = [node for node in self.sys.learning_object_repo.all(s) if isinstance(node, LearningObjectLeaf)]
-        leaves.sort(key=lambda node: (node.relative_path.as_posix(), str(node.title).strip(), id_canonical_text(node.node_id)))
-        return leaves
-
-    def _ensure_mistake_inbox_leaf_in_session(self, s: MutationSession) -> tuple[LearningObjectLeaf, bool]:
-        if self._project_type_in_session(s) != ProjectType.MISTAKE_BOOK:
-            raise PreconditionFailure("_ensure_mistake_inbox_leaf_in_session requires MISTAKE_BOOK project")
-
-        for leaf in self._sorted_manual_leaf_nodes(s):
-            if str(leaf.title).strip() == "待整理":
-                return leaf, False
-
-        instance_id = self.idgen.new_instance_id(s.project_id)
-        material_id = PurePosixPath(f"mistake_inbox/{instance_id}")
-        instance = Instance.create(s.project_id, instance_id, material_id, presence=InstancePresence.PRESENT, last_seen_at=None)
-        self.sys.instance_repo.add(s, instance)
-
-        node_id = self.idgen.new_learning_object_node_id(s.project_id)
-        leaf = LearningObjectLeaf(
-            source="MANUAL",
-            project_id=s.project_id,
-            node_id=node_id,
-            relative_path=material_id,
-            parent_id=None,
-            instance_id=instance_id,
-            title="待整理",
-        )
-        leaf.validate_write_time()
-        self.sys.learning_object_repo.add(s, leaf)
-        return leaf, True
-
-    def ensure_mistake_material_inbox(self, project_id: ProjectId) -> dict[str, object]:
-        self._ensure_startup_fs_sync_done(project_id)
-        s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
-        try:
-            if self._project_type_in_session(s) != ProjectType.MISTAKE_BOOK:
-                raise PreconditionFailure("ensure_mistake_material_inbox is only available for MISTAKE_BOOK projects")
-            binding = self.sys.project_material_source_binding_repo.get(s)
-            if binding.source_kind != MaterialSourceKind.MANUAL:
-                raise PreconditionFailure("ensure_mistake_material_inbox requires MANUAL source kind")
-
-            leaf, created = self._ensure_mistake_inbox_leaf_in_session(s)
-            self._append_audit_event(
-                s,
-                kind=AuditEventKind.ADD_LEARNING_OBJECT_LEAF,
-                api_name="ensure_mistake_material_inbox",
-                payload={"nodeId": str(leaf.node_id), "instanceId": str(leaf.instance_id), "created": bool(created)},
-            )
-            self.sys.commit(s)
-            return {
-                "created": bool(created),
-                "node_id": str(leaf.node_id),
-                "instance_id": str(leaf.instance_id),
-            }
-        except Exception:
-            if s.state == SessionState.OPEN:
-                self.sys.rollback(s)
-            raise
-
-    def _format_mistake_source_anchor_label(
-        self,
-        s: MutationSession,
-        *,
-        source_material_title: str,
-        recall_point: RecallPoint,
-    ) -> str:
-        parts: list[str] = [str(source_material_title or "").strip() or "来源材料"]
-        if recall_point.anchor is not None:
-            try:
-                instance = self.sys.instance_repo.get(s, recall_point.anchor.instance_id)
-                instance_title = str(instance.material_display_name).strip()
-                if instance_title:
-                    parts.append(instance_title)
-            except Exception:
-                pass
-            position = str(recall_point.anchor.position or "").strip()
-            if position:
-                parts.append(position)
-        else:
-            parts.append("未记录来源定位")
-        return self._truncate_for_llm_context(" · ".join([part for part in parts if part]), max_chars=240)
-
-    def collect_recall_point_to_subject_mistake_material(
-        self,
-        project_id: ProjectId,
-        recall_point_id: RecallPointId,
-        *,
-        target_material_id: str,
-        target_node_id: LearningObjectNodeId | None = None,
-        mistake_note: str | None = None,
-    ) -> dict[str, object]:
-        self._ensure_startup_fs_sync_done(project_id)
-        resolved_subject_id = self._resolve_subject_project_id(project_id)
-        source_material = self._resolve_current_material_for_project(project_id, resolved_subject_id)
-        target_material = self._find_subject_material(resolved_subject_id, target_material_id)
-        if target_material.material_type != StudyMaterialType.MISTAKE_BOOK:
-            raise PreconditionFailure("collect_recall_point_to_subject_mistake_material target material must be MISTAKE_BOOK")
-        target_project_id = target_material.compatibility_project_id
-        if target_project_id is None:
-            raise PreconditionFailure("target mistake material has no compatibility project")
-        if id_canonical_text(target_project_id) == id_canonical_text(project_id):
-            raise PreconditionFailure("collect_recall_point_to_subject_mistake_material target must differ from source project")
-
-        source_session = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
-        try:
-            source_recall_point = self.sys.recall_point_repo.get(source_session, recall_point_id)
-            if source_recall_point.state != RecallPointState.ACTIVE:
-                raise PreconditionFailure("collect_recall_point_to_subject_mistake_material source recall point must be ACTIVE")
-            source_anchor_label = self._format_mistake_source_anchor_label(
-                source_session,
-                source_material_title=source_material.title,
-                recall_point=source_recall_point,
-            )
-            source_question_text = self._truncate_for_llm_context(
-                self._rich_content_to_plain_text(source_recall_point.question),
-                max_chars=48,
-            )
-        finally:
-            self.sys.rollback(source_session)
-
-        target_session = self.sys.begin_session(target_project_id, SessionMode.READ_WRITE)
-        try:
-            if self._project_type_in_session(target_session) != ProjectType.MISTAKE_BOOK:
-                raise PreconditionFailure("collect_recall_point_to_subject_mistake_material target project must be MISTAKE_BOOK")
-
-            existing_duplicate = next(
-                (
-                    item
-                    for item in self.sys.recall_point_repo.all(target_session)
-                    if item.state == RecallPointState.ACTIVE
-                    and item.source_project_id is not None
-                    and item.source_recall_point_id is not None
-                    and id_canonical_text(item.source_project_id) == id_canonical_text(project_id)
-                    and id_canonical_text(item.source_recall_point_id) == id_canonical_text(recall_point_id)
-                ),
-                None,
-            )
-            if existing_duplicate is not None:
-                raise PreconditionFailure("collect_recall_point_to_subject_mistake_material source recall point already exists in target material")
-
-            created_inbox = False
-            if target_node_id is not None:
-                target_node = self.sys.learning_object_repo.get(target_session, target_node_id)
-                if not isinstance(target_node, LearningObjectLeaf):
-                    raise PreconditionFailure("collect_recall_point_to_subject_mistake_material target_node_id must resolve to leaf")
-                target_leaf = target_node
-            else:
-                leaves = self._sorted_manual_leaf_nodes(target_session)
-                if leaves:
-                    target_leaf = leaves[0]
-                else:
-                    target_leaf, created_inbox = self._ensure_mistake_inbox_leaf_in_session(target_session)
-
-            anchor = Anchor(instance_id=target_leaf.instance_id, position=source_anchor_label)
-            item_title = source_question_text or "错题记录"
-            learning_items = [
-                LearningItem(
-                    question=source_recall_point.question,
-                    answer=source_recall_point.answer,
-                    anchor=anchor,
-                    references=tuple(source_recall_point.references),
-                )
-            ]
-            res = learning_task_submit(
-                session=target_session,
-                id_gen=self.idgen,
-                instance_repo=self.sys.instance_repo,
-                recall_point_repo=self.sys.recall_point_repo,
-                learning_task_repo=self.sys.learning_task_repo,
-                learning_task_node_repo=self.sys.learning_task_node_repo,
-                items=learning_items,
-                title=f"错题 · {item_title}",
-                entry_node_title=f"错题 · {item_title}",
-            )
-            new_recall_point_id = res.recall_point_ids[0]
-            created_recall_point = self.sys.recall_point_repo.get(target_session, new_recall_point_id)
-            note_text = None if mistake_note is None or not str(mistake_note).strip() else str(mistake_note).strip()
-            updated_recall_point = RecallPoint(
-                project_id=created_recall_point.project_id,
-                recall_point_id=created_recall_point.recall_point_id,
-                created_at=created_recall_point.created_at,
-                question=created_recall_point.question,
-                answer=created_recall_point.answer,
-                anchor=created_recall_point.anchor,
-                references=tuple(created_recall_point.references),
-                insights=tuple(created_recall_point.insights),
-                source_project_id=project_id,
-                source_recall_point_id=recall_point_id,
-                source_material_id=source_material.material_id,
-                source_material_title=source_material.title,
-                source_anchor_label=source_anchor_label,
-                mistake_status=MistakeStatus.OPEN,
-                mistake_note=note_text,
-                state=created_recall_point.state,
-                deleted_at=created_recall_point.deleted_at,
-            )
-            self.sys.recall_point_repo.update(target_session, updated_recall_point)
-
-            target_layer_index = 0
-            self.sys.layer_repo.get_by_index(target_session, target_layer_index)
-            self._task_register(target_session, res.entry_node_id, target_layer_index)
-            self._enter_clearing_if_threshold_met(target_session, target_layer_index)
-
-            self._append_audit_event(
-                target_session,
-                kind=AuditEventKind.COLLECT_RECALL_POINT_TO_MISTAKE_BOOK,
-                api_name="collect_recall_point_to_subject_mistake_material",
-                payload={
-                    "sourceProjectId": str(project_id),
-                    "sourceRecallPointId": str(recall_point_id),
-                    "targetMaterialId": target_material.material_id,
-                    "targetNodeId": str(target_leaf.node_id),
-                    "targetRecallPointId": str(new_recall_point_id),
-                    "createdInbox": bool(created_inbox),
-                },
-            )
-            self.sys.commit(target_session)
-            self._best_effort_drive_idle_orchestration(target_project_id)
-            return {
-                "target_project_id": str(target_project_id),
-                "target_material_id": target_material.material_id,
-                "target_node_id": str(target_leaf.node_id),
-                "target_recall_point_id": str(new_recall_point_id),
-                "created_inbox": bool(created_inbox),
-            }
-        except Exception:
-            if target_session.state == SessionState.OPEN:
-                self.sys.rollback(target_session)
-            raise
 
     def add_learning_object_leaf(
         self,
@@ -5128,13 +4880,6 @@ class SystemAPI:
                     anchor=Anchor(instance_id=to_instance_id, position=rp.anchor.position),
                     references=tuple(rp.references),
                     insights=tuple(rp.insights),
-                    source_project_id=rp.source_project_id,
-                    source_recall_point_id=rp.source_recall_point_id,
-                    source_material_id=rp.source_material_id,
-                    source_material_title=rp.source_material_title,
-                    source_anchor_label=rp.source_anchor_label,
-                    mistake_status=rp.mistake_status,
-                    mistake_note=rp.mistake_note,
                     state=rp.state,
                     deleted_at=rp.deleted_at,
                 )
@@ -5398,13 +5143,6 @@ class SystemAPI:
                         anchor=Anchor(instance_id=InstanceId(new_key), position=rp.anchor.position),
                         references=tuple(rp.references),
                         insights=tuple(rp.insights),
-                        source_project_id=rp.source_project_id,
-                        source_recall_point_id=rp.source_recall_point_id,
-                        source_material_id=rp.source_material_id,
-                        source_material_title=rp.source_material_title,
-                        source_anchor_label=rp.source_anchor_label,
-                        mistake_status=rp.mistake_status,
-                        mistake_note=rp.mistake_note,
                         state=rp.state,
                         deleted_at=rp.deleted_at,
                     )
@@ -6114,27 +5852,12 @@ class SystemAPI:
         question: RichContent,
         answer: RichContent,
         anchor: Anchor | None,
-        *,
-        mistake_status: MistakeStatus | None = None,
-        mistake_note: str | None = None,
     ) -> None:
         self._ensure_startup_fs_sync_done(project_id)
         s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
         try:
             cur = self.sys.recall_point_repo.get(s, recall_point_id)
-            project_type = self._validate_anchor_for_project_type(s, anchor=anchor, api_name="edit_recall_point")
-            if project_type != ProjectType.MISTAKE_BOOK and (mistake_status is not None or mistake_note is not None):
-                raise PreconditionFailure("edit_recall_point mistake fields are only available for MISTAKE_BOOK projects")
-            next_mistake_status = cur.mistake_status
-            next_mistake_note = cur.mistake_note
-            if project_type == ProjectType.MISTAKE_BOOK:
-                if mistake_status is not None:
-                    next_mistake_status = mistake_status
-                if mistake_note is not None:
-                    trimmed_note = str(mistake_note).strip()
-                    next_mistake_note = trimmed_note or None
-                if next_mistake_status is None:
-                    next_mistake_status = MistakeStatus.OPEN
+            self._validate_anchor_for_project_type(s, anchor=anchor, api_name="edit_recall_point")
             rp = RecallPoint(
                 project_id=project_id,
                 recall_point_id=recall_point_id,
@@ -6144,13 +5867,6 @@ class SystemAPI:
                 anchor=anchor,
                 references=tuple(cur.references),
                 insights=tuple(cur.insights),
-                source_project_id=cur.source_project_id,
-                source_recall_point_id=cur.source_recall_point_id,
-                source_material_id=cur.source_material_id,
-                source_material_title=cur.source_material_title,
-                source_anchor_label=cur.source_anchor_label,
-                mistake_status=next_mistake_status,
-                mistake_note=next_mistake_note,
                 state=cur.state,
                 deleted_at=cur.deleted_at,
             )
@@ -8001,8 +7717,6 @@ API_WHITELIST: dict[str, SchedulingEffect] = {
     "add_instance": SchedulingEffect.NONE,
     "initialize_book_learning_objects": SchedulingEffect.NONE,
     "initialize_book_learning_objects_from_subject_material": SchedulingEffect.NONE,
-    "ensure_mistake_material_inbox": SchedulingEffect.NONE,
-    "collect_recall_point_to_subject_mistake_material": SchedulingEffect.ORCHESTRATION_MUTATING,
     "add_learning_object_leaf": SchedulingEffect.NONE,
     "add_learning_object_container": SchedulingEffect.NONE,
     "sync_learning_objects_from_fs": SchedulingEffect.NONE,

@@ -154,6 +154,7 @@ export function MembershipPage() {
       ),
     [recentInvites],
   )
+  const autoSyncIntervalMs = Math.max(3, activeCheckout?.paymentPayload.pollIntervalSeconds ?? 5) * 1_000
 
   useEffect(() => {
     if (!latestCheckout) return
@@ -162,6 +163,64 @@ export function MembershipPage() {
       setLatestCheckout(null)
     }
   }, [latestCheckout, ordersQ.data])
+
+  async function syncPaymentStatus(order: MembershipOrder, options?: { manual?: boolean }) {
+    const manual = options?.manual ?? true
+    try {
+      const result = await syncPayment.mutateAsync({ orderId: order.orderId })
+      if (result.confirmed) {
+        showSuccessFeedback(
+          result.idempotent ? "支付状态已同步" : "会员已开通",
+          result.membership.currentEndsAt ? `会员有效期已更新到 ${formatMembershipDateTime(result.membership.currentEndsAt)}。` : "会员权益已经发放。",
+        )
+        setLatestCheckout(null)
+        setPurchaseOpen(false)
+        return
+      }
+      if (result.order.status === "closed") {
+        setLatestCheckout(null)
+        setPurchaseOpen(false)
+        showSuccessFeedback(
+          "订单已关闭",
+          result.remote.remoteStatus === "closed"
+            ? "这笔订单已关闭。"
+            : result.remote.remoteStatus === "failed"
+              ? "支付未完成，这笔订单已结束。"
+              : result.remote.remoteStatus === "refunded"
+                ? "这笔订单已退款，不会继续等待支付。"
+                : "这笔订单已经结束。",
+        )
+        return
+      }
+      if (manual) {
+        showSuccessFeedback("支付状态已刷新", "这笔订单暂未支付成功，请稍后再试。")
+      }
+    } catch (err) {
+      if (manual) {
+        showErrorFeedback("同步支付状态失败", formatMembershipApiError(err))
+      }
+    }
+  }
+
+  useEffect(() => {
+    if (!purchaseOpen || !pendingOrder || pendingOrder.provider !== "wechat_native" || syncPayment.isPending) {
+      return
+    }
+    if (activeCheckout?.paymentPayload.provider === "wechat_native" && !activeCheckout.paymentPayload.statusCheckSupported) {
+      return
+    }
+    const timer = window.setInterval(() => {
+      void syncPaymentStatus(pendingOrder, { manual: false })
+    }, autoSyncIntervalMs)
+    return () => window.clearInterval(timer)
+  }, [
+    purchaseOpen,
+    pendingOrder,
+    activeCheckout?.paymentPayload.provider,
+    activeCheckout?.paymentPayload.statusCheckSupported,
+    autoSyncIntervalMs,
+    syncPayment.isPending,
+  ])
 
   async function onCreateOrder() {
     if (!effectiveSelectedProvider) {
@@ -209,36 +268,7 @@ export function MembershipPage() {
   }
 
   async function onSyncPayment(order: MembershipOrder) {
-    try {
-      const result = await syncPayment.mutateAsync({ orderId: order.orderId })
-      if (result.confirmed) {
-        showSuccessFeedback(
-          result.idempotent ? "支付状态已同步" : "会员已开通",
-          result.membership.currentEndsAt ? `会员有效期已更新到 ${formatMembershipDateTime(result.membership.currentEndsAt)}。` : "会员权益已经发放。",
-        )
-        setLatestCheckout(null)
-        setPurchaseOpen(false)
-        return
-      }
-      if (result.order.status === "closed") {
-        setLatestCheckout(null)
-        setPurchaseOpen(false)
-        showSuccessFeedback(
-          "订单已关闭",
-          result.remote.remoteStatus === "closed"
-            ? "这笔订单已关闭。"
-            : result.remote.remoteStatus === "failed"
-              ? "支付未完成，这笔订单已结束。"
-              : result.remote.remoteStatus === "refunded"
-                ? "这笔订单已退款，不会继续等待支付。"
-                : "这笔订单已经结束。",
-        )
-        return
-      }
-      showSuccessFeedback("支付状态已刷新", "这笔订单暂未支付成功，请稍后再试。")
-    } catch (err) {
-      showErrorFeedback("同步支付状态失败", formatMembershipApiError(err))
-    }
+    await syncPaymentStatus(order, { manual: true })
   }
 
   async function onCloseOrder(order: MembershipOrder) {
@@ -373,19 +403,21 @@ export function MembershipPage() {
                   <div className="text-2xl font-semibold tracking-tight text-foreground">{membershipState}</div>
                   {summary?.currentEndsAt ? <div className="text-sm leading-6 text-muted-foreground">有效期至 {formatMembershipDateTime(summary.currentEndsAt)}</div> : null}
                 </div>
-                <div className="min-w-[18rem] max-w-xl rounded-[1.25rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-4 py-4">
-                  <div className="text-[11px] uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">邀请码</div>
-                  {inviteSummaryQ.error ? <div className="mt-3 text-sm text-destructive">{formatMembershipApiError(inviteSummaryQ.error)}</div> : null}
-                  {!inviteSummaryQ.error ? (
-                    <div className="mt-3 space-y-3">
-                      <div className="min-w-0">
-                        <div className="truncate text-2xl font-semibold tracking-tight text-foreground">{inviteSummaryQ.data?.inviteCode ?? "加载中..."}</div>
-                        {inviteSummaryQ.data?.boundInviteCode ? (
-                          <div className="mt-1 text-sm text-muted-foreground">已绑定上级邀请码：{inviteSummaryQ.data.boundInviteCode}</div>
-                        ) : null}
+                <div className="flex min-w-[18rem] max-w-xl flex-col gap-3">
+                  <div className="rounded-[1.25rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-4 py-4">
+                    <div className="text-[11px] uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">邀请码</div>
+                    {inviteSummaryQ.error ? <div className="mt-3 text-sm text-destructive">{formatMembershipApiError(inviteSummaryQ.error)}</div> : null}
+                    {!inviteSummaryQ.error ? (
+                      <div className="mt-3 space-y-3">
+                        <div className="min-w-0">
+                          <div className="truncate text-2xl font-semibold tracking-tight text-foreground">{inviteSummaryQ.data?.inviteCode ?? "加载中..."}</div>
+                          {inviteSummaryQ.data?.boundInviteCode ? (
+                            <div className="mt-1 text-sm text-muted-foreground">已绑定上级邀请码：{inviteSummaryQ.data.boundInviteCode}</div>
+                          ) : null}
+                        </div>
                       </div>
-                    </div>
-                  ) : null}
+                    ) : null}
+                  </div>
                 </div>
               </div>
             </div>

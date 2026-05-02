@@ -10,6 +10,11 @@ export const SystemCapabilitiesSchema = z.object({
   baiduNetdiskEnabled: z.boolean(),
   authEnabled: z.boolean(),
   allowSignup: z.boolean(),
+  signupInviteRequired: z.boolean(),
+  passwordResetEnabled: z.boolean(),
+  emailVerificationEnabled: z.boolean(),
+  signupHumanCheckEnabled: z.boolean(),
+  signupHumanCheckSiteKey: z.string().nullable(),
   llmConfigured: z.boolean(),
   storyGenerationConfigured: z.boolean(),
   llmSource: z.enum(["user", "global", "env", "none"]),
@@ -20,6 +25,46 @@ export function getSystemCapabilities(options?: ApiRequestExecutionOptions) {
   return apiRequest({
     path: "/system/capabilities",
     responseSchema: SystemCapabilitiesSchema,
+    signal: options?.signal,
+    timeoutMs: options?.timeoutMs,
+  })
+}
+
+export const DataSafetyFindingSchema = z.object({
+  severity: z.enum(["blocking", "warning", "info"]),
+  code: z.string(),
+  message: z.string(),
+  protectedClassId: z.string(),
+  affectedEntityIds: z.array(z.string()),
+  expectedLocation: z.string().nullable(),
+  observedState: z.string().nullable(),
+  recommendedAction: z.string().nullable(),
+})
+
+export const ProtectedDataClassSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  storageKind: z.enum(["database", "filesystem", "derived-index"]),
+  locations: z.array(z.string()),
+  criticality: z.enum(["blocking", "warning"]),
+  ownerComponent: z.string(),
+})
+
+export const DataSafetyStatusSchema = z.object({
+  state: z.enum(["ok", "warning", "blocked", "unknown"]),
+  checkedAt: z.string(),
+  environment: z.string(),
+  releaseBlocked: z.boolean(),
+  protectedClasses: z.array(ProtectedDataClassSchema),
+  latestVerifiedBackup: z.record(z.string(), z.unknown()).nullable(),
+  findings: z.array(DataSafetyFindingSchema),
+})
+export type DataSafetyStatus = z.infer<typeof DataSafetyStatusSchema>
+
+export function getSystemDataSafetyStatus(options?: ApiRequestExecutionOptions) {
+  return apiRequest({
+    path: "/system/data-safety",
+    responseSchema: DataSafetyStatusSchema,
     signal: options?.signal,
     timeoutMs: options?.timeoutMs,
   })
@@ -64,10 +109,13 @@ export const SystemRuntimeSchema = z
     appMode: z.enum(["local", "hosted"]),
     authEnabled: z.boolean(),
     allowSignup: z.boolean(),
+    signupInviteRequired: z.boolean(),
     asrEnabled: z.boolean(),
     serverMediaStreamEnabled: z.boolean(),
     browserLocalMediaEnabled: z.boolean(),
     baiduNetdiskEnabled: z.boolean(),
+    emailVerificationEnabled: z.boolean().optional(),
+    signupHumanCheckEnabled: z.boolean().optional(),
     sqlBackend: z.string(),
   })
   .passthrough()

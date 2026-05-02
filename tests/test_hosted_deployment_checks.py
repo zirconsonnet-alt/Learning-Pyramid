@@ -1,8 +1,66 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import backend.system.membership_payment_service as membership_payment_service
 from backend.system.membership_payment_service import current_wechat_native_payment_config
-from backend.system.hosted_deployment_checks import hosted_runtime_blockers, hosted_runtime_warnings
+from backend.system.hosted_deployment_checks import hosted_runtime_blockers, hosted_runtime_warnings, protected_storage_blockers
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_selfhost_compose_persists_legacy_app_data_project_root() -> None:
+    compose_text = (REPO_ROOT / "docker-compose.selfhost.yml").read_text(encoding="utf-8")
+
+    assert "- ./data/selfhost:/app/data" in compose_text
+
+
+def test_selfhost_compose_declares_all_protected_data_roots() -> None:
+    compose_text = (REPO_ROOT / "docker-compose.selfhost.yml").read_text(encoding="utf-8")
+
+    assert "- ./data/selfhost:/data" in compose_text
+    assert "- ./data/selfhost:/app/data" in compose_text
+
+
+def test_selfhost_sync_preserves_old_frontend_chunks() -> None:
+    sync_script = (REPO_ROOT / "tools" / "sync_selfhost_server.ps1").read_text(encoding="utf-8")
+
+    assert "--filter 'P frontend/dist/assets/***'" in sync_script
+
+
+def test_selfhost_docker_context_includes_frontend_dist() -> None:
+    dockerignore_lines = (REPO_ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
+    active_excludes = {
+        line.strip()
+        for line in dockerignore_lines
+        if line.strip() and not line.strip().startswith("#") and not line.strip().startswith("!")
+    }
+
+    assert "frontend/dist" not in active_excludes
+    assert "frontend/dist/" not in active_excludes
+
+
+def test_selfhost_sync_excludes_runtime_data_paths_from_delete() -> None:
+    sync_script = (REPO_ROOT / "tools" / "sync_selfhost_server.ps1").read_text(encoding="utf-8")
+
+    assert "--exclude 'data/'" in sync_script
+    assert "--filter 'P data/***'" in sync_script
+    assert "--filter 'P /data/***'" in sync_script
+
+
+def test_shell_selfhost_sync_excludes_runtime_data_paths_from_delete() -> None:
+    sync_script = (REPO_ROOT / "tools" / "sync_selfhost_server.sh").read_text(encoding="utf-8")
+
+    assert "--exclude 'data/'" in sync_script
+    assert "--filter 'P data/***'" in sync_script
+
+
+def test_router_recovers_from_stale_dynamic_import_chunks() -> None:
+    router_source = (REPO_ROOT / "frontend" / "src" / "router.tsx").read_text(encoding="utf-8")
+
+    assert "Failed to fetch dynamically imported module" in router_source
+    assert "window.location.reload()" in router_source
 
 
 def test_local_mode_has_no_hosted_runtime_blockers(monkeypatch) -> None:
@@ -10,6 +68,28 @@ def test_local_mode_has_no_hosted_runtime_blockers(monkeypatch) -> None:
     monkeypatch.delenv("PLM_MEDIA_ACCESS_TOKEN_SECRET", raising=False)
 
     assert hosted_runtime_blockers() == tuple()
+
+
+def test_protected_storage_blockers_reject_missing_and_non_directory_paths(tmp_path) -> None:
+    missing = tmp_path / "missing"
+    file_path = tmp_path / "not-a-dir"
+    file_path.write_text("not a directory", encoding="utf-8")
+
+    blockers = protected_storage_blockers((missing, file_path), data_expected=True)
+
+    assert any("PROTECTED_PATH_MISSING" in item for item in blockers)
+    assert any("PROTECTED_PATH_NOT_DIRECTORY" in item for item in blockers)
+
+
+def test_protected_storage_blockers_reject_empty_expected_data_path(tmp_path) -> None:
+    empty = tmp_path / "empty"
+    empty.mkdir()
+
+    blockers = protected_storage_blockers((empty,), data_expected=True)
+
+    assert blockers == (
+        f"PROTECTED_PATH_EMPTY_UNEXPECTED: Protected data path is empty but data is expected: {empty}",
+    )
 
 
 def test_hosted_mode_requires_media_access_secret(monkeypatch) -> None:
@@ -24,6 +104,7 @@ def test_hosted_mode_requires_media_access_secret(monkeypatch) -> None:
 def test_hosted_mode_warns_about_signup_and_example_postgres_password(monkeypatch) -> None:
     monkeypatch.setenv("PLM_APP_MODE", "hosted")
     monkeypatch.setenv("PLM_ALLOW_SIGNUP", "true")
+    monkeypatch.setenv("PLM_REQUIRE_SIGNUP_INVITE", "false")
     monkeypatch.setenv("PLM_SECURE_COOKIES", "false")
     monkeypatch.setenv("PLM_SQL_BACKEND", "postgres")
     monkeypatch.setenv("PLM_POSTGRES_DSN", "postgresql://learningpyramid:learningpyramid@postgres:5432/learningpyramid")
@@ -34,11 +115,67 @@ def test_hosted_mode_warns_about_signup_and_example_postgres_password(monkeypatc
 
     warnings = hosted_runtime_warnings()
 
-    assert "PLM_ALLOW_SIGNUP=true leaves the hosted deployment open for self-registration." in warnings
+    assert (
+        "PLM_ALLOW_SIGNUP=true enables hosted self-registration endpoints. Keep it disabled unless you intentionally want bootstrap, invite-based, or public registration."
+        in warnings
+    )
+    assert (
+        "Public sign-up should enable password recovery. Configure PLM_ENABLE_PASSWORD_RESET=true together with PLM_SMTP_* and PLM_PUBLIC_ORIGIN before opening registration."
+        in warnings
+    )
+    assert (
+        "Public sign-up without invite codes should enable email verification. Configure PLM_ENABLE_EMAIL_VERIFICATION=true together with PLM_SMTP_* and PLM_PUBLIC_ORIGIN before opening free registration."
+        in warnings
+    )
+    assert (
+        "Public sign-up without invite codes should enable human verification. Configure PLM_ENABLE_SIGNUP_HUMAN_CHECK=true together with PLM_TURNSTILE_SITE_KEY and PLM_TURNSTILE_SECRET_KEY before opening free registration."
+        in warnings
+    )
     assert "PLM_SECURE_COOKIES is disabled. Use this only for temporary plain-HTTP localhost testing." in warnings
     assert "PLM_PUBLIC_ORIGIN is empty. Set it to the external HTTPS origin before public deployment." in warnings
     assert "PLM_TRUSTED_HOSTS is empty. Set it to the externally reachable host list." in warnings
     assert "PostgreSQL credentials still look like example values. Update PLM_POSTGRES_PASSWORD and PLM_POSTGRES_DSN before deployment." in warnings
+
+
+def test_hosted_mode_warns_about_partial_password_reset_config(monkeypatch) -> None:
+    monkeypatch.setenv("PLM_APP_MODE", "hosted")
+    monkeypatch.setenv("PLM_ENABLE_AUTH", "true")
+    monkeypatch.setenv("PLM_ENABLE_PASSWORD_RESET", "true")
+    monkeypatch.setenv("PLM_PUBLIC_ORIGIN", "https://example.com")
+    monkeypatch.setenv("PLM_MEDIA_ACCESS_TOKEN_SECRET", "real-secret")
+    monkeypatch.delenv("PLM_SMTP_HOST", raising=False)
+    monkeypatch.delenv("PLM_SMTP_FROM_EMAIL", raising=False)
+
+    warnings = hosted_runtime_warnings()
+
+    assert (
+        "Password reset email is only partially configured. Complete PLM_SMTP_HOST, PLM_SMTP_FROM_EMAIL, PLM_PUBLIC_ORIGIN, and matching SMTP credentials or disable PLM_ENABLE_PASSWORD_RESET."
+        in warnings
+    )
+
+
+def test_hosted_mode_warns_about_partial_email_verification_and_human_check_config(monkeypatch) -> None:
+    monkeypatch.setenv("PLM_APP_MODE", "hosted")
+    monkeypatch.setenv("PLM_ENABLE_AUTH", "true")
+    monkeypatch.setenv("PLM_ENABLE_EMAIL_VERIFICATION", "true")
+    monkeypatch.setenv("PLM_ENABLE_SIGNUP_HUMAN_CHECK", "true")
+    monkeypatch.setenv("PLM_PUBLIC_ORIGIN", "https://example.com")
+    monkeypatch.setenv("PLM_MEDIA_ACCESS_TOKEN_SECRET", "real-secret")
+    monkeypatch.delenv("PLM_SMTP_HOST", raising=False)
+    monkeypatch.delenv("PLM_SMTP_FROM_EMAIL", raising=False)
+    monkeypatch.setenv("PLM_TURNSTILE_SITE_KEY", "turnstile-site-key")
+    monkeypatch.delenv("PLM_TURNSTILE_SECRET_KEY", raising=False)
+
+    warnings = hosted_runtime_warnings()
+
+    assert (
+        "Email verification is only partially configured. Complete PLM_SMTP_HOST, PLM_SMTP_FROM_EMAIL, PLM_PUBLIC_ORIGIN, and matching SMTP credentials or disable PLM_ENABLE_EMAIL_VERIFICATION."
+        in warnings
+    )
+    assert (
+        "Sign-up human verification is only partially configured. Complete PLM_TURNSTILE_SITE_KEY and PLM_TURNSTILE_SECRET_KEY or disable PLM_ENABLE_SIGNUP_HUMAN_CHECK."
+        in warnings
+    )
 
 
 def test_hosted_mode_warns_about_partial_wechat_payment_config(monkeypatch) -> None:

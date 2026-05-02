@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import PlainTextResponse
 
@@ -39,6 +41,7 @@ from backend.system.membership_store import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _membership_summary_to_dto(item: MembershipSummary) -> dict[str, object]:
@@ -372,11 +375,15 @@ async def receive_wechat_payment_notification(
     membership_payment_service: MembershipPaymentService = Depends(get_membership_payment_service),
 ) -> PlainTextResponse:
     body_text = (await request.body()).decode("utf-8")
-    remote_status = membership_payment_service.parse_payment_notification(
-        "wechat_native",
-        headers=request.headers,
-        body_text=body_text,
-    )
+    try:
+        remote_status = membership_payment_service.parse_payment_notification(
+            "wechat_native",
+            headers=request.headers,
+            body_text=body_text,
+        )
+    except Exception:
+        logger.exception("failed to parse wechat payment notification")
+        raise
     if remote_status.remote_status == "paid":
         membership_store.confirm_provider_payment(
             order_id=remote_status.order_id,
@@ -397,11 +404,15 @@ async def receive_wechat_refund_notification(
     membership_payment_service: MembershipPaymentService = Depends(get_membership_payment_service),
 ) -> PlainTextResponse:
     body_text = (await request.body()).decode("utf-8")
-    remote_status = membership_payment_service.parse_refund_notification(
-        "wechat_native",
-        headers=request.headers,
-        body_text=body_text,
-    )
+    try:
+        remote_status = membership_payment_service.parse_refund_notification(
+            "wechat_native",
+            headers=request.headers,
+            body_text=body_text,
+        )
+    except Exception:
+        logger.exception("failed to parse wechat refund notification")
+        raise
     membership_store.sync_provider_refund(
         order_id=remote_status.order_id,
         provider=remote_status.provider,

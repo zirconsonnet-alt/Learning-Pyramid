@@ -1,7 +1,7 @@
 import { type ReactNode, useEffect, useMemo, useState } from "react"
 import { useQueries } from "@tanstack/react-query"
 import { Settings2, Sparkles, TriangleAlert } from "lucide-react"
-import { useNavigate, useParams } from "react-router-dom"
+import { useLocation, useNavigate, useParams } from "react-router-dom"
 
 import { listRecallPointsByInstance, type Instance } from "@/ui/api/instances"
 import { ApiError } from "@/ui/api/http"
@@ -15,6 +15,7 @@ import { formatMaterialReference, formatRecallPointReference } from "@/ui/displa
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
 import { scanProjectDirectoryMedia, useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
+import { buildProjectSettingsPath, buildProjectWorkbenchPath } from "@/ui/projectPaths"
 import { formatProjectTypeLabel } from "@/ui/projectTypes"
 import { useMyLlmSettings, useUpdateMyLlmSettings } from "@/ui/queries/profile"
 import { useProject } from "@/ui/queries/projects"
@@ -30,7 +31,6 @@ import { useGlobalLlmSettings, useSystemCapabilities, useUpdateGlobalLlmSettings
 import { useAppStore } from "@/ui/store/appStore"
 import {
   useBulkRemapRecallPointsInstance,
-  useEnsureMistakeInbox,
   useImportLearningObjectsFromBrowser,
   useInitializeBookLearningObjects,
   useInitializeBookLearningObjectsFromSubjectMaterial,
@@ -168,10 +168,8 @@ function SettingsQuickStartCard(props: {
   onOpenMissingPanel: () => void
   onRequestDirectoryPermission: () => Promise<void>
   onScrollToBookOutline: () => void
-  onScrollToMistakeStructure: () => void
   projectType: ProjectType
   sourceCourseMaterialsCount: number
-  sourceStructureMaterialsCount: number
 }) {
   const {
     actionableMissingInstanceCount,
@@ -189,10 +187,8 @@ function SettingsQuickStartCard(props: {
     onOpenMissingPanel,
     onRequestDirectoryPermission,
     onScrollToBookOutline,
-    onScrollToMistakeStructure,
     projectType,
     sourceCourseMaterialsCount,
-    sourceStructureMaterialsCount,
   } = props
 
   const steps: SettingsQuickStartStep[] =
@@ -210,7 +206,7 @@ function SettingsQuickStartCard(props: {
               ? {
                   key: "course-directory-loading",
                   title: "正在确认内容目录",
-                  description: "正在检查当前材料是否已经有可用内容。确认完成后，这里会给出更明确的下一步。",
+                  description: "正在检查当前项目是否已经有可用内容。确认完成后，这里会给出更明确的下一步。",
                   status: "确认中",
                   tone: "default",
                 }
@@ -232,7 +228,7 @@ function SettingsQuickStartCard(props: {
                 ? {
                     key: "course-directory-import",
                     title: "先导入内容目录",
-                    description: "目录已经接通。先把媒体文件扫进当前材料，再回工作台选内容开始学习。",
+                    description: "目录已经接通。先把媒体文件扫进当前项目，再回工作台选内容开始学习。",
                     status: "待导入",
                     tone: "warning",
                     action: {
@@ -258,7 +254,7 @@ function SettingsQuickStartCard(props: {
                   ? {
                       key: "course-directory-choose",
                       title: "先绑定并授权素材目录",
-                      description: "把视频所在目录接进当前材料，后面的导入、选内容和播放都会沿用这份绑定。",
+                      description: "把视频所在目录接进当前项目，后面的导入、选内容和播放都会沿用这份绑定。",
                       status: "未绑定",
                       tone: "warning",
                       action: {
@@ -313,7 +309,7 @@ function SettingsQuickStartCard(props: {
               ? {
                   key: "book-structure-ready",
                   title: "书本目录已就绪",
-                  description: "当前书本材料已有目录节点和实例，可以直接回工作台选章节开始学习。",
+                  description: "当前书本项目已有目录节点和实例，可以直接回工作台选章节开始学习。",
                   status: "已就绪",
                   tone: "success",
                 }
@@ -323,7 +319,7 @@ function SettingsQuickStartCard(props: {
                   description:
                     sourceCourseMaterialsCount > 0
                       ? "你可以一键复用同一学科下的网课树，也可以手动粘贴目录文本。先把这一步做完，后面录入和回看会顺很多。"
-                      : "当前学科下还没有可复用的网课材料，直接在下方粘贴目录文本初始化，会是最快的起步方式。",
+                      : "当前学科下还没有可复用的网课项目，直接在下方粘贴目录文本初始化，会是最快的起步方式。",
                   status: "待处理",
                   tone: "warning",
                   action: {
@@ -346,50 +342,11 @@ function SettingsQuickStartCard(props: {
               },
             },
           ]
-        : projectType === "MISTAKE_BOOK"
-          ? [
-              bookProjectAlreadyInitialized
-                ? {
-                    key: "mistake-structure-ready",
-                    title: "错题入口已就绪",
-                    description: "当前错题材料已有目录节点或待整理入口，可以直接回工作台选条目开始整理。",
-                    status: "已就绪",
-                    tone: "success",
-                  }
-                : {
-                    key: "mistake-structure-setup",
-                    title: "先准备错题入口",
-                    description:
-                      sourceStructureMaterialsCount > 0
-                        ? "你可以先创建一个“待整理”入口快速开用，也可以一键复用同学科的网课或书本结构。"
-                        : "建议先创建一个“待整理”入口，先把错题收进来，后面再慢慢细分结构。",
-                    status: "待处理",
-                    tone: "warning",
-                    action: {
-                      label: "去初始化错题结构",
-                      onClick: onScrollToMistakeStructure,
-                    },
-                  },
-              {
-                key: "mistake-go-workbench",
-                title: "回工作台选条目开始整理",
-                description: bookProjectAlreadyInitialized
-                  ? "入口已就绪。回工作台选中当前条目，再开始录入和整理。"
-                  : "入口准备好后，回工作台选中当前条目，再开始录入和整理。",
-                status: "下一步",
-                tone: "default",
-                action: {
-                  label: "回工作台",
-                  onClick: onGoWorkbench,
-                  variant: "outline",
-                },
-              },
-            ]
           : [
               {
                 key: "loose-points-go-workbench",
                 title: "回工作台开始录入",
-                description: "零散知识材料不需要目录授权或结构初始化，回工作台就能直接开始录入。",
+                description: "零散知识项目不需要目录授权或结构初始化，回工作台就能直接开始录入。",
                 status: "下一步",
                 tone: "success",
                 action: {
@@ -404,8 +361,6 @@ function SettingsQuickStartCard(props: {
       ? "第一次使用先跑通“绑定并授权目录 -> 导入内容 -> 清掉阻塞项 -> 回工作台选内容开始学习”这条线，下面其他设置先不用一次看完。"
       : projectType === "BOOK"
         ? "先初始化书本目录，再回工作台选章节开始学习，会比先读完整页设置更省心。"
-        : projectType === "MISTAKE_BOOK"
-          ? "先准备错题入口，再回工作台选条目开始整理；这页里其他配置都可以后置。"
           : "零散知识模式没有额外门槛，回工作台就能直接开始录入。"
 
   return (
@@ -588,6 +543,7 @@ function SettingsPanelSwitchCard(props: {
 
 export function ProjectSettingsPage() {
   const { projectId } = useParams()
+  const location = useLocation()
   const navigate = useNavigate()
   const pid = projectId ?? ""
   const projectQ = useProject(pid, { enabled: !!pid })
@@ -614,7 +570,6 @@ export function ProjectSettingsPage() {
   const importLearningObjectsM = useImportLearningObjectsFromBrowser(pid)
   const initializeBookLearningObjectsM = useInitializeBookLearningObjects(pid)
   const initializeBookFromMaterialM = useInitializeBookLearningObjectsFromSubjectMaterial(pid)
-  const ensureMistakeInboxM = useEnsureMistakeInbox(pid)
   const setLayerConfigM = useSetLayerConfig(pid)
   const setProjectRollUpStrategyM = useSetProjectRollUpStrategy(pid)
   const bulkRemapM = useBulkRemapRecallPointsInstance(pid)
@@ -625,30 +580,26 @@ export function ProjectSettingsPage() {
   const subjectContext = subjectContextQ.data
   const subjectProjectId = subjectContext?.subjectProjectId ?? pid
   const isSubjectRoot = subjectContext?.isSubjectRoot ?? true
+  const isSubjectSettingsScope = isSubjectRoot && !location.pathname.endsWith("/project-settings")
   const subjectTitle = subjectContext?.subject.title ?? projectQ.project?.title ?? ""
   const currentMaterial = subjectContext?.currentMaterial ?? null
   const currentMaterialTitle = currentMaterial?.title ?? projectQ.project?.title ?? ""
+  const currentMaterialProjectId = currentMaterial?.compatibilityProjectId ?? pid
+  const currentProjectSettingsPath = buildProjectSettingsPath(currentMaterialProjectId ?? "", { subjectProjectId })
+  const currentProjectWorkbenchPath = buildProjectWorkbenchPath(currentMaterialProjectId ?? "")
   const currentMaterialType =
     currentMaterial?.materialType ??
     (projectType === "BOOK"
       ? "BOOK"
-      : projectType === "MISTAKE_BOOK"
-        ? "MISTAKE_BOOK"
-        : projectType === "LOOSE_POINTS"
+      : projectType === "LOOSE_POINTS"
           ? "LOOSE_POINTS"
           : "COURSE")
   const subjectMaterials = subjectContext?.materials ?? []
   const sourceCourseMaterials = subjectMaterials.filter(
     (material) => material.materialType === "COURSE" && material.compatibilityProjectId && material.compatibilityProjectId !== pid,
   )
-  const sourceStructureMaterials = subjectMaterials.filter(
-    (material) =>
-      (material.materialType === "COURSE" || material.materialType === "BOOK") &&
-      material.compatibilityProjectId &&
-      material.compatibilityProjectId !== pid,
-  )
   const canDeleteCurrentMaterial =
-    !isSubjectRoot &&
+    !isSubjectSettingsScope &&
     currentMaterial !== null &&
     currentMaterial.compatibilityProjectId !== null &&
     currentMaterial.compatibilityProjectId !== subjectProjectId
@@ -722,13 +673,11 @@ export function ProjectSettingsPage() {
   const canClearDirectory = !!pid && !directoryBinding.loading && directoryPermission !== "missing"
   const directoryBusy = directoryAction !== null
   const [activePanel, setActivePanel] = useState<SettingsPanelKey>("basic")
-  const supportsMissingInstanceRepair = projectType !== "LOOSE_POINTS" && projectType !== "MISTAKE_BOOK"
+  const supportsMissingInstanceRepair = projectType !== "LOOSE_POINTS"
 
   const directoryStatusText =
     projectType === "BOOK"
       ? "目录初始化"
-      : projectType === "MISTAKE_BOOK"
-        ? "错题结构"
       : projectType === "LOOSE_POINTS"
         ? "零散模式"
         : browserLocalMediaEnabled
@@ -742,7 +691,7 @@ export function ProjectSettingsPage() {
           : "基础配置"
   const aiStatusText = capabilitiesQ.data?.llmConfigured ? "LLM 已可用" : "LLM 未接通"
   const missingStatusText =
-    projectType === "LOOSE_POINTS" || projectType === "MISTAKE_BOOK"
+    projectType === "LOOSE_POINTS"
       ? "不适用"
       : missingRepairCountsLoading
         ? "整理中..."
@@ -751,7 +700,7 @@ export function ProjectSettingsPage() {
           : "当前无缺失实例"
   const parsedBookOutlineItems = useMemo(() => parseBookOutlineDraft(bookOutlineDraft), [bookOutlineDraft])
   const bookOutlineValidationMessage = useMemo(() => {
-    if (projectType !== "BOOK" && projectType !== "MISTAKE_BOOK") return null
+    if (projectType !== "BOOK") return null
     if (parsedBookOutlineItems.length === 0) return "请先粘贴目录文本。"
     if (parsedBookOutlineItems[0]?.depth !== 0) return "目录第一行必须是顶层节点，不能带缩进。"
     for (let index = 1; index < parsedBookOutlineItems.length; index += 1) {
@@ -764,10 +713,14 @@ export function ProjectSettingsPage() {
   const bookProjectAlreadyInitialized = (instancesQ.data?.length ?? 0) > 0
 
   useEffect(() => {
+    if (isSubjectSettingsScope && activePanel !== "basic") {
+      setActivePanel("basic")
+      return
+    }
     if (!supportsMissingInstanceRepair && activePanel === "missing") {
       setActivePanel("basic")
     }
-  }, [activePanel, supportsMissingInstanceRepair])
+  }, [activePanel, isSubjectSettingsScope, supportsMissingInstanceRepair])
 
   function scrollToSettingsSection(sectionId: string) {
     const section = document.getElementById(sectionId)
@@ -805,11 +758,11 @@ export function ProjectSettingsPage() {
     try {
       const permission = await directoryBinding.authorizeDirectory()
       if (permission === "granted") {
-        showSuccessFeedback("本地目录已绑定", `浏览器已经记录并授权${isSubjectRoot ? "当前默认网课材料" : "当前材料"}的本地素材目录。`)
+        showSuccessFeedback("本地目录已绑定", `浏览器已经记录并授权${isSubjectSettingsScope ? "当前默认项目" : "当前项目"}的本地素材目录。`)
         await importAuthorizedDirectory(true)
         return
       } else {
-        showInfoFeedback("目录已记录", `目录已经保存到${isSubjectRoot ? "当前默认网课材料" : "当前材料"}，但浏览器还需要你继续授予读取权限。`)
+        showInfoFeedback("目录已记录", `目录已经保存到${isSubjectSettingsScope ? "当前默认项目" : "当前项目"}，但浏览器还需要你继续授予读取权限。`)
       }
     } catch (err) {
       if (!isDirectoryPickerAbort(err)) {
@@ -826,7 +779,7 @@ export function ProjectSettingsPage() {
     try {
       const permission = await directoryBinding.requestPermission()
       if (permission === "granted") {
-        showSuccessFeedback("目录权限已恢复", `现在可以扫描并导入${isSubjectRoot ? "默认网课材料" : "当前材料"}的本地素材目录。`)
+        showSuccessFeedback("目录权限已恢复", `现在可以扫描并导入${isSubjectSettingsScope ? "默认项目" : "当前项目"}的本地素材目录。`)
         await importAuthorizedDirectory(true)
         return
       } else if (permission === "denied") {
@@ -874,7 +827,7 @@ export function ProjectSettingsPage() {
     setDirectoryAction("clear")
     try {
       await directoryBinding.clearDirectory()
-      showSuccessFeedback("本地目录绑定已清除", `${isSubjectRoot ? "当前默认网课材料" : "当前材料"}不再保留这个浏览器里的目录授权记录。`)
+      showSuccessFeedback("本地目录绑定已清除", `${isSubjectSettingsScope ? "当前默认项目" : "当前项目"}不再保留这个浏览器里的目录授权记录。`)
     } catch (err) {
       showErrorFeedback("清除本地目录绑定失败", formatApiError(err))
     } finally {
@@ -883,7 +836,7 @@ export function ProjectSettingsPage() {
   }
 
   async function onInitializeBookOutline() {
-    if (projectType !== "BOOK" && projectType !== "MISTAKE_BOOK") return
+    if (projectType !== "BOOK") return
     if (bookOutlineValidationMessage) {
       showInfoFeedback("目录暂时还不能初始化", bookOutlineValidationMessage)
       return
@@ -891,52 +844,35 @@ export function ProjectSettingsPage() {
     try {
       const result = await initializeBookLearningObjectsM.mutateAsync({ items: parsedBookOutlineItems })
       showSuccessFeedback(
-        projectType === "MISTAKE_BOOK" ? "错题结构已初始化" : "书本目录已初始化",
-        projectType === "MISTAKE_BOOK"
-          ? `已创建 ${result.created_learning_object_nodes_count} 个错题目录节点和 ${result.created_instances_count} 个归档条目。`
-          : `已创建 ${result.created_learning_object_nodes_count} 个目录节点和 ${result.created_instances_count} 个书本实例。`,
+        "书本目录已初始化",
+        `已创建 ${result.created_learning_object_nodes_count} 个目录节点和 ${result.created_instances_count} 个书本实例。`,
       )
     } catch (err) {
-      showErrorFeedback(projectType === "MISTAKE_BOOK" ? "初始化错题结构失败" : "初始化书本目录失败", formatApiError(err))
+      showErrorFeedback("初始化书本目录失败", formatApiError(err))
     }
   }
 
   async function onInitializeBookFromMaterial(sourceMaterialId: string) {
-    if (projectType !== "BOOK" && projectType !== "MISTAKE_BOOK") return
+    if (projectType !== "BOOK") return
     if (!sourceMaterialId.trim()) {
-      showInfoFeedback("还没选来源材料", "先选一个要复用的来源材料，再开始初始化。")
+      showInfoFeedback("还没选来源项目", "先选一个要复用的来源项目，再开始初始化。")
       return
     }
     try {
       const result = await initializeBookFromMaterialM.mutateAsync({ sourceMaterialId })
       showSuccessFeedback(
-        projectType === "MISTAKE_BOOK" ? "错题结构已复用来源树" : "书本目录已复用网课树",
-        projectType === "MISTAKE_BOOK"
-          ? `已创建 ${result.created_learning_object_nodes_count} 个错题目录节点和 ${result.created_instances_count} 个归档条目。`
-          : `已创建 ${result.created_learning_object_nodes_count} 个目录节点和 ${result.created_instances_count} 个书本实例。`,
+        "书本目录已复用网课树",
+        `已创建 ${result.created_learning_object_nodes_count} 个目录节点和 ${result.created_instances_count} 个书本实例。`,
       )
     } catch (err) {
-      showErrorFeedback(projectType === "MISTAKE_BOOK" ? "复用来源树失败" : "复用网课树失败", formatApiError(err))
+      showErrorFeedback("复用网课树失败", formatApiError(err))
     }
   }
 
-  async function onEnsureMistakeInbox() {
-    if (projectType !== "MISTAKE_BOOK") return
-    try {
-      const result = await ensureMistakeInboxM.mutateAsync()
-      showSuccessFeedback(
-        result.created ? "待整理入口已创建" : "待整理入口已就绪",
-        "现在可以直接把错题收进这个材料，或者手动开始录入整理。",
-      )
-    } catch (err) {
-      showErrorFeedback("创建待整理入口失败", formatApiError(err))
-    }
-  }
-
-  const renameMutationError = isSubjectRoot ? editSubjectM.error : editSubjectMaterialM.error
-  const renameMutationPending = isSubjectRoot ? editSubjectM.isPending : editSubjectMaterialM.isPending
-  const deleteMutationError = isSubjectRoot ? deleteSubjectM.error : deleteSubjectMaterialM.error
-  const deleteMutationPending = isSubjectRoot ? deleteSubjectM.isPending : deleteSubjectMaterialM.isPending
+  const renameMutationError = isSubjectSettingsScope ? editSubjectM.error : editSubjectMaterialM.error
+  const renameMutationPending = isSubjectSettingsScope ? editSubjectM.isPending : editSubjectMaterialM.isPending
+  const deleteMutationError = isSubjectSettingsScope ? deleteSubjectM.error : deleteSubjectMaterialM.error
+  const deleteMutationPending = isSubjectSettingsScope ? deleteSubjectM.isPending : deleteSubjectMaterialM.isPending
 
   if (!pid) {
     return (
@@ -952,75 +888,77 @@ export function ProjectSettingsPage() {
 
   return (
     <div className="space-y-5">
-      <Card className="theme-card">
-        <CardHeader className="pb-4">
-          <CardTitle>设置分区</CardTitle>
-        </CardHeader>
-        <CardContent className={cn("grid gap-3", supportsMissingInstanceRepair ? "md:grid-cols-3" : "md:grid-cols-2")}>
-          <SettingsPanelSwitchCard
-            title="基本设置"
-            status={directoryStatusText}
-            icon={Settings2}
-            active={activePanel === "basic"}
-            tone={directoryPermission === "granted" ? "success" : "default"}
-            onClick={() => setActivePanel("basic")}
-          />
-          <SettingsPanelSwitchCard
-            title="AI 设置"
-            status={aiStatusText}
-            icon={Sparkles}
-            active={activePanel === "ai"}
-            tone={capabilitiesQ.data?.llmConfigured ? "success" : "default"}
-            onClick={() => setActivePanel("ai")}
-          />
-          {supportsMissingInstanceRepair ? (
+      {!isSubjectSettingsScope ? (
+        <Card className="theme-card">
+          <CardHeader className="pb-4">
+            <CardTitle>设置分区</CardTitle>
+          </CardHeader>
+          <CardContent className={cn("grid gap-3", supportsMissingInstanceRepair ? "md:grid-cols-3" : "md:grid-cols-2")}>
             <SettingsPanelSwitchCard
-              title="缺失实例设置"
-              status={missingStatusText}
-              icon={TriangleAlert}
-              active={activePanel === "missing"}
-              tone={missingRepairCountsLoading || actionableMissingInstances.length > 0 ? "warning" : "default"}
-              onClick={() => setActivePanel("missing")}
+              title="基本设置"
+              status={directoryStatusText}
+              icon={Settings2}
+              active={activePanel === "basic"}
+              tone={directoryPermission === "granted" ? "success" : "default"}
+              onClick={() => setActivePanel("basic")}
             />
-          ) : null}
-        </CardContent>
-      </Card>
+            <SettingsPanelSwitchCard
+              title="AI 设置"
+              status={aiStatusText}
+              icon={Sparkles}
+              active={activePanel === "ai"}
+              tone={capabilitiesQ.data?.llmConfigured ? "success" : "default"}
+              onClick={() => setActivePanel("ai")}
+            />
+            {supportsMissingInstanceRepair ? (
+              <SettingsPanelSwitchCard
+                title="缺失实例设置"
+                status={missingStatusText}
+                icon={TriangleAlert}
+                active={activePanel === "missing"}
+                tone={missingRepairCountsLoading || actionableMissingInstances.length > 0 ? "warning" : "default"}
+                onClick={() => setActivePanel("missing")}
+              />
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
 
       {activePanel === "basic" ? (
         <>
-          <SettingsQuickStartCard
-            actionableMissingInstanceCount={actionableMissingInstances.length}
-            bookProjectAlreadyInitialized={bookProjectAlreadyInitialized}
-            browserLocalMediaEnabled={browserLocalMediaEnabled}
-            canChooseDirectory={canChooseDirectory}
-            canRequestDirectoryPermission={canRequestDirectoryPermission}
-            directoryBusy={directoryBusy}
-            hasLearningContent={(instancesQ.data?.length ?? 0) > 0}
-            learningContentLoading={instancesQ.isLoading}
-            directoryPermission={directoryPermission}
-            onAuthorizeDirectory={onAuthorizeDirectory}
-            onGoWorkbench={() => {
-              navigate(`/p/${pid}/workbench`)
-            }}
-            onImportAuthorizedDirectory={() => onImportAuthorizedDirectory()}
-            onOpenMissingPanel={() => setActivePanel("missing")}
-            onRequestDirectoryPermission={onRequestDirectoryPermission}
-            onScrollToBookOutline={() => scrollToSettingsSection("settings-book-outline")}
-            onScrollToMistakeStructure={() => scrollToSettingsSection("settings-mistake-structure")}
-            projectType={projectType}
-            sourceCourseMaterialsCount={sourceCourseMaterials.length}
-            sourceStructureMaterialsCount={sourceStructureMaterials.length}
-          />
+          {!isSubjectSettingsScope ? (
+            <SettingsQuickStartCard
+              actionableMissingInstanceCount={actionableMissingInstances.length}
+              bookProjectAlreadyInitialized={bookProjectAlreadyInitialized}
+              browserLocalMediaEnabled={browserLocalMediaEnabled}
+              canChooseDirectory={canChooseDirectory}
+              canRequestDirectoryPermission={canRequestDirectoryPermission}
+              directoryBusy={directoryBusy}
+              hasLearningContent={(instancesQ.data?.length ?? 0) > 0}
+              learningContentLoading={instancesQ.isLoading}
+              directoryPermission={directoryPermission}
+              onAuthorizeDirectory={onAuthorizeDirectory}
+              onGoWorkbench={() => {
+                navigate(`/p/${pid}/workbench`)
+              }}
+              onImportAuthorizedDirectory={() => onImportAuthorizedDirectory()}
+              onOpenMissingPanel={() => setActivePanel("missing")}
+              onRequestDirectoryPermission={onRequestDirectoryPermission}
+              onScrollToBookOutline={() => scrollToSettingsSection("settings-book-outline")}
+              projectType={projectType}
+              sourceCourseMaterialsCount={sourceCourseMaterials.length}
+            />
+          ) : null}
 
           <SettingsScopeCard
-            isSubjectRoot={isSubjectRoot}
+            isSubjectRoot={isSubjectSettingsScope}
             materialTitle={currentMaterialTitle}
             materialType={currentMaterialType}
             onOpenSubjectSettings={
-              !isSubjectRoot && subjectProjectId
+              !isSubjectSettingsScope && subjectProjectId
                 ? () => {
-                    navigate(`/p/${subjectProjectId}/settings`)
-                  }
+                  navigate(`/p/${subjectProjectId}/settings`)
+                }
                 : undefined
             }
             subjectTitle={subjectTitle}
@@ -1028,141 +966,178 @@ export function ProjectSettingsPage() {
 
           <SubjectMaterialsCard
             createError={createSubjectMaterialM.error}
-            currentProjectId={pid}
+            currentProjectId={currentMaterialProjectId ?? pid}
             createPending={createSubjectMaterialM.isPending}
             error={subjectContextQ.error}
             isLoading={subjectContextQ.isLoading}
-            isSubjectRoot={isSubjectRoot}
+            isSubjectRoot={isSubjectSettingsScope}
             materials={subjectMaterials}
             onCreateMaterial={async (materialType, title) => {
               try {
                 const created = await createSubjectMaterialM.mutateAsync({ subjectId: subjectProjectId, materialType, title })
-                showSuccessFeedback("学习材料已创建", `“${created.title}” 已挂到“${subjectTitle || "当前学科"}”下。`)
+                showSuccessFeedback("项目已创建", `“${created.title}” 已挂到“${subjectTitle || "当前学科"}”下。`)
                 if (created.compatibilityProjectId) {
-                  navigate(created.materialType === "BOOK" ? `/p/${created.compatibilityProjectId}/settings` : `/p/${created.compatibilityProjectId}/workbench`)
+                  navigate(
+                    created.materialType === "BOOK"
+                      ? buildProjectSettingsPath(created.compatibilityProjectId, { subjectProjectId })
+                      : buildProjectWorkbenchPath(created.compatibilityProjectId),
+                  )
                 }
               } catch (err) {
-                showErrorFeedback("创建学习材料失败", formatApiError(err))
+                showErrorFeedback("创建项目失败", formatApiError(err))
                 throw err
               }
             }}
             onOpenMaterial={(material, target) => {
               if (!material.compatibilityProjectId) return
-              navigate(target === "settings" ? `/p/${material.compatibilityProjectId}/settings` : `/p/${material.compatibilityProjectId}/workbench`)
+              navigate(
+                target === "settings"
+                  ? buildProjectSettingsPath(material.compatibilityProjectId, { subjectProjectId })
+                  : buildProjectWorkbenchPath(material.compatibilityProjectId),
+              )
             }}
             subjectTitle={subjectTitle}
           />
 
-          <BasicInfoCard
-            actionableMissingInstanceCount={actionableMissingInstances.length}
-            baiduNetdiskEnabled={baiduNetdiskEnabled}
-            browserLocalMediaEnabled={browserLocalMediaEnabled}
-            canChooseDirectory={canChooseDirectory}
-            canClearDirectory={canClearDirectory}
-            canRequestDirectoryPermission={canRequestDirectoryPermission}
-            directoryAction={directoryAction}
-            directoryBinding={directoryBinding}
-            directoryBusy={directoryBusy}
-            directoryPermission={directoryPermission}
-            entityLabel={isSubjectRoot ? "学科" : "材料"}
-            entityPlaceholder={isSubjectRoot ? "输入新的学科名称" : "输入新的材料名称"}
-            entitySaveLabel={isSubjectRoot ? "保存学科名称" : "保存材料名称"}
-            entityTitle={isSubjectRoot ? subjectTitle : currentMaterialTitle}
-            importError={importLearningObjectsM.error}
-            isLoading={projectQ.isLoading || subjectContextQ.isLoading}
-            isPending={renameMutationPending}
-            isSubjectRoot={isSubjectRoot}
-            materialTitle={currentMaterialTitle}
-            materialType={currentMaterialType}
-            onOpenSubjectSettings={
-              !isSubjectRoot && subjectProjectId
-                ? () => {
-                    navigate(`/p/${subjectProjectId}/settings`)
-                  }
-                : undefined
-            }
-            projectType={projectType}
-            queryError={subjectContextQ.error ?? projectQ.error}
-            rollUpStrategy={currentRollUpStrategy}
-            saveError={renameMutationError}
-            rollUpStrategyError={setProjectRollUpStrategyM.error}
-            rollUpStrategySaving={setProjectRollUpStrategyM.isPending}
-            subjectTitle={subjectTitle}
-            onAuthorizeDirectory={onAuthorizeDirectory}
-            onChangeRollUpStrategy={async (nextStrategy) => {
-              try {
-                await setProjectRollUpStrategyM.mutateAsync(nextStrategy)
-                showSuccessFeedback("上推策略已更新", `当前材料已切换到“${getRollUpStrategyLabel(nextStrategy)}”。`)
-              } catch (err) {
-                showErrorFeedback("更新上推策略失败", formatApiError(err))
-              }
-            }}
-            onClearDirectoryBinding={onClearDirectoryBinding}
-            onOpenBaiduImport={() => setIsBaiduImportDialogOpen(true)}
-            onImportAuthorizedDirectory={onImportAuthorizedDirectory}
-            onRequestDirectoryPermission={onRequestDirectoryPermission}
-            onSave={async (title) => {
-              try {
-                if (isSubjectRoot) {
+          {isSubjectSettingsScope ? (
+            <SubjectSettingsInfoCard
+              subjectTitle={subjectTitle}
+              materialTitle={currentMaterialTitle}
+              materialType={currentMaterialType}
+              isLoading={projectQ.isLoading || subjectContextQ.isLoading}
+              isPending={renameMutationPending}
+              queryError={subjectContextQ.error ?? projectQ.error}
+              saveError={renameMutationError}
+              onSave={async (title) => {
+                try {
                   await editSubjectM.mutateAsync({ subjectId: subjectProjectId, title })
                   showSuccessFeedback("学科名称已更新", `当前学科现在显示为“${title}”。`)
-                  return
+                } catch (err) {
+                  showErrorFeedback("更新学科名称失败", formatApiError(err))
                 }
-                if (!currentMaterial) {
-                  showInfoFeedback("材料信息仍在加载", "等材料上下文同步完成后再试一次。")
-                  return
-                }
-                await editSubjectMaterialM.mutateAsync({ subjectId: subjectProjectId, materialId: currentMaterial.materialId, title })
-                showSuccessFeedback("材料名称已更新", `当前材料现在显示为“${title}”。`)
-              } catch (err) {
-                showErrorFeedback(isSubjectRoot ? "更新学科名称失败" : "更新材料名称失败", formatApiError(err))
+              }}
+              onOpenProjectWorkbench={
+                currentProjectWorkbenchPath
+                  ? () => {
+                      navigate(currentProjectWorkbenchPath)
+                    }
+                  : undefined
               }
-            }}
-            layerConfigSection={
-              <LayerConfigEditor
-                key={layerConfigVersion}
-                embedded
-                canSave={!!pid}
-                existingLayerIndexes={existingLayerIndexes}
-                initialConfig={effectiveLayerConfig}
-                knownLayerIndexes={knownLayerIndexes}
-                layersError={layersQ.error}
-                mutationError={setLayerConfigM.error}
-                projectConfigError={projectConfigQ.error}
-                rollUpStrategy={currentRollUpStrategy}
-                selectedLayerExists={selectedLayerExists}
-                selectedLayerHasSavedConfig={selectedLayerHasSavedConfig}
-                selectedLayerIndex={effectiveConfigLayerIndex}
-                saving={setLayerConfigM.isPending}
-                onSave={async ({ kNode, kPoint, reviewChainTemplate, thresholdRollUpEnabled }) => {
-                  try {
-                    await setLayerConfigM.mutateAsync({
-                      layerIndex: effectiveConfigLayerIndex,
-                      kNode,
-                      kPoint,
-                      reviewChainTemplate,
-                      thresholdRollUpEnabled,
-                    })
-                    showSuccessFeedback(
-                      selectedLayerExists ? "层配置已保存" : "未来层预配置已保存",
-                      selectedLayerExists
-                        ? currentRollUpStrategy === "THRESHOLD_AUTO"
-                          ? `第 ${effectiveConfigLayerIndex} 层现在使用 ${reviewChainTemplate.length} 个模板步骤，节点阈值 ${kNode}，复述点阈值 ${kPoint}，阈值自动上推已${thresholdRollUpEnabled ? "开启" : "关闭"}。`
-                          : `第 ${effectiveConfigLayerIndex} 层现在使用 ${reviewChainTemplate.length} 个模板步骤；阈值参数也已保存，等切回“阈值自动上推”时会继续沿用。`
-                        : currentRollUpStrategy === "THRESHOLD_AUTO"
-                          ? `第 ${effectiveConfigLayerIndex} 层还不存在，已先保存预配置；等它被创建时会自动使用这 ${reviewChainTemplate.length} 个模板步骤、当前阈值和阈值自动上推${thresholdRollUpEnabled ? "开启" : "关闭"}状态。`
-                          : `第 ${effectiveConfigLayerIndex} 层还不存在，已先保存预配置；等它被创建时会自动使用这 ${reviewChainTemplate.length} 个模板步骤，并保留当前阈值参数。`,
-                    )
-                  } catch (err) {
-                    showErrorFeedback("保存层配置失败", formatApiError(err))
+              onOpenProjectSettings={
+                currentProjectSettingsPath
+                  ? () => {
+                      navigate(currentProjectSettingsPath)
+                    }
+                  : undefined
+              }
+            />
+          ) : (
+            <BasicInfoCard
+              actionableMissingInstanceCount={actionableMissingInstances.length}
+              baiduNetdiskEnabled={baiduNetdiskEnabled}
+              browserLocalMediaEnabled={browserLocalMediaEnabled}
+              canChooseDirectory={canChooseDirectory}
+              canClearDirectory={canClearDirectory}
+              canRequestDirectoryPermission={canRequestDirectoryPermission}
+              directoryAction={directoryAction}
+              directoryBinding={directoryBinding}
+              directoryBusy={directoryBusy}
+              directoryPermission={directoryPermission}
+              entityLabel="项目"
+              entityPlaceholder="输入新的项目名称"
+              entitySaveLabel="保存项目名称"
+              entityTitle={currentMaterialTitle}
+              importError={importLearningObjectsM.error}
+              isLoading={projectQ.isLoading || subjectContextQ.isLoading}
+              isPending={renameMutationPending}
+              isSubjectRoot={false}
+              materialTitle={currentMaterialTitle}
+              materialType={currentMaterialType}
+              onOpenSubjectSettings={
+                subjectProjectId
+                  ? () => {
+                      navigate(`/p/${subjectProjectId}/settings`)
+                    }
+                  : undefined
+              }
+              projectType={projectType}
+              queryError={subjectContextQ.error ?? projectQ.error}
+              rollUpStrategy={currentRollUpStrategy}
+              saveError={renameMutationError}
+              rollUpStrategyError={setProjectRollUpStrategyM.error}
+              rollUpStrategySaving={setProjectRollUpStrategyM.isPending}
+              subjectTitle={subjectTitle}
+              onAuthorizeDirectory={onAuthorizeDirectory}
+              onChangeRollUpStrategy={async (nextStrategy) => {
+                try {
+                  await setProjectRollUpStrategyM.mutateAsync(nextStrategy)
+                  showSuccessFeedback("上推策略已更新", `当前项目已切换到“${getRollUpStrategyLabel(nextStrategy)}”。`)
+                } catch (err) {
+                  showErrorFeedback("更新上推策略失败", formatApiError(err))
+                }
+              }}
+              onClearDirectoryBinding={onClearDirectoryBinding}
+              onOpenBaiduImport={() => setIsBaiduImportDialogOpen(true)}
+              onImportAuthorizedDirectory={onImportAuthorizedDirectory}
+              onRequestDirectoryPermission={onRequestDirectoryPermission}
+              onSave={async (title) => {
+                try {
+                  if (!currentMaterial) {
+                    showInfoFeedback("项目信息仍在加载", "等项目上下文同步完成后再试一次。")
+                    return
                   }
-                }}
-                onSelectedLayerIndexChange={setConfigLayerIndex}
-              />
-            }
-          />
+                  await editSubjectMaterialM.mutateAsync({ subjectId: subjectProjectId, materialId: currentMaterial.materialId, title })
+                  showSuccessFeedback("项目名称已更新", `当前项目现在显示为“${title}”。`)
+                } catch (err) {
+                  showErrorFeedback("更新项目名称失败", formatApiError(err))
+                }
+              }}
+              layerConfigSection={
+                <LayerConfigEditor
+                  key={layerConfigVersion}
+                  embedded
+                  canSave={!!pid}
+                  existingLayerIndexes={existingLayerIndexes}
+                  initialConfig={effectiveLayerConfig}
+                  knownLayerIndexes={knownLayerIndexes}
+                  layersError={layersQ.error}
+                  mutationError={setLayerConfigM.error}
+                  projectConfigError={projectConfigQ.error}
+                  rollUpStrategy={currentRollUpStrategy}
+                  selectedLayerExists={selectedLayerExists}
+                  selectedLayerHasSavedConfig={selectedLayerHasSavedConfig}
+                  selectedLayerIndex={effectiveConfigLayerIndex}
+                  saving={setLayerConfigM.isPending}
+                  onSave={async ({ kNode, kPoint, reviewChainTemplate, thresholdRollUpEnabled }) => {
+                    try {
+                      await setLayerConfigM.mutateAsync({
+                        layerIndex: effectiveConfigLayerIndex,
+                        kNode,
+                        kPoint,
+                        reviewChainTemplate,
+                        thresholdRollUpEnabled,
+                      })
+                      showSuccessFeedback(
+                        selectedLayerExists ? "层配置已保存" : "未来层预配置已保存",
+                        selectedLayerExists
+                          ? currentRollUpStrategy === "THRESHOLD_AUTO"
+                            ? `第 ${effectiveConfigLayerIndex} 层现在使用 ${reviewChainTemplate.length} 个模板步骤，节点阈值 ${kNode}，复述点阈值 ${kPoint}，阈值自动上推已${thresholdRollUpEnabled ? "开启" : "关闭"}。`
+                            : `第 ${effectiveConfigLayerIndex} 层现在使用 ${reviewChainTemplate.length} 个模板步骤；阈值参数也已保存，等切回“阈值自动上推”时会继续沿用。`
+                          : currentRollUpStrategy === "THRESHOLD_AUTO"
+                            ? `第 ${effectiveConfigLayerIndex} 层还不存在，已先保存预配置；等它被创建时会自动使用这 ${reviewChainTemplate.length} 个模板步骤、当前阈值和阈值自动上推${thresholdRollUpEnabled ? "开启" : "关闭"}状态。`
+                            : `第 ${effectiveConfigLayerIndex} 层还不存在，已先保存预配置；等它被创建时会自动使用这 ${reviewChainTemplate.length} 个模板步骤，并保留当前阈值参数。`,
+                      )
+                    } catch (err) {
+                      showErrorFeedback("保存层配置失败", formatApiError(err))
+                    }
+                  }}
+                  onSelectedLayerIndexChange={setConfigLayerIndex}
+                />
+              }
+            />
+          )}
 
-          {projectType === "BOOK" ? (
+          {!isSubjectSettingsScope && projectType === "BOOK" ? (
             <div id="settings-book-outline">
               <BookOutlineSetupCard
                 courseMaterials={sourceCourseMaterials}
@@ -1181,77 +1156,57 @@ export function ProjectSettingsPage() {
             </div>
           ) : null}
 
-          {projectType === "MISTAKE_BOOK" ? (
-            <div id="settings-mistake-structure">
-              <MistakeStructureSetupCard
-                sourceMaterials={sourceStructureMaterials}
-                initialized={bookProjectAlreadyInitialized}
-                initializeFromMaterialError={initializeBookFromMaterialM.error}
-                initializeFromMaterialPending={initializeBookFromMaterialM.isPending}
-                ensureInboxError={ensureMistakeInboxM.error}
-                ensureInboxPending={ensureMistakeInboxM.isPending}
-                isPending={initializeBookLearningObjectsM.isPending}
-                mutationError={initializeBookLearningObjectsM.error}
-                draftValue={bookOutlineDraft}
-                onChange={setBookOutlineDraft}
-                onEnsureInbox={onEnsureMistakeInbox}
-                onInitializeFromMaterial={onInitializeBookFromMaterial}
-                onInitialize={onInitializeBookOutline}
-                parsedCount={parsedBookOutlineItems.length}
-                validationMessage={bookOutlineValidationMessage}
-              />
-            </div>
-          ) : null}
-
-          {isSubjectRoot || canDeleteCurrentMaterial ? (
+          {isSubjectSettingsScope || canDeleteCurrentMaterial ? (
             <DangerZoneCard
-              actionLabel={isSubjectRoot ? "删除学科" : "删除当前材料"}
-              actionPendingLabel={isSubjectRoot ? "删除学科中..." : "删除材料中..."}
-              confirmationLabel={isSubjectRoot ? "输入学科标题以确认删除" : "输入材料名称以确认删除"}
+              actionLabel={isSubjectSettingsScope ? "删除学科" : "删除当前项目"}
+              actionPendingLabel={isSubjectSettingsScope ? "删除学科中..." : "删除项目中..."}
+              confirmationLabel={isSubjectSettingsScope ? "输入学科标题以确认删除" : "输入项目名称以确认删除"}
               deleteError={deleteMutationError}
               description={
-                isSubjectRoot
-                  ? `删除学科会一起移除当前学科和下面的 ${Math.max(0, subjectMaterials.length - 1)} 份附属材料兼容入口，本地工作台缓存也会一并清理。`
-                  : `删除材料只会移除“${currentMaterialTitle || "当前材料"}”和它的兼容工作台，学科“${subjectTitle || "当前学科"}”以及其他材料会保留。`
+                isSubjectSettingsScope
+                  ? `删除学科会一起移除当前学科和下面的 ${Math.max(0, subjectMaterials.length - 1)} 个项目兼容入口，本地工作台缓存也会一并清理。`
+                  : `删除项目只会移除“${currentMaterialTitle || "当前项目"}”和它的兼容工作台，学科“${subjectTitle || "当前学科"}”以及其他项目会保留。`
               }
               isPending={deleteMutationPending}
               onDelete={async () => {
                 try {
-                  if (isSubjectRoot) {
+                  if (isSubjectSettingsScope) {
                     const relatedProjectIds = [subjectProjectId, ...subjectMaterials.map((material) => material.compatibilityProjectId ?? "")]
                     await deleteSubjectM.mutateAsync(subjectProjectId)
                     clearProjectLocalState(relatedProjectIds)
                     setSelectedProjectId("")
-                    showSuccessFeedback("学科已删除", `“${subjectTitle || "当前学科"}”和它下面的材料入口都已移除。`)
+                    showSuccessFeedback("学科已删除", `“${subjectTitle || "当前学科"}”和它下面的项目入口都已移除。`)
                     navigate("/projects")
                     return
                   }
                   if (!currentMaterial) {
-                    showInfoFeedback("材料信息仍在加载", "等材料上下文同步完成后再试一次。")
+                    showInfoFeedback("项目信息仍在加载", "等项目上下文同步完成后再试一次。")
                     return
                   }
                   await deleteSubjectMaterialM.mutateAsync({ subjectId: subjectProjectId, materialId: currentMaterial.materialId })
                   clearProjectLocalState([pid])
                   setSelectedProjectId(subjectProjectId)
-                  showSuccessFeedback("材料已删除", `“${currentMaterial.title}” 已从“${subjectTitle || "当前学科"}”下移除。`)
+                  showSuccessFeedback("项目已删除", `“${currentMaterial.title}” 已从“${subjectTitle || "当前学科"}”下移除。`)
                   navigate(`/p/${subjectProjectId}/settings`)
                 } catch (err) {
-                  showErrorFeedback(isSubjectRoot ? "删除学科失败" : "删除材料失败", formatApiError(err))
+                  showErrorFeedback(isSubjectSettingsScope ? "删除学科失败" : "删除项目失败", formatApiError(err))
                 }
               }}
-              targetTitle={isSubjectRoot ? subjectTitle : currentMaterialTitle}
+              targetTitle={isSubjectSettingsScope ? subjectTitle : currentMaterialTitle}
             />
           ) : null}
 
-          <BaiduNetdiskImportDialog
-            projectId={pid}
-            open={isBaiduImportDialogOpen}
-            onOpenChange={setIsBaiduImportDialogOpen}
-          />
+          {!isSubjectSettingsScope ? (
+            <BaiduNetdiskImportDialog
+              projectId={pid}
+              open={isBaiduImportDialogOpen}
+              onOpenChange={setIsBaiduImportDialogOpen}
+            />
+          ) : null}
         </>
       ) : null}
 
-      {activePanel === "ai" ? (
+      {!isSubjectSettingsScope && activePanel === "ai" ? (
         <div className="space-y-5">
           {authEnabled ? (
             <>
@@ -1311,10 +1266,10 @@ export function ProjectSettingsPage() {
         </div>
       ) : null}
 
-      {supportsMissingInstanceRepair && activePanel === "missing" ? (
+      {!isSubjectSettingsScope && supportsMissingInstanceRepair && activePanel === "missing" ? (
       <Card className="theme-card">
         <CardHeader>
-          <CardTitle>缺失材料修复</CardTitle>
+          <CardTitle>缺失内容修复</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4 text-sm">
           {instancesQ.isLoading ? <p className="text-sm text-muted-foreground">加载实例中...</p> : null}
@@ -1328,7 +1283,7 @@ export function ProjectSettingsPage() {
             <div className="rounded-xl border bg-muted/30 p-4 text-sm text-muted-foreground">正在整理仍需迁移的缺失实例...</div>
           ) : null}
           {!instancesQ.isLoading && !instancesQ.error && !missingRepairCountsLoading && actionableMissingInstances.length === 0 ? (
-            <div className="rounded-xl border bg-muted/30 p-4 text-sm text-muted-foreground">当前没有需要迁移的缺失材料实例。</div>
+            <div className="rounded-xl border bg-muted/30 p-4 text-sm text-muted-foreground">当前没有需要迁移的缺失内容实例。</div>
           ) : null}
 
           <div className="space-y-3">
@@ -1454,7 +1409,7 @@ function BookOutlineSetupCard({
       </CardHeader>
       <CardContent className="space-y-4 pt-0 text-sm">
         <div className="rounded-[1.2rem] border border-border/70 bg-muted/15 px-4 py-4 text-muted-foreground">
-          书本材料会维护自己的学习对象树。你可以手工粘贴目录文本，也可以直接复用同一门学科下某个网课材料的学习对象树，系统会把末级节点自动转换为可绑定复述点的书本实例。
+          书本项目会维护自己的学习对象树。你可以手工粘贴目录文本，也可以直接复用同一门学科下某个网课项目的学习对象树，系统会把末级节点自动转换为可绑定复述点的书本实例。
         </div>
 
         {initialized ? (
@@ -1466,13 +1421,13 @@ function BookOutlineSetupCard({
             <div className="space-y-4 rounded-[1.2rem] border border-border/70 bg-muted/10 px-4 py-4">
               <div className="space-y-1">
                 <div className="text-sm font-semibold text-foreground">一键复用网课树</div>
-                <p className="text-xs leading-5 text-muted-foreground">把同一门学科下某个网课材料的学习对象树复制成书本目录结构，省掉手动重新录目录。</p>
+                <p className="text-xs leading-5 text-muted-foreground">把同一门学科下某个网课项目的学习对象树复制成书本目录结构，省掉手动重新录目录。</p>
               </div>
 
               {courseMaterials.length > 0 ? (
                 <>
                   <div className="space-y-2">
-                    <Label htmlFor="bookOutlineSourceMaterial">来源网课材料</Label>
+                    <Label htmlFor="bookOutlineSourceMaterial">来源网课项目</Label>
                     <select
                       id="bookOutlineSourceMaterial"
                       className="h-11 w-full rounded-xl border bg-background px-4 text-sm"
@@ -1501,7 +1456,7 @@ function BookOutlineSetupCard({
                 </>
               ) : (
                 <div className="rounded-[1rem] border border-border/70 bg-background px-4 py-3 text-xs leading-5 text-muted-foreground">
-                  当前学科下还没有可复用的网课材料。先去新建或导入一个网课材料，再回来一键复用。
+                  当前学科下还没有可复用的网课项目。先去新建或导入一个网课项目，再回来一键复用。
                 </div>
               )}
 
@@ -1547,162 +1502,6 @@ function BookOutlineSetupCard({
   )
 }
 
-function MistakeStructureSetupCard({
-  sourceMaterials,
-  initialized,
-  initializeFromMaterialError,
-  initializeFromMaterialPending,
-  ensureInboxError,
-  ensureInboxPending,
-  isPending,
-  mutationError,
-  draftValue,
-  onChange,
-  onEnsureInbox,
-  onInitializeFromMaterial,
-  onInitialize,
-  parsedCount,
-  validationMessage,
-}: {
-  sourceMaterials: StudyMaterial[]
-  initialized: boolean
-  initializeFromMaterialError: unknown
-  initializeFromMaterialPending: boolean
-  ensureInboxError: unknown
-  ensureInboxPending: boolean
-  isPending: boolean
-  mutationError: unknown
-  draftValue: string
-  onChange: (value: string) => void
-  onEnsureInbox: () => Promise<void>
-  onInitializeFromMaterial: (sourceMaterialId: string) => Promise<void>
-  onInitialize: () => Promise<void>
-  parsedCount: number
-  validationMessage: string | null
-}) {
-  const [selectedSourceMaterialId, setSelectedSourceMaterialId] = useState("")
-
-  useEffect(() => {
-    if (sourceMaterials.length === 0) {
-      setSelectedSourceMaterialId("")
-      return
-    }
-    setSelectedSourceMaterialId((current) =>
-      sourceMaterials.some((item) => item.materialId === current) ? current : sourceMaterials[0]?.materialId ?? "",
-    )
-  }, [sourceMaterials])
-
-  return (
-    <Card className="theme-card">
-      <CardHeader>
-        <CardTitle>错题结构初始化</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4 pt-0 text-sm">
-        <div className="rounded-[1.2rem] border border-border/70 bg-muted/15 px-4 py-4 text-muted-foreground">
-          错题材料可以先用一个“待整理”入口快速开用，也可以复用同一学科下的网课/书本结构，把错题直接挂到对应章节下面；后续录入、复习、计划统计都会继续沿用这套材料。
-        </div>
-
-        {initialized ? (
-          <div className="rounded-[1.2rem] border border-emerald-200 bg-emerald-50 px-4 py-4 text-emerald-700">
-            当前错题材料已经存在目录节点和条目。如需重新初始化，请先清理现有结构后再执行。
-          </div>
-        ) : (
-          <>
-            <div className="space-y-4 rounded-[1.2rem] border border-border/70 bg-muted/10 px-4 py-4">
-              <div className="space-y-1">
-                <div className="text-sm font-semibold text-foreground">快速开用</div>
-                <p className="text-xs leading-5 text-muted-foreground">先创建一个“待整理”入口，适合立刻开始收集错题，后面再慢慢细分。</p>
-              </div>
-              <div className="flex justify-end">
-                <Button type="button" variant="outline" onClick={() => void onEnsureInbox()} disabled={ensureInboxPending}>
-                  {ensureInboxPending ? "创建中..." : "创建待整理入口"}
-                </Button>
-              </div>
-              {ensureInboxError ? <p className="text-sm text-destructive">{formatApiError(ensureInboxError)}</p> : null}
-            </div>
-
-            <div className="space-y-4 rounded-[1.2rem] border border-border/70 bg-muted/10 px-4 py-4">
-              <div className="space-y-1">
-                <div className="text-sm font-semibold text-foreground">一键复用学科结构</div>
-                <p className="text-xs leading-5 text-muted-foreground">把同一学科下的网课或书本材料结构复制过来，后续错题就能直接按章节归档。</p>
-              </div>
-              {sourceMaterials.length > 0 ? (
-                <>
-                  <div className="space-y-2">
-                    <Label htmlFor="mistakeStructureSourceMaterial">来源材料</Label>
-                    <select
-                      id="mistakeStructureSourceMaterial"
-                      className="h-11 w-full rounded-xl border bg-background px-4 text-sm"
-                      value={selectedSourceMaterialId}
-                      onChange={(event) => setSelectedSourceMaterialId(event.target.value)}
-                      disabled={initializeFromMaterialPending}
-                    >
-                      {sourceMaterials.map((material) => (
-                        <option key={material.materialId} value={material.materialId}>
-                          {material.title}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="flex justify-end">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => void onInitializeFromMaterial(selectedSourceMaterialId)}
-                      disabled={initializeFromMaterialPending || !selectedSourceMaterialId}
-                    >
-                      {initializeFromMaterialPending ? "复用中..." : "一键复用章节结构"}
-                    </Button>
-                  </div>
-                </>
-              ) : (
-                <div className="rounded-[1rem] border border-border/70 bg-background px-4 py-3 text-xs leading-5 text-muted-foreground">
-                  当前学科下还没有可复用的网课或书本材料。先去创建或整理一个来源材料，再回来复用结构。
-                </div>
-              )}
-              {initializeFromMaterialError ? <p className="text-sm text-destructive">{formatApiError(initializeFromMaterialError)}</p> : null}
-            </div>
-
-            <div className="flex items-center gap-3 text-xs text-muted-foreground">
-              <div className="h-px flex-1 bg-border/70" />
-              <span>或者手动粘贴错题目录</span>
-              <div className="h-px flex-1 bg-border/70" />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="mistakeOutlineDraft">目录文本</Label>
-              <textarea
-                id="mistakeOutlineDraft"
-                value={draftValue}
-                onChange={(event) => onChange(event.target.value)}
-                placeholder={`极限\n  函数极限\n  数列极限\n导数\n  导数定义\n  微分中值定理`}
-                rows={10}
-                className="min-h-[15rem] w-full resize-y rounded-[1rem] border border-border/70 bg-background px-4 py-3 text-sm leading-6 text-foreground outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15"
-              />
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-              <span>当前已解析 {parsedCount} 行有效目录</span>
-              <span>使用两个空格或一个 Tab 表示下一级缩进</span>
-            </div>
-
-            {validationMessage ? <p className="text-sm text-destructive">{validationMessage}</p> : null}
-
-            <div className="flex justify-end">
-              <Button type="button" onClick={() => void onInitialize()} disabled={isPending || !!validationMessage}>
-                {isPending ? "初始化中..." : "初始化错题结构"}
-              </Button>
-            </div>
-          </>
-        )}
-
-        {mutationError ? <p className="text-sm text-destructive">{formatApiError(mutationError)}</p> : null}
-      </CardContent>
-    </Card>
-  )
-}
-
 function SettingsScopeCard(props: {
   isSubjectRoot: boolean
   materialTitle: string
@@ -1725,9 +1524,9 @@ function SettingsScopeCard(props: {
               <div className="mt-1 text-sm font-semibold text-foreground">{subjectTitle || "当前学科"}</div>
             </div>
             <div>
-              <div className="text-xs text-muted-foreground">当前材料</div>
+              <div className="text-xs text-muted-foreground">当前项目</div>
               <div className="mt-1 flex flex-wrap items-center gap-2">
-                <span className="text-sm font-semibold text-foreground">{materialTitle || "当前材料"}</span>
+                <span className="text-sm font-semibold text-foreground">{materialTitle || "当前项目"}</span>
                 <span className="theme-meta-strong">{formatStudyMaterialTypeLabel(materialType)}</span>
               </div>
             </div>
@@ -1736,8 +1535,8 @@ function SettingsScopeCard(props: {
 
         <div className="theme-status-surface rounded-[1.2rem] border border-border/70 px-4 py-4 text-muted-foreground">
           {isSubjectRoot
-            ? "这里维护学科标题和学科下的材料编排。当前这套导入、目录初始化、层推进和缺失修复配置，实际作用在默认网课材料上。"
-            : "这里维护当前材料自己的导入、目录初始化、层推进和缺失修复配置。学科标题和材料编排仍然由学科设置统一管理。"}
+            ? "这里现在只维护学科标题和学科下的项目编排。项目级的导入、目录初始化、AI、层推进和缺失修复，请进入对应项目设置。"
+            : "这里维护当前项目自己的导入、目录初始化、层推进和缺失修复配置。学科标题和项目编排仍然由学科设置统一管理。"}
         </div>
 
         {!isSubjectRoot && onOpenSubjectSettings ? (
@@ -1786,21 +1585,21 @@ function SubjectMaterialsCard({
   return (
     <Card className="theme-card">
       <CardHeader>
-        <CardTitle>学习材料</CardTitle>
+        <CardTitle>学科项目</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4 text-sm">
         <div className="theme-status-surface rounded-[1.2rem] border border-border/70 px-4 py-4 text-muted-foreground">
           {isSubjectRoot
-            ? `“${subjectTitle || "当前学科"}”下面的每份材料都可以拥有自己的兼容工作台。这样网课、书本、错题和零散知识可以分开整理，同时仍然挂在同一门学科里。`
-            : `你现在在“${subjectTitle || "当前学科"}”的某个材料里，这里也可以直接切到兄弟材料，或者继续往这个学科下面新增材料。`}
+            ? `“${subjectTitle || "当前学科"}”下面的每个项目都可以拥有自己的兼容工作台。这样网课、书本和零散知识可以分开整理，同时仍然挂在同一门学科里。`
+            : `你现在在“${subjectTitle || "当前学科"}”的某个项目里，这里也可以直接切到兄弟项目，或者继续往这个学科下面新增项目。`}
         </div>
 
-        {isLoading ? <p className="text-sm text-muted-foreground">正在加载材料清单...</p> : null}
+        {isLoading ? <p className="text-sm text-muted-foreground">正在加载项目清单...</p> : null}
         {error ? <p className="text-sm text-destructive">{formatApiError(error)}</p> : null}
         {createError ? <p className="text-sm text-destructive">{formatApiError(createError)}</p> : null}
 
         <div className="flex flex-wrap gap-2">
-          {(["COURSE", "BOOK", "LOOSE_POINTS", "MISTAKE_BOOK"] as const).map((materialType) => (
+          {(["COURSE", "BOOK", "LOOSE_POINTS"] as const).map((materialType) => (
             <Button key={materialType} type="button" variant="outline" disabled={createPending} onClick={() => beginCreate(materialType)}>
               新建{formatStudyMaterialTypeLabel(materialType)}
             </Button>
@@ -1814,7 +1613,7 @@ function SubjectMaterialsCard({
               <p className="text-xs leading-5 text-muted-foreground">{describeStudyMaterialHint(draftType)}</p>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="subjectMaterialTitle">材料名称</Label>
+              <Label htmlFor="subjectMaterialTitle">项目名称</Label>
               <Input
                 id="subjectMaterialTitle"
                 value={draftTitle}
@@ -1858,7 +1657,7 @@ function SubjectMaterialsCard({
         ) : null}
 
         {!isLoading && materials.length === 0 ? (
-          <div className="rounded-[1.2rem] border border-border/70 bg-muted/15 px-4 py-4 text-sm text-muted-foreground">当前学科还没有材料。</div>
+          <div className="rounded-[1.2rem] border border-border/70 bg-muted/15 px-4 py-4 text-sm text-muted-foreground">当前学科还没有项目。</div>
         ) : null}
 
         <div className="grid gap-3 md:grid-cols-2">
@@ -1870,24 +1669,130 @@ function SubjectMaterialsCard({
                   <div className="mt-1 text-xs text-muted-foreground">各自拥有独立兼容工作台和导入入口</div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  {material.compatibilityProjectId === currentProjectId ? <span className="theme-meta-strong">当前材料</span> : null}
+                  {material.compatibilityProjectId === currentProjectId ? <span className="theme-meta-strong">当前项目</span> : null}
                   <span className="theme-meta-strong">{formatStudyMaterialTypeLabel(material.materialType)}</span>
                 </div>
               </div>
               <p className="mt-3 text-xs leading-5 text-muted-foreground">{describeStudyMaterialHint(material.materialType)}</p>
               {material.compatibilityProjectId ? (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Button type="button" size="sm" onClick={() => onOpenMaterial(material, "workbench")}>
-                    进入工作台
-                  </Button>
-                  <Button type="button" size="sm" variant="outline" onClick={() => onOpenMaterial(material, "settings")}>
-                    材料设置
-                  </Button>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button type="button" size="sm" onClick={() => onOpenMaterial(material, "workbench")}>
+                  进入工作台
+                </Button>
+                <Button type="button" size="sm" variant="outline" onClick={() => onOpenMaterial(material, "settings")}>
+                    项目设置
+                </Button>
+              </div>
+            ) : null}
+          </div>
+        ))}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function SubjectSettingsInfoCard(props: {
+  subjectTitle: string
+  materialTitle: string
+  materialType: StudyMaterial["materialType"]
+  isLoading: boolean
+  isPending: boolean
+  queryError: unknown
+  saveError: unknown
+  onSave: (title: string) => Promise<void>
+  onOpenProjectWorkbench?: () => void
+  onOpenProjectSettings?: () => void
+}) {
+  const {
+    subjectTitle,
+    materialTitle,
+    materialType,
+    isLoading,
+    isPending,
+    queryError,
+    saveError,
+    onSave,
+    onOpenProjectWorkbench,
+    onOpenProjectSettings,
+  } = props
+  const [titleDraft, setTitleDraft] = useState(subjectTitle)
+
+  useEffect(() => {
+    setTitleDraft(subjectTitle)
+  }, [subjectTitle])
+
+  const trimmedTitle = titleDraft.trim()
+  const canSave = !isLoading && !isPending && !!trimmedTitle && trimmedTitle !== subjectTitle.trim()
+
+  return (
+    <Card className="theme-card">
+      <CardHeader>
+        <CardTitle>学科信息</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-5 pt-0 text-sm">
+        <section className="grid gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(280px,0.9fr)] lg:items-start">
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <div className="text-sm font-semibold text-foreground">学科名称</div>
+            </div>
+            <form
+              className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center"
+              onSubmit={(event) => {
+                event.preventDefault()
+                if (!canSave) return
+                void onSave(trimmedTitle)
+              }}
+            >
+              <div>
+                <Label htmlFor="subjectTitle" className="sr-only">
+                  学科名称
+                </Label>
+                <Input
+                  id="subjectTitle"
+                  value={titleDraft}
+                  onChange={(event) => setTitleDraft(event.target.value)}
+                  placeholder="输入新的学科名称"
+                  disabled={isLoading || isPending}
+                />
+              </div>
+              <div className="flex items-center justify-end">
+                <Button type="submit" disabled={!canSave} className="w-full md:w-auto">
+                  {isPending ? "保存中..." : "保存学科名称"}
+                </Button>
+              </div>
+            </form>
+            {queryError ? <p className="text-sm text-destructive">{formatApiError(queryError)}</p> : null}
+            {saveError ? <p className="text-sm text-destructive">{formatApiError(saveError)}</p> : null}
+          </div>
+
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <div className="text-sm font-semibold text-foreground">当前项目入口</div>
+            </div>
+            <div className="rounded-[1.2rem] border border-border/70 bg-muted/15 px-4 py-4">
+              <div className="text-sm font-semibold text-foreground">{materialTitle || "默认网课项目"}</div>
+              <div className="mt-1 text-xs text-muted-foreground">{formatStudyMaterialTypeLabel(materialType)}项目</div>
+              <div className="mt-3 text-sm leading-6 text-muted-foreground">
+                项目级的导入、AI、目录初始化、层推进和缺失修复已经从学科设置里拆出，请进入项目设置单独维护。
+              </div>
+              {onOpenProjectWorkbench || onOpenProjectSettings ? (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {onOpenProjectWorkbench ? (
+                    <Button type="button" variant="outline" size="sm" onClick={onOpenProjectWorkbench}>
+                      进入工作台
+                    </Button>
+                  ) : null}
+                  {onOpenProjectSettings ? (
+                    <Button type="button" size="sm" onClick={onOpenProjectSettings}>
+                      项目设置
+                    </Button>
+                  ) : null}
                 </div>
               ) : null}
             </div>
-          ))}
-        </div>
+          </div>
+        </section>
       </CardContent>
     </Card>
   )
@@ -2020,19 +1925,19 @@ function BasicInfoCard({
 
           <div className="space-y-3">
             <div className="space-y-1">
-              <div className="text-sm font-semibold text-foreground">{isSubjectRoot ? "默认材料" : "所属学科"}</div>
+              <div className="text-sm font-semibold text-foreground">{isSubjectRoot ? "默认项目" : "所属学科"}</div>
             </div>
             <div className="rounded-[1.2rem] border border-border/70 bg-muted/15 px-4 py-3">
               {isSubjectRoot ? (
                 <>
-                  <div className="text-sm font-semibold text-foreground">{materialTitle || "默认网课材料"}</div>
+                  <div className="text-sm font-semibold text-foreground">{materialTitle || "默认项目"}</div>
                   <div className="mt-1 text-xs text-muted-foreground">{formatStudyMaterialTypeLabel(materialType)} · {formatProjectTypeLabel(projectType)}</div>
                 </>
               ) : (
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <div className="text-sm font-semibold text-foreground">{subjectTitle || "当前学科"}</div>
-                    <div className="mt-1 text-xs text-muted-foreground">当前材料类型：{formatStudyMaterialTypeLabel(materialType)}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">当前项目类型：{formatStudyMaterialTypeLabel(materialType)}</div>
                   </div>
                   {onOpenSubjectSettings ? (
                     <Button type="button" variant="outline" size="sm" onClick={onOpenSubjectSettings}>
@@ -2049,7 +1954,7 @@ function BasicInfoCard({
 
         <section className="space-y-3">
           <div className="space-y-1">
-            <div className="text-sm font-semibold text-foreground">{isSubjectRoot ? "默认网课材料" : `当前${formatStudyMaterialTypeLabel(materialType)}材料`}</div>
+            <div className="text-sm font-semibold text-foreground">{isSubjectRoot ? "默认项目" : `当前${formatStudyMaterialTypeLabel(materialType)}项目`}</div>
           </div>
 
           {projectType === "COURSE" ? (
@@ -2067,7 +1972,7 @@ function BasicInfoCard({
                         </span>
                       </div>
                       <div className="text-sm text-foreground">
-                        {directoryBinding.handleName ? directoryBinding.handleName : `当前${isSubjectRoot ? "默认网课材料" : "材料"}还没有绑定浏览器目录。`}
+                        {directoryBinding.handleName ? directoryBinding.handleName : `当前${isSubjectRoot ? "默认项目" : "项目"}还没有绑定浏览器目录。`}
                       </div>
                     </div>
 
@@ -2146,7 +2051,7 @@ function BasicInfoCard({
                         </span>
                       </div>
                       <div className="text-sm text-muted-foreground">
-                        支持在当前{isSubjectRoot ? "默认网课材料" : "材料"}里浏览百度网盘目录、导入视频并按实例播放；字幕会按同目录同名规则自动识别。
+                        支持在当前{isSubjectRoot ? "默认项目" : "项目"}里浏览百度网盘目录、导入视频并按实例播放；字幕会按同目录同名规则自动识别。
                       </div>
                     </div>
 
@@ -2162,10 +2067,8 @@ function BasicInfoCard({
           ) : (
             <div className="rounded-[1.2rem] border border-border/70 bg-muted/15 px-4 py-4 text-sm text-muted-foreground">
               {projectType === "BOOK"
-                ? `当前${isSubjectRoot ? "书本入口" : "书本材料"}不依赖浏览器目录授权；请使用“书本目录初始化”把目录文本转换为学习对象树。`
-                : projectType === "MISTAKE_BOOK"
-                  ? `当前${isSubjectRoot ? "错题入口" : "错题材料"}不接入素材目录；你可以先创建“待整理”入口，或复用学科内的网课/书本结构来承接错题。`
-                : `当前${isSubjectRoot ? "零散知识入口" : "零散知识材料"}不接入素材目录，也不会维护学习对象树。`}
+                ? `当前${isSubjectRoot ? "书本入口" : "书本项目"}不依赖浏览器目录授权；请使用“书本目录初始化”把目录文本转换为学习对象树。`
+                : `当前${isSubjectRoot ? "零散知识入口" : "零散知识项目"}不接入素材目录，也不会维护学习对象树。`}
             </div>
           )}
 
@@ -2182,12 +2085,12 @@ function BasicInfoCard({
           <div className="space-y-1">
             <div className="text-sm font-semibold text-foreground">上推策略</div>
             <p className="text-sm text-muted-foreground">
-              当前材料使用“{getRollUpStrategyLabel(rollUpStrategy)}”。{getRollUpStrategyDescription(rollUpStrategy)}
+              当前项目使用“{getRollUpStrategyLabel(rollUpStrategy)}”。{getRollUpStrategyDescription(rollUpStrategy)}
             </p>
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="rollUpStrategy">材料级推进方式</Label>
+            <Label htmlFor="rollUpStrategy">项目级推进方式</Label>
             <select
               id="rollUpStrategy"
               aria-label="选择上推策略"
@@ -2801,7 +2704,7 @@ function LayerConfigEditor({
     <div className="space-y-4 text-sm">
       {!thresholdControlsActive ? (
         <div className="rounded-[1.1rem] border border-amber-200 bg-amber-50/80 p-4 text-sm text-amber-900">
-          当前材料使用“{getRollUpStrategyLabel(rollUpStrategy)}”。下面的阈值参数会继续保存，但只有切回“阈值自动上推”时才会参与自动推进。
+          当前项目使用“{getRollUpStrategyLabel(rollUpStrategy)}”。下面的阈值参数会继续保存，但只有切回“阈值自动上推”时才会参与自动推进。
         </div>
       ) : null}
       <div className="grid gap-4">

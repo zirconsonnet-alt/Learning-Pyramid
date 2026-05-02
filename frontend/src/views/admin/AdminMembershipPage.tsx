@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query"
 import { type ReactNode, useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 
@@ -185,6 +186,7 @@ function TimelineRow(props: {
 }
 
 export function AdminMembershipPage() {
+  const queryClient = useQueryClient()
   const [orderUserSearch, setOrderUserSearch] = useState("")
   const [orderStatus, setOrderStatus] = useState("all")
   const [orderType, setOrderType] = useState("all")
@@ -233,6 +235,11 @@ export function AdminMembershipPage() {
   const syncPayment = useSyncAdminMembershipOrderPayment()
   const closeOrder = useCloseAdminMembershipOrder()
   const voidCoupon = useVoidAdminMembershipCoupon()
+  const autoRefreshIntervalMs = 5_000
+  const activeOrderStatuses = new Set(["pending", "refund_pending"])
+  const selectedOrderStatus = orderDetailQ.data?.order.status ?? ""
+  const hasActiveOrder =
+    (ordersQ.data ?? []).some((item) => activeOrderStatuses.has(item.status)) || activeOrderStatuses.has(selectedOrderStatus)
 
   useEffect(() => {
     const orders = ordersQ.data ?? []
@@ -244,6 +251,35 @@ export function AdminMembershipPage() {
       setSelectedOrderId(orders[0].orderId)
     }
   }, [ordersQ.data, selectedOrderId])
+
+  useEffect(() => {
+    if (!hasActiveOrder || typeof window === "undefined") return
+    const timer = window.setInterval(() => {
+      if (syncPayment.isPending || closeOrder.isPending || refundOrder.isPending || grantCoupon.isPending || voidCoupon.isPending) {
+        return
+      }
+      void Promise.allSettled([
+        queryClient.invalidateQueries({ queryKey: ["admin", "membership", "overview"] }),
+        queryClient.invalidateQueries({ queryKey: ["admin", "membership", "orders"] }),
+        queryClient.invalidateQueries({ queryKey: ["admin", "membership", "invites"] }),
+        queryClient.invalidateQueries({ queryKey: ["admin", "membership", "coupons"] }),
+        selectedOrderId
+          ? queryClient.invalidateQueries({ queryKey: ["admin", "membership", "order-detail", selectedOrderId] })
+          : Promise.resolve(),
+      ])
+    }, autoRefreshIntervalMs)
+    return () => window.clearInterval(timer)
+  }, [
+    autoRefreshIntervalMs,
+    closeOrder.isPending,
+    grantCoupon.isPending,
+    hasActiveOrder,
+    queryClient,
+    refundOrder.isPending,
+    selectedOrderId,
+    syncPayment.isPending,
+    voidCoupon.isPending,
+  ])
 
   async function onCopyValue(label: string, value: string | null | undefined) {
     const text = String(value || "").trim()
@@ -724,6 +760,11 @@ export function AdminMembershipPage() {
           {!ordersQ.error && ordersQ.isLoading ? <LoadingNotice title="正在加载会员订单" message="后台正在刷新会员支付记录。" /> : null}
           {!ordersQ.error && !ordersQ.isLoading && (ordersQ.data?.length ?? 0) === 0 ? (
             <ContentEmptyState title="没有匹配的订单" message="可以换一个搜索词，或者放宽订单状态和类型筛选。" />
+          ) : null}
+          {hasActiveOrder ? (
+            <div className="theme-accent-surface rounded-[1rem] border-dashed px-4 py-3 text-sm leading-6 text-muted-foreground">
+              检测到进行中的支付或退款，后台会每 5 秒自动刷新订单列表、详情面板和营销关联。
+            </div>
           ) : null}
 
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">

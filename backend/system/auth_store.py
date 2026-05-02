@@ -33,6 +33,7 @@ DEFAULT_POMODORO_FOCUS_MINUTES = 25
 DEFAULT_POMODORO_BREAK_MINUTES = 5
 DEFAULT_POMODORO_COUNT = 4
 DEFAULT_POMODORO_START_TIME = "19:00"
+MAX_POMODORO_PLANS_PER_DAY = 24
 MAX_POMODORO_PROMPT_LENGTH = 200
 POMODORO_WEEKDAY_KEYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 USER_COLUMNS_SQL = """
@@ -46,6 +47,8 @@ USER_COLUMNS_SQL = """
     p.status,
     p.updated_at
 """
+SESSION_TOKEN_HASH_PREFIX = "sha256:"
+SESSION_TOKEN_HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 from backend.models.cloud_account_binding import CloudAccountBinding
 from backend.models.errors import NotFound, PreconditionFailure
@@ -80,6 +83,62 @@ def _normalize_email(email: str) -> str:
     return value
 
 
+def _configured_bootstrap_super_admin_emails() -> tuple[str, ...]:
+    raw_values = (
+        os.getenv("PLM_BOOTSTRAP_SUPER_ADMIN_EMAILS"),
+        os.getenv("PLM_BOOTSTRAP_SUPER_ADMIN_EMAIL"),
+    )
+    items: list[str] = []
+    seen: set[str] = set()
+    for raw in raw_values:
+        if raw is None:
+            continue
+        for part in str(raw).split(","):
+            if not str(part).strip():
+                continue
+            normalized = _normalize_email(part)
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            items.append(normalized)
+    return tuple(items)
+
+
+def email_is_bootstrap_super_admin(email: str) -> bool:
+    return _normalize_email(email) in set(_configured_bootstrap_super_admin_emails())
+
+
+def _is_hashed_session_token(value: Any) -> bool:
+    return SESSION_TOKEN_HASH_RE.fullmatch(str(value or "").strip()) is not None
+
+
+def _hash_session_token(session_token: str) -> str:
+    token = str(session_token).strip()
+    if not token:
+        raise PreconditionFailure("session token must be non-empty")
+    digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    return f"{SESSION_TOKEN_HASH_PREFIX}{digest}"
+
+
+def _stored_session_token_value(session_token: Any) -> str:
+    token = str(session_token or "").strip()
+    if not token:
+        raise PreconditionFailure("session token must be non-empty")
+    if _is_hashed_session_token(token):
+        return token
+    return _hash_session_token(token)
+
+
+def _session_token_lookup_candidates(session_token: Any) -> tuple[str, ...]:
+    token = str(session_token or "").strip()
+    if not token:
+        return ()
+    stored_value = _stored_session_token_value(token)
+    if stored_value == token:
+        return (stored_value,)
+    return (stored_value, token)
+
+
 def _session_ttl_days() -> int:
     raw = (os.getenv("PLM_SESSION_TTL_DAYS") or "30").strip()
     try:
@@ -87,6 +146,24 @@ def _session_ttl_days() -> int:
     except Exception as exc:
         raise PreconditionFailure("PLM_SESSION_TTL_DAYS must be an integer") from exc
     return max(1, value)
+
+
+def _password_reset_token_ttl_minutes() -> int:
+    raw = (os.getenv("PLM_PASSWORD_RESET_TOKEN_TTL_MINUTES") or "30").strip()
+    try:
+        value = int(raw)
+    except Exception as exc:
+        raise PreconditionFailure("PLM_PASSWORD_RESET_TOKEN_TTL_MINUTES must be an integer") from exc
+    return max(5, value)
+
+
+def _email_verification_token_ttl_minutes() -> int:
+    raw = (os.getenv("PLM_EMAIL_VERIFICATION_TOKEN_TTL_MINUTES") or "1440").strip()
+    try:
+        value = int(raw)
+    except Exception as exc:
+        raise PreconditionFailure("PLM_EMAIL_VERIFICATION_TOKEN_TTL_MINUTES must be an integer") from exc
+    return max(10, value)
 
 
 def _require_psycopg() -> Any:
@@ -441,6 +518,16 @@ def _normalize_pomodoro_start_time(value: str | None) -> str:
     return f"{hours:02d}:{minutes:02d}"
 
 
+def _read_pomodoro_start_minutes(start_time: str) -> int:
+    hours_text, minutes_text = _normalize_pomodoro_start_time(start_time).split(":")
+    return int(hours_text) * 60 + int(minutes_text)
+
+
+def _normalize_pomodoro_plan_id(value: Any, *, day_key: str, index: int) -> str:
+    text = re.sub(r"\s+", "-", str(value or "").strip())
+    return text[:80] if text else f"{day_key}-{index + 1}"
+
+
 def _normalize_pomodoro_prompt_text(value: str | None) -> str:
     text = re.sub(r"\s+", " ", str(value or "").strip())
     if len(text) > MAX_POMODORO_PROMPT_LENGTH:
@@ -451,6 +538,8 @@ def _normalize_pomodoro_prompt_text(value: str | None) -> str:
 def _create_pomodoro_schedule_day(
     day_key: str,
     *,
+    plan_id: str = "",
+    plan_index: int = 0,
     enabled: bool = False,
     start_time: str = DEFAULT_POMODORO_START_TIME,
     focus_minutes: int = DEFAULT_POMODORO_FOCUS_MINUTES,
@@ -471,6 +560,7 @@ def _create_pomodoro_schedule_day(
     )
     return PomodoroScheduleDay(
         day_key=normalized_day_key,
+        plan_id=_normalize_pomodoro_plan_id(plan_id, day_key=normalized_day_key, index=plan_index),
         enabled=bool(enabled),
         start_time=_normalize_pomodoro_start_time(start_time),
         focus_minutes=_clamp_int(
@@ -490,6 +580,32 @@ def _create_pomodoro_schedule_day(
         break_prompt=_normalize_pomodoro_prompt_text(break_prompt),
         focus_prompts=_normalize_pomodoro_focus_prompts(focus_prompts, pomodoro_count=normalized_pomodoro_count),
     )
+
+
+def _pomodoro_plan_duration_minutes(item: PomodoroScheduleDay) -> int:
+    return int(item.focus_minutes) * int(item.pomodoro_count) + int(item.break_minutes) * max(
+        0,
+        int(item.pomodoro_count) - 1,
+    )
+
+
+def _validate_pomodoro_day_plan_conflicts(day_key: str, items: Iterable[PomodoroScheduleDay]) -> None:
+    enabled_ranges: list[tuple[int, int, PomodoroScheduleDay]] = []
+    for item in items:
+        if not item.enabled:
+            continue
+        start_minutes = _read_pomodoro_start_minutes(item.start_time)
+        end_minutes = start_minutes + _pomodoro_plan_duration_minutes(item)
+        if end_minutes > 24 * 60:
+            raise PreconditionFailure("pomodoro plan must end before midnight")
+        enabled_ranges.append((start_minutes, end_minutes, item))
+
+    enabled_ranges.sort(key=lambda value: (value[0], value[2].plan_id))
+    previous: tuple[int, int, PomodoroScheduleDay] | None = None
+    for current in enabled_ranges:
+        if previous is not None and current[0] < previous[1]:
+            raise PreconditionFailure(f"pomodoro plans for {day_key} overlap")
+        previous = current
 
 
 def _normalize_pomodoro_project_id(value: Any) -> str | None:
@@ -564,26 +680,42 @@ def _normalize_pomodoro_weekly_schedule(
         day_payload = payload.get(day_key)
         if not isinstance(day_payload, dict):
             day_payload = {}
-        items.append(
-            _create_pomodoro_schedule_day(
-                day_key,
-                enabled=bool(day_payload.get("enabled", False)),
-                start_time=str(day_payload.get("startTime", DEFAULT_POMODORO_START_TIME)),
-                focus_minutes=day_payload.get("focusMinutes", normalized_focus_minutes),
-                break_minutes=day_payload.get("breakMinutes", normalized_break_minutes),
-                pomodoro_count=day_payload.get("pomodoroCount", normalized_pomodoro_count),
-                project_ids=day_payload.get("projectIds"),
-                break_prompt=day_payload.get("breakPrompt"),
-                focus_prompts=day_payload.get("focusPrompts"),
+        raw_plans = day_payload.get("plans")
+        is_plan_list = isinstance(raw_plans, list)
+        plan_payloads = raw_plans if is_plan_list else ([day_payload] if bool(day_payload.get("enabled", False)) else [])
+        if len(plan_payloads) > MAX_POMODORO_PLANS_PER_DAY:
+            raise PreconditionFailure(f"pomodoro plans for {day_key} must be at most {MAX_POMODORO_PLANS_PER_DAY}")
+
+        day_items: list[PomodoroScheduleDay] = []
+        for plan_index, raw_plan in enumerate(plan_payloads):
+            plan_payload = raw_plan if isinstance(raw_plan, dict) else {}
+            day_items.append(
+                _create_pomodoro_schedule_day(
+                    day_key,
+                    plan_id=plan_payload.get("id"),
+                    plan_index=plan_index,
+                    enabled=bool(plan_payload.get("enabled", True if is_plan_list else False)),
+                    start_time=str(plan_payload.get("startTime", DEFAULT_POMODORO_START_TIME)),
+                    focus_minutes=plan_payload.get("focusMinutes", normalized_focus_minutes),
+                    break_minutes=plan_payload.get("breakMinutes", normalized_break_minutes),
+                    pomodoro_count=plan_payload.get("pomodoroCount", normalized_pomodoro_count),
+                    project_ids=plan_payload.get("projectIds"),
+                    break_prompt=plan_payload.get("breakPrompt"),
+                    focus_prompts=plan_payload.get("focusPrompts"),
+                )
             )
-        )
+        _validate_pomodoro_day_plan_conflicts(day_key, day_items)
+        items.extend(sorted(day_items, key=lambda item: (_read_pomodoro_start_minutes(item.start_time), item.plan_id)))
     return tuple(items)
 
 
 def _pomodoro_weekly_schedule_to_json(items: Iterable[PomodoroScheduleDay]) -> dict[str, dict[str, Any]]:
-    payload: dict[str, dict[str, Any]] = {}
+    payload: dict[str, dict[str, Any]] = {day_key: {"plans": []} for day_key in POMODORO_WEEKDAY_KEYS}
     for item in items:
-        payload[item.day_key] = {
+        if item.day_key not in payload:
+            continue
+        payload[item.day_key]["plans"].append({
+            "id": _normalize_pomodoro_plan_id(item.plan_id, day_key=item.day_key, index=len(payload[item.day_key]["plans"])),
             "enabled": bool(item.enabled),
             "startTime": _normalize_pomodoro_start_time(item.start_time),
             "focusMinutes": _clamp_int(
@@ -611,7 +743,7 @@ def _pomodoro_weekly_schedule_to_json(items: Iterable[PomodoroScheduleDay]) -> d
             "focusPrompts": list(
                 _normalize_pomodoro_focus_prompts(item.focus_prompts, pomodoro_count=item.pomodoro_count)
             ),
-        }
+        })
     return payload
 
 
@@ -746,6 +878,7 @@ class ReviewChainTemplateStep:
 @dataclass(frozen=True, slots=True)
 class PomodoroScheduleDay:
     day_key: str
+    plan_id: str
     enabled: bool
     start_time: str
     focus_minutes: int
@@ -1228,20 +1361,28 @@ class SQLiteAuthStore(_AuthStoreImpl):
                 ),
             )
 
-    def _bootstrap_super_admin(self, conn: sqlite3.Connection) -> None:
-        count_row = conn.execute("SELECT COUNT(*) AS count FROM user_global_roles").fetchone()
-        if count_row is not None and int(count_row["count"]) > 0:
+    def _bootstrap_configured_super_admins_sqlite(self, conn: sqlite3.Connection) -> None:
+        configured_emails = _configured_bootstrap_super_admin_emails()
+        if not configured_emails:
             return
-        owner_row = conn.execute("SELECT user_id, created_at FROM users ORDER BY created_at ASC, user_id ASC LIMIT 1").fetchone()
-        if owner_row is None:
-            return
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO user_global_roles (user_id, role, granted_by_user_id, created_at)
-            VALUES (?, 'super_admin', ?, ?)
+        placeholders = ", ".join("?" for _ in configured_emails)
+        rows = conn.execute(
+            f"""
+            SELECT user_id, created_at
+            FROM users
+            WHERE email IN ({placeholders})
+            ORDER BY created_at ASC, user_id ASC
             """,
-            (str(owner_row["user_id"]), str(owner_row["user_id"]), str(owner_row["created_at"])),
-        )
+            configured_emails,
+        ).fetchall()
+        for row in rows:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO user_global_roles (user_id, role, granted_by_user_id, created_at)
+                VALUES (?, 'super_admin', ?, ?)
+                """,
+                (str(row["user_id"]), str(row["user_id"]), str(row["created_at"])),
+            )
 
     def _roles_by_user_id(self, conn: sqlite3.Connection, user_ids: Iterable[str]) -> dict[str, tuple[str, ...]]:
         ids = tuple(str(user_id) for user_id in user_ids)
@@ -1272,6 +1413,71 @@ class SQLiteAuthStore(_AuthStoreImpl):
             """
         )
 
+    @staticmethod
+    def _ensure_users_email_verified_column(conn: sqlite3.Connection) -> bool:
+        columns = {
+            str(row["name"])
+            for row in conn.execute("PRAGMA table_info(users)").fetchall()
+        }
+        if "email_verified_at" in columns:
+            return False
+        conn.execute(
+            """
+            ALTER TABLE users
+            ADD COLUMN email_verified_at TEXT
+            """
+        )
+        return True
+
+    @staticmethod
+    def _ensure_email_verification_tokens_table(conn: sqlite3.Connection) -> None:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS email_verification_tokens (
+                token_hash TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_user_expires
+            ON email_verification_tokens (user_id, expires_at DESC)
+            """
+        )
+
+    @staticmethod
+    def _backfill_hashed_session_tokens_sqlite(conn: sqlite3.Connection) -> None:
+        rows = conn.execute(
+            """
+            SELECT session_token
+            FROM sessions
+            WHERE session_token IS NOT NULL
+              AND session_token <> ''
+              AND session_token NOT LIKE 'sha256:%'
+            ORDER BY created_at ASC, session_token ASC
+            """
+        ).fetchall()
+        for row in rows:
+            legacy_token = str(row["session_token"])
+            conn.execute(
+                "UPDATE sessions SET session_token = ? WHERE session_token = ?",
+                (_hash_session_token(legacy_token), legacy_token),
+            )
+
+    @staticmethod
+    def _backfill_existing_users_as_verified_sqlite(conn: sqlite3.Connection) -> None:
+        conn.execute(
+            """
+            UPDATE users
+            SET email_verified_at = created_at
+            WHERE email_verified_at IS NULL OR TRIM(email_verified_at) = ''
+            """
+        )
+
     def _init_db(self) -> None:
         with self._lock:
             conn = self._connect()
@@ -1282,11 +1488,28 @@ class SQLiteAuthStore(_AuthStoreImpl):
                         user_id TEXT PRIMARY KEY,
                         email TEXT NOT NULL UNIQUE,
                         password_hash TEXT NOT NULL,
-                        created_at TEXT NOT NULL
+                        created_at TEXT NOT NULL,
+                        email_verified_at TEXT
                     );
 
                     CREATE TABLE IF NOT EXISTS sessions (
                         session_token TEXT PRIMARY KEY,
+                        user_id TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        expires_at TEXT NOT NULL,
+                        FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE
+                    );
+
+                    CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                        token_hash TEXT PRIMARY KEY,
+                        user_id TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        expires_at TEXT NOT NULL,
+                        FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE
+                    );
+
+                    CREATE TABLE IF NOT EXISTS email_verification_tokens (
+                        token_hash TEXT PRIMARY KEY,
                         user_id TEXT NOT NULL,
                         created_at TEXT NOT NULL,
                         expires_at TEXT NOT NULL,
@@ -1417,6 +1640,10 @@ class SQLiteAuthStore(_AuthStoreImpl):
                     );
 
                     CREATE INDEX IF NOT EXISTS idx_user_profiles_public_uid ON user_profiles (public_uid);
+                    CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user_expires
+                    ON password_reset_tokens (user_id, expires_at DESC);
+                    CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_user_expires
+                    ON email_verification_tokens (user_id, expires_at DESC);
                     CREATE INDEX IF NOT EXISTS idx_user_service_configs_kind ON user_service_configs (service_kind, updated_at DESC);
                     CREATE INDEX IF NOT EXISTS idx_user_global_settings_updated_at ON user_global_settings (updated_at DESC);
                     CREATE INDEX IF NOT EXISTS idx_user_cloud_accounts_user_provider
@@ -1451,24 +1678,29 @@ class SQLiteAuthStore(_AuthStoreImpl):
                 # Older hosted auth databases may still carry the deprecated study-group tables.
                 # Drop them eagerly so upgraded installs converge on the friend-only schema.
                 self._ensure_user_service_prompt_assembly_mode_column(conn)
+                added_email_verified_column = self._ensure_users_email_verified_column(conn)
+                self._ensure_email_verification_tokens_table(conn)
+                if added_email_verified_column:
+                    self._backfill_existing_users_as_verified_sqlite(conn)
                 self._backfill_user_profiles(conn)
-                self._bootstrap_super_admin(conn)
+                self._backfill_hashed_session_tokens_sqlite(conn)
+                self._bootstrap_configured_super_admins_sqlite(conn)
                 conn.commit()
             finally:
                 conn.close()
 
-    def create_user(self, email: str, password: str) -> AuthUser:
+    def create_user(self, email: str, password: str, *, email_verified: bool = True) -> AuthUser:
         normalized_email = _normalize_email(email)
         now_text = _utc_now().isoformat()
         user_id = f"user_{uuid.uuid4().hex}"
         password_hash = self._hash_password(password)
+        email_verified_at = now_text if email_verified else None
         with self._lock:
             conn = self._connect()
             try:
-                is_first_user = int(conn.execute("SELECT COUNT(*) AS count FROM users").fetchone()["count"]) == 0
                 conn.execute(
-                    "INSERT INTO users (user_id, email, password_hash, created_at) VALUES (?, ?, ?, ?)",
-                    (user_id, normalized_email, password_hash, now_text),
+                    "INSERT INTO users (user_id, email, password_hash, created_at, email_verified_at) VALUES (?, ?, ?, ?, ?)",
+                    (user_id, normalized_email, password_hash, now_text, email_verified_at),
                 )
                 conn.execute(
                     """
@@ -1479,7 +1711,7 @@ class SQLiteAuthStore(_AuthStoreImpl):
                     """,
                     (user_id, self._ensure_unique_public_uid(conn), _default_nickname_for_email(normalized_email), now_text, now_text),
                 )
-                if is_first_user:
+                if email_is_bootstrap_super_admin(normalized_email):
                     conn.execute(
                         """
                         INSERT INTO user_global_roles (user_id, role, granted_by_user_id, created_at)
@@ -1500,7 +1732,7 @@ class SQLiteAuthStore(_AuthStoreImpl):
         try:
             row = conn.execute(
                 f"""
-                SELECT {USER_COLUMNS_SQL}, u.password_hash
+                SELECT {USER_COLUMNS_SQL}, u.password_hash, u.email_verified_at
                 FROM users u
                 JOIN user_profiles p ON p.user_id = u.user_id
                 WHERE u.email = ?
@@ -1511,6 +1743,8 @@ class SQLiteAuthStore(_AuthStoreImpl):
             conn.close()
         if row is None or not self._verify_password(password, str(row["password_hash"])):
             raise PreconditionFailure("invalid email or password")
+        if str(row["email_verified_at"] or "").strip() == "":
+            raise PreconditionFailure("email verification is required before login")
         if str(row["status"]) != "active":
             raise PreconditionFailure("account is not active")
         return self._row_to_user(row)
@@ -1518,13 +1752,14 @@ class SQLiteAuthStore(_AuthStoreImpl):
     def create_session(self, user_id: str) -> str:
         now = _utc_now()
         token = secrets.token_urlsafe(32)
+        stored_token = _hash_session_token(token)
         expires_at = (now + timedelta(days=_session_ttl_days())).isoformat()
         with self._lock:
             conn = self._connect()
             try:
                 conn.execute(
                     "INSERT INTO sessions (session_token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
-                    (token, str(user_id), now.isoformat(), expires_at),
+                    (stored_token, str(user_id), now.isoformat(), expires_at),
                 )
                 conn.commit()
                 return token
@@ -1532,10 +1767,11 @@ class SQLiteAuthStore(_AuthStoreImpl):
                 conn.close()
 
     def get_user_by_session(self, session_token: str) -> AuthUser:
-        token = str(session_token).strip()
-        if not token:
+        candidates = _session_token_lookup_candidates(session_token)
+        if not candidates:
             raise NotFound("session")
         now_text = _utc_now().isoformat()
+        placeholders = ", ".join("?" for _ in candidates)
         conn = self._connect()
         try:
             row = conn.execute(
@@ -1544,9 +1780,9 @@ class SQLiteAuthStore(_AuthStoreImpl):
                 FROM sessions s
                 JOIN users u ON u.user_id = s.user_id
                 JOIN user_profiles p ON p.user_id = u.user_id
-                WHERE s.session_token = ? AND s.expires_at > ? AND p.status = 'active'
+                WHERE s.session_token IN ({placeholders}) AND s.expires_at > ? AND p.status = 'active'
                 """,
-                (token, now_text),
+                (*candidates, now_text),
             ).fetchone()
         finally:
             conn.close()
@@ -1555,13 +1791,14 @@ class SQLiteAuthStore(_AuthStoreImpl):
         return self._row_to_user(row)
 
     def delete_session(self, session_token: str) -> None:
-        token = str(session_token).strip()
-        if not token:
+        candidates = _session_token_lookup_candidates(session_token)
+        if not candidates:
             return
+        placeholders = ", ".join("?" for _ in candidates)
         with self._lock:
             conn = self._connect()
             try:
-                conn.execute("DELETE FROM sessions WHERE session_token = ?", (token,))
+                conn.execute(f"DELETE FROM sessions WHERE session_token IN ({placeholders})", candidates)
                 conn.commit()
             finally:
                 conn.close()
@@ -1571,10 +1808,15 @@ class SQLiteAuthStore(_AuthStoreImpl):
             conn = self._connect()
             try:
                 if except_session_token:
-                    conn.execute(
-                        "DELETE FROM sessions WHERE user_id = ? AND session_token <> ?",
-                        (str(user_id), str(except_session_token)),
-                    )
+                    candidates = _session_token_lookup_candidates(except_session_token)
+                    if candidates:
+                        placeholders = ", ".join("?" for _ in candidates)
+                        conn.execute(
+                            f"DELETE FROM sessions WHERE user_id = ? AND session_token NOT IN ({placeholders})",
+                            (str(user_id), *candidates),
+                        )
+                    else:
+                        conn.execute("DELETE FROM sessions WHERE user_id = ?", (str(user_id),))
                 else:
                     conn.execute("DELETE FROM sessions WHERE user_id = ?", (str(user_id),))
                 conn.commit()
@@ -2388,6 +2630,141 @@ class SQLiteAuthStore(_AuthStoreImpl):
             finally:
                 conn.close()
 
+    def create_password_reset_token(self, email: str) -> str | None:
+        normalized_email = _normalize_email(email)
+        now = _utc_now()
+        now_text = now.isoformat()
+        expires_at = (now + timedelta(minutes=_password_reset_token_ttl_minutes())).isoformat()
+        raw_token = secrets.token_urlsafe(32)
+        token_hash = _hash_session_token(raw_token)
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("DELETE FROM password_reset_tokens WHERE expires_at <= ?", (now_text,))
+                row = conn.execute(
+                    f"""
+                    SELECT {USER_COLUMNS_SQL}
+                    FROM users u
+                    JOIN user_profiles p ON p.user_id = u.user_id
+                    WHERE u.email = ? AND p.status = 'active' AND u.email_verified_at IS NOT NULL AND TRIM(u.email_verified_at) <> ''
+                    """,
+                    (normalized_email,),
+                ).fetchone()
+                if row is None:
+                    conn.commit()
+                    return None
+                conn.execute("DELETE FROM password_reset_tokens WHERE user_id = ?", (str(row["user_id"]),))
+                conn.execute(
+                    """
+                    INSERT INTO password_reset_tokens (token_hash, user_id, created_at, expires_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (token_hash, str(row["user_id"]), now_text, expires_at),
+                )
+                conn.commit()
+                return raw_token
+            finally:
+                conn.close()
+
+    def create_email_verification_token(self, email: str) -> str | None:
+        normalized_email = _normalize_email(email)
+        now = _utc_now()
+        now_text = now.isoformat()
+        expires_at = (now + timedelta(minutes=_email_verification_token_ttl_minutes())).isoformat()
+        raw_token = secrets.token_urlsafe(32)
+        token_hash = _hash_session_token(raw_token)
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("DELETE FROM email_verification_tokens WHERE expires_at <= ?", (now_text,))
+                row = conn.execute(
+                    """
+                    SELECT u.user_id
+                    FROM users u
+                    JOIN user_profiles p ON p.user_id = u.user_id
+                    WHERE u.email = ?
+                      AND p.status = 'active'
+                      AND (u.email_verified_at IS NULL OR TRIM(u.email_verified_at) = '')
+                    """,
+                    (normalized_email,),
+                ).fetchone()
+                if row is None:
+                    conn.commit()
+                    return None
+                user_id = str(row["user_id"])
+                conn.execute("DELETE FROM email_verification_tokens WHERE user_id = ?", (user_id,))
+                conn.execute(
+                    """
+                    INSERT INTO email_verification_tokens (token_hash, user_id, created_at, expires_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (token_hash, user_id, now_text, expires_at),
+                )
+                conn.commit()
+                return raw_token
+            finally:
+                conn.close()
+
+    def verify_email_with_token(self, token: str) -> AuthUser:
+        token_hash = _hash_session_token(token)
+        now_text = _utc_now().isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("DELETE FROM email_verification_tokens WHERE expires_at <= ?", (now_text,))
+                row = conn.execute(
+                    """
+                    SELECT evt.user_id
+                    FROM email_verification_tokens evt
+                    JOIN user_profiles p ON p.user_id = evt.user_id
+                    WHERE evt.token_hash = ? AND evt.expires_at > ? AND p.status = 'active'
+                    """,
+                    (token_hash, now_text),
+                ).fetchone()
+                if row is None:
+                    raise PreconditionFailure("email verification token is invalid or expired")
+                user_id = str(row["user_id"])
+                conn.execute(
+                    "UPDATE users SET email_verified_at = COALESCE(email_verified_at, ?) WHERE user_id = ?",
+                    (now_text, user_id),
+                )
+                conn.execute("DELETE FROM email_verification_tokens WHERE user_id = ?", (user_id,))
+                conn.commit()
+            finally:
+                conn.close()
+        return self.get_user_by_id(user_id)
+
+    def reset_password_with_token(self, token: str, *, new_password: str) -> None:
+        token_hash = _hash_session_token(token)
+        new_hash = self._hash_password(new_password)
+        now_text = _utc_now().isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("DELETE FROM password_reset_tokens WHERE expires_at <= ?", (now_text,))
+                row = conn.execute(
+                    """
+                    SELECT pr.user_id
+                    FROM password_reset_tokens pr
+                    JOIN user_profiles p ON p.user_id = pr.user_id
+                    WHERE pr.token_hash = ? AND pr.expires_at > ? AND p.status = 'active'
+                    """,
+                    (token_hash, now_text),
+                ).fetchone()
+                if row is None:
+                    raise PreconditionFailure("password reset token is invalid or expired")
+                user_id = str(row["user_id"])
+                conn.execute("UPDATE users SET password_hash = ? WHERE user_id = ?", (new_hash, user_id))
+                conn.execute(
+                    "UPDATE user_profiles SET password_changed_at = ?, updated_at = ? WHERE user_id = ?",
+                    (now_text, now_text, user_id),
+                )
+                conn.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+                conn.execute("DELETE FROM password_reset_tokens WHERE user_id = ?", (user_id,))
+                conn.commit()
+            finally:
+                conn.close()
+
     def change_password(self, user_id: str, *, current_password: str, new_password: str) -> None:
         new_hash = self._hash_password(new_password)
         now_text = _utc_now().isoformat()
@@ -2877,9 +3254,14 @@ class SQLiteAuthStore(_AuthStoreImpl):
                     "email": str(row["email"]),
                     "passwordHash": str(row["password_hash"]),
                     "createdAt": str(row["created_at"]),
+                    "emailVerifiedAt": None if row["email_verified_at"] is None else str(row["email_verified_at"]),
                 }
                 for row in conn.execute(
-                    "SELECT user_id, email, password_hash, created_at FROM users ORDER BY created_at ASC, user_id ASC"
+                    """
+                    SELECT user_id, email, password_hash, created_at, email_verified_at
+                    FROM users
+                    ORDER BY created_at ASC, user_id ASC
+                    """
                 ).fetchall()
             ]
             sessions = [
@@ -3096,14 +3478,15 @@ class SQLiteAuthStore(_AuthStoreImpl):
                     row = dict(item)
                     conn.execute(
                         """
-                        INSERT INTO users (user_id, email, password_hash, created_at)
-                        VALUES (?, ?, ?, ?)
+                        INSERT INTO users (user_id, email, password_hash, created_at, email_verified_at)
+                        VALUES (?, ?, ?, ?, ?)
                         """,
                         (
                             str(row.get("userId", "")),
                             str(row.get("email", "")),
                             str(row.get("passwordHash", "")),
                             str(row.get("createdAt", "")),
+                            row.get("emailVerifiedAt", row.get("createdAt")),
                         ),
                     )
                 for item in profiles:
@@ -3218,7 +3601,7 @@ class SQLiteAuthStore(_AuthStoreImpl):
                         ),
                     )
                 if not roles:
-                    self._bootstrap_super_admin(conn)
+                    self._bootstrap_configured_super_admins_sqlite(conn)
                 for item in sessions:
                     row = dict(item)
                     conn.execute(
@@ -3227,7 +3610,7 @@ class SQLiteAuthStore(_AuthStoreImpl):
                         VALUES (?, ?, ?, ?)
                         """,
                         (
-                            str(row.get("sessionToken", "")),
+                            _stored_session_token_value(row.get("sessionToken", "")),
                             str(row.get("userId", "")),
                             str(row.get("createdAt", "")),
                             str(row.get("expiresAt", "")),
@@ -3345,6 +3728,48 @@ class PostgresAuthStore(_AuthStoreImpl):
                 return candidate
             candidate = _random_public_uid()
 
+    def _bootstrap_configured_super_admins_postgres(self, conn) -> None:
+        configured_emails = _configured_bootstrap_super_admin_emails()
+        if not configured_emails:
+            return
+        rows = conn.execute(
+            """
+            SELECT user_id, created_at
+            FROM users
+            WHERE email = ANY(%s)
+            ORDER BY created_at ASC, user_id ASC
+            """,
+            (list(configured_emails),),
+        ).fetchall()
+        for row in rows:
+            conn.execute(
+                """
+                INSERT INTO user_global_roles (user_id, role, granted_by_user_id, created_at)
+                VALUES (%s, 'super_admin', %s, %s)
+                ON CONFLICT(user_id, role) DO NOTHING
+                """,
+                (str(row["user_id"]), str(row["user_id"]), str(row["created_at"])),
+            )
+
+    @staticmethod
+    def _backfill_hashed_session_tokens_postgres(conn) -> None:
+        rows = conn.execute(
+            """
+            SELECT session_token
+            FROM sessions
+            WHERE session_token IS NOT NULL
+              AND session_token <> ''
+              AND session_token NOT LIKE 'sha256:%'
+            ORDER BY created_at ASC, session_token ASC
+            """
+        ).fetchall()
+        for row in rows:
+            legacy_token = str(row["session_token"])
+            conn.execute(
+                "UPDATE sessions SET session_token = %s WHERE session_token = %s",
+                (_hash_session_token(legacy_token), legacy_token),
+            )
+
     def _roles_by_user_id(self, conn, user_ids: Iterable[str]) -> dict[str, tuple[str, ...]]:
         ids = tuple(str(user_id) for user_id in user_ids)
         if not ids:
@@ -3364,6 +3789,8 @@ class PostgresAuthStore(_AuthStoreImpl):
             conn = self._pool.acquire()
             try:
                 apply_postgres_migrations(conn, target="auth")
+                self._backfill_hashed_session_tokens_postgres(conn)
+                conn.commit()
             finally:
                 self._pool.release(conn)
 
@@ -3386,18 +3813,18 @@ class PostgresAuthStore(_AuthStoreImpl):
             return "Pending PostgreSQL auth migrations detected"
         return None
 
-    def create_user(self, email: str, password: str) -> AuthUser:
+    def create_user(self, email: str, password: str, *, email_verified: bool = True) -> AuthUser:
         normalized_email = _normalize_email(email)
         now_text = _utc_now().isoformat()
         user_id = f"user_{uuid.uuid4().hex}"
         password_hash = self._hash_password(password)
+        email_verified_at = now_text if email_verified else None
         with self._lock:
             conn = self._pool.acquire()
             try:
-                is_first_user = int(conn.execute("SELECT COUNT(*) AS count FROM users").fetchone()["count"]) == 0
                 conn.execute(
-                    "INSERT INTO users (user_id, email, password_hash, created_at) VALUES (%s, %s, %s, %s)",
-                    (user_id, normalized_email, password_hash, now_text),
+                    "INSERT INTO users (user_id, email, password_hash, created_at, email_verified_at) VALUES (%s, %s, %s, %s, %s)",
+                    (user_id, normalized_email, password_hash, now_text, email_verified_at),
                 )
                 conn.execute(
                     """
@@ -3408,7 +3835,7 @@ class PostgresAuthStore(_AuthStoreImpl):
                     """,
                     (user_id, self._ensure_unique_public_uid(conn), _default_nickname_for_email(normalized_email), now_text, now_text),
                 )
-                if is_first_user:
+                if email_is_bootstrap_super_admin(normalized_email):
                     conn.execute(
                         """
                         INSERT INTO user_global_roles (user_id, role, granted_by_user_id, created_at)
@@ -3432,7 +3859,7 @@ class PostgresAuthStore(_AuthStoreImpl):
         with self._connect() as conn:
             row = conn.execute(
                 f"""
-                SELECT {USER_COLUMNS_SQL}, u.password_hash
+                SELECT {USER_COLUMNS_SQL}, u.password_hash, u.email_verified_at
                 FROM users u
                 JOIN user_profiles p ON p.user_id = u.user_id
                 WHERE u.email = %s
@@ -3441,6 +3868,8 @@ class PostgresAuthStore(_AuthStoreImpl):
             ).fetchone()
         if row is None or not self._verify_password(password, str(row["password_hash"])):
             raise PreconditionFailure("invalid email or password")
+        if str(row["email_verified_at"] or "").strip() == "":
+            raise PreconditionFailure("email verification is required before login")
         if str(row["status"]) != "active":
             raise PreconditionFailure("account is not active")
         return self._row_to_user(row)
@@ -3448,21 +3877,23 @@ class PostgresAuthStore(_AuthStoreImpl):
     def create_session(self, user_id: str) -> str:
         now = _utc_now()
         token = secrets.token_urlsafe(32)
+        stored_token = _hash_session_token(token)
         expires_at = (now + timedelta(days=_session_ttl_days())).isoformat()
         with self._lock:
             with self._connect() as conn:
                 conn.execute(
                     "INSERT INTO sessions (session_token, user_id, created_at, expires_at) VALUES (%s, %s, %s, %s)",
-                    (token, str(user_id), now.isoformat(), expires_at),
+                    (stored_token, str(user_id), now.isoformat(), expires_at),
                 )
                 conn.commit()
                 return token
 
     def get_user_by_session(self, session_token: str) -> AuthUser:
-        token = str(session_token).strip()
-        if not token:
+        candidates = _session_token_lookup_candidates(session_token)
+        if not candidates:
             raise NotFound("session")
         now_text = _utc_now().isoformat()
+        placeholders = ", ".join("%s" for _ in candidates)
         with self._connect() as conn:
             row = conn.execute(
                 f"""
@@ -3470,31 +3901,37 @@ class PostgresAuthStore(_AuthStoreImpl):
                 FROM sessions s
                 JOIN users u ON u.user_id = s.user_id
                 JOIN user_profiles p ON p.user_id = u.user_id
-                WHERE s.session_token = %s AND s.expires_at > %s AND p.status = 'active'
+                WHERE s.session_token IN ({placeholders}) AND s.expires_at > %s AND p.status = 'active'
                 """,
-                (token, now_text),
+                (*candidates, now_text),
             ).fetchone()
         if row is None:
             raise NotFound("session")
         return self._row_to_user(row)
 
     def delete_session(self, session_token: str) -> None:
-        token = str(session_token).strip()
-        if not token:
+        candidates = _session_token_lookup_candidates(session_token)
+        if not candidates:
             return
+        placeholders = ", ".join("%s" for _ in candidates)
         with self._lock:
             with self._connect() as conn:
-                conn.execute("DELETE FROM sessions WHERE session_token = %s", (token,))
+                conn.execute(f"DELETE FROM sessions WHERE session_token IN ({placeholders})", candidates)
                 conn.commit()
 
     def delete_other_sessions_for_user(self, user_id: str, *, except_session_token: str | None = None) -> None:
         with self._lock:
             with self._connect() as conn:
                 if except_session_token:
-                    conn.execute(
-                        "DELETE FROM sessions WHERE user_id = %s AND session_token <> %s",
-                        (str(user_id), str(except_session_token)),
-                    )
+                    candidates = _session_token_lookup_candidates(except_session_token)
+                    if candidates:
+                        placeholders = ", ".join("%s" for _ in candidates)
+                        conn.execute(
+                            f"DELETE FROM sessions WHERE user_id = %s AND session_token NOT IN ({placeholders})",
+                            (str(user_id), *candidates),
+                        )
+                    else:
+                        conn.execute("DELETE FROM sessions WHERE user_id = %s", (str(user_id),))
                 else:
                     conn.execute("DELETE FROM sessions WHERE user_id = %s", (str(user_id),))
                 conn.commit()
@@ -4258,6 +4695,129 @@ class PostgresAuthStore(_AuthStoreImpl):
                     raise NotFound("cloud account")
                 conn.commit()
 
+    def create_password_reset_token(self, email: str) -> str | None:
+        normalized_email = _normalize_email(email)
+        now = _utc_now()
+        now_text = now.isoformat()
+        expires_at = (now + timedelta(minutes=_password_reset_token_ttl_minutes())).isoformat()
+        raw_token = secrets.token_urlsafe(32)
+        token_hash = _hash_session_token(raw_token)
+        with self._lock:
+            with self._connect() as conn:
+                conn.execute("DELETE FROM password_reset_tokens WHERE expires_at <= %s", (now_text,))
+                row = conn.execute(
+                    f"""
+                    SELECT {USER_COLUMNS_SQL}
+                    FROM users u
+                    JOIN user_profiles p ON p.user_id = u.user_id
+                    WHERE u.email = %s AND p.status = 'active' AND u.email_verified_at IS NOT NULL AND BTRIM(u.email_verified_at) <> ''
+                    """,
+                    (normalized_email,),
+                ).fetchone()
+                if row is None:
+                    conn.commit()
+                    return None
+                conn.execute("DELETE FROM password_reset_tokens WHERE user_id = %s", (str(row["user_id"]),))
+                conn.execute(
+                    """
+                    INSERT INTO password_reset_tokens (token_hash, user_id, created_at, expires_at)
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                    (token_hash, str(row["user_id"]), now_text, expires_at),
+                )
+                conn.commit()
+                return raw_token
+
+    def create_email_verification_token(self, email: str) -> str | None:
+        normalized_email = _normalize_email(email)
+        now = _utc_now()
+        now_text = now.isoformat()
+        expires_at = (now + timedelta(minutes=_email_verification_token_ttl_minutes())).isoformat()
+        raw_token = secrets.token_urlsafe(32)
+        token_hash = _hash_session_token(raw_token)
+        with self._lock:
+            with self._connect() as conn:
+                conn.execute("DELETE FROM email_verification_tokens WHERE expires_at <= %s", (now_text,))
+                row = conn.execute(
+                    """
+                    SELECT u.user_id
+                    FROM users u
+                    JOIN user_profiles p ON p.user_id = u.user_id
+                    WHERE u.email = %s
+                      AND p.status = 'active'
+                      AND (u.email_verified_at IS NULL OR BTRIM(u.email_verified_at) = '')
+                    """,
+                    (normalized_email,),
+                ).fetchone()
+                if row is None:
+                    conn.commit()
+                    return None
+                user_id = str(row["user_id"])
+                conn.execute("DELETE FROM email_verification_tokens WHERE user_id = %s", (user_id,))
+                conn.execute(
+                    """
+                    INSERT INTO email_verification_tokens (token_hash, user_id, created_at, expires_at)
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                    (token_hash, user_id, now_text, expires_at),
+                )
+                conn.commit()
+                return raw_token
+
+    def verify_email_with_token(self, token: str) -> AuthUser:
+        token_hash = _hash_session_token(token)
+        now_text = _utc_now().isoformat()
+        with self._lock:
+            with self._connect() as conn:
+                conn.execute("DELETE FROM email_verification_tokens WHERE expires_at <= %s", (now_text,))
+                row = conn.execute(
+                    """
+                    SELECT evt.user_id
+                    FROM email_verification_tokens evt
+                    JOIN user_profiles p ON p.user_id = evt.user_id
+                    WHERE evt.token_hash = %s AND evt.expires_at > %s AND p.status = 'active'
+                    """,
+                    (token_hash, now_text),
+                ).fetchone()
+                if row is None:
+                    raise PreconditionFailure("email verification token is invalid or expired")
+                user_id = str(row["user_id"])
+                conn.execute(
+                    "UPDATE users SET email_verified_at = COALESCE(email_verified_at, %s) WHERE user_id = %s",
+                    (now_text, user_id),
+                )
+                conn.execute("DELETE FROM email_verification_tokens WHERE user_id = %s", (user_id,))
+                conn.commit()
+        return self.get_user_by_id(user_id)
+
+    def reset_password_with_token(self, token: str, *, new_password: str) -> None:
+        token_hash = _hash_session_token(token)
+        new_hash = self._hash_password(new_password)
+        now_text = _utc_now().isoformat()
+        with self._lock:
+            with self._connect() as conn:
+                conn.execute("DELETE FROM password_reset_tokens WHERE expires_at <= %s", (now_text,))
+                row = conn.execute(
+                    """
+                    SELECT pr.user_id
+                    FROM password_reset_tokens pr
+                    JOIN user_profiles p ON p.user_id = pr.user_id
+                    WHERE pr.token_hash = %s AND pr.expires_at > %s AND p.status = 'active'
+                    """,
+                    (token_hash, now_text),
+                ).fetchone()
+                if row is None:
+                    raise PreconditionFailure("password reset token is invalid or expired")
+                user_id = str(row["user_id"])
+                conn.execute("UPDATE users SET password_hash = %s WHERE user_id = %s", (new_hash, user_id))
+                conn.execute(
+                    "UPDATE user_profiles SET password_changed_at = %s, updated_at = %s WHERE user_id = %s",
+                    (now_text, now_text, user_id),
+                )
+                conn.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,))
+                conn.execute("DELETE FROM password_reset_tokens WHERE user_id = %s", (user_id,))
+                conn.commit()
+
     def change_password(self, user_id: str, *, current_password: str, new_password: str) -> None:
         new_hash = self._hash_password(new_password)
         now_text = _utc_now().isoformat()
@@ -4717,9 +5277,14 @@ class PostgresAuthStore(_AuthStoreImpl):
                     "email": str(row["email"]),
                     "passwordHash": str(row["password_hash"]),
                     "createdAt": str(row["created_at"]),
+                    "emailVerifiedAt": None if row["email_verified_at"] is None else str(row["email_verified_at"]),
                 }
                 for row in conn.execute(
-                    "SELECT user_id, email, password_hash, created_at FROM users ORDER BY created_at ASC, user_id ASC"
+                    """
+                    SELECT user_id, email, password_hash, created_at, email_verified_at
+                    FROM users
+                    ORDER BY created_at ASC, user_id ASC
+                    """
                 ).fetchall()
             ]
             sessions = [
@@ -4933,14 +5498,15 @@ class PostgresAuthStore(_AuthStoreImpl):
                     row = dict(item)
                     conn.execute(
                         """
-                        INSERT INTO users (user_id, email, password_hash, created_at)
-                        VALUES (%s, %s, %s, %s)
+                        INSERT INTO users (user_id, email, password_hash, created_at, email_verified_at)
+                        VALUES (%s, %s, %s, %s, %s)
                         """,
                         (
                             str(row.get("userId", "")),
                             str(row.get("email", "")),
                             str(row.get("passwordHash", "")),
                             str(row.get("createdAt", "")),
+                            row.get("emailVerifiedAt", row.get("createdAt")),
                         ),
                     )
                 for item in profiles:
@@ -5082,16 +5648,7 @@ class PostgresAuthStore(_AuthStoreImpl):
                         ),
                     )
                 if not roles:
-                    conn.execute(
-                        """
-                        INSERT INTO user_global_roles (user_id, role, granted_by_user_id, created_at)
-                        SELECT user_id, 'super_admin', user_id, created_at
-                        FROM users
-                        ORDER BY created_at ASC, user_id ASC
-                        LIMIT 1
-                        ON CONFLICT(user_id, role) DO NOTHING
-                        """
-                    )
+                    self._bootstrap_configured_super_admins_postgres(conn)
                 for item in sessions:
                     row = dict(item)
                     conn.execute(
@@ -5100,7 +5657,7 @@ class PostgresAuthStore(_AuthStoreImpl):
                         VALUES (%s, %s, %s, %s)
                         """,
                         (
-                            str(row.get("sessionToken", "")),
+                            _stored_session_token_value(row.get("sessionToken", "")),
                             str(row.get("userId", "")),
                             str(row.get("createdAt", "")),
                             str(row.get("expiresAt", "")),
@@ -5254,8 +5811,8 @@ class AuthStore:
             return
         self._impl = SQLiteAuthStore(cfg.auth_db_path)
 
-    def create_user(self, email: str, password: str) -> AuthUser:
-        return self._impl.create_user(email, password)
+    def create_user(self, email: str, password: str, *, email_verified: bool = True) -> AuthUser:
+        return self._impl.create_user(email, password, email_verified=email_verified)
 
     def authenticate_user(self, email: str, password: str) -> AuthUser:
         return self._impl.authenticate_user(email, password)
@@ -5495,6 +6052,18 @@ class AuthStore:
 
     def change_password(self, user_id: str, *, current_password: str, new_password: str) -> None:
         self._impl.change_password(user_id, current_password=current_password, new_password=new_password)
+
+    def create_password_reset_token(self, email: str) -> str | None:
+        return self._impl.create_password_reset_token(email)
+
+    def create_email_verification_token(self, email: str) -> str | None:
+        return self._impl.create_email_verification_token(email)
+
+    def verify_email_with_token(self, token: str) -> AuthUser:
+        return self._impl.verify_email_with_token(token)
+
+    def reset_password_with_token(self, token: str, *, new_password: str) -> None:
+        self._impl.reset_password_with_token(token, new_password=new_password)
 
     def list_user_roles(self, user_id: str) -> tuple[str, ...]:
         return self._impl.list_user_roles(user_id)

@@ -23,6 +23,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/car
 import { formatInstanceReference } from "@/ui/displayIdentifiers"
 import { useCommitReviewTask, useReviewBundle } from "@/ui/queries/workbench"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
+import {
+  EMPTY_REVIEW_SESSION,
+  clearPersistedReviewSession,
+  loadReviewSessionStateByHeadId,
+  saveReviewSessionStateByHeadId,
+  type ReviewSessionState,
+} from "@/ui/store/reviewSessionStore"
 import { touchDailyStudyActivity } from "@/ui/store/workbenchDailyStats"
 import { cn } from "@/ui/utils"
 
@@ -52,7 +59,7 @@ function msToClock(ms: number) {
 
 function simplifyMaterialName(value: string) {
   const normalized = value.trim()
-  if (!normalized) return "材料待确认"
+  if (!normalized) return "内容待确认"
   const leaf = normalized.split("/").at(-1)?.split("\\").at(-1) ?? normalized
   return leaf.replace(/\.[a-z0-9]+$/i, "") || leaf
 }
@@ -61,22 +68,6 @@ function formatAnchorLabel(instanceId: string, displayName: string | null | unde
   const title = simplifyMaterialName(formatInstanceReference(instanceId, displayName))
   const ms = parseAnchorMs(position)
   return `${title} · ${ms === null ? position : msToClock(ms)}`
-}
-
-type ReviewSessionState = {
-  answers: Record<string, 0 | 1>
-  showAnswer: Record<string, boolean>
-  insightDrafts: Record<string, string>
-  showInsightEditor: Record<string, boolean>
-  activeRecallPointId: string | null
-}
-
-const EMPTY_REVIEW_SESSION: ReviewSessionState = {
-  answers: {},
-  showAnswer: {},
-  insightDrafts: {},
-  showInsightEditor: {},
-  activeRecallPointId: null,
 }
 
 const REVIEW_ACTIVITY_WINDOW_MS = 75_000
@@ -103,20 +94,28 @@ export function ReviewPane({
     touchDailyStudyActivity(projectId, "review", REVIEW_ACTIVITY_WINDOW_MS)
   }
 
-  const [sessionStateByHeadId, setSessionStateByHeadId] = useState<Record<string, ReviewSessionState>>({})
+  const [sessionStateByHeadId, setSessionStateByHeadId] = useState<Record<string, ReviewSessionState>>(() =>
+    loadReviewSessionStateByHeadId(projectId),
+  )
   const sessionState = sessionStateByHeadId[headId] ?? EMPTY_REVIEW_SESSION
   const answers = sessionState.answers
   const showAnswer = sessionState.showAnswer
   const insightDrafts = sessionState.insightDrafts
   const showInsightEditor = sessionState.showInsightEditor
 
+  useEffect(() => {
+    setSessionStateByHeadId(loadReviewSessionStateByHeadId(projectId))
+  }, [projectId])
+
   function updateSessionState(updater: (current: ReviewSessionState) => ReviewSessionState) {
     setSessionStateByHeadId((state) => {
       const current = state[headId] ?? EMPTY_REVIEW_SESSION
-      return {
+      const nextState = {
         ...state,
         [headId]: updater(current),
       }
+      saveReviewSessionStateByHeadId(projectId, nextState)
+      return nextState
     })
   }
 
@@ -245,6 +244,12 @@ export function ReviewPane({
         reviewTaskId: headId,
         canRecall: canRecall as number[],
         appendedInsights,
+      })
+      clearPersistedReviewSession(projectId, headId)
+      setSessionStateByHeadId((state) => {
+        const nextState = { ...state }
+        delete nextState[headId]
+        return nextState
       })
       showSuccessFeedback(
         "复习结果已提交",

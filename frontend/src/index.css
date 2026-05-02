@@ -612,6 +612,8 @@
 @layer components {
   .theme-shell-glow {
     background: var(--theme-shell-glow);
+    -webkit-mask-image: linear-gradient(180deg, #000 0%, rgba(0, 0, 0, 0.88) 52%, transparent 100%);
+    mask-image: linear-gradient(180deg, #000 0%, rgba(0, 0, 0, 0.88) 52%, transparent 100%);
   }
 
   .theme-shell-header {
@@ -1506,6 +1508,10 @@
 
   .lp-showcase-carousel-section {
     padding-top: 22px;
+  }
+
+  .lp-showcase-page main > .lp-showcase-carousel-section:first-child {
+    padding-top: 18px;
   }
 
   .lp-showcase-carousel-shell {

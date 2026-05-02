@@ -12,7 +12,7 @@ type ShowcaseNavItem = {
 }
 
 const SHOWCASE_SCROLL_SPY_OFFSET = 156
-const BRAND_LOGO_SRC = "/favicon.svg"
+const BRAND_LOGO_SRC = "/favicon-logo-white-v2-192.png"
 
 function buildHomeSectionHref(sectionId: string, homeSectionPrefix: string) {
   return `${homeSectionPrefix}#${sectionId}`
@@ -34,9 +34,8 @@ export function getShowcaseNavItems(homeSectionPrefix = ""): ShowcaseNavItem[] {
   ]
 }
 
-function getShowcasePrimaryNavItems(homeSectionPrefix = ""): ShowcaseNavItem[] {
+function getShowcasePrimaryNavItems(): ShowcaseNavItem[] {
   return [
-    { href: buildHomeSectionHref("onboarding", homeSectionPrefix), label: "快速开始" },
     { href: "/subtitle-tool", label: "字幕工具" },
   ]
 }
@@ -97,7 +96,7 @@ export function ShowcaseSiteHeader(props: { homeSectionPrefix?: string }) {
   const location = useLocation()
   const { navActionHref, navActionLabel } = useShowcaseEntryPaths()
   const navItems = useMemo(() => getShowcaseNavItems(homeSectionPrefix), [homeSectionPrefix])
-  const primaryNavItems = useMemo(() => getShowcasePrimaryNavItems(homeSectionPrefix), [homeSectionPrefix])
+  const primaryNavItems = useMemo(() => getShowcasePrimaryNavItems(), [])
   const homeSectionIds = useMemo(
     () => navItems.map((item) => getSectionIdFromHref(item.href)).filter(Boolean),
     [navItems],

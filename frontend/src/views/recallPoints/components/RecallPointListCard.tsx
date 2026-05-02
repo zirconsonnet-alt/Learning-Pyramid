@@ -17,7 +17,7 @@ function formatApiError(err: unknown) {
 function formatInstanceLabel(instanceId: string | null | undefined, instanceTitleById?: Record<string, string>) {
   if (!instanceId) return "未绑定锚点"
   const title = instanceTitleById?.[instanceId]?.trim()
-  return title || "关联材料"
+  return title || "关联内容"
 }
 
 function buildWorkbenchHref(projectId: string, instanceId: string, position: string) {

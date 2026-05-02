@@ -933,13 +933,6 @@ class RecallPointRepository:
             anchor=rp.anchor,
             references=tuple(rp.references),
             insights=tuple(existed.insights),
-            source_project_id=rp.source_project_id,
-            source_recall_point_id=rp.source_recall_point_id,
-            source_material_id=rp.source_material_id,
-            source_material_title=rp.source_material_title,
-            source_anchor_label=rp.source_anchor_label,
-            mistake_status=rp.mistake_status,
-            mistake_note=rp.mistake_note,
             state=existed.state,
             deleted_at=existed.deleted_at,
         )
@@ -965,13 +958,6 @@ class RecallPointRepository:
             anchor=rp.anchor,
             references=tuple(rp.references),
             insights=tuple(rp.insights) + (insight,),
-            source_project_id=rp.source_project_id,
-            source_recall_point_id=rp.source_recall_point_id,
-            source_material_id=rp.source_material_id,
-            source_material_title=rp.source_material_title,
-            source_anchor_label=rp.source_anchor_label,
-            mistake_status=rp.mistake_status,
-            mistake_note=rp.mistake_note,
             state=rp.state,
             deleted_at=rp.deleted_at,
         )
@@ -993,13 +979,6 @@ class RecallPointRepository:
             anchor=rp.anchor,
             references=tuple(rp.references),
             insights=tuple(rp.insights),
-            source_project_id=rp.source_project_id,
-            source_recall_point_id=rp.source_recall_point_id,
-            source_material_id=rp.source_material_id,
-            source_material_title=rp.source_material_title,
-            source_anchor_label=rp.source_anchor_label,
-            mistake_status=rp.mistake_status,
-            mistake_note=rp.mistake_note,
             state=RecallPointState.DELETED,
             deleted_at=deleted_at,
         )
@@ -2906,8 +2885,8 @@ class InMemorySystem:
                 raise PreconditionFailure("create_project.initial_source_kind must be MaterialSourceKind")
             if not isinstance(initial_project_type, ProjectType):
                 raise PreconditionFailure("create_project.initial_project_type must be ProjectType")
-            if initial_project_type in {ProjectType.BOOK, ProjectType.MISTAKE_BOOK, ProjectType.LOOSE_POINTS} and initial_source_kind != MaterialSourceKind.MANUAL:
-                raise PreconditionFailure("create_project for BOOK/MISTAKE_BOOK/LOOSE_POINTS must use MANUAL source kind")
+            if initial_project_type in {ProjectType.BOOK, ProjectType.LOOSE_POINTS} and initial_source_kind != MaterialSourceKind.MANUAL:
+                raise PreconditionFailure("create_project for BOOK/LOOSE_POINTS must use MANUAL source kind")
             resolved_project_root = project_root
             if resolved_project_root is None:
                 auto_project_root, _ = allocate_project_root(title)

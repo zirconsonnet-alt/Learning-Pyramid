@@ -54,9 +54,32 @@ If you plan to enable paid membership, also read [membership-selfhost-launch-che
 - When `PLM_SQL_BACKEND=sqlite`, auth users, sessions, and project memberships are stored in `/data/plm_auth.sqlite3`.
 - When `PLM_SQL_BACKEND=sqlite`, core LearningPyramid business data is stored in `/data/plm_store.sqlite3` as normalized SQL tables plus one compatibility snapshot row per project.
 - When `PLM_SQL_BACKEND=postgres`, auth and project data live in the configured PostgreSQL database.
+- The self-host compose file mounts the same persistent directory at both `/data` and `/app/data`. `/data` stores runtime databases, while `/app/data` preserves existing project roots and uploaded recall-point media such as `media/asset_*.png` across container rebuilds.
 - Legacy `plm_store.json` files are import-only. If one is detected on first start, it is migrated into the active SQL backend and archived.
 - Project structure and server-side sync still come from the server's own project directory.
 - Browser local folder authorization is only used when the web client needs to read media files directly from the same device.
+
+## Data safety gate
+
+Hosted deployments expose `/api/system/data-safety` so operators and the frontend can distinguish a genuinely empty workspace from protected data that is missing or unreachable. The self-host sync scripts also protect runtime data paths from rsync delete rules.
+
+When enabling strict storage checks, set:
+
+```dotenv
+PLM_ENABLE_DATA_SAFETY_STORAGE_CHECKS=true
+PLM_PROTECTED_DATA_ROOTS=/data,/app/data
+PLM_PROTECTED_DATA_EXPECTED=true
+```
+
+With those checks enabled, deployment is blocked when protected data roots are missing, not directories, unreadable, or unexpectedly empty.
+
+Run an integrity check with explicit media references:
+
+```bash
+python tools/check_data_safety.py --media-references media-references.json --media-root ./data/selfhost --json
+```
+
+Blocking findings such as `MEDIA_FILE_MISSING` include the affected project, asset, and referencing record identifiers. Emergency overrides should be time-limited, include an operator, reason, expiry, and acknowledged risks, and be retained with the data-safety audit log.
 
 ## PostgreSQL runtime knobs
 
@@ -164,13 +187,14 @@ Recommended production setup is to schedule this script every 5 minutes with the
 Create a runtime bundle before major schema or backend changes:
 
 ```bash
-python tools/backup_runtime_bundle.py runtime-backup.json
+python tools/backup_runtime_bundle.py runtime-backup.json --include-media --media-root ./data/selfhost --verify
 ```
 
 Restore that bundle into the currently configured runtime with:
 
 ```bash
-python tools/restore_runtime_bundle.py runtime-backup.json
+python tools/restore_runtime_bundle.py runtime-backup.json --dry-run
+python tools/restore_runtime_bundle.py runtime-backup.json --confirm-replace --target-media-root ./data/selfhost
 ```
 
 Recommended migration/rollback workflow:
@@ -183,7 +207,11 @@ Recommended migration/rollback workflow:
 ## Recommended settings
 
 - Keep `PLM_ENABLE_ASR=false` for public deployments.
-- Keep `PLM_ALLOW_SIGNUP=false` unless you intentionally want open self-registration.
+- Hosted auth now keeps `PLM_ALLOW_SIGNUP=false` by default. Only set it to `true` when you intentionally want bootstrap or invite-based registration.
+- Hosted auth also keeps `PLM_REQUIRE_SIGNUP_INVITE=true` by default. Leave it that way for bootstrap or invite-based registration; only set it to `false` when you intentionally want free public registration.
+- When `PLM_ALLOW_SIGNUP=true` and `PLM_REQUIRE_SIGNUP_INVITE=true`, normal users must register with an invite code, and fresh deployments should set `PLM_BOOTSTRAP_SUPER_ADMIN_EMAILS` first so the initial administrator can sign up without one.
+- `PLM_BOOTSTRAP_SUPER_ADMIN_EMAILS` acts as a persistent break-glass allowlist while it stays configured; remove it after bootstrap if you do not want those addresses to keep regaining `super_admin`.
+- If you plan to open registration publicly, set `PLM_ENABLE_PASSWORD_RESET=true`, `PLM_ENABLE_EMAIL_VERIFICATION=true`, and `PLM_ENABLE_SIGNUP_HUMAN_CHECK=true`, then complete `PLM_SMTP_HOST`, `PLM_SMTP_FROM_EMAIL`, `PLM_PUBLIC_ORIGIN`, `PLM_TURNSTILE_SITE_KEY`, and `PLM_TURNSTILE_SECRET_KEY`.
 - Set `PLM_SECURE_COOKIES=true` when serving behind HTTPS.
 - If you expose the app on a public domain, put it behind a reverse proxy that terminates TLS.
 - The shipped `.env.selfhost.example` now uses `change-me` placeholders for secrets; replace them before booting the hosted app.

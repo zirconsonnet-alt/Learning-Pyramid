@@ -23,6 +23,7 @@ from backend.system.auth_store import (
     UserGlobalSettings,
     UserProjectDailyStudyStat,
     UserProjectDailyStudyStatInput,
+    _pomodoro_weekly_schedule_to_json,
 )
 from backend.system.baidu_netdisk_client import BAIDU_NETDISK_PROVIDER
 
@@ -104,18 +105,7 @@ def _global_settings_to_dto(item: UserGlobalSettings) -> dict:
             template.append({"kind": "REVIEW_TASK", "count": int(step.count or 1)})
         else:
             template.append({"kind": step.kind})
-    weekly_schedule = {}
-    for day in item.pomodoro_weekly_schedule:
-        weekly_schedule[day.day_key] = {
-            "enabled": day.enabled,
-            "startTime": day.start_time,
-            "focusMinutes": day.focus_minutes,
-            "breakMinutes": day.break_minutes,
-            "pomodoroCount": day.pomodoro_count,
-            "projectIds": list(day.project_ids),
-            "breakPrompt": day.break_prompt,
-            "focusPrompts": list(day.focus_prompts),
-        }
+    weekly_schedule = _pomodoro_weekly_schedule_to_json(item.pomodoro_weekly_schedule)
     return {
         "theme": item.theme,
         "pomodoro": {

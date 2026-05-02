@@ -17,7 +17,10 @@ from adapter.schemas import (
 from adapter.runtime_status import collect_runtime_status
 from backend.models.types import LearningObjectNodeId, LearningTaskNodeId, RecallPointId
 from backend.models.errors import ExternalServiceError, NotFound, PreconditionFailure
+from backend.system.email_verification_delivery import email_verification_enabled
+from backend.system.password_reset_delivery import password_reset_enabled
 from backend.system.runtime_features import current_runtime_features
+from backend.system.signup_human_check import current_signup_human_check_config, signup_human_check_enabled
 from backend.system.api import SystemAPI
 from backend.system.auth_store import AuthStore
 from backend.system.pomodoro_tts import PomodoroTtsUnavailable, synthesize_pomodoro_prompt_audio
@@ -62,6 +65,11 @@ def get_system_capabilities(
             "baiduNetdiskEnabled": features.baidu_netdisk_enabled,
             "authEnabled": features.auth_enabled,
             "allowSignup": features.allow_signup,
+            "signupInviteRequired": features.signup_invite_required,
+            "passwordResetEnabled": password_reset_enabled(),
+            "emailVerificationEnabled": email_verification_enabled(),
+            "signupHumanCheckEnabled": signup_human_check_enabled(),
+            "signupHumanCheckSiteKey": current_signup_human_check_config().site_key if signup_human_check_enabled() else None,
             "sqlBackend": runtime.get("sqlBackend"),
             "llmConfigured": bool(runtime.get("llmConfigured", False)),
             "storyGenerationConfigured": bool(runtime.get("storyGenerationConfigured", False)),
@@ -82,6 +90,16 @@ def get_system_runtime(
         auth_store=auth_store,
     )
     return JSONResponse(status_code=200 if ready else 503, content={"ok": ready, "data": runtime})
+
+
+@router.get("/system/data-safety")
+def get_system_data_safety(api: SystemAPI = Depends(get_api)) -> dict:
+    return {"ok": True, "data": api.get_data_safety_status()}
+
+
+@router.post("/system/data-safety/check")
+def run_system_data_safety_check(api: SystemAPI = Depends(get_api)) -> dict:
+    return {"ok": True, "data": api.get_data_safety_status()}
 
 
 @router.get("/system/public-downloads")

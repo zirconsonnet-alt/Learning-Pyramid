@@ -139,12 +139,95 @@ def test_postgres_auth_store_round_trip() -> None:
     user = auth.create_user("user@example.com", "password-123")
     session_token = auth.create_session(user.user_id)
 
+    conn = psycopg.connect(dsn)
+    try:
+        row = conn.execute(
+            "SELECT session_token FROM sessions WHERE user_id = %s",
+            (user.user_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+
     resolved = auth.get_user_by_session(session_token)
 
+    assert row is not None
+    assert str(row[0]).startswith("sha256:")
+    assert str(row[0]) != session_token
     assert resolved.user_id == user.user_id
     assert auth.authenticate_user("user@example.com", "password-123").user_id == user.user_id
     with pytest.raises(PreconditionFailure, match="email already exists"):
         auth.create_user("user@example.com", "password-456")
+
+
+def test_postgres_auth_store_backfills_legacy_plaintext_session_tokens() -> None:
+    dsn = require_postgres_test_dsn()
+    reset_postgres_database(dsn)
+
+    auth = PostgresAuthStore(dsn)
+    user = auth.create_user("legacy-user@example.com", "password-123")
+    session_token = auth.create_session(user.user_id)
+
+    conn = psycopg.connect(dsn)
+    try:
+        conn.execute(
+            "UPDATE sessions SET session_token = %s WHERE user_id = %s",
+            (session_token, user.user_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    reloaded = PostgresAuthStore(dsn)
+
+    conn = psycopg.connect(dsn)
+    try:
+        row = conn.execute(
+            "SELECT session_token FROM sessions WHERE user_id = %s",
+            (user.user_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert row is not None
+    assert str(row[0]).startswith("sha256:")
+    assert str(row[0]) != session_token
+    assert reloaded.get_user_by_session(session_token).user_id == user.user_id
+
+
+def test_postgres_auth_store_password_reset_flow() -> None:
+    dsn = require_postgres_test_dsn()
+    reset_postgres_database(dsn)
+
+    auth = PostgresAuthStore(dsn)
+    user = auth.create_user("reset@example.com", "password-123")
+    session_token = auth.create_session(user.user_id)
+    reset_token = auth.create_password_reset_token("reset@example.com")
+
+    assert reset_token is not None
+
+    conn = psycopg.connect(dsn)
+    try:
+        row = conn.execute(
+            "SELECT token_hash FROM password_reset_tokens WHERE user_id = %s",
+            (user.user_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert row is not None
+    assert str(row[0]).startswith("sha256:")
+    assert str(row[0]) != reset_token
+
+    auth.reset_password_with_token(str(reset_token), new_password="password-456")
+
+    with pytest.raises(PreconditionFailure, match="invalid or expired"):
+        auth.reset_password_with_token(str(reset_token), new_password="password-789")
+    with pytest.raises(PreconditionFailure, match="invalid email or password"):
+        auth.authenticate_user("reset@example.com", "password-123")
+    with pytest.raises(NotFound, match="session"):
+        auth.get_user_by_session(session_token)
+
+    assert auth.authenticate_user("reset@example.com", "password-456").user_id == user.user_id
 
 
 def test_postgres_auth_store_tolerates_missing_user_cloud_accounts_table() -> None:
@@ -239,6 +322,7 @@ def test_postgres_runtime_records_schema_migrations_and_uses_hot_indexes() -> No
             ("auth", 12, "auth_user_cloud_accounts"),
             ("auth", 13, "auth_user_project_daily_study_stats"),
             ("auth", 14, "auth_user_global_settings"),
+            ("auth", 15, "auth_password_reset_tokens"),
             ("store", 1, "initial_store_schema"),
             ("store", 2, "store_hot_indexes"),
             ("store", 3, "entry_registration_seq"),

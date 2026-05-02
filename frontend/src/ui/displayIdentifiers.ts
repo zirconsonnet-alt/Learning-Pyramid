@@ -27,14 +27,14 @@ export function formatRecallPointReference(recallPointId: string | null | undefi
 export function formatInstanceReference(
   instanceId: string | null | undefined,
   displayName?: string | null,
-  empty = "材料实例待确认",
+  empty = "内容实例待确认",
 ) {
   const normalizedTitle = displayName?.trim()
   if (normalizedTitle) return normalizedTitle
-  return formatOpaqueReference(instanceId, "材料实例", 6, empty)
+  return formatOpaqueReference(instanceId, "内容实例", 6, empty)
 }
 
-export function simplifyMaterialDisplayName(value: string | null | undefined, empty = "材料待确认") {
+export function simplifyMaterialDisplayName(value: string | null | undefined, empty = "内容待确认") {
   const normalized = value?.trim()
   if (!normalized) return empty
   const leaf = normalized.split("/").at(-1)?.split("\\").at(-1)?.trim() ?? normalized
@@ -45,8 +45,8 @@ export function simplifyMaterialDisplayName(value: string | null | undefined, em
   return leaf.slice(0, dotIndex).trim() || leaf
 }
 
-export function formatMaterialReference(materialId: string | null | undefined, empty = "材料待确认") {
-  return formatOpaqueReference(materialId, "材料", 6, empty)
+export function formatMaterialReference(materialId: string | null | undefined, empty = "内容待确认") {
+  return formatOpaqueReference(materialId, "内容", 6, empty)
 }
 
 export function formatObjectNodeReference(nodeId: string | null | undefined, empty = "对象节点未关联") {

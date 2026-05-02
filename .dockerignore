@@ -3,6 +3,10 @@
 .pytest_cache
 __pycache__
 *.py[cod]
+.venv
+venv
+*.log*
+coverage
 
 .plm_store.json
 .plm_store.json.bak-*
@@ -11,6 +15,7 @@ __pycache__
 data
 build
 release
+.env*
 
 frontend/node_modules
 frontend/*.tsbuildinfo

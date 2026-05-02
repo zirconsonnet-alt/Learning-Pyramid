@@ -1,4 +1,5 @@
 import { startTransition, type ReactNode } from "react"
+import { Copy } from "lucide-react"
 import katex from "katex"
 import "katex/dist/katex.min.css"
 import { useSearchParams } from "react-router-dom"
@@ -6,7 +7,16 @@ import { useSearchParams } from "react-router-dom"
 import methodGuideMarkdown from "../../../../docs/plm-method-guide.md?raw"
 import userManualMarkdown from "../../../../docs/learningpyramid-user-manual.md?raw"
 
+import { Button } from "@/ui/components/ui/button"
+import {
+  getOfficialCommunityCopyLabel,
+  getOfficialCommunityCopySuccessMessage,
+  getOfficialCommunityCopySuccessTitle,
+  getOfficialCommunityCopyValue,
+} from "@/ui/officialCommunity"
+import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { cn } from "@/ui/utils"
+import { copyTextToClipboard } from "@/views/membership/membershipUi"
 
 type HeadingLevel = 1 | 2 | 3 | 4 | 5 | 6
 
@@ -212,7 +222,7 @@ const docs: DocDefinition[] = [
     slug: "manual",
     label: "系统使用说明",
     audience: "面向使用者",
-    summary: "从创建项目、整理材料到录入复述点和完成复习，按当前界面一步步上手。",
+    summary: "从创建项目、整理内容到录入复述点和完成复习，按当前界面一步步上手。",
     sourcePath: "仓库文档 / 系统使用说明",
     parsed: parseMarkdown(userManualMarkdown),
   },
@@ -370,6 +380,16 @@ export function GuidePage() {
   const requestedSlug = searchParams.get("doc")
   const activeDoc = docs.find((item) => item.slug === requestedSlug) ?? docs[0]
 
+  async function onCopyOfficialCommunityContact() {
+    try {
+      await copyTextToClipboard(getOfficialCommunityCopyValue())
+      showSuccessFeedback(getOfficialCommunityCopySuccessTitle(), getOfficialCommunityCopySuccessMessage())
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "请稍后再试。"
+      showErrorFeedback("复制官方群入口失败", message)
+    }
+  }
+
   function selectDoc(slug: string) {
     const nextSearchParams = new URLSearchParams(searchParams)
     if (slug === docs[0].slug) nextSearchParams.delete("doc")
@@ -408,6 +428,20 @@ export function GuidePage() {
                 )
               })}
             </div>
+          </section>
+
+          <section className="theme-card mt-4 p-4">
+            <div className="text-sm font-semibold text-foreground">官方群与反馈</div>
+            <img
+              src="/official-community-qq-group.png"
+              alt="LearningPyramid 官方群二维码"
+              className="mt-4 w-full rounded-[1.25rem] border border-[color:var(--theme-soft-border)] bg-white object-cover"
+              loading="lazy"
+            />
+            <Button type="button" variant="outline" className="mt-4 w-full justify-center" onClick={() => void onCopyOfficialCommunityContact()}>
+              <Copy className="h-4 w-4" />
+              {getOfficialCommunityCopyLabel()}
+            </Button>
           </section>
         </aside>
 

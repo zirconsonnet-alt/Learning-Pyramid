@@ -3,7 +3,6 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 import { ApiError } from "@/ui/api/http"
 import { getAggregationQueue, listAggregationEvents, listLayers, manualRollUp } from "@/ui/api/layers"
 import {
-  ensureMistakeInbox,
   getLearningObjectNode,
   importLearningObjectsFromBaiduNetdisk,
   importLearningObjectsFromBrowser,
@@ -247,19 +246,6 @@ export function useInitializeBookLearningObjectsFromSubjectMaterial(projectId: s
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (params: { sourceMaterialId: string }) => initializeBookLearningObjectsFromSubjectMaterial(projectId, params),
-    onSuccess: async () => {
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: ["instances", projectId] }),
-        qc.invalidateQueries({ queryKey: ["learningObjectNodes", projectId] }),
-      ])
-    },
-  })
-}
-
-export function useEnsureMistakeInbox(projectId: string) {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: () => ensureMistakeInbox(projectId),
     onSuccess: async () => {
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["instances", projectId] }),

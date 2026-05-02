@@ -12,7 +12,7 @@ export const SubjectSchema = z.object({
 })
 export type Subject = z.infer<typeof SubjectSchema>
 
-export const StudyMaterialTypeSchema = z.enum(["COURSE", "BOOK", "LOOSE_POINTS", "MISTAKE_BOOK"])
+export const StudyMaterialTypeSchema = z.enum(["COURSE", "BOOK", "LOOSE_POINTS"])
 export type StudyMaterialType = z.infer<typeof StudyMaterialTypeSchema>
 
 export const StudyMaterialSchema = z.object({

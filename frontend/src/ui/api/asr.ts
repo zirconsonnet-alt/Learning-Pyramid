@@ -2,6 +2,9 @@ import { z } from "zod"
 
 import { apiRequest } from "@/ui/api/http"
 
+const AUDIO_PAYLOAD_TOO_LARGE_MESSAGE =
+  "上传的音频片段过大，服务器或网关拒绝了这次请求。请稍后重试；如果问题持续出现，需要调大站点上传限制。"
+
 export const AsrSegmentSchema = z.object({
   startMs: z.number().int(),
   endMs: z.number().int(),
@@ -103,6 +106,7 @@ export function requestAsrFromAudioClip(
     body,
     responseSchema: AsrTranscriptResultSchema,
     timeoutMs: 180_000,
+    payloadTooLargeMessage: AUDIO_PAYLOAD_TOO_LARGE_MESSAGE,
   })
 }
 
@@ -158,6 +162,7 @@ export function requestInstanceAsrFromAudioClip(
     body,
     responseSchema: InstanceAsrTranscriptResultSchema,
     timeoutMs: 180_000,
+    payloadTooLargeMessage: AUDIO_PAYLOAD_TOO_LARGE_MESSAGE,
   })
 }
 

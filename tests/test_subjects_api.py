@@ -309,7 +309,7 @@ def test_initialize_book_from_course_material_tree(monkeypatch, tmp_path: Path) 
     _reset_caches()
 
 
-def test_collect_recall_point_into_mistake_material(monkeypatch, tmp_path: Path) -> None:
+def test_reject_removed_mistake_material_type(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("PLM_APP_MODE", "local")
     monkeypatch.setenv("PLM_ENABLE_AUTH", "false")
     monkeypatch.setenv("PLM_STORE_PATH", "")
@@ -324,102 +324,13 @@ def test_collect_recall_point_into_mistake_material(monkeypatch, tmp_path: Path)
     assert create_subject_resp.status_code == 200
     subject_id = create_subject_resp.json()["data"]["subjectId"]
 
-    import_course_resp = client.post(
-        f"/api/projects/{subject_id}/import-learning-objects-from-browser",
-        json={
-            "rootTitle": "高数网课",
-            "relativeFilePaths": ["第一章/1.1 极限.mp4"],
-        },
-    )
-    assert import_course_resp.status_code == 200
-
-    instances_resp = client.get(f"/api/projects/{subject_id}/instances")
-    assert instances_resp.status_code == 200
-    source_instance_id = instances_resp.json()["data"][0]["instanceId"]
-
-    submit_task_resp = client.post(
-        f"/api/projects/{subject_id}/learning-tasks",
-        json={
-            "title": "极限入门",
-            "items": [
-                {
-                    "question": [{"kind": "TEXT", "text": "什么时候要用夹逼定理？"}],
-                    "answer": [{"kind": "TEXT", "text": "当目标极限难直接求，但能找到上下界且它们极限相同时。"}],
-                    "anchor": {"instanceId": source_instance_id, "position": "t=1200"},
-                }
-            ],
-        },
-    )
-    assert submit_task_resp.status_code == 200
-
-    source_recall_points_resp = client.get(f"/api/projects/{subject_id}/instances/{source_instance_id}/recall-points")
-    assert source_recall_points_resp.status_code == 200
-    source_recall_point_id = source_recall_points_resp.json()["data"]["recallPointIds"][0]
-
     create_mistake_resp = client.post(
         f"/api/subjects/{subject_id}/materials",
         json={"materialType": "MISTAKE_BOOK", "title": "高数错题"},
     )
-    assert create_mistake_resp.status_code == 200
-    mistake_material = create_mistake_resp.json()["data"]
-    mistake_project_id = mistake_material["compatibilityProjectId"]
-    assert mistake_project_id
-
-    mistake_config_resp = client.get(f"/api/projects/{mistake_project_id}/project-config")
-    assert mistake_config_resp.status_code == 200
-    assert mistake_config_resp.json()["data"]["projectType"] == "MISTAKE_BOOK"
-
-    collect_resp = client.post(
-        f"/api/projects/{subject_id}/recall-points/{source_recall_point_id}/collect-to-mistake-material",
-        json={
-            "targetMaterialId": mistake_material["materialId"],
-            "mistakeNote": "总是在这里忘记先构造上下界。",
-        },
-    )
-    assert collect_resp.status_code == 200
-    collect_data = collect_resp.json()["data"]
-    assert collect_data["target_project_id"] == mistake_project_id
-    assert collect_data["created_inbox"] is True
-
-    mistake_nodes_resp = client.get(f"/api/projects/{mistake_project_id}/learning-object-nodes")
-    assert mistake_nodes_resp.status_code == 200
-    mistake_nodes = mistake_nodes_resp.json()["data"]
-    assert len(mistake_nodes) == 1
-    assert mistake_nodes[0]["kind"] == "leaf"
-    assert mistake_nodes[0]["title"] == "待整理"
-
-    target_recall_point_resp = client.get(
-        f"/api/projects/{mistake_project_id}/recall-points/{collect_data['target_recall_point_id']}"
-    )
-    assert target_recall_point_resp.status_code == 200
-    target_recall_point = target_recall_point_resp.json()["data"]
-    assert target_recall_point["sourceProjectId"] == subject_id
-    assert target_recall_point["sourceRecallPointId"] == source_recall_point_id
-    assert target_recall_point["sourceMaterialId"] == "legacy_main"
-    assert target_recall_point["sourceMaterialTitle"] == "默认网课材料"
-    assert target_recall_point["mistakeStatus"] == "OPEN"
-    assert target_recall_point["mistakeNote"] == "总是在这里忘记先构造上下界。"
-    assert target_recall_point["anchor"]["instanceId"]
-    assert "默认网课材料" in target_recall_point["anchor"]["position"]
-
-    edit_resp = client.put(
-        f"/api/projects/{mistake_project_id}/recall-points/{collect_data['target_recall_point_id']}",
-        json={
-            "question": target_recall_point["question"],
-            "answer": target_recall_point["answer"],
-            "anchor": target_recall_point["anchor"],
-            "mistakeStatus": "RESOLVING",
-            "mistakeNote": "已经知道要先找一对可比较的上下界。",
-        },
-    )
-    assert edit_resp.status_code == 200
-
-    edited_target_recall_point_resp = client.get(
-        f"/api/projects/{mistake_project_id}/recall-points/{collect_data['target_recall_point_id']}"
-    )
-    assert edited_target_recall_point_resp.status_code == 200
-    edited_target_recall_point = edited_target_recall_point_resp.json()["data"]
-    assert edited_target_recall_point["mistakeStatus"] == "RESOLVING"
-    assert edited_target_recall_point["mistakeNote"] == "已经知道要先找一对可比较的上下界。"
+    assert create_mistake_resp.status_code == 400
+    payload = create_mistake_resp.json()
+    assert payload["error"]["code"] == "PRECONDITION"
+    assert payload["error"]["message"] == "materialType must be one of COURSE, BOOK, LOOSE_POINTS"
 
     _reset_caches()

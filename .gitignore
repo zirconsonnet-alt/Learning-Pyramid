@@ -2,6 +2,10 @@
 .pytest_cache/
 __pycache__/
 *.py[cod]
+.venv/
+venv/
+*.log
+coverage/
 
 .plm_store.json
 .plm_store.json.bak-*
@@ -16,6 +20,8 @@ config/caddy/
 frontend/node_modules/
 frontend/dist/
 frontend/*.tsbuildinfo
+.env
+.env*
 .env.selfhost.sync
 
 .DS_Store

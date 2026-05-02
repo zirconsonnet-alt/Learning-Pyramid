@@ -42,6 +42,7 @@ def hosted_postgres_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> str:
     monkeypatch.setenv("PLM_POSTGRES_DSN", dsn)
     monkeypatch.setenv("PLM_ENABLE_AUTH", "true")
     monkeypatch.setenv("PLM_ALLOW_SIGNUP", "true")
+    monkeypatch.setenv("PLM_BOOTSTRAP_SUPER_ADMIN_EMAILS", "owner@example.com")
     monkeypatch.setenv("PLM_ENABLE_ASR", "false")
     monkeypatch.setenv("PLM_ENABLE_SERVER_MEDIA_STREAM", "false")
     monkeypatch.setenv("PLM_ENABLE_BROWSER_LOCAL_MEDIA", "true")

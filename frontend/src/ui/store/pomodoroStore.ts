@@ -7,6 +7,8 @@ export type PomodoroWeekday = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "s
 
 export type PomodoroSegment = {
   phase: PomodoroPhase
+  planId: string
+  planIndex: number
   pomodoroIndex: number
   durationMs: number
   startOffsetMs: number
@@ -15,7 +17,8 @@ export type PomodoroSegment = {
   promptText: string
 }
 
-export type PomodoroDaySchedule = {
+export type PomodoroPlanSchedule = {
+  id: string
   enabled: boolean
   startTime: string
   focusMinutes: number
@@ -24,6 +27,10 @@ export type PomodoroDaySchedule = {
   projectIds: Array<string | null>
   breakPrompt: string
   focusPrompts: string[]
+}
+
+export type PomodoroDaySchedule = {
+  plans: PomodoroPlanSchedule[]
 }
 
 export type PomodoroWeekSchedule = Record<PomodoroWeekday, PomodoroDaySchedule>
@@ -46,6 +53,8 @@ export type PomodoroSnapshot = {
   progressRatio: number
   segmentProgressRatio: number
   segment: PomodoroSegment | null
+  currentPlan: PomodoroPlanSchedule | null
+  currentPlanIndex: number
   startTime: string
   startAtMs: number | null
   endAtMs: number | null
@@ -78,6 +87,10 @@ type PomodoroState = {
   setDaySchedule: (day: PomodoroWeekday, schedule: Partial<PomodoroDaySchedule>) => void
   setSettings: (settings: { enabled: boolean; weeklySchedule: PomodoroWeekSchedule; transitionSoundEnabled?: boolean }) => void
   reset: () => void
+}
+
+type PomodoroDayScheduleInput = Partial<PomodoroPlanSchedule> & {
+  plans?: unknown[]
 }
 
 const DEFAULT_FOCUS_MINUTES = 25
@@ -113,6 +126,11 @@ function normalizeBreakMinutes(value: number) {
 
 function normalizePomodoroCount(value: number) {
   return clampInt(value, 1, 12)
+}
+
+function normalizePomodoroPlanId(value: unknown, fallback: string) {
+  const text = typeof value === "string" ? value.replace(/\s+/g, "-").trim() : ""
+  return (text || fallback).slice(0, 80)
 }
 
 function normalizePomodoroProjectId(value: unknown) {
@@ -154,9 +172,15 @@ export function normalizePomodoroStartTime(value: string | null | undefined) {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`
 }
 
-export function createPomodoroDaySchedule(overrides?: Partial<PomodoroDaySchedule>): PomodoroDaySchedule {
+export function createPomodoroPlanSchedule(
+  overrides?: Partial<PomodoroPlanSchedule>,
+  options?: { day?: PomodoroWeekday; index?: number },
+): PomodoroPlanSchedule {
+  const planIndex = options?.index ?? 0
+  const fallbackId = `${options?.day ?? "plan"}-${planIndex + 1}`
   const pomodoroCount = normalizePomodoroCount(overrides?.pomodoroCount ?? DEFAULT_POMODORO_COUNT)
   return {
+    id: normalizePomodoroPlanId(overrides?.id, fallbackId),
     enabled: Boolean(overrides?.enabled ?? false),
     startTime: normalizePomodoroStartTime(overrides?.startTime),
     focusMinutes: normalizeFocusMinutes(overrides?.focusMinutes ?? DEFAULT_FOCUS_MINUTES),
@@ -168,16 +192,33 @@ export function createPomodoroDaySchedule(overrides?: Partial<PomodoroDaySchedul
   }
 }
 
-export function createPomodoroWeekSchedule(overrides?: Partial<Record<PomodoroWeekday, Partial<PomodoroDaySchedule>>>) {
+export function createPomodoroDaySchedule(
+  overrides?: PomodoroDayScheduleInput,
+  options?: { day?: PomodoroWeekday },
+): PomodoroDaySchedule {
+  const raw = overrides && typeof overrides === "object" ? (overrides as Record<string, unknown>) : {}
+  const rawPlans = Array.isArray(raw.plans) ? raw.plans : raw.enabled ? [raw] : []
+  const plans = rawPlans
+    .map((item, index) =>
+      createPomodoroPlanSchedule(
+        item && typeof item === "object" ? (item as Partial<PomodoroPlanSchedule>) : {},
+        { day: options?.day, index },
+      ),
+    )
+    .sort((left, right) => readStartMinutes(left.startTime) - readStartMinutes(right.startTime) || left.id.localeCompare(right.id))
+  return { plans }
+}
+
+export function createPomodoroWeekSchedule(overrides?: Partial<Record<PomodoroWeekday, PomodoroDayScheduleInput>>) {
   return POMODORO_WEEKDAYS.reduce((result, day) => {
-    result[day] = createPomodoroDaySchedule(overrides?.[day])
+    result[day] = createPomodoroDaySchedule(overrides?.[day], { day })
     return result
   }, {} as PomodoroWeekSchedule)
 }
 
 export function clonePomodoroWeekSchedule(weeklySchedule: PomodoroWeekSchedule) {
   return POMODORO_WEEKDAYS.reduce((result, day) => {
-    result[day] = createPomodoroDaySchedule(weeklySchedule[day])
+    result[day] = createPomodoroDaySchedule(weeklySchedule[day], { day })
     return result
   }, {} as PomodoroWeekSchedule)
 }
@@ -206,26 +247,35 @@ export function normalizePomodoroWeekSchedule(
 
   return POMODORO_WEEKDAYS.reduce((result, day) => {
     const item = raw?.[day]
-    const schedule = item && typeof item === "object" ? (item as Partial<PomodoroDaySchedule>) : {}
-    result[day] = createPomodoroDaySchedule({
-      enabled: schedule.enabled,
-      startTime: schedule.startTime,
-      focusMinutes:
-        typeof schedule.focusMinutes === "number" ? schedule.focusMinutes : fallbackFocusMinutes,
-      breakMinutes:
-        typeof schedule.breakMinutes === "number" ? schedule.breakMinutes : fallbackBreakMinutes,
-      pomodoroCount:
-        typeof schedule.pomodoroCount === "number" ? schedule.pomodoroCount : fallbackPomodoroCount,
-      projectIds: schedule.projectIds,
-      breakPrompt: schedule.breakPrompt,
-      focusPrompts: schedule.focusPrompts,
-    })
+    const schedule = item && typeof item === "object" ? (item as Record<string, unknown>) : {}
+    const rawPlans = Array.isArray(schedule.plans) ? schedule.plans : schedule.enabled ? [schedule] : []
+    result[day] = createPomodoroDaySchedule(
+      {
+        plans: rawPlans.map((rawPlan) => {
+          const plan = rawPlan && typeof rawPlan === "object" ? (rawPlan as Partial<PomodoroPlanSchedule>) : {}
+          return {
+            ...plan,
+            enabled: plan.enabled ?? (Array.isArray(schedule.plans) ? true : Boolean(schedule.enabled)),
+            focusMinutes: typeof plan.focusMinutes === "number" ? plan.focusMinutes : fallbackFocusMinutes,
+            breakMinutes: typeof plan.breakMinutes === "number" ? plan.breakMinutes : fallbackBreakMinutes,
+            pomodoroCount: typeof plan.pomodoroCount === "number" ? plan.pomodoroCount : fallbackPomodoroCount,
+          }
+        }),
+      },
+      { day },
+    )
     return result
   }, {} as PomodoroWeekSchedule)
 }
 
 export function hasEnabledPomodoroSchedule(weeklySchedule: PomodoroWeekSchedule) {
-  return POMODORO_WEEKDAYS.some((day) => weeklySchedule[day].enabled)
+  return POMODORO_WEEKDAYS.some((day) => getActivePomodoroDayPlans(weeklySchedule[day]).length > 0)
+}
+
+export function getActivePomodoroDayPlans(daySchedule: PomodoroDaySchedule) {
+  return [...(daySchedule?.plans ?? [])]
+    .filter((plan) => plan.enabled)
+    .sort((left, right) => readStartMinutes(left.startTime) - readStartMinutes(right.startTime) || left.id.localeCompare(right.id))
 }
 
 function readStartMinutes(startTime: string) {
@@ -233,6 +283,47 @@ function readStartMinutes(startTime: string) {
   const hours = Number.parseInt(hoursText ?? "0", 10)
   const minutes = Number.parseInt(minutesText ?? "0", 10)
   return hours * 60 + minutes
+}
+
+function getPomodoroPlanDurationMs(plan: PomodoroPlanSchedule) {
+  const focusDurationMs = normalizeFocusMinutes(plan.focusMinutes) * 60_000
+  const breakDurationMs = normalizeBreakMinutes(plan.breakMinutes) * 60_000
+  const pomodoroCount = normalizePomodoroCount(plan.pomodoroCount)
+  return focusDurationMs * pomodoroCount + breakDurationMs * Math.max(0, pomodoroCount - 1)
+}
+
+export function validatePomodoroWeekSchedule(weeklySchedule: PomodoroWeekSchedule) {
+  const normalized = normalizePomodoroWeekSchedule(weeklySchedule)
+  const messages: string[] = []
+
+  for (const day of POMODORO_WEEKDAYS) {
+    const ranges = getActivePomodoroDayPlans(normalized[day]).map((plan) => {
+      const startMinutes = readStartMinutes(plan.startTime)
+      const endMinutes = startMinutes + getPomodoroPlanDurationMs(plan) / 60_000
+      return { plan, startMinutes, endMinutes }
+    })
+
+    for (const range of ranges) {
+      if (range.endMinutes > 24 * 60) {
+        messages.push(`${POMODORO_WEEKDAY_LABELS[day]} ${range.plan.startTime} 的计划不能跨过当天 24:00`)
+      }
+    }
+
+    const sortedRanges = ranges
+      .filter((range) => range.endMinutes <= 24 * 60)
+      .sort((left, right) => left.startMinutes - right.startMinutes || left.plan.id.localeCompare(right.plan.id))
+    for (let index = 1; index < sortedRanges.length; index += 1) {
+      const previous = sortedRanges[index - 1]
+      const current = sortedRanges[index]
+      if (previous && current && current.startMinutes < previous.endMinutes) {
+        messages.push(
+          `${POMODORO_WEEKDAY_LABELS[day]} 计划时间冲突：${previous.plan.startTime} 与 ${current.plan.startTime}`,
+        )
+      }
+    }
+  }
+
+  return messages
 }
 
 function getPomodoroWeekday(date: Date): PomodoroWeekday {
@@ -265,13 +356,14 @@ function findNextPomodoroStart(now: number, weeklySchedule: PomodoroWeekSchedule
   for (let offset = 0; offset < 14; offset += 1) {
     const candidateDate = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate() + offset)
     const candidateDay = getPomodoroWeekday(candidateDate)
-    const candidateSchedule = weeklySchedule[candidateDay]
-    if (!candidateSchedule.enabled) continue
-    const candidateStartAtMs = getScheduledStartAtMs(candidateDate, candidateSchedule.startTime)
-    if (candidateStartAtMs > now) {
-      return {
-        nextStartAtMs: candidateStartAtMs,
-        nextStartDay: candidateDay,
+    const candidatePlans = getActivePomodoroDayPlans(weeklySchedule[candidateDay])
+    for (const candidatePlan of candidatePlans) {
+      const candidateStartAtMs = getScheduledStartAtMs(candidateDate, candidatePlan.startTime)
+      if (candidateStartAtMs > now) {
+        return {
+          nextStartAtMs: candidateStartAtMs,
+          nextStartDay: candidateDay,
+        }
       }
     }
   }
@@ -297,6 +389,7 @@ export function buildPomodoroSegments(
   projectIds?: Array<string | null>,
   focusPrompts?: string[],
   breakPrompt?: string,
+  options?: { planId?: string; planIndex?: number },
 ): PomodoroSegment[] {
   const normalizedFocusMinutes = normalizeFocusMinutes(focusMinutes)
   const normalizedBreakMinutes = normalizeBreakMinutes(breakMinutes)
@@ -304,6 +397,8 @@ export function buildPomodoroSegments(
   const normalizedProjectIds = normalizePomodoroProjectIds(projectIds, normalizedPomodoroCount)
   const normalizedFocusPrompts = normalizePomodoroFocusPrompts(focusPrompts, normalizedPomodoroCount)
   const normalizedBreakPrompt = normalizePomodoroPromptText(breakPrompt)
+  const planId = normalizePomodoroPlanId(options?.planId, "plan-1")
+  const planIndex = options?.planIndex ?? 0
   const focusDurationMs = normalizedFocusMinutes * 60_000
   const breakDurationMs = normalizedBreakMinutes * 60_000
   const segments: PomodoroSegment[] = []
@@ -312,6 +407,8 @@ export function buildPomodoroSegments(
   for (let index = 0; index < normalizedPomodoroCount; index += 1) {
     segments.push({
       phase: "focus",
+      planId,
+      planIndex,
       pomodoroIndex: index + 1,
       durationMs: focusDurationMs,
       startOffsetMs: offsetMs,
@@ -324,6 +421,8 @@ export function buildPomodoroSegments(
     if (index < normalizedPomodoroCount - 1) {
       segments.push({
         phase: "break",
+        planId,
+        planIndex,
         pomodoroIndex: index + 1,
         durationMs: breakDurationMs,
         startOffsetMs: offsetMs,
@@ -348,19 +447,39 @@ export function getPomodoroSnapshot(
   const date = new Date(now)
   const weekday = getPomodoroWeekday(date)
   const todaySchedule = weeklySchedule[weekday]
-  const totalPomodoros = todaySchedule.pomodoroCount
-  const todaySegments = buildPomodoroSegments(
-    todaySchedule.focusMinutes,
-    todaySchedule.breakMinutes,
-    todaySchedule.pomodoroCount,
-    todaySchedule.projectIds,
-    todaySchedule.focusPrompts,
-    todaySchedule.breakPrompt,
+  const todayPlans = getActivePomodoroDayPlans(todaySchedule)
+  const todayPlanRanges = todayPlans.map((plan, planIndex) => {
+    const segments = buildPomodoroSegments(
+      plan.focusMinutes,
+      plan.breakMinutes,
+      plan.pomodoroCount,
+      plan.projectIds,
+      plan.focusPrompts,
+      plan.breakPrompt,
+      { planId: plan.id, planIndex },
+    )
+    const startAtMs = getScheduledStartAtMs(date, plan.startTime)
+    const totalMs = segments.at(-1)?.endOffsetMs ?? 0
+    return {
+      plan,
+      planIndex,
+      segments,
+      totalMs,
+      startAtMs,
+      endAtMs: startAtMs + totalMs,
+    }
+  })
+  const todayTimeline = todayPlanRanges.flatMap((range) =>
+    range.segments.map((segment) => ({
+      ...range,
+      segment,
+      segmentStartAtMs: range.startAtMs + segment.startOffsetMs,
+      segmentEndAtMs: range.startAtMs + segment.endOffsetMs,
+    })),
   )
-  const totalMs = todaySegments.at(-1)?.endOffsetMs ?? 0
+  const firstTodayRange = todayPlanRanges[0] ?? null
+  const lastTodayRange = todayPlanRanges.at(-1) ?? null
   const nextStart = findNextPomodoroStart(now, weeklySchedule)
-  const startAtMs = todaySchedule.enabled ? getScheduledStartAtMs(date, todaySchedule.startTime) : null
-  const endAtMs = startAtMs === null ? null : startAtMs + totalMs
 
   const createBaseSnapshot = (
     overrides: Partial<PomodoroSnapshot>,
@@ -372,19 +491,21 @@ export function getPomodoroSnapshot(
     phase: null,
     weekday,
     todaySchedule,
-    totalPomodoros,
+    totalPomodoros: firstTodayRange?.plan.pomodoroCount ?? 0,
     currentPomodoro: 0,
     completedPomodoros: 0,
-    totalMs,
+    totalMs: firstTodayRange?.totalMs ?? 0,
     remainingMs: 0,
     segmentRemainingMs: 0,
     segmentIndex: -1,
     progressRatio: 0,
     segmentProgressRatio: 0,
     segment: null,
-    startTime: todaySchedule.startTime,
-    startAtMs,
-    endAtMs,
+    currentPlan: firstTodayRange?.plan ?? null,
+    currentPlanIndex: firstTodayRange?.planIndex ?? -1,
+    startTime: firstTodayRange?.plan.startTime ?? DEFAULT_POMODORO_START_TIME,
+    startAtMs: firstTodayRange?.startAtMs ?? null,
+    endAtMs: firstTodayRange?.endAtMs ?? null,
     untilStartMs: 0,
     nextStartAtMs: nextStart.nextStartAtMs,
     nextStartDay: nextStart.nextStartDay,
@@ -412,7 +533,7 @@ export function getPomodoroSnapshot(
     })
   }
 
-  if (!todaySchedule.enabled || startAtMs === null || endAtMs === null) {
+  if (todayPlanRanges.length === 0) {
     return createBaseSnapshot({
       status: "idle",
       idleReason: "day_off",
@@ -422,35 +543,55 @@ export function getPomodoroSnapshot(
     })
   }
 
-  if (now < startAtMs) {
+  const runningTimelineIndex = todayTimeline.findIndex(
+    (item) => now >= item.segmentStartAtMs && now < item.segmentEndAtMs,
+  )
+  const runningItem = runningTimelineIndex >= 0 ? todayTimeline[runningTimelineIndex] : null
+  const upcomingRange = todayPlanRanges.find((range) => range.startAtMs > now) ?? null
+
+  if (!runningItem && upcomingRange) {
     return createBaseSnapshot({
       status: "idle",
       idleReason: "waiting",
-      untilStartMs: Math.max(0, startAtMs - now),
+      totalPomodoros: upcomingRange.plan.pomodoroCount,
+      totalMs: upcomingRange.totalMs,
+      currentPlan: upcomingRange.plan,
+      currentPlanIndex: upcomingRange.planIndex,
+      startTime: upcomingRange.plan.startTime,
+      startAtMs: upcomingRange.startAtMs,
+      endAtMs: upcomingRange.endAtMs,
+      untilStartMs: Math.max(0, upcomingRange.startAtMs - now),
     })
   }
 
-  if (now >= endAtMs) {
+  if (!runningItem || (lastTodayRange && now >= lastTodayRange.endAtMs)) {
+    const completedPomodoros = todayPlanRanges.reduce((sum, range) => sum + range.plan.pomodoroCount, 0)
     return createBaseSnapshot({
       status: "completed",
       idleReason: null,
-      currentPomodoro: totalPomodoros,
-      completedPomodoros: totalPomodoros,
+      totalPomodoros: completedPomodoros,
+      currentPomodoro: completedPomodoros,
+      completedPomodoros,
+      totalMs: todayPlanRanges.reduce((sum, range) => sum + range.totalMs, 0),
       remainingMs: 0,
       segmentRemainingMs: 0,
-      segmentIndex: todaySegments.length - 1,
+      segmentIndex: todayTimeline.length - 1,
       progressRatio: 1,
       segmentProgressRatio: 1,
-      segment: todaySegments.at(-1) ?? null,
+      segment: todayTimeline.at(-1)?.segment ?? null,
+      currentPlan: lastTodayRange?.plan ?? null,
+      currentPlanIndex: lastTodayRange?.planIndex ?? -1,
+      startTime: lastTodayRange?.plan.startTime ?? DEFAULT_POMODORO_START_TIME,
+      startAtMs: lastTodayRange?.startAtMs ?? null,
+      endAtMs: lastTodayRange?.endAtMs ?? null,
     })
   }
 
-  const elapsedMs = Math.max(0, now - startAtMs)
-  const segmentIndex = todaySegments.findIndex((segment) => elapsedMs < segment.endOffsetMs)
-  const segment = segmentIndex >= 0 ? todaySegments[segmentIndex] : null
+  const elapsedMs = Math.max(0, now - runningItem.startAtMs)
+  const segment = runningItem.segment
   const segmentElapsedMs = segment ? Math.max(0, elapsedMs - segment.startOffsetMs) : 0
   const segmentRemainingMs = segment ? Math.max(0, segment.endOffsetMs - elapsedMs) : 0
-  const completedPomodoros = todaySegments.filter(
+  const completedPomodoros = runningItem.segments.filter(
     (item) => item.phase === "focus" && item.endOffsetMs <= elapsedMs,
   ).length
   const canUseWorkbench = segment?.phase === "focus"
@@ -460,14 +601,21 @@ export function getPomodoroSnapshot(
     status: "running",
     idleReason: null,
     phase: segment?.phase ?? null,
+    totalPomodoros: runningItem.plan.pomodoroCount,
     currentPomodoro: segment?.pomodoroIndex ?? 0,
     completedPomodoros,
-    remainingMs: Math.max(0, totalMs - elapsedMs),
+    totalMs: runningItem.totalMs,
+    remainingMs: Math.max(0, runningItem.totalMs - elapsedMs),
     segmentRemainingMs,
-    segmentIndex,
-    progressRatio: totalMs > 0 ? Math.min(1, elapsedMs / totalMs) : 0,
+    segmentIndex: runningTimelineIndex,
+    progressRatio: runningItem.totalMs > 0 ? Math.min(1, elapsedMs / runningItem.totalMs) : 0,
     segmentProgressRatio: segment && segment.durationMs > 0 ? Math.min(1, segmentElapsedMs / segment.durationMs) : 0,
     segment,
+    currentPlan: runningItem.plan,
+    currentPlanIndex: runningItem.planIndex,
+    startTime: runningItem.plan.startTime,
+    startAtMs: runningItem.startAtMs,
+    endAtMs: runningItem.endAtMs,
     canUseWorkbench,
     shouldRestrictWorkbench: !canUseWorkbench,
     currentProjectId,
@@ -482,7 +630,7 @@ export function getPomodoroUpcomingSegmentPreview(
   if (!snapshot.enabled || !snapshot.hasEnabledSchedule) return null
 
   if (snapshot.status === "idle" && snapshot.idleReason === "waiting") {
-    const projectId = snapshot.todaySchedule.projectIds[0] ?? null
+    const projectId = snapshot.currentPlan?.projectIds[0] ?? null
     if (snapshot.startAtMs === null) return null
     return {
       weekday: snapshot.weekday,
@@ -492,22 +640,45 @@ export function getPomodoroUpcomingSegmentPreview(
       startsInMs: snapshot.untilStartMs,
       startAtMs: snapshot.startAtMs,
       projectId,
-      promptText: snapshot.todaySchedule.focusPrompts[0] ?? "",
+      promptText: snapshot.currentPlan?.focusPrompts[0] ?? "",
     }
   }
 
-  if (snapshot.status === "running") {
+  if (snapshot.status === "running" && snapshot.currentPlan && snapshot.segment) {
     const segments = buildPomodoroSegments(
-      snapshot.todaySchedule.focusMinutes,
-      snapshot.todaySchedule.breakMinutes,
-      snapshot.todaySchedule.pomodoroCount,
-      snapshot.todaySchedule.projectIds,
-      snapshot.todaySchedule.focusPrompts,
-      snapshot.todaySchedule.breakPrompt,
+      snapshot.currentPlan.focusMinutes,
+      snapshot.currentPlan.breakMinutes,
+      snapshot.currentPlan.pomodoroCount,
+      snapshot.currentPlan.projectIds,
+      snapshot.currentPlan.focusPrompts,
+      snapshot.currentPlan.breakPrompt,
+      { planId: snapshot.currentPlan.id, planIndex: snapshot.currentPlanIndex },
     )
-    const nextSegment = segments[snapshot.segmentIndex + 1]
-    if (!nextSegment || snapshot.startAtMs === null) {
+    const currentSegmentIndex = segments.findIndex(
+      (segment) =>
+        segment.phase === snapshot.segment?.phase &&
+        segment.pomodoroIndex === snapshot.segment?.pomodoroIndex &&
+        segment.startOffsetMs === snapshot.segment?.startOffsetMs,
+    )
+    const nextSegment = currentSegmentIndex >= 0 ? segments[currentSegmentIndex + 1] : null
+    if (snapshot.startAtMs === null) {
       return null
+    }
+    if (!nextSegment) {
+      const finalBreakPreview =
+        snapshot.segment.phase === "focus"
+          ? {
+              weekday: snapshot.weekday,
+              phase: "break" as const,
+              pomodoroIndex: snapshot.segment.pomodoroIndex,
+              totalPomodoros: snapshot.totalPomodoros,
+              startsInMs: snapshot.segmentRemainingMs,
+              startAtMs: snapshot.startAtMs + snapshot.segment.endOffsetMs,
+              projectId: null,
+              promptText: snapshot.currentPlan.breakPrompt,
+            }
+          : null
+      return finalBreakPreview
     }
     return {
       weekday: snapshot.weekday,
@@ -608,10 +779,7 @@ export const usePomodoroStore = create<PomodoroState>()(
           ...state,
           weeklySchedule: {
             ...state.weeklySchedule,
-            [day]: createPomodoroDaySchedule({
-              ...state.weeklySchedule[day],
-              ...schedule,
-            }),
+            [day]: createPomodoroDaySchedule(schedule, { day }),
           },
         })),
       setSettings: (settings) =>
@@ -624,7 +792,7 @@ export const usePomodoroStore = create<PomodoroState>()(
     }),
     {
       name: "plm-pomodoro",
-      version: 6,
+      version: 7,
       migrate: (persistedState: unknown, version) => {
         if (!persistedState || typeof persistedState !== "object") {
           return persistedState as PomodoroState
@@ -638,7 +806,7 @@ export const usePomodoroStore = create<PomodoroState>()(
           pomodoroCount?: unknown
         }
 
-        if (version >= 6) {
+        if (version >= 7) {
           return {
             enabled: typeof raw.enabled === "boolean" ? raw.enabled : false,
             weeklySchedule: normalizePomodoroWeekSchedule(raw.weeklySchedule),

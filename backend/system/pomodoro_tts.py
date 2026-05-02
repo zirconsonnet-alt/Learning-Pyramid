@@ -34,16 +34,19 @@ async def synthesize_pomodoro_prompt_audio(text: str) -> bytes:
     except ImportError as exc:  # pragma: no cover - depends on deployment environment
         raise PomodoroTtsUnavailable("edge-tts is not installed") from exc
 
-    communicate = edge_tts.Communicate(
-        normalized_text,
-        voice=_pomodoro_tts_voice(),
-    )
     audio_bytes = bytearray()
-    async for chunk in communicate.stream():
-        if isinstance(chunk, dict) and chunk.get("type") == "audio":
-            payload = chunk.get("data")
-            if isinstance(payload, (bytes, bytearray)):
-                audio_bytes.extend(payload)
+    try:
+        communicate = edge_tts.Communicate(
+            normalized_text,
+            voice=_pomodoro_tts_voice(),
+        )
+        async for chunk in communicate.stream():
+            if isinstance(chunk, dict) and chunk.get("type") == "audio":
+                payload = chunk.get("data")
+                if isinstance(payload, (bytes, bytearray)):
+                    audio_bytes.extend(payload)
+    except Exception as exc:
+        raise PomodoroTtsUnavailable("pomodoro TTS service is unavailable") from exc
 
     if not audio_bytes:
         raise PomodoroTtsUnavailable("edge-tts returned empty audio")

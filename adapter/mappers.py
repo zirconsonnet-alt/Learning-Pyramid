@@ -165,13 +165,6 @@ def recall_point_to_dto(rp: RecallPoint) -> Dict[str, Any]:
         "anchor": None if rp.anchor is None else {"instanceId": str(rp.anchor.instance_id), "position": rp.anchor.position},
         "references": [str(x) for x in rp.references],
         "insights": [_rich_content_to_dto(x) for x in rp.insights],
-        "sourceProjectId": None if rp.source_project_id is None else str(rp.source_project_id),
-        "sourceRecallPointId": None if rp.source_recall_point_id is None else str(rp.source_recall_point_id),
-        "sourceMaterialId": rp.source_material_id,
-        "sourceMaterialTitle": rp.source_material_title,
-        "sourceAnchorLabel": rp.source_anchor_label,
-        "mistakeStatus": _jsonable(rp.mistake_status),
-        "mistakeNote": rp.mistake_note,
     }
 
 

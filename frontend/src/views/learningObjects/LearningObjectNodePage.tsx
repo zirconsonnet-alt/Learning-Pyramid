@@ -25,7 +25,7 @@ function formatApiError(err: unknown) {
 }
 
 function formatNodeType(kind: "leaf" | "container", depth: number) {
-  if (kind === "leaf") return "材料节点"
+  if (kind === "leaf") return "内容节点"
   if (depth === 0) return "根目录"
   return "分组节点"
 }
@@ -122,8 +122,8 @@ export function LearningObjectNodePage() {
         ]
       : [
           { label: "节点类型", value: formatNodeType(nodeQ.data.kind, depth) },
-          { label: "材料名", value: boundInstance?.materialDisplayName ?? "未绑定实例" },
-          { label: "材料状态", value: boundInstance ? (boundInstance.presence === "MISSING" ? "缺失" : "正常") : "未知" },
+          { label: "内容名", value: boundInstance?.materialDisplayName ?? "未绑定实例" },
+          { label: "内容状态", value: boundInstance ? (boundInstance.presence === "MISSING" ? "缺失" : "正常") : "未知" },
           {
             label: "实例入口",
             value: boundInstance ? (

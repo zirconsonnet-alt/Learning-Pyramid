@@ -297,6 +297,37 @@ function Get-PublicFrontendEntryAssetInfo {
     return $null
 }
 
+function New-FrontendVerificationFailureMessage {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Stage,
+        [Parameter(Mandatory = $true)]
+        [string]$ExpectedAsset,
+        [string]$ObservedAsset = "",
+        [string]$ObservedLabel = "",
+        [string]$CheckedUrl = "",
+        [string]$Hint = ""
+    )
+
+    $lines = @(
+        "Frontend verification failed at stage: $Stage",
+        "Expected asset from local build: $ExpectedAsset"
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($ObservedLabel)) {
+        $value = if ([string]::IsNullOrWhiteSpace($ObservedAsset)) { "unavailable" } else { $ObservedAsset }
+        $lines += "${ObservedLabel}: $value"
+    }
+    if (-not [string]::IsNullOrWhiteSpace($CheckedUrl)) {
+        $lines += "Checked URL: $CheckedUrl"
+    }
+    if (-not [string]::IsNullOrWhiteSpace($Hint)) {
+        $lines += "What this usually means: $Hint"
+    }
+
+    return ($lines -join "`n")
+}
+
 function Invoke-WithRetry {
     param(
         [Parameter(Mandatory = $true)]
@@ -631,8 +662,9 @@ if ($SkipBuild -and -not $IncludePublicDownloads -and $bundleItem.Length -gt 100
     Write-Warning "The latest bundle is still very large. It was probably built earlier with public-downloads included. Re-run once without -SkipBuild to generate a smaller deploy bundle."
 }
 $bundleHash = (Get-FileHash -Path $bundlePath -Algorithm SHA256).Hash.ToUpperInvariant()
+$localFrontendDistFingerprint = (Get-FileHash -Path (Join-Path $repoRoot "frontend/dist/index.html") -Algorithm SHA256).Hash.ToUpperInvariant()
 $localFrontendEntryAssetName = Get-LocalBuiltFrontendEntryAssetName -RepoRoot $repoRoot
-Write-Host "Expected frontend entry asset: $localFrontendEntryAssetName"
+Write-Host "Expected frontend entry asset from local build: $localFrontendEntryAssetName"
 $includePublicDownloadsValue = if ($IncludePublicDownloads) { "1" } else { "0" }
 $envSyncFile = Join-Path $repoRoot ".env.selfhost.sync"
 $hasEnvSyncFile = Test-Path $envSyncFile
@@ -640,9 +672,13 @@ $remoteZipPath = "$RemoteRoot/upload/latest.zip"
 $remoteTarget = "${ServerUser}@${connectHost}:${remoteZipPath}"
 $remoteEnvSyncPath = "$RemoteRoot/upload/selfhost.env.sync"
 $remoteEnvSyncTarget = "${ServerUser}@${connectHost}:${remoteEnvSyncPath}"
+$remoteStage1ScriptPath = "$RemoteRoot/upload/deploy-stage1.sh"
+$remoteStage2ScriptPath = "$RemoteRoot/upload/deploy-stage2.sh"
 $sshReuseTempRoot = $null
 $sshReuseControlArgs = @()
 $sshDestination = "${ServerUser}@${connectHost}"
+$localStage1ScriptPath = $null
+$localStage2ScriptPath = $null
 
 try {
     $supportsSshConnectionReuse = $true
@@ -688,7 +724,9 @@ APP_DIR="`$REMOTE_ROOT/app"
 TMP_DIR="`$REMOTE_ROOT/release-tmp"
 ZIP_PATH="`$REMOTE_ROOT/upload/latest.zip"
 EXPECTED_HASH='$bundleHash'
+EXPECTED_FRONTEND_ENTRY_ASSET='$localFrontendEntryAssetName'
 INCLUDE_PUBLIC_DOWNLOADS='$includePublicDownloadsValue'
+FRONTEND_DIST_FINGERPRINT='$localFrontendDistFingerprint'
 HAS_ENV_SYNC='$(if ($hasEnvSyncFile) { "1" } else { "0" })'
 ENV_SYNC_UPLOAD_PATH="`$REMOTE_ROOT/upload/selfhost.env.sync"
 
@@ -782,7 +820,7 @@ if [ -z "`$SRC_DIR" ]; then
   exit 1
 fi
 
-RSYNC_ARGS=(-a --delete --exclude '.env' --exclude 'data/' --exclude 'release/')
+RSYNC_ARGS=(-a --delete --filter 'P frontend/dist/assets/***' --filter 'P data/***' --filter 'P /data/***' --exclude '.env' --exclude 'data/' --exclude 'release/')
 if [ "`$INCLUDE_PUBLIC_DOWNLOADS" != "1" ]; then
   RSYNC_ARGS+=(--exclude 'public-downloads/')
 fi
@@ -836,6 +874,7 @@ if [ -z "`$TRUSTED_HOSTS_RAW" ]; then
 fi
 
 cd "`$APP_DIR"
+
 if [ -f tools/post_deploy_selfhost.sh ]; then
   chmod +x tools/post_deploy_selfhost.sh
   docker compose \
@@ -845,18 +884,120 @@ if [ -f tools/post_deploy_selfhost.sh ]; then
     up -d postgres
   bash tools/post_deploy_selfhost.sh
 fi
+"@
+    $remoteScript = $remoteScript -replace "`r`n", "`n"
+    $deployScratchRoot = Get-DeployScratchRoot -RepoRoot $repoRoot
+    $localStage1ScriptPath = Join-Path $deployScratchRoot ("remote-stage1-" + [guid]::NewGuid().ToString("N") + ".sh")
+    [System.IO.File]::WriteAllText($localStage1ScriptPath, $remoteScript, [System.Text.UTF8Encoding]::new($false))
 
-docker compose \
-  -f docker-compose.selfhost.yml \
-  -f docker-compose.selfhost.postgres.yml \
-  --env-file .env \
-  up -d --build
+    Write-Host "Deploying on server..."
+    Invoke-ExternalCommandWithRetry -Description "scp remote stage1 script upload" -Command {
+        & scp @scpArgs $localStage1ScriptPath "${ServerUser}@${connectHost}:${remoteStage1ScriptPath}"
+    } -MaxAttempts 6 -DelaySeconds 3
+    Invoke-ExternalCommandWithRetry -Description "Remote deploy" -Command {
+        & ssh @sshArgs $sshDestination "bash '$remoteStage1ScriptPath'"
+    } -MaxAttempts 4 -DelaySeconds 5
 
-docker compose \
-  -f docker-compose.selfhost.yml \
-  -f docker-compose.selfhost.postgres.yml \
-  --env-file .env \
-  ps
+    $remoteAppRefreshScript = @"
+set -euo pipefail
+
+REMOTE_ROOT='$RemoteRoot'
+APP_DIR="`$REMOTE_ROOT/app"
+EXPECTED_FRONTEND_ENTRY_ASSET='$localFrontendEntryAssetName'
+FRONTEND_DIST_FINGERPRINT='$localFrontendDistFingerprint'
+
+cd "`$APP_DIR"
+
+compose_selfhost() {
+  docker compose \
+    -f docker-compose.selfhost.yml \
+    -f docker-compose.selfhost.postgres.yml \
+    --env-file .env "`$@"
+}
+
+get_running_app_container_id() {
+  compose_selfhost ps -q app 2>/dev/null | tail -n 1
+}
+
+get_container_frontend_entry_asset() {
+  local container_id="`$1"
+  if [ -z "`$container_id" ]; then
+    return 0
+  fi
+  docker exec "`$container_id" sh -lc "grep -m1 -oE 'assets/(index-[A-Za-z0-9_-]+\\.js)' /app/frontend/dist/index.html" 2>/dev/null | cut -d/ -f2 | tr -d '\r'
+}
+
+get_container_frontend_dist_fingerprint() {
+  local container_id="`$1"
+  if [ -z "`$container_id" ]; then
+    return 0
+  fi
+  docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "`$container_id" 2>/dev/null | grep '^PLM_FRONTEND_DIST_FINGERPRINT=' | tail -n 1 | cut -d= -f2- | tr -d '\r'
+}
+
+wait_for_expected_app_container_frontend() {
+  local attempts="`$1"
+  local sleep_seconds="`$2"
+  LAST_APP_CONTAINER_ID=""
+  LAST_APP_CONTAINER_STATE=""
+  LAST_APP_FRONTEND_ENTRY_ASSET=""
+  LAST_APP_FRONTEND_FINGERPRINT=""
+  local attempt=1
+  while [ `$attempt -le `$attempts ]; do
+    LAST_APP_CONTAINER_ID=`$(get_running_app_container_id)
+    if [ -n "`$LAST_APP_CONTAINER_ID" ]; then
+      LAST_APP_CONTAINER_STATE=`$(docker inspect -f '{{.State.Status}}' "`$LAST_APP_CONTAINER_ID" 2>/dev/null | tr -d '\r' || true)
+      if [ "`$LAST_APP_CONTAINER_STATE" = "running" ]; then
+        LAST_APP_FRONTEND_ENTRY_ASSET=`$(get_container_frontend_entry_asset "`$LAST_APP_CONTAINER_ID")
+        LAST_APP_FRONTEND_FINGERPRINT=`$(get_container_frontend_dist_fingerprint "`$LAST_APP_CONTAINER_ID")
+        if [ "`$LAST_APP_FRONTEND_ENTRY_ASSET" = "`$EXPECTED_FRONTEND_ENTRY_ASSET" ] && [ "`$LAST_APP_FRONTEND_FINGERPRINT" = "`$FRONTEND_DIST_FINGERPRINT" ]; then
+          return 0
+        fi
+      fi
+    fi
+    sleep "`$sleep_seconds"
+    attempt=`$((attempt + 1))
+  done
+  return 1
+}
+
+hard_refresh_app_container() {
+  echo "Running hard app container refresh to pick up the new frontend bundle..." >&2
+  compose_selfhost stop app || true
+  compose_selfhost rm -f app || true
+  PLM_FRONTEND_DIST_FINGERPRINT="`$FRONTEND_DIST_FINGERPRINT" compose_selfhost build --pull --no-cache app
+  PLM_FRONTEND_DIST_FINGERPRINT="`$FRONTEND_DIST_FINGERPRINT" compose_selfhost up -d --force-recreate --no-deps app
+}
+
+echo "Refreshing app container with the deployed frontend bundle..."
+PLM_FRONTEND_DIST_FINGERPRINT="`$FRONTEND_DIST_FINGERPRINT" compose_selfhost build --no-cache app
+PLM_FRONTEND_DIST_FINGERPRINT="`$FRONTEND_DIST_FINGERPRINT" compose_selfhost up -d --force-recreate app
+
+if ! wait_for_expected_app_container_frontend 10 2; then
+  echo "Warning: app container does not expose the freshly deployed frontend bundle yet." >&2
+  echo "Observed container id: `$LAST_APP_CONTAINER_ID" >&2
+  echo "Observed container state: `$LAST_APP_CONTAINER_STATE" >&2
+  echo "Observed container asset: `$LAST_APP_FRONTEND_ENTRY_ASSET" >&2
+  echo "Observed container fingerprint: `$LAST_APP_FRONTEND_FINGERPRINT" >&2
+  echo "Expected container asset: `$EXPECTED_FRONTEND_ENTRY_ASSET" >&2
+  echo "Expected container fingerprint: `$FRONTEND_DIST_FINGERPRINT" >&2
+  hard_refresh_app_container
+  if ! wait_for_expected_app_container_frontend 15 2; then
+    echo "App container frontend verification failed even after hard refresh." >&2
+    echo "Observed container id: `$LAST_APP_CONTAINER_ID" >&2
+    echo "Observed container state: `$LAST_APP_CONTAINER_STATE" >&2
+    echo "Observed container asset: `$LAST_APP_FRONTEND_ENTRY_ASSET" >&2
+    echo "Observed container fingerprint: `$LAST_APP_FRONTEND_FINGERPRINT" >&2
+    echo "Expected container asset: `$EXPECTED_FRONTEND_ENTRY_ASSET" >&2
+    echo "Expected container fingerprint: `$FRONTEND_DIST_FINGERPRINT" >&2
+    compose_selfhost ps >&2
+    compose_selfhost logs --tail=80 app >&2 || true
+    exit 1
+  fi
+fi
+
+echo "Verified app container frontend bundle: asset=`$LAST_APP_FRONTEND_ENTRY_ASSET fingerprint=`$LAST_APP_FRONTEND_FINGERPRINT"
+compose_selfhost ps
 
 PUBLIC_HOST=`$(grep '^PLM_PUBLIC_HOST=' .env | cut -d= -f2- | tr -d '\r' | xargs || true)
 TRUSTED_HOSTS=`$(grep '^PLM_TRUSTED_HOSTS=' .env | cut -d= -f2- | tr -d '\r' | xargs || true)
@@ -897,25 +1038,23 @@ while [ `$i -le `$ATTEMPTS ]; do
 done
 
 echo "Health check did not become ready in time." >&2
-docker compose \
-  -f docker-compose.selfhost.yml \
-  -f docker-compose.selfhost.postgres.yml \
-  --env-file .env \
-  ps >&2
-docker compose \
-  -f docker-compose.selfhost.yml \
-  -f docker-compose.selfhost.postgres.yml \
-  --env-file .env \
-  logs --tail=80 app >&2 || true
+compose_selfhost ps >&2
+compose_selfhost logs --tail=80 app >&2 || true
 exit 1
 "@
-    $remoteScript = $remoteScript -replace "`r`n", "`n"
+    $remoteAppRefreshScript = $remoteAppRefreshScript -replace "`r`n", "`n"
+    $localStage2ScriptPath = Join-Path $deployScratchRoot ("remote-stage2-" + [guid]::NewGuid().ToString("N") + ".sh")
+    [System.IO.File]::WriteAllText($localStage2ScriptPath, $remoteAppRefreshScript, [System.Text.UTF8Encoding]::new($false))
 
-    Write-Host "Deploying on server..."
-    Invoke-ExternalCommandWithRetry -Description "Remote deploy" -Command {
-        $remoteScript | & ssh @sshArgs $sshDestination bash -s
+    Write-Host "Refreshing the running app container on server..."
+    Invoke-ExternalCommandWithRetry -Description "scp remote stage2 script upload" -Command {
+        & scp @scpArgs $localStage2ScriptPath "${ServerUser}@${connectHost}:${remoteStage2ScriptPath}"
+    } -MaxAttempts 6 -DelaySeconds 3
+    Invoke-ExternalCommandWithRetry -Description "Remote app refresh" -Command {
+        & ssh @sshArgs $sshDestination "bash '$remoteStage2ScriptPath'"
     } -MaxAttempts 4 -DelaySeconds 5
 
+    Write-Host "Verifying frontend files synced to the server directory..."
     $remoteIndexHtml = & ssh @sshArgs $sshDestination "cat '$RemoteRoot/app/frontend/dist/index.html'"
     if ($LASTEXITCODE -ne 0) {
         throw "Could not read deployed frontend/dist/index.html from server."
@@ -926,22 +1065,104 @@ exit 1
         throw "Could not parse deployed frontend entry asset from server index.html."
     }
     if ($remoteFrontendEntryAssetName -ne $localFrontendEntryAssetName) {
-        throw "Deployed frontend asset mismatch. local=$localFrontendEntryAssetName remote=$remoteFrontendEntryAssetName"
+        throw (
+            New-FrontendVerificationFailureMessage `
+                -Stage "server files" `
+                -ExpectedAsset $localFrontendEntryAssetName `
+                -ObservedAsset $remoteFrontendEntryAssetName `
+                -ObservedLabel "Observed asset in $RemoteRoot/app/frontend/dist/index.html" `
+                -Hint "The deploy bundle was built locally, but the server-side app directory does not match it yet. This usually points to upload, unzip, or rsync not landing the expected frontend/dist files."
+        )
     }
-    Write-Host "Verified deployed frontend asset: $remoteFrontendEntryAssetName"
+    Write-Host "Verified server directory frontend asset: $remoteFrontendEntryAssetName"
 
-    $publicFrontendAssetInfo = Get-PublicFrontendEntryAssetInfo -ServerHost $ServerHost
-    if ($null -eq $publicFrontendAssetInfo) {
-        Write-Warning "Could not verify the public site root after deploy. The server-side bundle was verified, but the public host did not return a parseable frontend entry asset."
+    Write-Host "Verifying the running app container frontend..."
+    $script:lastRunningFrontendAssetName = ""
+    $remoteRunningFrontendEntryAssetName = $null
+    try {
+        $remoteRunningFrontendEntryAssetName = Invoke-WithRetry -Description "Running app frontend verification" -MaxAttempts 6 -DelaySeconds 3 -Action {
+            $remoteRunningIndexHtml = & ssh @sshArgs $sshDestination "curl -fsS -H 'Host: $ServerHost' http://127.0.0.1:8001/"
+            if ($LASTEXITCODE -ne 0) {
+                $script:lastRunningFrontendAssetName = ""
+                throw "Running app root did not return HTML yet."
+            }
+
+            $assetName = Get-FrontendEntryAssetNameFromHtml -Html ($remoteRunningIndexHtml | Out-String)
+            $script:lastRunningFrontendAssetName = if ($assetName) { $assetName } else { "" }
+            if (-not $assetName) {
+                throw "Running app root returned HTML, but no parseable frontend asset yet."
+            }
+            if ($assetName -ne $localFrontendEntryAssetName) {
+                throw "Running app still serves $assetName."
+            }
+            return $assetName
+        }
     }
-    elseif ($publicFrontendAssetInfo.AssetName -ne $localFrontendEntryAssetName) {
-        throw "Public frontend asset mismatch after deploy. local=$localFrontendEntryAssetName public=$($publicFrontendAssetInfo.AssetName) url=$($publicFrontendAssetInfo.Url)"
+    catch {
+        $runningHint =
+            if ([string]::IsNullOrWhiteSpace($script:lastRunningFrontendAssetName)) {
+                "The server files may already be updated, but the app container is still starting, restarting, or not serving the SPA root correctly."
+            }
+            else {
+                "The bundle was synced to disk, and the remote deploy already attempted a hard app refresh, but the running app container still serves an older frontend build. Check for compose project/image selection drift, another app instance on the same host port, or Docker serving a stale container."
+            }
+        throw (
+            New-FrontendVerificationFailureMessage `
+                -Stage "running app" `
+                -ExpectedAsset $localFrontendEntryAssetName `
+                -ObservedAsset $script:lastRunningFrontendAssetName `
+                -ObservedLabel "Observed asset from running app root" `
+                -CheckedUrl "http://127.0.0.1:8001/ (Host: $ServerHost)" `
+                -Hint $runningHint
+        )
     }
-    else {
+    Write-Host "Verified running frontend asset: $remoteRunningFrontendEntryAssetName"
+
+    Write-Host "Verifying the public site frontend..."
+    $script:lastPublicFrontendAssetName = ""
+    $script:lastPublicFrontendUrl = "https://$ServerHost/ or http://$ServerHost/"
+    $publicFrontendAssetInfo = $null
+    try {
+        $publicFrontendAssetInfo = Invoke-WithRetry -Description "Public site frontend verification" -MaxAttempts 6 -DelaySeconds 3 -Action {
+            $info = Get-PublicFrontendEntryAssetInfo -ServerHost $ServerHost
+            if ($null -eq $info) {
+                $script:lastPublicFrontendAssetName = ""
+                throw "Public site did not return a parseable frontend asset yet."
+            }
+
+            $script:lastPublicFrontendAssetName = $info.AssetName
+            $script:lastPublicFrontendUrl = $info.Url
+            if ($info.AssetName -ne $localFrontendEntryAssetName) {
+                throw "Public site still serves $($info.AssetName)."
+            }
+            return $info
+        }
+    }
+    catch {
+        if (-not [string]::IsNullOrWhiteSpace($script:lastPublicFrontendAssetName)) {
+            throw (
+                New-FrontendVerificationFailureMessage `
+                    -Stage "public host" `
+                    -ExpectedAsset $localFrontendEntryAssetName `
+                    -ObservedAsset $script:lastPublicFrontendAssetName `
+                    -ObservedLabel "Observed asset from public site root" `
+                    -CheckedUrl $script:lastPublicFrontendUrl `
+                    -Hint "The running app is already updated, but the public host still serves a different frontend asset. This usually points to reverse proxy, CDN, or cache."
+            )
+        }
+        Write-Warning (
+            "Could not verify the public site root after deploy, even after retries.`n" +
+            "The server directory and running app were both verified, but the public host did not return a parseable frontend entry asset.`n" +
+            "This usually means the reverse proxy, CDN, or public entrypoint returned unexpected HTML."
+        )
+    }
+    if ($null -ne $publicFrontendAssetInfo) {
         Write-Host "Verified public frontend asset: $($publicFrontendAssetInfo.AssetName) via $($publicFrontendAssetInfo.Url)"
     }
 }
 finally {
+    Remove-PathIfPresent -Path $localStage1ScriptPath
+    Remove-PathIfPresent -Path $localStage2ScriptPath
     Stop-SshConnectionReuse -BaseSshArgs $baseSshArgs -ControlArgs $sshReuseControlArgs -Destination $sshDestination -TempRoot $sshReuseTempRoot
 }
 

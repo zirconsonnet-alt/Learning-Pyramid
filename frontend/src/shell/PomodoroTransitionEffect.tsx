@@ -99,7 +99,7 @@ export function PomodoroTransitionEffect(props: {
       phase: transition.toPhase,
       currentPomodoro: snapshot.currentPomodoro,
       totalPomodoros: snapshot.totalPomodoros,
-      breakMinutes: snapshot.todaySchedule.breakMinutes,
+      breakMinutes: snapshot.currentPlan?.breakMinutes ?? 5,
       hasProjectBinding: Boolean(snapshot.currentProjectId),
       projectTitle: currentProjectTitle ?? null,
     }

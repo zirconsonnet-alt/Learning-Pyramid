@@ -17,6 +17,8 @@ class RuntimeFeatures:
     baidu_netdisk_enabled: bool
     auth_enabled: bool
     allow_signup: bool
+    signup_invite_required: bool
+    data_safety_storage_checks_enabled: bool
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -50,7 +52,9 @@ def current_runtime_features() -> RuntimeFeatures:
         browser_local_media_enabled=_env_bool("PLM_ENABLE_BROWSER_LOCAL_MEDIA", True),
         baidu_netdisk_enabled=_env_bool("PLM_ENABLE_BAIDU_NETDISK", False),
         auth_enabled=_env_bool("PLM_ENABLE_AUTH", hosted),
-        allow_signup=_env_bool("PLM_ALLOW_SIGNUP", True),
+        allow_signup=_env_bool("PLM_ALLOW_SIGNUP", False),
+        signup_invite_required=_env_bool("PLM_REQUIRE_SIGNUP_INVITE", True),
+        data_safety_storage_checks_enabled=_env_bool("PLM_ENABLE_DATA_SAFETY_STORAGE_CHECKS", False),
     )
 
 
