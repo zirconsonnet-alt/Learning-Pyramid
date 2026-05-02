@@ -1,6 +1,5 @@
 import { type ReactNode, useMemo, useRef, useState } from "react"
-import { ArrowRight, Copy, Mail, Sparkles, Trophy, UserMinus, UserPlus } from "lucide-react"
-import { Link } from "react-router-dom"
+import { Copy, Mail, Sparkles, Trophy, UserMinus, UserPlus } from "lucide-react"
 
 import type { Friend, FriendLeaderboardEntry, FriendRequest } from "@/ui/api/friends"
 import { ApiError } from "@/ui/api/http"
@@ -239,11 +238,6 @@ export function FriendsPage() {
           </CardHeader>
           <CardContent className="space-y-5">
             <div className="flex flex-col gap-4">
-              <div className="flex flex-wrap gap-2">
-                <SummaryChip label="好友" value={friendsQ.isLoading ? "..." : friends.length} />
-                <SummaryChip label="待我处理" value={incomingRequestsQ.isLoading ? "..." : incomingPendingCount} tone={incomingPendingCount > 0 ? "accent" : "default"} />
-                <SummaryChip label="等待对方" value={outgoingRequestsQ.isLoading ? "..." : outgoingPendingCount} />
-              </div>
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <div className="min-w-0 flex-1 space-y-1">
                   <div className="text-xs uppercase tracking-[0.12em] text-[color:var(--theme-subtle-text)]">我的好友 UID</div>
@@ -263,12 +257,6 @@ export function FriendsPage() {
                   >
                     <Copy className="h-4 w-4" />
                     复制 UID
-                  </Button>
-                  <Button asChild size="sm" className="[box-shadow:none]">
-                    <Link to="/profile">
-                      完善个人资料
-                      <ArrowRight className="h-4 w-4" />
-                    </Link>
                   </Button>
                 </div>
               </div>
@@ -390,6 +378,11 @@ export function FriendsPage() {
             <DialogTitle className="text-2xl tracking-tight text-foreground">添加好友</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 px-6 py-6">
+            <div className="flex flex-wrap gap-2">
+              <SummaryChip label="好友" value={friendsQ.isLoading ? "..." : friends.length} />
+              <SummaryChip label="待我处理" value={incomingRequestsQ.isLoading ? "..." : incomingPendingCount} tone={incomingPendingCount > 0 ? "accent" : "default"} />
+              <SummaryChip label="等待对方" value={outgoingRequestsQ.isLoading ? "..." : outgoingPendingCount} />
+            </div>
             <div className="space-y-2">
               <Label htmlFor="friend-uid">好友 UID</Label>
               <Input
