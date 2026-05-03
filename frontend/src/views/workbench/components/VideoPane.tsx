@@ -43,7 +43,7 @@ import { resolveProjectFile, useProjectDirectoryBinding } from "@/ui/localMedia/
 import { useProjectMaterialSourceBinding, useProjects } from "@/ui/queries/projects"
 import { useSystemCapabilities } from "@/ui/queries/system"
 import type { AiChatCourseEvidence } from "@/ui/store/aiChatStore"
-import { formatPomodoroCountdown, getPomodoroUpcomingSegmentPreview, usePomodoroNow, usePomodoroStore } from "@/ui/store/pomodoroStore"
+import { formatPomodoroCountdown, getPomodoroUpcomingSegmentPreview, isQuickPomodoroSessionActive, usePomodoroNow, usePomodoroStore } from "@/ui/store/pomodoroStore"
 import { useRecallPointsByInstance } from "@/ui/queries/workbench"
 import { useInstancePlaybackDescriptor } from "@/ui/queries/workbench"
 import { showInfoFeedback } from "@/ui/store/feedbackStore"
@@ -331,7 +331,9 @@ export function VideoPane({
   const addDraft = useWorkbenchStore((s) => s.addDraft)
   const pomodoroEnabled = usePomodoroStore((state) => state.enabled)
   const pomodoroWeeklySchedule = usePomodoroStore((state) => state.weeklySchedule)
-  const pomodoroNow = usePomodoroNow(pomodoroEnabled)
+  const pomodoroQuickPomodoro = usePomodoroStore((state) => state.quickPomodoro)
+  const pomodoroQuickClockActive = isQuickPomodoroSessionActive(pomodoroQuickPomodoro)
+  const pomodoroNow = usePomodoroNow(pomodoroEnabled || pomodoroQuickClockActive)
   const projectsQ = useProjects(true)
 
   const instanceId = instance?.instanceId ?? null
@@ -1616,11 +1618,8 @@ export function VideoPane({
   )
   const pomodoroUpcomingSegment = useMemo(
     () =>
-      getPomodoroUpcomingSegmentPreview(
-        { enabled: pomodoroEnabled, weeklySchedule: pomodoroWeeklySchedule },
-        pomodoroNow,
-      ),
-    [pomodoroEnabled, pomodoroNow, pomodoroWeeklySchedule],
+      getPomodoroUpcomingSegmentPreview({ enabled: pomodoroEnabled, weeklySchedule: pomodoroWeeklySchedule, quickPomodoro: pomodoroQuickPomodoro }, pomodoroNow),
+    [pomodoroEnabled, pomodoroNow, pomodoroQuickPomodoro, pomodoroWeeklySchedule],
   )
   const fullscreenUpcomingProjectTitle = useMemo(() => {
     const upcomingProjectId = pomodoroUpcomingSegment?.projectId ?? ""
@@ -2277,7 +2276,7 @@ export function VideoPane({
                                 openCaptureReferencePicker("question")
                                 return
                               }
-                              if (event.key === "Enter" && !(event.ctrlKey || event.metaKey)) {
+                              if (event.key === "Enter" && !(event.ctrlKey || event.metaKey || event.shiftKey)) {
                                 event.preventDefault()
                                 answerTextareaRef.current?.focus()
                               }
@@ -2347,7 +2346,7 @@ export function VideoPane({
                                 openCaptureReferencePicker("answer")
                                 return
                               }
-                              if (event.key === "Enter" && !(event.ctrlKey || event.metaKey)) {
+                              if (event.key === "Enter" && !(event.ctrlKey || event.metaKey || event.shiftKey)) {
                                 event.preventDefault()
                                 void saveCaptureDraft()
                               }
@@ -2416,7 +2415,7 @@ export function VideoPane({
                         {captureError ??
                           (isFrameCaptureUploading
                             ? "正在截取并插入当前视频帧..."
-                            : "全屏时 Enter 可打开录入；问题/答案中 Tab 引用复述点，Ctrl+Alt 截当前视频帧到答案，Ctrl+V 粘贴图片会先上传到服务器。")}
+                            : "全屏时 Enter 可打开录入；录入框中 Enter 切换/保存，Shift+Enter 换行，Tab 引用复述点，Ctrl+Alt 截当前视频帧到答案。")}
                       </div>
 
                       <div className="mt-3 flex items-center justify-end gap-2">

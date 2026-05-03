@@ -35,6 +35,14 @@ export type PomodoroDaySchedule = {
 
 export type PomodoroWeekSchedule = Record<PomodoroWeekday, PomodoroDaySchedule>
 
+export type QuickPomodoroSession = {
+  id: string
+  createdAtMs: number
+  startAtMs: number
+  endAtMs: number
+  projectId: string | null
+}
+
 export type PomodoroSnapshot = {
   enabled: boolean
   hasEnabledSchedule: boolean
@@ -80,12 +88,15 @@ export type PomodoroUpcomingSegmentPreview = {
 type PomodoroState = {
   enabled: boolean
   weeklySchedule: PomodoroWeekSchedule
+  quickPomodoro: QuickPomodoroSession | null
   transitionSoundEnabled: boolean
   setEnabled: (enabled: boolean) => void
   setTransitionSoundEnabled: (enabled: boolean) => void
   setWeeklySchedule: (weeklySchedule: PomodoroWeekSchedule) => void
   setDaySchedule: (day: PomodoroWeekday, schedule: Partial<PomodoroDaySchedule>) => void
   setSettings: (settings: { enabled: boolean; weeklySchedule: PomodoroWeekSchedule; transitionSoundEnabled?: boolean }) => void
+  startQuickPomodoro: (projectId?: string | null) => QuickPomodoroSession
+  clearQuickPomodoro: () => void
   reset: () => void
 }
 
@@ -98,6 +109,9 @@ const DEFAULT_BREAK_MINUTES = 5
 const DEFAULT_POMODORO_COUNT = 4
 const DEFAULT_POMODORO_START_TIME = "19:00"
 const MAX_POMODORO_PROMPT_LENGTH = 200
+export const QUICK_POMODORO_PREPARE_MS = 10_000
+export const QUICK_POMODORO_FOCUS_MS = 25 * 60_000
+const QUICK_POMODORO_PLAN_ID = "quick-pomodoro"
 
 export const POMODORO_WEEKDAYS: PomodoroWeekday[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
@@ -136,6 +150,41 @@ function normalizePomodoroPlanId(value: unknown, fallback: string) {
 function normalizePomodoroProjectId(value: unknown) {
   const text = typeof value === "string" ? value.trim() : ""
   return text || null
+}
+
+function createSessionId() {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+export function createQuickPomodoroSession(projectId?: string | null, now = Date.now()): QuickPomodoroSession {
+  const startAtMs = now + QUICK_POMODORO_PREPARE_MS
+  return {
+    id: createSessionId(),
+    createdAtMs: now,
+    startAtMs,
+    endAtMs: startAtMs + QUICK_POMODORO_FOCUS_MS,
+    projectId: normalizePomodoroProjectId(projectId),
+  }
+}
+
+function normalizeQuickPomodoroSession(value: unknown): QuickPomodoroSession | null {
+  if (!value || typeof value !== "object") return null
+  const raw = value as Partial<QuickPomodoroSession>
+  const createdAtMs = typeof raw.createdAtMs === "number" && Number.isFinite(raw.createdAtMs) ? raw.createdAtMs : Date.now()
+  const startAtMs = typeof raw.startAtMs === "number" && Number.isFinite(raw.startAtMs) ? raw.startAtMs : createdAtMs + QUICK_POMODORO_PREPARE_MS
+  const endAtMs = typeof raw.endAtMs === "number" && Number.isFinite(raw.endAtMs) ? raw.endAtMs : startAtMs + QUICK_POMODORO_FOCUS_MS
+  if (endAtMs <= createdAtMs || startAtMs < createdAtMs) return null
+  return {
+    id: typeof raw.id === "string" && raw.id.trim() ? raw.id : createSessionId(),
+    createdAtMs,
+    startAtMs,
+    endAtMs,
+    projectId: normalizePomodoroProjectId(raw.projectId),
+  }
+}
+
+export function isQuickPomodoroSessionActive(quickPomodoro: QuickPomodoroSession | null | undefined, now = Date.now()) {
+  return Boolean(quickPomodoro && now < quickPomodoro.endAtMs)
 }
 
 function normalizePomodoroPromptText(value: unknown) {
@@ -190,6 +239,28 @@ export function createPomodoroPlanSchedule(
     breakPrompt: normalizePomodoroPromptText(overrides?.breakPrompt),
     focusPrompts: normalizePomodoroFocusPrompts(overrides?.focusPrompts, pomodoroCount),
   }
+}
+
+export function buildQuickPomodoroPlan(quickPomodoro: QuickPomodoroSession): PomodoroPlanSchedule {
+  return createPomodoroPlanSchedule(
+    {
+      id: QUICK_POMODORO_PLAN_ID,
+      enabled: true,
+      startTime: formatQuickPomodoroStartTime(quickPomodoro.startAtMs),
+      focusMinutes: Math.floor(QUICK_POMODORO_FOCUS_MS / 60_000),
+      breakMinutes: DEFAULT_BREAK_MINUTES,
+      pomodoroCount: 1,
+      projectIds: [quickPomodoro.projectId],
+      focusPrompts: [""],
+      breakPrompt: "",
+    },
+    { day: "mon", index: 0 },
+  )
+}
+
+function formatQuickPomodoroStartTime(startAtMs: number) {
+  const date = new Date(startAtMs)
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
 }
 
 export function createPomodoroDaySchedule(
@@ -378,6 +449,7 @@ function createInitialState() {
   return {
     enabled: false,
     weeklySchedule: createPomodoroWeekSchedule(),
+    quickPomodoro: null,
     transitionSoundEnabled: false,
   }
 }
@@ -438,12 +510,16 @@ export function buildPomodoroSegments(
 }
 
 export function getPomodoroSnapshot(
-  input: { enabled: boolean; weeklySchedule: PomodoroWeekSchedule },
+  input: { enabled: boolean; weeklySchedule: PomodoroWeekSchedule; quickPomodoro?: QuickPomodoroSession | null },
   now = Date.now(),
 ): PomodoroSnapshot {
   const weeklySchedule = normalizePomodoroWeekSchedule(input.weeklySchedule)
-  const enabled = Boolean(input.enabled)
-  const hasEnabledSchedule = hasEnabledPomodoroSchedule(weeklySchedule)
+  const quickPomodoro = normalizeQuickPomodoroSession(input.quickPomodoro)
+  const activeQuickPomodoro = quickPomodoro && now < quickPomodoro.endAtMs ? quickPomodoro : null
+  const scheduledEnabled = Boolean(input.enabled)
+  const enabled = scheduledEnabled || Boolean(activeQuickPomodoro)
+  const hasScheduledEnabledSchedule = hasEnabledPomodoroSchedule(weeklySchedule)
+  const hasEnabledSchedule = hasScheduledEnabledSchedule || Boolean(activeQuickPomodoro)
   const date = new Date(now)
   const weekday = getPomodoroWeekday(date)
   const todaySchedule = weeklySchedule[weekday]
@@ -479,7 +555,10 @@ export function getPomodoroSnapshot(
   )
   const firstTodayRange = todayPlanRanges[0] ?? null
   const lastTodayRange = todayPlanRanges.at(-1) ?? null
-  const nextStart = findNextPomodoroStart(now, weeklySchedule)
+  const nextStart =
+    activeQuickPomodoro && activeQuickPomodoro.startAtMs > now
+      ? { nextStartAtMs: activeQuickPomodoro.startAtMs, nextStartDay: weekday }
+      : findNextPomodoroStart(now, weeklySchedule)
 
   const createBaseSnapshot = (
     overrides: Partial<PomodoroSnapshot>,
@@ -521,6 +600,67 @@ export function getPomodoroSnapshot(
       idleReason: "disabled",
       canUseWorkbench: true,
       shouldRestrictWorkbench: false,
+    })
+  }
+
+  if (activeQuickPomodoro) {
+    const quickPlan = buildQuickPomodoroPlan(activeQuickPomodoro)
+    const quickSegments = buildPomodoroSegments(
+      quickPlan.focusMinutes,
+      quickPlan.breakMinutes,
+      quickPlan.pomodoroCount,
+      quickPlan.projectIds,
+      quickPlan.focusPrompts,
+      quickPlan.breakPrompt,
+      { planId: quickPlan.id, planIndex: -1 },
+    )
+    const quickSegment = quickSegments[0] ?? null
+
+    if (now < activeQuickPomodoro.startAtMs) {
+      return createBaseSnapshot({
+        status: "idle",
+        idleReason: "waiting",
+        totalPomodoros: 1,
+        currentPomodoro: 0,
+        completedPomodoros: 0,
+        totalMs: QUICK_POMODORO_FOCUS_MS,
+        currentPlan: quickPlan,
+        currentPlanIndex: -1,
+        startTime: quickPlan.startTime,
+        startAtMs: activeQuickPomodoro.startAtMs,
+        endAtMs: activeQuickPomodoro.endAtMs,
+        untilStartMs: Math.max(0, activeQuickPomodoro.startAtMs - now),
+        nextStartAtMs: activeQuickPomodoro.startAtMs,
+        nextStartDay: weekday,
+        shouldRestrictWorkbench: true,
+      })
+    }
+
+    const elapsedMs = Math.max(0, now - activeQuickPomodoro.startAtMs)
+    const remainingMs = Math.max(0, activeQuickPomodoro.endAtMs - now)
+
+    return createBaseSnapshot({
+      status: "running",
+      idleReason: null,
+      phase: "focus",
+      totalPomodoros: 1,
+      currentPomodoro: 1,
+      completedPomodoros: 0,
+      totalMs: QUICK_POMODORO_FOCUS_MS,
+      remainingMs,
+      segmentRemainingMs: remainingMs,
+      segmentIndex: 0,
+      progressRatio: Math.min(1, elapsedMs / QUICK_POMODORO_FOCUS_MS),
+      segmentProgressRatio: Math.min(1, elapsedMs / QUICK_POMODORO_FOCUS_MS),
+      segment: quickSegment,
+      currentPlan: quickPlan,
+      currentPlanIndex: -1,
+      startTime: quickPlan.startTime,
+      startAtMs: activeQuickPomodoro.startAtMs,
+      endAtMs: activeQuickPomodoro.endAtMs,
+      canUseWorkbench: true,
+      shouldRestrictWorkbench: false,
+      currentProjectId: activeQuickPomodoro.projectId,
     })
   }
 
@@ -623,7 +763,7 @@ export function getPomodoroSnapshot(
 }
 
 export function getPomodoroUpcomingSegmentPreview(
-  input: { enabled: boolean; weeklySchedule: PomodoroWeekSchedule },
+  input: { enabled: boolean; weeklySchedule: PomodoroWeekSchedule; quickPomodoro?: QuickPomodoroSession | null },
   now = Date.now(),
 ): PomodoroUpcomingSegmentPreview | null {
   const snapshot = getPomodoroSnapshot(input, now)
@@ -665,6 +805,7 @@ export function getPomodoroUpcomingSegmentPreview(
       return null
     }
     if (!nextSegment) {
+      if (snapshot.currentPlan.id === QUICK_POMODORO_PLAN_ID) return null
       const finalBreakPreview =
         snapshot.segment.phase === "focus"
           ? {
@@ -783,16 +924,30 @@ export const usePomodoroStore = create<PomodoroState>()(
           },
         })),
       setSettings: (settings) =>
-        set(() => ({
+        set((state) => ({
           enabled: Boolean(settings.enabled),
           weeklySchedule: normalizePomodoroWeekSchedule(settings.weeklySchedule),
+          quickPomodoro: state.quickPomodoro,
           transitionSoundEnabled: Boolean(settings.transitionSoundEnabled),
+        })),
+      startQuickPomodoro: (projectId) => {
+        const quickPomodoro = createQuickPomodoroSession(projectId)
+        set((state) => ({
+          ...state,
+          quickPomodoro,
+        }))
+        return quickPomodoro
+      },
+      clearQuickPomodoro: () =>
+        set((state) => ({
+          ...state,
+          quickPomodoro: null,
         })),
       reset: () => set(createInitialState()),
     }),
     {
       name: "plm-pomodoro",
-      version: 7,
+      version: 8,
       migrate: (persistedState: unknown, version) => {
         if (!persistedState || typeof persistedState !== "object") {
           return persistedState as PomodoroState
@@ -800,6 +955,7 @@ export const usePomodoroStore = create<PomodoroState>()(
         const raw = persistedState as {
           enabled?: unknown
           weeklySchedule?: unknown
+          quickPomodoro?: unknown
           transitionSoundEnabled?: unknown
           focusMinutes?: unknown
           breakMinutes?: unknown
@@ -810,6 +966,7 @@ export const usePomodoroStore = create<PomodoroState>()(
           return {
             enabled: typeof raw.enabled === "boolean" ? raw.enabled : false,
             weeklySchedule: normalizePomodoroWeekSchedule(raw.weeklySchedule),
+            quickPomodoro: normalizeQuickPomodoroSession(raw.quickPomodoro),
             transitionSoundEnabled: typeof raw.transitionSoundEnabled === "boolean" ? raw.transitionSoundEnabled : false,
           } as PomodoroState
         }
@@ -821,6 +978,7 @@ export const usePomodoroStore = create<PomodoroState>()(
             breakMinutes: raw.breakMinutes,
             pomodoroCount: raw.pomodoroCount,
           }),
+          quickPomodoro: null,
           transitionSoundEnabled: false,
         } as PomodoroState
       },

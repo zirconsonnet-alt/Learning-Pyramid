@@ -34,6 +34,7 @@ import {
   describePomodoroPhase,
   formatPomodoroCountdown,
   getPomodoroSnapshot,
+  isQuickPomodoroSessionActive,
   normalizePomodoroStartTime,
   normalizePomodoroWeekSchedule,
   validatePomodoroWeekSchedule,
@@ -480,11 +481,14 @@ export function PomodoroPage() {
   const defaultProjectReviewTemplate = useGlobalConfigStore((state) => state.defaultProjectReviewTemplate)
   const enabled = usePomodoroStore((state) => state.enabled)
   const weeklySchedule = usePomodoroStore((state) => state.weeklySchedule)
+  const quickPomodoro = usePomodoroStore((state) => state.quickPomodoro)
   const transitionSoundEnabled = usePomodoroStore((state) => state.transitionSoundEnabled)
   const setEnabled = usePomodoroStore((state) => state.setEnabled)
   const setTransitionSoundEnabled = usePomodoroStore((state) => state.setTransitionSoundEnabled)
   const setSettings = usePomodoroStore((state) => state.setSettings)
-  const now = usePomodoroNow(enabled)
+  const startQuickPomodoro = usePomodoroStore((state) => state.startQuickPomodoro)
+  const quickPomodoroClockActive = isQuickPomodoroSessionActive(quickPomodoro)
+  const now = usePomodoroNow(enabled || quickPomodoroClockActive)
   const { fromPath } = useMemo(() => readLocationState(location.state), [location.state])
   const [pomodoroDrafts, setPomodoroDrafts] = useState<PomodoroPlanDraft[]>(() => toPomodoroPlanDrafts(weeklySchedule))
   const [testingPromptKey, setTestingPromptKey] = useState("")
@@ -507,7 +511,15 @@ export function PomodoroPage() {
   )
   const availableProjects = projectsQ.data ?? []
 
-  const snapshot = useMemo(() => getPomodoroSnapshot({ enabled, weeklySchedule }, now), [enabled, now, weeklySchedule])
+  const snapshot = useMemo(() => getPomodoroSnapshot({ enabled, weeklySchedule, quickPomodoro }, now), [enabled, now, quickPomodoro, weeklySchedule])
+  const activeQuickPomodoro = isQuickPomodoroSessionActive(quickPomodoro, now) ? quickPomodoro : null
+  const quickPomodoroButtonLabel =
+    activeQuickPomodoro && now < activeQuickPomodoro.startAtMs
+      ? `小番茄 ${formatPomodoroCountdown(activeQuickPomodoro.startAtMs - now)}`
+      : activeQuickPomodoro
+        ? "小番茄进行中"
+        : "新建小番茄"
+  const isFocusRunning = snapshot.status === "running" && snapshot.phase === "focus"
   const hasFocusProject = snapshot.currentProjectId ? projectTitleMap.has(snapshot.currentProjectId) : false
   const focusProjectTitle =
     snapshot.currentProjectId && hasFocusProject ? projectTitleMap.get(snapshot.currentProjectId) ?? "" : ""
@@ -697,6 +709,20 @@ export function PomodoroPage() {
     }
   }
 
+  function handleStartQuickPomodoro() {
+    if (isFocusRunning) {
+      showInfoFeedback("番茄钟正在运行", "当前已经处于学习阶段，结束后再新建小番茄。")
+      return
+    }
+    const quick = startQuickPomodoro(selectedProjectId)
+    showSuccessFeedback(
+      "小番茄已创建",
+      quick.projectId
+        ? "10 秒后开始 25 分钟学习，系统会进入当前选中项目的工作台。"
+        : "10 秒后开始 25 分钟学习。",
+    )
+  }
+
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-8">
       <section className="space-y-5">
@@ -726,6 +752,10 @@ export function PomodoroPage() {
             <Button variant="outline" onClick={handleTestSound}>
               <Volume2 className="h-4 w-4" />
               测试铃声
+            </Button>
+            <Button variant="outline" onClick={handleStartQuickPomodoro} disabled={Boolean(activeQuickPomodoro) || isFocusRunning}>
+              <TimerReset className="h-4 w-4" />
+              {quickPomodoroButtonLabel}
             </Button>
             {snapshot.canUseWorkbench && preferredWorkbenchPath ? (
               <Button asChild>

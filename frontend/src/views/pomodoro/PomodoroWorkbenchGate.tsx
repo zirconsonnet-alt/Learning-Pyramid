@@ -2,7 +2,7 @@ import type { ReactNode } from "react"
 import { Navigate, useLocation, useParams } from "react-router-dom"
 
 import { useProjects } from "@/ui/queries/projects"
-import { getPomodoroSnapshot, usePomodoroNow, usePomodoroStore } from "@/ui/store/pomodoroStore"
+import { getPomodoroSnapshot, isQuickPomodoroSessionActive, usePomodoroNow, usePomodoroStore } from "@/ui/store/pomodoroStore"
 import { buildPomodoroPath } from "@/views/pomodoro/pomodoroRouting"
 
 export function PomodoroWorkbenchGate(props: { children: ReactNode }) {
@@ -11,18 +11,21 @@ export function PomodoroWorkbenchGate(props: { children: ReactNode }) {
   const location = useLocation()
   const enabled = usePomodoroStore((state) => state.enabled)
   const weeklySchedule = usePomodoroStore((state) => state.weeklySchedule)
-  const now = usePomodoroNow(enabled)
+  const quickPomodoro = usePomodoroStore((state) => state.quickPomodoro)
+  const activeQuickPomodoro = isQuickPomodoroSessionActive(quickPomodoro) ? quickPomodoro : null
+  const pomodoroActive = enabled || Boolean(activeQuickPomodoro)
+  const now = usePomodoroNow(pomodoroActive)
   const projectsQ = useProjects(true)
 
   if (!projectId) {
     return <>{children}</>
   }
 
-  if (!enabled) {
+  if (!pomodoroActive) {
     return <>{children}</>
   }
 
-  const snapshot = getPomodoroSnapshot({ enabled, weeklySchedule }, now)
+  const snapshot = getPomodoroSnapshot({ enabled, weeklySchedule, quickPomodoro }, now)
   const accessibleProjectIds = new Set((projectsQ.data ?? []).map((item) => item.projectId))
   const focusProjectId =
     snapshot.currentProjectId && accessibleProjectIds.has(snapshot.currentProjectId)

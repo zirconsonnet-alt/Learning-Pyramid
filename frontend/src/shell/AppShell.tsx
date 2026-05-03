@@ -26,6 +26,7 @@ import {
   formatPomodoroCountdown,
   getPomodoroSnapshot,
   getPomodoroUpcomingSegmentPreview,
+  isQuickPomodoroSessionActive,
   usePomodoroNow,
   usePomodoroStore,
 } from "@/ui/store/pomodoroStore"
@@ -333,8 +334,10 @@ export function AppShell() {
   const logout = useLogout()
   const pomodoroEnabled = usePomodoroStore((state) => state.enabled)
   const pomodoroWeeklySchedule = usePomodoroStore((state) => state.weeklySchedule)
+  const pomodoroQuickPomodoro = usePomodoroStore((state) => state.quickPomodoro)
   const pomodoroTransitionSoundEnabled = usePomodoroStore((state) => state.transitionSoundEnabled)
-  const pomodoroNow = usePomodoroNow(pomodoroEnabled)
+  const activePomodoroQuickSession = isQuickPomodoroSessionActive(pomodoroQuickPomodoro) ? pomodoroQuickPomodoro : null
+  const pomodoroNow = usePomodoroNow(pomodoroEnabled || Boolean(activePomodoroQuickSession))
   const resolvedSubjectId = subjectContextQ.data?.subject.subjectId ?? routeSubject?.subjectId ?? ""
   const fallbackSubjectTitle = routeSubject?.title || projectTitle || pid || "当前学科"
   const subjectTitle = subjectContextQ.data?.subject.title ?? fallbackSubjectTitle
@@ -397,16 +400,13 @@ export function AppShell() {
   const subjectMenuActive = isNavGroupActive(location.pathname, subjectNavItems)
   const projectMenuActive = isNavGroupActive(location.pathname, projectNavItems)
   const pomodoroSnapshot = useMemo(
-    () => getPomodoroSnapshot({ enabled: pomodoroEnabled, weeklySchedule: pomodoroWeeklySchedule }, pomodoroNow),
-    [pomodoroEnabled, pomodoroNow, pomodoroWeeklySchedule],
+    () => getPomodoroSnapshot({ enabled: pomodoroEnabled, weeklySchedule: pomodoroWeeklySchedule, quickPomodoro: pomodoroQuickPomodoro }, pomodoroNow),
+    [pomodoroEnabled, pomodoroNow, pomodoroQuickPomodoro, pomodoroWeeklySchedule],
   )
   const pomodoroUpcomingSegment = useMemo(
     () =>
-      getPomodoroUpcomingSegmentPreview(
-        { enabled: pomodoroEnabled, weeklySchedule: pomodoroWeeklySchedule },
-        pomodoroNow,
-      ),
-    [pomodoroEnabled, pomodoroNow, pomodoroWeeklySchedule],
+      getPomodoroUpcomingSegmentPreview({ enabled: pomodoroEnabled, weeklySchedule: pomodoroWeeklySchedule, quickPomodoro: pomodoroQuickPomodoro }, pomodoroNow),
+    [pomodoroEnabled, pomodoroNow, pomodoroQuickPomodoro, pomodoroWeeklySchedule],
   )
   const accessibleProjectIds = useMemo(
     () => new Set((projectsQ.data ?? []).map((project) => project.projectId)),
@@ -465,7 +465,7 @@ export function AppShell() {
         }
       : null,
   )
-  const showPomodoroShortcut = pomodoroEnabled
+  const showPomodoroShortcut = pomodoroEnabled || Boolean(activePomodoroQuickSession)
   const pomodoroShortcutText =
     pomodoroSnapshot.status === "running"
       ? `${pomodoroSnapshot.phase === "focus" ? "学习" : "间歇"} ${formatPomodoroCountdown(pomodoroSnapshot.segmentRemainingMs)}`

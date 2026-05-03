@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react"
-import { BookOpenText, Bot, Clock3, FolderKanban, LayoutDashboard, PanelsTopLeft, Settings2, Shield, TimerReset, UsersRound, Waypoints, Workflow } from "lucide-react"
+import { BookOpenText, Bot, Clock3, FolderKanban, LayoutDashboard, PanelsTopLeft, Settings2, Shield, UsersRound, Waypoints, Workflow } from "lucide-react"
 
 import { buildGlobalSettingsPath } from "@/views/settings/globalSettingsRouting"
 
@@ -12,7 +12,6 @@ export type NavItem = {
 
 const BASE_GLOBAL_NAV_ITEMS: NavItem[] = [
   { to: "/projects", label: "学科中心", icon: FolderKanban },
-  { to: "/pomodoro", label: "番茄钟", icon: TimerReset },
   { to: "/friends", label: "好友", icon: UsersRound },
   { to: "/guide", label: "用户指南", icon: BookOpenText },
   { to: buildGlobalSettingsPath(), label: "全局设置", icon: Settings2 },

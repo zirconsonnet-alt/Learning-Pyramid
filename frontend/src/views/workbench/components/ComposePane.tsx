@@ -146,6 +146,7 @@ export function ComposePane({
   const questionRefs = useRef<Record<string, HTMLTextAreaElement | null>>({})
   const answerRefs = useRef<Record<string, HTMLTextAreaElement | null>>({})
   const lastRecommendedTitleRef = useRef("")
+  const previousDraftScopeRef = useRef<{ scopeKey: string; count: number } | null>(null)
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null)
   const [referencePicker, setReferencePicker] = useState<{
     field: ReferencePickerField
@@ -323,6 +324,14 @@ export function ComposePane({
   useEffect(() => {
     setReferencePicker(null)
   }, [resolvedActiveDraftId])
+
+  useEffect(() => {
+    const previous = previousDraftScopeRef.current
+    previousDraftScopeRef.current = { scopeKey: taskScopeKey, count: drafts.length }
+    if (!previous || previous.scopeKey !== taskScopeKey || drafts.length <= previous.count) return
+    const newestDraft = drafts[drafts.length - 1]
+    if (newestDraft) setActiveDraftId(newestDraft.localId)
+  }, [drafts, taskScopeKey])
 
   function focusDraftFields(draft: DraftRecallPoint) {
     const questionFilled = richContentHasMeaning(draft.question)

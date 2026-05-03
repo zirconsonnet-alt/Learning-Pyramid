@@ -6,6 +6,8 @@ POMODORO_STORE = REPO_ROOT / "frontend" / "src" / "ui" / "store" / "pomodoroStor
 POMODORO_PAGE = REPO_ROOT / "frontend" / "src" / "views" / "pomodoro" / "PomodoroPage.tsx"
 POMODORO_ROUTING = REPO_ROOT / "frontend" / "src" / "views" / "pomodoro" / "pomodoroRouting.ts"
 FRONTEND_ROUTER = REPO_ROOT / "frontend" / "src" / "router.tsx"
+APP_SHELL = REPO_ROOT / "frontend" / "src" / "shell" / "AppShell.tsx"
+NAV_ITEMS = REPO_ROOT / "frontend" / "src" / "shell" / "navItems.ts"
 LOCAL_MEDIA = REPO_ROOT / "frontend" / "src" / "ui" / "localMedia" / "projectDirectory.ts"
 POMODORO_REST_MUSIC_PLAYER = REPO_ROOT / "frontend" / "src" / "ui" / "pomodoroRestMusicPlayer.ts"
 GLOBAL_SETTINGS_PAGE = REPO_ROOT / "frontend" / "src" / "views" / "settings" / "GlobalSettingsPage.tsx"
@@ -19,7 +21,52 @@ def test_pomodoro_store_supports_multiple_non_overlapping_day_plans() -> None:
     assert "plans: PomodoroPlanSchedule[]" in source
     assert "validatePomodoroWeekSchedule" in source
     assert "getActivePomodoroDayPlans" in source
-    assert "version: 7" in source
+    assert "version: 8" in source
+
+
+def test_pomodoro_store_supports_quick_pomodoro_session() -> None:
+    source = POMODORO_STORE.read_text(encoding="utf-8")
+
+    assert "export type QuickPomodoroSession" in source
+    assert "QUICK_POMODORO_PREPARE_MS = 10_000" in source
+    assert "QUICK_POMODORO_FOCUS_MS = 25 * 60_000" in source
+    assert "quickPomodoro: QuickPomodoroSession | null" in source
+    assert "startQuickPomodoro: (projectId?: string | null) => QuickPomodoroSession" in source
+    assert "clearQuickPomodoro: () => void" in source
+    assert "buildQuickPomodoroPlan" in source
+    assert "quickPomodoro && now < quickPomodoro.endAtMs" in source
+    assert "getPomodoroSnapshot({ enabled, weeklySchedule, quickPomodoro }, now)" in POMODORO_PAGE.read_text(encoding="utf-8")
+
+
+def test_pomodoro_page_exposes_quick_pomodoro_action() -> None:
+    source = POMODORO_PAGE.read_text(encoding="utf-8")
+
+    assert "const quickPomodoro = usePomodoroStore((state) => state.quickPomodoro)" in source
+    assert "const startQuickPomodoro = usePomodoroStore((state) => state.startQuickPomodoro)" in source
+    assert "function handleStartQuickPomodoro()" in source
+    assert "startQuickPomodoro(selectedProjectId)" in source
+    assert 'const isFocusRunning = snapshot.status === "running" && snapshot.phase === "focus"' in source
+    assert "disabled={Boolean(activeQuickPomodoro) || isFocusRunning}" in source
+    assert "新建小番茄" in source
+    assert "10 秒后开始 25 分钟学习" in source
+
+
+def test_quick_pomodoro_feeds_shell_gate_and_fullscreen_previews() -> None:
+    app_shell_source = APP_SHELL.read_text(encoding="utf-8")
+    gate_source = (REPO_ROOT / "frontend" / "src" / "views" / "pomodoro" / "PomodoroWorkbenchGate.tsx").read_text(encoding="utf-8")
+    video_pane_source = (REPO_ROOT / "frontend" / "src" / "views" / "workbench" / "components" / "VideoPane.tsx").read_text(encoding="utf-8")
+
+    assert "const pomodoroQuickPomodoro = usePomodoroStore((state) => state.quickPomodoro)" in app_shell_source
+    assert "getPomodoroSnapshot({ enabled: pomodoroEnabled, weeklySchedule: pomodoroWeeklySchedule, quickPomodoro: pomodoroQuickPomodoro }, pomodoroNow)" in app_shell_source
+    assert "getPomodoroUpcomingSegmentPreview({ enabled: pomodoroEnabled, weeklySchedule: pomodoroWeeklySchedule, quickPomodoro: pomodoroQuickPomodoro }, pomodoroNow)" in app_shell_source
+    assert "const showPomodoroShortcut = pomodoroEnabled || Boolean(activePomodoroQuickSession)" in app_shell_source
+
+    assert "const quickPomodoro = usePomodoroStore((state) => state.quickPomodoro)" in gate_source
+    assert "const pomodoroActive = enabled || Boolean(activeQuickPomodoro)" in gate_source
+    assert "getPomodoroSnapshot({ enabled, weeklySchedule, quickPomodoro }, now)" in gate_source
+
+    assert "const pomodoroQuickPomodoro = usePomodoroStore((state) => state.quickPomodoro)" in video_pane_source
+    assert "getPomodoroUpcomingSegmentPreview({ enabled: pomodoroEnabled, weeklySchedule: pomodoroWeeklySchedule, quickPomodoro: pomodoroQuickPomodoro }, pomodoroNow)" in video_pane_source
 
 
 def test_pomodoro_page_can_edit_multiple_plans_and_warn_conflicts() -> None:
@@ -45,6 +92,16 @@ def test_pomodoro_plan_editing_uses_dedicated_route() -> None:
     assert "to={buildPomodoroEditPath({ addPlan: true })}" in page_source
     assert "to={buildPomodoroEditPath()}" in page_source
     assert "setIsScheduleDetailOpen" not in page_source
+
+
+def test_pomodoro_entry_stays_as_header_shortcut_not_global_menu_item() -> None:
+    app_shell_source = APP_SHELL.read_text(encoding="utf-8")
+    nav_source = NAV_ITEMS.read_text(encoding="utf-8")
+    global_nav_block = nav_source[nav_source.index("const BASE_GLOBAL_NAV_ITEMS"):nav_source.index("export function getGlobalNavItems")]
+
+    assert "to={buildPomodoroPath()}" in app_shell_source
+    assert 'to: "/pomodoro"' not in global_nav_block
+    assert "番茄钟" not in global_nav_block
 
 
 def test_pomodoro_preview_warns_before_last_focus_enters_rest() -> None:
