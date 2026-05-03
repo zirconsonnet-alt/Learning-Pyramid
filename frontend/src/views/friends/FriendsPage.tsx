@@ -275,18 +275,12 @@ export function FriendsPage() {
             ) : null}
 
             <div className="space-y-4">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="space-y-1">
-                  <div className="text-base font-semibold tracking-tight text-foreground">好友列表</div>
-                  <div className="text-sm text-muted-foreground">{hasFilterText ? "按当前关键词筛选匹配到的好友。" : "已经互加成功的好友都会显示在这里。"}</div>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  {hasFilterText ? <MetaTag>结果 {filteredFriends.length}</MetaTag> : null}
-                  <Button type="button" size="sm" variant="ghost" onClick={onShowLeaderboard}>
-                    <Sparkles className="h-4 w-4" />
-                    学习排行
-                  </Button>
-                </div>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {hasFilterText ? <MetaTag>结果 {filteredFriends.length}</MetaTag> : null}
+                <Button type="button" size="sm" variant="ghost" onClick={onShowLeaderboard}>
+                  <Sparkles className="h-4 w-4" />
+                  学习排行
+                </Button>
               </div>
 
               {friendsQ.isLoading ? <LoadingNotice title="正在加载好友列表" message="请稍候，正在同步你的好友关系。" /> : null}
@@ -352,7 +346,7 @@ export function FriendsPage() {
           <DialogHeader className="border-b border-[color:var(--theme-soft-border)] px-6 py-5">
             <DialogTitle className="text-2xl tracking-tight text-foreground">添加好友</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 px-6 py-6">
+          <div className="space-y-4 px-6 pb-6 pt-3">
             <div className="flex flex-wrap gap-2">
               <SummaryChip label="好友" value={friendsQ.isLoading ? "..." : friends.length} />
               <SummaryChip label="待我处理" value={incomingRequestsQ.isLoading ? "..." : incomingPendingCount} tone={incomingPendingCount > 0 ? "accent" : "default"} />
