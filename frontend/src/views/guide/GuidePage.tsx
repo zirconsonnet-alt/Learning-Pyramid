@@ -17,6 +17,8 @@ import {
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { cn } from "@/ui/utils"
 import { copyTextToClipboard } from "@/views/membership/membershipUi"
+import { GuideDemoFrame } from "./demos/GuideDemoFrame"
+import { resolveGuideScene } from "./demos/guideSceneRegistry"
 
 type HeadingLevel = 1 | 2 | 3 | 4 | 5 | 6
 
@@ -52,6 +54,15 @@ type MarkdownBlock =
   | {
       type: "code"
       text: string
+    }
+  | {
+      type: "guideDemo"
+      scene: string
+      state: string
+      highlight?: string
+      title?: string
+      caption?: string
+      invalidReason?: string
     }
 
 type ParsedMarkdown = {
@@ -94,6 +105,41 @@ function renderMathHtml(expression: string, displayMode: boolean) {
   }
 }
 
+function parseGuideDemoAttributes(rawAttributes: string) {
+  const attributes: Record<string, string> = {}
+  const quotedAttributePattern = /([a-zA-Z][\w-]*)="([^"]*)"/g
+  let consumed = rawAttributes
+
+  for (const match of rawAttributes.matchAll(quotedAttributePattern)) {
+    attributes[match[1]] = match[2]
+    consumed = consumed.replace(match[0], "")
+  }
+
+  if (consumed.trim()) {
+    return { attributes, invalidReason: "guide-demo attributes must use quoted values" }
+  }
+
+  return { attributes }
+}
+
+function parseGuideDemoOpening(rawLine: string) {
+  const openingMatch = rawLine.match(/^:::guide-demo\b(.*)$/)
+  if (!openingMatch) return null
+
+  const parsed = parseGuideDemoAttributes(openingMatch[1])
+  const scene = parsed.attributes.scene
+  const state = parsed.attributes.state
+  const invalidReason = parsed.invalidReason ?? (!scene || !state ? "guide-demo requires quoted scene and state attributes" : undefined)
+
+  return {
+    scene: scene || "invalid-directive",
+    state: state || "invalid-directive",
+    highlight: parsed.attributes.highlight,
+    title: parsed.attributes.title,
+    invalidReason,
+  }
+}
+
 function parseMarkdown(source: string): ParsedMarkdown {
   const lines = source.replace(/\r\n/g, "\n").split("\n")
   const blocks: MarkdownBlock[] = []
@@ -129,6 +175,28 @@ function parseMarkdown(source: string): ParsedMarkdown {
       headings.push(heading)
       blocks.push({ type: "heading", ...heading })
       index += 1
+      continue
+    }
+
+    const guideDemoOpening = parseGuideDemoOpening(rawLine)
+    if (guideDemoOpening) {
+      const captionLines: string[] = []
+      index += 1
+
+      while (index < lines.length && lines[index].trim() !== ":::") {
+        captionLines.push(lines[index].trimEnd())
+        index += 1
+      }
+
+      const hasClosingDirective = index < lines.length
+      if (hasClosingDirective) index += 1
+
+      blocks.push({
+        type: "guideDemo",
+        ...guideDemoOpening,
+        caption: captionLines.join("\n").trim() || undefined,
+        invalidReason: guideDemoOpening.invalidReason ?? (!hasClosingDirective ? "guide-demo closing directive is missing" : undefined),
+      })
       continue
     }
 
@@ -194,6 +262,7 @@ function parseMarkdown(source: string): ParsedMarkdown {
       if (/^<a id="([^"]+)"><\/a>$/.test(nextTrimmed)) break
       if (/^(#{1,6})\s+/.test(paragraphLine)) break
       if (/^---+$/.test(nextTrimmed)) break
+      if (/^:::guide-demo\b/.test(paragraphLine)) break
       if (nextTrimmed === "\\[") break
       if (/^(```|~~~)/.test(nextTrimmed)) break
       if (/^[-*]\s+/.test(paragraphLine) || /^\d+\.\s+/.test(paragraphLine)) break
@@ -366,6 +435,24 @@ function MarkdownContent({ blocks }: { blocks: MarkdownBlock[] }) {
             >
               <code>{block.text}</code>
             </pre>
+          )
+        }
+
+        if (block.type === "guideDemo") {
+          const resolution = resolveGuideScene(block)
+          const fallbackReason = resolution.status === "ready" ? undefined : resolution.reason
+          return (
+            <GuideDemoFrame
+              key={`guide-demo-${blockIndex}`}
+              title={resolution.title}
+              caption={resolution.caption}
+              stateLabel={resolution.stateLabel}
+              stateDescription={resolution.stateDescription}
+              fallbackReason={fallbackReason}
+              maintainerHint={resolution.maintainerHint}
+            >
+              {resolution.status === "fallback" ? null : resolution.content}
+            </GuideDemoFrame>
           )
         }
 
