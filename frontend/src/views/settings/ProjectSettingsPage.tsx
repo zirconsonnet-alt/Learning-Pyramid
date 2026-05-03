@@ -501,8 +501,6 @@ export function ProjectSettingsPage() {
   const currentMaterial = subjectContext?.currentMaterial ?? null
   const currentMaterialTitle = currentMaterial?.title ?? projectQ.project?.title ?? ""
   const currentMaterialProjectId = currentMaterial?.compatibilityProjectId ?? pid
-  const currentProjectSettingsPath = buildProjectSettingsPath(currentMaterialProjectId ?? "", { subjectProjectId })
-  const currentProjectWorkbenchPath = buildProjectWorkbenchPath(currentMaterialProjectId ?? "")
   const currentMaterialType =
     currentMaterial?.materialType ??
     (projectType === "BOOK"
@@ -857,60 +855,62 @@ export function ProjectSettingsPage() {
             />
           ) : null}
 
-          <SettingsScopeCard
-            isSubjectRoot={isSubjectSettingsScope}
-            materialTitle={currentMaterialTitle}
-            materialType={currentMaterialType}
-            onOpenSubjectSettings={
-              !isSubjectSettingsScope && subjectProjectId
-                ? () => {
-                  navigate(`/p/${subjectProjectId}/settings`)
+          {!isSubjectSettingsScope ? (
+            <>
+              <SettingsScopeCard
+                isSubjectRoot={false}
+                materialTitle={currentMaterialTitle}
+                materialType={currentMaterialType}
+                onOpenSubjectSettings={
+                  subjectProjectId
+                    ? () => {
+                        navigate(`/p/${subjectProjectId}/settings`)
+                      }
+                    : undefined
                 }
-                : undefined
-            }
-            subjectTitle={subjectTitle}
-          />
+                subjectTitle={subjectTitle}
+              />
 
-          <SubjectMaterialsCard
-            createError={createSubjectMaterialM.error}
-            currentProjectId={currentMaterialProjectId ?? pid}
-            createPending={createSubjectMaterialM.isPending}
-            error={subjectContextQ.error}
-            isLoading={subjectContextQ.isLoading}
-            isSubjectRoot={isSubjectSettingsScope}
-            materials={subjectMaterials}
-            onCreateMaterial={async (materialType, title) => {
-              try {
-                const created = await createSubjectMaterialM.mutateAsync({ subjectId: subjectProjectId, materialType, title })
-                showSuccessFeedback("项目已创建", `“${created.title}” 已挂到“${subjectTitle || "当前学科"}”下。`)
-                if (created.compatibilityProjectId) {
+              <SubjectMaterialsCard
+                createError={createSubjectMaterialM.error}
+                currentProjectId={currentMaterialProjectId ?? pid}
+                createPending={createSubjectMaterialM.isPending}
+                error={subjectContextQ.error}
+                isLoading={subjectContextQ.isLoading}
+                isSubjectRoot={false}
+                materials={subjectMaterials}
+                onCreateMaterial={async (materialType, title) => {
+                  try {
+                    const created = await createSubjectMaterialM.mutateAsync({ subjectId: subjectProjectId, materialType, title })
+                    showSuccessFeedback("项目已创建", `“${created.title}” 已挂到“${subjectTitle || "当前学科"}”下。`)
+                    if (created.compatibilityProjectId) {
+                      navigate(
+                        created.materialType === "BOOK"
+                          ? buildProjectSettingsPath(created.compatibilityProjectId, { subjectProjectId })
+                          : buildProjectWorkbenchPath(created.compatibilityProjectId),
+                      )
+                    }
+                  } catch (err) {
+                    showErrorFeedback("创建项目失败", formatApiError(err))
+                    throw err
+                  }
+                }}
+                onOpenMaterial={(material, target) => {
+                  if (!material.compatibilityProjectId) return
                   navigate(
-                    created.materialType === "BOOK"
-                      ? buildProjectSettingsPath(created.compatibilityProjectId, { subjectProjectId })
-                      : buildProjectWorkbenchPath(created.compatibilityProjectId),
+                    target === "settings"
+                      ? buildProjectSettingsPath(material.compatibilityProjectId, { subjectProjectId })
+                      : buildProjectWorkbenchPath(material.compatibilityProjectId),
                   )
-                }
-              } catch (err) {
-                showErrorFeedback("创建项目失败", formatApiError(err))
-                throw err
-              }
-            }}
-            onOpenMaterial={(material, target) => {
-              if (!material.compatibilityProjectId) return
-              navigate(
-                target === "settings"
-                  ? buildProjectSettingsPath(material.compatibilityProjectId, { subjectProjectId })
-                  : buildProjectWorkbenchPath(material.compatibilityProjectId),
-              )
-            }}
-            subjectTitle={subjectTitle}
-          />
+                }}
+                subjectTitle={subjectTitle}
+              />
+            </>
+          ) : null}
 
           {isSubjectSettingsScope ? (
             <SubjectSettingsInfoCard
               subjectTitle={subjectTitle}
-              materialTitle={currentMaterialTitle}
-              materialType={currentMaterialType}
               isLoading={projectQ.isLoading || subjectContextQ.isLoading}
               isPending={renameMutationPending}
               queryError={subjectContextQ.error ?? projectQ.error}
@@ -923,20 +923,6 @@ export function ProjectSettingsPage() {
                   showErrorFeedback("更新学科名称失败", formatApiError(err))
                 }
               }}
-              onOpenProjectWorkbench={
-                currentProjectWorkbenchPath
-                  ? () => {
-                      navigate(currentProjectWorkbenchPath)
-                    }
-                  : undefined
-              }
-              onOpenProjectSettings={
-                currentProjectSettingsPath
-                  ? () => {
-                      navigate(currentProjectSettingsPath)
-                    }
-                  : undefined
-              }
             />
           ) : (
             <BasicInfoCard
@@ -1534,27 +1520,19 @@ function SubjectMaterialsCard({
 
 function SubjectSettingsInfoCard(props: {
   subjectTitle: string
-  materialTitle: string
-  materialType: StudyMaterial["materialType"]
   isLoading: boolean
   isPending: boolean
   queryError: unknown
   saveError: unknown
   onSave: (title: string) => Promise<void>
-  onOpenProjectWorkbench?: () => void
-  onOpenProjectSettings?: () => void
 }) {
   const {
     subjectTitle,
-    materialTitle,
-    materialType,
     isLoading,
     isPending,
     queryError,
     saveError,
     onSave,
-    onOpenProjectWorkbench,
-    onOpenProjectSettings,
   } = props
   const [titleDraft, setTitleDraft] = useState(subjectTitle)
 
@@ -1571,67 +1549,38 @@ function SubjectSettingsInfoCard(props: {
         <CardTitle>学科信息</CardTitle>
       </CardHeader>
       <CardContent className="space-y-5 pt-0 text-sm">
-        <section className="grid gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(280px,0.9fr)] lg:items-start">
-          <div className="space-y-3">
-            <div className="space-y-1">
-              <div className="text-sm font-semibold text-foreground">学科名称</div>
-            </div>
-            <form
-              className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center"
-              onSubmit={(event) => {
-                event.preventDefault()
-                if (!canSave) return
-                void onSave(trimmedTitle)
-              }}
-            >
-              <div>
-                <Label htmlFor="subjectTitle" className="sr-only">
-                  学科名称
-                </Label>
-                <Input
-                  id="subjectTitle"
-                  value={titleDraft}
-                  onChange={(event) => setTitleDraft(event.target.value)}
-                  placeholder="输入新的学科名称"
-                  disabled={isLoading || isPending}
-                />
-              </div>
-              <div className="flex items-center justify-end">
-                <Button type="submit" disabled={!canSave} className="w-full md:w-auto">
-                  {isPending ? "保存中..." : "保存学科名称"}
-                </Button>
-              </div>
-            </form>
-            {queryError ? <p className="text-sm text-destructive">{formatApiError(queryError)}</p> : null}
-            {saveError ? <p className="text-sm text-destructive">{formatApiError(saveError)}</p> : null}
+        <section className="space-y-3">
+          <div className="space-y-1">
+            <div className="text-sm font-semibold text-foreground">学科名称</div>
           </div>
-
-          <div className="space-y-3">
-            <div className="space-y-1">
-              <div className="text-sm font-semibold text-foreground">当前项目入口</div>
+          <form
+            className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center"
+            onSubmit={(event) => {
+              event.preventDefault()
+              if (!canSave) return
+              void onSave(trimmedTitle)
+            }}
+          >
+            <div>
+              <Label htmlFor="subjectTitle" className="sr-only">
+                学科名称
+              </Label>
+              <Input
+                id="subjectTitle"
+                value={titleDraft}
+                onChange={(event) => setTitleDraft(event.target.value)}
+                placeholder="输入新的学科名称"
+                disabled={isLoading || isPending}
+              />
             </div>
-            <div className="rounded-[1.2rem] border border-border/70 bg-muted/15 px-4 py-4">
-              <div className="text-sm font-semibold text-foreground">{materialTitle || "默认网课项目"}</div>
-              <div className="mt-1 text-xs text-muted-foreground">{formatStudyMaterialTypeLabel(materialType)}项目</div>
-              <div className="mt-3 text-sm leading-6 text-muted-foreground">
-                项目级的导入、AI、目录初始化、层推进和缺失修复已经从学科设置里拆出，请进入项目设置单独维护。
-              </div>
-              {onOpenProjectWorkbench || onOpenProjectSettings ? (
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {onOpenProjectWorkbench ? (
-                    <Button type="button" variant="outline" size="sm" onClick={onOpenProjectWorkbench}>
-                      进入工作台
-                    </Button>
-                  ) : null}
-                  {onOpenProjectSettings ? (
-                    <Button type="button" size="sm" onClick={onOpenProjectSettings}>
-                      项目设置
-                    </Button>
-                  ) : null}
-                </div>
-              ) : null}
+            <div className="flex items-center justify-end">
+              <Button type="submit" disabled={!canSave} className="w-full md:w-auto">
+                {isPending ? "保存中..." : "保存学科名称"}
+              </Button>
             </div>
-          </div>
+          </form>
+          {queryError ? <p className="text-sm text-destructive">{formatApiError(queryError)}</p> : null}
+          {saveError ? <p className="text-sm text-destructive">{formatApiError(saveError)}</p> : null}
         </section>
       </CardContent>
     </Card>
