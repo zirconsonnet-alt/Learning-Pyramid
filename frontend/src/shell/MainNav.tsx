@@ -19,6 +19,7 @@ export function MainNav(props: { items: NavItem[]; onNavigate?: () => void; clas
           >
             {({ isActive }) => (
               <div
+                data-guide-tour={item.guideTourAnchor}
                 className={cn(
                   "group flex min-h-11 w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition-all duration-200",
                   isActive

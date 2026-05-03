@@ -1207,11 +1207,12 @@ function BasicInfoCard({
                     <div className="flex flex-wrap gap-2 lg:justify-end">
                       {directoryPermission === "granted" ? (
                         <>
-                          <Button type="button" onClick={() => void onImportAuthorizedDirectory()} disabled={directoryBusy}>
+                          <Button type="button" data-guide-tour="import-directory-button" onClick={() => void onImportAuthorizedDirectory()} disabled={directoryBusy}>
                             {directoryAction === "import" ? "同步中..." : "同步目录内容"}
                           </Button>
                           <Button
                             type="button"
+                            data-guide-tour="authorize-directory-button"
                             variant="outline"
                             onClick={() => void onAuthorizeDirectory()}
                             disabled={!canChooseDirectory || directoryBusy}
@@ -1222,7 +1223,7 @@ function BasicInfoCard({
                       ) : null}
 
                       {(directoryPermission === "missing" || directoryPermission === "unsupported") ? (
-                        <Button type="button" onClick={() => void onAuthorizeDirectory()} disabled={!canChooseDirectory || directoryBusy}>
+                        <Button type="button" data-guide-tour="authorize-directory-button" onClick={() => void onAuthorizeDirectory()} disabled={!canChooseDirectory || directoryBusy}>
                           {directoryAction === "authorize" ? "打开目录选择器..." : "选择目录"}
                         </Button>
                       ) : null}
@@ -1231,6 +1232,7 @@ function BasicInfoCard({
                         <>
                           <Button
                             type="button"
+                            data-guide-tour="authorize-directory-button"
                             onClick={() => void onRequestDirectoryPermission()}
                             disabled={!canRequestDirectoryPermission || directoryBusy}
                           >
@@ -1238,6 +1240,7 @@ function BasicInfoCard({
                           </Button>
                           <Button
                             type="button"
+                            data-guide-tour="authorize-directory-button"
                             variant="outline"
                             onClick={() => void onAuthorizeDirectory()}
                             disabled={!canChooseDirectory || directoryBusy}

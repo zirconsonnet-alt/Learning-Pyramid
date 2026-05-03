@@ -337,6 +337,7 @@ export function ProjectsPage() {
               ))}
               <button
                 type="button"
+                data-guide-tour="new-subject-button"
                 onClick={() => setCreateOpen(true)}
                 className="group flex h-full min-h-[12.75rem] flex-col items-start gap-5 rounded-[1.75rem] border border-dashed border-[color:var(--theme-subtle-border)] bg-[color:var(--theme-subtle-bg)] p-8 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/25 hover:bg-[color:var(--theme-soft-bg)]"
               >
@@ -374,7 +375,7 @@ export function ProjectsPage() {
             <Button variant="secondary" onClick={() => setCreateOpen(false)}>
               取消
             </Button>
-            <Button onClick={onCreate} disabled={create.isPending || !title.trim()}>
+            <Button data-guide-tour="create-subject-submit" onClick={onCreate} disabled={create.isPending || !title.trim()}>
               {create.isPending ? "创建中..." : "创建学科"}
             </Button>
           </DialogFooter>

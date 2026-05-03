@@ -263,7 +263,7 @@ export function ReviewPane({
   }
 
   return (
-    <Card className="theme-card-main">
+    <Card data-guide-tour="review-pane" className="theme-card-main">
       <CardHeader className="theme-card-header flex-col gap-4 space-y-0 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
           <div className="theme-icon-surface h-10 w-10">

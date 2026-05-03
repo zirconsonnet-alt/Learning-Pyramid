@@ -7,6 +7,7 @@ POMODORO_PAGE = REPO_ROOT / "frontend" / "src" / "views" / "pomodoro" / "Pomodor
 POMODORO_ROUTING = REPO_ROOT / "frontend" / "src" / "views" / "pomodoro" / "pomodoroRouting.ts"
 FRONTEND_ROUTER = REPO_ROOT / "frontend" / "src" / "router.tsx"
 LOCAL_MEDIA = REPO_ROOT / "frontend" / "src" / "ui" / "localMedia" / "projectDirectory.ts"
+POMODORO_REST_MUSIC_PLAYER = REPO_ROOT / "frontend" / "src" / "ui" / "pomodoroRestMusicPlayer.ts"
 GLOBAL_SETTINGS_PAGE = REPO_ROOT / "frontend" / "src" / "views" / "settings" / "GlobalSettingsPage.tsx"
 USER_MANUAL = REPO_ROOT / "docs" / "learningpyramid-user-manual.md"
 
@@ -86,9 +87,23 @@ def test_pomodoro_rest_music_directory_can_be_bound_and_played_during_breaks() -
     assert 'snapshot.phase === "break"' in pomodoro_page_source
 
 
+def test_pomodoro_rest_music_playback_survives_route_changes() -> None:
+    player_source = POMODORO_REST_MUSIC_PLAYER.read_text(encoding="utf-8")
+    pomodoro_page_source = POMODORO_PAGE.read_text(encoding="utf-8")
+
+    assert "pomodoroRestMusicState" in player_source
+    assert "subscribePomodoroRestMusicPlayer" in player_source
+    assert "playPomodoroRestMusicTrack" in player_source
+    assert "pausePomodoroRestMusic" in player_source
+    assert "isRestPhaseActive" in player_source
+    assert "audio.pause()" not in pomodoro_page_source[pomodoro_page_source.index("function RestMusicPlayer"):]
+    assert "revokePomodoroRestMusicObjectUrl" not in pomodoro_page_source
+
+
 def test_user_manual_documents_local_rest_music_directory_scope() -> None:
     manual_source = USER_MANUAL.read_text(encoding="utf-8")
 
     assert "休息音乐目录" in manual_source
     assert "本地浏览器授权" in manual_source
     assert "不会上传到服务端" in manual_source
+    assert "切换到 AI 问答等其他路由会继续播放" in manual_source

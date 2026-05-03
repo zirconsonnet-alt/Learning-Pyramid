@@ -243,7 +243,7 @@ export function SubjectDashboardPage() {
                 <CardContent className="space-y-4">
                   {material.compatibilityProjectId ? (
                     <div className="flex flex-wrap gap-2">
-                      <Button type="button" onClick={() => openMaterial(material, "workbench")}>
+                      <Button type="button" data-guide-tour="subject-project-entry" onClick={() => openMaterial(material, "workbench")}>
                         <ArrowRight className="h-4 w-4" />
                         进入工作台
                       </Button>

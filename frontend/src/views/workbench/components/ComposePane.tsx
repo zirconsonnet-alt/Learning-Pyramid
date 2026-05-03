@@ -420,7 +420,12 @@ export function ComposePane({
             </div>
           </div>
           <div className="flex w-full gap-2 md:w-auto md:self-center">
-            <Button onClick={onAdd} disabled={requiresLearningObjectTree && !selectedInstanceId} className="flex-1 whitespace-nowrap md:flex-none">
+            <Button
+              data-guide-tour="add-recall-point-button"
+              onClick={onAdd}
+              disabled={requiresLearningObjectTree && !selectedInstanceId}
+              className="flex-1 whitespace-nowrap md:flex-none"
+            >
               添加
             </Button>
             {activeDraft ? (
@@ -737,6 +742,7 @@ export function ComposePane({
               }
             />
             <Button
+              data-guide-tour="submit-learning-button"
               className="h-11 shrink-0 rounded-xl px-5 md:min-w-[7rem]"
               onClick={() => void onSubmit()}
               disabled={!canSubmit}

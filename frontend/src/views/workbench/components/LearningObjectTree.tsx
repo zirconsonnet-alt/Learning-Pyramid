@@ -242,7 +242,7 @@ export function LearningObjectTree({
   if (rootIds.length === 0) {
     const canImportHere = projectType === "COURSE" && directoryBinding.permission === "granted" && !directoryBinding.loading
     return (
-      <div className="space-y-3 rounded-[1rem] border border-dashed border-border/70 bg-white p-4">
+      <div data-guide-tour="learning-object-tree" className="space-y-3 rounded-[1rem] border border-dashed border-border/70 bg-white p-4">
         <div className="text-sm font-medium text-foreground">当前还没有学习对象</div>
         <div className="text-sm text-muted-foreground">
           {projectType === "BOOK"
@@ -266,7 +266,7 @@ export function LearningObjectTree({
   }
 
   return (
-    <div className="space-y-1.5">
+    <div data-guide-tour="learning-object-tree" className="space-y-1.5">
       {rootIds.map((rootId) => (
         <TreeNode
           key={rootId}

@@ -5,6 +5,12 @@ import { Link, useLocation, useNavigate } from "react-router-dom"
 import { ApiError } from "@/ui/api/http"
 import type { ReviewChainTemplateItem } from "@/ui/api/projectConfig"
 import { playPomodoroTransitionSound, playPomodoroVoicePrompt, unlockPomodoroAudio } from "@/ui/pomodoroAudio"
+import {
+  getPomodoroRestMusicPlayerSnapshot,
+  pausePomodoroRestMusic,
+  playPomodoroRestMusicTrack,
+  subscribePomodoroRestMusicPlayer,
+} from "@/ui/pomodoroRestMusicPlayer"
 import { Button } from "@/ui/components/ui/button"
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
@@ -285,19 +291,12 @@ function RestMusicPlayer(props: { isRestPhase: boolean }) {
   const musicDirectory = usePomodoroRestMusicDirectoryBinding()
   const [tracks, setTracks] = useState<PomodoroRestMusicTrack[]>([])
   const [selectedTrackPath, setSelectedTrackPath] = useState("")
-  const [currentTrackPath, setCurrentTrackPath] = useState("")
   const [tracksLoading, setTracksLoading] = useState(false)
   const [tracksError, setTracksError] = useState("")
-  const [isPlaying, setIsPlaying] = useState(false)
-  const audioRef = useRef<HTMLAudioElement | null>(null)
-  const objectUrlRef = useRef("")
+  const [playerState, setPlayerState] = useState(getPomodoroRestMusicPlayerSnapshot)
   const selectedTrack = tracks.find((track) => track.relativePath === selectedTrackPath) ?? null
-
-  function revokeRestMusicObjectUrl() {
-    if (!objectUrlRef.current) return
-    URL.revokeObjectURL(objectUrlRef.current)
-    objectUrlRef.current = ""
-  }
+  const currentTrackPath = playerState.currentTrackPath
+  const isPlaying = playerState.isPlaying
 
   const loadRestMusicTracks = useCallback(async (options?: { force?: boolean }) => {
     if (!options?.force && musicDirectory.permission !== "granted") {
@@ -336,32 +335,12 @@ function RestMusicPlayer(props: { isRestPhase: boolean }) {
         showErrorFeedback("播放休息音乐失败", "浏览器暂时无法读取这首音乐，请重新授权音乐目录。")
         return
       }
-      const audio = audioRef.current ?? new Audio()
-      audioRef.current = audio
-      audio.pause()
-      revokeRestMusicObjectUrl()
-      const objectUrl = URL.createObjectURL(file)
-      objectUrlRef.current = objectUrl
-      audio.src = objectUrl
-      audio.preload = "auto"
-      audio.onended = () => setIsPlaying(false)
-      audio.onerror = () => {
-        setIsPlaying(false)
-        showErrorFeedback("播放休息音乐失败", "当前浏览器无法播放这首音频文件。")
-      }
-      await audio.play()
-      setCurrentTrackPath(normalizedPath)
+      await playPomodoroRestMusicTrack(normalizedPath, file)
       setSelectedTrackPath(normalizedPath)
-      setIsPlaying(true)
     } catch (err) {
-      setIsPlaying(false)
+      pausePomodoroRestMusic()
       showErrorFeedback("播放休息音乐失败", formatApiError(err))
     }
-  }
-
-  function pauseRestMusic() {
-    audioRef.current?.pause()
-    setIsPlaying(false)
   }
 
   async function playNextRestMusicTrack() {
@@ -388,17 +367,10 @@ function RestMusicPlayer(props: { isRestPhase: boolean }) {
   }
 
   useEffect(() => {
-    return () => {
-      audioRef.current?.pause()
-      revokeRestMusicObjectUrl()
-    }
+    return subscribePomodoroRestMusicPlayer(() => {
+      setPlayerState(getPomodoroRestMusicPlayerSnapshot())
+    })
   }, [])
-
-  useEffect(() => {
-    if (isRestPhase) return
-    audioRef.current?.pause()
-    setIsPlaying(false)
-  }, [isRestPhase])
 
   useEffect(() => {
     if (!isRestPhase || musicDirectory.permission !== "granted") return
@@ -451,7 +423,7 @@ function RestMusicPlayer(props: { isRestPhase: boolean }) {
             <div className="flex flex-wrap items-end gap-2">
               <Button
                 type="button"
-                onClick={() => (isPlaying ? pauseRestMusic() : void playRestMusicTrack())}
+                onClick={() => (isPlaying ? pausePomodoroRestMusic() : void playRestMusicTrack())}
                 disabled={tracksLoading || !selectedTrack}
               >
                 {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}

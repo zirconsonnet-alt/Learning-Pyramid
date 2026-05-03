@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react"
 import { ChevronDown, CreditCard, LogOut, Sparkles, TimerReset, User, type LucideIcon } from "lucide-react"
 import { Link, Navigate, NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router-dom"
+import "driver.js/dist/driver.css"
 
 import { MainNav } from "@/shell/MainNav"
 import { getGlobalNavItems, getProjectNavItems, getSubjectNavItems, type NavItem } from "@/shell/navItems"
@@ -17,6 +18,8 @@ import { useProject, useProjects } from "@/ui/queries/projects"
 import { useSystemCapabilities } from "@/ui/queries/system"
 import { useProjectConfig } from "@/ui/queries/workbench"
 import { usePomodoroPreTransitionSpeech, usePomodoroTransitionSound } from "@/ui/pomodoroAudio"
+import { setPomodoroRestMusicPhaseActive } from "@/ui/pomodoroRestMusicPlayer"
+import { useGuideWalkthroughController } from "@/ui/guideWalkthrough/guideWalkthroughController"
 import { buildProjectSettingsPath } from "@/ui/projectPaths"
 import { useAppStore } from "@/ui/store/appStore"
 import {
@@ -300,6 +303,7 @@ function AccountMenuActionButton(props: {
 export function AppShell() {
   const nav = useNavigate()
   const location = useLocation()
+  useGuideWalkthroughController({ navigate: nav, pathname: location.pathname })
   const { projectId, subjectId: routeSubjectId } = useParams()
   const pid = projectId ?? ""
   const isProjectsScope = location.pathname === "/projects"
@@ -444,6 +448,11 @@ export function AppShell() {
       ? `${pomodoroSnapshot.weekday}:${pomodoroSnapshot.segmentIndex}:${pomodoroFocusProjectId}:${pomodoroSnapshot.startAtMs ?? 0}`
       : ""
   usePomodoroTransitionSound(pomodoroSnapshot, pomodoroTransitionSoundEnabled)
+  useEffect(() => {
+    setPomodoroRestMusicPhaseActive(
+      pomodoroSnapshot.status === "running" && pomodoroSnapshot.phase === "break",
+    )
+  }, [pomodoroSnapshot.phase, pomodoroSnapshot.status])
   usePomodoroPreTransitionSpeech(
     pomodoroUpcomingSegment &&
       pomodoroUpcomingSegment.startsInMs > 0 &&

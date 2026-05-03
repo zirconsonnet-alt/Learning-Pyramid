@@ -29,7 +29,7 @@
 对于可以在 1～3 个文件内以最小改动完成、且不会影响公共接口或配置的任务，默认直接实施，不要重复征求确认。
 
 <!-- SPECKIT START -->
-Current Spec Kit plan: `specs/001-prevent-data-loss/plan.md`.
-For data-safety work, use that plan for the active requirements, project
-structure, validation approach, and operator workflow contracts.
+Current Spec Kit plan: `specs/003-driver-page-guide/plan.md`.
+For page-walkthrough guide work, use that plan for the active requirements,
+project structure, validation approach, and walkthrough authoring contracts.
 <!-- SPECKIT END -->

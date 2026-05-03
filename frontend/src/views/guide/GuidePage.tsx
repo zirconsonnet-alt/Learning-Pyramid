@@ -1,13 +1,13 @@
-import { startTransition, type ReactNode } from "react"
-import { Copy } from "lucide-react"
+import { startTransition, useEffect, type ReactNode } from "react"
+import { Copy, PlayCircle } from "lucide-react"
 import katex from "katex"
 import "katex/dist/katex.min.css"
 import { useSearchParams } from "react-router-dom"
 
-import methodGuideMarkdown from "../../../../docs/plm-method-guide.md?raw"
 import userManualMarkdown from "../../../../docs/learningpyramid-user-manual.md?raw"
 
 import { Button } from "@/ui/components/ui/button"
+import { startGuideWalkthrough } from "@/ui/guideWalkthrough/guideWalkthroughController"
 import {
   getOfficialCommunityCopyLabel,
   getOfficialCommunityCopySuccessMessage,
@@ -79,6 +79,8 @@ type DocDefinition = {
   sourcePath: string
   parsed: ParsedMarkdown
 }
+
+const LEGACY_GUIDE_DOC_SLUGS = new Set(["method"])
 
 function decodeMarkdownEscapes(text: string) {
   return text.replace(/\\([\\`*_{}#+.!&>-])/g, "$1")
@@ -295,14 +297,6 @@ const docs: DocDefinition[] = [
     sourcePath: "仓库文档 / 系统使用说明",
     parsed: parseMarkdown(userManualMarkdown),
   },
-  {
-    slug: "method",
-    label: "方法说明",
-    audience: "面向使用者",
-    summary: "解释 LearningPyramid 的核心思路、分层复习逻辑，以及为什么要这样组织学习。",
-    sourcePath: "仓库文档 / 方法说明",
-    parsed: parseMarkdown(methodGuideMarkdown),
-  },
 ]
 
 function renderInline(text: string, keyPrefix: string) {
@@ -465,7 +459,15 @@ function MarkdownContent({ blocks }: { blocks: MarkdownBlock[] }) {
 export function GuidePage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const requestedSlug = searchParams.get("doc")
-  const activeDoc = docs.find((item) => item.slug === requestedSlug) ?? docs[0]
+  const resolvedRequestedSlug = requestedSlug && !LEGACY_GUIDE_DOC_SLUGS.has(requestedSlug) ? requestedSlug : null
+  const activeDoc = docs.find((item) => item.slug === resolvedRequestedSlug) ?? docs[0]
+
+  useEffect(() => {
+    if (!requestedSlug || !LEGACY_GUIDE_DOC_SLUGS.has(requestedSlug)) return
+    const nextSearchParams = new URLSearchParams(searchParams)
+    nextSearchParams.delete("doc")
+    setSearchParams(nextSearchParams, { replace: true })
+  }, [requestedSlug, searchParams, setSearchParams])
 
   async function onCopyOfficialCommunityContact() {
     try {
@@ -514,6 +516,10 @@ export function GuidePage() {
                   </button>
                 )
               })}
+              <Button type="button" className="mt-3 w-full justify-center" onClick={() => startGuideWalkthrough()}>
+                <PlayCircle className="h-4 w-4" />
+                开始引导
+              </Button>
             </div>
           </section>
 

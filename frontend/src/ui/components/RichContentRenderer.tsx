@@ -1,5 +1,6 @@
 import type { RichContent } from "@/ui/api/richContent"
 import { mediaAssetUrl } from "@/ui/api/mediaAssets"
+import { MarkdownRichText } from "@/ui/components/MarkdownRichText"
 
 export function RichContentRenderer({
   projectId,
@@ -19,9 +20,12 @@ export function RichContentRenderer({
       {value.map((block, index) => {
         if (block.kind === "TEXT") {
           return (
-            <div key={`text-${index}`} className={textClassName}>
-              {block.text}
-            </div>
+            <MarkdownRichText
+              key={`text-${index}`}
+              text={block.text}
+              className={textClassName}
+              textClassName={textClassName}
+            />
           )
         }
         return (
