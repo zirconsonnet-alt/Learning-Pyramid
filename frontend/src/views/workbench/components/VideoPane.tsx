@@ -292,7 +292,7 @@ export function VideoPane({
   const lastPlaybackTrackedPositionClockRef = useRef<number | null>(null)
   const assistantAbortRef = useRef<AbortController | null>(null)
   const hlsRef = useRef<Hls | null>(null)
-  const lastPrintScreenShortcutAtRef = useRef(0)
+  const lastFrameCaptureShortcutAtRef = useRef(0)
 
   const [playbackMs, setPlaybackMs] = useState(0)
   const [durationMs, setDurationMs] = useState(0)
@@ -1473,9 +1473,14 @@ export function VideoPane({
   }
 
   useEffect(() => {
-    function handleFullscreenPrintScreen(event: KeyboardEvent) {
-      const isPrintScreenKey = event.key === "PrintScreen" || event.code === "PrintScreen"
-      if (!isPrintScreenKey) return false
+    function handleFullscreenFrameCaptureShortcut(event: KeyboardEvent) {
+      const isFrameCaptureShortcut =
+        event.shiftKey &&
+        !event.altKey &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        (event.key === "c" || event.key === "C" || event.code === "KeyC")
+      if (!isFrameCaptureShortcut) return false
       if (!isCapturePanelOpen || capturePanelMode !== "capture") return false
       const video = videoRef.current
       if (!video || video.readyState < 1) return false
@@ -1484,8 +1489,8 @@ export function VideoPane({
       event.preventDefault()
       event.stopPropagation()
       const now = Date.now()
-      if (now - lastPrintScreenShortcutAtRef.current < 350) return true
-      lastPrintScreenShortcutAtRef.current = now
+      if (now - lastFrameCaptureShortcutAtRef.current < 350) return true
+      lastFrameCaptureShortcutAtRef.current = now
       void captureCurrentFrameIntoAnswer()
       return true
     }
@@ -1504,7 +1509,7 @@ export function VideoPane({
         return
       }
 
-      if (handleFullscreenPrintScreen(event)) return
+      if (handleFullscreenFrameCaptureShortcut(event)) return
 
       if (event.altKey || event.ctrlKey || event.metaKey) return
       if (isShortcutBlockedTarget(event.target)) return
@@ -1515,7 +1520,7 @@ export function VideoPane({
         return
       }
 
-      if ((event.key === "c" || event.key === "C") && !isCapturePanelOpen) {
+      if ((event.key === "c" || event.key === "C") && !event.shiftKey && !isCapturePanelOpen) {
         event.preventDefault()
         toggleSubtitles()
         return
@@ -1568,7 +1573,7 @@ export function VideoPane({
 
     function handleFullscreenKeyUp(event: KeyboardEvent) {
       if (event.defaultPrevented || event.isComposing) return
-      handleFullscreenPrintScreen(event)
+      handleFullscreenFrameCaptureShortcut(event)
     }
 
     document.addEventListener("keydown", handleFullscreenKeyDown, true)
@@ -2403,7 +2408,7 @@ export function VideoPane({
                         {captureError ??
                           (isFrameCaptureUploading
                             ? "正在截取并插入当前视频帧..."
-                            : "全屏时 Enter 可打开录入；问题/答案中 Tab 引用复述点，PrtScSysRq 截当前视频帧到答案，Ctrl+V 粘贴图片会先上传到服务器。")}
+                            : "全屏时 Enter 可打开录入；问题/答案中 Tab 引用复述点，Shift+C 截当前视频帧到答案，Ctrl+V 粘贴图片会先上传到服务器。")}
                       </div>
 
                       <div className="mt-3 flex items-center justify-end gap-2">
