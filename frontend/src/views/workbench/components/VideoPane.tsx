@@ -1856,7 +1856,7 @@ export function VideoPane({
 
                     <div className="ml-auto flex items-center gap-1 text-white/86">
                       <div className="group/volume relative hidden sm:block">
-                        <div className="pointer-events-none absolute bottom-full left-1/2 mb-2 -translate-x-1/2 opacity-0 transition duration-150 group-hover/volume:pointer-events-auto group-hover/volume:opacity-100 group-focus-within/volume:pointer-events-auto group-focus-within/volume:opacity-100">
+                        <div className="pointer-events-none absolute bottom-full left-1/2 pb-2 -translate-x-1/2 opacity-0 transition duration-150 group-hover/volume:pointer-events-auto group-hover/volume:opacity-100 group-focus-within/volume:pointer-events-auto group-focus-within/volume:opacity-100">
                           <div className="rounded-xl border border-white/12 bg-slate-950 p-1 shadow-[0_14px_32px_-20px_rgba(0,0,0,0.9)]">
                             <div className="flex h-28 w-10 items-center justify-center rounded-lg bg-white/[0.04]">
                               <div className="w-20 -rotate-90">
@@ -1899,7 +1899,7 @@ export function VideoPane({
                         <span className="sr-only">{isMuted ? "取消静音" : "静音"}</span>
                       </Button>
                     <div className="group/rate relative">
-                      <div className="pointer-events-none absolute bottom-full left-1/2 mb-2 -translate-x-1/2 opacity-0 transition duration-150 group-hover/rate:pointer-events-auto group-hover/rate:opacity-100 group-focus-within/rate:pointer-events-auto group-focus-within/rate:opacity-100">
+                      <div className="pointer-events-none absolute bottom-full left-1/2 pb-2 -translate-x-1/2 opacity-0 transition duration-150 group-hover/rate:pointer-events-auto group-hover/rate:opacity-100 group-focus-within/rate:pointer-events-auto group-focus-within/rate:opacity-100">
                           <div className="min-w-[4.75rem] rounded-xl border border-white/12 bg-slate-950 p-1 shadow-[0_14px_32px_-20px_rgba(0,0,0,0.9)]">
                             {[...PLAYBACK_RATE_OPTIONS].sort((left, right) => right - left).map((rate) => {
                               const active = Math.abs(rate - playbackRate) < 0.001
