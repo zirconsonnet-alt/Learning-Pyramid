@@ -237,31 +237,6 @@ export function FriendsPage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-5">
-            <div className="flex flex-col gap-4">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                <div className="min-w-0 flex-1 space-y-1">
-                  <div className="text-xs uppercase tracking-[0.12em] text-[color:var(--theme-subtle-text)]">我的好友 UID</div>
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                    <div className="text-2xl font-semibold tracking-tight text-foreground">{currentUserQ.data?.publicUid ?? "正在加载..."}</div>
-                    <p className="text-sm leading-6 text-muted-foreground">把这个 UID 发给朋友，对方就能直接搜索并发送好友申请。</p>
-                  </div>
-                </div>
-                <div className="flex flex-wrap gap-2 lg:justify-end">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => void onCopyMyUid()}
-                    disabled={!currentUserQ.data?.publicUid}
-                    className="[box-shadow:none]"
-                  >
-                    <Copy className="h-4 w-4" />
-                    复制 UID
-                  </Button>
-                </div>
-              </div>
-            </div>
-
             {showPendingRequestsPanel ? (
               <div className="rounded-[1.2rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-4 py-4 sm:px-5">
                 <div className="space-y-1">
@@ -382,6 +357,23 @@ export function FriendsPage() {
               <SummaryChip label="好友" value={friendsQ.isLoading ? "..." : friends.length} />
               <SummaryChip label="待我处理" value={incomingRequestsQ.isLoading ? "..." : incomingPendingCount} tone={incomingPendingCount > 0 ? "accent" : "default"} />
               <SummaryChip label="等待对方" value={outgoingRequestsQ.isLoading ? "..." : outgoingPendingCount} />
+            </div>
+            <div className="flex flex-col gap-3 rounded-[1rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0 space-y-1">
+                <div className="text-xs uppercase tracking-[0.12em] text-[color:var(--theme-subtle-text)]">我的好友 UID</div>
+                <div className="text-xl font-semibold tracking-tight text-foreground">{currentUserQ.data?.publicUid ?? "正在加载..."}</div>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => void onCopyMyUid()}
+                disabled={!currentUserQ.data?.publicUid}
+                className="self-start [box-shadow:none] sm:self-center"
+              >
+                <Copy className="h-4 w-4" />
+                复制 UID
+              </Button>
             </div>
             <div className="space-y-2">
               <Label htmlFor="friend-uid">好友 UID</Label>
