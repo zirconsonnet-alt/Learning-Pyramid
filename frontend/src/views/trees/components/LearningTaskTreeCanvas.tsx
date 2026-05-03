@@ -338,7 +338,7 @@ export function LearningTaskTreeCanvas({
           const isActive = !!focusNodeId && activeNodeIds.has(rect.nodeId)
           const isMuted = !!focusNodeId && !isActive
           const displayTitle = node.displayTitle ?? node.title
-          const metaText = node.metaText ?? (node.kind === "container" ? `${node.children?.length ?? 0} 个子节点` : "学习任务")
+          const metaText = node.metaText ?? (node.kind === "container" ? `${node.children?.length ?? 0} 个子节点` : undefined)
           const Icon = visual.Icon
 
           return (
@@ -373,7 +373,7 @@ export function LearningTaskTreeCanvas({
 
               <div className="mt-3 flex min-h-0 flex-1 flex-col justify-between">
                 <div className={cn("text-[15px] font-semibold leading-snug tracking-tight", visual.titleClass)}>{displayTitle}</div>
-                <div className={cn("mt-3 text-xs font-medium", visual.metaClass)}>{metaText}</div>
+                {metaText ? <div className={cn("mt-3 text-xs font-medium", visual.metaClass)}>{metaText}</div> : null}
               </div>
             </button>
           )

@@ -155,11 +155,11 @@ export function TaskTreePage() {
         displayTitle: formatDisplayTitle(node.title, uiType, layerIndex),
         uiType,
         metaText:
-          uiType === "task"
-            ? "叶子任务"
-            : uiType === "aggregation"
+          uiType === "aggregation"
               ? `${taskSpan} 个任务 · ${childCount} 个分支`
-              : `${taskSpan} 个任务`,
+              : uiType === "chapter"
+                ? `${taskSpan} 个任务`
+                : undefined,
         kind: node.kind,
         children: node.kind === "container" ? node.children : undefined,
         learningTaskId: node.kind === "leaf" ? node.boundLearningTaskId : undefined,
