@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { Bot } from "lucide-react"
 
 import { ApiError } from "@/ui/api/http"
 import { Button } from "@/ui/components/ui/button"
@@ -338,9 +339,14 @@ function LlmSettingsCard({
   return (
     <Card className="theme-card">
       <CardHeader>
-        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-          <div className="space-y-1">
-            <CardTitle>{title}</CardTitle>
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-center gap-4">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border [border-color:var(--theme-icon-border)] [background:var(--theme-icon-bg)] [color:var(--theme-icon-text)]">
+              <Bot className="h-5 w-5" />
+            </div>
+            <div className="space-y-1">
+              <CardTitle>{title}</CardTitle>
+            </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <span
