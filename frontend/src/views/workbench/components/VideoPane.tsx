@@ -1474,12 +1474,20 @@ export function VideoPane({
 
   useEffect(() => {
     function handleFullscreenFrameCaptureShortcut(event: KeyboardEvent) {
+      const isFrameCaptureModifierKey =
+        event.key === "Control" ||
+        event.key === "Alt" ||
+        event.code === "ControlLeft" ||
+        event.code === "ControlRight" ||
+        event.code === "AltLeft" ||
+        event.code === "AltRight"
       const isFrameCaptureShortcut =
-        event.shiftKey &&
-        !event.altKey &&
-        !event.ctrlKey &&
+        event.ctrlKey &&
+        event.altKey &&
+        isFrameCaptureModifierKey &&
+        !event.shiftKey &&
         !event.metaKey &&
-        (event.key === "c" || event.key === "C" || event.code === "KeyC")
+        !event.repeat
       if (!isFrameCaptureShortcut) return false
       if (!isCapturePanelOpen || capturePanelMode !== "capture") return false
       const video = videoRef.current
@@ -2408,7 +2416,7 @@ export function VideoPane({
                         {captureError ??
                           (isFrameCaptureUploading
                             ? "正在截取并插入当前视频帧..."
-                            : "全屏时 Enter 可打开录入；问题/答案中 Tab 引用复述点，Shift+C 截当前视频帧到答案，Ctrl+V 粘贴图片会先上传到服务器。")}
+                            : "全屏时 Enter 可打开录入；问题/答案中 Tab 引用复述点，Ctrl+Alt 截当前视频帧到答案，Ctrl+V 粘贴图片会先上传到服务器。")}
                       </div>
 
                       <div className="mt-3 flex items-center justify-end gap-2">

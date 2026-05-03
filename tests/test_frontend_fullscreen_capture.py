@@ -16,19 +16,28 @@ def test_fullscreen_capture_supports_tab_reference_picker() -> None:
     assert "references: captureReferenceIds" in source
 
 
-def test_fullscreen_shift_c_captures_current_video_frame_into_answer() -> None:
+def test_fullscreen_ctrl_alt_captures_current_video_frame_into_answer() -> None:
     source = VIDEO_PANE.read_text(encoding="utf-8")
 
-    assert "event.shiftKey" in source
-    assert "!event.altKey" in source
-    assert "!event.ctrlKey" in source
+    assert "const isFrameCaptureModifierKey =" in source
+    assert 'event.key === "Control"' in source
+    assert 'event.key === "Alt"' in source
+    assert 'event.code === "ControlLeft"' in source
+    assert 'event.code === "ControlRight"' in source
+    assert 'event.code === "AltLeft"' in source
+    assert 'event.code === "AltRight"' in source
+    assert "event.ctrlKey" in source
+    assert "event.altKey" in source
+    assert "!event.shiftKey" in source
     assert "!event.metaKey" in source
-    assert 'event.code === "KeyC"' in source
+    assert "!event.repeat" in source
     assert "captureCurrentFrameIntoAnswer" in source
     assert "captureDisplayedVideoFrameFile" in source
     assert "uploadMediaAsset(projectId, captured.file)" in source
     assert "setAnswerContent((prev) => appendImageBlock(prev, uploaded.assetId))" in source
-    assert "Shift+C" in source
+    assert "Ctrl+Alt" in source
+    assert "Shift+C" not in source
+    assert 'event.code === "KeyC"' not in source
     assert "PrtScSysRq" not in source
 
 
