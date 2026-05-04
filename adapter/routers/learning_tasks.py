@@ -6,7 +6,7 @@ from adapter.deps import get_api
 from adapter.mappers import asr_artifact_to_dto, learning_task_node_to_dto, learning_task_to_dto, recall_point_to_dto, review_chain_binding_to_dto
 from adapter.schemas import EditLearningTaskNodeRequest, EditLearningTaskRequest, SubmitLearningTaskRequest
 from backend.models.enums import ContentBlockKind
-from backend.models.errors import PreconditionFailure
+from backend.models.errors import NotFound, PreconditionFailure
 from backend.models.learning_task_node import LearningTaskLeaf
 from backend.models.recall_point import Anchor
 from backend.models.rich_content import ContentBlock, RichContent
@@ -15,6 +15,14 @@ from backend.system.api import SystemAPI
 
 
 router = APIRouter()
+
+
+def _learning_task_node_target_layer_index(api: SystemAPI, project_id: str, node_id: str) -> int | None:
+    try:
+        return int(api.get_learning_task_node_entry_registration(project_id, node_id).target_layer_index)  # type: ignore[arg-type]
+    except NotFound:
+        return None
+
 
 def _to_rich_content(blocks) -> RichContent:
     out: list[ContentBlock] = []
@@ -71,7 +79,13 @@ def get_learning_task(projectId: str, learningTaskId: str, api: SystemAPI = Depe
 @router.get("/projects/{projectId}/learning-task-nodes/{nodeId}")
 def get_learning_task_node(projectId: str, nodeId: str, api: SystemAPI = Depends(get_api)) -> dict:
     n = api.get_learning_task_node(projectId, nodeId)  # type: ignore[arg-type]
-    return {"ok": True, "data": learning_task_node_to_dto(n)}
+    return {
+        "ok": True,
+        "data": learning_task_node_to_dto(
+            n,
+            target_layer_index=_learning_task_node_target_layer_index(api, projectId, nodeId),
+        ),
+    }
 
 
 @router.get("/projects/{projectId}/learning-task-nodes/{nodeId}/binding")
@@ -92,7 +106,13 @@ def get_learning_task_node_binding(projectId: str, nodeId: str, api: SystemAPI =
 
 @router.get("/projects/{projectId}/learning-task-nodes")
 def list_learning_task_nodes(projectId: str, api: SystemAPI = Depends(get_api)) -> dict:
-    items = [learning_task_node_to_dto(n) for n in api.list_learning_task_nodes(projectId)]  # type: ignore[arg-type]
+    items = [
+        learning_task_node_to_dto(
+            n,
+            target_layer_index=_learning_task_node_target_layer_index(api, projectId, str(n.node_id)),
+        )
+        for n in api.list_learning_task_nodes(projectId)  # type: ignore[arg-type]
+    ]
     return {"ok": True, "data": items}
 
 

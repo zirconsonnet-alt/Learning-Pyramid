@@ -351,7 +351,7 @@ def learning_object_node_to_dto(n: LearningObjectNode) -> Dict[str, Any]:
     raise TypeError(f"Unknown LearningObjectNode type: {type(n)}")
 
 
-def learning_task_node_to_dto(n: LearningTaskNode) -> Dict[str, Any]:
+def learning_task_node_to_dto(n: LearningTaskNode, *, target_layer_index: int | None = None) -> Dict[str, Any]:
     if isinstance(n, LearningTaskLeaf):
         return {
             "kind": "leaf",
@@ -360,6 +360,7 @@ def learning_task_node_to_dto(n: LearningTaskNode) -> Dict[str, Any]:
             "parentId": None if n.parent_id is None else str(n.parent_id),
             "boundLearningTaskId": str(n.bound_learning_task_id),
             "title": n.title,
+            "targetLayerIndex": target_layer_index,
         }
     if isinstance(n, LearningTaskContainer):
         return {
@@ -372,6 +373,7 @@ def learning_task_node_to_dto(n: LearningTaskNode) -> Dict[str, Any]:
             "nodeOrigin": _jsonable(n.node_origin),
             "boundLearningObjectNodeId": None if n.bound_learning_object_node_id is None else str(n.bound_learning_object_node_id),
             "objectMirrorStatus": _jsonable(n.object_mirror_status),
+            "targetLayerIndex": target_layer_index,
         }
     raise TypeError(f"Unknown LearningTaskNode type: {type(n)}")
 

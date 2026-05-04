@@ -22,7 +22,8 @@ function deriveTaskNodeLayers(nodes: LearningTaskNode[], events: AggregationEven
   const layerById: Record<string, number> = {}
 
   for (const node of nodes) {
-    if (node.kind === "leaf") layerById[node.nodeId] = 0
+    if (node.targetLayerIndex !== null) layerById[node.nodeId] = node.targetLayerIndex
+    else if (node.kind === "leaf") layerById[node.nodeId] = 0
   }
 
   const sortedEvents = [...events].sort((a, b) => {
@@ -76,6 +77,7 @@ function formatDisplayTitle(rawTitle: string, uiType: TaskTreeVisualType, _layer
 
 function classifyTaskNode(node: LearningTaskNode, event: AggregationEvent | undefined): TaskTreeVisualType {
   if (node.kind === "leaf") return "task"
+  if (node.nodeOrigin === "OBJECT_MIRROR") return "chapter"
 
   const title = node.title.trim()
   if (isDefaultAggregationTitle(title)) return "aggregation"
