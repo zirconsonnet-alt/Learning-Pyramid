@@ -15,8 +15,16 @@ import { Link } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
 import type { RecallPoint } from "@/ui/api/review"
-import { richText } from "@/ui/api/richContent"
+import {
+  appendImageBlock,
+  normalizeRichContent,
+  removeImageBlockAt,
+  richContentHasMeaning,
+  richText,
+  setRichContentText,
+} from "@/ui/api/richContent"
 import type { Instance } from "@/ui/api/instances"
+import { RichContentEditor } from "@/ui/components/RichContentEditor"
 import { RichContentRenderer } from "@/ui/components/RichContentRenderer"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
@@ -100,6 +108,9 @@ export function ReviewPane({
   const sessionState = sessionStateByHeadId[headId] ?? EMPTY_REVIEW_SESSION
   const answers = sessionState.answers
   const showAnswer = sessionState.showAnswer
+  const writtenAnswerDrafts = sessionState.writtenAnswerDrafts
+  const submittedWrittenAnswers = sessionState.submittedWrittenAnswers
+  const skippedWrittenAnswers = sessionState.skippedWrittenAnswers
   const insightDrafts = sessionState.insightDrafts
   const showInsightEditor = sessionState.showInsightEditor
 
@@ -117,6 +128,10 @@ export function ReviewPane({
       saveReviewSessionStateByHeadId(projectId, nextState)
       return nextState
     })
+  }
+
+  function hasUnlockedAnswer(rpId: string) {
+    return submittedWrittenAnswers[rpId] !== undefined || skippedWrittenAnswers[rpId] === true
   }
 
   const loading =
@@ -156,6 +171,7 @@ export function ReviewPane({
   }, [error, loading, resolvedActiveRecallPointId, totalCount])
 
   function chooseAnswer(rpId: string, nextValue: 0 | 1) {
+    if (!hasUnlockedAnswer(rpId)) return
     touchReviewActivity()
     updateSessionState((current) => ({
       ...current,
@@ -185,12 +201,80 @@ export function ReviewPane({
   }
 
   function toggleAnswerVisibility(rpId: string) {
+    if (!hasUnlockedAnswer(rpId)) return
     touchReviewActivity()
     updateSessionState((current) => ({
       ...current,
       showAnswer: {
         ...current.showAnswer,
         [rpId]: !(current.showAnswer[rpId] ?? false),
+      },
+    }))
+  }
+
+  function updateWrittenAnswerText(rpId: string, text: string) {
+    updateSessionState((current) => ({
+      ...current,
+      writtenAnswerDrafts: {
+        ...current.writtenAnswerDrafts,
+        [rpId]: setRichContentText(current.writtenAnswerDrafts[rpId] ?? [], text),
+      },
+    }))
+  }
+
+  function appendWrittenAnswerImage(rpId: string, assetId: string) {
+    touchReviewActivity()
+    updateSessionState((current) => ({
+      ...current,
+      writtenAnswerDrafts: {
+        ...current.writtenAnswerDrafts,
+        [rpId]: appendImageBlock(current.writtenAnswerDrafts[rpId] ?? [], assetId),
+      },
+    }))
+  }
+
+  function removeWrittenAnswerImage(rpId: string, imageIndex: number) {
+    touchReviewActivity()
+    updateSessionState((current) => ({
+      ...current,
+      writtenAnswerDrafts: {
+        ...current.writtenAnswerDrafts,
+        [rpId]: removeImageBlockAt(current.writtenAnswerDrafts[rpId] ?? [], imageIndex),
+      },
+    }))
+  }
+
+  function submitWrittenAnswer(rpId: string) {
+    touchReviewActivity()
+    updateSessionState((current) => {
+      const submittedContent = normalizeRichContent(current.writtenAnswerDrafts[rpId] ?? [])
+      if (!richContentHasMeaning(submittedContent)) return current
+      const nextSkippedWrittenAnswers = { ...current.skippedWrittenAnswers }
+      delete nextSkippedWrittenAnswers[rpId]
+      return {
+        ...current,
+        writtenAnswerDrafts: {
+          ...current.writtenAnswerDrafts,
+          [rpId]: submittedContent,
+        },
+        submittedWrittenAnswers: {
+          ...current.submittedWrittenAnswers,
+          [rpId]: submittedContent,
+        },
+        skippedWrittenAnswers: nextSkippedWrittenAnswers,
+      }
+    })
+  }
+
+  function skipWrittenAnswer(rpId: string) {
+    touchReviewActivity()
+    updateSessionState((current) => ({
+      ...current,
+      answers: { ...current.answers, [rpId]: 0 },
+      showAnswer: { ...current.showAnswer, [rpId]: true },
+      skippedWrittenAnswers: {
+        ...current.skippedWrittenAnswers,
+        [rpId]: true,
       },
     }))
   }
@@ -339,7 +423,12 @@ export function ReviewPane({
               const chosen = answers[rpId]
               const isRemembered = chosen === 1
               const isForgotten = chosen === 0
-              const answerVisible = showAnswer[rpId] ?? false
+              const writtenAnswerDraft = writtenAnswerDrafts[rpId] ?? []
+              const submittedWrittenAnswer = submittedWrittenAnswers[rpId]
+              const isSkippedWrittenAnswer = skippedWrittenAnswers[rpId] === true
+              const hasSubmittedWrittenAnswer = submittedWrittenAnswer !== undefined || isSkippedWrittenAnswer
+              const canSubmitWrittenAnswer = richContentHasMeaning(writtenAnswerDraft)
+              const answerVisible = hasSubmittedWrittenAnswer && (showAnswer[rpId] ?? false)
               const draftInsight = insightDrafts[rpId] ?? ""
               const hasDraftInsight = draftInsight.trim().length > 0
               const insightEditorVisible = showInsightEditor[rpId] || hasDraftInsight
@@ -442,7 +531,14 @@ export function ReviewPane({
                           </Button>
                         ) : null}
 
-                        <Button variant="ghost" size="sm" className="rounded-full" onClick={() => toggleAnswerVisibility(rpId)}>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="rounded-full"
+                          onClick={() => toggleAnswerVisibility(rpId)}
+                          disabled={!hasSubmittedWrittenAnswer}
+                          title={hasSubmittedWrittenAnswer ? undefined : "先提交自己的答案，再查看答案"}
+                        >
                           {answerVisible ? (
                             <>
                               <EyeOff className="h-4 w-4" />
@@ -460,6 +556,59 @@ export function ReviewPane({
                           <Lightbulb className="h-4 w-4" />
                           {insightEditorVisible ? "收起理解" : "追加理解"}
                         </Button>
+                      </div>
+
+                      <div className="theme-soft-surface mt-3 p-3">
+                        <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">你的答案</div>
+                        <RichContentEditor
+                          projectId={projectId}
+                          field="answer"
+                          value={writtenAnswerDraft}
+                          disabled={hasSubmittedWrittenAnswer}
+                          placeholder="先写下自己的答案，提交后再核对标准答案。"
+                          onTextChange={(text) => updateWrittenAnswerText(rpId, text)}
+                          onAppendImage={(assetId) => appendWrittenAnswerImage(rpId, assetId)}
+                          onRemoveImage={(imageIndex) => removeWrittenAnswerImage(rpId, imageIndex)}
+                          onUserActivity={touchReviewActivity}
+                          textareaClassName="min-h-[140px] resize-y rounded-2xl [border-color:var(--theme-subtle-border)] [background:var(--theme-subtle-bg)] text-foreground outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:cursor-not-allowed disabled:opacity-75"
+                          imageClassName="h-28 w-full max-w-[220px] rounded-2xl border [border-color:var(--theme-subtle-border)] [background:var(--theme-subtle-bg)] object-cover"
+                        />
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <Button
+                            type="button"
+                            variant={hasSubmittedWrittenAnswer ? "secondary" : "default"}
+                            size="sm"
+                            className="rounded-full"
+                            onClick={() => submitWrittenAnswer(rpId)}
+                            disabled={hasSubmittedWrittenAnswer || !canSubmitWrittenAnswer}
+                          >
+                            {hasSubmittedWrittenAnswer ? (
+                              <>
+                                <CheckCircle2 className="h-4 w-4" />
+                                {isSkippedWrittenAnswer ? "已跳过" : "已提交答案"}
+                              </>
+                            ) : (
+                              "提交答案"
+                            )}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="rounded-full"
+                            onClick={() => skipWrittenAnswer(rpId)}
+                            disabled={hasSubmittedWrittenAnswer}
+                          >
+                            跳过
+                          </Button>
+                          <span className="text-xs text-muted-foreground">
+                            {isSkippedWrittenAnswer
+                              ? "已跳过，已展开答案并标记为不记得。"
+                              : hasSubmittedWrittenAnswer
+                                ? "已提交，可查看答案或判断记忆状态。"
+                                : "先提交自己的答案，再查看答案或判断记忆状态。"}
+                          </span>
+                        </div>
                       </div>
 
                       {answerVisible ? (
@@ -490,6 +639,7 @@ export function ReviewPane({
                           size="sm"
                           className={cn("min-w-[96px] rounded-full", isRemembered ? "bg-emerald-600 hover:bg-emerald-700" : "")}
                           onClick={() => chooseAnswerAndAdvance(rpId, 1)}
+                          disabled={!hasSubmittedWrittenAnswer}
                         >
                           记得
                         </Button>
@@ -501,6 +651,7 @@ export function ReviewPane({
                             isForgotten ? "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100" : "",
                           )}
                           onClick={() => chooseAnswerAndAdvance(rpId, 0)}
+                          disabled={!hasSubmittedWrittenAnswer}
                         >
                           不记得
                         </Button>

@@ -1,6 +1,11 @@
+import { normalizeRichContent, type RichContent } from "@/ui/api/richContent"
+
 export type ReviewSessionState = {
   answers: Record<string, 0 | 1>
   showAnswer: Record<string, boolean>
+  writtenAnswerDrafts: Record<string, RichContent>
+  submittedWrittenAnswers: Record<string, RichContent>
+  skippedWrittenAnswers: Record<string, boolean>
   insightDrafts: Record<string, string>
   showInsightEditor: Record<string, boolean>
   activeRecallPointId: string | null
@@ -9,6 +14,9 @@ export type ReviewSessionState = {
 export const EMPTY_REVIEW_SESSION: ReviewSessionState = {
   answers: {},
   showAnswer: {},
+  writtenAnswerDrafts: {},
+  submittedWrittenAnswers: {},
+  skippedWrittenAnswers: {},
   insightDrafts: {},
   showInsightEditor: {},
   activeRecallPointId: null,
@@ -53,11 +61,37 @@ function normalizeStringMap(value: unknown): Record<string, string> {
   )
 }
 
+function normalizeRichContentValue(value: unknown): RichContent {
+  if (typeof value === "string") return value.trim() ? [{ kind: "TEXT", text: value }] : []
+  if (!Array.isArray(value)) return []
+  return normalizeRichContent(
+    value.flatMap((block): RichContent => {
+      if (!isRecord(block)) return []
+      if (block.kind === "TEXT" && typeof block.text === "string") return [{ kind: "TEXT", text: block.text }]
+      if (block.kind === "IMAGE" && typeof block.assetId === "string") return [{ kind: "IMAGE", assetId: block.assetId }]
+      return []
+    }),
+  )
+}
+
+function normalizeRichContentMap(value: unknown): Record<string, RichContent> {
+  if (!isRecord(value)) return {}
+  return Object.fromEntries(
+    Object.entries(value).flatMap(([key, item]) => {
+      const content = normalizeRichContentValue(item)
+      return content.length > 0 ? [[key, content]] : []
+    }),
+  )
+}
+
 export function normalizeReviewSessionState(value: unknown): ReviewSessionState {
   const raw = isRecord(value) ? value : {}
   return {
     answers: normalizeAnswerMap(raw.answers),
     showAnswer: normalizeBooleanMap(raw.showAnswer),
+    writtenAnswerDrafts: normalizeRichContentMap(raw.writtenAnswerDrafts),
+    submittedWrittenAnswers: normalizeRichContentMap(raw.submittedWrittenAnswers),
+    skippedWrittenAnswers: normalizeBooleanMap(raw.skippedWrittenAnswers),
     insightDrafts: normalizeStringMap(raw.insightDrafts),
     showInsightEditor: normalizeBooleanMap(raw.showInsightEditor),
     activeRecallPointId: typeof raw.activeRecallPointId === "string" ? raw.activeRecallPointId : null,
