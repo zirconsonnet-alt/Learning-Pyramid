@@ -52,6 +52,17 @@ def test_review_pane_reveals_answer_after_submitting_written_answer() -> None:
     assert "showAnswer: { ...current.showAnswer, [rpId]: true }" in submit_source
 
 
+def test_review_pane_uses_single_layer_insight_editor_prompt() -> None:
+    source = REVIEW_PANE.read_text(encoding="utf-8")
+    placeholder = 'placeholder="补充这道复习点的新理解、易错点、联想线索或自己的话解释。"'
+    placeholder_start = source.index(placeholder)
+    insight_source = source[placeholder_start - 300 : placeholder_start + 500]
+
+    assert placeholder in insight_source
+    assert "rounded-2xl border" not in insight_source
+    assert "提交本轮复习时，这段内容会作为新的" not in insight_source
+
+
 def test_review_session_store_uses_project_scoped_local_storage_and_sanitizes_values() -> None:
     source = REVIEW_SESSION_STORE.read_text(encoding="utf-8")
 

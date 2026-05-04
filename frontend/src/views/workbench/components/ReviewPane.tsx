@@ -622,16 +622,14 @@ export function ReviewPane({
 
                       {insightEditorVisible ? (
                         <div className="theme-soft-surface mt-3 p-3">
-                          <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">追加理解</div>
                           <textarea
                             value={draftInsight}
                             onChange={(event) => updateInsightDraft(rpId, event.target.value)}
                             onFocus={touchReviewActivity}
                             rows={3}
                             placeholder="补充这道复习点的新理解、易错点、联想线索或自己的话解释。"
-                            className="w-full resize-y rounded-2xl border [border-color:var(--theme-subtle-border)] [background:var(--theme-subtle-bg)] px-3 py-2 text-sm text-foreground outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15"
+                            className="min-h-[96px] w-full resize-y border-0 bg-transparent p-0 text-sm text-foreground outline-none transition placeholder:text-muted-foreground focus:ring-0"
                           />
-                          <div className="mt-2 text-xs text-muted-foreground">提交本轮复习时，这段内容会作为新的“理解”追加到对应复述点。</div>
                         </div>
                       ) : null}
 
