@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 
 import backend.system.membership_payment_service as membership_payment_service
@@ -8,6 +9,16 @@ from backend.system.hosted_deployment_checks import hosted_runtime_blockers, hos
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _load_build_selfhost_bundle_module():
+    module_path = REPO_ROOT / "tools" / "build_selfhost_bundle.py"
+    spec = importlib.util.spec_from_file_location("build_selfhost_bundle", module_path)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_selfhost_compose_persists_legacy_app_data_project_root() -> None:
@@ -27,6 +38,17 @@ def test_selfhost_sync_preserves_old_frontend_chunks() -> None:
     sync_script = (REPO_ROOT / "tools" / "sync_selfhost_server.ps1").read_text(encoding="utf-8")
 
     assert "--filter 'P frontend/dist/assets/***'" in sync_script
+
+
+def test_selfhost_bundle_normalizes_shell_scripts_to_lf(tmp_path: Path) -> None:
+    module = _load_build_selfhost_bundle_module()
+    script = tmp_path / "tools" / "post_deploy_selfhost.sh"
+    script.parent.mkdir()
+    script.write_bytes(b"#!/usr/bin/env bash\r\nset -euo pipefail\r\necho ok\r\n")
+
+    module._normalize_bundle_shell_scripts(tmp_path)
+
+    assert script.read_bytes() == b"#!/usr/bin/env bash\nset -euo pipefail\necho ok\n"
 
 
 def test_selfhost_docker_context_includes_frontend_dist() -> None:

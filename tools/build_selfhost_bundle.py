@@ -179,6 +179,19 @@ def _write_notes(dst: Path) -> None:
     (dst / "DEPLOY_SELFHOST.txt").write_text(text, encoding="utf-8", newline="\n")
 
 
+def _normalize_bundle_shell_scripts(bundle_dir: Path) -> None:
+    tools_dir = bundle_dir / "tools"
+    if not tools_dir.exists():
+        return
+    for path in tools_dir.rglob("*.sh"):
+        if not path.is_file():
+            continue
+        original = path.read_bytes()
+        normalized = original.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        if normalized != original:
+            path.write_bytes(normalized)
+
+
 def _create_zip(src_dir: Path, zip_path: Path) -> None:
     with ZipFile(zip_path, "w", compression=ZIP_DEFLATED) as zf:
         for path in sorted(src_dir.rglob("*")):
@@ -234,6 +247,7 @@ def main() -> int:
         shutil.copy2(PROJECT_ROOT / rel_file, dst)
 
     _write_notes(bundle_dir)
+    _normalize_bundle_shell_scripts(bundle_dir)
 
     if zip_path.exists():
         zip_path.unlink()
