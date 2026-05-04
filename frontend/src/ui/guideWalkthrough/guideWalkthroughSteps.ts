@@ -2,6 +2,7 @@ export type GuideWalkthroughExtractMode = "heading" | "item" | "paragraph" | "su
 export type GuideWalkthroughFallbackMode = "centered-popover" | "route-hint" | "skip-with-explanation"
 export type GuideWalkthroughPopoverSide = "top" | "right" | "bottom" | "left"
 export type GuideWalkthroughSessionStatus = "idle" | "running" | "closed"
+export type GuideWalkthroughAdvanceMode = "manual" | "target-click" | "completion-event"
 
 export type GuideWalkthroughSourceRef = {
   heading: string
@@ -12,10 +13,12 @@ export type GuideWalkthroughSourceRef = {
 
 export type GuideWalkthroughStep = {
   id: string
+  popoverTitle?: string
   sourceRef: GuideWalkthroughSourceRef
   routeHint?: string
   targetAnchor?: string
   fallbackMode: GuideWalkthroughFallbackMode
+  advanceOn?: GuideWalkthroughAdvanceMode
   popoverSide?: GuideWalkthroughPopoverSide
 }
 
@@ -30,10 +33,12 @@ export const GUIDE_WALKTHROUGH_STEPS: GuideWalkthroughStep[] = [
     routeHint: "/projects",
     targetAnchor: "new-subject-button",
     fallbackMode: "centered-popover",
+    advanceOn: "target-click",
     popoverSide: "bottom",
   },
   {
     id: "create-subject-submit",
+    popoverTitle: "第 2 步：填写标题并创建学科",
     sourceRef: {
       heading: "第 1 步：创建学科和项目",
       itemIndex: 4,
@@ -42,6 +47,7 @@ export const GUIDE_WALKTHROUGH_STEPS: GuideWalkthroughStep[] = [
     routeHint: "/projects",
     targetAnchor: "create-subject-submit",
     fallbackMode: "centered-popover",
+    advanceOn: "completion-event",
     popoverSide: "top",
   },
   {
@@ -54,6 +60,7 @@ export const GUIDE_WALKTHROUGH_STEPS: GuideWalkthroughStep[] = [
     routeHint: "/subjects/:subjectId",
     targetAnchor: "subject-project-entry",
     fallbackMode: "route-hint",
+    advanceOn: "target-click",
     popoverSide: "right",
   },
   {
@@ -66,6 +73,7 @@ export const GUIDE_WALKTHROUGH_STEPS: GuideWalkthroughStep[] = [
     routeHint: "/p/:projectId/settings",
     targetAnchor: "project-settings-nav",
     fallbackMode: "route-hint",
+    advanceOn: "target-click",
     popoverSide: "bottom",
   },
   {
@@ -78,6 +86,7 @@ export const GUIDE_WALKTHROUGH_STEPS: GuideWalkthroughStep[] = [
     routeHint: "/p/:projectId/settings",
     targetAnchor: "authorize-directory-button",
     fallbackMode: "centered-popover",
+    advanceOn: "target-click",
     popoverSide: "left",
   },
   {
@@ -90,6 +99,7 @@ export const GUIDE_WALKTHROUGH_STEPS: GuideWalkthroughStep[] = [
     routeHint: "/p/:projectId/settings",
     targetAnchor: "import-directory-button",
     fallbackMode: "centered-popover",
+    advanceOn: "target-click",
     popoverSide: "left",
   },
   {
@@ -102,6 +112,7 @@ export const GUIDE_WALKTHROUGH_STEPS: GuideWalkthroughStep[] = [
     routeHint: "/p/:projectId/workbench",
     targetAnchor: "workbench-nav",
     fallbackMode: "route-hint",
+    advanceOn: "target-click",
     popoverSide: "bottom",
   },
   {
@@ -114,6 +125,7 @@ export const GUIDE_WALKTHROUGH_STEPS: GuideWalkthroughStep[] = [
     routeHint: "/p/:projectId/workbench",
     targetAnchor: "learning-object-tree",
     fallbackMode: "centered-popover",
+    advanceOn: "target-click",
     popoverSide: "right",
   },
   {
@@ -126,6 +138,7 @@ export const GUIDE_WALKTHROUGH_STEPS: GuideWalkthroughStep[] = [
     routeHint: "/p/:projectId/workbench",
     targetAnchor: "add-recall-point-button",
     fallbackMode: "centered-popover",
+    advanceOn: "target-click",
     popoverSide: "left",
   },
   {

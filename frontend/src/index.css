@@ -452,6 +452,28 @@
     }
   }
 
+  @keyframes plmMicroBreakBackdrop {
+    0% {
+      opacity: 0;
+    }
+
+    100% {
+      opacity: 1;
+    }
+  }
+
+  @keyframes plmMicroBreakCard {
+    0% {
+      opacity: 0;
+      transform: translate3d(0, 12px, 0) scale(0.98);
+    }
+
+    100% {
+      opacity: 1;
+      transform: translate3d(0, 0, 0) scale(1);
+    }
+  }
+
   .dark {
     --background: 222.2 84% 4.9%;
     --foreground: 210 40% 98%;
@@ -728,6 +750,20 @@
 
   .pomodoro-transition-sweep {
     animation: plmPomodoroSweep 1280ms ease-out 120ms both;
+  }
+
+  .pomodoro-micro-break-overlay {
+    animation: plmMicroBreakBackdrop 520ms ease-out both;
+    background:
+      radial-gradient(circle at center, rgba(15, 23, 42, 0.88) 0%, rgba(3, 7, 18, 0.96) 48%, rgba(0, 0, 0, 0.98) 100%),
+      linear-gradient(180deg, rgba(0, 0, 0, 0.92), rgba(0, 0, 0, 0.98));
+  }
+
+  .pomodoro-micro-break-card {
+    animation: plmMicroBreakCard 640ms cubic-bezier(0.2, 0.8, 0.2, 1) 90ms both;
+    background: linear-gradient(145deg, rgba(15, 23, 42, 0.72), rgba(2, 6, 23, 0.62));
+    box-shadow: 0 28px 90px -42px rgba(0, 0, 0, 0.96);
+    backdrop-filter: blur(18px);
   }
 
   .theme-progress-track {
@@ -1171,25 +1207,34 @@
     cursor: pointer;
   }
 
-  .lp-showcase-btn-primary {
+  .lp-showcase-page .lp-showcase-btn-primary {
     background: linear-gradient(135deg, var(--lp-primary), var(--lp-primary-strong));
     color: var(--lp-primary-contrast);
     box-shadow: 0 18px 40px color-mix(in srgb, var(--lp-primary) 28%, transparent);
   }
 
-  .lp-showcase-btn-primary:hover {
+  .lp-showcase-page .lp-showcase-btn-primary:hover {
     transform: translateY(-1px);
   }
 
-  .lp-showcase-btn-secondary {
+  .lp-showcase-page .lp-showcase-btn-secondary {
     background: var(--lp-secondary-bg);
     border-color: var(--lp-secondary-border);
     color: var(--lp-text);
   }
 
-  .lp-showcase-btn-secondary:hover {
+  .lp-showcase-page .lp-showcase-btn-secondary:hover {
     background: var(--lp-secondary-hover-bg);
     transform: translateY(-1px);
+  }
+
+  .lp-showcase-nav-actions .lp-showcase-btn {
+    min-height: 40px;
+    padding: 0 16px;
+    border-radius: 999px;
+    font-size: 15px;
+    line-height: 1;
+    box-shadow: 0 12px 26px color-mix(in srgb, var(--lp-primary) 24%, transparent);
   }
 
   .lp-showcase-hero {

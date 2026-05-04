@@ -23,6 +23,7 @@ from backend.system.auth_store import (
     UserGlobalSettings,
     UserProjectDailyStudyStat,
     UserProjectDailyStudyStatInput,
+    _pomodoro_micro_break_settings_to_json,
     _pomodoro_weekly_schedule_to_json,
 )
 from backend.system.baidu_netdisk_client import BAIDU_NETDISK_PROVIDER
@@ -111,6 +112,9 @@ def _global_settings_to_dto(item: UserGlobalSettings) -> dict:
         "pomodoro": {
             "enabled": item.pomodoro_enabled,
             "transitionSoundEnabled": item.pomodoro_transition_sound_enabled,
+            "defaultFocusPrompt": item.pomodoro_default_focus_prompt,
+            "defaultBreakPrompt": item.pomodoro_default_break_prompt,
+            "microBreaks": _pomodoro_micro_break_settings_to_json(item.pomodoro_micro_breaks),
             "weeklySchedule": weekly_schedule,
         },
         "defaultProjectReviewTemplate": template,
@@ -249,6 +253,9 @@ def update_my_global_settings(
         theme=req.theme,
         pomodoro_enabled=bool(req.pomodoro.enabled),
         pomodoro_transition_sound_enabled=bool(req.pomodoro.transitionSoundEnabled),
+        pomodoro_default_focus_prompt=req.pomodoro.defaultFocusPrompt,
+        pomodoro_default_break_prompt=req.pomodoro.defaultBreakPrompt,
+        pomodoro_micro_breaks=req.pomodoro.microBreaks.dict(),
         pomodoro_weekly_schedule=req.pomodoro.weeklySchedule.dict(),
         default_project_review_template=(
             {"kind": item.kind, "count": item.count} for item in req.defaultProjectReviewTemplate

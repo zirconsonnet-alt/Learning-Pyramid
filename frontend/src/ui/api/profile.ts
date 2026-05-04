@@ -26,6 +26,25 @@ const UserPomodoroDaySchema = z.union([
   LegacyUserPomodoroDaySchema,
 ])
 
+const DEFAULT_USER_POMODORO_MICRO_BREAKS = {
+  enabled: false,
+  minIntervalSeconds: 180,
+  maxIntervalSeconds: 300,
+  durationSeconds: 10,
+}
+
+const UserPomodoroMicroBreaksSchema = z
+  .object({
+    enabled: z.boolean(),
+    minIntervalSeconds: z.number().int().min(30).max(3600),
+    maxIntervalSeconds: z.number().int().min(30).max(3600),
+    durationSeconds: z.number().int().min(5).max(300),
+  })
+  .refine((settings) => settings.maxIntervalSeconds >= settings.minIntervalSeconds, {
+    message: "maxIntervalSeconds must be greater than or equal to minIntervalSeconds",
+    path: ["maxIntervalSeconds"],
+  })
+
 export const UserProfileSchema = z.object({
   userId: z.string(),
   email: z.string(),
@@ -106,6 +125,9 @@ export const UserGlobalSettingsSchema = z.object({
   pomodoro: z.object({
     enabled: z.boolean(),
     transitionSoundEnabled: z.boolean().optional().default(false),
+    defaultFocusPrompt: z.string().max(200).optional().default(""),
+    defaultBreakPrompt: z.string().max(200).optional().default(""),
+    microBreaks: UserPomodoroMicroBreaksSchema.optional().default(DEFAULT_USER_POMODORO_MICRO_BREAKS),
     weeklySchedule: z.object({
       mon: UserPomodoroDaySchema,
       tue: UserPomodoroDaySchema,
@@ -237,6 +259,9 @@ export function updateMyGlobalSettings(params: {
   pomodoro: {
     enabled: boolean
     transitionSoundEnabled?: boolean
+    defaultFocusPrompt?: string
+    defaultBreakPrompt?: string
+    microBreaks?: z.input<typeof UserPomodoroMicroBreaksSchema>
     weeklySchedule: {
       mon: z.input<typeof UserPomodoroDaySchema>
       tue: z.input<typeof UserPomodoroDaySchema>

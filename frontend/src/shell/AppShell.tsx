@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react"
-import { ChevronDown, CreditCard, LogOut, Sparkles, TimerReset, User, type LucideIcon } from "lucide-react"
+import { ChevronDown, CreditCard, LogOut, Settings2, Sparkles, TimerReset, User, type LucideIcon } from "lucide-react"
 import { Link, Navigate, NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router-dom"
 import "driver.js/dist/driver.css"
 
@@ -31,7 +31,7 @@ import {
   usePomodoroStore,
 } from "@/ui/store/pomodoroStore"
 import { cn } from "@/ui/utils"
-import { buildPomodoroPath } from "@/views/pomodoro/pomodoroRouting"
+import { buildPomodoroPath, buildPomodoroSettingsPath } from "@/views/pomodoro/pomodoroRouting"
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -707,18 +707,28 @@ export function AppShell() {
 
             <div className="flex min-w-0 items-center gap-2">
               {showPomodoroShortcut ? (
-                <Link
-                  to={buildPomodoroPath()}
-                  className={cn(
-                    "hidden h-10 items-center gap-2 rounded-xl border px-3 text-[13px] [box-shadow:var(--theme-soft-shadow)] sm:inline-flex",
-                    pomodoroSnapshot.phase === "break"
-                      ? "border-amber-200 bg-amber-50 text-amber-900"
-                      : "border-primary/15 bg-[hsl(var(--primary)/0.08)] text-foreground",
-                  )}
-                >
-                  <TimerReset className={cn("h-4 w-4", pomodoroSnapshot.phase === "break" ? "text-amber-700" : "text-primary")} />
-                  <span>{pomodoroShortcutText}</span>
-                </Link>
+                <>
+                  <Link
+                    to={buildPomodoroPath()}
+                    className={cn(
+                      "hidden h-10 items-center gap-2 rounded-xl border px-3 text-[13px] [box-shadow:var(--theme-soft-shadow)] sm:inline-flex",
+                      pomodoroSnapshot.phase === "break"
+                        ? "border-amber-200 bg-amber-50 text-amber-900"
+                        : "border-primary/15 bg-[hsl(var(--primary)/0.08)] text-foreground",
+                    )}
+                  >
+                    <TimerReset className={cn("h-4 w-4", pomodoroSnapshot.phase === "break" ? "text-amber-700" : "text-primary")} />
+                    <span>{pomodoroShortcutText}</span>
+                  </Link>
+                  <Link
+                    to={buildPomodoroSettingsPath()}
+                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/15 bg-[hsl(var(--primary)/0.06)] text-primary [box-shadow:var(--theme-soft-shadow)] transition-colors hover:bg-[hsl(var(--primary)/0.12)]"
+                    aria-label="打开番茄钟设置"
+                    title="番茄钟设置"
+                  >
+                    <Settings2 className="h-4 w-4" />
+                  </Link>
+                </>
               ) : null}
 
               <div className="flex min-w-0 items-center gap-2">

@@ -33,6 +33,12 @@ DEFAULT_POMODORO_FOCUS_MINUTES = 25
 DEFAULT_POMODORO_BREAK_MINUTES = 5
 DEFAULT_POMODORO_COUNT = 4
 DEFAULT_POMODORO_START_TIME = "19:00"
+DEFAULT_POMODORO_MICRO_BREAKS = {
+    "enabled": False,
+    "minIntervalSeconds": 180,
+    "maxIntervalSeconds": 300,
+    "durationSeconds": 10,
+}
 MAX_POMODORO_PLANS_PER_DAY = 24
 MAX_POMODORO_PROMPT_LENGTH = 200
 POMODORO_WEEKDAY_KEYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
@@ -535,6 +541,50 @@ def _normalize_pomodoro_prompt_text(value: str | None) -> str:
     return text
 
 
+def _normalize_pomodoro_micro_break_settings(value: Any) -> PomodoroMicroBreakSettings:
+    payload = value if isinstance(value, dict) else {}
+    min_interval_seconds = _clamp_int(
+        payload.get("minIntervalSeconds", DEFAULT_POMODORO_MICRO_BREAKS["minIntervalSeconds"]),
+        minimum=30,
+        maximum=3600,
+        field_name="pomodoro micro break min interval seconds",
+    )
+    max_interval_seconds = _clamp_int(
+        payload.get("maxIntervalSeconds", DEFAULT_POMODORO_MICRO_BREAKS["maxIntervalSeconds"]),
+        minimum=30,
+        maximum=3600,
+        field_name="pomodoro micro break max interval seconds",
+    )
+    return PomodoroMicroBreakSettings(
+        enabled=bool(payload.get("enabled", DEFAULT_POMODORO_MICRO_BREAKS["enabled"])),
+        min_interval_seconds=min_interval_seconds,
+        max_interval_seconds=max(min_interval_seconds, max_interval_seconds),
+        duration_seconds=_clamp_int(
+            payload.get("durationSeconds", DEFAULT_POMODORO_MICRO_BREAKS["durationSeconds"]),
+            minimum=5,
+            maximum=300,
+            field_name="pomodoro micro break duration seconds",
+        ),
+    )
+
+
+def _pomodoro_micro_break_settings_to_json(item: PomodoroMicroBreakSettings) -> dict[str, Any]:
+    normalized = _normalize_pomodoro_micro_break_settings(
+        {
+            "enabled": item.enabled,
+            "minIntervalSeconds": item.min_interval_seconds,
+            "maxIntervalSeconds": item.max_interval_seconds,
+            "durationSeconds": item.duration_seconds,
+        }
+    )
+    return {
+        "enabled": normalized.enabled,
+        "minIntervalSeconds": normalized.min_interval_seconds,
+        "maxIntervalSeconds": normalized.max_interval_seconds,
+        "durationSeconds": normalized.duration_seconds,
+    }
+
+
 def _create_pomodoro_schedule_day(
     day_key: str,
     *,
@@ -890,11 +940,22 @@ class PomodoroScheduleDay:
 
 
 @dataclass(frozen=True, slots=True)
+class PomodoroMicroBreakSettings:
+    enabled: bool
+    min_interval_seconds: int
+    max_interval_seconds: int
+    duration_seconds: int
+
+
+@dataclass(frozen=True, slots=True)
 class UserGlobalSettings:
     user_id: str
     theme: str
     pomodoro_enabled: bool
     pomodoro_transition_sound_enabled: bool
+    pomodoro_default_focus_prompt: str
+    pomodoro_default_break_prompt: str
+    pomodoro_micro_breaks: PomodoroMicroBreakSettings
     pomodoro_weekly_schedule: tuple[PomodoroScheduleDay, ...]
     default_project_review_template: tuple[ReviewChainTemplateStep, ...]
     learning_plans: dict[str, Any]
@@ -1116,6 +1177,9 @@ class _AuthStoreImpl:
             theme=DEFAULT_USER_THEME,
             pomodoro_enabled=DEFAULT_POMODORO_ENABLED,
             pomodoro_transition_sound_enabled=DEFAULT_POMODORO_TRANSITION_SOUND_ENABLED,
+            pomodoro_default_focus_prompt="",
+            pomodoro_default_break_prompt="",
+            pomodoro_micro_breaks=_normalize_pomodoro_micro_break_settings({}),
             pomodoro_weekly_schedule=_normalize_pomodoro_weekly_schedule({}),
             default_project_review_template=(ReviewChainTemplateStep(kind="CONVERGENCE"),),
             learning_plans=_default_learning_plans_payload(),
@@ -1159,6 +1223,15 @@ class _AuthStoreImpl:
             )
             if isinstance(pomodoro_payload, dict)
             else DEFAULT_POMODORO_TRANSITION_SOUND_ENABLED,
+            pomodoro_default_focus_prompt=_normalize_pomodoro_prompt_text(
+                pomodoro_payload.get("defaultFocusPrompt") if isinstance(pomodoro_payload, dict) else ""
+            ),
+            pomodoro_default_break_prompt=_normalize_pomodoro_prompt_text(
+                pomodoro_payload.get("defaultBreakPrompt") if isinstance(pomodoro_payload, dict) else ""
+            ),
+            pomodoro_micro_breaks=_normalize_pomodoro_micro_break_settings(
+                pomodoro_payload.get("microBreaks") if isinstance(pomodoro_payload, dict) else {}
+            ),
             pomodoro_weekly_schedule=_normalize_pomodoro_weekly_schedule(
                 pomodoro_payload.get("weeklySchedule") if isinstance(pomodoro_payload, dict) else {},
                 legacy_focus_minutes=legacy_focus_minutes,
@@ -2381,12 +2454,18 @@ class SQLiteAuthStore(_AuthStoreImpl):
         theme: str | None,
         pomodoro_enabled: bool,
         pomodoro_transition_sound_enabled: bool,
+        pomodoro_default_focus_prompt: str | None,
+        pomodoro_default_break_prompt: str | None,
+        pomodoro_micro_breaks: dict[str, Any] | None,
         pomodoro_weekly_schedule: dict[str, Any],
         default_project_review_template: Iterable[dict[str, Any] | tuple[str, int | None] | list[Any]],
         learning_plans: dict[str, Any] | None = None,
     ) -> UserGlobalSettings:
         current = self.get_user_global_settings(user_id)
         normalized_theme = _normalize_user_theme(theme)
+        normalized_default_focus_prompt = _normalize_pomodoro_prompt_text(pomodoro_default_focus_prompt)
+        normalized_default_break_prompt = _normalize_pomodoro_prompt_text(pomodoro_default_break_prompt)
+        normalized_micro_breaks = _normalize_pomodoro_micro_break_settings(pomodoro_micro_breaks)
         normalized_template = _normalize_review_chain_template(default_project_review_template)
         normalized_weekly_schedule = _normalize_pomodoro_weekly_schedule(pomodoro_weekly_schedule)
         normalized_learning_plans = (
@@ -2398,6 +2477,9 @@ class SQLiteAuthStore(_AuthStoreImpl):
                 "pomodoro": {
                     "enabled": bool(pomodoro_enabled),
                     "transitionSoundEnabled": bool(pomodoro_transition_sound_enabled),
+                    "defaultFocusPrompt": normalized_default_focus_prompt,
+                    "defaultBreakPrompt": normalized_default_break_prompt,
+                    "microBreaks": _pomodoro_micro_break_settings_to_json(normalized_micro_breaks),
                     "weeklySchedule": _pomodoro_weekly_schedule_to_json(normalized_weekly_schedule),
                 },
                 "defaultProjectReviewTemplate": _review_chain_template_to_json(normalized_template),
@@ -4448,12 +4530,18 @@ class PostgresAuthStore(_AuthStoreImpl):
         theme: str | None,
         pomodoro_enabled: bool,
         pomodoro_transition_sound_enabled: bool,
+        pomodoro_default_focus_prompt: str | None,
+        pomodoro_default_break_prompt: str | None,
+        pomodoro_micro_breaks: dict[str, Any] | None,
         pomodoro_weekly_schedule: dict[str, Any],
         default_project_review_template: Iterable[dict[str, Any] | tuple[str, int | None] | list[Any]],
         learning_plans: dict[str, Any] | None = None,
     ) -> UserGlobalSettings:
         current = self.get_user_global_settings(user_id)
         normalized_theme = _normalize_user_theme(theme)
+        normalized_default_focus_prompt = _normalize_pomodoro_prompt_text(pomodoro_default_focus_prompt)
+        normalized_default_break_prompt = _normalize_pomodoro_prompt_text(pomodoro_default_break_prompt)
+        normalized_micro_breaks = _normalize_pomodoro_micro_break_settings(pomodoro_micro_breaks)
         normalized_template = _normalize_review_chain_template(default_project_review_template)
         normalized_weekly_schedule = _normalize_pomodoro_weekly_schedule(pomodoro_weekly_schedule)
         normalized_learning_plans = (
@@ -4465,6 +4553,9 @@ class PostgresAuthStore(_AuthStoreImpl):
                 "pomodoro": {
                     "enabled": bool(pomodoro_enabled),
                     "transitionSoundEnabled": bool(pomodoro_transition_sound_enabled),
+                    "defaultFocusPrompt": normalized_default_focus_prompt,
+                    "defaultBreakPrompt": normalized_default_break_prompt,
+                    "microBreaks": _pomodoro_micro_break_settings_to_json(normalized_micro_breaks),
                     "weeklySchedule": _pomodoro_weekly_schedule_to_json(normalized_weekly_schedule),
                 },
                 "defaultProjectReviewTemplate": _review_chain_template_to_json(normalized_template),
@@ -5947,6 +6038,9 @@ class AuthStore:
         theme: str | None,
         pomodoro_enabled: bool,
         pomodoro_transition_sound_enabled: bool,
+        pomodoro_default_focus_prompt: str | None,
+        pomodoro_default_break_prompt: str | None,
+        pomodoro_micro_breaks: dict[str, Any] | None,
         pomodoro_weekly_schedule: dict[str, Any],
         default_project_review_template: Iterable[dict[str, Any] | tuple[str, int | None] | list[Any]],
         learning_plans: dict[str, Any] | None = None,
@@ -5956,6 +6050,9 @@ class AuthStore:
             theme=theme,
             pomodoro_enabled=pomodoro_enabled,
             pomodoro_transition_sound_enabled=pomodoro_transition_sound_enabled,
+            pomodoro_default_focus_prompt=pomodoro_default_focus_prompt,
+            pomodoro_default_break_prompt=pomodoro_default_break_prompt,
+            pomodoro_micro_breaks=pomodoro_micro_breaks,
             pomodoro_weekly_schedule=pomodoro_weekly_schedule,
             default_project_review_template=default_project_review_template,
             learning_plans=learning_plans,
@@ -5971,6 +6068,9 @@ class AuthStore:
             theme=current.theme,
             pomodoro_enabled=current.pomodoro_enabled,
             pomodoro_transition_sound_enabled=current.pomodoro_transition_sound_enabled,
+            pomodoro_default_focus_prompt=current.pomodoro_default_focus_prompt,
+            pomodoro_default_break_prompt=current.pomodoro_default_break_prompt,
+            pomodoro_micro_breaks=_pomodoro_micro_break_settings_to_json(current.pomodoro_micro_breaks),
             pomodoro_weekly_schedule=_pomodoro_weekly_schedule_to_json(current.pomodoro_weekly_schedule),
             default_project_review_template=_review_chain_template_to_json(
                 ((step.kind, step.count) for step in current.default_project_review_template)

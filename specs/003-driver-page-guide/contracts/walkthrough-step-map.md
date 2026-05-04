@@ -9,6 +9,7 @@ Define the contract between system usage instructions, walkthrough steps, fronte
 ```ts
 type GuideWalkthroughStep = {
   id: string
+  popoverTitle?: string
   sourceRef: {
     heading: string
     itemIndex?: number
@@ -17,9 +18,16 @@ type GuideWalkthroughStep = {
   routeHint?: string
   targetAnchor?: string
   fallbackMode: "centered-popover" | "route-hint" | "skip-with-explanation"
+  advanceOn?: "manual" | "target-click" | "completion-event"
   popoverSide?: "top" | "right" | "bottom" | "left"
 }
 ```
+
+`advanceOn` defines how the learner leaves an actionable step:
+
+- `target-click`: advance after the learner clicks the highlighted target.
+- `completion-event`: advance only after the underlying business action reports success.
+- `manual` or omitted: show normal walkthrough controls for fallback, review, or non-action guidance.
 
 ## First-Release Step Coverage
 
@@ -44,4 +52,6 @@ type GuideWalkthroughStep = {
 - Every `itemIndex` must resolve inside that heading's ordered list.
 - Every non-empty `targetAnchor` must appear in source files as `data-guide-tour="<anchor>"`.
 - Every step must declare a fallback mode.
+- Actionable steps must prefer `target-click` or `completion-event` over requiring the learner to press the walkthrough next button.
 - No step may include separately authored popover body text.
+- `popoverTitle` may be used for guide-specific micro-step titles, while body copy must still come from the manual source.

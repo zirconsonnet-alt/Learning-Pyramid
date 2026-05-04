@@ -65,6 +65,7 @@ const ObjectTreePage = lazyRoute(() => import("@/views/trees/ObjectTreePage"), (
 const TaskTreePage = lazyRoute(() => import("@/views/trees/TaskTreePage"), (mod) => mod.TaskTreePage)
 const WorkbenchPage = lazyRoute(() => import("@/views/workbench/WorkbenchPage"), (mod) => mod.WorkbenchPage)
 const PomodoroPage = lazyRoute(() => import("@/views/pomodoro/PomodoroPage"), (mod) => mod.PomodoroPage)
+const PomodoroSettingsPage = lazyRoute(() => import("@/views/pomodoro/PomodoroSettingsPage"), (mod) => mod.PomodoroSettingsPage)
 
 function lazyElement(element: ReactNode) {
   return <Suspense fallback={<RoutePendingPage />}>{element}</Suspense>
@@ -121,6 +122,7 @@ export const router = createBrowserRouter([
       },
       { path: "/pomodoro", element: lazyElement(<PomodoroPage />) },
       { path: "/pomodoro/edit", element: lazyElement(<PomodoroPage />) },
+      { path: "/pomodoro/settings", element: lazyElement(<PomodoroSettingsPage />) },
       { path: "/p/:projectId/pomodoro", element: <Navigate to="/pomodoro" replace /> },
       { path: "/p/:projectId/recommended-reviews", element: lazyElement(<ReviewRecommendationsPage />) },
       { path: "/p/:projectId/settings", element: lazyElement(<ProjectSettingsPage />) },

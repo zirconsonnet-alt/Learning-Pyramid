@@ -40,10 +40,11 @@ import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent } from "@/ui/components/ui/card"
 import { askCourseAgent } from "@/ui/llm/courseAgent"
 import { resolveProjectFile, useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
+import { playPomodoroMicroBreakReminderSound } from "@/ui/pomodoroAudio"
 import { useProjectMaterialSourceBinding, useProjects } from "@/ui/queries/projects"
 import { useSystemCapabilities } from "@/ui/queries/system"
 import type { AiChatCourseEvidence } from "@/ui/store/aiChatStore"
-import { formatPomodoroCountdown, getPomodoroUpcomingSegmentPreview, isQuickPomodoroSessionActive, usePomodoroNow, usePomodoroStore } from "@/ui/store/pomodoroStore"
+import { formatPomodoroCountdown, getPomodoroSnapshot, getPomodoroUpcomingSegmentPreview, isQuickPomodoroSessionActive, usePomodoroNow, usePomodoroStore } from "@/ui/store/pomodoroStore"
 import { useRecallPointsByInstance } from "@/ui/queries/workbench"
 import { useInstancePlaybackDescriptor } from "@/ui/queries/workbench"
 import { showInfoFeedback } from "@/ui/store/feedbackStore"
@@ -51,6 +52,12 @@ import { formatRecallPointReference } from "@/ui/displayIdentifiers"
 import { SUPPORTED_SUBTITLE_EXTENSIONS_LABEL } from "@/ui/subtitles/subtitleSupport"
 import { recordStudyActivity, touchDailyStudyActivity } from "@/ui/store/workbenchDailyStats"
 import { clearPlaybackResumeMs, loadPlaybackResumeMs, savePlaybackResumeMs } from "@/ui/store/playbackResume"
+import {
+  loadVideoPlaybackRate,
+  normalizeVideoPlaybackRate,
+  saveVideoPlaybackRate,
+  VIDEO_PLAYBACK_RATE_OPTIONS,
+} from "@/ui/store/videoPlaybackRate"
 import { saveVideoDurationMs } from "@/ui/store/videoDurations"
 import { recordVideoWatchCoverageRange } from "@/ui/store/videoWatchCoverage"
 import { useWorkbenchStore } from "@/ui/store/workbenchStore"
@@ -74,11 +81,13 @@ import { useVideoSubtitles } from "./useVideoSubtitles"
 
 const FULLSCREEN_KEYBOARD_SEEK_STEP_MS = 5000
 const CHROME_HIDE_DELAY_MS = 1600
-const PLAYBACK_RATE_OPTIONS = [0.75, 1, 1.25, 1.5, 2]
+const PLAYBACK_RATE_OPTIONS = VIDEO_PLAYBACK_RATE_OPTIONS
 const WATCH_TRACKING_MAX_CHUNK_MS = 5000
 const COMPOSE_ACTIVITY_WINDOW_MS = 60_000
 const QA_ACTIVITY_WINDOW_MS = 30_000
 const MAX_CAPTURE_REFERENCE_PICKER_ITEMS = 12
+const POMODORO_MICRO_BREAK_FORBIDDEN_WINDOW_MS = 3 * 60_000
+const POMODORO_TRANSITION_PREVIEW_WINDOW_MS = 10_000
 
 type FullscreenCapableVideo = HTMLVideoElement & {
   webkitDisplayingFullscreen?: boolean
@@ -86,6 +95,23 @@ type FullscreenCapableVideo = HTMLVideoElement & {
 
 type CapturePanelMode = "capture" | "assistant"
 type CaptureReferencePickerField = "question" | "answer"
+type MicroBreakCancelReason =
+  | "fullscreen_exit"
+  | "pomodoro_ineligible"
+  | "route_change"
+  | "settings_disabled"
+  | "video_unavailable"
+
+type PomodoroMicroBreakTimerState = {
+  status: "idle" | "scheduled" | "resting"
+  fullscreenEnteredAtMs: number | null
+  targetAtMs: number | null
+  forbiddenAfterMs: number | null
+  segmentKey: string
+  wasPlayingBeforeBreak: boolean
+  countdownEndsAtMs: number | null
+  cancelReason: MicroBreakCancelReason | null
+}
 
 type CourseAssistantTurn = {
   id: string
@@ -103,6 +129,26 @@ type CapturedVideoFrame = {
 type CapturedVideoFrameFile = {
   timeMs: number
   file: File
+}
+
+function createIdleMicroBreakState(cancelReason: MicroBreakCancelReason | null = null): PomodoroMicroBreakTimerState {
+  return {
+    status: "idle",
+    fullscreenEnteredAtMs: null,
+    targetAtMs: null,
+    forbiddenAfterMs: null,
+    segmentKey: "",
+    wasPlayingBeforeBreak: false,
+    countdownEndsAtMs: null,
+    cancelReason,
+  }
+}
+
+function createRandomMicroBreakDelayMs(settings: { minIntervalSeconds: number; maxIntervalSeconds: number }) {
+  const minDelayMs = Math.max(0, Math.floor(settings.minIntervalSeconds * 1000))
+  const maxDelayMs = Math.max(minDelayMs, Math.floor(settings.maxIntervalSeconds * 1000))
+  if (maxDelayMs === minDelayMs) return minDelayMs
+  return minDelayMs + Math.floor(Math.random() * (maxDelayMs - minDelayMs + 1))
 }
 
 function isRelativeMaterialId(materialId: string) {
@@ -293,13 +339,16 @@ export function VideoPane({
   const assistantAbortRef = useRef<AbortController | null>(null)
   const hlsRef = useRef<Hls | null>(null)
   const lastFrameCaptureShortcutAtRef = useRef(0)
+  const microBreakTimeoutRef = useRef<number | null>(null)
+  const microBreakIntervalRef = useRef<number | null>(null)
+  const microBreakStateRef = useRef<PomodoroMicroBreakTimerState>(createIdleMicroBreakState())
 
   const [playbackMs, setPlaybackMs] = useState(0)
   const [durationMs, setDurationMs] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
   const [isMuted, setIsMuted] = useState(false)
   const [volumePercent, setVolumePercent] = useState(100)
-  const [playbackRate, setPlaybackRate] = useState(1)
+  const [playbackRate, setPlaybackRate] = useState(() => loadVideoPlaybackRate())
   const [localSrc, setLocalSrc] = useState<string | null>(null)
   const [localError, setLocalError] = useState<string | null>(null)
   const [mediaElementError, setMediaElementError] = useState<string | null>(null)
@@ -327,11 +376,14 @@ export function VideoPane({
   const [isBarrageEnabled, setIsBarrageEnabled] = useState(() => loadVideoBarrageEnabled())
   const [isSubtitleEnabled, setIsSubtitleEnabled] = useState(() => loadVideoSubtitleEnabled())
   const [subtitleDelayMs, setSubtitleDelayMs] = useState(() => loadVideoSubtitleDelayMs())
+  const [microBreakState, setMicroBreakState] = useState<PomodoroMicroBreakTimerState>(() => createIdleMicroBreakState())
+  const [microBreakNow, setMicroBreakNow] = useState(() => Date.now())
 
   const addDraft = useWorkbenchStore((s) => s.addDraft)
   const pomodoroEnabled = usePomodoroStore((state) => state.enabled)
   const pomodoroWeeklySchedule = usePomodoroStore((state) => state.weeklySchedule)
   const pomodoroQuickPomodoro = usePomodoroStore((state) => state.quickPomodoro)
+  const pomodoroMicroBreaks = usePomodoroStore((state) => state.microBreaks)
   const pomodoroQuickClockActive = isQuickPomodoroSessionActive(pomodoroQuickPomodoro)
   const pomodoroNow = usePomodoroNow(pomodoroEnabled || pomodoroQuickClockActive)
   const projectsQ = useProjects(true)
@@ -571,6 +623,14 @@ export function VideoPane({
     }
   }, [instanceId, onDurationResolved, projectId])
 
+  const applyRememberedPlaybackRate = useCallback((video?: HTMLVideoElement | null) => {
+    const rememberedPlaybackRate = loadVideoPlaybackRate()
+    if (video) {
+      video.playbackRate = rememberedPlaybackRate
+    }
+    setPlaybackRate(rememberedPlaybackRate)
+  }, [])
+
   const persistPlaybackPosition = useCallback(
     (ms: number) => {
       if (!instanceId) return
@@ -698,8 +758,10 @@ export function VideoPane({
     (nextRate: number) => {
       const video = videoRef.current
       if (!video) return
-      video.playbackRate = nextRate
-      setPlaybackRate(nextRate)
+      const normalizedRate = normalizeVideoPlaybackRate(nextRate)
+      video.playbackRate = normalizedRate
+      saveVideoPlaybackRate(normalizedRate)
+      setPlaybackRate(normalizedRate)
       wakeChrome()
     },
     [wakeChrome],
@@ -1060,7 +1122,7 @@ export function VideoPane({
     setIsPlaying(false)
     setIsMuted(false)
     setVolumePercent(100)
-    setPlaybackRate(1)
+    setPlaybackRate(loadVideoPlaybackRate())
     setMediaElementError(null)
     setIsShellFullscreen(false)
     setIsChromeAwake(true)
@@ -1428,12 +1490,14 @@ export function VideoPane({
 
   function handleLoadedMetadata() {
     setMediaElementError(null)
+    applyRememberedPlaybackRate(videoRef.current)
     syncVideoUiState(videoRef.current)
     tryApplyPendingSeek()
     tryRestoreSavedPlaybackPosition()
   }
 
   function handleCanPlay() {
+    applyRememberedPlaybackRate(videoRef.current)
     syncVideoUiState(videoRef.current)
     tryApplyPendingSeek()
     tryRestoreSavedPlaybackPosition()
@@ -1616,6 +1680,217 @@ export function VideoPane({
     () => [...assistantTurns].reverse().find((turn) => turn.role === "assistant") ?? null,
     [assistantTurns],
   )
+  const pomodoroSnapshot = useMemo(
+    () => getPomodoroSnapshot({ enabled: pomodoroEnabled, weeklySchedule: pomodoroWeeklySchedule, quickPomodoro: pomodoroQuickPomodoro }, pomodoroNow),
+    [pomodoroEnabled, pomodoroNow, pomodoroQuickPomodoro, pomodoroWeeklySchedule],
+  )
+  const pomodoroMicroBreakSegmentKey = useMemo(() => {
+    if (!pomodoroSnapshot.segment || pomodoroSnapshot.startAtMs === null) return ""
+    return [
+      pomodoroSnapshot.startAtMs,
+      pomodoroSnapshot.segment.planId,
+      pomodoroSnapshot.segment.planIndex,
+      pomodoroSnapshot.segment.pomodoroIndex,
+      pomodoroSnapshot.segment.startOffsetMs,
+      pomodoroSnapshot.segment.endOffsetMs,
+    ].join(":")
+  }, [pomodoroSnapshot.segment, pomodoroSnapshot.startAtMs])
+  const pomodoroMicroBreakProjectAllowed =
+    !pomodoroSnapshot.currentProjectId || pomodoroSnapshot.currentProjectId === projectId
+  const pomodoroMicroBreakEligible =
+    pomodoroMicroBreaks.enabled &&
+    pomodoroSnapshot.status === "running" &&
+    pomodoroSnapshot.phase === "focus" &&
+    pomodoroMicroBreakProjectAllowed &&
+    isShellFullscreen &&
+    shouldRenderVideo &&
+    pomodoroSnapshot.segmentRemainingMs > POMODORO_MICRO_BREAK_FORBIDDEN_WINDOW_MS
+
+  const clearMicroBreakTimers = useCallback(() => {
+    if (microBreakTimeoutRef.current !== null) {
+      window.clearTimeout(microBreakTimeoutRef.current)
+      microBreakTimeoutRef.current = null
+    }
+    if (microBreakIntervalRef.current !== null) {
+      window.clearInterval(microBreakIntervalRef.current)
+      microBreakIntervalRef.current = null
+    }
+  }, [])
+
+  const cancelMicroBreak = useCallback((reason: MicroBreakCancelReason) => {
+    clearMicroBreakTimers()
+    // canceled-break no-resume: cancellation never calls video.play().
+    setMicroBreakState((current) => (current.status === "idle" ? current : createIdleMicroBreakState(reason)))
+    setMicroBreakNow(Date.now())
+  }, [clearMicroBreakTimers])
+
+  const createNextMicroBreakSchedule = useCallback(() => {
+    if (!pomodoroMicroBreakSegmentKey) return null
+    const delayMs = createRandomMicroBreakDelayMs(pomodoroMicroBreaks)
+    const targetAtMs = pomodoroNow + delayMs
+    const forbiddenAfterMs = pomodoroNow + pomodoroSnapshot.segmentRemainingMs - POMODORO_MICRO_BREAK_FORBIDDEN_WINDOW_MS
+    if (forbiddenAfterMs <= pomodoroNow) return null
+    if (targetAtMs >= forbiddenAfterMs) return null
+    return {
+      fullscreenEnteredAtMs: Date.now(),
+      targetAtMs,
+      forbiddenAfterMs,
+      segmentKey: pomodoroMicroBreakSegmentKey,
+    }
+  }, [pomodoroMicroBreakSegmentKey, pomodoroMicroBreaks, pomodoroNow, pomodoroSnapshot.segmentRemainingMs])
+
+  useEffect(() => {
+    microBreakStateRef.current = microBreakState
+  }, [microBreakState])
+
+  useEffect(() => {
+    return () => cancelMicroBreak("route_change")
+  }, [cancelMicroBreak])
+
+  useEffect(() => {
+    cancelMicroBreak("route_change")
+  }, [cancelMicroBreak, instanceId, projectId])
+
+  useEffect(() => {
+    if (!pomodoroMicroBreaks.enabled) {
+      cancelMicroBreak("settings_disabled")
+      return
+    }
+    if (!shouldRenderVideo) {
+      cancelMicroBreak("video_unavailable")
+      return
+    }
+    if (!isShellFullscreen) {
+      cancelMicroBreak("fullscreen_exit")
+      return
+    }
+    if (!pomodoroMicroBreakEligible) {
+      cancelMicroBreak("pomodoro_ineligible")
+      return
+    }
+    if (microBreakState.status !== "idle" && microBreakState.segmentKey === pomodoroMicroBreakSegmentKey) return
+    const schedule = createNextMicroBreakSchedule()
+    if (!schedule) {
+      setMicroBreakState((current) => (current.status === "idle" ? current : createIdleMicroBreakState("pomodoro_ineligible")))
+      return
+    }
+    clearMicroBreakTimers()
+    setMicroBreakState({ status: "scheduled",
+      fullscreenEnteredAtMs: schedule.fullscreenEnteredAtMs,
+      targetAtMs: schedule.targetAtMs,
+      forbiddenAfterMs: schedule.forbiddenAfterMs,
+      segmentKey: schedule.segmentKey,
+      wasPlayingBeforeBreak: false,
+      countdownEndsAtMs: null,
+      cancelReason: null,
+    })
+    setMicroBreakNow(Date.now())
+  }, [
+    cancelMicroBreak,
+    clearMicroBreakTimers,
+    createNextMicroBreakSchedule,
+    isShellFullscreen,
+    microBreakState.segmentKey,
+    microBreakState.status,
+    pomodoroMicroBreakEligible,
+    pomodoroMicroBreakSegmentKey,
+    pomodoroMicroBreaks.enabled,
+    shouldRenderVideo,
+  ])
+
+  const handleMicroBreakTrigger = useCallback(() => {
+    const scheduledState = microBreakStateRef.current
+    if (scheduledState.status !== "scheduled") return
+    const video = videoRef.current
+    if (!video) {
+      cancelMicroBreak("video_unavailable")
+      return
+    }
+    if (!pomodoroMicroBreakEligible || !scheduledState.forbiddenAfterMs || Date.now() >= scheduledState.forbiddenAfterMs) {
+      cancelMicroBreak("pomodoro_ineligible")
+      return
+    }
+
+    const wasPlayingBeforeBreak = !video.paused && !video.ended
+    void playPomodoroMicroBreakReminderSound()
+    video.pause()
+    const now = Date.now()
+    setMicroBreakNow(now)
+    setMicroBreakState({
+      ...scheduledState,
+      status: "resting",
+      wasPlayingBeforeBreak,
+      countdownEndsAtMs: now + pomodoroMicroBreaks.durationSeconds * 1000,
+      cancelReason: null,
+    })
+  }, [cancelMicroBreak, pomodoroMicroBreakEligible, pomodoroMicroBreaks.durationSeconds])
+
+  useEffect(() => {
+    if (microBreakState.status !== "scheduled" || microBreakState.targetAtMs === null) return
+    const delayMs = Math.max(0, microBreakState.targetAtMs - Date.now())
+    const timer = window.setTimeout(handleMicroBreakTrigger, delayMs)
+    microBreakTimeoutRef.current = timer
+    return () => {
+      window.clearTimeout(timer)
+      if (microBreakTimeoutRef.current === timer) {
+        microBreakTimeoutRef.current = null
+      }
+    }
+  }, [handleMicroBreakTrigger, microBreakState.status, microBreakState.targetAtMs])
+
+  const completeMicroBreak = useCallback((completedState: PomodoroMicroBreakTimerState) => {
+    const video = videoRef.current
+    if (completedState.wasPlayingBeforeBreak) {
+      if (video) {
+        void video.play().catch(() => {
+          // Ignore autoplay refusal; the learner can resume playback manually.
+        })
+      }
+    }
+    const schedule = pomodoroMicroBreakEligible ? createNextMicroBreakSchedule() : null
+    if (!schedule) {
+      setMicroBreakState(createIdleMicroBreakState())
+      return
+    }
+    setMicroBreakState({ status: "scheduled",
+      fullscreenEnteredAtMs: completedState.fullscreenEnteredAtMs ?? schedule.fullscreenEnteredAtMs,
+      targetAtMs: schedule.targetAtMs,
+      forbiddenAfterMs: schedule.forbiddenAfterMs,
+      segmentKey: schedule.segmentKey,
+      wasPlayingBeforeBreak: false,
+      countdownEndsAtMs: null,
+      cancelReason: null,
+    })
+  }, [createNextMicroBreakSchedule, pomodoroMicroBreakEligible])
+
+  useEffect(() => {
+    if (microBreakState.status !== "resting") return
+    const timer = window.setInterval(() => {
+      const now = Date.now()
+      setMicroBreakNow(now)
+      const completedState = microBreakStateRef.current
+      if (completedState.status !== "resting" || completedState.countdownEndsAtMs === null) return
+      if (now < completedState.countdownEndsAtMs) return
+      window.clearInterval(timer)
+      if (microBreakIntervalRef.current === timer) {
+        microBreakIntervalRef.current = null
+      }
+      completeMicroBreak(completedState)
+    }, 1000)
+    microBreakIntervalRef.current = timer
+    return () => {
+      window.clearInterval(timer)
+      if (microBreakIntervalRef.current === timer) {
+        microBreakIntervalRef.current = null
+      }
+    }
+  }, [completeMicroBreak, microBreakState.status])
+
+  const showMicroBreakOverlay = microBreakState.status === "resting" && isShellFullscreen
+  const microBreakRemainingMs =
+    microBreakState.status === "resting" && microBreakState.countdownEndsAtMs !== null
+      ? Math.max(0, microBreakState.countdownEndsAtMs - microBreakNow)
+      : 0
   const pomodoroUpcomingSegment = useMemo(
     () =>
       getPomodoroUpcomingSegmentPreview({ enabled: pomodoroEnabled, weeklySchedule: pomodoroWeeklySchedule, quickPomodoro: pomodoroQuickPomodoro }, pomodoroNow),
@@ -1627,17 +1902,19 @@ export function VideoPane({
     return projectsQ.data?.find((project) => project.projectId === upcomingProjectId)?.title ?? ""
   }, [pomodoroUpcomingSegment?.projectId, projectsQ.data])
   const showFullscreenFocusPreview =
+    !showMicroBreakOverlay &&
     isShellFullscreen &&
     pomodoroUpcomingSegment?.phase === "focus" &&
     Boolean(pomodoroUpcomingSegment?.projectId) &&
     pomodoroUpcomingSegment.projectId !== projectId &&
     pomodoroUpcomingSegment.startsInMs > 0 &&
-    pomodoroUpcomingSegment.startsInMs <= 10_000
+    pomodoroUpcomingSegment.startsInMs <= POMODORO_TRANSITION_PREVIEW_WINDOW_MS
   const showFullscreenBreakPreview =
+    !showMicroBreakOverlay &&
     isShellFullscreen &&
     pomodoroUpcomingSegment?.phase === "break" &&
     pomodoroUpcomingSegment.startsInMs > 0 &&
-    pomodoroUpcomingSegment.startsInMs <= 10_000
+    pomodoroUpcomingSegment.startsInMs <= POMODORO_TRANSITION_PREVIEW_WINDOW_MS
 
   return (
     <Card className="theme-card-main overflow-hidden">
@@ -1675,6 +1952,7 @@ export function VideoPane({
               }}
               onLoadedData={() => {
                 setMediaElementError(null)
+                applyRememberedPlaybackRate(videoRef.current)
                 syncVideoUiState(videoRef.current)
               }}
               onLoadedMetadata={handleLoadedMetadata}
@@ -1711,6 +1989,21 @@ export function VideoPane({
                 handleTimeUpdate()
               }}
             />
+
+            {showMicroBreakOverlay ? (
+              <div className="pomodoro-micro-break-overlay pointer-events-none absolute inset-0 z-[24] flex items-center justify-center px-4 text-white">
+                <div className="pomodoro-micro-break-card w-full max-w-[min(88vw,28rem)] rounded-[1.2rem] border border-white/18 px-5 py-6 text-center">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-white/68">Micro Break</div>
+                  <div className="mt-3 text-3xl font-semibold tracking-normal">闭眼休息</div>
+                  <div className="mt-3 font-mono text-5xl font-semibold tabular-nums">
+                    {formatPomodoroCountdown(microBreakRemainingMs)}
+                  </div>
+                  <div className="mt-3 text-sm leading-6 text-white/78">
+                    放松眼睛，保持呼吸。倒计时结束后会按之前的播放状态继续。
+                  </div>
+                </div>
+              </div>
+            ) : null}
 
             {showFullscreenFocusPreview && pomodoroUpcomingSegment ? (
               <div className="pointer-events-none absolute inset-x-0 top-4 z-[22] flex justify-center px-4">

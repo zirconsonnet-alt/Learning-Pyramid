@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "frontend"
 SRC = FRONTEND / "src"
 GUIDE_PAGE = SRC / "views" / "guide" / "GuidePage.tsx"
+PROJECTS_PAGE = SRC / "views" / "projects" / "ProjectsPage.tsx"
 APP_SHELL = SRC / "shell" / "AppShell.tsx"
 NAV_ITEMS = SRC / "shell" / "navItems.ts"
 MAIN_NAV = SRC / "shell" / "MainNav.tsx"
@@ -253,3 +254,77 @@ def test_controller_contains_missing_target_fallback_route_hint_and_cleanup():
         "cleanupGuideWalkthrough",
     ]:
         assert symbol in controller
+
+
+def test_walkthrough_action_steps_advance_from_user_actions():
+    steps = read(STEPS_MODULE)
+    controller = read(CONTROLLER_MODULE)
+    projects_page = read(PROJECTS_PAGE)
+
+    create_subject_step = re.search(r'\{\s*id:\s*"create-subject".+?popoverSide:\s*"bottom",\s*\}', steps, flags=re.DOTALL)
+    create_submit_step = re.search(r'\{\s*id:\s*"create-subject-submit".+?popoverSide:\s*"top",\s*\}', steps, flags=re.DOTALL)
+    assert create_subject_step
+    assert create_submit_step
+    assert 'advanceOn: "target-click"' in create_subject_step.group(0)
+    assert 'advanceOn: "completion-event"' in create_submit_step.group(0)
+
+    assert "completeGuideWalkthroughStep" in controller
+    assert "GUIDE_WALKTHROUGH_STEP_COMPLETED_EVENT" in controller
+    assert re.search(r'addEventListener\(\s*"click"', controller)
+    assert "ACTION_STEP_BUTTONS" in controller
+    assert '["close"]' in controller
+
+    assert "completeGuideWalkthroughStep" in projects_page
+    assert 'completeGuideWalkthroughStep("create-subject-submit")' in projects_page
+
+
+def test_controller_refreshes_active_steps_without_orphaning_popovers():
+    controller = read(CONTROLLER_MODULE)
+
+    assert ".setSteps(" not in controller
+    assert "replaceGuideWalkthroughSteps" in controller
+    assert ".setConfig({" in controller
+
+
+def test_walkthrough_can_run_during_pomodoro_and_stops_before_locked_workbench():
+    controller = read(CONTROLLER_MODULE)
+
+    assert "shouldEndGuideWalkthroughBeforeWorkbench" in controller
+    assert "usePomodoroStore.getState()" in controller
+    assert "getPomodoroSnapshot({ enabled: state.enabled, weeklySchedule: state.weeklySchedule, quickPomodoro: state.quickPomodoro }, now)" in controller
+    assert "snapshot.shouldRestrictWorkbench && !snapshot.canUseWorkbench" in controller
+    assert "describePomodoroPhase" in controller
+    assert "showInfoFeedback" in controller
+    assert "当前不是学习时间" in controller
+    assert "本次引导先到这里" in controller
+
+    start_function = re.search(r"export function startGuideWalkthrough\(\).*?\n\}", controller, flags=re.DOTALL)
+    assert start_function
+    assert "isGuideWalkthroughBlockedByPomodoro" not in start_function.group(0)
+    assert "return true" in start_function.group(0)
+
+    run_function = re.search(r"function runWalkthrough\(\).*?function destroyActiveWalkthrough", controller, flags=re.DOTALL)
+    assert run_function
+    assert "isGuideWalkthroughBlockedByPomodoro" not in run_function.group(0)
+
+    advance_function = re.search(r"function advanceGuideWalkthroughFromIndex\(.*?function completeActiveGuideWalkthroughStep", controller, flags=re.DOTALL)
+    assert advance_function
+    assert "shouldEndGuideWalkthroughBeforeWorkbench(nextStep)" in advance_function.group(0)
+    assert "cleanupGuideWalkthrough" in advance_function.group(0)
+
+    highlighted_function = re.search(r"onHighlighted: \(element, _driverStep, opts\) => \{.*?popover:", controller, flags=re.DOTALL)
+    assert highlighted_function
+    assert "event.preventDefault()" in highlighted_function.group(0)
+    assert "event.stopPropagation()" in highlighted_function.group(0)
+
+
+def test_create_subject_submit_step_has_distinct_copy_and_dialog_target():
+    steps = read(STEPS_MODULE)
+    projects_page = read(PROJECTS_PAGE)
+    manual = read(MANUAL)
+
+    create_submit_step = re.search(r'\{\s*id:\s*"create-subject-submit".+?popoverSide:\s*"top",\s*\}', steps, flags=re.DOTALL)
+    assert create_submit_step
+    assert 'popoverTitle: "第 2 步：填写标题并创建学科"' in create_submit_step.group(0)
+    assert "填写学科标题后，点击“创建学科”。" in manual
+    assert re.search(r"<DialogContent[^>]+data-guide-tour=\"create-subject-submit\"", projects_page)

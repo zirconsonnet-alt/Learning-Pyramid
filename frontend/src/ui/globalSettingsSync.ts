@@ -17,6 +17,9 @@ export function applyGlobalSettingsSnapshot(settings: UserGlobalSettings) {
     enabled: settings.pomodoro.enabled,
     weeklySchedule: settings.pomodoro.weeklySchedule,
     transitionSoundEnabled: settings.pomodoro.transitionSoundEnabled,
+    defaultFocusPrompt: settings.pomodoro.defaultFocusPrompt,
+    defaultBreakPrompt: settings.pomodoro.defaultBreakPrompt,
+    microBreaks: settings.pomodoro.microBreaks,
   })
 }
 

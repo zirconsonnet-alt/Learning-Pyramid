@@ -4,6 +4,9 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 VIDEO_PANE = REPO_ROOT / "frontend" / "src" / "views" / "workbench" / "components" / "VideoPane.tsx"
 COMPOSE_PANE = REPO_ROOT / "frontend" / "src" / "views" / "workbench" / "components" / "ComposePane.tsx"
+VIDEO_PLAYBACK_RATE = REPO_ROOT / "frontend" / "src" / "ui" / "store" / "videoPlaybackRate.ts"
+POMODORO_STORE = REPO_ROOT / "frontend" / "src" / "ui" / "store" / "pomodoroStore.ts"
+POMODORO_AUDIO = REPO_ROOT / "frontend" / "src" / "ui" / "pomodoroAudio.ts"
 
 
 def test_fullscreen_capture_supports_tab_reference_picker() -> None:
@@ -70,3 +73,78 @@ def test_playback_hover_menus_keep_clickable_pointer_bridge() -> None:
     assert source.count("bottom-full left-1/2 pb-2") >= 2
     assert "group-hover/volume:pointer-events-auto" in source
     assert "group-hover/rate:pointer-events-auto" in source
+
+
+def test_video_playback_rate_remembers_last_selected_rate() -> None:
+    source = VIDEO_PANE.read_text(encoding="utf-8")
+
+    assert 'from "@/ui/store/videoPlaybackRate"' in source
+    storage_source = VIDEO_PLAYBACK_RATE.read_text(encoding="utf-8")
+
+    assert "VIDEO_PLAYBACK_RATE_STORAGE_KEY" in storage_source
+    assert "loadVideoPlaybackRate" in storage_source
+    assert "saveVideoPlaybackRate" in storage_source
+    assert "normalizeVideoPlaybackRate" in storage_source
+    assert "const [playbackRate, setPlaybackRate] = useState(() => loadVideoPlaybackRate())" in source
+    assert "const rememberedPlaybackRate = loadVideoPlaybackRate()" in source
+    assert "video.playbackRate = rememberedPlaybackRate" in source
+    assert "saveVideoPlaybackRate(normalizedRate)" in source
+    assert "setPlaybackRate(loadVideoPlaybackRate())" in source
+    assert "setPlaybackRate(1)" not in source
+
+
+def test_pomodoro_micro_break_focus_fullscreen_schedules_random_countdown() -> None:
+    source = VIDEO_PANE.read_text(encoding="utf-8")
+
+    assert "getPomodoroSnapshot" in source
+    assert "const pomodoroMicroBreaks = usePomodoroStore((state) => state.microBreaks)" in source
+    assert "const pomodoroSnapshot = useMemo(" in source
+    assert 'pomodoroSnapshot.status === "running"' in source
+    assert 'pomodoroSnapshot.phase === "focus"' in source
+    assert "isShellFullscreen" in source
+    assert "createRandomMicroBreakDelayMs" in source
+    assert "segmentKey" in source
+    assert "targetAtMs" in source
+    assert "countdownEndsAtMs" in source
+    assert "setMicroBreakState({ status: \"scheduled\"" in source
+    assert "window.setTimeout(handleMicroBreakTrigger" in source
+    assert "window.setInterval" in source
+
+
+def test_pomodoro_micro_break_reminder_pauses_and_conditionally_resumes_video() -> None:
+    source = VIDEO_PANE.read_text(encoding="utf-8")
+
+    assert "playPomodoroMicroBreakReminderSound" in source
+    assert "wasPlayingBeforeBreak" in source
+    assert "const wasPlayingBeforeBreak = !video.paused && !video.ended" in source
+    assert "video.pause()" in source
+    assert "if (completedState.wasPlayingBeforeBreak)" in source
+    assert "void video.play().catch" in source
+
+    audio_source = POMODORO_AUDIO.read_text(encoding="utf-8")
+    assert "playPomodoroMicroBreakReminderSound" in audio_source
+
+
+def test_pomodoro_micro_break_skips_final_three_minutes_and_transition_prompt_overlap() -> None:
+    source = VIDEO_PANE.read_text(encoding="utf-8")
+
+    assert "POMODORO_MICRO_BREAK_FORBIDDEN_WINDOW_MS = 3 * 60_000" in source
+    assert "POMODORO_TRANSITION_PREVIEW_WINDOW_MS = 10_000" in source
+    assert "forbiddenAfterMs" in source
+    assert "forbiddenAfterMs = pomodoroNow + pomodoroSnapshot.segmentRemainingMs - POMODORO_MICRO_BREAK_FORBIDDEN_WINDOW_MS" in source
+    assert "if (targetAtMs >= forbiddenAfterMs) return null" in source
+    assert "showFullscreenFocusPreview" in source
+    assert "showFullscreenBreakPreview" in source
+    assert "showMicroBreakOverlay" in source
+
+
+def test_pomodoro_micro_break_cancels_on_fullscreen_exit_and_ineligible_state_without_resume() -> None:
+    source = VIDEO_PANE.read_text(encoding="utf-8")
+
+    assert "cancelMicroBreak(\"fullscreen_exit\")" in source
+    assert "cancelMicroBreak(\"pomodoro_ineligible\")" in source
+    assert "cancelMicroBreak(\"settings_disabled\")" in source
+    assert "cancelMicroBreak(\"video_unavailable\")" in source
+    assert "cancelMicroBreak(\"route_change\")" in source
+    assert "return () => cancelMicroBreak(\"route_change\")" in source
+    assert "canceled-break no-resume" in source

@@ -113,7 +113,7 @@ Primary implementation slices:
 - Copy source: parse or reference `docs/learningpyramid-user-manual.md` so each step's title/description is derived from a manual section or numbered instruction.
 - Target anchors: add stable tour anchors to the subject creation, project creation, project settings, directory import, workbench object tree/video, recall form, and review areas.
 - Fallbacks: handle legacy `?doc=method`, missing project data, missing route context, and unavailable target elements without leaving the walkthrough stuck.
-- Validation: add static tests for dependency/configuration, guide document removal, source-copy references, target anchor coverage, fallback coverage, and manual alignment; run frontend build/lint and manual browser review.
+- Validation: add static tests for dependency/configuration, guide document removal, source-copy references, target anchor coverage, action-driven advancement, fallback coverage, and manual alignment; run frontend build/lint and manual browser review.
 
 ## Constitution Check
 

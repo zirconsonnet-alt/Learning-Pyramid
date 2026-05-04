@@ -43,6 +43,18 @@ export type QuickPomodoroSession = {
   projectId: string | null
 }
 
+export type PomodoroDefaultPrompts = {
+  focusPrompt: string
+  breakPrompt: string
+}
+
+export type RandomMicroBreakSettings = {
+  enabled: boolean
+  minIntervalSeconds: number
+  maxIntervalSeconds: number
+  durationSeconds: number
+}
+
 export type PomodoroSnapshot = {
   enabled: boolean
   hasEnabledSchedule: boolean
@@ -90,11 +102,23 @@ type PomodoroState = {
   weeklySchedule: PomodoroWeekSchedule
   quickPomodoro: QuickPomodoroSession | null
   transitionSoundEnabled: boolean
+  defaultFocusPrompt: string
+  defaultBreakPrompt: string
+  microBreaks: RandomMicroBreakSettings
   setEnabled: (enabled: boolean) => void
   setTransitionSoundEnabled: (enabled: boolean) => void
+  setMicroBreakSettings: (settings: Partial<RandomMicroBreakSettings>) => void
   setWeeklySchedule: (weeklySchedule: PomodoroWeekSchedule) => void
   setDaySchedule: (day: PomodoroWeekday, schedule: Partial<PomodoroDaySchedule>) => void
-  setSettings: (settings: { enabled: boolean; weeklySchedule: PomodoroWeekSchedule; transitionSoundEnabled?: boolean }) => void
+  setSettings: (settings: {
+    enabled: boolean
+    weeklySchedule: PomodoroWeekSchedule
+    transitionSoundEnabled?: boolean
+    defaultFocusPrompt?: string
+    defaultBreakPrompt?: string
+    microBreaks?: Partial<RandomMicroBreakSettings>
+  }) => void
+  setDefaultPrompts: (prompts: Partial<PomodoroDefaultPrompts>) => void
   startQuickPomodoro: (projectId?: string | null) => QuickPomodoroSession
   clearQuickPomodoro: () => void
   reset: () => void
@@ -112,6 +136,13 @@ const MAX_POMODORO_PROMPT_LENGTH = 200
 export const QUICK_POMODORO_PREPARE_MS = 10_000
 export const QUICK_POMODORO_FOCUS_MS = 25 * 60_000
 const QUICK_POMODORO_PLAN_ID = "quick-pomodoro"
+
+export const DEFAULT_RANDOM_MICRO_BREAK_SETTINGS: RandomMicroBreakSettings = {
+  enabled: false,
+  minIntervalSeconds: 180,
+  maxIntervalSeconds: 300,
+  durationSeconds: 10,
+}
 
 export const POMODORO_WEEKDAYS: PomodoroWeekday[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
@@ -140,6 +171,30 @@ function normalizeBreakMinutes(value: number) {
 
 function normalizePomodoroCount(value: number) {
   return clampInt(value, 1, 12)
+}
+
+export function normalizeRandomMicroBreakSettings(value: unknown): RandomMicroBreakSettings {
+  const raw = value && typeof value === "object" ? (value as Partial<RandomMicroBreakSettings>) : {}
+  const minIntervalSeconds = clampInt(
+    typeof raw.minIntervalSeconds === "number" ? raw.minIntervalSeconds : DEFAULT_RANDOM_MICRO_BREAK_SETTINGS.minIntervalSeconds,
+    30,
+    3600,
+  )
+  const maxIntervalSeconds = clampInt(
+    typeof raw.maxIntervalSeconds === "number" ? raw.maxIntervalSeconds : DEFAULT_RANDOM_MICRO_BREAK_SETTINGS.maxIntervalSeconds,
+    30,
+    3600,
+  )
+  return {
+    enabled: typeof raw.enabled === "boolean" ? raw.enabled : DEFAULT_RANDOM_MICRO_BREAK_SETTINGS.enabled,
+    minIntervalSeconds,
+    maxIntervalSeconds: Math.max(minIntervalSeconds, maxIntervalSeconds),
+    durationSeconds: clampInt(
+      typeof raw.durationSeconds === "number" ? raw.durationSeconds : DEFAULT_RANDOM_MICRO_BREAK_SETTINGS.durationSeconds,
+      5,
+      300,
+    ),
+  }
 }
 
 function normalizePomodoroPlanId(value: unknown, fallback: string) {
@@ -187,7 +242,7 @@ export function isQuickPomodoroSessionActive(quickPomodoro: QuickPomodoroSession
   return Boolean(quickPomodoro && now < quickPomodoro.endAtMs)
 }
 
-function normalizePomodoroPromptText(value: unknown) {
+export function normalizePomodoroPromptText(value: unknown) {
   const text = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : ""
   return text.slice(0, MAX_POMODORO_PROMPT_LENGTH)
 }
@@ -451,6 +506,9 @@ function createInitialState() {
     weeklySchedule: createPomodoroWeekSchedule(),
     quickPomodoro: null,
     transitionSoundEnabled: false,
+    defaultFocusPrompt: "",
+    defaultBreakPrompt: "",
+    microBreaks: normalizeRandomMicroBreakSettings(DEFAULT_RANDOM_MICRO_BREAK_SETTINGS),
   }
 }
 
@@ -880,15 +938,20 @@ export function usePomodoroNow(enabled = true) {
   const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
-    if (!enabled) {
+    const refreshNow = () => {
       setNow(Date.now())
-      return
     }
-    setNow(Date.now())
+    const initialTimer = window.setTimeout(refreshNow, 0)
+    if (!enabled) {
+      return () => window.clearTimeout(initialTimer)
+    }
     const timer = window.setInterval(() => {
-      setNow(Date.now())
+      refreshNow()
     }, 1000)
-    return () => window.clearInterval(timer)
+    return () => {
+      window.clearTimeout(initialTimer)
+      window.clearInterval(timer)
+    }
   }, [enabled])
 
   return now
@@ -910,6 +973,11 @@ export const usePomodoroStore = create<PomodoroState>()(
           ...state,
           transitionSoundEnabled: Boolean(enabled),
         })),
+      setMicroBreakSettings: (settings) =>
+        set((state) => ({
+          ...state,
+          microBreaks: normalizeRandomMicroBreakSettings({ ...state.microBreaks, ...settings }),
+        })),
       setWeeklySchedule: (weeklySchedule) =>
         set((state) => ({
           ...state,
@@ -929,6 +997,15 @@ export const usePomodoroStore = create<PomodoroState>()(
           weeklySchedule: normalizePomodoroWeekSchedule(settings.weeklySchedule),
           quickPomodoro: state.quickPomodoro,
           transitionSoundEnabled: Boolean(settings.transitionSoundEnabled),
+          defaultFocusPrompt: normalizePomodoroPromptText(settings.defaultFocusPrompt ?? state.defaultFocusPrompt),
+          defaultBreakPrompt: normalizePomodoroPromptText(settings.defaultBreakPrompt ?? state.defaultBreakPrompt),
+          microBreaks: normalizeRandomMicroBreakSettings(settings.microBreaks ?? state.microBreaks),
+        })),
+      setDefaultPrompts: (prompts) =>
+        set((state) => ({
+          ...state,
+          defaultFocusPrompt: normalizePomodoroPromptText(prompts.focusPrompt ?? state.defaultFocusPrompt),
+          defaultBreakPrompt: normalizePomodoroPromptText(prompts.breakPrompt ?? state.defaultBreakPrompt),
         })),
       startQuickPomodoro: (projectId) => {
         const quickPomodoro = createQuickPomodoroSession(projectId)
@@ -947,7 +1024,7 @@ export const usePomodoroStore = create<PomodoroState>()(
     }),
     {
       name: "plm-pomodoro",
-      version: 8,
+      version: 10,
       migrate: (persistedState: unknown, version) => {
         if (!persistedState || typeof persistedState !== "object") {
           return persistedState as PomodoroState
@@ -957,6 +1034,9 @@ export const usePomodoroStore = create<PomodoroState>()(
           weeklySchedule?: unknown
           quickPomodoro?: unknown
           transitionSoundEnabled?: unknown
+          defaultFocusPrompt?: unknown
+          defaultBreakPrompt?: unknown
+          microBreaks?: unknown
           focusMinutes?: unknown
           breakMinutes?: unknown
           pomodoroCount?: unknown
@@ -968,6 +1048,9 @@ export const usePomodoroStore = create<PomodoroState>()(
             weeklySchedule: normalizePomodoroWeekSchedule(raw.weeklySchedule),
             quickPomodoro: normalizeQuickPomodoroSession(raw.quickPomodoro),
             transitionSoundEnabled: typeof raw.transitionSoundEnabled === "boolean" ? raw.transitionSoundEnabled : false,
+            defaultFocusPrompt: normalizePomodoroPromptText(raw.defaultFocusPrompt),
+            defaultBreakPrompt: normalizePomodoroPromptText(raw.defaultBreakPrompt),
+            microBreaks: normalizeRandomMicroBreakSettings(raw.microBreaks),
           } as PomodoroState
         }
 
@@ -980,6 +1063,9 @@ export const usePomodoroStore = create<PomodoroState>()(
           }),
           quickPomodoro: null,
           transitionSoundEnabled: false,
+          defaultFocusPrompt: "",
+          defaultBreakPrompt: "",
+          microBreaks: normalizeRandomMicroBreakSettings(DEFAULT_RANDOM_MICRO_BREAK_SETTINGS),
         } as PomodoroState
       },
     },

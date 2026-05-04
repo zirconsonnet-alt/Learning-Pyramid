@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { BellRing, FolderOpen, Music2, PanelsTopLeft, Pause, Play, Plus, RefreshCw, RotateCcw, Save, SkipForward, TimerReset, Trash2, Volume2 } from "lucide-react"
+import { BellRing, FolderOpen, Music2, PanelsTopLeft, Pause, Play, Plus, RefreshCw, RotateCcw, Save, Settings2, SkipForward, TimerReset, Trash2, Volume2 } from "lucide-react"
 import { Link, useLocation, useNavigate } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
@@ -20,6 +20,7 @@ import {
   type PomodoroRestMusicTrack,
   usePomodoroRestMusicDirectoryBinding,
 } from "@/ui/localMedia/projectDirectory"
+import { readPomodoroWallpaperBlob } from "@/ui/pomodoroWallpaper"
 import { useCurrentUser } from "@/ui/queries/auth"
 import { useProject, useProjects } from "@/ui/queries/projects"
 import { useUpdateMyGlobalSettings } from "@/ui/queries/profile"
@@ -36,8 +37,10 @@ import {
   getPomodoroSnapshot,
   isQuickPomodoroSessionActive,
   normalizePomodoroStartTime,
+  normalizePomodoroPromptText,
   normalizePomodoroWeekSchedule,
   validatePomodoroWeekSchedule,
+  type PomodoroDefaultPrompts,
   type PomodoroPlanSchedule,
   type PomodoroSnapshot,
   type PomodoroWeekSchedule,
@@ -47,8 +50,7 @@ import {
 } from "@/ui/store/pomodoroStore"
 import { useThemeStore } from "@/ui/store/themeStore"
 import { cn } from "@/ui/utils"
-import { buildPomodoroEditPath, buildPomodoroPath } from "@/views/pomodoro/pomodoroRouting"
-import { buildGlobalSettingsPath } from "@/views/settings/globalSettingsRouting"
+import { buildPomodoroEditPath, buildPomodoroPath, buildPomodoroSettingsPath } from "@/views/pomodoro/pomodoroRouting"
 
 type PomodoroPlanDraft = {
   id: string
@@ -103,15 +105,13 @@ function normalizeDraftProjectIds(projectIds: Array<string | null> | undefined, 
 }
 
 function normalizeDraftPromptText(value: string | null | undefined) {
-  return String(value ?? "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 200)
+  return normalizePomodoroPromptText(value)
 }
 
-function normalizeDraftFocusPrompts(focusPrompts: string[] | undefined, pomodoroCount: number) {
+function normalizeDraftFocusPrompts(focusPrompts: string[] | undefined, pomodoroCount: number, defaultFocusPrompt = "") {
   const normalizedCount = clampInteger(pomodoroCount, 1, 12)
-  return Array.from({ length: normalizedCount }, (_, index) => normalizeDraftPromptText(focusPrompts?.[index]))
+  const fallbackPrompt = normalizeDraftPromptText(defaultFocusPrompt)
+  return Array.from({ length: normalizedCount }, (_, index) => normalizeDraftPromptText(focusPrompts?.[index] ?? fallbackPrompt))
 }
 
 function clonePomodoroPlanDraft(draft: PomodoroPlanDraft): PomodoroPlanDraft {
@@ -123,8 +123,10 @@ function clonePomodoroPlanDraft(draft: PomodoroPlanDraft): PomodoroPlanDraft {
   }
 }
 
-function createDefaultPomodoroPlanDraft(overrides?: Partial<PomodoroPlanDraft>): PomodoroPlanDraft {
+function createDefaultPomodoroPlanDraft(overrides?: Partial<PomodoroPlanDraft>, defaultPrompts?: PomodoroDefaultPrompts): PomodoroPlanDraft {
   const pomodoroCount = normalizeCountInput(overrides?.pomodoroCount ?? "4", 4)
+  const hasBreakPromptOverride = Boolean(overrides && Object.prototype.hasOwnProperty.call(overrides, "breakPrompt"))
+  const focusPromptDefaults = overrides?.focusPrompts === undefined ? defaultPrompts?.focusPrompt : ""
   return {
     id: overrides?.id ?? createPomodoroDraftId(),
     activeDays: overrides?.activeDays ? [...overrides.activeDays] : [],
@@ -133,18 +135,18 @@ function createDefaultPomodoroPlanDraft(overrides?: Partial<PomodoroPlanDraft>):
     breakMinutes: String(normalizeBreakInput(overrides?.breakMinutes ?? "5", 5)),
     pomodoroCount: String(pomodoroCount),
     projectIds: normalizeDraftProjectIds(overrides?.projectIds, pomodoroCount),
-    breakPrompt: normalizeDraftPromptText(overrides?.breakPrompt),
-    focusPrompts: normalizeDraftFocusPrompts(overrides?.focusPrompts, pomodoroCount),
+    breakPrompt: normalizeDraftPromptText(hasBreakPromptOverride ? overrides?.breakPrompt : defaultPrompts?.breakPrompt),
+    focusPrompts: normalizeDraftFocusPrompts(overrides?.focusPrompts, pomodoroCount, focusPromptDefaults),
   }
 }
 
-function appendDefaultPomodoroPlanDraft(prev: PomodoroPlanDraft[]) {
+function appendDefaultPomodoroPlanDraft(prev: PomodoroPlanDraft[], defaultPrompts?: PomodoroDefaultPrompts) {
   const draftStartTimes = [...new Set(prev.map((draft) => normalizePomodoroStartTime(draft.startTime)))].sort()
   return [
     ...prev,
     createDefaultPomodoroPlanDraft({
       startTime: draftStartTimes.at(-1) ?? "20:00",
-    }),
+    }, defaultPrompts),
   ]
 }
 
@@ -360,7 +362,7 @@ function RestMusicPlayer(props: { isRestPhase: boolean }) {
         showSuccessFeedback("休息音乐目录权限已恢复", "现在可以选择并播放目录里的音乐。")
         await loadRestMusicTracks({ force: true })
       } else {
-        showInfoFeedback("休息音乐目录仍未授权", "浏览器没有放行读取权限，可以到全局设置里更换目录。")
+        showInfoFeedback("休息音乐目录仍未授权", "浏览器没有放行读取权限，可以到番茄钟设置里更换目录。")
       }
     } catch (err) {
       showErrorFeedback("授权休息音乐目录失败", formatApiError(err))
@@ -393,9 +395,9 @@ function RestMusicPlayer(props: { isRestPhase: boolean }) {
           </div>
         </div>
         <Button asChild variant="outline">
-          <Link to={buildGlobalSettingsPath()}>
+          <Link to={buildPomodoroSettingsPath()}>
             <FolderOpen className="h-4 w-4" />
-            全局设置
+            番茄钟设置
           </Link>
         </Button>
       </div>
@@ -451,7 +453,7 @@ function RestMusicPlayer(props: { isRestPhase: boolean }) {
       ) : (
         <div className="rounded-lg border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-4 py-3 text-sm leading-6 text-muted-foreground">
           {musicDirectory.permission === "missing"
-            ? "还没有在全局设置里绑定休息音乐目录。"
+            ? "还没有在番茄钟设置里绑定休息音乐目录。"
             : musicDirectory.permission === "unsupported"
               ? "当前浏览器不支持本地音乐目录授权。"
               : "音乐目录需要重新授权后才能读取。"}
@@ -483,6 +485,9 @@ export function PomodoroPage() {
   const weeklySchedule = usePomodoroStore((state) => state.weeklySchedule)
   const quickPomodoro = usePomodoroStore((state) => state.quickPomodoro)
   const transitionSoundEnabled = usePomodoroStore((state) => state.transitionSoundEnabled)
+  const defaultFocusPrompt = usePomodoroStore((state) => state.defaultFocusPrompt)
+  const defaultBreakPrompt = usePomodoroStore((state) => state.defaultBreakPrompt)
+  const microBreaks = usePomodoroStore((state) => state.microBreaks)
   const setEnabled = usePomodoroStore((state) => state.setEnabled)
   const setTransitionSoundEnabled = usePomodoroStore((state) => state.setTransitionSoundEnabled)
   const setSettings = usePomodoroStore((state) => state.setSettings)
@@ -492,6 +497,8 @@ export function PomodoroPage() {
   const { fromPath } = useMemo(() => readLocationState(location.state), [location.state])
   const [pomodoroDrafts, setPomodoroDrafts] = useState<PomodoroPlanDraft[]>(() => toPomodoroPlanDrafts(weeklySchedule))
   const [testingPromptKey, setTestingPromptKey] = useState("")
+  const [wallpaperUrl, setWallpaperUrl] = useState("")
+  const wallpaperObjectUrlRef = useRef("")
   const addPlanRouteRequestKeyRef = useRef("")
 
   usePageMeta({
@@ -510,6 +517,24 @@ export function PomodoroPage() {
     [projectsQ.data],
   )
   const availableProjects = projectsQ.data ?? []
+  const defaultPrompts = useMemo(
+    () => ({ focusPrompt: defaultFocusPrompt, breakPrompt: defaultBreakPrompt }),
+    [defaultBreakPrompt, defaultFocusPrompt],
+  )
+
+  const replacePomodoroWallpaperPreview = useCallback((blob: Blob | null) => {
+    if (wallpaperObjectUrlRef.current) {
+      URL.revokeObjectURL(wallpaperObjectUrlRef.current)
+      wallpaperObjectUrlRef.current = ""
+    }
+    if (!blob) {
+      setWallpaperUrl("")
+      return
+    }
+    const nextUrl = URL.createObjectURL(blob)
+    wallpaperObjectUrlRef.current = nextUrl
+    setWallpaperUrl(nextUrl)
+  }, [])
 
   const snapshot = useMemo(() => getPomodoroSnapshot({ enabled, weeklySchedule, quickPomodoro }, now), [enabled, now, quickPomodoro, weeklySchedule])
   const activeQuickPomodoro = isQuickPomodoroSessionActive(quickPomodoro, now) ? quickPomodoro : null
@@ -541,13 +566,32 @@ export function PomodoroPage() {
   }, [weeklySchedule])
 
   useEffect(() => {
+    let cancelled = false
+    void readPomodoroWallpaperBlob()
+      .then((blob) => {
+        if (cancelled || !blob) return
+        replacePomodoroWallpaperPreview(blob)
+      })
+      .catch(() => {
+        // Wallpaper is cosmetic, so a local storage read failure should not block the timer page.
+      })
+    return () => {
+      cancelled = true
+      if (wallpaperObjectUrlRef.current) {
+        URL.revokeObjectURL(wallpaperObjectUrlRef.current)
+        wallpaperObjectUrlRef.current = ""
+      }
+    }
+  }, [replacePomodoroWallpaperPreview])
+
+  useEffect(() => {
     if (!isScheduleEditRoute || !isAddPlanRouteRequest) return
     const requestKey = `${location.key}:${location.search}`
     if (addPlanRouteRequestKeyRef.current === requestKey) return
     addPlanRouteRequestKeyRef.current = requestKey
-    setPomodoroDrafts(appendDefaultPomodoroPlanDraft)
+    setPomodoroDrafts((prev) => appendDefaultPomodoroPlanDraft(prev, defaultPrompts))
     nav(buildPomodoroEditPath(), { replace: true, state: location.state })
-  }, [isAddPlanRouteRequest, isScheduleEditRoute, location.key, location.search, location.state, nav])
+  }, [defaultPrompts, isAddPlanRouteRequest, isScheduleEditRoute, location.key, location.search, location.state, nav])
 
   const draftSchedule = useMemo(
     () => buildPomodoroScheduleFromPlanDrafts(pomodoroDrafts),
@@ -582,7 +626,7 @@ export function PomodoroPage() {
   }
 
   function addPomodoroDraftPlan() {
-    setPomodoroDrafts(appendDefaultPomodoroPlanDraft)
+    setPomodoroDrafts((prev) => appendDefaultPomodoroPlanDraft(prev, defaultPrompts))
   }
 
   function removePomodoroDraftPlan(draftId: string) {
@@ -600,6 +644,9 @@ export function PomodoroPage() {
         enabled: overrides?.enabled ?? enabled,
         weeklySchedule: overrides?.weeklySchedule ?? weeklySchedule,
         transitionSoundEnabled: overrides?.transitionSoundEnabled ?? transitionSoundEnabled,
+        defaultFocusPrompt,
+        defaultBreakPrompt,
+        microBreaks,
       },
       defaultProjectReviewTemplate: defaultProjectReviewTemplate as ReviewChainTemplateItem[],
     }
@@ -616,7 +663,7 @@ export function PomodoroPage() {
     }
     try {
       await persistPomodoroSettings({ weeklySchedule: draftSchedule })
-      setSettings({ enabled, weeklySchedule: draftSchedule, transitionSoundEnabled })
+      setSettings({ enabled, weeklySchedule: draftSchedule, transitionSoundEnabled, microBreaks })
       showSuccessFeedback(
         "番茄钟排程已保存",
         enabledDayCount > 0
@@ -724,48 +771,72 @@ export function PomodoroPage() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-8">
-      <section className="space-y-5">
-        <div className="space-y-5">
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
-            <PhaseBadge snapshot={snapshot} />
-            <span>
-              {snapshot.status === "running" ? `剩余 ${headlineCountdown}` : snapshot.idleReason === "waiting" ? `距离开始 ${headlineCountdown}` : "按排程运行"}
-            </span>
-            <span>{transitionSoundEnabled ? "铃声开" : "铃声关"}</span>
-            {snapshot.currentProjectId ? (
+    <>
+      {wallpaperUrl ? (
+        <div
+          data-pomodoro-wallpaper-backdrop
+          className="pointer-events-none fixed inset-x-0 bottom-0 top-[4.5rem] z-0 bg-cover bg-center"
+          style={{ backgroundImage: `url(${wallpaperUrl})` }}
+        >
+          <div
+            className="absolute inset-0 backdrop-blur-[1px]"
+            style={{
+              background:
+                "linear-gradient(180deg, hsl(var(--background) / 0.58) 0%, hsl(var(--background) / 0.72) 48%, hsl(var(--background) / 0.82) 100%)",
+            }}
+          />
+        </div>
+      ) : null}
+      <div data-pomodoro-wallpaper-scope="page" className="relative z-10 mx-auto flex w-full max-w-5xl flex-col gap-8">
+      <section data-pomodoro-session-controls className="space-y-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0 flex-1 space-y-5">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
+              <PhaseBadge snapshot={snapshot} />
               <span>
-                {describeProjectLabel(snapshot.currentProjectId, projectTitleMap)}
+                {snapshot.status === "running" ? `剩余 ${headlineCountdown}` : snapshot.idleReason === "waiting" ? `距离开始 ${headlineCountdown}` : "按排程运行"}
               </span>
-            ) : null}
-          </div>
-          <div className="text-3xl font-semibold tracking-[-0.04em] text-foreground sm:text-4xl">{headlineCountdown}</div>
-          <div className="flex flex-wrap gap-3">
-            <Button variant={enabled ? "outline" : "default"} onClick={handleTogglePomodoro} disabled={updateGlobalSettings.isPending}>
-              <TimerReset className="h-4 w-4" />
-              {enabled ? "关闭番茄钟" : "开启番茄钟"}
-            </Button>
-            <Button variant="outline" onClick={handleToggleTransitionSound} disabled={updateGlobalSettings.isPending}>
-              <BellRing className="h-4 w-4" />
-              {transitionSoundEnabled ? "关闭铃声" : "开启铃声"}
-            </Button>
-            <Button variant="outline" onClick={handleTestSound}>
-              <Volume2 className="h-4 w-4" />
-              测试铃声
-            </Button>
-            <Button variant="outline" onClick={handleStartQuickPomodoro} disabled={Boolean(activeQuickPomodoro) || isFocusRunning}>
-              <TimerReset className="h-4 w-4" />
-              {quickPomodoroButtonLabel}
-            </Button>
-            {snapshot.canUseWorkbench && preferredWorkbenchPath ? (
-              <Button asChild>
-                <Link to={preferredWorkbenchPath}>
-                  <PanelsTopLeft className="h-4 w-4" />
-                  {preferredWorkbenchLabel}
-                </Link>
+              <span>{transitionSoundEnabled ? "铃声开" : "铃声关"}</span>
+              {snapshot.currentProjectId ? (
+                <span>
+                  {describeProjectLabel(snapshot.currentProjectId, projectTitleMap)}
+                </span>
+              ) : null}
+            </div>
+            <div className="text-3xl font-semibold tracking-[-0.04em] text-foreground sm:text-4xl">{headlineCountdown}</div>
+            <div className="flex flex-wrap gap-3">
+              <Button variant={enabled ? "outline" : "default"} onClick={handleTogglePomodoro} disabled={updateGlobalSettings.isPending}>
+                <TimerReset className="h-4 w-4" />
+                {enabled ? "关闭番茄钟" : "开启番茄钟"}
               </Button>
-            ) : null}
+              <Button variant="outline" onClick={handleToggleTransitionSound} disabled={updateGlobalSettings.isPending}>
+                <BellRing className="h-4 w-4" />
+                {transitionSoundEnabled ? "关闭铃声" : "开启铃声"}
+              </Button>
+              <Button variant="outline" onClick={handleTestSound}>
+                <Volume2 className="h-4 w-4" />
+                测试铃声
+              </Button>
+              <Button variant="outline" onClick={handleStartQuickPomodoro} disabled={Boolean(activeQuickPomodoro) || isFocusRunning}>
+                <TimerReset className="h-4 w-4" />
+                {quickPomodoroButtonLabel}
+              </Button>
+              {snapshot.canUseWorkbench && preferredWorkbenchPath ? (
+                <Button asChild>
+                  <Link to={preferredWorkbenchPath}>
+                    <PanelsTopLeft className="h-4 w-4" />
+                    {preferredWorkbenchLabel}
+                  </Link>
+                </Button>
+              ) : null}
+            </div>
           </div>
+          <Button variant="outline" asChild className="shrink-0">
+            <Link to={buildPomodoroSettingsPath()} aria-label="打开番茄钟设置">
+              <Settings2 className="h-4 w-4" />
+              番茄钟设置
+            </Link>
+          </Button>
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -1173,6 +1244,7 @@ export function PomodoroPage() {
             </div>
         ) : null}
       </section>
-    </div>
+      </div>
+    </>
   )
 }

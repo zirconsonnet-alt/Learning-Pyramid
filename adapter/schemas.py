@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, List, Optional
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, root_validator
 from pydantic import conlist
 
 
@@ -339,9 +339,27 @@ class UserPomodoroWeeklyScheduleRequest(BaseModel):
     sun: dict[str, Any]
 
 
+class UserPomodoroMicroBreakSettingsRequest(BaseModel):
+    enabled: bool = False
+    minIntervalSeconds: int = Field(default=180, ge=30, le=3600)
+    maxIntervalSeconds: int = Field(default=300, ge=30, le=3600)
+    durationSeconds: int = Field(default=10, ge=5, le=300)
+
+    @root_validator
+    def validate_interval_order(cls, values: dict[str, Any]) -> dict[str, Any]:
+        min_interval = int(values.get("minIntervalSeconds", 180))
+        max_interval = int(values.get("maxIntervalSeconds", 300))
+        if max_interval < min_interval:
+            raise ValueError("maxIntervalSeconds must be greater than or equal to minIntervalSeconds")
+        return values
+
+
 class UserPomodoroConfigRequest(BaseModel):
     enabled: bool = False
     transitionSoundEnabled: bool = False
+    defaultFocusPrompt: str = Field(default="", max_length=200)
+    defaultBreakPrompt: str = Field(default="", max_length=200)
+    microBreaks: UserPomodoroMicroBreakSettingsRequest = Field(default_factory=UserPomodoroMicroBreakSettingsRequest)
     weeklySchedule: UserPomodoroWeeklyScheduleRequest
 
 

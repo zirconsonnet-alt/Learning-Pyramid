@@ -16,6 +16,14 @@ from adapter.deps import (
 from adapter.main import create_app
 
 
+DEFAULT_POMODORO_MICRO_BREAKS = {
+    "enabled": False,
+    "minIntervalSeconds": 180,
+    "maxIntervalSeconds": 300,
+    "durationSeconds": 10,
+}
+
+
 def _reset_caches() -> None:
     get_api.cache_clear()
     get_auth_rate_limit_store.cache_clear()
@@ -23,6 +31,10 @@ def _reset_caches() -> None:
     get_membership_marketing_store.cache_clear()
     get_membership_payment_service.cache_clear()
     get_membership_store.cache_clear()
+
+
+def _default_pomodoro_weekly_schedule() -> dict:
+    return {day: {"plans": []} for day in ("mon", "tue", "wed", "thu", "fri", "sat", "sun")}
 
 
 @pytest.fixture()
@@ -276,7 +288,7 @@ def test_profile_global_settings_persist_across_relogin(auth_env: None) -> None:
     registered = client.post("/api/auth/register", json={"email": "owner@example.com", "password": "password123"})
     assert registered.status_code == 200
 
-    default_schedule = {day: {"plans": []} for day in ("mon", "tue", "wed", "thu", "fri", "sat", "sun")}
+    default_schedule = _default_pomodoro_weekly_schedule()
     updated_schedule = {
         "mon": {
             "plans": [
@@ -367,6 +379,9 @@ def test_profile_global_settings_persist_across_relogin(auth_env: None) -> None:
     assert before.json()["data"]["pomodoro"] == {
         "enabled": False,
         "transitionSoundEnabled": False,
+        "defaultFocusPrompt": "",
+        "defaultBreakPrompt": "",
+        "microBreaks": DEFAULT_POMODORO_MICRO_BREAKS,
         "weeklySchedule": default_schedule,
     }
     assert before.json()["data"]["defaultProjectReviewTemplate"] == [{"kind": "CONVERGENCE"}]
@@ -378,6 +393,14 @@ def test_profile_global_settings_persist_across_relogin(auth_env: None) -> None:
             "pomodoro": {
                 "enabled": True,
                 "transitionSoundEnabled": True,
+                "defaultFocusPrompt": "十秒后开始学习，请准备专注。",
+                "defaultBreakPrompt": "十秒后进入休息，请放松一下。",
+                "microBreaks": {
+                    "enabled": True,
+                    "minIntervalSeconds": 120,
+                    "maxIntervalSeconds": 240,
+                    "durationSeconds": 15,
+                },
                 "weeklySchedule": updated_schedule,
             },
             "defaultProjectReviewTemplate": [{"kind": "REVIEW_TASK", "count": 2}],
@@ -389,6 +412,14 @@ def test_profile_global_settings_persist_across_relogin(auth_env: None) -> None:
     assert updated_body["pomodoro"] == {
         "enabled": True,
         "transitionSoundEnabled": True,
+        "defaultFocusPrompt": "十秒后开始学习，请准备专注。",
+        "defaultBreakPrompt": "十秒后进入休息，请放松一下。",
+        "microBreaks": {
+            "enabled": True,
+            "minIntervalSeconds": 120,
+            "maxIntervalSeconds": 240,
+            "durationSeconds": 15,
+        },
         "weeklySchedule": updated_schedule,
     }
     assert updated_body["defaultProjectReviewTemplate"] == [
@@ -408,6 +439,14 @@ def test_profile_global_settings_persist_across_relogin(auth_env: None) -> None:
     assert after_body["pomodoro"] == {
         "enabled": True,
         "transitionSoundEnabled": True,
+        "defaultFocusPrompt": "十秒后开始学习，请准备专注。",
+        "defaultBreakPrompt": "十秒后进入休息，请放松一下。",
+        "microBreaks": {
+            "enabled": True,
+            "minIntervalSeconds": 120,
+            "maxIntervalSeconds": 240,
+            "durationSeconds": 15,
+        },
         "weeklySchedule": updated_schedule,
     }
     assert after_body["defaultProjectReviewTemplate"] == [
@@ -464,6 +503,105 @@ def test_profile_global_settings_reject_overlapping_pomodoro_plans(auth_env: Non
 
     assert response.status_code == 400
     assert "overlap" in response.json()["error"]["message"]
+
+
+def test_profile_global_settings_pomodoro_micro_break_defaults_and_persistence(auth_env: None) -> None:
+    client = TestClient(create_app())
+    registered = client.post("/api/auth/register", json={"email": "owner@example.com", "password": "password123"})
+    assert registered.status_code == 200
+
+    default_schedule = _default_pomodoro_weekly_schedule()
+    before = client.get("/api/profile/me/global-settings")
+    assert before.status_code == 200
+    assert before.json()["data"]["pomodoro"]["microBreaks"] == DEFAULT_POMODORO_MICRO_BREAKS
+
+    micro_breaks = {
+        "enabled": True,
+        "minIntervalSeconds": 90,
+        "maxIntervalSeconds": 210,
+        "durationSeconds": 20,
+    }
+    updated = client.put(
+        "/api/profile/me/global-settings",
+        json={
+            "theme": "mist",
+            "pomodoro": {
+                "enabled": True,
+                "transitionSoundEnabled": False,
+                "defaultFocusPrompt": "",
+                "defaultBreakPrompt": "",
+                "microBreaks": micro_breaks,
+                "weeklySchedule": default_schedule,
+            },
+            "defaultProjectReviewTemplate": [{"kind": "CONVERGENCE"}],
+        },
+    )
+    assert updated.status_code == 200
+    assert updated.json()["data"]["pomodoro"]["microBreaks"] == micro_breaks
+
+    client.post("/api/auth/logout")
+    relogin = client.post("/api/auth/login", json={"email": "owner@example.com", "password": "password123"})
+    assert relogin.status_code == 200
+
+    after = client.get("/api/profile/me/global-settings")
+    assert after.status_code == 200
+    assert after.json()["data"]["pomodoro"]["microBreaks"] == micro_breaks
+
+
+def test_profile_global_settings_rejects_invalid_pomodoro_micro_break_ordering(auth_env: None) -> None:
+    client = TestClient(create_app())
+    client.post("/api/auth/register", json={"email": "owner@example.com", "password": "password123"})
+
+    response = client.put(
+        "/api/profile/me/global-settings",
+        json={
+            "theme": "mist",
+            "pomodoro": {
+                "enabled": True,
+                "transitionSoundEnabled": False,
+                "defaultFocusPrompt": "",
+                "defaultBreakPrompt": "",
+                "microBreaks": {
+                    "enabled": True,
+                    "minIntervalSeconds": 300,
+                    "maxIntervalSeconds": 120,
+                    "durationSeconds": 20,
+                },
+                "weeklySchedule": _default_pomodoro_weekly_schedule(),
+            },
+            "defaultProjectReviewTemplate": [{"kind": "CONVERGENCE"}],
+        },
+    )
+
+    assert response.status_code == 400
+
+
+def test_profile_global_settings_rejects_invalid_pomodoro_micro_break_bounds(auth_env: None) -> None:
+    client = TestClient(create_app())
+    client.post("/api/auth/register", json={"email": "owner@example.com", "password": "password123"})
+
+    response = client.put(
+        "/api/profile/me/global-settings",
+        json={
+            "theme": "mist",
+            "pomodoro": {
+                "enabled": True,
+                "transitionSoundEnabled": False,
+                "defaultFocusPrompt": "",
+                "defaultBreakPrompt": "",
+                "microBreaks": {
+                    "enabled": True,
+                    "minIntervalSeconds": 10,
+                    "maxIntervalSeconds": 3601,
+                    "durationSeconds": 4,
+                },
+                "weeklySchedule": _default_pomodoro_weekly_schedule(),
+            },
+            "defaultProjectReviewTemplate": [{"kind": "CONVERGENCE"}],
+        },
+    )
+
+    assert response.status_code == 400
 
 
 def test_profile_learning_plans_sync_and_survive_global_settings_update(auth_env: None) -> None:

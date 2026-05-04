@@ -1,5 +1,5 @@
-import { useEffect, useState, type CSSProperties } from "react"
-import { Clock3, Cloud, FolderOpen, Music2, Palette, RotateCcw, Save, Trash2 } from "lucide-react"
+import { useState, type CSSProperties } from "react"
+import { Clock3, Palette, RotateCcw, Save } from "lucide-react"
 
 import { ApiError } from "@/ui/api/http"
 import type { ReviewChainTemplateItem } from "@/ui/api/projectConfig"
@@ -11,7 +11,6 @@ import { useCurrentUser } from "@/ui/queries/auth"
 import { useMyLlmSettings, useUpdateMyGlobalSettings, useUpdateMyLlmSettings } from "@/ui/queries/profile"
 import { useGlobalLlmSettings, useSystemCapabilities, useUpdateGlobalLlmSettings } from "@/ui/queries/system"
 import { usePageMeta } from "@/ui/seo/usePageMeta"
-import { type DirectoryBindingPermission, usePomodoroRestMusicDirectoryBinding } from "@/ui/localMedia/projectDirectory"
 import {
   DEFAULT_PROJECT_REVIEW_TEMPLATE,
   cloneReviewChainTemplate,
@@ -42,21 +41,6 @@ function formatApiError(err: unknown) {
   return "未知错误"
 }
 
-function describeLocalDirectoryPermission(permission: DirectoryBindingPermission) {
-  if (permission === "unsupported") return "当前浏览器不支持目录授权"
-  if (permission === "missing") return "未绑定目录"
-  if (permission === "prompt") return "待授权"
-  if (permission === "denied") return "已拒绝"
-  return "已授权"
-}
-
-function describeLocalDirectoryPermissionTone(permission: DirectoryBindingPermission) {
-  if (permission === "granted") return "theme-pill-accent"
-  if (permission === "prompt") return "theme-pill-warm"
-  if (permission === "denied") return "theme-pill-danger"
-  return "theme-pill-default"
-}
-
 function createTemplateEditorItem(kind: "CONVERGENCE" | "REVIEW_TASK", count = 1): TemplateEditorItem {
   return { id: nextTemplateItemId++, kind, count: String(count) }
 }
@@ -71,6 +55,9 @@ export function GlobalSettingsPage() {
   const enabled = usePomodoroStore((state) => state.enabled)
   const weeklySchedule = usePomodoroStore((state) => state.weeklySchedule)
   const transitionSoundEnabled = usePomodoroStore((state) => state.transitionSoundEnabled)
+  const defaultFocusPrompt = usePomodoroStore((state) => state.defaultFocusPrompt)
+  const defaultBreakPrompt = usePomodoroStore((state) => state.defaultBreakPrompt)
+  const microBreaks = usePomodoroStore((state) => state.microBreaks)
   const defaultProjectReviewTemplate = useGlobalConfigStore((state) => state.defaultProjectReviewTemplate)
   const setDefaultProjectReviewTemplate = useGlobalConfigStore((state) => state.setDefaultProjectReviewTemplate)
   const resetDefaultProjectReviewTemplate = useGlobalConfigStore((state) => state.resetDefaultProjectReviewTemplate)
@@ -93,26 +80,6 @@ export function GlobalSettingsPage() {
   const myLlmSettingsQ = useMyLlmSettings(authEnabled)
   const updateMyLlmSettingsM = useUpdateMyLlmSettings()
   const shouldSyncRemotely = authEnabled && Boolean(currentUserQ.data?.userId)
-  const restMusicDirectory = usePomodoroRestMusicDirectoryBinding()
-  const [restMusicDirectoryAction, setRestMusicDirectoryAction] = useState<"authorize" | "request" | "clear" | null>(null)
-  const restMusicDirectoryBusy = restMusicDirectoryAction !== null
-  const canChooseRestMusicDirectory =
-    restMusicDirectory.supported && !restMusicDirectory.loading && !restMusicDirectoryBusy
-  const canRequestRestMusicDirectoryPermission =
-    restMusicDirectory.supported &&
-    !restMusicDirectory.loading &&
-    !restMusicDirectoryBusy &&
-    (restMusicDirectory.permission === "prompt" || restMusicDirectory.permission === "denied")
-  const canClearRestMusicDirectory =
-    restMusicDirectory.supported &&
-    !restMusicDirectory.loading &&
-    !restMusicDirectoryBusy &&
-    restMusicDirectory.permission !== "missing"
-
-  useEffect(() => {
-    setTemplateItems(toTemplateEditorItems(defaultProjectReviewTemplate))
-    setTemplateError(null)
-  }, [defaultProjectReviewTemplate])
 
   async function persistGlobalSettings(overrides?: {
     theme?: string
@@ -124,6 +91,9 @@ export function GlobalSettingsPage() {
         enabled,
         weeklySchedule,
         transitionSoundEnabled,
+        defaultFocusPrompt,
+        defaultBreakPrompt,
+        microBreaks,
       },
       defaultProjectReviewTemplate: overrides?.defaultProjectReviewTemplate ?? defaultProjectReviewTemplate,
     }
@@ -165,6 +135,8 @@ export function GlobalSettingsPage() {
     try {
       await persistGlobalSettings({ defaultProjectReviewTemplate: defaultTemplate })
       resetDefaultProjectReviewTemplate()
+      setTemplateItems(toTemplateEditorItems(defaultTemplate))
+      setTemplateError(null)
       showInfoFeedback("默认模板已恢复", "新建项目会重新使用系统默认的单步收敛模板。")
     } catch (err) {
       showErrorFeedback("恢复默认模板失败", formatApiError(err))
@@ -191,152 +163,8 @@ export function GlobalSettingsPage() {
     }
   }
 
-  async function onAuthorizeRestMusicDirectory() {
-    if (!canChooseRestMusicDirectory) return
-    try {
-      setRestMusicDirectoryAction("authorize")
-      const permission = await restMusicDirectory.authorizeDirectory()
-      if (permission === "granted") {
-        showSuccessFeedback("休息音乐目录已绑定", "休息时可以在番茄钟页面选择并播放这个目录里的音乐。")
-      } else {
-        showInfoFeedback("休息音乐目录已记录", "浏览器还没有授予读取权限，需要继续授权后才能播放。")
-      }
-    } catch (err) {
-      showErrorFeedback("绑定休息音乐目录失败", formatApiError(err))
-    } finally {
-      setRestMusicDirectoryAction(null)
-    }
-  }
-
-  async function onRequestRestMusicDirectoryPermission() {
-    if (!canRequestRestMusicDirectoryPermission) return
-    try {
-      setRestMusicDirectoryAction("request")
-      const permission = await restMusicDirectory.requestPermission()
-      if (permission === "granted") {
-        showSuccessFeedback("休息音乐目录权限已恢复", "现在可以在番茄钟休息界面播放本地音乐。")
-      } else {
-        showInfoFeedback("休息音乐目录仍未授权", "浏览器没有放行读取权限，可以更换目录后重试。")
-      }
-    } catch (err) {
-      showErrorFeedback("授权休息音乐目录失败", formatApiError(err))
-    } finally {
-      setRestMusicDirectoryAction(null)
-    }
-  }
-
-  async function onClearRestMusicDirectory() {
-    if (!canClearRestMusicDirectory) return
-    try {
-      setRestMusicDirectoryAction("clear")
-      await restMusicDirectory.clearDirectory()
-      showSuccessFeedback("休息音乐目录已清除", "当前浏览器不再保留这个音乐目录授权记录。")
-    } catch (err) {
-      showErrorFeedback("清除休息音乐目录失败", formatApiError(err))
-    } finally {
-      setRestMusicDirectoryAction(null)
-    }
-  }
-
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-      <Card className="theme-card-main overflow-hidden">
-        <CardHeader className="theme-card-header">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl border [border-color:var(--theme-icon-border)] [background:var(--theme-icon-bg)] [color:var(--theme-icon-text)]">
-              <Cloud className="h-5 w-5" />
-            </div>
-            <div className="min-w-0">
-              <CardTitle>系统接入中心</CardTitle>
-              <CardDescription className="mt-1">本地资源接入统一收口在这里。完成绑定后，就可以在番茄钟休息阶段使用。</CardDescription>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4 pt-5">
-          <div className="rounded-[1.25rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] p-4">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Music2 className="h-4 w-4 text-[color:var(--theme-soft-text-strong)]" />
-                  <span className="text-sm font-semibold text-foreground">休息音乐目录</span>
-                  <span
-                    className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${describeLocalDirectoryPermissionTone(restMusicDirectory.permission)}`}
-                  >
-                    {describeLocalDirectoryPermission(restMusicDirectory.permission)}
-                  </span>
-                </div>
-                <div className="mt-2 break-all text-sm text-muted-foreground">
-                  {restMusicDirectory.handleName || "还没有绑定本地音乐目录。"}
-                </div>
-                <div className="mt-1 text-xs leading-6 text-[color:var(--theme-subtle-text)]">
-                  这个目录授权只保存在当前浏览器里，音乐文件不会上传到服务端。
-                </div>
-                {restMusicDirectory.error ? (
-                  <div className="mt-2 text-sm text-destructive">{restMusicDirectory.error}</div>
-                ) : null}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {restMusicDirectory.permission === "granted" ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => void onAuthorizeRestMusicDirectory()}
-                    disabled={!canChooseRestMusicDirectory}
-                  >
-                    <FolderOpen className="h-4 w-4" />
-                    更换音乐目录
-                  </Button>
-                ) : null}
-                {(restMusicDirectory.permission === "missing" || restMusicDirectory.permission === "unsupported") ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => void onAuthorizeRestMusicDirectory()}
-                    disabled={!canChooseRestMusicDirectory}
-                  >
-                    <FolderOpen className="h-4 w-4" />
-                    {restMusicDirectoryAction === "authorize" ? "打开目录选择器..." : "选择音乐目录"}
-                  </Button>
-                ) : null}
-                {(restMusicDirectory.permission === "prompt" || restMusicDirectory.permission === "denied") ? (
-                  <>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => void onRequestRestMusicDirectoryPermission()}
-                      disabled={!canRequestRestMusicDirectoryPermission}
-                    >
-                      <FolderOpen className="h-4 w-4" />
-                      {restMusicDirectoryAction === "request" ? "请求中..." : "继续授权"}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => void onAuthorizeRestMusicDirectory()}
-                      disabled={!canChooseRestMusicDirectory}
-                    >
-                      <FolderOpen className="h-4 w-4" />
-                      {restMusicDirectoryAction === "authorize" ? "打开目录选择器..." : "更换音乐目录"}
-                    </Button>
-                  </>
-                ) : null}
-                {restMusicDirectory.permission !== "missing" && restMusicDirectory.permission !== "unsupported" ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={() => void onClearRestMusicDirectory()}
-                    disabled={!canClearRestMusicDirectory}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    {restMusicDirectoryAction === "clear" ? "清除中..." : "清除音乐目录"}
-                  </Button>
-                ) : null}
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
       {authEnabled ? (
         <UserLlmSettingsCard
           queryError={myLlmSettingsQ.error}

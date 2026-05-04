@@ -137,6 +137,29 @@ export async function playPomodoroTransitionSound(phase: PomodoroPhase) {
   return true
 }
 
+export async function playPomodoroMicroBreakReminderSound() {
+  const context = await ensureAudioContextReady()
+  if (!context) return false
+
+  const startAt = context.currentTime + 0.02
+  const microBreakReminderNotes = [
+    { frequency: 880, offset: 0, duration: 0.12, volume: 0.055 },
+    { frequency: 1174.66, offset: 0.16, duration: 0.14, volume: 0.05 },
+    { frequency: 880, offset: 0.34, duration: 0.18, volume: 0.045 },
+  ]
+
+  for (const note of microBreakReminderNotes) {
+    scheduleNote(context, {
+      startAt: startAt + note.offset,
+      frequency: note.frequency,
+      duration: note.duration,
+      volume: note.volume,
+    })
+  }
+
+  return true
+}
+
 export function detectPomodoroPhaseTransition(
   previous: PomodoroTransitionSnapshot | null,
   snapshot: PomodoroTransitionSnapshot,

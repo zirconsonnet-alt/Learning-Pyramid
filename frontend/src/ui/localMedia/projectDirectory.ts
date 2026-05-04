@@ -345,7 +345,7 @@ export async function scanPomodoroRestMusicDirectory(): Promise<PomodoroRestMusi
 
   const permission = await queryHandlePermission(record.handle)
   if (permission !== "granted") {
-    throw new Error("当前浏览器还没有授予休息音乐目录读取权限，请先在全局设置里完成授权。")
+    throw new Error("当前浏览器还没有授予休息音乐目录读取权限，请先在番茄钟设置里完成授权。")
   }
 
   const tracks: PomodoroRestMusicTrack[] = []

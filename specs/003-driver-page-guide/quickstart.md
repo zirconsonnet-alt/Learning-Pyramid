@@ -13,7 +13,9 @@
 2. Import `driver.js/dist/driver.css` once from the walkthrough controller or a shell-level module.
 3. Mount the controller from `frontend/src/shell/AppShell.tsx` so it can survive route changes after starting from `/guide`.
 4. Expose a small start API that `GuidePage.tsx` can call.
-5. Destroy the Driver.js instance on close and on component cleanup.
+5. Advance actionable steps from the learner's real page actions: use target clicks for simple navigation/open actions, and explicit completion events for writes that must succeed before moving on.
+6. Hide manual next/previous controls on action-driven steps; keep manual controls available for fallback or non-action guidance.
+7. Destroy the Driver.js instance on close and on component cleanup.
 
 ## Keep Copy Sourced From The Manual
 
@@ -54,10 +56,11 @@ Manual review:
 1. Open `/guide`.
 2. Confirm the method explanation document is gone.
 3. Click the start-guidance action.
-4. Move forward and backward through the walkthrough.
-5. Close the walkthrough and confirm the page is usable without refresh.
-6. Open `/guide?doc=method` and confirm it resolves to a valid guide state.
-7. Repeat at desktop and narrow widths.
+4. Follow the highlighted page actions and confirm the walkthrough advances automatically after each completed action.
+5. Confirm fallback or non-action steps can still be advanced manually when no real page action is available.
+6. Close the walkthrough and confirm the page is usable without refresh.
+7. Open `/guide?doc=method` and confirm it resolves to a valid guide state.
+8. Repeat at desktop and narrow widths.
 
 ## Release Review
 

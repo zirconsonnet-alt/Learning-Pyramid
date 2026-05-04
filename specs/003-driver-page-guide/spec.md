@@ -19,7 +19,7 @@ A learner opens the in-product user guide and starts an interactive page walkthr
 
 1. **Given** a learner opens the user guide, **When** they view the guide navigation, **Then** they see the system usage instructions and a clear start-guidance action instead of a method explanation document entry.
 2. **Given** a learner clicks the start-guidance action, **When** the walkthrough begins, **Then** the first step uses wording from the system usage instructions and points the learner toward the first-use path.
-3. **Given** the walkthrough is running, **When** the learner advances, goes back, or closes it, **Then** the page remains usable and the learner can restart guidance from the user guide.
+3. **Given** the walkthrough is running, **When** the learner completes the highlighted page action, uses fallback manual controls, or closes it, **Then** the page remains usable and the learner can restart guidance from the user guide.
 
 ---
 
@@ -72,7 +72,7 @@ A learner may start guidance before creating data, before authorizing local cont
 - **FR-004**: The walkthrough MUST cover the primary first-use path described by the system usage instructions.
 - **FR-005**: Each walkthrough step MUST use user-facing wording sourced from the corresponding system usage instruction content rather than independently rewritten guidance text.
 - **FR-006**: The walkthrough MUST identify which system usage instruction section or step each walkthrough step is based on.
-- **FR-007**: Users MUST be able to advance, go back, close, and restart the walkthrough without reloading the application.
+- **FR-007**: Actionable walkthrough steps MUST advance from the learner completing the highlighted page action; fallback or non-action steps MAY expose manual advance/back controls, and users MUST be able to close and restart the walkthrough without reloading the application.
 - **FR-008**: The walkthrough MUST highlight or otherwise anchor guidance to the relevant visible page area or control when that target is available.
 - **FR-009**: When a target page area or control is unavailable, the walkthrough MUST show a clear fallback, navigation hint, or safe skip behavior.
 - **FR-010**: Existing system usage instruction reading behavior MUST remain available in the user guide.

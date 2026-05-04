@@ -20,6 +20,7 @@ import {
 } from "@/ui/components/ui/dialog"
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
+import { completeGuideWalkthroughStep } from "@/ui/guideWalkthrough/guideWalkthroughController"
 import { useCreateSubject, useDeleteSubject, useSubjects } from "@/ui/queries/subjects"
 import { useAppStore } from "@/ui/store/appStore"
 import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
@@ -201,6 +202,7 @@ export function ProjectsPage() {
       setCreateOpen(false)
       showSuccessFeedback("学科已创建", `“${t}” 已准备好。先在项目中心里选择或创建项目。`)
       nav(`/subjects/${res.subjectId}`)
+      completeGuideWalkthroughStep("create-subject-submit")
     } catch (err) {
       showErrorFeedback("创建学科失败", formatApiError(err))
     }
@@ -352,7 +354,7 @@ export function ProjectsPage() {
       </div>
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="p-4">
+        <DialogContent data-guide-tour="create-subject-submit" className="p-4">
           <DialogHeader>
             <DialogTitle>创建新学科</DialogTitle>
           </DialogHeader>
@@ -375,7 +377,7 @@ export function ProjectsPage() {
             <Button variant="secondary" onClick={() => setCreateOpen(false)}>
               取消
             </Button>
-            <Button data-guide-tour="create-subject-submit" onClick={onCreate} disabled={create.isPending || !title.trim()}>
+            <Button onClick={onCreate} disabled={create.isPending || !title.trim()}>
               {create.isPending ? "创建中..." : "创建学科"}
             </Button>
           </DialogFooter>
