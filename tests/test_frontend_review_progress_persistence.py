@@ -42,6 +42,16 @@ def test_review_pane_uses_rich_content_editor_for_written_answer_and_can_skip_to
     assert "showAnswer: { ...current.showAnswer, [rpId]: true }" in source
 
 
+def test_review_pane_reveals_answer_after_submitting_written_answer() -> None:
+    source = REVIEW_PANE.read_text(encoding="utf-8")
+    submit_start = source.index("function submitWrittenAnswer")
+    skip_start = source.index("function skipWrittenAnswer")
+    submit_source = source[submit_start:skip_start]
+
+    assert "submittedWrittenAnswers" in submit_source
+    assert "showAnswer: { ...current.showAnswer, [rpId]: true }" in submit_source
+
+
 def test_review_session_store_uses_project_scoped_local_storage_and_sanitizes_values() -> None:
     source = REVIEW_SESSION_STORE.read_text(encoding="utf-8")
 

@@ -261,6 +261,7 @@ export function ReviewPane({
           ...current.submittedWrittenAnswers,
           [rpId]: submittedContent,
         },
+        showAnswer: { ...current.showAnswer, [rpId]: true },
         skippedWrittenAnswers: nextSkippedWrittenAnswers,
       }
     })
@@ -558,54 +559,55 @@ export function ReviewPane({
                         </Button>
                       </div>
 
-                      <div className="theme-soft-surface mt-3 p-3">
+                      <div className="mt-4">
                         <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">你的答案</div>
                         <RichContentEditor
                           projectId={projectId}
                           field="answer"
                           value={writtenAnswerDraft}
                           disabled={hasSubmittedWrittenAnswer}
-                          placeholder="先写下自己的答案，提交后再核对标准答案。"
+                          placeholder="先写下自己的答案，提交后会自动展开标准答案。"
                           onTextChange={(text) => updateWrittenAnswerText(rpId, text)}
                           onAppendImage={(assetId) => appendWrittenAnswerImage(rpId, assetId)}
                           onRemoveImage={(imageIndex) => removeWrittenAnswerImage(rpId, imageIndex)}
                           onUserActivity={touchReviewActivity}
-                          textareaClassName="min-h-[140px] resize-y rounded-2xl [border-color:var(--theme-subtle-border)] [background:var(--theme-subtle-bg)] text-foreground outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:cursor-not-allowed disabled:opacity-75"
-                          imageClassName="h-28 w-full max-w-[220px] rounded-2xl border [border-color:var(--theme-subtle-border)] [background:var(--theme-subtle-bg)] object-cover"
+                          textareaClassName="min-h-[140px] resize-y rounded-xl [border-color:var(--theme-subtle-border)] [background:var(--theme-subtle-bg)] text-foreground outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:cursor-not-allowed disabled:opacity-75"
+                          imageClassName="h-28 w-full max-w-[220px] rounded-xl border [border-color:var(--theme-subtle-border)] [background:var(--theme-subtle-bg)] object-cover"
                         />
                         <div className="mt-2 flex flex-wrap items-center gap-2">
-                          <Button
-                            type="button"
-                            variant={hasSubmittedWrittenAnswer ? "secondary" : "default"}
-                            size="sm"
-                            className="rounded-full"
-                            onClick={() => submitWrittenAnswer(rpId)}
-                            disabled={hasSubmittedWrittenAnswer || !canSubmitWrittenAnswer}
-                          >
-                            {hasSubmittedWrittenAnswer ? (
-                              <>
-                                <CheckCircle2 className="h-4 w-4" />
-                                {isSkippedWrittenAnswer ? "已跳过" : "已提交答案"}
-                              </>
-                            ) : (
-                              "提交答案"
-                            )}
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="rounded-full"
-                            onClick={() => skipWrittenAnswer(rpId)}
-                            disabled={hasSubmittedWrittenAnswer}
-                          >
-                            跳过
-                          </Button>
+                          {hasSubmittedWrittenAnswer ? (
+                            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                              <CheckCircle2 className="h-4 w-4" />
+                              {isSkippedWrittenAnswer ? "已跳过" : "已提交答案"}
+                            </span>
+                          ) : (
+                            <>
+                              <Button
+                                type="button"
+                                variant="default"
+                                size="sm"
+                                className="rounded-xl"
+                                onClick={() => submitWrittenAnswer(rpId)}
+                                disabled={!canSubmitWrittenAnswer}
+                              >
+                                提交答案
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="rounded-xl"
+                                onClick={() => skipWrittenAnswer(rpId)}
+                              >
+                                跳过
+                              </Button>
+                            </>
+                          )}
                           <span className="text-xs text-muted-foreground">
                             {isSkippedWrittenAnswer
                               ? "已跳过，已展开答案并标记为不记得。"
                               : hasSubmittedWrittenAnswer
-                                ? "已提交，可查看答案或判断记忆状态。"
+                                ? "已提交，已展开答案，可判断记忆状态。"
                                 : "先提交自己的答案，再查看答案或判断记忆状态。"}
                           </span>
                         </div>
