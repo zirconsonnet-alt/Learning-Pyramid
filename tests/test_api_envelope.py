@@ -1041,6 +1041,52 @@ def test_learning_task_node_list_includes_entry_target_layer_for_object_mirrors(
     _reset_caches()
 
 
+def test_learning_task_node_list_includes_display_children_for_object_mirrors(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PLM_APP_MODE", "local")
+    monkeypatch.setenv("PLM_ENABLE_AUTH", "false")
+    monkeypatch.setenv("PLM_STORE_PATH", "")
+    monkeypatch.setenv("PLM_LEGACY_STORE_PATH", "")
+    monkeypatch.setenv("PLM_STORE_DB_PATH", str(tmp_path / "plm_store.sqlite3"))
+    monkeypatch.setenv("PLM_AUTH_DB_PATH", str(tmp_path / "plm_auth.sqlite3"))
+    _reset_caches()
+
+    client = TestClient(create_app())
+    api = get_api()
+    project_id = api.create_project(
+        "Object Mirror Task Tree Children Project",
+        project_root=str(tmp_path / "project-object-mirror-task-tree-children"),
+        initial_source_kind=MaterialSourceKind.MANUAL,
+    )
+    root_node_id = api.add_learning_object_container(project_id, parent_id=None, children=tuple(), title="课程")
+    chapter_node_id = api.add_learning_object_container(project_id, parent_id=root_node_id, children=tuple(), title="第一章")
+    lesson_a = api.add_instance(project_id, "course/chapter-1/lesson-a.mp4")
+    lesson_b = api.add_instance(project_id, "course/chapter-1/lesson-b.mp4")
+    api.add_learning_object_leaf(project_id, parent_id=chapter_node_id, instance_id=lesson_a, title="1.1")
+    api.add_learning_object_leaf(project_id, parent_id=chapter_node_id, instance_id=lesson_b, title="1.2")
+
+    api.set_project_roll_up_strategy(project_id, RollUpStrategy.LEARNING_OBJECT_ISOMORPHIC)
+    entry_node_id = api.submit_learning_task(
+        project_id,
+        items=[
+            (rich_text("Q1"), rich_text("A1"), Anchor(lesson_a, position="t=1000")),
+            (rich_text("Q2"), rich_text("A2"), Anchor(lesson_b, position="t=2000")),
+        ],
+        title="第一章学习",
+    )
+
+    resp = client.get(f"/api/projects/{project_id}/learning-task-nodes")
+    assert resp.status_code == 200
+    mirror = next(
+        item
+        for item in resp.json()["data"]
+        if item.get("nodeOrigin") == "OBJECT_MIRROR" and item.get("boundLearningObjectNodeId") == str(chapter_node_id)
+    )
+    assert mirror["targetLayerIndex"] == 1
+    assert mirror["children"] == []
+    assert mirror["displayChildNodeIds"] == [str(entry_node_id)]
+    _reset_caches()
+
+
 def test_hosted_mode_disables_api_docs_by_default(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("PLM_APP_MODE", "hosted")
     monkeypatch.setenv("PLM_ENABLE_ASR", "false")

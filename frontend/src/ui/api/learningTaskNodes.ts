@@ -25,6 +25,7 @@ export const LearningTaskContainerSchema = z.object({
   boundLearningObjectNodeId: z.string().nullable().optional().default(null),
   objectMirrorStatus: z.enum(["ACTIVE", "ORPHANED"]).nullable().optional().default(null),
   targetLayerIndex: z.number().int().nullable().optional().default(null),
+  displayChildNodeIds: z.array(z.string()).nullable().optional().default(null),
 })
 
 export const LearningTaskNodeSchema = z.discriminatedUnion("kind", [

@@ -46,8 +46,9 @@ function deriveTaskNodeLayers(nodes: LearningTaskNode[], events: AggregationEven
       const current = layerById[node.nodeId]
 
       if (current === undefined && node.kind === "container") {
-        const childLayers = (node.children ?? []).map((childId) => layerById[childId]).filter((value) => value !== undefined)
-        if (childLayers.length === (node.children ?? []).length && childLayers.length > 0) {
+        const childIds = getTaskTreeChildIds(node)
+        const childLayers = childIds.map((childId) => layerById[childId]).filter((value) => value !== undefined)
+        if (childLayers.length === childIds.length && childLayers.length > 0) {
           layerById[node.nodeId] = Math.max(...childLayers) + 1
           changed = true
           continue
@@ -66,6 +67,11 @@ function deriveTaskNodeLayers(nodes: LearningTaskNode[], events: AggregationEven
   }
 
   return layerById
+}
+
+function getTaskTreeChildIds(node: LearningTaskNode) {
+  if (node.kind !== "container") return []
+  return node.displayChildNodeIds ?? node.children
 }
 
 function formatDisplayTitle(rawTitle: string, uiType: TaskTreeVisualType, _layerIndex: number) {
@@ -135,7 +141,7 @@ export function TaskTreePage() {
         return 1
       }
 
-      const total = (node.children ?? []).reduce((sum, childId) => sum + countLeafDescendants(childId), 0)
+      const total = getTaskTreeChildIds(node).reduce((sum, childId) => sum + countLeafDescendants(childId), 0)
       descendantCountById[nodeId] = total
       return total
     }
@@ -148,7 +154,8 @@ export function TaskTreePage() {
       const layerIndex = layerById[node.nodeId] ?? 0
       const uiType = classifyTaskNode(node, eventByParentId[node.nodeId])
       const taskSpan = descendantCountById[node.nodeId] ?? 0
-      const childCount = node.kind === "container" ? (node.children?.length ?? 0) : 0
+      const childIds = getTaskTreeChildIds(node)
+      const childCount = node.kind === "container" ? childIds.length : 0
 
       map[node.nodeId] = {
         nodeId: node.nodeId,
@@ -163,7 +170,7 @@ export function TaskTreePage() {
                 ? `${taskSpan} 个任务`
                 : undefined,
         kind: node.kind,
-        children: node.kind === "container" ? node.children : undefined,
+        children: node.kind === "container" ? childIds : undefined,
         learningTaskId: node.kind === "leaf" ? node.boundLearningTaskId : undefined,
       }
     }

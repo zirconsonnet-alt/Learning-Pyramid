@@ -4,7 +4,7 @@ from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import PurePosixPath
-from typing import Any, Dict
+from typing import Any, Dict, Sequence
 
 from backend.models.asr_artifact import AsrArtifact, AsrSegment, AsrTranscriptResult, InstanceAsrTranscriptResult
 from backend.models.convergence import Convergence
@@ -351,7 +351,12 @@ def learning_object_node_to_dto(n: LearningObjectNode) -> Dict[str, Any]:
     raise TypeError(f"Unknown LearningObjectNode type: {type(n)}")
 
 
-def learning_task_node_to_dto(n: LearningTaskNode, *, target_layer_index: int | None = None) -> Dict[str, Any]:
+def learning_task_node_to_dto(
+    n: LearningTaskNode,
+    *,
+    target_layer_index: int | None = None,
+    display_child_node_ids: Sequence[str] | None = None,
+) -> Dict[str, Any]:
     if isinstance(n, LearningTaskLeaf):
         return {
             "kind": "leaf",
@@ -374,6 +379,7 @@ def learning_task_node_to_dto(n: LearningTaskNode, *, target_layer_index: int | 
             "boundLearningObjectNodeId": None if n.bound_learning_object_node_id is None else str(n.bound_learning_object_node_id),
             "objectMirrorStatus": _jsonable(n.object_mirror_status),
             "targetLayerIndex": target_layer_index,
+            "displayChildNodeIds": None if display_child_node_ids is None else [str(x) for x in display_child_node_ids],
         }
     raise TypeError(f"Unknown LearningTaskNode type: {type(n)}")
 

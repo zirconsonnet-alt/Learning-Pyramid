@@ -24,3 +24,12 @@ def test_task_tree_uses_registered_target_layer_for_object_mirrors() -> None:
     assert "if (node.targetLayerIndex !== null) layerById[node.nodeId] = node.targetLayerIndex" in page_source
     assert 'node.nodeOrigin === "OBJECT_MIRROR"' in page_source
     assert 'return "chapter"' in page_source
+
+
+def test_task_tree_uses_display_children_for_object_mirror_edges() -> None:
+    page_source = TASK_TREE_PAGE.read_text(encoding="utf-8")
+    api_source = (REPO_ROOT / "frontend" / "src" / "ui" / "api" / "learningTaskNodes.ts").read_text(encoding="utf-8")
+
+    assert "displayChildNodeIds: z.array(z.string()).nullable().optional().default(null)" in api_source
+    assert "getTaskTreeChildIds(node)" in page_source
+    assert "node.displayChildNodeIds ?? node.children" in page_source
