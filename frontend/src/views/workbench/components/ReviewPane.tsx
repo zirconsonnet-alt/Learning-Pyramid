@@ -5,8 +5,6 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
-  Eye,
-  EyeOff,
   Lightbulb,
   PlayCircle,
   Undo2,
@@ -200,18 +198,6 @@ export function ReviewPane({
     }
   }
 
-  function toggleAnswerVisibility(rpId: string) {
-    if (!hasUnlockedAnswer(rpId)) return
-    touchReviewActivity()
-    updateSessionState((current) => ({
-      ...current,
-      showAnswer: {
-        ...current.showAnswer,
-        [rpId]: !(current.showAnswer[rpId] ?? false),
-      },
-    }))
-  }
-
   function updateWrittenAnswerText(rpId: string, text: string) {
     updateSessionState((current) => ({
       ...current,
@@ -271,7 +257,6 @@ export function ReviewPane({
     touchReviewActivity()
     updateSessionState((current) => ({
       ...current,
-      answers: { ...current.answers, [rpId]: 0 },
       showAnswer: { ...current.showAnswer, [rpId]: true },
       skippedWrittenAnswers: {
         ...current.skippedWrittenAnswers,
@@ -532,27 +517,6 @@ export function ReviewPane({
                           </Button>
                         ) : null}
 
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="rounded-full"
-                          onClick={() => toggleAnswerVisibility(rpId)}
-                          disabled={!hasSubmittedWrittenAnswer}
-                          title={hasSubmittedWrittenAnswer ? undefined : "先提交自己的答案，再查看答案"}
-                        >
-                          {answerVisible ? (
-                            <>
-                              <EyeOff className="h-4 w-4" />
-                              收起答案
-                            </>
-                          ) : (
-                            <>
-                              <Eye className="h-4 w-4" />
-                              查看答案
-                            </>
-                          )}
-                        </Button>
-
                         <Button variant="ghost" size="sm" className="rounded-full" onClick={() => toggleInsightEditor(rpId, hasDraftInsight)}>
                           <Lightbulb className="h-4 w-4" />
                           {insightEditorVisible ? "收起理解" : "追加理解"}
@@ -605,10 +569,10 @@ export function ReviewPane({
                           )}
                           <span className="text-xs text-muted-foreground">
                             {isSkippedWrittenAnswer
-                              ? "已跳过，已展开答案并标记为不记得。"
+                              ? "已跳过，已展开答案，可判断记忆状态。"
                               : hasSubmittedWrittenAnswer
                                 ? "已提交，已展开答案，可判断记忆状态。"
-                                : "先提交自己的答案，再查看答案或判断记忆状态。"}
+                                : "先提交自己的答案或跳过，再判断记忆状态。"}
                           </span>
                         </div>
                       </div>
@@ -676,8 +640,8 @@ export function ReviewPane({
                               ? "这题已标记为“记得”，作答后会自动切到下一题。"
                               : "这题已标记为“记得”，已经是最后一题，可以直接提交。"
                             : hasNextRecallPoint
-                              ? "这题已标记为“不记得”，如需核对答案请手动点“查看答案”。"
-                              : "这题已标记为“不记得”，如需核对答案请手动点“查看答案”，然后直接提交。"}
+                              ? "这题已标记为“不记得”，作答后会自动切到下一题。"
+                              : "这题已标记为“不记得”，已经是最后一题，可以直接提交。"}
                         </div>
                       ) : null}
                     </div>

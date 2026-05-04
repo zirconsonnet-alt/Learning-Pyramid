@@ -19,27 +19,39 @@ def test_review_pane_persists_in_progress_review_session_across_refresh() -> Non
     assert "skippedWrittenAnswers" in source
 
 
-def test_review_pane_requires_submitted_written_answer_before_reveal_or_judgement() -> None:
+def test_review_pane_requires_submitted_written_answer_before_judgement() -> None:
     source = REVIEW_PANE.read_text(encoding="utf-8")
 
     assert "提交答案" in source
     assert "hasSubmittedWrittenAnswer" in source
     assert "disabled={!hasSubmittedWrittenAnswer}" in source
-    assert "先提交自己的答案，再查看答案或判断记忆状态。" in source
+    assert "先提交自己的答案或跳过，再判断记忆状态。" in source
 
 
-def test_review_pane_uses_rich_content_editor_for_written_answer_and_can_skip_to_forgotten() -> None:
+def test_review_pane_uses_rich_content_editor_for_written_answer_and_can_skip_to_reveal_answer() -> None:
     source = REVIEW_PANE.read_text(encoding="utf-8")
+    skip_start = source.index("function skipWrittenAnswer")
+    insight_start = source.index("function toggleInsightEditor")
+    skip_source = source[skip_start:insight_start]
 
     assert "RichContentEditor" in source
     assert 'field="answer"' in source
     assert "appendImageBlock" in source
     assert "removeImageBlockAt" in source
     assert "richContentHasMeaning" in source
-    assert "skipWrittenAnswer" in source
+    assert "skipWrittenAnswer" in skip_source
     assert "跳过" in source
-    assert "answers: { ...current.answers, [rpId]: 0 }" in source
-    assert "showAnswer: { ...current.showAnswer, [rpId]: true }" in source
+    assert "answers: { ...current.answers, [rpId]: 0 }" not in skip_source
+    assert "showAnswer: { ...current.showAnswer, [rpId]: true }" in skip_source
+    assert "skippedWrittenAnswers" in skip_source
+
+
+def test_review_pane_removes_manual_answer_visibility_button() -> None:
+    source = REVIEW_PANE.read_text(encoding="utf-8")
+
+    assert "toggleAnswerVisibility" not in source
+    assert "查看答案" not in source
+    assert "收起答案" not in source
 
 
 def test_review_pane_reveals_answer_after_submitting_written_answer() -> None:
