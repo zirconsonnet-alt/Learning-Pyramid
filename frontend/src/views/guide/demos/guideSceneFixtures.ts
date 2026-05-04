@@ -3,7 +3,7 @@ export const GUIDE_SCENE_FIXTURES = {
     subjectTitle: "机器学习入门",
     projectTitle: "线性代数视频课",
     projectType: "网课项目",
-    setupNotice: "创建后请到项目设置中绑定本地素材目录，并手动导入内容目录。",
+    setupNotice: "创建后请到项目设置中绑定本地素材目录，并手动同步目录内容。",
   },
   projectDirectory: {
     projectTitle: "线性代数视频课",

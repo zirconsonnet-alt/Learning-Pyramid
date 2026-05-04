@@ -27,6 +27,7 @@ import { RichContentRenderer } from "@/ui/components/RichContentRenderer"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import { formatInstanceReference } from "@/ui/displayIdentifiers"
+import { completeGuideWalkthroughStep } from "@/ui/guideWalkthrough/guideWalkthroughController"
 import { useCommitReviewTask, useReviewBundle } from "@/ui/queries/workbench"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import {
@@ -193,6 +194,7 @@ export function ReviewPane({
 
   function chooseAnswerAndAdvance(rpId: string, nextValue: 0 | 1) {
     chooseAnswer(rpId, nextValue)
+    completeGuideWalkthroughStep("mark-review-result")
     if (activeRecallPointIndex >= 0 && activeRecallPointIndex < totalCount - 1) {
       goToRecallPoint(activeRecallPointIndex + 1)
     }
@@ -231,10 +233,10 @@ export function ReviewPane({
   }
 
   function submitWrittenAnswer(rpId: string) {
+    const submittedContent = normalizeRichContent(writtenAnswerDrafts[rpId] ?? [])
+    if (!richContentHasMeaning(submittedContent)) return
     touchReviewActivity()
     updateSessionState((current) => {
-      const submittedContent = normalizeRichContent(current.writtenAnswerDrafts[rpId] ?? [])
-      if (!richContentHasMeaning(submittedContent)) return current
       const nextSkippedWrittenAnswers = { ...current.skippedWrittenAnswers }
       delete nextSkippedWrittenAnswers[rpId]
       return {
@@ -251,6 +253,7 @@ export function ReviewPane({
         skippedWrittenAnswers: nextSkippedWrittenAnswers,
       }
     })
+    completeGuideWalkthroughStep("submit-review-answer")
   }
 
   function skipWrittenAnswer(rpId: string) {
@@ -263,6 +266,7 @@ export function ReviewPane({
         [rpId]: true,
       },
     }))
+    completeGuideWalkthroughStep("submit-review-answer")
   }
 
   function toggleInsightEditor(rpId: string, hasDraftInsight: boolean) {
@@ -327,6 +331,7 @@ export function ReviewPane({
           appendedInsights.length > 0 ? `，并追加了 ${appendedInsights.length} 条理解。` : "。"
         }`,
       )
+      completeGuideWalkthroughStep("submit-review")
     } catch (err) {
       showErrorFeedback("提交复习结果失败", formatApiError(err))
     }
@@ -547,6 +552,7 @@ export function ReviewPane({
                           ) : (
                             <>
                               <Button
+                                data-guide-tour="submit-review-answer-button"
                                 type="button"
                                 variant="default"
                                 size="sm"
@@ -597,7 +603,7 @@ export function ReviewPane({
                         </div>
                       ) : null}
 
-                      <div className="mt-4 flex flex-wrap items-center gap-2">
+                      <div data-guide-tour="review-memory-choice-buttons" className="mt-4 flex flex-wrap items-center gap-2">
                         <Button
                           variant={isRemembered ? "default" : "outline"}
                           size="sm"
@@ -658,7 +664,7 @@ export function ReviewPane({
 
         {rangeQ.data ? (
           <div className="flex flex-col items-center gap-2 pt-2">
-            <Button onClick={() => void onSubmit()} disabled={commit.isPending || !canSubmit} className="min-w-[140px]">
+            <Button data-guide-tour="submit-review-button" onClick={() => void onSubmit()} disabled={commit.isPending || !canSubmit} className="min-w-[140px]">
               {commit.isPending ? "提交中..." : "提交本轮复习"}
             </Button>
             {commit.error ? <p className="text-center text-sm text-destructive">{formatApiError(commit.error)}</p> : null}

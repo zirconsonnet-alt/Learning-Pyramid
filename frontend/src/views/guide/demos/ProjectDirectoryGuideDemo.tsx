@@ -35,7 +35,7 @@ export function ProjectDirectoryGuideDemo({ state, highlight }: ProjectDirectory
       <div className="rounded-lg border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] p-4">
         <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
           <div>
-            <div className="text-sm font-medium text-foreground">内容目录导入</div>
+            <div className="text-sm font-medium text-foreground">目录内容同步</div>
             <div className="mt-1 text-xs leading-5 text-[color:var(--theme-subtle-text)]">
               示例目录：{fixture.sampleDirectoryLabel}
             </div>
@@ -45,13 +45,13 @@ export function ProjectDirectoryGuideDemo({ state, highlight }: ProjectDirectory
             className={`inline-flex items-center justify-center gap-1.5 rounded-lg border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-3 py-2 text-xs font-medium text-foreground ${highlight === "import-button" ? highlightClass : ""}`}
           >
             <UploadCloud className="h-3.5 w-3.5" />
-            导入内容目录
+            同步目录内容
           </button>
         </div>
         {state === "imported" ? (
           <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3 text-xs leading-5 text-emerald-800">
             <CheckCircle2 className="mr-1 inline h-3.5 w-3.5" />
-            已导入 {fixture.importedCount} 个内容实例，工作台左侧会显示学习对象树。
+            已同步 {fixture.importedCount} 个内容实例，工作台左侧会显示学习对象树。
           </div>
         ) : null}
       </div>

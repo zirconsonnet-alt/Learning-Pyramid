@@ -3772,6 +3772,50 @@ class SystemAPI:
                 parent_id = parent.parent_id
             return None
 
+        def prune_source_queue_for_object_node(node_key: str, target_layer_index: int) -> bool:
+            source_layer_index = int(target_layer_index) - 1
+            if source_layer_index < 0:
+                return False
+            target_instance_keys = set(covered_instance_keys(node_key))
+            if not target_instance_keys:
+                return False
+            try:
+                queue = self.sys.aggq_repo.get(s, source_layer_index)
+            except NotFound:
+                return False
+            current_ids = queue.current_ids()
+            if not current_ids:
+                return False
+
+            remove_keys: set[str] = set()
+            for candidate_id in current_ids:
+                candidate_instance_keys: set[str] = set()
+                for rp_id in self.sys.learning_task_node_repo.covered_rp_ids(s, candidate_id):
+                    try:
+                        rp = self.sys.recall_point_repo.get(s, rp_id)
+                    except NotFound:
+                        continue
+                    if rp.anchor is not None:
+                        candidate_instance_keys.add(id_canonical_text(rp.anchor.instance_id))
+                if candidate_instance_keys and candidate_instance_keys.issubset(target_instance_keys):
+                    remove_keys.add(id_canonical_text(candidate_id))
+
+            if not remove_keys:
+                return False
+            historical_ids = tuple(queue.node_ids[: queue.head_index])
+            remaining_current_ids = tuple(
+                node_id for node_id in current_ids if id_canonical_text(node_id) not in remove_keys
+            )
+            updated_queue = AggregationQueue(
+                project_id=queue.project_id,
+                layer_index=queue.layer_index,
+                node_ids=historical_ids + remaining_current_ids,
+                head_index=queue.head_index,
+            )
+            updated_queue.validate_local_invariants()
+            s._staged.aggregation_queues[source_layer_index] = updated_queue
+            return True
+
         for node_key in sorted(current_mirror_keys, key=lambda item: (logical_level(item), str(object_nodes[item].relative_path), item)):
             node = object_nodes[node_key]
             mirror = mirror_by_object_key[node_key]
@@ -3795,13 +3839,16 @@ class SystemAPI:
 
         for node_key in eligible_object_keys:
             mirror = mirror_by_object_key[node_key]
-            if self.sys.entry_repo.maybe_get(s, mirror.node_id) is not None:
-                continue
             target_layer_index = logical_level(node_key)
             if int(target_layer_index) <= 0:
                 continue
+            if self.sys.entry_repo.maybe_get(s, mirror.node_id) is not None:
+                if prune_source_queue_for_object_node(node_key, int(target_layer_index)):
+                    return mirror.node_id
+                continue
             self._ensure_layers_through(s, int(target_layer_index))
             self._task_register(s, mirror.node_id, int(target_layer_index))
+            prune_source_queue_for_object_node(node_key, int(target_layer_index))
             return mirror.node_id
 
         return None

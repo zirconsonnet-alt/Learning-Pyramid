@@ -8,6 +8,7 @@ import type { ProjectType } from "@/ui/api/projects"
 import { ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { listLearningObjectNodes, type LearningObjectNode } from "@/ui/api/learningObjects"
 import { Button } from "@/ui/components/ui/button"
+import { completeGuideWalkthroughStep } from "@/ui/guideWalkthrough/guideWalkthroughController"
 import {
   isSyntheticFilesContainer,
   sortLearningObjectNodeIdsForDisplay,
@@ -140,7 +141,11 @@ function TreeNode({
         isSelected ? "bg-[#eef5ff] text-[#153f74]" : "text-[#33475b] hover:bg-[#f6f8fb]",
       )}
       style={{ paddingLeft: depth * 14 + 10 }}
-      onClick={() => onSelectInstance(data.instanceId)}
+      data-guide-tour="learning-object-tree-item"
+      onClick={() => {
+        onSelectInstance(data.instanceId)
+        completeGuideWalkthroughStep("select-learning-object")
+      }}
       aria-current={isSelected ? "true" : undefined}
     >
       <span className={cn("absolute inset-y-1.5 left-0 w-[3px] rounded-r-full", isSelected ? "bg-[#3b82f6]" : "bg-transparent")} />

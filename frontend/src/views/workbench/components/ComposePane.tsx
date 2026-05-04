@@ -15,6 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/car
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
 import { formatInstanceReference, formatRecallPointReference, simplifyMaterialDisplayName } from "@/ui/displayIdentifiers"
+import { completeGuideWalkthroughStep } from "@/ui/guideWalkthrough/guideWalkthroughController"
 import {
   projectTypeRequiresAnchor,
   projectTypeRequiresLearningObjectTree,
@@ -225,6 +226,7 @@ export function ComposePane({
     const draft = createDraft(projectType, activeScopeInstanceId, currentMs)
     addDraft(projectId, draft)
     setActiveDraftId(draft.localId)
+    completeGuideWalkthroughStep("add-recall-point")
     window.setTimeout(() => focusDraftFields(draft), 80)
   }
 
@@ -257,6 +259,7 @@ export function ComposePane({
       await submit.mutateAsync({ title, items })
       clearDraftsForInstance(projectId, activeScopeInstanceId)
       showSuccessFeedback("学习任务已提交", `“${title}” 已提交，共包含 ${items.length} 个复述点。`)
+      completeGuideWalkthroughStep("submit-learning")
     } catch (err) {
       showErrorFeedback("提交学习任务失败", formatApiError(err))
     }
@@ -591,14 +594,17 @@ export function ComposePane({
                 ) : null}
 
                 <div className="grid gap-3 xl:grid-cols-2">
-                  <div className="space-y-2">
+                  <div className="space-y-2" data-guide-tour="recall-question-editor">
                     <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">问题</div>
                     <RichContentEditor
                       projectId={projectId}
                       field="question"
                       value={activeDraft.question}
                       placeholder="请输入问题/提示语"
-                      onTextChange={(text) => updateDraftText(projectId, activeDraft.localId, "question", text)}
+                      onTextChange={(text) => {
+                        updateDraftText(projectId, activeDraft.localId, "question", text)
+                        if (text.trim()) completeGuideWalkthroughStep("fill-recall-question")
+                      }}
                       onAppendImage={(assetId) => {
                         touchComposeActivity()
                         appendDraftImage(projectId, activeDraft.localId, "question", assetId)
@@ -642,14 +648,17 @@ export function ComposePane({
                     />
                   </div>
 
-                  <div className="space-y-2">
+                  <div className="space-y-2" data-guide-tour="recall-answer-editor">
                     <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">答案</div>
                     <RichContentEditor
                       projectId={projectId}
                       field="answer"
                       value={activeDraft.answer}
                       placeholder="请输入答案/复述内容"
-                      onTextChange={(text) => updateDraftText(projectId, activeDraft.localId, "answer", text)}
+                      onTextChange={(text) => {
+                        updateDraftText(projectId, activeDraft.localId, "answer", text)
+                        if (text.trim()) completeGuideWalkthroughStep("fill-recall-answer")
+                      }}
                       onAppendImage={(assetId) => {
                         touchComposeActivity()
                         appendDraftImage(projectId, activeDraft.localId, "answer", assetId)

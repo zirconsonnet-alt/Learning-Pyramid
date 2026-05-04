@@ -3,11 +3,16 @@ import { driver, type AllowedButtons, type DriveStep, type Driver } from "driver
 
 import { resolveGuideWalkthroughCopy } from "./guideWalkthroughCopy"
 import {
+  DEFAULT_GUIDE_WALKTHROUGH_DOC_SLUG,
   GUIDE_WALKTHROUGH_STEPS,
+  getGuideWalkthroughSteps,
+  isGuideWalkthroughDocSlug,
+  type GuideWalkthroughDocSlug,
   type GuideWalkthroughSessionStatus,
   type GuideWalkthroughStep,
 } from "./guideWalkthroughSteps"
 import { showInfoFeedback } from "@/ui/store/feedbackStore"
+import { useAppStore } from "@/ui/store/appStore"
 import { describePomodoroPhase, getPomodoroSnapshot, usePomodoroStore } from "@/ui/store/pomodoroStore"
 
 const START_GUIDE_WALKTHROUGH_EVENT = "learningpyramid:start-guide-walkthrough"
@@ -26,6 +31,8 @@ type GuideNavigate = (to: string, options?: { replace?: boolean }) => void
 type BuildDriverStepsOptions = {
   getPathname: () => string
   navigate: GuideNavigate
+  getDocSlug: () => GuideWalkthroughDocSlug
+  getSteps: () => GuideWalkthroughStep[]
 }
 
 function dispatchGuideWalkthroughEvent(name: string) {
@@ -38,8 +45,8 @@ function dispatchGuideWalkthroughCustomEvent(name: string, detail: Record<string
   window.dispatchEvent(new CustomEvent(name, { detail }))
 }
 
-export function startGuideWalkthrough() {
-  dispatchGuideWalkthroughEvent(START_GUIDE_WALKTHROUGH_EVENT)
+export function startGuideWalkthrough(docSlug: GuideWalkthroughDocSlug = DEFAULT_GUIDE_WALKTHROUGH_DOC_SLUG) {
+  dispatchGuideWalkthroughCustomEvent(START_GUIDE_WALKTHROUGH_EVENT, { docSlug })
   return true
 }
 
@@ -95,10 +102,28 @@ export function resolveGuideTargetElement(step: GuideWalkthroughStep) {
   return document.querySelector<HTMLElement>(guideTourSelector(step.targetAnchor))
 }
 
+function getProjectIdFromPathname(pathname: string) {
+  return pathname.match(/^\/p\/([^/]+)/)?.[1] ?? null
+}
+
+function resolveGuideProjectId(pathname: string) {
+  const state = useAppStore.getState()
+  return state.selectedProjectId ?? getProjectIdFromPathname(pathname) ?? state.recentProjectIds[0] ?? null
+}
+
+export function resolveGuideRouteHint(step: GuideWalkthroughStep | undefined, pathname: string) {
+  if (!step?.routeHint) return null
+  if (!step.routeHint.includes(":projectId")) return step.routeHint.includes(":") ? null : step.routeHint
+
+  const projectId = resolveGuideProjectId(pathname)
+  return projectId ? step.routeHint.replace(":projectId", encodeURIComponent(projectId)) : null
+}
+
 export function handleRouteHint(step: GuideWalkthroughStep | undefined, navigate: GuideNavigate, pathname: string) {
-  if (!step?.routeHint || step.routeHint.includes(":")) return false
-  if (pathname === step.routeHint || pathname.startsWith(`${step.routeHint}/`)) return false
-  navigate(step.routeHint)
+  const routeHint = resolveGuideRouteHint(step, pathname)
+  if (!routeHint) return false
+  if (pathname === routeHint || pathname.startsWith(`${routeHint}/`)) return false
+  navigate(routeHint)
   return true
 }
 
@@ -106,9 +131,9 @@ function getCurrentPathname(fallback: string) {
   return typeof window === "undefined" ? fallback : window.location.pathname
 }
 
-function getActiveGuideWalkthroughStep(driverInstance: Driver, fallbackIndex: number) {
+function getActiveGuideWalkthroughStep(driverInstance: Driver, fallbackIndex: number, steps = GUIDE_WALKTHROUGH_STEPS) {
   const activeIndex = driverInstance.getActiveIndex() ?? fallbackIndex
-  const step = GUIDE_WALKTHROUGH_STEPS[activeIndex]
+  const step = steps[activeIndex]
   return step ? { activeIndex, step } : null
 }
 
@@ -123,7 +148,7 @@ function waitForStepTarget(step: GuideWalkthroughStep, onReady: () => void, atte
 
 function advanceGuideWalkthroughFromIndex(driverInstance: Driver, stepIndex: number, options: BuildDriverStepsOptions) {
   const nextIndex = stepIndex + 1
-  const nextStep = GUIDE_WALKTHROUGH_STEPS[nextIndex]
+  const nextStep = options.getSteps()[nextIndex]
   if (!nextStep) {
     driverInstance.destroy()
     return
@@ -148,13 +173,13 @@ function advanceGuideWalkthroughFromIndex(driverInstance: Driver, stepIndex: num
 }
 
 function completeActiveGuideWalkthroughStep(driverInstance: Driver, stepId: string, fallbackIndex: number, options: BuildDriverStepsOptions) {
-  const active = getActiveGuideWalkthroughStep(driverInstance, fallbackIndex)
+  const active = getActiveGuideWalkthroughStep(driverInstance, fallbackIndex, options.getSteps())
   if (!active || active.step.id !== stepId) return
   advanceGuideWalkthroughFromIndex(driverInstance, active.activeIndex, options)
 }
 
 function createPopover(step: GuideWalkthroughStep, stepIndex: number, options: BuildDriverStepsOptions, hasTarget: boolean): DriveStep["popover"] {
-  const copy = resolveGuideWalkthroughCopy(step.sourceRef)
+  const copy = resolveGuideWalkthroughCopy(step.sourceRef, options.getDocSlug())
   const showButtons = hasTarget && step.advanceOn && step.advanceOn !== "manual" ? ACTION_STEP_BUTTONS : undefined
   return {
     title: step.popoverTitle ?? copy.title,
@@ -208,7 +233,7 @@ function buildDriverStep(step: GuideWalkthroughStep, stepIndex: number, options:
 }
 
 function buildDriverSteps(options: BuildDriverStepsOptions) {
-  return GUIDE_WALKTHROUGH_STEPS.map((step, index) => buildDriverStep(step, index, options))
+  return options.getSteps().map((step, index) => buildDriverStep(step, index, options))
 }
 
 function replaceGuideWalkthroughSteps(driverInstance: Driver, options: BuildDriverStepsOptions) {
@@ -236,6 +261,7 @@ export function useGuideWalkthroughController({ navigate, pathname }: { navigate
   const driverRef = useRef<Driver | null>(null)
   const statusRef = useRef<GuideWalkthroughSessionStatus>("idle")
   const latestPathnameRef = useRef(pathname)
+  const activeDocSlugRef = useRef<GuideWalkthroughDocSlug>(DEFAULT_GUIDE_WALKTHROUGH_DOC_SLUG)
 
   useEffect(() => {
     latestPathnameRef.current = pathname
@@ -243,6 +269,8 @@ export function useGuideWalkthroughController({ navigate, pathname }: { navigate
     replaceGuideWalkthroughSteps(driverRef.current, {
       getPathname: () => getCurrentPathname(latestPathnameRef.current),
       navigate,
+      getDocSlug: () => activeDocSlugRef.current,
+      getSteps: () => getGuideWalkthroughSteps(activeDocSlugRef.current),
     })
     driverRef.current.refresh()
   }, [navigate, pathname])
@@ -251,13 +279,24 @@ export function useGuideWalkthroughController({ navigate, pathname }: { navigate
     const options: BuildDriverStepsOptions = {
       getPathname: () => getCurrentPathname(latestPathnameRef.current),
       navigate,
+      getDocSlug: () => activeDocSlugRef.current,
+      getSteps: () => getGuideWalkthroughSteps(activeDocSlugRef.current),
     }
 
-    function runWalkthrough() {
+    function runWalkthrough(event: Event) {
       cleanupGuideWalkthrough(driverRef, statusRef)
       statusRef.current = "running"
 
-      const firstStep = GUIDE_WALKTHROUGH_STEPS[0]
+      const requestedDocSlug = event instanceof CustomEvent && isGuideWalkthroughDocSlug(event.detail?.docSlug) ? event.detail.docSlug : DEFAULT_GUIDE_WALKTHROUGH_DOC_SLUG
+      activeDocSlugRef.current = requestedDocSlug
+
+      const firstStep = options.getSteps()[0]
+      if (!firstStep) return
+      if (shouldEndGuideWalkthroughBeforeWorkbench(firstStep)) {
+        notifyGuideWalkthroughEndedBeforeWorkbench()
+        cleanupGuideWalkthrough(driverRef, statusRef)
+        return
+      }
       const didNavigate = handleRouteHint(firstStep, navigate, options.getPathname())
 
       window.setTimeout(

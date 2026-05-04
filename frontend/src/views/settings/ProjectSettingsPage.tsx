@@ -12,6 +12,7 @@ import { ContentNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import { formatMaterialReference, formatRecallPointReference } from "@/ui/displayIdentifiers"
+import { completeGuideWalkthroughStep } from "@/ui/guideWalkthrough/guideWalkthroughController"
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
 import { scanProjectDirectoryMedia, useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
@@ -240,9 +241,6 @@ export function ProjectSettingsPage() {
   const effectiveConfigLayerIndex = configLayerIndex
   const knownLayerIndexes = useMemo(() => [0, 1, 2, 3, 4, 5], [])
   const selectedLayerExists = existingLayerIndexes.includes(effectiveConfigLayerIndex)
-  const selectedLayerHasSavedConfig =
-    projectConfigQ.data?.layerConfigs[String(effectiveConfigLayerIndex)] !== undefined
-
   const effectiveLayerConfig = useMemo(() => {
     const k = String(effectiveConfigLayerIndex)
     return projectConfigQ.data?.layerConfigs[k] ?? defaultLayerConfig
@@ -379,6 +377,7 @@ export function ProjectSettingsPage() {
       if (permission === "granted") {
         showSuccessFeedback("本地目录已绑定", `浏览器已经记录并授权${isSubjectSettingsScope ? "当前默认项目" : "当前项目"}的本地素材目录。`)
         await importAuthorizedDirectory(true)
+        completeGuideWalkthroughStep("authorize-directory")
         return
       } else {
         showInfoFeedback("目录已记录", `目录已经保存到${isSubjectSettingsScope ? "当前默认项目" : "当前项目"}，但浏览器还需要你继续授予读取权限。`)
@@ -400,6 +399,7 @@ export function ProjectSettingsPage() {
       if (permission === "granted") {
         showSuccessFeedback("目录权限已恢复", `现在可以扫描并导入${isSubjectSettingsScope ? "默认项目" : "当前项目"}的本地素材目录。`)
         await importAuthorizedDirectory(true)
+        completeGuideWalkthroughStep("authorize-directory")
         return
       } else if (permission === "denied") {
         showInfoFeedback("目录权限未授予", "浏览器仍未允许读取该目录，你可以重试或直接更换目录。")
@@ -426,11 +426,11 @@ export function ProjectSettingsPage() {
         return
       }
       showSuccessFeedback(
-        "内容目录已导入",
-        `已导入 ${scan.relativeFilePaths.length} 个媒体文件，新增 ${result.created_instances_count} 个实例。`,
+        "目录内容已同步",
+        `已同步 ${scan.relativeFilePaths.length} 个媒体文件，新增 ${result.created_instances_count} 个实例。`,
       )
     } catch (err) {
-      showErrorFeedback("导入本地目录失败", formatApiError(err))
+      showErrorFeedback("同步本地目录失败", formatApiError(err))
     } finally {
       setDirectoryAction(null)
     }
@@ -626,8 +626,6 @@ export function ProjectSettingsPage() {
                   mutationError={setLayerConfigM.error}
                   projectConfigError={projectConfigQ.error}
                   rollUpStrategy={currentRollUpStrategy}
-                  selectedLayerExists={selectedLayerExists}
-                  selectedLayerHasSavedConfig={selectedLayerHasSavedConfig}
                   selectedLayerIndex={effectiveConfigLayerIndex}
                   saving={setLayerConfigM.isPending}
                   onSave={async ({ kNode, kPoint, reviewChainTemplate, thresholdRollUpEnabled }) => {
@@ -1320,8 +1318,7 @@ function BasicInfoCard({
             </p>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="rollUpStrategy">项目级推进方式</Label>
+          <div>
             <select
               id="rollUpStrategy"
               aria-label="选择上推策略"
@@ -1339,15 +1336,11 @@ function BasicInfoCard({
             </select>
           </div>
 
-          <div className="rounded-[1.1rem] border border-border/70 bg-muted/15 p-4 text-sm text-muted-foreground">
-            {rollUpStrategy === "LEARNING_OBJECT_ISOMORPHIC"
-              ? actionableMissingInstanceCount > 0
-                ? `当前有 ${actionableMissingInstanceCount} 个待迁移的缺失实例，同构上推和学习任务提交都会先被门禁拦住。请先完成下方修复。`
-                : "当前没有待迁移的缺失实例，同构上推会在队列清空后按对象树自动扫描推进。"
-              : rollUpStrategy === "MANUAL"
-                ? "你可以继续保留各层阈值配置，但系统不会自动触发上推。"
-                : "各层的节点阈值、复述点阈值和阈值开关都在下面的层配置里生效。"}
-          </div>
+          {rollUpStrategy === "LEARNING_OBJECT_ISOMORPHIC" && actionableMissingInstanceCount > 0 ? (
+            <div className="rounded-[1.1rem] border border-amber-200 bg-amber-50/80 p-4 text-sm text-amber-900">
+              当前有 {actionableMissingInstanceCount} 个待迁移的缺失实例，同构上推和学习任务提交都会先被门禁拦住。请先完成下方修复。
+            </div>
+          ) : null}
 
           {rollUpStrategyError ? <p className="text-sm text-destructive">{formatApiError(rollUpStrategyError)}</p> : null}
         </section>
@@ -1422,8 +1415,6 @@ function LayerConfigEditor({
   onSelectedLayerIndexChange,
   projectConfigError,
   rollUpStrategy,
-  selectedLayerExists,
-  selectedLayerHasSavedConfig,
   saving,
   selectedLayerIndex,
 }: {
@@ -1448,25 +1439,16 @@ function LayerConfigEditor({
   onSelectedLayerIndexChange: (layerIndex: number) => void
   projectConfigError: unknown
   rollUpStrategy: RollUpStrategy
-  selectedLayerExists: boolean
-  selectedLayerHasSavedConfig: boolean
   saving: boolean
   selectedLayerIndex: number
 }) {
   const [cfgKNode, setCfgKNode] = useState(() => String(initialConfig.aggregationKNode))
   const [cfgKPoint, setCfgKPoint] = useState(() => String(initialConfig.aggregationKPoint))
-  const [cfgThresholdRollUpEnabled, setCfgThresholdRollUpEnabled] = useState(() => initialConfig.thresholdRollUpEnabled)
+  const cfgThresholdRollUpEnabled = initialConfig.thresholdRollUpEnabled
   const [cfgTemplateItems, setCfgTemplateItems] = useState<TemplateEditorItem[]>(() => toTemplateEditorItems(initialConfig.reviewChainTemplate))
   const [cfgErr, setCfgErr] = useState<string | null>(null)
   const [pendingTemplateKind, setPendingTemplateKind] = useState<"" | "CONVERGENCE" | "REVIEW_TASK">("")
   const thresholdControlsActive = rollUpStrategy === "THRESHOLD_AUTO"
-  const layerStatusText = selectedLayerExists
-    ? selectedLayerHasSavedConfig
-      ? "当前层已经存在，下面显示的是它的已保存配置。"
-      : "当前层已经存在，但还没有专属配置，当前显示的是系统默认值。"
-    : selectedLayerHasSavedConfig
-      ? "当前层还不存在，下面显示的是它的预配置；该层创建后会自动使用。"
-      : "当前层还不存在，当前显示的是系统默认值；保存后会成为这层的预配置。"
 
   function onAppendTemplateItem() {
     if (!pendingTemplateKind) return
@@ -1522,12 +1504,10 @@ function LayerConfigEditor({
     <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
       <div className="space-y-1">
         {_embedded ? <div className="text-sm font-semibold text-foreground">层配置</div> : <CardTitle>层配置</CardTitle>}
-        <p className="text-sm text-muted-foreground">{layerStatusText}</p>
       </div>
 
       <div className="w-full max-w-[360px] shrink-0 space-y-3">
-        <div className="space-y-2">
-          <Label htmlFor="configLayer">已知层</Label>
+        <div>
           <select
             id="configLayer"
             aria-label="选择已知层"
@@ -1567,29 +1547,6 @@ function LayerConfigEditor({
           <div className="space-y-2">
             <Label htmlFor="kPoint">复述点阈值</Label>
             <Input id="kPoint" value={cfgKPoint} onChange={(e) => setCfgKPoint(e.target.value)} disabled={saving} />
-          </div>
-        </div>
-
-        <div className="rounded-[1.2rem] border border-border/70 bg-muted/15 p-4">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="space-y-1">
-              <Label>阈值自动上推</Label>
-              <p className="text-xs text-muted-foreground">
-                {!thresholdControlsActive
-                  ? "当前策略不是“阈值自动上推”，这里先作为保留配置展示。"
-                  : cfgThresholdRollUpEnabled
-                    ? "达到节点数或复述点阈值后，系统会自动进入聚合周期。"
-                    : "已关闭自动阈值上推。达到阈值后，候选任务会继续保留在这一层，直到你手动上推或重新开启。"}
-              </p>
-            </div>
-            <Button
-              type="button"
-              variant={cfgThresholdRollUpEnabled ? "outline" : "default"}
-              onClick={() => setCfgThresholdRollUpEnabled((prev) => !prev)}
-              disabled={saving || !thresholdControlsActive}
-            >
-              {!thresholdControlsActive ? "当前策略下不生效" : cfgThresholdRollUpEnabled ? "已开启，点击关闭" : "已关闭，点击开启"}
-            </Button>
           </div>
         </div>
 

@@ -4,10 +4,12 @@ import katex from "katex"
 import "katex/dist/katex.min.css"
 import { useSearchParams } from "react-router-dom"
 
-import userManualMarkdown from "../../../../docs/learningpyramid-user-manual.md?raw"
+import createSubjectProjectMarkdown from "../../../../docs/how-to-create-subject-project.md?raw"
+import studyReviewMarkdown from "../../../../docs/how-to-study-review.md?raw"
 
 import { Button } from "@/ui/components/ui/button"
 import { startGuideWalkthrough } from "@/ui/guideWalkthrough/guideWalkthroughController"
+import type { GuideWalkthroughDocSlug } from "@/ui/guideWalkthrough/guideWalkthroughSteps"
 import {
   getOfficialCommunityCopyLabel,
   getOfficialCommunityCopySuccessMessage,
@@ -72,7 +74,7 @@ type ParsedMarkdown = {
 }
 
 type DocDefinition = {
-  slug: string
+  slug: GuideWalkthroughDocSlug
   label: string
   audience: string
   summary: string
@@ -80,7 +82,7 @@ type DocDefinition = {
   parsed: ParsedMarkdown
 }
 
-const LEGACY_GUIDE_DOC_SLUGS = new Set(["method"])
+const LEGACY_GUIDE_DOC_SLUGS = new Set(["manual", "method"])
 
 function decodeMarkdownEscapes(text: string) {
   return text.replace(/\\([\\`*_{}#+.!&>-])/g, "$1")
@@ -290,12 +292,20 @@ function parseMarkdown(source: string): ParsedMarkdown {
 
 const docs: DocDefinition[] = [
   {
-    slug: "manual",
-    label: "系统使用说明",
+    slug: "create-subject-project",
+    label: "如何创建学科项目",
     audience: "面向使用者",
-    summary: "从创建项目、整理内容到录入复述点和完成复习，按当前界面一步步上手。",
-    sourcePath: "仓库文档 / 系统使用说明",
-    parsed: parseMarkdown(userManualMarkdown),
+    summary: "从新建学科、进入项目，到绑定并导入本地学习材料。",
+    sourcePath: "仓库文档 / 如何创建学科项目",
+    parsed: parseMarkdown(createSubjectProjectMarkdown),
+  },
+  {
+    slug: "study-review",
+    label: "如何学习复习",
+    audience: "面向使用者",
+    summary: "进入工作台后，录入复述点、提交学习并完成复习闭环。",
+    sourcePath: "仓库文档 / 如何学习复习",
+    parsed: parseMarkdown(studyReviewMarkdown),
   },
 ]
 
@@ -493,7 +503,7 @@ export function GuidePage() {
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-6 xl:grid-cols-[18rem_minmax(0,1fr)]">
+      <div className="grid gap-6 xl:grid-cols-[18rem_minmax(0,1fr)_18rem]">
         <aside className="xl:sticky xl:top-28 xl:self-start">
           <section className="theme-card p-4">
             <div className="mb-3 text-sm font-semibold text-foreground">文档目录</div>
@@ -516,7 +526,7 @@ export function GuidePage() {
                   </button>
                 )
               })}
-              <Button type="button" className="mt-3 w-full justify-center" onClick={() => startGuideWalkthrough()}>
+              <Button type="button" className="mt-3 w-full justify-center" onClick={() => startGuideWalkthrough(activeDoc.slug)}>
                 <PlayCircle className="h-4 w-4" />
                 开始引导
               </Button>
@@ -543,6 +553,28 @@ export function GuidePage() {
             <MarkdownContent blocks={activeDoc.parsed.blocks} />
           </div>
         </section>
+
+        <aside className="xl:sticky xl:top-28 xl:self-start">
+          <section className="theme-card p-4">
+            <div className="mb-3 text-sm font-semibold text-foreground">当前文档目录</div>
+            <nav className="space-y-1" aria-label="当前文档目录结构">
+              {activeDoc.parsed.headings.map((heading) => (
+                <a
+                  key={heading.id}
+                  href={`#${heading.id}`}
+                  className={cn(
+                    "block rounded-xl px-3 py-2 text-sm leading-5 text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground",
+                    heading.level === 1 ? "font-semibold text-foreground" : "",
+                    heading.level === 3 ? "pl-5" : "",
+                    heading.level >= 4 ? "pl-7 text-xs" : "",
+                  )}
+                >
+                  {heading.text}
+                </a>
+              ))}
+            </nav>
+          </section>
+        </aside>
       </div>
     </div>
   )

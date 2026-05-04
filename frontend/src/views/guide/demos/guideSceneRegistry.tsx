@@ -81,7 +81,7 @@ export const guideSceneRegistry: GuideSceneDefinition[] = [
   {
     scene: "project-directory",
     label: "绑定本地素材目录",
-    description: "展示项目设置里的本地素材目录授权和导入内容目录操作。",
+    description: "展示项目设置里的本地素材目录授权和同步目录内容操作。",
     states: [
       {
         state: "unbound",
@@ -90,8 +90,8 @@ export const guideSceneRegistry: GuideSceneDefinition[] = [
       },
       {
         state: "imported",
-        label: "目录已导入",
-        stateDescription: "展示目录授权后导入内容目录的完成状态。",
+        label: "目录已同步",
+        stateDescription: "展示目录授权后同步目录内容的完成状态。",
       },
     ],
     highlights: ["authorize-button", "import-button"],

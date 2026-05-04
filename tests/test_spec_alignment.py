@@ -442,6 +442,82 @@ class _SpecAlignmentBackendMixin:
         self.assertEqual(chapter_reg.target_layer_index, 1)
         self.assertEqual(root_reg.target_layer_index, 2)
 
+    def test_learning_object_isomorphic_roll_up_consumes_covered_lower_layer_candidates(self) -> None:
+        api, root = self._new_api()
+        project_root, _ = self._make_project_dirs(root, "manual-submit-tree")
+        project_id = api.create_project("manual", project_root.as_posix(), initial_source_kind=MaterialSourceKind.MANUAL)
+
+        root_node_id = api.add_learning_object_container(project_id, parent_id=None, children=tuple(), title="课程")
+        chapter_two_id = api.add_learning_object_container(project_id, parent_id=root_node_id, children=tuple(), title="第二章")
+        chapter_three_id = api.add_learning_object_container(project_id, parent_id=root_node_id, children=tuple(), title="第三章")
+        lesson_a = api.add_instance(project_id, "course/chapter-2/lesson-a.mp4")
+        lesson_b = api.add_instance(project_id, "course/chapter-2/lesson-b.mp4")
+        lesson_c = api.add_instance(project_id, "course/chapter-3/lesson-c.mp4")
+        api.add_learning_object_leaf(project_id, parent_id=chapter_two_id, instance_id=lesson_a, title="2.1")
+        api.add_learning_object_leaf(project_id, parent_id=chapter_two_id, instance_id=lesson_b, title="2.2")
+        api.add_learning_object_leaf(project_id, parent_id=chapter_three_id, instance_id=lesson_c, title="3.1")
+
+        api.set_project_roll_up_strategy(project_id, RollUpStrategy.LEARNING_OBJECT_ISOMORPHIC)
+        api.submit_learning_task(
+            project_id,
+            items=[
+                (rich_text("Q1"), rich_text("A1"), Anchor(lesson_a, position="t=1000")),
+                (rich_text("Q2"), rich_text("A2"), Anchor(lesson_b, position="t=2000")),
+            ],
+            title="第二章学习",
+        )
+
+        self.assertEqual(api.get_aggregation_queue_current(project_id, 0), tuple())
+        layer_one_candidates = api.get_aggregation_queue_current(project_id, 1)
+        self.assertEqual(len(layer_one_candidates), 1)
+        chapter_two_mirror = api.get_learning_task_node(project_id, layer_one_candidates[0])
+        self.assertIsInstance(chapter_two_mirror, LearningTaskContainer)
+        assert isinstance(chapter_two_mirror, LearningTaskContainer)
+        self.assertEqual(chapter_two_mirror.title, "第二章")
+        self.assertEqual(chapter_two_mirror.node_origin, LearningTaskNodeOrigin.OBJECT_MIRROR)
+        self.assertEqual(chapter_two_mirror.bound_learning_object_node_id, chapter_two_id)
+
+    def test_learning_object_isomorphic_roll_up_prunes_stale_lower_layer_candidates(self) -> None:
+        api, root = self._new_api()
+        project_root, _ = self._make_project_dirs(root, "manual-stale-queue-tree")
+        project_id = api.create_project("manual", project_root.as_posix(), initial_source_kind=MaterialSourceKind.MANUAL)
+
+        root_node_id = api.add_learning_object_container(project_id, parent_id=None, children=tuple(), title="课程")
+        chapter_two_id = api.add_learning_object_container(project_id, parent_id=root_node_id, children=tuple(), title="第二章")
+        lesson_a = api.add_instance(project_id, "course/chapter-2/lesson-a.mp4")
+        lesson_b = api.add_instance(project_id, "course/chapter-2/lesson-b.mp4")
+        api.add_learning_object_leaf(project_id, parent_id=chapter_two_id, instance_id=lesson_a, title="2.1")
+        api.add_learning_object_leaf(project_id, parent_id=chapter_two_id, instance_id=lesson_b, title="2.2")
+
+        api.set_project_roll_up_strategy(project_id, RollUpStrategy.LEARNING_OBJECT_ISOMORPHIC)
+        entry_node_id = api.submit_learning_task(
+            project_id,
+            items=[
+                (rich_text("Q1"), rich_text("A1"), Anchor(lesson_a, position="t=1000")),
+                (rich_text("Q2"), rich_text("A2"), Anchor(lesson_b, position="t=2000")),
+            ],
+            title="第二章学习",
+        )
+
+        session = api.sys.begin_session(project_id, SessionMode.READ_WRITE)
+        try:
+            _, review_task_ids = api.get_queue(project_id)
+            for review_task_id in review_task_ids:
+                api.sys.queue_repo.remove_by_id(session, review_task_id)
+            api.sys.aggq_repo.enqueue(session, 0, entry_node_id)
+            api.sys.commit(session)
+        except Exception:
+            if session.state == "OPEN":
+                api.sys.rollback(session)
+            raise
+
+        self.assertEqual(api.get_queue(project_id), (None, tuple()))
+        self.assertEqual(api.get_aggregation_queue_current(project_id, 0), (entry_node_id,))
+
+        api.set_project_roll_up_strategy(project_id, RollUpStrategy.LEARNING_OBJECT_ISOMORPHIC)
+
+        self.assertEqual(api.get_aggregation_queue_current(project_id, 0), tuple())
+
     def test_create_project_auto_creates_project_dir_under_workspace_data_root(self) -> None:
         api, root = self._new_api()
         projects_root = root / "data-root"

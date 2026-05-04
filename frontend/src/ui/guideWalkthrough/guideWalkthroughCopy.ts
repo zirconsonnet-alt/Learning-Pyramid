@@ -1,9 +1,21 @@
-import userManualMarkdownSource from "../../../../docs/learningpyramid-user-manual.md?raw"
+import createSubjectProjectMarkdownSource from "../../../../docs/how-to-create-subject-project.md?raw"
+import studyReviewMarkdownSource from "../../../../docs/how-to-study-review.md?raw"
 
-import type { GuideWalkthroughSourceRef } from "./guideWalkthroughSteps"
+import { DEFAULT_GUIDE_WALKTHROUGH_DOC_SLUG, type GuideWalkthroughDocSlug, type GuideWalkthroughSourceRef } from "./guideWalkthroughSteps"
 
-export const USER_MANUAL_SOURCE_PATH = "docs/learningpyramid-user-manual.md"
-export const userManualMarkdown = userManualMarkdownSource
+export const CREATE_SUBJECT_PROJECT_SOURCE_PATH = "docs/how-to-create-subject-project.md"
+export const STUDY_REVIEW_SOURCE_PATH = "docs/how-to-study-review.md"
+
+export const guideWalkthroughCopySources: Record<GuideWalkthroughDocSlug, { markdown: string; sourcePath: string }> = {
+  "create-subject-project": {
+    markdown: createSubjectProjectMarkdownSource,
+    sourcePath: CREATE_SUBJECT_PROJECT_SOURCE_PATH,
+  },
+  "study-review": {
+    markdown: studyReviewMarkdownSource,
+    sourcePath: STUDY_REVIEW_SOURCE_PATH,
+  },
+}
 
 export type GuideWalkthroughCopy = {
   title: string
@@ -26,7 +38,7 @@ function stripInlineMarkdown(value: string) {
     .trim()
 }
 
-export function extractManualSections(markdown = userManualMarkdown): ManualSection[] {
+export function extractManualSections(markdown = guideWalkthroughCopySources[DEFAULT_GUIDE_WALKTHROUGH_DOC_SLUG].markdown): ManualSection[] {
   const sections: ManualSection[] = []
   let current: ManualSection | null = null
 
@@ -47,7 +59,7 @@ export function extractManualSections(markdown = userManualMarkdown): ManualSect
   return sections
 }
 
-function findSection(heading: string, markdown = userManualMarkdown) {
+function findSection(heading: string, markdown = guideWalkthroughCopySources[DEFAULT_GUIDE_WALKTHROUGH_DOC_SLUG].markdown) {
   return extractManualSections(markdown).find((section) => section.heading === heading) ?? null
 }
 
@@ -75,13 +87,18 @@ function extractFirstParagraph(section: ManualSection) {
   return section.heading
 }
 
-export function resolveGuideWalkthroughCopy(sourceRef: GuideWalkthroughSourceRef, markdown = userManualMarkdown): GuideWalkthroughCopy {
+export function resolveGuideWalkthroughCopy(
+  sourceRef: GuideWalkthroughSourceRef,
+  docSlug: GuideWalkthroughDocSlug = DEFAULT_GUIDE_WALKTHROUGH_DOC_SLUG,
+  markdown = guideWalkthroughCopySources[docSlug]?.markdown ?? guideWalkthroughCopySources[DEFAULT_GUIDE_WALKTHROUGH_DOC_SLUG].markdown,
+): GuideWalkthroughCopy {
+  const sourcePath = guideWalkthroughCopySources[docSlug]?.sourcePath ?? guideWalkthroughCopySources[DEFAULT_GUIDE_WALKTHROUGH_DOC_SLUG].sourcePath
   const section = findSection(sourceRef.heading, markdown)
   if (!section) {
     return {
       title: sourceRef.heading,
       description: sourceRef.heading,
-      sourcePath: USER_MANUAL_SOURCE_PATH,
+      sourcePath,
       sourceHeading: sourceRef.heading,
     }
   }
@@ -101,7 +118,7 @@ export function resolveGuideWalkthroughCopy(sourceRef: GuideWalkthroughSourceRef
   return {
     title: section.heading,
     description: description || section.heading,
-    sourcePath: USER_MANUAL_SOURCE_PATH,
+    sourcePath,
     sourceHeading: section.heading,
   }
 }
