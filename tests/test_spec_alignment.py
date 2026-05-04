@@ -121,6 +121,62 @@ class _SpecAlignmentBackendMixin:
                 system.rollback(session)
             raise
 
+    def _add_recall_point(
+        self,
+        api: SystemAPI,
+        project_id: object,
+        recall_point_id: str,
+        instance_id: InstanceId,
+        *,
+        position: str = "t=1000",
+    ) -> None:
+        session = api.sys.begin_session(project_id, SessionMode.READ_WRITE)
+        try:
+            api.sys.recall_point_repo.add(
+                session,
+                RecallPoint(
+                    project_id=project_id,
+                    recall_point_id=RecallPointId(recall_point_id),
+                    created_at=now_utc_ms(),
+                    question=rich_text(f"Q {recall_point_id}"),
+                    answer=rich_text(f"A {recall_point_id}"),
+                    anchor=Anchor(instance_id=instance_id, position=position),
+                ),
+            )
+            api.sys.commit(session)
+        except Exception:
+            if session.state == "OPEN":
+                api.sys.rollback(session)
+            raise
+
+    def _list_object_mirror_nodes(self, api: SystemAPI, project_id: object) -> list[LearningTaskContainer]:
+        return [
+            node
+            for node in api.list_learning_task_nodes(project_id)
+            if isinstance(node, LearningTaskContainer) and node.node_origin == LearningTaskNodeOrigin.OBJECT_MIRROR
+        ]
+
+    def _list_task_containers_by_title(
+        self, api: SystemAPI, project_id: object, title: str
+    ) -> list[LearningTaskContainer]:
+        return [
+            node
+            for node in api.list_learning_task_nodes(project_id)
+            if isinstance(node, LearningTaskContainer) and node.title == title
+        ]
+
+    def _clear_review_queue(self, api: SystemAPI, project_id: object) -> None:
+        session = api.sys.begin_session(project_id, SessionMode.READ_WRITE)
+        try:
+            _, review_task_ids = api.get_queue(project_id)
+            for review_task_id in review_task_ids:
+                api.sys.queue_repo.remove_by_id(session, review_task_id)
+            api.sys.commit(session)
+        except Exception:
+            if session.state == "OPEN":
+                api.sys.rollback(session)
+            raise
+
     def _build_review_then_convergence_fixture(self) -> dict[str, object]:
         api, root = self._new_api()
         project_root, learning_root = self._make_project_dirs(root, "videos")
@@ -389,37 +445,15 @@ class _SpecAlignmentBackendMixin:
         api.add_learning_object_leaf(project_id, parent_id=chapter_node_id, instance_id=lesson_a, title="视频 A")
         api.add_learning_object_leaf(project_id, parent_id=chapter_node_id, instance_id=lesson_b, title="视频 B")
 
-        session = api.sys.begin_session(project_id, SessionMode.READ_WRITE)
-        try:
-            api.sys.recall_point_repo.add(
-                session,
-                RecallPoint(
-                    project_id=project_id,
-                    recall_point_id=RecallPointId("rp_iso_1"),
-                    created_at=now_utc_ms(),
-                    question=rich_text("Q1"),
-                    answer=rich_text("A1"),
-                    anchor=Anchor(instance_id=lesson_a, position="t=1000"),
-                ),
-            )
-            api.sys.recall_point_repo.add(
-                session,
-                RecallPoint(
-                    project_id=project_id,
-                    recall_point_id=RecallPointId("rp_iso_2"),
-                    created_at=now_utc_ms(),
-                    question=rich_text("Q2"),
-                    answer=rich_text("A2"),
-                    anchor=Anchor(instance_id=lesson_b, position="t=2000"),
-                ),
-            )
-            api.sys.commit(session)
-        except Exception:
-            if session.state == "OPEN":
-                api.sys.rollback(session)
-            raise
-
         api.set_project_roll_up_strategy(project_id, RollUpStrategy.LEARNING_OBJECT_ISOMORPHIC)
+        api.submit_learning_task(
+            project_id,
+            items=[
+                (rich_text("Q1"), rich_text("A1"), Anchor(lesson_a, position="t=1000")),
+                (rich_text("Q2"), rich_text("A2"), Anchor(lesson_b, position="t=2000")),
+            ],
+            title="第一章学习",
+        )
 
         mirror_nodes = [
             node
@@ -517,6 +551,62 @@ class _SpecAlignmentBackendMixin:
         api.set_project_roll_up_strategy(project_id, RollUpStrategy.LEARNING_OBJECT_ISOMORPHIC)
 
         self.assertEqual(api.get_aggregation_queue_current(project_id, 0), tuple())
+
+    def test_learning_object_isomorphic_roll_up_does_not_duplicate_after_manual_roll_up(self) -> None:
+        api, root = self._new_api()
+        project_root, _ = self._make_project_dirs(root, "manual-then-isomorphic-tree")
+        project_id = api.create_project("manual", project_root.as_posix(), initial_source_kind=MaterialSourceKind.MANUAL)
+
+        root_node_id = api.add_learning_object_container(project_id, parent_id=None, children=tuple(), title="课程")
+        chapter_one_id = api.add_learning_object_container(project_id, parent_id=root_node_id, children=tuple(), title="第一章")
+        lesson_a = api.add_instance(project_id, "course/chapter-1/lesson-a.mp4")
+        lesson_b = api.add_instance(project_id, "course/chapter-1/lesson-b.mp4")
+        api.add_learning_object_leaf(project_id, parent_id=chapter_one_id, instance_id=lesson_a, title="1.1")
+        api.add_learning_object_leaf(project_id, parent_id=chapter_one_id, instance_id=lesson_b, title="1.2")
+
+        entry_node_id = api.submit_learning_task(
+            project_id,
+            items=[
+                (rich_text("Q1"), rich_text("A1"), Anchor(lesson_a, position="t=1000")),
+                (rich_text("Q2"), rich_text("A2"), Anchor(lesson_b, position="t=2000")),
+            ],
+            title="第一章学习",
+        )
+
+        self.assertEqual(api.get_aggregation_queue_current(project_id, 0), (entry_node_id,))
+        self._clear_review_queue(api, project_id)
+        parent_node_id = api.manual_roll_up(project_id, 0, "第一章")
+        self.assertIsNotNone(parent_node_id)
+        self.assertEqual(api.get_aggregation_queue_current(project_id, 0), tuple())
+        self.assertEqual(len(self._list_task_containers_by_title(api, project_id, "第一章")), 1)
+
+        api.set_project_roll_up_strategy(project_id, RollUpStrategy.LEARNING_OBJECT_ISOMORPHIC)
+
+        self.assertEqual(api.get_aggregation_queue_current(project_id, 0), tuple())
+        self.assertEqual(self._list_object_mirror_nodes(api, project_id), [])
+        self.assertEqual(len(self._list_task_containers_by_title(api, project_id, "第一章")), 1)
+
+    def test_learning_object_isomorphic_roll_up_noops_with_empty_source_queue(self) -> None:
+        api, root = self._new_api()
+        project_root, _ = self._make_project_dirs(root, "manual-empty-source-tree")
+        project_id = api.create_project("manual", project_root.as_posix(), initial_source_kind=MaterialSourceKind.MANUAL)
+
+        root_node_id = api.add_learning_object_container(project_id, parent_id=None, children=tuple(), title="课程")
+        chapter_one_id = api.add_learning_object_container(project_id, parent_id=root_node_id, children=tuple(), title="第一章")
+        lesson_a = api.add_instance(project_id, "course/chapter-1/lesson-a.mp4")
+        lesson_b = api.add_instance(project_id, "course/chapter-1/lesson-b.mp4")
+        api.add_learning_object_leaf(project_id, parent_id=chapter_one_id, instance_id=lesson_a, title="1.1")
+        api.add_learning_object_leaf(project_id, parent_id=chapter_one_id, instance_id=lesson_b, title="1.2")
+        self._add_recall_point(api, project_id, "rp_empty_source_1", lesson_a, position="t=1000")
+        self._add_recall_point(api, project_id, "rp_empty_source_2", lesson_b, position="t=2000")
+
+        self.assertEqual(api.get_aggregation_queue_current(project_id, 0), tuple())
+        api.set_project_roll_up_strategy(project_id, RollUpStrategy.LEARNING_OBJECT_ISOMORPHIC)
+
+        self.assertEqual(api.get_aggregation_queue_current(project_id, 0), tuple())
+        with self.assertRaises(NotFound):
+            api.get_aggregation_queue_current(project_id, 1)
+        self.assertEqual(self._list_object_mirror_nodes(api, project_id), [])
 
     def test_create_project_auto_creates_project_dir_under_workspace_data_root(self) -> None:
         api, root = self._new_api()

@@ -11,6 +11,7 @@ from adapter.deps import (
     get_api,
     get_auth_rate_limit_store,
     get_auth_store,
+    get_membership_commission_store,
     get_membership_marketing_store,
     get_membership_payment_service,
     get_membership_store,
@@ -24,6 +25,7 @@ def _reset_caches() -> None:
     get_api.cache_clear()
     get_auth_rate_limit_store.cache_clear()
     get_auth_store.cache_clear()
+    get_membership_commission_store.cache_clear()
     get_membership_marketing_store.cache_clear()
     get_membership_payment_service.cache_clear()
     get_membership_store.cache_clear()
@@ -72,6 +74,7 @@ def auth_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("PLM_LEGACY_STORE_PATH", "")
     monkeypatch.setenv("PLM_STORE_DB_PATH", str(tmp_path / "plm_store.sqlite3"))
     monkeypatch.setenv("PLM_AUTH_DB_PATH", str(tmp_path / "plm_auth.sqlite3"))
+    monkeypatch.setenv("PLM_MEMBERSHIP_DB_PATH", str(tmp_path / "plm_membership.sqlite3"))
     _reset_caches()
     yield
     _reset_caches()

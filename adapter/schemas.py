@@ -85,12 +85,28 @@ class BindInviteCodeRequest(BaseModel):
     inviteCode: str = Field(min_length=1, max_length=32)
 
 
+class CreateCommissionWithdrawalRequest(BaseModel):
+    amountCent: int = Field(ge=1)
+    wechatOpenId: Optional[str] = Field(default=None, max_length=128)
+
+
+class AdminResolveCommissionWithdrawalRequest(BaseModel):
+    status: str = Field(min_length=1, max_length=32)
+    providerTransferNo: Optional[str] = Field(default=None, max_length=128)
+    failureReason: Optional[str] = Field(default="", max_length=200)
+
+
 class AdminGrantMembershipCouponRequest(BaseModel):
     userId: str = Field(min_length=1)
     amountCent: int = Field(ge=1)
     title: str = Field(min_length=1, max_length=60)
     expiresInDays: int = Field(ge=1, le=365)
     minSpendCent: int = Field(default=0, ge=0)
+
+
+class AdminGrantMembershipMonthsRequest(BaseModel):
+    userId: str = Field(min_length=1)
+    months: int = Field(ge=1, le=24)
 
 
 class AdminVoidMembershipCouponRequest(BaseModel):

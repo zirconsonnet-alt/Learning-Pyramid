@@ -9,6 +9,7 @@ from adapter.deps import (
     get_api,
     get_auth_rate_limit_store,
     get_auth_store,
+    get_membership_commission_store,
     get_membership_marketing_store,
     get_membership_payment_service,
     get_membership_store,
@@ -28,6 +29,7 @@ def _reset_caches() -> None:
     get_api.cache_clear()
     get_auth_rate_limit_store.cache_clear()
     get_auth_store.cache_clear()
+    get_membership_commission_store.cache_clear()
     get_membership_marketing_store.cache_clear()
     get_membership_payment_service.cache_clear()
     get_membership_store.cache_clear()
@@ -37,11 +39,24 @@ def _default_pomodoro_weekly_schedule() -> dict:
     return {day: {"plans": []} for day in ("mon", "tue", "wed", "thu", "fri", "sat", "sun")}
 
 
+def _activate_membership(client: TestClient) -> None:
+    created = client.post("/api/membership/orders", json={"provider": "manual_test"})
+    assert created.status_code == 200
+    order_id = str(created.json()["data"]["order"]["orderId"])
+    confirmed = client.post(
+        "/api/payments/membership/callback/manual_test",
+        json={"orderId": order_id, "providerTradeNo": f"manual_{order_id}"},
+    )
+    assert confirmed.status_code == 200
+    assert confirmed.json()["data"]["membership"]["isActive"] is True
+
+
 @pytest.fixture()
 def auth_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("PLM_APP_MODE", "hosted")
     monkeypatch.setenv("PLM_ENABLE_AUTH", "true")
     monkeypatch.setenv("PLM_ALLOW_SIGNUP", "true")
+    monkeypatch.setenv("PLM_ENABLE_MANUAL_TEST_PAYMENT", "true")
     monkeypatch.setenv("PLM_BOOTSTRAP_SUPER_ADMIN_EMAILS", "owner@example.com,stranger@example.com")
     monkeypatch.setenv("PLM_ENABLE_ASR", "false")
     monkeypatch.setenv("PLM_ENABLE_SERVER_MEDIA_STREAM", "false")
@@ -50,6 +65,7 @@ def auth_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("PLM_LEGACY_STORE_PATH", "")
     monkeypatch.setenv("PLM_STORE_DB_PATH", str(tmp_path / "plm_store.sqlite3"))
     monkeypatch.setenv("PLM_AUTH_DB_PATH", str(tmp_path / "plm_auth.sqlite3"))
+    monkeypatch.setenv("PLM_MEMBERSHIP_DB_PATH", str(tmp_path / "plm_membership.sqlite3"))
     monkeypatch.setenv("PLM_DATA_DIR", str(tmp_path / "runtime-data"))
     _reset_caches()
     yield
@@ -222,6 +238,7 @@ def test_profile_service_settings_persist_across_relogin(auth_env: None) -> None
     client = TestClient(create_app())
     registered = client.post("/api/auth/register", json={"email": "owner@example.com", "password": "password123"})
     assert registered.status_code == 200
+    _activate_membership(client)
 
     llm_before = client.get("/api/profile/me/llm-settings")
     assert llm_before.status_code == 200
@@ -667,6 +684,7 @@ def test_auth_mode_does_not_fallback_to_deployment_llm_settings(
     client = TestClient(create_app())
     registered = client.post("/api/auth/register", json={"email": "owner@example.com", "password": "password123"})
     assert registered.status_code == 200
+    _activate_membership(client)
 
     llm_before = client.get("/api/profile/me/llm-settings")
     assert llm_before.status_code == 200
@@ -723,6 +741,9 @@ def test_system_pomodoro_tts_preview_returns_audio_when_auth_enabled(
     )
 
     client = TestClient(create_app())
+    register = client.post("/api/auth/register", json={"email": "owner@example.com", "password": "password123"})
+    assert register.status_code == 200
+    _activate_membership(client)
     response = client.post("/api/system/pomodoro/tts-preview", json={"text": "十秒后开始学习"})
 
     assert response.status_code == 200
@@ -747,6 +768,9 @@ def test_system_pomodoro_tts_preview_returns_unavailable_for_tts_failure(
     )
 
     client = TestClient(create_app())
+    register = client.post("/api/auth/register", json={"email": "owner@example.com", "password": "password123"})
+    assert register.status_code == 200
+    _activate_membership(client)
     response = client.post("/api/system/pomodoro/tts-preview", json={"text": "十秒后开始学习"})
 
     assert response.status_code == 503

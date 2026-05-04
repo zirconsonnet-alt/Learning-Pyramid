@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from adapter.auth import get_request_auth_user
-from adapter.deps import get_api, get_auth_store
+from adapter.deps import get_api, get_auth_store, get_membership_store, require_active_membership
 from adapter.schemas import (
     AskLlmRequest,
     AskProjectLlmRawChatCompletionRequest,
@@ -23,6 +23,7 @@ from backend.system.runtime_features import current_runtime_features
 from backend.system.signup_human_check import current_signup_human_check_config, signup_human_check_enabled
 from backend.system.api import SystemAPI
 from backend.system.auth_store import AuthStore
+from backend.system.membership_store import MembershipStore
 from backend.system.pomodoro_tts import PomodoroTtsUnavailable, synthesize_pomodoro_prompt_audio
 from backend.system.public_downloads import list_public_downloads
 
@@ -108,7 +109,13 @@ def get_public_download_catalog() -> dict:
 
 
 @router.post("/system/pomodoro/tts-preview")
-async def synthesize_pomodoro_tts_preview(req: PomodoroTtsPreviewRequest) -> Response:
+async def synthesize_pomodoro_tts_preview(
+    req: PomodoroTtsPreviewRequest,
+    request: Request,
+    membership_store: MembershipStore = Depends(get_membership_store),
+) -> Response:
+    if current_runtime_features().auth_enabled:
+        require_active_membership(request, membership_store)
     try:
         audio_bytes = await synthesize_pomodoro_prompt_audio(req.text)
     except PomodoroTtsUnavailable as exc:
@@ -161,7 +168,10 @@ def ask_llm(
     request: Request,
     api: SystemAPI = Depends(get_api),
     auth_store: AuthStore = Depends(get_auth_store),
+    membership_store: MembershipStore = Depends(get_membership_store),
 ) -> dict:
+    if current_runtime_features().auth_enabled:
+        require_active_membership(request, membership_store)
     current_user = get_request_auth_user(request)
     content = api.request_llm_text(
         user_prompt=req.prompt,
@@ -181,7 +191,10 @@ def ask_project_llm(
     request: Request,
     api: SystemAPI = Depends(get_api),
     auth_store: AuthStore = Depends(get_auth_store),
+    membership_store: MembershipStore = Depends(get_membership_store),
 ) -> dict:
+    if current_runtime_features().auth_enabled:
+        require_active_membership(request, membership_store)
     current_user = get_request_auth_user(request)
     content = api.request_project_llm_text(
         project_id=projectId,  # type: ignore[arg-type]
@@ -206,7 +219,10 @@ def ask_project_llm_chat_completions(
     request: Request,
     api: SystemAPI = Depends(get_api),
     auth_store: AuthStore = Depends(get_auth_store),
+    membership_store: MembershipStore = Depends(get_membership_store),
 ) -> dict:
+    if current_runtime_features().auth_enabled:
+        require_active_membership(request, membership_store)
     current_user = get_request_auth_user(request)
     data = api.request_llm_chat_completion_raw(
         messages=req.messages,
@@ -238,11 +254,14 @@ def ask_project_llm_stream(
     request: Request,
     api: SystemAPI = Depends(get_api),
     auth_store: AuthStore = Depends(get_auth_store),
+    membership_store: MembershipStore = Depends(get_membership_store),
 ) -> StreamingResponse:
     current_user = get_request_auth_user(request)
 
     def _event_stream():
         try:
+            if current_runtime_features().auth_enabled:
+                require_active_membership(request, membership_store)
             yield _sse_event("start", {"ok": True})
             for chunk in api.request_project_llm_text_stream(
                 project_id=projectId,  # type: ignore[arg-type]

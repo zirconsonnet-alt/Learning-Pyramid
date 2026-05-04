@@ -12,6 +12,7 @@ from adapter.deps import (
     get_api,
     get_auth_rate_limit_store,
     get_auth_store,
+    get_membership_commission_store,
     get_membership_marketing_store,
     get_membership_payment_service,
     get_membership_store,
@@ -28,9 +29,50 @@ def _reset_caches() -> None:
     get_api.cache_clear()
     get_auth_rate_limit_store.cache_clear()
     get_auth_store.cache_clear()
+    get_membership_commission_store.cache_clear()
     get_membership_marketing_store.cache_clear()
     get_membership_payment_service.cache_clear()
     get_membership_store.cache_clear()
+
+
+@pytest.fixture()
+def hosted_membership_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PLM_APP_MODE", "hosted")
+    monkeypatch.setenv("PLM_ENABLE_AUTH", "true")
+    monkeypatch.setenv("PLM_ALLOW_SIGNUP", "true")
+    monkeypatch.setenv("PLM_REQUIRE_SIGNUP_INVITE", "false")
+    monkeypatch.setenv("PLM_ENABLE_MANUAL_TEST_PAYMENT", "true")
+    monkeypatch.setenv("PLM_ENABLE_ASR", "false")
+    monkeypatch.setenv("PLM_ENABLE_SERVER_MEDIA_STREAM", "false")
+    monkeypatch.setenv("PLM_PROJECTS_ROOT", str(tmp_path / "projects"))
+    monkeypatch.setenv("PLM_STORE_PATH", "")
+    monkeypatch.setenv("PLM_LEGACY_STORE_PATH", "")
+    monkeypatch.setenv("PLM_STORE_DB_PATH", str(tmp_path / "plm_store.sqlite3"))
+    monkeypatch.setenv("PLM_AUTH_DB_PATH", str(tmp_path / "plm_auth.sqlite3"))
+    monkeypatch.setenv("PLM_MEMBERSHIP_DB_PATH", str(tmp_path / "plm_membership.sqlite3"))
+    monkeypatch.setenv("PLM_DATA_DIR", str(tmp_path / "runtime-data"))
+    _reset_caches()
+    yield
+    _reset_caches()
+
+
+def _register_member(client: TestClient, email: str) -> str:
+    resp = client.post("/api/auth/register", json={"email": email, "password": "password123"})
+    assert resp.status_code == 200
+    return str(resp.json()["data"]["userId"])
+
+
+def _activate_membership(client: TestClient) -> str:
+    created = client.post("/api/membership/orders", json={"provider": "manual_test"})
+    assert created.status_code == 200
+    order_id = str(created.json()["data"]["order"]["orderId"])
+    confirmed = client.post(
+        "/api/payments/membership/callback/manual_test",
+        json={"orderId": order_id, "providerTradeNo": f"manual_{order_id}"},
+    )
+    assert confirmed.status_code == 200
+    assert confirmed.json()["data"]["membership"]["isActive"] is True
+    return order_id
 
 
 def test_unknown_api_path_returns_error_envelope() -> None:
@@ -360,6 +402,59 @@ def test_system_llm_ask_endpoint_uses_saved_global_settings(monkeypatch, tmp_pat
         "temperature": 0.2,
     }
     _reset_caches()
+
+
+def test_member_can_read_and_update_personal_llm_settings(hosted_membership_env: None) -> None:
+    client = TestClient(create_app())
+    _register_member(client, "active-member@example.com")
+    _activate_membership(client)
+
+    before = client.get("/api/profile/me/llm-settings")
+    assert before.status_code == 200
+
+    updated = client.put(
+        "/api/profile/me/llm-settings",
+        json={
+            "baseUrl": "https://api.openai.com/v1",
+            "modelName": "gpt-4o-mini",
+            "apiKey": "sk-member-12345678",
+        },
+    )
+    assert updated.status_code == 200
+    assert updated.json()["data"]["llmConfigured"] is True
+    assert updated.json()["data"]["llmSource"] == "user"
+
+
+def test_non_member_is_blocked_from_personal_llm_settings(hosted_membership_env: None) -> None:
+    client = TestClient(create_app())
+    _register_member(client, "non-member@example.com")
+
+    listed = client.get("/api/profile/me/llm-settings")
+    assert listed.status_code == 400
+    assert listed.json() == {
+        "ok": False,
+        "error": {
+            "code": "PRECONDITION",
+            "message": "This feature requires active membership.",
+        },
+    }
+
+    updated = client.put(
+        "/api/profile/me/llm-settings",
+        json={
+            "baseUrl": "https://api.openai.com/v1",
+            "modelName": "gpt-4o-mini",
+            "apiKey": "sk-member-12345678",
+        },
+    )
+    assert updated.status_code == 400
+    assert updated.json() == {
+        "ok": False,
+        "error": {
+            "code": "PRECONDITION",
+            "message": "This feature requires active membership.",
+        },
+    }
 
 
 def test_system_llm_ask_endpoint_can_concat_system_prompt_into_user_message(monkeypatch, tmp_path: Path) -> None:
@@ -895,6 +990,131 @@ def test_project_llm_stream_endpoint_returns_sse_events(monkeypatch, tmp_path: P
     assert str(kwargs["learning_task_node_id"]) == "ltn_stream_1"
     assert kwargs["user_prompt"] == "打个招呼"
     _reset_caches()
+
+
+def test_non_member_hosted_llm_endpoints_are_blocked_before_llm_work(hosted_membership_env: None, tmp_path: Path) -> None:
+    client = TestClient(create_app())
+    _register_member(client, "blocked-ai@example.com")
+
+    project_resp = client.post(
+        "/api/projects",
+        json={"title": "Blocked AI Project", "projectRoot": str(tmp_path / "blocked-ai-project"), "initialSourceKind": "MANUAL"},
+    )
+    assert project_resp.status_code == 200
+    project_id = str(project_resp.json()["data"]["projectId"])
+
+    system_resp = client.post("/api/system/llm/ask", json={"prompt": "hello"})
+    assert system_resp.status_code == 400
+    assert system_resp.json()["error"]["message"] == "This feature requires active membership."
+
+    project_resp = client.post(f"/api/projects/{project_id}/llm/ask", json={"prompt": "hello"})
+    assert project_resp.status_code == 400
+    assert project_resp.json()["error"]["message"] == "This feature requires active membership."
+
+    raw_resp = client.post(
+        f"/api/projects/{project_id}/llm/chat-completions",
+        json={"messages": [{"role": "user", "content": "hello"}]},
+    )
+    assert raw_resp.status_code == 400
+    assert raw_resp.json()["error"]["message"] == "This feature requires active membership."
+
+    stream_resp = client.post(f"/api/projects/{project_id}/llm/ask/stream", json={"prompt": "hello"})
+    assert stream_resp.status_code == 200
+    assert 'event: error\ndata: {"code": "PRECONDITION", "message": "This feature requires active membership."}' in stream_resp.text
+
+
+def test_member_hosted_llm_endpoints_continue_to_work(hosted_membership_env: None, tmp_path: Path) -> None:
+    client = TestClient(create_app())
+    _register_member(client, "working-ai@example.com")
+    _activate_membership(client)
+    client.put(
+        "/api/profile/me/llm-settings",
+        json={
+            "baseUrl": "https://api.openai.com/v1",
+            "modelName": "gpt-4o-mini",
+            "apiKey": "sk-member-12345678",
+        },
+    )
+
+    project_resp = client.post(
+        "/api/projects",
+        json={"title": "Working AI Project", "projectRoot": str(tmp_path / "working-ai-project"), "initialSourceKind": "MANUAL"},
+    )
+    assert project_resp.status_code == 200
+    project_id = str(project_resp.json()["data"]["projectId"])
+
+    with patch(
+        "backend.system.api.SystemAPI._http_post_json",
+        return_value={"choices": [{"message": {"role": "assistant", "content": "会员可用"}}]},
+    ):
+        system_resp = client.post("/api/system/llm/ask", json={"prompt": "hello"})
+        assert system_resp.status_code == 200
+        assert system_resp.json()["data"]["content"] == "会员可用"
+
+        project_ask = client.post(f"/api/projects/{project_id}/llm/ask", json={"prompt": "hello"})
+        assert project_ask.status_code == 200
+        assert project_ask.json()["data"]["content"] == "会员可用"
+
+        raw_resp = client.post(
+            f"/api/projects/{project_id}/llm/chat-completions",
+            json={"messages": [{"role": "user", "content": "hello"}]},
+        )
+        assert raw_resp.status_code == 200
+
+
+def test_non_member_is_blocked_from_pomodoro_tts_preview(hosted_membership_env: None) -> None:
+    client = TestClient(create_app())
+    _register_member(client, "blocked-pomodoro@example.com")
+
+    resp = client.post("/api/system/pomodoro/tts-preview", json={"text": "10 秒后开始专注"})
+    assert resp.status_code == 400
+    assert resp.json() == {
+        "ok": False,
+        "error": {
+            "code": "PRECONDITION",
+            "message": "This feature requires active membership.",
+        },
+    }
+
+
+def test_non_member_can_still_use_project_and_review_endpoints(hosted_membership_env: None, tmp_path: Path) -> None:
+    client = TestClient(create_app())
+    _register_member(client, "non-member-regression@example.com")
+
+    project_resp = client.post(
+        "/api/projects",
+        json={
+            "title": "Ungated Workflow Project",
+            "projectRoot": str(tmp_path / "ungated-project"),
+            "initialSourceKind": "MANUAL",
+            "initialProjectType": "LOOSE_POINTS",
+        },
+    )
+    assert project_resp.status_code == 200
+    project_id = str(project_resp.json()["data"]["projectId"])
+
+    listed_projects = client.get("/api/projects")
+    assert listed_projects.status_code == 200
+    assert any(str(item["projectId"]) == project_id for item in listed_projects.json()["data"])
+
+    submitted = client.post(
+        f"/api/projects/{project_id}/learning-tasks",
+        json={
+            "title": "Review remains available",
+            "items": [
+                {
+                    "question": [{"kind": "TEXT", "text": "什么是学习金字塔？"}],
+                    "answer": [{"kind": "TEXT", "text": "一种帮助组织学习过程的结构化方法。"}],
+                    "references": [],
+                }
+            ],
+        },
+    )
+    assert submitted.status_code == 200, submitted.json()
+
+    recall_points = client.get(f"/api/projects/{project_id}/recall-points")
+    assert recall_points.status_code == 200
+    assert len(recall_points.json()["data"]) == 1
 
 
 def test_project_llm_debug_endpoint_returns_latest_stream_record(monkeypatch, tmp_path: Path) -> None:

@@ -11,12 +11,17 @@ import { Label } from "@/ui/components/ui/label"
 import {
   useCloseAdminMembershipOrder,
   useAdminMembershipCoupons,
+  useAdminMembershipCommissions,
   useAdminMembershipInvites,
   useAdminMembershipOrderDetail,
   useAdminMembershipOrders,
   useAdminMembershipOverview,
+  useAdminMembershipWithdrawals,
   useGrantAdminMembershipCoupon,
+  useGrantAdminMembershipMonths,
   useRefundAdminMembershipOrder,
+  useResolveAdminMembershipWithdrawal,
+  useSettleAdminMembershipCommissions,
   useSyncAdminMembershipOrderPayment,
   useVoidAdminMembershipCoupon,
 } from "@/ui/queries/admin"
@@ -25,12 +30,14 @@ import { cn } from "@/ui/utils"
 import { AdminNav } from "@/views/admin/AdminNav"
 import {
   copyTextToClipboard,
+  describeCommissionStatus,
   describeInviteRecordStatus,
   describeMembershipCouponSource,
   describeMembershipCouponStatus,
   describeMembershipOrderStatus,
   describeMembershipOrderType,
   describeMembershipPaymentProvider,
+  describeWithdrawalStatus,
   formatMembershipDateTime,
   formatMembershipPrice,
 } from "@/views/membership/membershipUi"
@@ -196,11 +203,17 @@ export function AdminMembershipPage() {
   const [inviteStatus, setInviteStatus] = useState("all")
   const [couponSearch, setCouponSearch] = useState("")
   const [couponStatus, setCouponStatus] = useState("all")
+  const [commissionSearch, setCommissionSearch] = useState("")
+  const [commissionStatus, setCommissionStatus] = useState("all")
+  const [withdrawalSearch, setWithdrawalSearch] = useState("")
+  const [withdrawalStatus, setWithdrawalStatus] = useState("all")
   const [grantUserId, setGrantUserId] = useState("")
   const [grantAmountCent, setGrantAmountCent] = useState("500")
   const [grantTitle, setGrantTitle] = useState("后台补偿 5 元券")
   const [grantExpiresInDays, setGrantExpiresInDays] = useState("30")
   const [grantMinSpendCent, setGrantMinSpendCent] = useState("0")
+  const [grantMembershipUserId, setGrantMembershipUserId] = useState("")
+  const [grantMembershipMonths, setGrantMembershipMonths] = useState("1")
 
   const overviewQ = useAdminMembershipOverview()
   const ordersQ = useAdminMembershipOrders(
@@ -229,12 +242,31 @@ export function AdminMembershipPage() {
     },
     true,
   )
+  const commissionsQ = useAdminMembershipCommissions(
+    {
+      search: commissionSearch.trim() || undefined,
+      status: commissionStatus === "all" ? undefined : commissionStatus,
+      limit: 50,
+    },
+    true,
+  )
+  const withdrawalsQ = useAdminMembershipWithdrawals(
+    {
+      search: withdrawalSearch.trim() || undefined,
+      status: withdrawalStatus === "all" ? undefined : withdrawalStatus,
+      limit: 50,
+    },
+    true,
+  )
   const orderDetailQ = useAdminMembershipOrderDetail(selectedOrderId, Boolean(selectedOrderId))
   const grantCoupon = useGrantAdminMembershipCoupon()
+  const grantMembership = useGrantAdminMembershipMonths()
   const refundOrder = useRefundAdminMembershipOrder()
   const syncPayment = useSyncAdminMembershipOrderPayment()
   const closeOrder = useCloseAdminMembershipOrder()
   const voidCoupon = useVoidAdminMembershipCoupon()
+  const settleCommissions = useSettleAdminMembershipCommissions()
+  const resolveWithdrawal = useResolveAdminMembershipWithdrawal()
   const autoRefreshIntervalMs = 5_000
   const activeOrderStatuses = new Set(["pending", "refund_pending"])
   const selectedOrderStatus = orderDetailQ.data?.order.status ?? ""
@@ -255,7 +287,16 @@ export function AdminMembershipPage() {
   useEffect(() => {
     if (!hasActiveOrder || typeof window === "undefined") return
     const timer = window.setInterval(() => {
-      if (syncPayment.isPending || closeOrder.isPending || refundOrder.isPending || grantCoupon.isPending || voidCoupon.isPending) {
+      if (
+        syncPayment.isPending ||
+        closeOrder.isPending ||
+        refundOrder.isPending ||
+        grantCoupon.isPending ||
+        grantMembership.isPending ||
+        settleCommissions.isPending ||
+        resolveWithdrawal.isPending ||
+        voidCoupon.isPending
+      ) {
         return
       }
       void Promise.allSettled([
@@ -263,6 +304,8 @@ export function AdminMembershipPage() {
         queryClient.invalidateQueries({ queryKey: ["admin", "membership", "orders"] }),
         queryClient.invalidateQueries({ queryKey: ["admin", "membership", "invites"] }),
         queryClient.invalidateQueries({ queryKey: ["admin", "membership", "coupons"] }),
+        queryClient.invalidateQueries({ queryKey: ["admin", "membership", "commissions"] }),
+        queryClient.invalidateQueries({ queryKey: ["admin", "membership", "withdrawals"] }),
         selectedOrderId
           ? queryClient.invalidateQueries({ queryKey: ["admin", "membership", "order-detail", selectedOrderId] })
           : Promise.resolve(),
@@ -273,10 +316,13 @@ export function AdminMembershipPage() {
     autoRefreshIntervalMs,
     closeOrder.isPending,
     grantCoupon.isPending,
+    grantMembership.isPending,
     hasActiveOrder,
     queryClient,
     refundOrder.isPending,
+    resolveWithdrawal.isPending,
     selectedOrderId,
+    settleCommissions.isPending,
     syncPayment.isPending,
     voidCoupon.isPending,
   ])
@@ -389,6 +435,34 @@ export function AdminMembershipPage() {
     }
   }
 
+  async function onGrantMembership(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const months = Number(grantMembershipMonths)
+    if (!grantMembershipUserId.trim()) {
+      showErrorFeedback("授予会员失败", "请先填写目标用户 ID 或 UID。")
+      return
+    }
+    if (!Number.isFinite(months) || months < 1 || months > 24) {
+      showErrorFeedback("授予会员失败", "授予月数必须是 1 到 24 之间的数字。")
+      return
+    }
+    try {
+      const result = await grantMembership.mutateAsync({
+        userId: grantMembershipUserId.trim(),
+        months: Math.round(months),
+      })
+      const owner = userLabel(result.user)
+      showSuccessFeedback(
+        "会员已授予",
+        `已向 ${owner.title} 授予 ${result.months} 个月会员，有效期至 ${formatMembershipDateTime(result.membership.currentEndsAt)}。`,
+      )
+      setGrantMembershipUserId("")
+      setGrantMembershipMonths("1")
+    } catch (err) {
+      showErrorFeedback("授予会员失败", formatApiError(err))
+    }
+  }
+
   async function onVoidCoupon(couponId: string, title: string) {
     if (typeof window !== "undefined" && !window.confirm(`确认作废「${title}」吗？`)) {
       return
@@ -455,6 +529,32 @@ export function AdminMembershipPage() {
     }
   }
 
+  async function onSettleCommissions() {
+    try {
+      const result = await settleCommissions.mutateAsync()
+      showSuccessFeedback(
+        "佣金结算已执行",
+        `已结算 ${result.settledCount} 笔，取消 ${result.canceledCount} 笔，跳过 ${result.skippedCount} 笔。`,
+      )
+    } catch (err) {
+      showErrorFeedback("佣金结算失败", formatApiError(err))
+    }
+  }
+
+  async function onResolveWithdrawal(withdrawalId: string, status: "succeeded" | "failed") {
+    const failureReason = status === "failed" ? window.prompt("请输入失败原因", "微信转账失败") || "微信转账失败" : ""
+    try {
+      const result = await resolveWithdrawal.mutateAsync({
+        withdrawalId,
+        status,
+        failureReason,
+      })
+      showSuccessFeedback("提现状态已更新", `提现 ${result.withdrawalId} 当前为 ${describeWithdrawalStatus(result.status)}。`)
+    } catch (err) {
+      showErrorFeedback("更新提现状态失败", formatApiError(err))
+    }
+  }
+
   if (overviewQ.isLoading && !overviewQ.data) {
     return <LoadingNotice title="正在加载会员后台" message="稍等一下，我们正在汇总订单、邀请和优惠券数据。" />
   }
@@ -470,7 +570,10 @@ export function AdminMembershipPage() {
         { label: "活跃会员", value: overview.activeMemberships, help: "当前仍在有效期内的会员" },
         { label: "会员收入", value: formatMembershipPrice(overview.totalPaidAmountCent), help: "已支付订单累计实收" },
         { label: "邀请绑定", value: overview.inviteBindings, help: "已录入的邀请码绑定关系" },
-        { label: "已转化邀请", value: overview.rewardedInvites, help: "首单支付成功并发券的邀请" },
+        { label: "待结算佣金", value: formatMembershipPrice(overview.pendingCommissionCent), help: "仍处于退款窗口内的邀请佣金" },
+        { label: "可提现佣金", value: formatMembershipPrice(overview.withdrawableCommissionCent), help: "已过退款窗口且尚未提现的佣金" },
+        { label: "提现处理中", value: formatMembershipPrice(overview.reservedWithdrawalCent), help: "已提交但未回填终态的提现金额" },
+        { label: "已打款", value: formatMembershipPrice(overview.paidOutCent), help: "已完成提现打款的累计金额" },
         { label: "可用优惠券", value: overview.availableCoupons, help: "当前仍可在会员下单时使用" },
       ]
     : []
@@ -551,7 +654,7 @@ export function AdminMembershipPage() {
     }
     if (selectedOrderDetail.invite?.rewardTriggeredByThisOrder) {
       detailNotes.push({
-        title: "这笔订单触发了邀请奖励",
+        title: "这笔订单触发了历史邀请奖励",
         message: selectedOrderDetail.invite.rewardCoupon
           ? `奖励券 ${selectedOrderDetail.invite.rewardCoupon.couponId} 已发给邀请人。`
           : "邀请奖励已关联到这笔订单，可以继续检查奖励券状态。",
@@ -591,13 +694,182 @@ export function AdminMembershipPage() {
         ))}
       </div>
 
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <CardTitle>邀请佣金</CardTitle>
+                <CardDescription>查看待结算、已结算和已取消的邀请佣金，并手动执行到期结算。</CardDescription>
+              </div>
+              <Button type="button" variant="outline" onClick={() => void onSettleCommissions()} disabled={settleCommissions.isPending}>
+                {settleCommissions.isPending ? "结算中..." : "执行结算"}
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_160px]">
+              <Input
+                value={commissionSearch}
+                onChange={(event) => setCommissionSearch(event.target.value)}
+                placeholder="按邀请人/被邀请人搜索"
+              />
+              <select
+                value={commissionStatus}
+                onChange={(event) => setCommissionStatus(event.target.value)}
+                className="rounded-xl border border-input bg-background px-3 py-2 text-sm"
+              >
+                <option value="all">全部状态</option>
+                <option value="pending">待结算</option>
+                <option value="settled">已结算</option>
+                <option value="canceled">已取消</option>
+              </select>
+            </div>
+            {commissionsQ.error ? <ErrorNotice title="佣金列表加载失败" message={formatApiError(commissionsQ.error)} /> : null}
+            {!commissionsQ.error && commissionsQ.isLoading ? <LoadingNotice title="正在加载佣金" message="后台正在读取邀请佣金流水。" /> : null}
+            {!commissionsQ.error && !commissionsQ.isLoading && (commissionsQ.data?.length ?? 0) === 0 ? (
+              <ContentEmptyState title="暂无佣金记录" message="当前筛选条件下还没有邀请佣金。" />
+            ) : null}
+            <div className="space-y-3">
+              {commissionsQ.data?.map((item) => {
+                const inviter = userLabel(item.inviter)
+                const invitee = userLabel(item.invitee)
+                return (
+                  <div key={item.commissionId} className="theme-soft-surface rounded-2xl p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-foreground">{formatMembershipPrice(item.commissionAmountCent)}</div>
+                        <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                          邀请人 {inviter.title} · 被邀请人 {invitee.title}
+                        </div>
+                        <div className="mt-1 break-all text-xs leading-5 text-muted-foreground">订单 {item.sourceOrderId}</div>
+                      </div>
+                      <StatusPill tone={item.status === "settled" ? "accent" : item.status === "pending" ? "warm" : "default"}>
+                        {describeCommissionStatus(item.status)}
+                      </StatusPill>
+                    </div>
+                    <div className="mt-3 text-xs leading-5 text-muted-foreground">退款窗口至 {formatMembershipDateTime(item.refundWindowEndsAt)}</div>
+                  </div>
+                )
+              })}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>佣金提现</CardTitle>
+            <CardDescription>查看用户提现到微信支付的请求，并回填 provider 成功或失败结果。</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_160px]">
+              <Input
+                value={withdrawalSearch}
+                onChange={(event) => setWithdrawalSearch(event.target.value)}
+                placeholder="按提现用户搜索"
+              />
+              <select
+                value={withdrawalStatus}
+                onChange={(event) => setWithdrawalStatus(event.target.value)}
+                className="rounded-xl border border-input bg-background px-3 py-2 text-sm"
+              >
+                <option value="all">全部状态</option>
+                <option value="processing">处理中</option>
+                <option value="succeeded">已到账</option>
+                <option value="failed">失败退回</option>
+              </select>
+            </div>
+            {withdrawalsQ.error ? <ErrorNotice title="提现列表加载失败" message={formatApiError(withdrawalsQ.error)} /> : null}
+            {!withdrawalsQ.error && withdrawalsQ.isLoading ? <LoadingNotice title="正在加载提现" message="后台正在读取佣金提现请求。" /> : null}
+            {!withdrawalsQ.error && !withdrawalsQ.isLoading && (withdrawalsQ.data?.length ?? 0) === 0 ? (
+              <ContentEmptyState title="暂无提现记录" message="当前筛选条件下还没有提现请求。" />
+            ) : null}
+            <div className="space-y-3">
+              {withdrawalsQ.data?.map((item) => {
+                const owner = userLabel(item.user)
+                return (
+                  <div key={item.withdrawalId} className="theme-soft-surface rounded-2xl p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-foreground">{formatMembershipPrice(item.amountCent)}</div>
+                        <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                          {owner.title} · {item.wechatOpenIdMasked}
+                        </div>
+                        <div className="mt-1 break-all text-xs leading-5 text-muted-foreground">
+                          提现单 {item.withdrawalId}
+                          {item.providerTransferNo ? ` · provider ${item.providerTransferNo}` : ""}
+                        </div>
+                      </div>
+                      <StatusPill tone={item.status === "succeeded" ? "accent" : item.status === "failed" ? "default" : "warm"}>
+                        {describeWithdrawalStatus(item.status)}
+                      </StatusPill>
+                    </div>
+                    {item.failureReason ? <div className="mt-2 text-xs text-destructive">{item.failureReason}</div> : null}
+                    {item.status === "processing" || item.status === "pending" ? (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={() => void onResolveWithdrawal(item.withdrawalId, "succeeded")}
+                          disabled={resolveWithdrawal.isPending}
+                        >
+                          标记成功
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void onResolveWithdrawal(item.withdrawalId, "failed")}
+                          disabled={resolveWithdrawal.isPending}
+                        >
+                          标记失败
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
+                )
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
         <Card>
           <CardHeader>
-            <CardTitle>人工发券</CardTitle>
+            <CardTitle>人工授予</CardTitle>
             <CardDescription>用于补偿、活动补发或人工干预。目标用户支持填写内部 userId，也支持直接填公开 UID。</CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-5">
+            <form className="grid gap-4 md:grid-cols-[minmax(0,1fr)_160px]" onSubmit={(event) => void onGrantMembership(event)}>
+              <div className="space-y-2">
+                <Label htmlFor="admin-membership-grant-membership-user">授予会员</Label>
+                <Input
+                  id="admin-membership-grant-membership-user"
+                  value={grantMembershipUserId}
+                  onChange={(event) => setGrantMembershipUserId(event.target.value)}
+                  placeholder="userId 或公开 UID"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="admin-membership-grant-membership-months">授予月数</Label>
+                <Input
+                  id="admin-membership-grant-membership-months"
+                  type="number"
+                  min="1"
+                  max="24"
+                  step="1"
+                  value={grantMembershipMonths}
+                  onChange={(event) => setGrantMembershipMonths(event.target.value)}
+                />
+              </div>
+              <div className="theme-subtle-surface md:col-span-2 flex flex-wrap items-center justify-between gap-3 rounded-[1rem] border-dashed px-4 py-3">
+                <div className="text-sm text-muted-foreground">直接写入会员权益，不生成会员订单。</div>
+                <Button type="submit" disabled={grantMembership.isPending}>
+                  {grantMembership.isPending ? "正在授予..." : "确认授予会员"}
+                </Button>
+              </div>
+            </form>
             <form className="grid gap-4 md:grid-cols-2" onSubmit={(event) => void onGrantCoupon(event)}>
               <div className="space-y-2 md:col-span-2">
                 <Label htmlFor="admin-membership-grant-user">目标用户</Label>
@@ -1043,12 +1315,16 @@ export function AdminMembershipPage() {
                             : "当前用户没有邀请码绑定"}
                         </div>
                         <div>
-                          奖励触发：
-                          {selectedOrderDetail.invite?.rewardTriggeredByThisOrder
-                            ? selectedOrderDetail.invite.rewardCoupon
-                              ? `本单已触发奖励券 ${selectedOrderDetail.invite.rewardCoupon.couponId}`
-                              : "本单已触发邀请奖励"
-                            : "这笔订单没有触发新的邀请奖励"}
+                          邀请收益：
+                          {selectedOrderDetail.invite?.commission
+                            ? `本单关联佣金 ${selectedOrderDetail.invite.commission.commissionId}，状态 ${describeCommissionStatus(
+                                selectedOrderDetail.invite.commission.status,
+                              )}`
+                            : selectedOrderDetail.invite?.rewardTriggeredByThisOrder
+                              ? selectedOrderDetail.invite.rewardCoupon
+                                ? `本单已触发历史奖励券 ${selectedOrderDetail.invite.rewardCoupon.couponId}`
+                                : "本单已触发历史邀请奖励"
+                              : "这笔订单没有触发新的邀请佣金"}
                         </div>
                       </div>
                     </div>
@@ -1111,7 +1387,7 @@ export function AdminMembershipPage() {
       <Card>
         <CardHeader>
           <CardTitle>邀请转化</CardTitle>
-          <CardDescription>用来追踪邀请码绑定是否成功、谁已转化首单，以及奖励券是否正确发放。</CardDescription>
+          <CardDescription>用来追踪邀请码绑定、7.5 折券、佣金触发与结算状态。</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px]">
@@ -1134,13 +1410,16 @@ export function AdminMembershipPage() {
               >
                 <option value="all">全部状态</option>
                 <option value="bound">bound</option>
+                <option value="discount_issued">discount_issued</option>
+                <option value="commission_pending">commission_pending</option>
+                <option value="commission_settled">commission_settled</option>
                 <option value="rewarded">rewarded</option>
               </select>
             </div>
           </div>
 
           {invitesQ.error ? <ErrorNotice title="邀请记录加载失败" message={formatApiError(invitesQ.error)} /> : null}
-          {!invitesQ.error && invitesQ.isLoading ? <LoadingNotice title="正在加载邀请记录" message="后台正在汇总邀请码绑定与奖励发放数据。" /> : null}
+          {!invitesQ.error && invitesQ.isLoading ? <LoadingNotice title="正在加载邀请记录" message="后台正在汇总邀请码绑定、折扣券与佣金数据。" /> : null}
           {!invitesQ.error && !invitesQ.isLoading && (invitesQ.data?.length ?? 0) === 0 ? (
             <ContentEmptyState title="没有匹配的邀请记录" message="可以换个用户关键词，或者放宽绑定状态筛选。" />
           ) : null}
@@ -1166,9 +1445,14 @@ export function AdminMembershipPage() {
                       <span>被邀请人：{invitee.subtitle}</span>
                       <span>奖励时间：{formatMembershipDateTime(item.rewardedAt)}</span>
                     </div>
-                    {item.rewardCouponId || item.rewardTriggerOrderId ? (
+                    {item.commissionAmountCent ? (
                       <div className="text-xs text-muted-foreground">
-                        触发订单：{item.rewardTriggerOrderId || "未触发"} · 奖励券：{item.rewardCouponId || "未发放"}
+                        触发订单：{item.rewardTriggerOrderId || "未触发"} · 佣金：{formatMembershipPrice(item.commissionAmountCent)} · 状态：
+                        {item.commissionStatus ? describeCommissionStatus(item.commissionStatus) : "待记录"}
+                      </div>
+                    ) : item.rewardCouponId || item.rewardTriggerOrderId ? (
+                      <div className="text-xs text-muted-foreground">
+                        触发订单：{item.rewardTriggerOrderId || "未触发"} · 历史奖励券：{item.rewardCouponId || "未发放"}
                       </div>
                     ) : null}
                   </div>
@@ -1194,7 +1478,7 @@ export function AdminMembershipPage() {
       <Card>
         <CardHeader>
           <CardTitle>优惠券运营</CardTitle>
-          <CardDescription>查看邀请奖励券和后台补偿券的状态，必要时可以手动作废还未使用的券。</CardDescription>
+          <CardDescription>查看邀请码 7.5 折券、历史邀请奖励券和后台补偿券的状态，必要时可以手动作废还未使用的券。</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px]">

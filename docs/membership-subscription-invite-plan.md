@@ -1,8 +1,8 @@
 # 会员、邀请码、优惠券落地方案
 
-## 0. 当前实现状态（2026-03-26）
+## 0. 当前实现状态（2026-05-05）
 
-这份文档最初是落地方案，现在项目里对应功能已经基本实现完成。下面先给出“当前代码实际状态”，后面的章节保留原始设计与规划说明；如果两边有冲突，以这一节和 [membership-selfhost-launch-checklist.md](/i:/Projects/LearningPyramid/docs/membership-selfhost-launch-checklist.md) 为准。
+这份文档最初是落地方案，现在项目里对应功能已经基本实现完成。下面先给出“当前代码实际状态”，后面的章节保留原始设计与规划说明；如果两边有冲突，以这一节、`specs/008-invite-commission/plan.md` 和 [membership-selfhost-launch-checklist.md](/i:/Projects/LearningPyramid/docs/membership-selfhost-launch-checklist.md) 为准。后文仍出现的 `19.9 元`、`14.9 元`、邀请人 `5 元券` 等内容属于旧模型历史说明，不再代表当前新订单行为。
 
 当前已经落地：
 
@@ -12,8 +12,16 @@
 - 已支持用户侧手动同步支付状态
 - 已支持用户侧关闭待支付订单
 - 已支持后台查看订单详情、同步支付、关闭待支付订单、退款回滚
+- 已支持后台按月直接授予会员，写入独立会员权益，不生成会员订单
 - 已支持远端 `closed / failed` 终态回写本地订单，不再长期停留在 `pending`
 - 已提供待支付微信订单巡检脚本：`python tools/reconcile_membership_payments.py`
+- 已将 AI 能力与番茄钟划为会员专属功能：配置个人 LLM、AI 问答、播放器 AI 问答、番茄钟页面与设置仅对有效会员开放
+- 已将月会员价格调整为 `20 元`
+- 已将邀请码奖励模型调整为：被邀请人获得 `7.5 折会员券`，邀请人不再新发 `5 元券`
+- 已支持邀请人固定 `5 元` 佣金：支付实付金额至少 `15 元`，并在 `24 小时` 退款窗口结束后结算
+- 已支持用户佣金余额、佣金记录、提现申请与提现记录
+- 已支持佣金提现到微信支付相关收款身份；本地会先冻结可提现余额，成功后转入已打款，失败后退回可提现
+- 已支持后台查看佣金、手动触发结算、查看提现和处理提现成功/失败状态
 
 当前代码里相较于原始方案多出来的关键字段：
 
@@ -27,35 +35,45 @@
 - `POST /api/payments/wechat/notify`
 - `POST /api/payments/wechat/refund-notify`
 - `GET /api/admin/membership/orders/{orderId}`
+- `POST /api/admin/membership/grants`
 - `POST /api/admin/membership/orders/{orderId}/sync-payment`
 - `POST /api/admin/membership/orders/{orderId}/close`
+- `GET /api/commissions/me`
+- `GET /api/commissions/withdrawals`
+- `POST /api/commissions/withdrawals`
+- `GET /api/admin/membership/commissions`
+- `POST /api/admin/membership/commissions/settle`
+- `GET /api/admin/membership/withdrawals`
+- `POST /api/admin/membership/withdrawals/{withdrawalId}/resolve`
 
 ## 1. 范围与业务规则
 
-这版按你当前确认的规则落地：
+当前按 `specs/008-invite-commission/plan.md` 确认的规则落地：
 
-- 月会员标准价：`19.9 元`
-- 新用户首个成功会员订单：`14.9 元`
-- 用户有 `5 元券` 时，可用于首单，也可用于续费
+- 月会员标准价：`20 元`
+- 被邀请人在绑定有效邀请码后获得 `1 张 7.5 折会员券`
+- 邀请折扣券用于 `20 元` 月会员订单时，实付金额为 `15 元`
 - 每笔订单最多使用 `1 张券`
-- 邀请成功定义：被邀请人完成自己的首个成功会员订单
-- 邀请奖励：邀请人获得 `1 张 5 元券`
-- 每个被邀请人只能绑定 `1` 个邀请人，只能触发 `1` 次邀请奖励
+- 邀请成功定义：被邀请人完成自己的首个成功会员订单，且该订单实付金额至少 `15 元`
+- 邀请奖励：邀请人获得固定 `5 元` 佣金，不再新发邀请人侧 `5 元券`
+- 每个被邀请人只能绑定 `1` 个邀请人，只能触发 `1` 次佣金
 - 邀请码第一版直接复用现有 `user_profiles.public_uid`
-- 退款时需要撤销该首单触发的邀请奖励；若奖励券已使用，记为冻结或负账状态
+- 会员订单退款期为支付成功后 `24 小时`，超过退款期不能再发起新的退款
+- 佣金在退款窗口结束前保持 `pending`，退款会取消待结算佣金；窗口结束且未退款后结算为可提现余额
+- 提现会先从可提现余额转入冻结/处理中余额；微信支付打款成功后转入已打款，失败后退回可提现
 
 建议补充的固定规则：
 
 - 金额统一使用“分”为单位存储，避免浮点误差
 - 会员时长第一版按 `30 天` 发放，前端文案仍显示“月会员”
-- 优惠券有效期建议 `30 天`
-- 订单成功、发会员、发邀请券都必须做幂等
+- 邀请折扣券有效期建议 `30 天`
+- 订单成功、发会员、发邀请券、创建佣金、结算佣金和提现状态处理都必须做幂等
 
 当前价格换算：
 
-- `1990` 分：标准月会员
-- `1490` 分：首单优惠价
-- `500` 分：邀请奖励券金额
+- `2000` 分：标准月会员
+- `1500` 分：使用 `7.5 折` 邀请券后的实付金额
+- `500` 分：邀请人固定佣金金额
 
 ## 2. 接入现有项目的推荐位置
 
@@ -342,6 +360,17 @@ CREATE TABLE IF NOT EXISTS membership_accounts (
 
 ## 4. 关键约束与判定逻辑
 
+### 4.0 会员专属功能
+
+当前托管鉴权模式下，以下功能需要当前账号拥有有效会员：
+
+- 全局设置里的个人 LLM 配置
+- 系统 AI 问答与项目 AI 问答
+- 播放器里的视频 AI 问答
+- 番茄钟页面、番茄钟设置，以及服务端番茄钟语音预览辅助接口
+
+非会员访问这些功能时，后端统一返回 `PRECONDITION: This feature requires active membership.`，前端统一展示“会员专属功能”提示和 `/membership` 会员中心入口。自托管或本地关闭鉴权模式不启用这层会员门禁。
+
 ### 4.1 首单判定
 
 用户满足以下条件时，算“首单”：
@@ -364,6 +393,12 @@ CREATE TABLE IF NOT EXISTS membership_accounts (
 - `invite_reward_records` 里还没有这位被邀请人的已发奖励
 
 ### 4.3 退款撤销
+
+新退款发起必须在会员订单支付成功后 `24 小时` 内完成判断：
+
+- 退款窗口以订单 `paid_at` 为准，不以创建时间或权益开始时间为准
+- 刚好支付成功后 `24 小时` 仍允许发起退款；超过该时间点后拒绝新退款
+- 已经进入 `refund_pending` 的退款不再按退款窗口重新拦截，后续微信回调或后台同步可以继续完成
 
 若被邀请人的首个成功订单退款：
 
@@ -608,7 +643,7 @@ CREATE TABLE IF NOT EXISTS membership_accounts (
 
 #### `POST /api/membership/orders/{orderId}/refund`
 
-用途：后台退款或人工触发退款。
+用途：后台退款或人工触发退款。新退款只能在支付成功后 `24 小时` 内发起；已在退款中的订单可继续同步或接收回调完成。
 
 ### 5.4 管理后台
 
@@ -1003,6 +1038,9 @@ class AdminGrantCouponRequest(BaseModel):
 - 首单退款后，邀请奖励券应撤销
 - 被邀请人不得绑定自己
 - 已成功首单后，不允许再补绑邀请码
+- 非会员不能配置个人 LLM，不能使用系统/项目 AI 问答、播放器 AI 问答和番茄钟
+- 有效会员可以正常使用个人 LLM 配置、AI 问答、播放器 AI 问答和番茄钟
+- 购买、续费、退款、过期或后台撤销会员后，下一次受保护功能请求必须按最新会员状态放行或拦截
 
 ## 11. 上线收尾轮（已落地）
 

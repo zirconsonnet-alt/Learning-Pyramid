@@ -7,13 +7,18 @@ import {
   getAdminUserDetail,
   getAdminOverview,
   grantAdminMembershipCoupon,
+  grantAdminMembershipMonths,
   refundAdminMembershipOrder,
   listAdminActionLogs,
   listAdminMembershipCoupons,
+  listAdminMembershipCommissions,
   listAdminMembershipInvites,
   listAdminMembershipOrders,
+  listAdminMembershipWithdrawals,
   listAdminUsers,
   syncAdminMembershipOrderPayment,
+  resolveAdminMembershipWithdrawal,
+  settleAdminMembershipCommissions,
   updateAdminUserRole,
   updateAdminUserStatus,
   voidAdminMembershipCoupon,
@@ -89,6 +94,22 @@ export function useAdminMembershipCoupons(params?: { search?: string; status?: s
   })
 }
 
+export function useAdminMembershipCommissions(params?: { search?: string; status?: string; limit?: number }, enabled = true) {
+  return useQuery({
+    queryKey: ["admin", "membership", "commissions", params?.search ?? "", params?.status ?? "", params?.limit ?? 100],
+    queryFn: () => listAdminMembershipCommissions(params),
+    enabled,
+  })
+}
+
+export function useAdminMembershipWithdrawals(params?: { search?: string; status?: string; limit?: number }, enabled = true) {
+  return useQuery({
+    queryKey: ["admin", "membership", "withdrawals", params?.search ?? "", params?.status ?? "", params?.limit ?? 100],
+    queryFn: () => listAdminMembershipWithdrawals(params),
+    enabled,
+  })
+}
+
 export function useAdminUsers(params?: { search?: string; status?: string; role?: string; limit?: number }, enabled = true) {
   return useQuery({
     queryKey: ["admin", "users", params?.search ?? "", params?.status ?? "", params?.role ?? "", params?.limit ?? 100],
@@ -144,6 +165,19 @@ export function useGrantAdminMembershipCoupon() {
   })
 }
 
+export function useGrantAdminMembershipMonths() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: grantAdminMembershipMonths,
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["admin", "membership", "overview"] })
+      await qc.invalidateQueries({ queryKey: ["admin", "membership", "orders"] })
+      await qc.invalidateQueries({ queryKey: ["admin", "activity"] })
+      await qc.invalidateQueries({ queryKey: ["membership"] })
+    },
+  })
+}
+
 export function useVoidAdminMembershipCoupon() {
   const qc = useQueryClient()
   return useMutation({
@@ -164,6 +198,34 @@ export function useSyncAdminMembershipOrderPayment() {
       await qc.invalidateQueries({ queryKey: ["admin", "membership", "overview"] })
       await qc.invalidateQueries({ queryKey: ["admin", "membership", "orders"] })
       await qc.invalidateQueries({ queryKey: ["admin", "membership", "order-detail", variables.orderId] })
+      await qc.invalidateQueries({ queryKey: ["admin", "membership", "commissions"] })
+      await qc.invalidateQueries({ queryKey: ["admin", "activity"] })
+      await qc.invalidateQueries({ queryKey: ["membership"] })
+    },
+  })
+}
+
+export function useSettleAdminMembershipCommissions() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: settleAdminMembershipCommissions,
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["admin", "membership", "overview"] })
+      await qc.invalidateQueries({ queryKey: ["admin", "membership", "commissions"] })
+      await qc.invalidateQueries({ queryKey: ["admin", "membership", "invites"] })
+      await qc.invalidateQueries({ queryKey: ["admin", "activity"] })
+      await qc.invalidateQueries({ queryKey: ["membership"] })
+    },
+  })
+}
+
+export function useResolveAdminMembershipWithdrawal() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: resolveAdminMembershipWithdrawal,
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["admin", "membership", "overview"] })
+      await qc.invalidateQueries({ queryKey: ["admin", "membership", "withdrawals"] })
       await qc.invalidateQueries({ queryKey: ["admin", "activity"] })
       await qc.invalidateQueries({ queryKey: ["membership"] })
     },

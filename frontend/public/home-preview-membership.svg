@@ -5,12 +5,12 @@
   <rect x="72" y="72" width="114" height="34" rx="17" fill="#E8F1FF"/>
   <text x="97" y="94" fill="#23548D" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="16" font-weight="700">月会员</text>
   <rect x="198" y="72" width="116" height="34" rx="17" fill="#FFF4DF"/>
-  <text x="224" y="94" fill="#8B5A15" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="16" font-weight="700">首单 14.9</text>
+  <text x="224" y="94" fill="#8B5A15" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="16" font-weight="700">折后 15.0</text>
   <text x="72" y="146" fill="#17324E" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="36" font-weight="700">会员中心</text>
   <text x="72" y="186" fill="#60748B" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="21">邀请码、优惠券、订单记录和支付状态都在一个页面里说清楚。</text>
   <rect x="660" y="82" width="220" height="132" rx="24" fill="#173554"/>
   <text x="690" y="117" fill="#FFFFFF" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="16" font-weight="600">首单会员价</text>
-  <text x="690" y="166" fill="#FFFFFF" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="38" font-weight="700">14.9 元</text>
+  <text x="690" y="166" fill="#FFFFFF" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="38" font-weight="700">15.0 元</text>
   <text x="690" y="196" fill="#D7E7FA" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="15">邀请成功返 5 元券，可用于首单或续费</text>
 
   <rect x="42" y="274" width="420" height="148" rx="24" fill="white" stroke="#DFE8F1"/>
@@ -23,7 +23,7 @@
   <rect x="498" y="274" width="420" height="148" rx="24" fill="white" stroke="#DFE8F1"/>
   <text x="526" y="314" fill="#17324E" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700">可用优惠券</text>
   <rect x="526" y="334" width="364" height="58" rx="18" fill="#F8FBFF" stroke="#DCE8F4"/>
-  <text x="548" y="360" fill="#17324E" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="700">邀请奖励 5 元券</text>
+  <text x="548" y="360" fill="#17324E" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="700">邀请码 7.5 折券</text>
   <text x="548" y="384" fill="#61758D" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="16">满 0 元可用 · 30 天有效</text>
   <text x="826" y="372" fill="#1D4F8F" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="700">-5.00</text>
 

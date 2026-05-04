@@ -6,10 +6,11 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import PlainTextResponse
 
 from adapter.auth import require_request_auth_user
-from adapter.deps import get_auth_store, get_membership_marketing_store, get_membership_payment_service, get_membership_store
+from adapter.deps import get_auth_store, get_membership_commission_store, get_membership_marketing_store, get_membership_payment_service, get_membership_store
 from adapter.schemas import (
     BindInviteCodeRequest,
     ConfirmMembershipPaymentRequest,
+    CreateCommissionWithdrawalRequest,
     CreateMembershipOrderRequest,
     PreviewMembershipOrderRequest,
 )
@@ -23,6 +24,7 @@ from backend.system.membership_marketing_store import (
     InviteSummary,
     MembershipMarketingStore,
 )
+from backend.system.membership_commission_store import CommissionAccountSummary, CommissionRecord, MembershipCommissionStore, WithdrawalRequest
 from backend.system.membership_payment_service import (
     MembershipPaymentPayload,
     MembershipPaymentService,
@@ -175,6 +177,7 @@ def _invite_binding_to_dto(item: InviteBinding) -> dict[str, object]:
         "rewardedAt": item.rewarded_at,
         "rewardTriggerOrderId": item.reward_trigger_order_id,
         "rewardCouponId": item.reward_coupon_id,
+        "discountCouponId": item.discount_coupon_id,
     }
 
 
@@ -189,6 +192,8 @@ def _invite_summary_to_dto(item: InviteSummary) -> dict[str, object]:
         "totalInvitedUsers": item.total_invited_users,
         "rewardedInviteCount": item.rewarded_invite_count,
         "availableCouponCount": item.available_coupon_count,
+        "pendingCommissionCent": item.pending_commission_cent,
+        "withdrawableCommissionCent": item.withdrawable_commission_cent,
     }
 
 
@@ -210,6 +215,8 @@ def _invite_referral_to_dto(item: InviteReferralRecord, auth_store: AuthStore) -
         "rewardedAt": item.rewarded_at,
         "rewardTriggerOrderId": item.reward_trigger_order_id,
         "rewardCouponId": item.reward_coupon_id,
+        "discountCouponId": item.discount_coupon_id,
+        "commissionAmountCent": item.commission_amount_cent,
     }
 
 
@@ -218,6 +225,8 @@ def _coupon_to_dto(item: CouponRecord) -> dict[str, object]:
         "couponId": item.coupon_id,
         "userId": item.user_id,
         "title": item.title,
+        "couponType": item.coupon_type,
+        "discountRate": item.discount_rate,
         "amountCent": item.amount_cent,
         "minSpendCent": item.min_spend_cent,
         "source": item.source,
@@ -227,6 +236,60 @@ def _coupon_to_dto(item: CouponRecord) -> dict[str, object]:
         "expiresAt": item.expires_at,
         "usedAt": item.used_at,
         "usedOrderId": item.used_order_id,
+    }
+
+
+def _commission_account_to_dto(item: CommissionAccountSummary) -> dict[str, object]:
+    return {
+        "userId": item.user_id,
+        "pendingCent": item.pending_cent,
+        "withdrawableCent": item.withdrawable_cent,
+        "reservedCent": item.reserved_cent,
+        "paidOutCent": item.paid_out_cent,
+        "canceledCent": item.canceled_cent,
+        "updatedAt": item.updated_at,
+    }
+
+
+def _commission_record_to_dto(item: CommissionRecord) -> dict[str, object]:
+    return {
+        "commissionId": item.commission_id,
+        "inviteeUserId": item.invitee_user_id,
+        "sourceOrderId": item.source_order_id,
+        "sourcePaymentAmountCent": item.source_payment_amount_cent,
+        "thresholdAmountCent": item.threshold_amount_cent,
+        "commissionAmountCent": item.commission_amount_cent,
+        "refundWindowEndsAt": item.refund_window_ends_at,
+        "status": item.status,
+        "createdAt": item.created_at,
+        "settledAt": item.settled_at,
+        "canceledAt": item.canceled_at,
+        "cancelReason": item.cancel_reason,
+    }
+
+
+def _mask_wechat_open_id(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if len(text) <= 6:
+        return f"{text[:1]}***"
+    return f"{text[:7]}***"
+
+
+def _withdrawal_to_dto(item: WithdrawalRequest) -> dict[str, object]:
+    return {
+        "withdrawalId": item.withdrawal_id,
+        "userId": item.user_id,
+        "amountCent": item.amount_cent,
+        "targetType": item.target_type,
+        "wechatOpenIdMasked": _mask_wechat_open_id(item.wechat_open_id),
+        "status": item.status,
+        "providerTransferNo": item.provider_transfer_no,
+        "failureReason": item.failure_reason,
+        "createdAt": item.created_at,
+        "submittedAt": item.submitted_at,
+        "completedAt": item.completed_at,
     }
 
 
@@ -447,11 +510,15 @@ def get_my_invite_summary(
     request: Request,
     auth_store: AuthStore = Depends(get_auth_store),
     membership_marketing_store: MembershipMarketingStore = Depends(get_membership_marketing_store),
+    membership_commission_store: MembershipCommissionStore = Depends(get_membership_commission_store),
 ) -> dict:
     user = require_request_auth_user(request)
     summary = membership_marketing_store.get_invite_summary(user.user_id, invite_code=user.public_uid)
     recent_invites = membership_marketing_store.list_recent_invites(user.user_id, limit=10)
     payload = _invite_summary_to_dto(summary)
+    account = membership_commission_store.get_user_account(user.user_id)
+    payload["pendingCommissionCent"] = account.pending_cent
+    payload["withdrawableCommissionCent"] = account.withdrawable_cent
     payload["recentInvites"] = [_invite_referral_to_dto(item, auth_store) for item in recent_invites]
     return {"ok": True, "data": payload}
 
@@ -465,3 +532,69 @@ def list_my_coupons(
     user = require_request_auth_user(request)
     coupons = membership_marketing_store.list_coupons(user.user_id, limit=limit)
     return {"ok": True, "data": [_coupon_to_dto(item) for item in coupons]}
+
+
+@router.get("/commissions/me")
+def get_my_commissions(
+    request: Request,
+    limit: int = 20,
+    membership_commission_store: MembershipCommissionStore = Depends(get_membership_commission_store),
+) -> dict:
+    user = require_request_auth_user(request)
+    account = membership_commission_store.get_user_account(user.user_id)
+    recent = membership_commission_store.list_user_commissions(user.user_id, limit=limit)
+    return {
+        "ok": True,
+        "data": {
+            "account": _commission_account_to_dto(account),
+            "recentCommissions": [_commission_record_to_dto(item) for item in recent],
+        },
+    }
+
+
+@router.post("/commissions/withdrawals")
+def request_my_commission_withdrawal(
+    req: CreateCommissionWithdrawalRequest,
+    request: Request,
+    membership_commission_store: MembershipCommissionStore = Depends(get_membership_commission_store),
+    membership_payment_service: MembershipPaymentService = Depends(get_membership_payment_service),
+) -> dict:
+    user = require_request_auth_user(request)
+    withdrawal = membership_commission_store.create_withdrawal_request(
+        user.user_id,
+        amount_cent=req.amountCent,
+        wechat_open_id=req.wechatOpenId or "",
+    )
+    try:
+        payout = membership_payment_service.request_commission_payout(withdrawal)
+    except Exception as exc:
+        membership_commission_store.mark_withdrawal_failed(withdrawal.withdrawal_id, failure_reason=str(exc))
+        raise
+    if payout.remote_status == "succeeded":
+        withdrawal = membership_commission_store.mark_withdrawal_succeeded(
+            withdrawal.withdrawal_id,
+            provider_transfer_no=payout.provider_transfer_no,
+        )
+    elif payout.remote_status == "failed":
+        withdrawal = membership_commission_store.mark_withdrawal_failed(
+            withdrawal.withdrawal_id,
+            provider_transfer_no=payout.provider_transfer_no,
+            failure_reason=payout.failure_reason or "wechat payout failed",
+        )
+    else:
+        withdrawal = membership_commission_store.mark_withdrawal_processing(
+            withdrawal.withdrawal_id,
+            provider_transfer_no=payout.provider_transfer_no,
+        )
+    return {"ok": True, "data": _withdrawal_to_dto(withdrawal)}
+
+
+@router.get("/commissions/withdrawals")
+def list_my_commission_withdrawals(
+    request: Request,
+    limit: int = 20,
+    membership_commission_store: MembershipCommissionStore = Depends(get_membership_commission_store),
+) -> dict:
+    user = require_request_auth_user(request)
+    items = membership_commission_store.list_user_withdrawals(user.user_id, limit=limit)
+    return {"ok": True, "data": [_withdrawal_to_dto(item) for item in items]}

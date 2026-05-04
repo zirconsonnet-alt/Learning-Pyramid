@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
 import { useCurrentUser } from "@/ui/queries/auth"
+import { useMembershipSummary } from "@/ui/queries/membership"
 import { useMyLlmSettings, useUpdateMyGlobalSettings, useUpdateMyLlmSettings } from "@/ui/queries/profile"
 import { useGlobalLlmSettings, useSystemCapabilities, useUpdateGlobalLlmSettings } from "@/ui/queries/system"
 import { usePageMeta } from "@/ui/seo/usePageMeta"
@@ -20,6 +21,7 @@ import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/s
 import { usePomodoroStore } from "@/ui/store/pomodoroStore"
 import { useThemeStore } from "@/ui/store/themeStore"
 import { THEME_PRESETS } from "@/ui/theme/themePresets"
+import { MemberOnlyFeatureNotice } from "@/views/membership/membershipUi"
 import { GlobalLlmSettingsCard, UserLlmSettingsCard } from "@/views/settings/components/LlmSettingsCards"
 import { buildGlobalSettingsPath } from "@/views/settings/globalSettingsRouting"
 
@@ -80,6 +82,9 @@ export function GlobalSettingsPage() {
   const myLlmSettingsQ = useMyLlmSettings(authEnabled)
   const updateMyLlmSettingsM = useUpdateMyLlmSettings()
   const shouldSyncRemotely = authEnabled && Boolean(currentUserQ.data?.userId)
+  const membershipQ = useMembershipSummary(authEnabled)
+  const llmSettingsMemberBlocked = authEnabled && (membershipQ.isLoading || Boolean(membershipQ.error) || !membershipQ.data?.isActive)
+  const llmSettingsMemberReady = !authEnabled || !llmSettingsMemberBlocked
 
   async function persistGlobalSettings(overrides?: {
     theme?: string
@@ -166,6 +171,7 @@ export function GlobalSettingsPage() {
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
       {authEnabled ? (
+        llmSettingsMemberReady ? (
         <UserLlmSettingsCard
           queryError={myLlmSettingsQ.error}
           saveError={updateMyLlmSettingsM.error}
@@ -189,6 +195,12 @@ export function GlobalSettingsPage() {
             }
           }}
         />
+        ) : (
+          <MemberOnlyFeatureNotice
+            title="大模型配置是会员专属功能"
+            message="当前账号还没有有效会员，所以这里先不开放个人 LLM 配置。开通后就可以保存自己的 Base URL、模型名和 API Key。"
+          />
+        )
       ) : (
         <GlobalLlmSettingsCard
           queryError={globalLlmSettingsQ.error}

@@ -125,6 +125,8 @@ export const InviteReferralSchema = z.object({
   rewardedAt: z.string().nullable(),
   rewardTriggerOrderId: z.string().nullable(),
   rewardCouponId: z.string().nullable(),
+  discountCouponId: z.string().nullable(),
+  commissionAmountCent: z.number().nullable(),
 })
 
 export type InviteReferral = z.infer<typeof InviteReferralSchema>
@@ -139,6 +141,8 @@ export const InviteSummarySchema = z.object({
   totalInvitedUsers: z.number(),
   rewardedInviteCount: z.number(),
   availableCouponCount: z.number(),
+  pendingCommissionCent: z.number().default(0),
+  withdrawableCommissionCent: z.number().default(0),
   recentInvites: z.array(InviteReferralSchema),
 })
 
@@ -153,6 +157,7 @@ export const InviteBindingSchema = z.object({
   rewardedAt: z.string().nullable(),
   rewardTriggerOrderId: z.string().nullable(),
   rewardCouponId: z.string().nullable(),
+  discountCouponId: z.string().nullable(),
 })
 
 export type InviteBinding = z.infer<typeof InviteBindingSchema>
@@ -161,6 +166,8 @@ export const CouponRecordSchema = z.object({
   couponId: z.string(),
   userId: z.string(),
   title: z.string(),
+  couponType: z.string().default("cash"),
+  discountRate: z.number().nullable().default(null),
   amountCent: z.number(),
   minSpendCent: z.number(),
   source: z.string(),
@@ -173,6 +180,58 @@ export const CouponRecordSchema = z.object({
 })
 
 export type CouponRecord = z.infer<typeof CouponRecordSchema>
+
+export const CommissionAccountSchema = z.object({
+  userId: z.string(),
+  pendingCent: z.number(),
+  withdrawableCent: z.number(),
+  reservedCent: z.number(),
+  paidOutCent: z.number(),
+  canceledCent: z.number(),
+  updatedAt: z.string().nullable(),
+})
+
+export type CommissionAccount = z.infer<typeof CommissionAccountSchema>
+
+export const CommissionRecordSchema = z.object({
+  commissionId: z.string(),
+  inviteeUserId: z.string(),
+  sourceOrderId: z.string(),
+  sourcePaymentAmountCent: z.number(),
+  thresholdAmountCent: z.number(),
+  commissionAmountCent: z.number(),
+  refundWindowEndsAt: z.string(),
+  status: z.enum(["pending", "settled", "canceled", "reversed"]),
+  createdAt: z.string(),
+  settledAt: z.string().nullable(),
+  canceledAt: z.string().nullable(),
+  cancelReason: z.string(),
+})
+
+export type CommissionRecord = z.infer<typeof CommissionRecordSchema>
+
+export const CommissionSummarySchema = z.object({
+  account: CommissionAccountSchema,
+  recentCommissions: z.array(CommissionRecordSchema),
+})
+
+export type CommissionSummary = z.infer<typeof CommissionSummarySchema>
+
+export const CommissionWithdrawalSchema = z.object({
+  withdrawalId: z.string(),
+  userId: z.string(),
+  amountCent: z.number(),
+  targetType: z.literal("wechat_pay"),
+  wechatOpenIdMasked: z.string(),
+  status: z.enum(["pending", "processing", "succeeded", "failed", "canceled"]),
+  providerTransferNo: z.string().nullable(),
+  failureReason: z.string(),
+  createdAt: z.string(),
+  submittedAt: z.string().nullable(),
+  completedAt: z.string().nullable(),
+})
+
+export type CommissionWithdrawal = z.infer<typeof CommissionWithdrawalSchema>
 
 export function getMembershipSummary() {
   return apiRequest({
@@ -257,5 +316,31 @@ export function listCoupons(limit = 20) {
   return apiRequest({
     path: `/coupons/me?limit=${encodeURIComponent(String(limit))}`,
     responseSchema: z.array(CouponRecordSchema),
+  })
+}
+
+export function getCommissionSummary(limit = 20) {
+  return apiRequest({
+    path: `/commissions/me?limit=${encodeURIComponent(String(limit))}`,
+    responseSchema: CommissionSummarySchema,
+  })
+}
+
+export function listCommissionWithdrawals(limit = 20) {
+  return apiRequest({
+    path: `/commissions/withdrawals?limit=${encodeURIComponent(String(limit))}`,
+    responseSchema: z.array(CommissionWithdrawalSchema),
+  })
+}
+
+export function requestCommissionWithdrawal(params: { amountCent: number; wechatOpenId: string }) {
+  return apiRequest({
+    path: "/commissions/withdrawals",
+    method: "POST",
+    body: {
+      amountCent: params.amountCent,
+      wechatOpenId: params.wechatOpenId.trim(),
+    },
+    responseSchema: CommissionWithdrawalSchema,
   })
 }

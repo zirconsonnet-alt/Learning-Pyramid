@@ -3,10 +3,12 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Request
 
 from adapter.auth import require_admin_user, require_super_admin_user
-from adapter.deps import get_auth_store, get_membership_marketing_store, get_membership_payment_service, get_membership_store
+from adapter.deps import get_auth_store, get_membership_commission_store, get_membership_marketing_store, get_membership_payment_service, get_membership_store
 from adapter.schemas import (
+    AdminGrantMembershipMonthsRequest,
     AdminGrantMembershipCouponRequest,
     AdminRefundMembershipOrderRequest,
+    AdminResolveCommissionWithdrawalRequest,
     AdminVoidMembershipCouponRequest,
     UpdateUserRoleRequest,
     UpdateUserStatusRequest,
@@ -24,9 +26,11 @@ from backend.system.membership_marketing_store import (
     MembershipMarketingAdminOverview,
     MembershipMarketingStore,
 )
+from backend.system.membership_commission_store import CommissionAdminOverview, CommissionRecord, CommissionSettlementResult, MembershipCommissionStore, WithdrawalRequest
 from backend.system.membership_payment_service import MembershipPaymentService, MembershipRemotePaymentStatus
 from backend.system.membership_store import (
     MembershipAdminOverview,
+    MembershipGrantResult,
     MembershipOrderCloseResult,
     MembershipOrder,
     MembershipPaymentRecord,
@@ -150,8 +154,29 @@ def _admin_membership_summary_to_dto(item: MembershipSummary, auth_store: AuthSt
     }
 
 
-def _admin_membership_invite_to_dto(binding: InviteBinding, auth_store: AuthStore) -> dict[str, object]:
+def _admin_membership_grant_to_dto(item: MembershipGrantResult, auth_store: AuthStore) -> dict[str, object]:
     return {
+        "user": _admin_user_ref_to_dto(item.user_id, auth_store),
+        "userId": item.user_id,
+        "entitlementId": item.entitlement_id,
+        "sourceRefId": item.source_ref_id,
+        "months": item.months,
+        "grantedDays": item.granted_days,
+        "startAt": item.start_at,
+        "endAt": item.end_at,
+        "membership": _admin_membership_summary_to_dto(item.membership, auth_store),
+    }
+
+
+def _admin_membership_invite_to_dto(
+    binding: InviteBinding,
+    auth_store: AuthStore,
+    membership_commission_store: MembershipCommissionStore | None = None,
+) -> dict[str, object]:
+    commission = None
+    if membership_commission_store is not None and binding.reward_trigger_order_id:
+        commission = membership_commission_store.get_commission_for_order(binding.reward_trigger_order_id)
+    payload = {
         "invitee": _admin_user_ref_to_dto(binding.invitee_user_id, auth_store),
         "inviter": _admin_user_ref_to_dto(binding.inviter_user_id, auth_store),
         "inviteCode": binding.invite_code_snapshot,
@@ -160,7 +185,14 @@ def _admin_membership_invite_to_dto(binding: InviteBinding, auth_store: AuthStor
         "rewardedAt": binding.rewarded_at,
         "rewardTriggerOrderId": binding.reward_trigger_order_id,
         "rewardCouponId": binding.reward_coupon_id,
+        "discountCouponId": binding.discount_coupon_id,
     }
+    if commission is not None:
+        payload["commissionId"] = commission.commission_id
+        payload["commissionAmountCent"] = commission.commission_amount_cent
+        payload["commissionStatus"] = commission.status
+        payload["refundWindowEndsAt"] = commission.refund_window_ends_at
+    return payload
 
 
 def _admin_coupon_to_dto(coupon: CouponRecord, auth_store: AuthStore) -> dict[str, object]:
@@ -168,6 +200,8 @@ def _admin_coupon_to_dto(coupon: CouponRecord, auth_store: AuthStore) -> dict[st
         "couponId": coupon.coupon_id,
         "user": _admin_user_ref_to_dto(coupon.user_id, auth_store),
         "title": coupon.title,
+        "couponType": coupon.coupon_type,
+        "discountRate": coupon.discount_rate,
         "amountCent": coupon.amount_cent,
         "minSpendCent": coupon.min_spend_cent,
         "source": coupon.source,
@@ -226,13 +260,18 @@ def _admin_membership_order_detail_to_dto(
     payment: MembershipPaymentRecord | None,
     auth_store: AuthStore,
     membership_marketing_store: MembershipMarketingStore,
+    membership_commission_store: MembershipCommissionStore,
 ) -> dict[str, object]:
     binding = membership_marketing_store.get_invite_binding(order.user_id)
     coupon = None if order.coupon_id is None else membership_marketing_store.get_coupon(order.coupon_id)
     reward_coupon = None
     if binding is not None and binding.reward_coupon_id:
         reward_coupon = membership_marketing_store.get_coupon(binding.reward_coupon_id)
-    reward_triggered_by_this_order = binding is not None and binding.reward_trigger_order_id == order.order_id
+    discount_coupon = None
+    if binding is not None and binding.discount_coupon_id:
+        discount_coupon = membership_marketing_store.get_coupon(binding.discount_coupon_id)
+    commission = membership_commission_store.get_commission_for_order(order.order_id)
+    reward_triggered_by_this_order = binding is not None and binding.reward_trigger_order_id == order.order_id and reward_coupon is not None
     return {
         "order": _admin_membership_order_to_dto(order, auth_store),
         "membership": _admin_membership_summary_to_dto(membership, auth_store),
@@ -241,9 +280,18 @@ def _admin_membership_order_detail_to_dto(
         "invite": None
         if binding is None
         else {
-            "binding": _admin_membership_invite_to_dto(binding, auth_store),
+            "binding": _admin_membership_invite_to_dto(binding, auth_store, membership_commission_store),
             "rewardTriggeredByThisOrder": reward_triggered_by_this_order,
             "rewardCoupon": None if reward_coupon is None else _admin_coupon_to_dto(reward_coupon, auth_store),
+            "discountCoupon": None if discount_coupon is None else _admin_coupon_to_dto(discount_coupon, auth_store),
+            "commission": None
+            if commission is None
+            else {
+                "commissionId": commission.commission_id,
+                "commissionAmountCent": commission.commission_amount_cent,
+                "status": commission.status,
+                "refundWindowEndsAt": commission.refund_window_ends_at,
+            },
         },
         "operations": _admin_membership_order_operations_to_dto(order, payment=payment),
     }
@@ -261,6 +309,50 @@ def _admin_membership_refund_to_dto(item: MembershipRefundResult, auth_store: Au
         "refundRequestSubmitted": item.refund_request_submitted,
         "remoteStatus": item.remote_status,
         "providerRefundNo": item.provider_refund_no,
+    }
+
+
+def _admin_commission_to_dto(item: CommissionRecord, auth_store: AuthStore) -> dict[str, object]:
+    return {
+        "commissionId": item.commission_id,
+        "inviter": _admin_user_ref_to_dto(item.inviter_user_id, auth_store),
+        "invitee": _admin_user_ref_to_dto(item.invitee_user_id, auth_store),
+        "sourceOrderId": item.source_order_id,
+        "sourcePaymentAmountCent": item.source_payment_amount_cent,
+        "thresholdAmountCent": item.threshold_amount_cent,
+        "commissionAmountCent": item.commission_amount_cent,
+        "refundWindowEndsAt": item.refund_window_ends_at,
+        "status": item.status,
+        "createdAt": item.created_at,
+        "settledAt": item.settled_at,
+        "canceledAt": item.canceled_at,
+        "cancelReason": item.cancel_reason,
+    }
+
+
+def _mask_wechat_open_id(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if len(text) <= 6:
+        return f"{text[:1]}***"
+    return f"{text[:7]}***"
+
+
+def _admin_withdrawal_to_dto(item: WithdrawalRequest, auth_store: AuthStore) -> dict[str, object]:
+    return {
+        "withdrawalId": item.withdrawal_id,
+        "user": _admin_user_ref_to_dto(item.user_id, auth_store),
+        "userId": item.user_id,
+        "amountCent": item.amount_cent,
+        "targetType": item.target_type,
+        "wechatOpenIdMasked": _mask_wechat_open_id(item.wechat_open_id),
+        "status": item.status,
+        "providerTransferNo": item.provider_transfer_no,
+        "failureReason": item.failure_reason,
+        "createdAt": item.created_at,
+        "submittedAt": item.submitted_at,
+        "completedAt": item.completed_at,
     }
 
 
@@ -337,10 +429,12 @@ def get_admin_membership_overview(
     auth_store: AuthStore = Depends(get_auth_store),
     membership_store: MembershipStore = Depends(get_membership_store),
     membership_marketing_store: MembershipMarketingStore = Depends(get_membership_marketing_store),
+    membership_commission_store: MembershipCommissionStore = Depends(get_membership_commission_store),
 ) -> dict:
     require_admin_user(request, auth_store)
     membership: MembershipAdminOverview = membership_store.get_admin_overview()
     marketing: MembershipMarketingAdminOverview = membership_marketing_store.get_admin_overview()
+    commission: CommissionAdminOverview = membership_commission_store.get_admin_overview()
     return {
         "ok": True,
         "data": {
@@ -355,6 +449,12 @@ def get_admin_membership_overview(
             "coupons": marketing.coupon_count,
             "availableCoupons": marketing.available_coupon_count,
             "usedCoupons": marketing.used_coupon_count,
+            "pendingCommissionCent": commission.pending_commission_cent,
+            "withdrawableCommissionCent": commission.withdrawable_commission_cent,
+            "reservedWithdrawalCent": commission.reserved_withdrawal_cent,
+            "paidOutCent": commission.paid_out_cent,
+            "commissionRecords": commission.commission_record_count,
+            "withdrawals": commission.withdrawal_count,
         },
     }
 
@@ -385,6 +485,7 @@ def get_admin_membership_order_detail(
     auth_store: AuthStore = Depends(get_auth_store),
     membership_store: MembershipStore = Depends(get_membership_store),
     membership_marketing_store: MembershipMarketingStore = Depends(get_membership_marketing_store),
+    membership_commission_store: MembershipCommissionStore = Depends(get_membership_commission_store),
 ) -> dict:
     require_admin_user(request, auth_store)
     order = membership_store.get_order(orderId)
@@ -398,8 +499,29 @@ def get_admin_membership_order_detail(
             payment=payment,
             auth_store=auth_store,
             membership_marketing_store=membership_marketing_store,
+            membership_commission_store=membership_commission_store,
         ),
     }
+
+
+@router.post("/admin/membership/grants")
+def grant_admin_membership_months(
+    req: AdminGrantMembershipMonthsRequest,
+    request: Request,
+    auth_store: AuthStore = Depends(get_auth_store),
+    membership_store: MembershipStore = Depends(get_membership_store),
+) -> dict:
+    actor = require_admin_user(request, auth_store)
+    target = _resolve_admin_target_user(auth_store, req.userId)
+    granted = membership_store.grant_membership_months(target.user_id, months=req.months)
+    auth_store.record_admin_action(
+        actor_user_id=actor.user_id,
+        action_type="membership.months_granted",
+        target_kind="membership_entitlement",
+        target_id=granted.entitlement_id,
+        summary=f"Granted {req.months} month(s) of membership to user {target.public_uid}",
+    )
+    return {"ok": True, "data": _admin_membership_grant_to_dto(granted, auth_store)}
 
 
 @router.post("/admin/membership/orders/{orderId}/sync-payment")
@@ -469,6 +591,7 @@ def refund_admin_membership_order(
     elif order.provider == "wechat_native":
         payment = membership_store.get_payment_for_order(orderId)
         if order.status == "paid":
+            membership_store.ensure_refund_can_start(order)
             remote_refund = membership_payment_service.request_refund(
                 order,
                 payment,
@@ -536,13 +659,14 @@ def list_admin_membership_invites(
     limit: int = 100,
     auth_store: AuthStore = Depends(get_auth_store),
     membership_marketing_store: MembershipMarketingStore = Depends(get_membership_marketing_store),
+    membership_commission_store: MembershipCommissionStore = Depends(get_membership_commission_store),
 ) -> dict:
     require_admin_user(request, auth_store)
     invites = membership_marketing_store.list_admin_invites(status=status, limit=limit)
     user_ids = _resolve_admin_user_search_ids(auth_store, search)
     if user_ids is not None:
         invites = tuple(item for item in invites if item.inviter_user_id in user_ids or item.invitee_user_id in user_ids)
-    return {"ok": True, "data": [_admin_membership_invite_to_dto(item, auth_store) for item in invites]}
+    return {"ok": True, "data": [_admin_membership_invite_to_dto(item, auth_store, membership_commission_store) for item in invites]}
 
 
 @router.get("/admin/membership/coupons")
@@ -564,6 +688,91 @@ def list_admin_membership_coupons(
             if item.user_id in user_ids or (item.source_invitee_user_id is not None and item.source_invitee_user_id in user_ids)
         )
     return {"ok": True, "data": [_admin_coupon_to_dto(item, auth_store) for item in coupons]}
+
+
+@router.get("/admin/membership/commissions")
+def list_admin_membership_commissions(
+    request: Request,
+    search: str | None = None,
+    status: str | None = None,
+    limit: int = 100,
+    auth_store: AuthStore = Depends(get_auth_store),
+    membership_commission_store: MembershipCommissionStore = Depends(get_membership_commission_store),
+) -> dict:
+    require_admin_user(request, auth_store)
+    items = membership_commission_store.list_admin_commissions(status=status, limit=limit)
+    user_ids = _resolve_admin_user_search_ids(auth_store, search)
+    if user_ids is not None:
+        items = tuple(item for item in items if item.inviter_user_id in user_ids or item.invitee_user_id in user_ids)
+    return {"ok": True, "data": [_admin_commission_to_dto(item, auth_store) for item in items]}
+
+
+@router.post("/admin/membership/commissions/settle")
+def settle_admin_membership_commissions(
+    request: Request,
+    auth_store: AuthStore = Depends(get_auth_store),
+    membership_commission_store: MembershipCommissionStore = Depends(get_membership_commission_store),
+) -> dict:
+    actor = require_admin_user(request, auth_store)
+    result: CommissionSettlementResult = membership_commission_store.settle_due_commissions()
+    auth_store.record_admin_action(
+        actor_user_id=actor.user_id,
+        action_type="membership.commissions_settled",
+        target_kind="membership_commission",
+        target_id="batch",
+        summary=f"Settled {result.settled_count} commissions, canceled {result.canceled_count}, skipped {result.skipped_count}",
+    )
+    return {"ok": True, "data": {"settledCount": result.settled_count, "canceledCount": result.canceled_count, "skippedCount": result.skipped_count}}
+
+
+@router.get("/admin/membership/withdrawals")
+def list_admin_membership_withdrawals(
+    request: Request,
+    search: str | None = None,
+    status: str | None = None,
+    limit: int = 100,
+    auth_store: AuthStore = Depends(get_auth_store),
+    membership_commission_store: MembershipCommissionStore = Depends(get_membership_commission_store),
+) -> dict:
+    require_admin_user(request, auth_store)
+    items = membership_commission_store.list_admin_withdrawals(status=status, limit=limit)
+    user_ids = _resolve_admin_user_search_ids(auth_store, search)
+    if user_ids is not None:
+        items = tuple(item for item in items if item.user_id in user_ids)
+    return {"ok": True, "data": [_admin_withdrawal_to_dto(item, auth_store) for item in items]}
+
+
+@router.post("/admin/membership/withdrawals/{withdrawalId}/resolve")
+def resolve_admin_membership_withdrawal(
+    withdrawalId: str,
+    req: AdminResolveCommissionWithdrawalRequest,
+    request: Request,
+    auth_store: AuthStore = Depends(get_auth_store),
+    membership_commission_store: MembershipCommissionStore = Depends(get_membership_commission_store),
+) -> dict:
+    actor = require_admin_user(request, auth_store)
+    normalized_status = str(req.status or "").strip().lower()
+    if normalized_status == "succeeded":
+        item = membership_commission_store.mark_withdrawal_succeeded(
+            withdrawalId,
+            provider_transfer_no=req.providerTransferNo,
+        )
+    elif normalized_status == "failed":
+        item = membership_commission_store.mark_withdrawal_failed(
+            withdrawalId,
+            provider_transfer_no=req.providerTransferNo,
+            failure_reason=req.failureReason or "wechat payout failed",
+        )
+    else:
+        raise PreconditionFailure("withdrawal resolve status must be succeeded or failed")
+    auth_store.record_admin_action(
+        actor_user_id=actor.user_id,
+        action_type="membership.withdrawal_resolved",
+        target_kind="membership_withdrawal",
+        target_id=item.withdrawal_id,
+        summary=f"Marked withdrawal {item.withdrawal_id} as {item.status}",
+    )
+    return {"ok": True, "data": _admin_withdrawal_to_dto(item, auth_store)}
 
 
 @router.post("/admin/membership/coupons/grant")

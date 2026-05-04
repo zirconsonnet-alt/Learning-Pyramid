@@ -62,6 +62,12 @@ export const AdminMembershipOverviewSchema = z.object({
   coupons: z.number(),
   availableCoupons: z.number(),
   usedCoupons: z.number(),
+  pendingCommissionCent: z.number().default(0),
+  withdrawableCommissionCent: z.number().default(0),
+  reservedWithdrawalCent: z.number().default(0),
+  paidOutCent: z.number().default(0),
+  commissionRecords: z.number().default(0),
+  withdrawals: z.number().default(0),
 })
 
 export type AdminMembershipOverview = z.infer<typeof AdminMembershipOverviewSchema>
@@ -141,6 +147,20 @@ export const AdminMembershipSummarySchema = z.object({
 
 export type AdminMembershipSummary = z.infer<typeof AdminMembershipSummarySchema>
 
+export const AdminMembershipGrantSchema = z.object({
+  user: AdminMembershipUserRefSchema,
+  userId: z.string(),
+  entitlementId: z.string(),
+  sourceRefId: z.string(),
+  months: z.number(),
+  grantedDays: z.number(),
+  startAt: z.string(),
+  endAt: z.string(),
+  membership: AdminMembershipSummarySchema,
+})
+
+export type AdminMembershipGrant = z.infer<typeof AdminMembershipGrantSchema>
+
 export const AdminMembershipInviteSchema = z.object({
   invitee: AdminMembershipUserRefSchema,
   inviter: AdminMembershipUserRefSchema,
@@ -150,6 +170,11 @@ export const AdminMembershipInviteSchema = z.object({
   rewardedAt: z.string().nullable(),
   rewardTriggerOrderId: z.string().nullable(),
   rewardCouponId: z.string().nullable(),
+  discountCouponId: z.string().nullable(),
+  commissionId: z.string().optional(),
+  commissionAmountCent: z.number().optional(),
+  commissionStatus: z.string().optional(),
+  refundWindowEndsAt: z.string().optional(),
 })
 
 export type AdminMembershipInvite = z.infer<typeof AdminMembershipInviteSchema>
@@ -158,6 +183,8 @@ export const AdminMembershipCouponSchema = z.object({
   couponId: z.string(),
   user: AdminMembershipUserRefSchema,
   title: z.string(),
+  couponType: z.string().default("cash"),
+  discountRate: z.number().nullable().default(null),
   amountCent: z.number(),
   minSpendCent: z.number(),
   source: z.string(),
@@ -170,6 +197,49 @@ export const AdminMembershipCouponSchema = z.object({
 })
 
 export type AdminMembershipCoupon = z.infer<typeof AdminMembershipCouponSchema>
+
+export const AdminMembershipCommissionSchema = z.object({
+  commissionId: z.string(),
+  inviter: AdminMembershipUserRefSchema,
+  invitee: AdminMembershipUserRefSchema,
+  sourceOrderId: z.string(),
+  sourcePaymentAmountCent: z.number(),
+  thresholdAmountCent: z.number(),
+  commissionAmountCent: z.number(),
+  refundWindowEndsAt: z.string(),
+  status: z.enum(["pending", "settled", "canceled", "reversed"]),
+  createdAt: z.string(),
+  settledAt: z.string().nullable(),
+  canceledAt: z.string().nullable(),
+  cancelReason: z.string(),
+})
+
+export type AdminMembershipCommission = z.infer<typeof AdminMembershipCommissionSchema>
+
+export const AdminCommissionSettlementSchema = z.object({
+  settledCount: z.number(),
+  canceledCount: z.number(),
+  skippedCount: z.number(),
+})
+
+export type AdminCommissionSettlement = z.infer<typeof AdminCommissionSettlementSchema>
+
+export const AdminMembershipWithdrawalSchema = z.object({
+  withdrawalId: z.string(),
+  user: AdminMembershipUserRefSchema,
+  userId: z.string(),
+  amountCent: z.number(),
+  targetType: z.literal("wechat_pay"),
+  wechatOpenIdMasked: z.string(),
+  status: z.enum(["pending", "processing", "succeeded", "failed", "canceled"]),
+  providerTransferNo: z.string().nullable(),
+  failureReason: z.string(),
+  createdAt: z.string(),
+  submittedAt: z.string().nullable(),
+  completedAt: z.string().nullable(),
+})
+
+export type AdminMembershipWithdrawal = z.infer<typeof AdminMembershipWithdrawalSchema>
 
 export const AdminMembershipOrderOperationsSchema = z.object({
   hasPaymentRecord: z.boolean(),
@@ -185,6 +255,15 @@ export const AdminMembershipOrderInviteSchema = z.object({
   binding: AdminMembershipInviteSchema,
   rewardTriggeredByThisOrder: z.boolean(),
   rewardCoupon: AdminMembershipCouponSchema.nullable(),
+  discountCoupon: AdminMembershipCouponSchema.nullable(),
+  commission: z
+    .object({
+      commissionId: z.string(),
+      commissionAmountCent: z.number(),
+      status: z.string(),
+      refundWindowEndsAt: z.string(),
+    })
+    .nullable(),
 })
 
 export type AdminMembershipOrderInvite = z.infer<typeof AdminMembershipOrderInviteSchema>
@@ -254,6 +333,8 @@ const AdminActionLogListSchema = z.array(AdminActionLogSchema)
 const AdminMembershipOrderListSchema = z.array(AdminMembershipOrderSchema)
 const AdminMembershipInviteListSchema = z.array(AdminMembershipInviteSchema)
 const AdminMembershipCouponListSchema = z.array(AdminMembershipCouponSchema)
+const AdminMembershipCommissionListSchema = z.array(AdminMembershipCommissionSchema)
+const AdminMembershipWithdrawalListSchema = z.array(AdminMembershipWithdrawalSchema)
 
 function buildAdminListPath(path: string, params?: { search?: string; status?: string; role?: string; limit?: number }) {
   const query = new URLSearchParams()
@@ -356,6 +437,46 @@ export function listAdminMembershipCoupons(params?: { search?: string; status?: 
   })
 }
 
+export function listAdminMembershipCommissions(params?: { search?: string; status?: string; limit?: number }) {
+  return apiRequest({
+    path: buildAdminListPath("/admin/membership/commissions", params),
+    responseSchema: AdminMembershipCommissionListSchema,
+  })
+}
+
+export function settleAdminMembershipCommissions() {
+  return apiRequest({
+    path: "/admin/membership/commissions/settle",
+    method: "POST",
+    responseSchema: AdminCommissionSettlementSchema,
+  })
+}
+
+export function listAdminMembershipWithdrawals(params?: { search?: string; status?: string; limit?: number }) {
+  return apiRequest({
+    path: buildAdminListPath("/admin/membership/withdrawals", params),
+    responseSchema: AdminMembershipWithdrawalListSchema,
+  })
+}
+
+export function resolveAdminMembershipWithdrawal(params: {
+  withdrawalId: string
+  status: "succeeded" | "failed"
+  providerTransferNo?: string
+  failureReason?: string
+}) {
+  return apiRequest({
+    path: `/admin/membership/withdrawals/${encodeURIComponent(params.withdrawalId)}/resolve`,
+    method: "POST",
+    body: {
+      status: params.status,
+      providerTransferNo: params.providerTransferNo,
+      failureReason: params.failureReason ?? "",
+    },
+    responseSchema: AdminMembershipWithdrawalSchema,
+  })
+}
+
 export function grantAdminMembershipCoupon(params: {
   userId: string
   amountCent: number
@@ -374,6 +495,18 @@ export function grantAdminMembershipCoupon(params: {
       minSpendCent: params.minSpendCent ?? 0,
     },
     responseSchema: AdminMembershipCouponSchema,
+  })
+}
+
+export function grantAdminMembershipMonths(params: { userId: string; months: number }) {
+  return apiRequest({
+    path: "/admin/membership/grants",
+    method: "POST",
+    body: {
+      userId: params.userId,
+      months: params.months,
+    },
+    responseSchema: AdminMembershipGrantSchema,
   })
 }
 

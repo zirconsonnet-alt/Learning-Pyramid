@@ -25,10 +25,10 @@
   <rect x="42" y="262" width="388" height="302" rx="24" fill="white" stroke="#DFE8F1"/>
   <text x="70" y="300" fill="#17324E" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700">订单列表</text>
   <rect x="70" y="322" width="332" height="74" rx="18" fill="#F8FBFF" stroke="#DCE8F4"/>
-  <text x="92" y="350" fill="#17324E" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="700">用户A · 首单 · 14.9</text>
+  <text x="92" y="350" fill="#17324E" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="700">用户A · 首单 · 15.0</text>
   <text x="92" y="376" fill="#61758D" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="16">已支付 · wechat_native · 03-26</text>
   <rect x="70" y="410" width="332" height="74" rx="18" fill="#F8FBFF" stroke="#DCE8F4"/>
-  <text x="92" y="438" fill="#17324E" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="700">用户B · 续费 · 19.9</text>
+  <text x="92" y="438" fill="#17324E" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="18" font-weight="700">用户B · 续费 · 20.0</text>
   <text x="92" y="464" fill="#61758D" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="16">待支付 · 可同步 / 可关单 · 03-26</text>
   <rect x="70" y="498" width="332" height="38" rx="19" fill="#FFF4DF"/>
   <text x="150" y="522" fill="#8B5A15" font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif" font-size="16" font-weight="700">支持退款回滚和异常处理</text>

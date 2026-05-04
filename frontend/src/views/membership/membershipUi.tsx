@@ -1,6 +1,9 @@
 import { type ReactNode } from "react"
+import { Crown } from "lucide-react"
+import { Link } from "react-router-dom"
 
-import { ApiError } from "@/ui/api/http"
+import { ApiError, MEMBERSHIP_CENTER_PATH } from "@/ui/api/http"
+import { Button } from "@/ui/components/ui/button"
 import { cn } from "@/ui/utils"
 
 export function formatMembershipApiError(err: unknown) {
@@ -11,6 +14,13 @@ export function formatMembershipApiError(err: unknown) {
 
 export function formatMembershipPrice(amountCent: number) {
   return `¥${(amountCent / 100).toFixed(1)}`
+}
+
+export function formatMembershipCouponValue(coupon: { couponType?: string; discountRate?: number | null; amountCent: number }) {
+  if (coupon.couponType === "percent" && coupon.discountRate) {
+    return `${(coupon.discountRate / 10).toFixed(1).replace(/\.0$/, "")} 折`
+  }
+  return `-${formatMembershipPrice(coupon.amountCent)}`
 }
 
 export function formatMembershipDateTime(value: string | null | undefined) {
@@ -49,6 +59,7 @@ export function describeMembershipCouponStatus(value: string) {
 }
 
 export function describeMembershipCouponSource(value: string) {
+  if (value === "invite_discount") return "邀请码折扣"
   if (value === "invite_reward") return "邀请奖励"
   if (value === "admin_grant") return "后台发放"
   return value
@@ -63,6 +74,26 @@ export function describeMembershipPaymentProvider(value: string) {
 export function describeInviteRecordStatus(value: string) {
   if (value === "rewarded") return "首单已转化"
   if (value === "bound") return "已绑定待转化"
+  if (value === "discount_issued") return "折扣券已发放"
+  if (value === "commission_pending") return "佣金待结算"
+  if (value === "commission_settled") return "佣金已结算"
+  return value
+}
+
+export function describeCommissionStatus(value: string) {
+  if (value === "pending") return "待结算"
+  if (value === "settled") return "可提现"
+  if (value === "canceled") return "已取消"
+  if (value === "reversed") return "已冲正"
+  return value
+}
+
+export function describeWithdrawalStatus(value: string) {
+  if (value === "pending") return "待提交"
+  if (value === "processing") return "处理中"
+  if (value === "succeeded") return "已到账"
+  if (value === "failed") return "失败退回"
+  if (value === "canceled") return "已取消"
   return value
 }
 
@@ -104,5 +135,40 @@ export function StatusPill(props: { children: ReactNode; tone?: "default" | "acc
     >
       {props.children}
     </span>
+  )
+}
+
+export function MemberOnlyFeatureNotice({
+  title = "会员专属功能",
+  message = "开通会员后即可使用 AI 能力和番茄钟；当前账号还没有有效会员，所以这里先为你锁定。",
+  className,
+  compact = false,
+}: {
+  title?: string
+  message?: string
+  className?: string
+  compact?: boolean
+}) {
+  return (
+    <section
+      className={cn(
+        "theme-card-main flex items-start gap-3 rounded-[1rem] border border-[color:var(--theme-soft-border)] px-4 py-4 shadow-[var(--theme-soft-shadow)]",
+        compact ? "py-3" : "sm:px-5 sm:py-5",
+        className,
+      )}
+    >
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-amber-200/70 bg-amber-50 text-amber-700">
+        <Crown className="h-4 w-4" />
+      </div>
+      <div className="min-w-0 flex-1 space-y-2">
+        <div>
+          <h2 className="text-sm font-semibold text-foreground">{title}</h2>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">{message}</p>
+        </div>
+        <Button asChild size={compact ? "sm" : "default"}>
+          <Link to={MEMBERSHIP_CENTER_PATH}>前往会员中心</Link>
+        </Button>
+      </div>
+    </section>
   )
 }

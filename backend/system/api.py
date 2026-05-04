@@ -3703,10 +3703,46 @@ class SystemAPI:
             key=lambda node_key: (logical_level(node_key), str(object_nodes[node_key].relative_path), node_key),
         )
 
+        def source_queue_candidate_ids_for_object_node(
+            node_key: str, target_layer_index: int
+        ) -> Tuple[LearningTaskNodeId, ...]:
+            source_layer_index = int(target_layer_index) - 1
+            if source_layer_index < 0:
+                return tuple()
+            target_instance_keys = set(covered_instance_keys(node_key))
+            if not target_instance_keys:
+                return tuple()
+            try:
+                queue = self.sys.aggq_repo.get(s, source_layer_index)
+            except NotFound:
+                return tuple()
+            current_ids = queue.current_ids()
+            if not current_ids:
+                return tuple()
+
+            selected: list[LearningTaskNodeId] = []
+            for candidate_id in current_ids:
+                candidate_instance_keys: set[str] = set()
+                for rp_id in self.sys.learning_task_node_repo.covered_rp_ids(s, candidate_id):
+                    try:
+                        rp = self.sys.recall_point_repo.get(s, rp_id)
+                    except NotFound:
+                        continue
+                    if rp.anchor is not None:
+                        candidate_instance_keys.add(id_canonical_text(rp.anchor.instance_id))
+                if candidate_instance_keys and candidate_instance_keys.issubset(target_instance_keys):
+                    selected.append(candidate_id)
+            return tuple(selected)
+
         for node_key in eligible_object_keys:
             node = object_nodes[node_key]
             existing = mirror_by_object_key.get(node_key)
             if existing is not None:
+                continue
+            target_layer_index = logical_level(node_key)
+            if int(target_layer_index) <= 0:
+                continue
+            if not source_queue_candidate_ids_for_object_node(node_key, int(target_layer_index)):
                 continue
             created = LearningTaskContainer(
                 project_id=s.project_id,
@@ -3773,34 +3809,19 @@ class SystemAPI:
             return None
 
         def prune_source_queue_for_object_node(node_key: str, target_layer_index: int) -> bool:
+            remove_keys = {
+                id_canonical_text(candidate_id)
+                for candidate_id in source_queue_candidate_ids_for_object_node(node_key, target_layer_index)
+            }
+            if not remove_keys:
+                return False
             source_layer_index = int(target_layer_index) - 1
-            if source_layer_index < 0:
-                return False
-            target_instance_keys = set(covered_instance_keys(node_key))
-            if not target_instance_keys:
-                return False
             try:
                 queue = self.sys.aggq_repo.get(s, source_layer_index)
             except NotFound:
                 return False
             current_ids = queue.current_ids()
             if not current_ids:
-                return False
-
-            remove_keys: set[str] = set()
-            for candidate_id in current_ids:
-                candidate_instance_keys: set[str] = set()
-                for rp_id in self.sys.learning_task_node_repo.covered_rp_ids(s, candidate_id):
-                    try:
-                        rp = self.sys.recall_point_repo.get(s, rp_id)
-                    except NotFound:
-                        continue
-                    if rp.anchor is not None:
-                        candidate_instance_keys.add(id_canonical_text(rp.anchor.instance_id))
-                if candidate_instance_keys and candidate_instance_keys.issubset(target_instance_keys):
-                    remove_keys.add(id_canonical_text(candidate_id))
-
-            if not remove_keys:
                 return False
             historical_ids = tuple(queue.node_ids[: queue.head_index])
             remaining_current_ids = tuple(
@@ -3841,6 +3862,8 @@ class SystemAPI:
             mirror = mirror_by_object_key[node_key]
             target_layer_index = logical_level(node_key)
             if int(target_layer_index) <= 0:
+                continue
+            if not source_queue_candidate_ids_for_object_node(node_key, int(target_layer_index)):
                 continue
             if self.sys.entry_repo.maybe_get(s, mirror.node_id) is not None:
                 if prune_source_queue_for_object_node(node_key, int(target_layer_index)):

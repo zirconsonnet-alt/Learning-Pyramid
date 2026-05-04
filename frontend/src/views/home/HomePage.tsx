@@ -76,10 +76,10 @@ const onboardingSteps = [
 ] as const
 
 const inviteBullets = [
-  "好友绑定你的邀请码并完成首个会员订单后，你会获得 1 张 5 元券。",
-  "每个被邀请人只能绑定 1 个邀请人，也只会触发 1 次奖励。",
-  "奖励券可用于首单，也可用于后续续费。",
-  "会员中心可以统一查看邀请码、优惠券、订单和邀请记录。",
+  "好友绑定你的邀请码后，会获得 1 张会员 7.5 折券。",
+  "好友实际支付满 15 元并过 24 小时退款窗口后，你会获得 5 元佣金。",
+  "已结算佣金可在会员中心申请提现到本人微信支付账户。",
+  "会员中心可以统一查看邀请码、折扣券、佣金、提现和订单记录。",
 ] as const
 
 const faqItems = [
@@ -415,10 +415,10 @@ export function HomePage() {
               <article className="lp-showcase-pricing-card lp-showcase-pricing-card-primary">
                 <h3>月会员</h3>
                 <div className="lp-showcase-price">
-                  <strong>¥19.9</strong>
+                  <strong>¥20</strong>
                   <span>/ 月</span>
                 </div>
-                <div className="lp-showcase-price-note">首单价 ¥14.9，首单叠券最低可到 ¥9.9</div>
+                <div className="lp-showcase-price-note">邀请码 7.5 折券可让首单实付 ¥15</div>
                 <div className="lp-showcase-hero-actions lp-showcase-membership-actions">
                   <Link className="lp-showcase-btn lp-showcase-btn-primary" to={membershipEntryHref}>
                     {membershipEntryLabel}

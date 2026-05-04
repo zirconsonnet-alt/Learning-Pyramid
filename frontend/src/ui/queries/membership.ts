@@ -5,11 +5,14 @@ import {
   closeMembershipOrder,
   confirmMembershipPayment,
   createMembershipOrder,
+  getCommissionSummary,
   getInviteSummary,
   getMembershipSummary,
+  listCommissionWithdrawals,
   listCoupons,
   listMembershipOrders,
   previewMembershipOrder,
+  requestCommissionWithdrawal,
   syncMembershipPayment,
 } from "@/ui/api/membership"
 
@@ -47,6 +50,7 @@ export function useCreateMembershipOrder() {
   return useMutation({
     mutationFn: createMembershipOrder,
     onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["membership", "summary"] })
       await qc.invalidateQueries({ queryKey: ["membership", "orders"] })
       await qc.invalidateQueries({ queryKey: ["membership", "preview"] })
       await qc.invalidateQueries({ queryKey: ["membership", "coupons"] })
@@ -64,6 +68,7 @@ export function useConfirmMembershipPayment() {
       await qc.invalidateQueries({ queryKey: ["membership", "preview"] })
       await qc.invalidateQueries({ queryKey: ["membership", "invites"] })
       await qc.invalidateQueries({ queryKey: ["membership", "coupons"] })
+      await qc.invalidateQueries({ queryKey: ["membership", "commissions"] })
     },
   })
 }
@@ -78,6 +83,7 @@ export function useSyncMembershipPayment() {
       await qc.invalidateQueries({ queryKey: ["membership", "preview"] })
       await qc.invalidateQueries({ queryKey: ["membership", "invites"] })
       await qc.invalidateQueries({ queryKey: ["membership", "coupons"] })
+      await qc.invalidateQueries({ queryKey: ["membership", "commissions"] })
     },
   })
 }
@@ -105,6 +111,24 @@ export function useInviteSummary(enabled = true) {
   })
 }
 
+export function useCommissionSummary(limit = 20, enabled = true) {
+  return useQuery({
+    queryKey: ["membership", "commissions", limit],
+    queryFn: () => getCommissionSummary(limit),
+    enabled,
+    staleTime: 10_000,
+  })
+}
+
+export function useCommissionWithdrawals(limit = 20, enabled = true) {
+  return useQuery({
+    queryKey: ["membership", "withdrawals", limit],
+    queryFn: () => listCommissionWithdrawals(limit),
+    enabled,
+    staleTime: 10_000,
+  })
+}
+
 export function useMembershipCoupons(limit = 20, enabled = true) {
   return useQuery({
     queryKey: ["membership", "coupons", limit],
@@ -119,6 +143,19 @@ export function useBindInviteCode() {
   return useMutation({
     mutationFn: bindInviteCode,
     onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["membership", "invites"] })
+      await qc.invalidateQueries({ queryKey: ["membership", "coupons"] })
+    },
+  })
+}
+
+export function useRequestCommissionWithdrawal() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: requestCommissionWithdrawal,
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["membership", "commissions"] })
+      await qc.invalidateQueries({ queryKey: ["membership", "withdrawals"] })
       await qc.invalidateQueries({ queryKey: ["membership", "invites"] })
     },
   })

@@ -15,6 +15,7 @@ from backend.system.membership_marketing_store import (
     COUPON_STATUS_EXPIRED,
     COUPON_STATUS_REVOKED,
     COUPON_STATUS_USED,
+    INVITE_BINDING_STATUS_COMMISSION_PENDING,
     INVITE_BINDING_STATUS_BOUND,
     INVITE_BINDING_STATUS_REWARDED,
     INVITE_REWARD_COUPON_AMOUNT_CENT,
@@ -25,18 +26,22 @@ from backend.system.membership_marketing_store import (
     REWARD_STATUS_ISSUED,
     REWARD_STATUS_REVOKED,
 )
+from backend.system.membership_commission_store import MembershipCommissionStore
 from backend.system.membership_payment_service import (
     MembershipRemotePaymentStatus,
     PAYMENT_PROVIDER_MANUAL_TEST,
     list_supported_membership_payment_providers,
 )
 
-BASE_MONTHLY_PRICE_CENT = 1990
-FIRST_ORDER_DISCOUNT_CENT = 500
+BASE_MONTHLY_PRICE_CENT = 2000
+FIRST_ORDER_DISCOUNT_CENT = 0
 FIRST_ORDER_PRICE_CENT = BASE_MONTHLY_PRICE_CENT - FIRST_ORDER_DISCOUNT_CENT
 RENEWAL_PRICE_CENT = BASE_MONTHLY_PRICE_CENT
+MEMBERSHIP_PRICING_VERSION = "invite_commission_v1"
 MEMBERSHIP_PERIOD_DAYS = 30
 ORDER_TTL_MINUTES = 30
+REFUND_WINDOW_HOURS = 24
+REFUND_WINDOW_EXPIRED_MESSAGE = "Membership refund period has expired."
 
 
 def _utc_now() -> datetime:
@@ -185,6 +190,18 @@ class MembershipRefundResult:
 
 
 @dataclass(frozen=True, slots=True)
+class MembershipGrantResult:
+    user_id: str
+    entitlement_id: str
+    source_ref_id: str
+    months: int
+    granted_days: int
+    start_at: str
+    end_at: str
+    membership: MembershipSummary
+
+
+@dataclass(frozen=True, slots=True)
 class MembershipAdminOverview:
     paid_order_count: int
     active_membership_count: int
@@ -220,6 +237,63 @@ class MembershipStore:
         if any(str(row["name"]) == str(column_name) for row in columns):
             return
         conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_sql}")
+
+    @staticmethod
+    def _ensure_nullable_entitlement_source_order(conn: sqlite3.Connection) -> None:
+        columns = {str(row["name"]): row for row in conn.execute("PRAGMA table_info(membership_entitlements)").fetchall()}
+        source_order = columns.get("source_order_id")
+        if source_order is None or int(source_order["notnull"] or 0) == 0:
+            return
+        temp_table = f"membership_entitlements_migration_{uuid.uuid4().hex[:8]}"
+        conn.execute(f"ALTER TABLE membership_entitlements RENAME TO {temp_table}")
+        conn.executescript(
+            f"""
+            CREATE TABLE membership_entitlements (
+                entitlement_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                source_order_id TEXT,
+                source_kind TEXT NOT NULL DEFAULT 'order',
+                start_at TEXT NOT NULL,
+                end_at TEXT NOT NULL,
+                granted_days INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                granted_at TEXT NOT NULL,
+                revoked_at TEXT,
+                revoke_reason TEXT NOT NULL DEFAULT '',
+                CHECK (granted_days > 0),
+                CHECK (status IN ('active', 'expired', 'revoked'))
+            );
+
+            INSERT INTO membership_entitlements (
+                entitlement_id,
+                user_id,
+                source_order_id,
+                source_kind,
+                start_at,
+                end_at,
+                granted_days,
+                status,
+                granted_at,
+                revoked_at,
+                revoke_reason
+            )
+            SELECT
+                entitlement_id,
+                user_id,
+                source_order_id,
+                'order',
+                start_at,
+                end_at,
+                granted_days,
+                status,
+                granted_at,
+                revoked_at,
+                revoke_reason
+            FROM {temp_table};
+
+            DROP TABLE {temp_table};
+            """
+        )
 
     def _init_db(self) -> None:
         with self._lock:
@@ -281,7 +355,8 @@ class MembershipStore:
                     CREATE TABLE IF NOT EXISTS membership_entitlements (
                         entitlement_id TEXT PRIMARY KEY,
                         user_id TEXT NOT NULL,
-                        source_order_id TEXT NOT NULL,
+                        source_order_id TEXT,
+                        source_kind TEXT NOT NULL DEFAULT 'order',
                         start_at TEXT NOT NULL,
                         end_at TEXT NOT NULL,
                         granted_days INTEGER NOT NULL,
@@ -349,6 +424,25 @@ class MembershipStore:
                     "membership_orders",
                     "remark",
                     "remark TEXT NOT NULL DEFAULT ''",
+                )
+                self._ensure_column(
+                    conn,
+                    "membership_entitlements",
+                    "source_kind",
+                    "source_kind TEXT NOT NULL DEFAULT 'order'",
+                )
+                self._ensure_nullable_entitlement_source_order(conn)
+                conn.execute(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_membership_entitlements_source_order
+                    ON membership_entitlements (source_order_id);
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_membership_entitlements_user_end
+                    ON membership_entitlements (user_id, end_at DESC);
+                    """
                 )
                 self._ensure_column(
                     conn,
@@ -440,6 +534,54 @@ class MembershipStore:
                 tuple(coupon_params),
             )
 
+    def _ensure_commission_tables(self, conn: sqlite3.Connection) -> None:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS commission_records (
+                commission_id TEXT PRIMARY KEY,
+                inviter_user_id TEXT NOT NULL,
+                invitee_user_id TEXT NOT NULL,
+                source_order_id TEXT NOT NULL UNIQUE,
+                source_payment_amount_cent INTEGER NOT NULL,
+                threshold_amount_cent INTEGER NOT NULL,
+                commission_amount_cent INTEGER NOT NULL,
+                refund_window_ends_at TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                settled_at TEXT,
+                canceled_at TEXT,
+                cancel_reason TEXT NOT NULL DEFAULT ''
+            );
+
+            CREATE TABLE IF NOT EXISTS commission_withdrawal_requests (
+                withdrawal_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                amount_cent INTEGER NOT NULL,
+                target_type TEXT NOT NULL,
+                wechat_open_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                provider_transfer_no TEXT,
+                failure_reason TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                submitted_at TEXT,
+                completed_at TEXT
+            );
+            """
+        )
+
+    @staticmethod
+    def _ensure_refund_window_open(order: MembershipOrder, *, now: datetime) -> None:
+        if order.status != "paid":
+            return
+        if not order.paid_at:
+            raise PreconditionFailure("membership order successful payment time is unavailable")
+        paid_at = _parse_dt(order.paid_at)
+        if now > paid_at + timedelta(hours=REFUND_WINDOW_HOURS):
+            raise PreconditionFailure(REFUND_WINDOW_EXPIRED_MESSAGE)
+
+    def ensure_refund_can_start(self, order: MembershipOrder, *, now: datetime | None = None) -> None:
+        self._ensure_refund_window_open(order, now=now or _utc_now())
+
     def _is_first_order_eligible(self, conn: sqlite3.Connection, user_id: str) -> bool:
         row = conn.execute(
             "SELECT 1 FROM membership_orders WHERE user_id = ? AND status = 'paid' LIMIT 1",
@@ -456,7 +598,7 @@ class MembershipStore:
         coupon_id: str | None = None,
     ) -> MembershipOrderPreview:
         is_first = self._is_first_order_eligible(conn, user_id)
-        first_order_discount_cent = FIRST_ORDER_DISCOUNT_CENT if is_first else 0
+        first_order_discount_cent = 0
         normalized_coupon_discount_cent = max(0, int(coupon_discount_cent))
         payable_amount_cent = max(0, BASE_MONTHLY_PRICE_CENT - first_order_discount_cent - normalized_coupon_discount_cent)
         return MembershipOrderPreview(
@@ -804,7 +946,7 @@ class MembershipStore:
 
         entitlement_rows = conn.execute(
             """
-            SELECT e.entitlement_id, e.source_order_id, COALESCE(o.status, '') AS order_status
+            SELECT e.entitlement_id, e.source_order_id, e.source_kind, COALESCE(o.status, '') AS order_status
             FROM membership_entitlements e
             LEFT JOIN membership_orders o ON o.order_id = e.source_order_id
             WHERE e.user_id = ?
@@ -812,6 +954,8 @@ class MembershipStore:
             (str(user_id),),
         ).fetchall()
         for entitlement_row in entitlement_rows:
+            if str(entitlement_row["source_kind"] or "order") != "order":
+                continue
             source_order_id = str(entitlement_row["source_order_id"])
             if source_order_id in retained_order_ids:
                 continue
@@ -1002,6 +1146,65 @@ class MembershipStore:
         finally:
             conn.close()
 
+    def grant_membership_months(self, user_id: str, *, months: int) -> MembershipGrantResult:
+        normalized_months = int(months)
+        if normalized_months < 1 or normalized_months > 24:
+            raise PreconditionFailure("membership grant months must be between 1 and 24")
+        granted_days = MEMBERSHIP_PERIOD_DAYS * normalized_months
+        now = _utc_now()
+        source_ref_id = f"admin_grant_{uuid.uuid4().hex}"
+        entitlement_id = f"ment_{uuid.uuid4().hex}"
+        conn = self._connect()
+        try:
+            with self._lock:
+                self._sync_expired_rows(conn, user_id=str(user_id), now=now)
+                summary_before = self._summary_from_conn(conn, str(user_id))
+                start_at_dt = now if not summary_before.is_active or not summary_before.current_ends_at else _parse_dt(summary_before.current_ends_at)
+                end_at_dt = start_at_dt + timedelta(days=granted_days)
+                status = "expired" if end_at_dt <= now else "active"
+                conn.execute(
+                    """
+                    INSERT INTO membership_entitlements (
+                        entitlement_id,
+                        user_id,
+                        source_order_id,
+                        source_kind,
+                        start_at,
+                        end_at,
+                        granted_days,
+                        status,
+                        granted_at,
+                        revoked_at,
+                        revoke_reason
+                    )
+                    VALUES (?, ?, ?, 'admin_grant', ?, ?, ?, ?, ?, NULL, '')
+                    """,
+                    (
+                        entitlement_id,
+                        str(user_id),
+                        source_ref_id,
+                        start_at_dt.isoformat(),
+                        end_at_dt.isoformat(),
+                        granted_days,
+                        status,
+                        now.isoformat(),
+                    ),
+                )
+                conn.commit()
+                membership = self._summary_from_conn(conn, str(user_id))
+                return MembershipGrantResult(
+                    user_id=str(user_id),
+                    entitlement_id=entitlement_id,
+                    source_ref_id=source_ref_id,
+                    months=normalized_months,
+                    granted_days=granted_days,
+                    start_at=start_at_dt.isoformat(),
+                    end_at=end_at_dt.isoformat(),
+                    membership=membership,
+                )
+        finally:
+            conn.close()
+
     def list_pending_payment_sync_candidates(
         self,
         *,
@@ -1080,7 +1283,7 @@ class MembershipStore:
                         """
                         UPDATE membership_orders
                         SET order_type = ?,
-                            pricing_version = 'membership_v2',
+                            pricing_version = ?,
                             period_days = ?,
                             list_amount_cent = ?,
                             first_order_discount_cent = ?,
@@ -1094,6 +1297,7 @@ class MembershipStore:
                         """,
                         (
                             preview.order_type,
+                            MEMBERSHIP_PRICING_VERSION,
                             preview.period_days,
                             preview.list_amount_cent,
                             preview.first_order_discount_cent,
@@ -1142,12 +1346,13 @@ class MembershipStore:
                         created_at,
                         expired_at
                     )
-                    VALUES (?, ?, ?, 'membership_v2', ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
                     """,
                     (
                         order_id,
                         str(user_id),
                         preview.order_type,
+                        MEMBERSHIP_PRICING_VERSION,
                         preview.period_days,
                         preview.list_amount_cent,
                         preview.first_order_discount_cent,
@@ -1492,7 +1697,7 @@ class MembershipStore:
     ) -> None:
         if order.order_type != "first_purchase":
             return
-        if not self._table_exists(conn, "invite_bindings") or not self._table_exists(conn, "invite_reward_records"):
+        if not self._table_exists(conn, "invite_bindings"):
             return
         invite_binding_row = conn.execute(
             """
@@ -1505,70 +1710,46 @@ class MembershipStore:
         ).fetchone()
         if invite_binding_row is None:
             return
-        reward_row = conn.execute(
+        self._ensure_commission_tables(conn)
+        commission_row = conn.execute(
             """
-            SELECT reward_id
-            FROM invite_reward_records
-            WHERE invitee_user_id = ?
+            SELECT commission_id
+            FROM commission_records
+            WHERE source_order_id = ?
             LIMIT 1
             """,
-            (str(order.user_id),),
+            (order.order_id,),
         ).fetchone()
-        if reward_row is not None:
+        if commission_row is not None:
             return
-        reward_coupon_id = f"mcpn_{uuid.uuid4().hex}"
-        reward_id = f"mrew_{uuid.uuid4().hex}"
-        reward_expires_at = (confirmed_at_dt + timedelta(days=INVITE_REWARD_COUPON_EXPIRE_DAYS)).isoformat()
+        if order.payable_amount_cent < 1500:
+            return
+        commission_id = f"mcom_{uuid.uuid4().hex}"
+        refund_window_ends_at = (confirmed_at_dt + timedelta(hours=REFUND_WINDOW_HOURS)).isoformat()
         inviter_user_id = str(invite_binding_row["inviter_user_id"])
         conn.execute(
             """
-            INSERT INTO coupons (
-                coupon_id,
-                user_id,
-                title,
-                amount_cent,
-                min_spend_cent,
-                source,
-                status,
-                source_invitee_user_id,
-                created_at,
-                expires_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                reward_coupon_id,
-                inviter_user_id,
-                INVITE_REWARD_COUPON_TITLE,
-                INVITE_REWARD_COUPON_AMOUNT_CENT,
-                INVITE_REWARD_COUPON_MIN_SPEND_CENT,
-                INVITE_REWARD_SOURCE,
-                COUPON_STATUS_AVAILABLE,
-                str(order.user_id),
-                confirmed_at,
-                reward_expires_at,
-            ),
-        )
-        conn.execute(
-            """
-            INSERT INTO invite_reward_records (
-                reward_id,
+            INSERT INTO commission_records (
+                commission_id,
                 inviter_user_id,
                 invitee_user_id,
-                trigger_order_id,
-                coupon_id,
+                source_order_id,
+                source_payment_amount_cent,
+                threshold_amount_cent,
+                commission_amount_cent,
+                refund_window_ends_at,
                 status,
                 created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, 1500, 500, ?, 'pending', ?)
             """,
             (
-                reward_id,
+                commission_id,
                 inviter_user_id,
                 str(order.user_id),
                 order.order_id,
-                reward_coupon_id,
-                REWARD_STATUS_ISSUED,
+                order.payable_amount_cent,
+                refund_window_ends_at,
                 confirmed_at,
             ),
         )
@@ -1576,16 +1757,12 @@ class MembershipStore:
             """
             UPDATE invite_bindings
             SET status = ?,
-                rewarded_at = ?,
-                reward_trigger_order_id = ?,
-                reward_coupon_id = ?
+                reward_trigger_order_id = ?
             WHERE invitee_user_id = ?
             """,
             (
-                INVITE_BINDING_STATUS_REWARDED,
-                confirmed_at,
+                INVITE_BINDING_STATUS_COMMISSION_PENDING,
                 order.order_id,
-                reward_coupon_id,
                 str(order.user_id),
             ),
         )
@@ -1938,6 +2115,36 @@ class MembershipStore:
             raise PreconditionFailure("only paid or refund_pending membership orders can be refunded")
 
         restored_coupon_id, restored_coupon_status = self._restore_coupon_after_refund(conn, order, now=now)
+        self._ensure_commission_tables(conn)
+        conn.execute(
+            """
+            UPDATE commission_records
+            SET status = 'canceled',
+                canceled_at = ?,
+                cancel_reason = ?
+            WHERE source_order_id = ?
+              AND status = 'pending'
+            """,
+            (now_text, normalized_reason, order.order_id),
+        )
+        conn.execute(
+            """
+            UPDATE invite_bindings
+            SET status = ?,
+                reward_trigger_order_id = CASE
+                    WHEN reward_trigger_order_id = ? THEN NULL
+                    ELSE reward_trigger_order_id
+                END
+            WHERE invitee_user_id = ?
+              AND status = ?
+            """,
+            (
+                INVITE_BINDING_STATUS_BOUND,
+                order.order_id,
+                str(order.user_id),
+                INVITE_BINDING_STATUS_COMMISSION_PENDING,
+            ),
+        )
         revoked_reward_coupon_id = self._rollback_invite_reward_for_refund(
             conn,
             order,
@@ -2046,6 +2253,7 @@ class MembershipStore:
                     )
                 if order.status not in {"paid", "refund_pending"}:
                     raise PreconditionFailure("only paid or refund_pending membership orders can enter refund_pending")
+                self._ensure_refund_window_open(order, now=_parse_dt(requested_at_text))
                 payment_row = self._latest_payment_row_for_order(conn, order.order_id)
                 if payment_row is None:
                     raise NotFound("membership payment")
@@ -2254,6 +2462,7 @@ class MembershipStore:
                 if row is None:
                     raise NotFound("membership order")
                 order = self._row_to_order(row)
+                self._ensure_refund_window_open(order, now=now)
                 return self._finalize_refund_locked(
                     conn,
                     order,

@@ -39,6 +39,7 @@ import { Input } from "@/ui/components/ui/input"
 import { formatRecallPointReference } from "@/ui/displayIdentifiers"
 import { askCourseAgent } from "@/ui/llm/courseAgent"
 import { useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
+import { useMembershipSummary } from "@/ui/queries/membership"
 import { useProjectMaterialSourceBinding } from "@/ui/queries/projects"
 import { useSystemCapabilities } from "@/ui/queries/system"
 import { useInstances } from "@/ui/queries/workbench"
@@ -52,6 +53,7 @@ import { buildSubtitleContextText, loadSubtitleDocumentForInstance } from "@/ui/
 import { cn } from "@/ui/utils"
 import { formatLearningTaskNodeDisplayTitle } from "@/views/learningTasks/displayTitle"
 import { buildAiChatPath, describeAiChatContextKind, isAiChatContextKind, type AiChatContextKind } from "@/views/ai/chatRouting"
+import { MemberOnlyFeatureNotice } from "@/views/membership/membershipUi"
 import { buildGlobalSettingsPath } from "@/views/settings/globalSettingsRouting"
 
 type SidebarNode = {
@@ -991,6 +993,8 @@ export function AiChatPage() {
   const streamingContentRef = useRef("")
 
   const capabilitiesQ = useSystemCapabilities()
+  const authEnabled = capabilitiesQ.data?.authEnabled ?? false
+  const membershipQ = useMembershipSummary(authEnabled)
   const materialSourceBindingQ = useProjectMaterialSourceBinding(pid)
   const directoryBinding = useProjectDirectoryBinding(pid)
   const instancesQ = useInstances(pid)
@@ -1058,8 +1062,9 @@ export function AiChatPage() {
         ? activeTaskRecallPointsQ.data ?? []
         : activeObjectRecallPointsQ.data ?? []
   const llmConfigured = capabilitiesQ.data?.llmConfigured ?? false
+  const aiChatMemberBlocked = authEnabled && (membershipQ.isLoading || Boolean(membershipQ.error) || !membershipQ.data?.isActive)
   const todayDateKey = getLocalDateKey()
-  const interactionDisabled = !pid || !activeNodeId || !llmConfigured
+  const interactionDisabled = !pid || !activeNodeId || !llmConfigured || aiChatMemberBlocked
   const persistedMessages = selectedConversation?.messages ?? []
   const latestAssistantIndex = useMemo(() => {
     for (let index = persistedMessages.length - 1; index >= 0; index -= 1) {
@@ -1495,7 +1500,7 @@ export function AiChatPage() {
 
   async function handleSend() {
     const trimmed = composerValue.trim()
-    if (!trimmed || !pid || !activeNodeId || !llmConfigured || isStreaming) return
+    if (!trimmed || !pid || !activeNodeId || !llmConfigured || aiChatMemberBlocked || isStreaming) return
 
     touchQaActivity()
     const userMessage = createMessage("user", trimmed)
@@ -1556,7 +1561,7 @@ export function AiChatPage() {
   }
 
   async function handleRegenerateLastAnswer() {
-    if (!selectedConversation || !pid || !activeNodeId || !llmConfigured || isStreaming || !canRegenerate || latestAssistantIndex < 1) return
+    if (!selectedConversation || !pid || !activeNodeId || !llmConfigured || aiChatMemberBlocked || isStreaming || !canRegenerate || latestAssistantIndex < 1) return
 
     const latestUserMessage = persistedMessages[latestAssistantIndex - 1]
     if (!latestUserMessage || latestUserMessage.role !== "user") return
@@ -1736,7 +1741,15 @@ export function AiChatPage() {
             {taskNodesQ.error && activeKind === "task" ? <ErrorNotice title="任务节点目录加载失败" message={formatApiError(taskNodesQ.error)} /> : null}
             {objectNodesQ.error && activeKind === "object" ? <ErrorNotice title="对象节点目录加载失败" message={formatApiError(objectNodesQ.error)} /> : null}
 
-            {!llmConfigured && !capabilitiesQ.isLoading ? (
+            {aiChatMemberBlocked && !capabilitiesQ.isLoading ? (
+              <MemberOnlyFeatureNotice
+                className="mx-auto max-w-3xl"
+                title="AI 问答是会员专属功能"
+                message="当前账号还没有有效会员，所以这里先不开放 AI 问答。开通会员后，就可以继续使用项目问答和节点上下文提问。"
+              />
+            ) : null}
+
+            {!aiChatMemberBlocked && !llmConfigured && !capabilitiesQ.isLoading ? (
               <ContentNotice
                 title="当前还没有接通可用的 LLM"
                 message={
@@ -1752,7 +1765,7 @@ export function AiChatPage() {
               />
             ) : null}
 
-            {llmConfigured && !activeNodeId ? (
+            {llmConfigured && !aiChatMemberBlocked && !activeNodeId ? (
               <ContentNotice
                 title="先选择一个节点"
                 message="从左侧选择一个学习任务节点、学习对象节点或复述点上下文，AI 会优先围绕该上下文来回答。"
@@ -1761,7 +1774,7 @@ export function AiChatPage() {
 
             {chatError ? <ErrorNotice title="本轮问答失败" message={chatError} className="mx-auto mb-5 max-w-3xl" /> : null}
 
-            {llmConfigured && activeNodeId && visibleMessages.length === 0 ? (
+            {llmConfigured && !aiChatMemberBlocked && activeNodeId && visibleMessages.length === 0 ? (
               <div className="mx-auto flex max-w-3xl flex-col items-center px-2 pt-16 text-center">
                 <div className="flex h-16 w-16 items-center justify-center rounded-[1.75rem] bg-[linear-gradient(135deg,hsl(var(--primary)),hsl(var(--primary)/0.72))] text-primary-foreground shadow-[0_24px_48px_-26px_hsl(var(--primary)/0.5)]">
                   <Sparkles className="h-6 w-6" />
@@ -1773,7 +1786,7 @@ export function AiChatPage() {
               </div>
             ) : null}
 
-            {llmConfigured && activeNodeId && visibleMessages.length > 0 ? (
+            {llmConfigured && !aiChatMemberBlocked && activeNodeId && visibleMessages.length > 0 ? (
               <div className="mx-auto max-w-3xl space-y-8">
                 {visibleMessages.map((message, index) => {
                   let latestAssistantVisibleIndex = -1

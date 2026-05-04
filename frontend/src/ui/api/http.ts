@@ -31,6 +31,13 @@ export type ApiRequestExecutionOptions = {
   timeoutMs?: number
 }
 
+export const MEMBER_ONLY_ERROR_MESSAGE = "This feature requires active membership."
+export const MEMBERSHIP_CENTER_PATH = "/membership"
+
+export function isMemberOnlyApiError(err: unknown) {
+  return err instanceof ApiError && err.code === "PRECONDITION" && err.message === MEMBER_ONLY_ERROR_MESSAGE
+}
+
 const API_GET_TIMEOUT_MS = 25_000
 const API_MUTATION_TIMEOUT_MS = 25_000
 const DEFAULT_PAYLOAD_TOO_LARGE_MESSAGE = "上传内容过大，服务器或网关拒绝了这次请求。请压缩后重试；如果问题持续出现，需要调大站点上传限制。"

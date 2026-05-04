@@ -2,12 +2,13 @@ import { ArrowRight, Copy, Gift, Ticket } from "lucide-react"
 import { Link } from "react-router-dom"
 
 import { Button } from "@/ui/components/ui/button"
-import { useInviteSummary, useMembershipCoupons, useMembershipSummary } from "@/ui/queries/membership"
+import { useCommissionSummary, useInviteSummary, useMembershipCoupons, useMembershipSummary } from "@/ui/queries/membership"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import {
   copyTextToClipboard,
   describeMembershipCouponSource,
   formatMembershipApiError,
+  formatMembershipCouponValue,
   formatMembershipDateTime,
   formatMembershipPrice,
   StatusPill,
@@ -17,9 +18,11 @@ export function MembershipProfilePanel() {
   const summaryQ = useMembershipSummary()
   const inviteSummaryQ = useInviteSummary()
   const couponsQ = useMembershipCoupons(6)
+  const commissionQ = useCommissionSummary(3)
 
   const summary = summaryQ.data
   const inviteSummary = inviteSummaryQ.data
+  const commissionAccount = commissionQ.data?.account
   const availableCoupons = (couponsQ.data ?? []).filter((item) => item.status === "available").slice(0, 3)
 
   async function onCopyInviteCode() {
@@ -81,7 +84,7 @@ export function MembershipProfilePanel() {
                 <div>
                   <div className="text-2xl font-semibold tracking-tight text-foreground">{inviteSummary?.inviteCode ?? "加载中..."}</div>
                   <div className="mt-1 text-sm text-muted-foreground">
-                    已邀请 {inviteSummary?.totalInvitedUsers ?? 0} 人，已触发奖励 {inviteSummary?.rewardedInviteCount ?? 0} 次
+                    已邀请 {inviteSummary?.totalInvitedUsers ?? 0} 人，待结算 {formatMembershipPrice(commissionAccount?.pendingCent ?? 0)}
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -114,7 +117,7 @@ export function MembershipProfilePanel() {
 
           {!couponsQ.error && availableCoupons.length === 0 ? (
             <div className="theme-subtle-surface mt-4 border-dashed px-4 py-8 text-center text-sm">
-              暂时还没有可用优惠券。好友完成首单后，你会收到 5 元优惠券。
+              暂时还没有可用优惠券。绑定好友邀请码后，你会收到 7.5 折会员券。
             </div>
           ) : null}
 
@@ -133,7 +136,7 @@ export function MembershipProfilePanel() {
                       </div>
                     </div>
                     <div className="shrink-0 text-right">
-                      <div className="text-xl font-semibold tracking-tight text-foreground">-{formatMembershipPrice(coupon.amountCent)}</div>
+                      <div className="text-xl font-semibold tracking-tight text-foreground">{formatMembershipCouponValue(coupon)}</div>
                       <div className="mt-1 text-xs text-muted-foreground">{formatMembershipDateTime(coupon.expiresAt)} 到期</div>
                     </div>
                   </div>

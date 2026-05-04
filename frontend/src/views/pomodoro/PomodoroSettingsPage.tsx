@@ -14,6 +14,7 @@ import {
   savePomodoroWallpaperBlob,
 } from "@/ui/pomodoroWallpaper"
 import { useCurrentUser } from "@/ui/queries/auth"
+import { useMembershipSummary } from "@/ui/queries/membership"
 import { useUpdateMyGlobalSettings } from "@/ui/queries/profile"
 import { useSystemCapabilities } from "@/ui/queries/system"
 import { usePageMeta } from "@/ui/seo/usePageMeta"
@@ -27,6 +28,7 @@ import {
   usePomodoroStore,
 } from "@/ui/store/pomodoroStore"
 import { useThemeStore } from "@/ui/store/themeStore"
+import { MemberOnlyFeatureNotice } from "@/views/membership/membershipUi"
 import { buildPomodoroPath, buildPomodoroSettingsPath } from "@/views/pomodoro/pomodoroRouting"
 
 function formatApiError(err: unknown) {
@@ -125,6 +127,8 @@ export function PomodoroSettingsPage() {
   const currentUserQ = useCurrentUser(authEnabled)
   const updateGlobalSettings = useUpdateMyGlobalSettings()
   const shouldSyncRemotely = authEnabled && Boolean(currentUserQ.data?.userId)
+  const membershipQ = useMembershipSummary(authEnabled)
+  const pomodoroMemberBlocked = authEnabled && (membershipQ.isLoading || Boolean(membershipQ.error) || !membershipQ.data?.isActive)
   const restMusicDirectory = usePomodoroRestMusicDirectoryBinding()
   const [restMusicDirectoryAction, setRestMusicDirectoryAction] = useState<"authorize" | "request" | "clear" | null>(null)
   const [wallpaperUrl, setWallpaperUrl] = useState("")
@@ -337,6 +341,23 @@ export function PomodoroSettingsPage() {
     } catch (err) {
       showErrorFeedback("移除壁纸失败", formatApiError(err))
     }
+  }
+
+  if (pomodoroMemberBlocked) {
+    return (
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
+        <Button variant="ghost" asChild className="self-start px-0">
+          <Link to={buildPomodoroPath()}>
+            <ArrowLeft className="h-4 w-4" />
+            返回番茄钟
+          </Link>
+        </Button>
+        <MemberOnlyFeatureNotice
+          title="番茄钟设置是会员专属功能"
+          message="当前账号还没有有效会员，所以默认提示词、随机微休息、休息音乐目录和壁纸设置先不开放。"
+        />
+      </div>
+    )
   }
 
   return (

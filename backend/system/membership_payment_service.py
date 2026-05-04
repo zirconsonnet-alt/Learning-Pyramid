@@ -225,6 +225,13 @@ class MembershipPaymentRecordLike(Protocol):
     refund_out_refund_no: str | None
 
 
+class CommissionWithdrawalLike(Protocol):
+    withdrawal_id: str
+    user_id: str
+    amount_cent: int
+    wechat_open_id: str
+
+
 @dataclass(frozen=True, slots=True)
 class MembershipPaymentPayload:
     mode: str
@@ -261,6 +268,15 @@ class MembershipRemoteRefundStatus:
     remote_status: str
     refunded_at: str | None
     refund_amount_cent: int | None
+    raw_payload_json: str
+
+
+@dataclass(frozen=True, slots=True)
+class CommissionPayoutStatus:
+    withdrawal_id: str
+    provider_transfer_no: str | None
+    remote_status: str
+    failure_reason: str
     raw_payload_json: str
 
 
@@ -351,6 +367,27 @@ class MembershipPaymentService:
         if normalized_provider != PAYMENT_PROVIDER_WECHAT_NATIVE:
             raise PreconditionFailure("membership refund notification is unsupported for this provider")
         return self._parse_wechat_refund_notification(headers=headers, body_text=body_text)
+
+    def request_commission_payout(self, withdrawal: CommissionWithdrawalLike) -> CommissionPayoutStatus:
+        if manual_test_payment_enabled() and not current_wechat_native_payment_config().enabled:
+            provider_transfer_no = f"manual_{withdrawal.withdrawal_id}"
+            return CommissionPayoutStatus(
+                withdrawal_id=withdrawal.withdrawal_id,
+                provider_transfer_no=provider_transfer_no,
+                remote_status="processing",
+                failure_reason="",
+                raw_payload_json=json.dumps(
+                    {
+                        "mode": "manual_test",
+                        "withdrawalId": withdrawal.withdrawal_id,
+                        "providerTransferNo": provider_transfer_no,
+                    },
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            )
+        return self._request_wechat_commission_payout(withdrawal)
 
     def _create_wechat_native_payload(
         self,
@@ -500,6 +537,45 @@ class MembershipPaymentService:
             ),
             refund_out_trade_no=str(response_body.get("out_refund_no") or refund_out_trade_no),
             payload=response_body,
+        )
+
+    def _request_wechat_commission_payout(self, withdrawal: CommissionWithdrawalLike) -> CommissionPayoutStatus:
+        config = current_wechat_native_payment_config()
+        if not config.enabled:
+            raise PreconditionFailure("wechat payout is not configured in this deployment")
+        provider_transfer_no = f"wxt_{uuid.uuid4().hex}"
+        request_body: dict[str, object] = {
+            "appid": config.app_id,
+            "out_batch_no": provider_transfer_no,
+            "batch_name": "LearningPyramid 佣金提现",
+            "batch_remark": "会员邀请佣金提现",
+            "total_amount": int(withdrawal.amount_cent),
+            "total_num": 1,
+            "transfer_detail_list": [
+                {
+                    "out_detail_no": str(withdrawal.withdrawal_id),
+                    "transfer_amount": int(withdrawal.amount_cent),
+                    "transfer_remark": "会员邀请佣金提现",
+                    "openid": str(withdrawal.wechat_open_id),
+                }
+            ],
+        }
+        response_body = self._wechat_request_json("POST", "/v3/transfer/batches", request_body)
+        resolved_transfer_no = str(response_body.get("batch_id") or response_body.get("out_batch_no") or provider_transfer_no).strip() or provider_transfer_no
+        status_value = str(response_body.get("batch_status") or response_body.get("status") or "ACCEPTED").strip().upper()
+        remote_status = "processing"
+        failure_reason = ""
+        if status_value in {"FINISHED", "SUCCESS"}:
+            remote_status = "succeeded"
+        elif status_value in {"CLOSED", "FAIL", "FAILED"}:
+            remote_status = "failed"
+            failure_reason = str(response_body.get("fail_reason") or response_body.get("reason") or "wechat payout failed").strip()
+        return CommissionPayoutStatus(
+            withdrawal_id=str(withdrawal.withdrawal_id),
+            provider_transfer_no=resolved_transfer_no,
+            remote_status=remote_status,
+            failure_reason=failure_reason,
+            raw_payload_json=json.dumps(response_body, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
         )
 
     def _query_wechat_refund(

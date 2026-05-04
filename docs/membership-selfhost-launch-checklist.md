@@ -1,14 +1,17 @@
 # 会员支付上线清单
 
-适用日期：`2026-03-26`
+适用日期：`2026-05-05`
 
 这份清单对应当前已经落地的会员体系实现，包含：
 
-- 月会员、首单优惠、邀请码、邀请奖励券
+- 月会员 `20 元`、邀请码、被邀请人 `7.5 折会员券`、邀请人固定 `5 元` 佣金
 - `manual_test` 与 `wechat_native`
 - 用户侧支付同步、关单
-- 后台订单详情、支付同步、关单、退款回滚
+- 用户侧佣金余额、佣金提现申请与提现记录
+- 后台订单详情、支付同步、关单、退款回滚、佣金结算与提现处理
 - 微信支付通知与退款通知
+- 微信支付提现请求与后台提现状态处理
+- AI 能力与番茄钟会员门禁
 
 ## 1. 上线前必须核对
 
@@ -42,7 +45,7 @@ PLM_PIP_DEFAULT_TIMEOUT=120
 PLM_PIP_RETRIES=10
 ```
 
-## 2. 微信支付必须配置
+## 2. 微信支付与提现必须配置
 
 这些变量缺一不可：
 
@@ -73,6 +76,8 @@ PLM_PIP_RETRIES=10
 - 或显式配 `PLM_WECHAT_PAY_REFUND_NOTIFY_URL`
 - 或显式配 `PLM_WECHAT_PAY_NOTIFY_URL`，系统会用同域名推导退款通知地址
 
+佣金提现使用同一套微信支付商户号、证书和签名配置发起转账请求。上线前需要确认商户号已经具备对应的微信支付转账能力；如果提现请求进入 `processing` 后无法自动获得最终结果，可在后台提现列表中根据微信支付商户后台结果手动标记成功或失败。
+
 ## 3. 公网回调地址
 
 上线后必须从公网可访问：
@@ -86,9 +91,26 @@ PLM_PIP_RETRIES=10
 2. 完成真实扫码支付
 3. 确认用户侧订单变成 `paid`
 4. 确认后台订单详情能看到支付流水
-5. 发起一次退款
+5. 在支付成功后 `24 小时` 内发起一次退款
 6. 确认订单进入 `refund_pending`
 7. 等待或同步退款结果，确认最终进入 `refunded`
+8. 使用一笔超过支付成功后 `24 小时` 的已支付订单尝试发起新退款，确认系统拒绝且不会向微信提交新退款请求
+
+邀请佣金链路建议至少人工验证一次：
+
+1. 使用邀请人邀请码绑定一个新被邀请人
+2. 确认被邀请人获得 `7.5 折会员券`
+3. 创建 `20 元` 月会员订单并使用该券，确认实付为 `15 元`
+4. 完成支付后，确认邀请人出现 `5 元` 待结算佣金
+5. 在 `24 小时` 退款窗口内退款一次，确认待结算佣金不会进入可提现余额
+6. 再创建一笔不退款的邀请订单，退款窗口结束后触发结算，确认邀请人可提现余额增加 `5 元`
+
+佣金提现链路建议至少人工验证一次：
+
+1. 使用有可提现佣金的邀请人发起提现
+2. 确认提现金额从可提现余额转入冻结/处理中余额
+3. 根据微信支付返回或商户后台结果，将提现标记为成功或失败
+4. 成功时确认金额进入已打款余额；失败时确认金额退回可提现余额
 
 ## 4. 巡检任务
 
@@ -145,10 +167,27 @@ python i:\Projects\LearningPyramid\tools\reconcile_membership_payments.py --min-
 - 是否存在大量 `pending` 微信订单长期不收口
 - 是否出现支付成功但本地没有发会员的情况
 - 是否出现退款成功但本地仍停留在 `refund_pending`
-- 邀请奖励券是否按首单成功正确发放
-- 首单退款后奖励券是否正确撤销
+- 是否出现超过 `24 小时` 的已支付订单仍能发起新退款
+- 被邀请人绑定邀请码后是否只获得一张 `7.5 折会员券`
+- 邀请人是否不再获得新的 `邀请奖励 5 元券`
+- 邀请佣金是否在首单支付后进入待结算，并只在 `24 小时` 退款窗口结束后转入可提现
+- 首单退款后待结算佣金是否正确取消或保持不可提现
+- 提现失败后冻结余额是否正确退回可提现余额
+- 非会员是否被正确拦截在个人 LLM 配置、AI 问答、播放器 AI 问答和番茄钟之外
+- 有效会员购买或续费后，受保护功能是否在下一次访问时恢复可用
 
-## 8. 当前关键接口
+## 8. 会员专属功能核验
+
+上线前建议至少用一个非会员账号和一个有效会员账号各跑一遍：
+
+- 非会员打开全局设置，应看到大模型配置的会员专属提示和会员中心入口
+- 非会员打开 AI 问答页，输入框和发送行为应被会员门禁拦截
+- 非会员在播放器里打开视频助手，应看到会员专属提示
+- 非会员打开番茄钟和番茄钟设置，应看到会员专属提示
+- 有效会员应能正常保存个人 LLM 配置、发起 AI 问答、使用播放器 AI 问答和进入番茄钟
+- 退款、过期或后台撤销后，下一次访问上述功能应重新进入会员门禁
+
+## 9. 当前关键接口
 
 用户侧：
 
@@ -158,6 +197,9 @@ python i:\Projects\LearningPyramid\tools\reconcile_membership_payments.py --min-
 - `POST /api/membership/orders/preview`
 - `POST /api/membership/orders/{orderId}/sync-payment`
 - `POST /api/membership/orders/{orderId}/close`
+- `GET /api/commissions/me`
+- `GET /api/commissions/withdrawals`
+- `POST /api/commissions/withdrawals`
 
 微信侧：
 
@@ -169,6 +211,11 @@ python i:\Projects\LearningPyramid\tools\reconcile_membership_payments.py --min-
 - `GET /api/admin/membership/overview`
 - `GET /api/admin/membership/orders`
 - `GET /api/admin/membership/orders/{orderId}`
+- `POST /api/admin/membership/grants`
 - `POST /api/admin/membership/orders/{orderId}/sync-payment`
 - `POST /api/admin/membership/orders/{orderId}/close`
 - `POST /api/admin/membership/orders/{orderId}/refund`
+- `GET /api/admin/membership/commissions`
+- `POST /api/admin/membership/commissions/settle`
+- `GET /api/admin/membership/withdrawals`
+- `POST /api/admin/membership/withdrawals/{withdrawalId}/resolve`

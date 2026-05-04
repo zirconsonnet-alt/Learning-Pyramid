@@ -41,6 +41,7 @@ import { Card, CardContent } from "@/ui/components/ui/card"
 import { askCourseAgent } from "@/ui/llm/courseAgent"
 import { resolveProjectFile, useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
 import { playPomodoroMicroBreakReminderSound } from "@/ui/pomodoroAudio"
+import { useMembershipSummary } from "@/ui/queries/membership"
 import { useProjectMaterialSourceBinding, useProjects } from "@/ui/queries/projects"
 import { useSystemCapabilities } from "@/ui/queries/system"
 import type { AiChatCourseEvidence } from "@/ui/store/aiChatStore"
@@ -62,6 +63,7 @@ import { saveVideoDurationMs } from "@/ui/store/videoDurations"
 import { recordVideoWatchCoverageRange } from "@/ui/store/videoWatchCoverage"
 import { useWorkbenchStore } from "@/ui/store/workbenchStore"
 import { cn } from "@/ui/utils"
+import { MemberOnlyFeatureNotice } from "@/views/membership/membershipUi"
 import {
   VideoBarrageDetailCard,
   VideoBarrageLayer,
@@ -390,6 +392,8 @@ export function VideoPane({
 
   const instanceId = instance?.instanceId ?? null
   const capabilitiesQ = useSystemCapabilities()
+  const authEnabled = capabilitiesQ.data?.authEnabled ?? false
+  const membershipQ = useMembershipSummary(authEnabled)
   const materialSourceBindingQ = useProjectMaterialSourceBinding(projectId)
   const playbackDescriptorQ = useInstancePlaybackDescriptor(projectId, instanceId ?? "", !!instanceId)
   const directoryBinding = useProjectDirectoryBinding(projectId)
@@ -447,10 +451,12 @@ export function VideoPane({
   const subtitleButtonLabel = subtitleState.isLoading ? "字幕载入" : subtitleMissing ? "无字幕" : isSubtitleEnabled ? "字幕开" : "字幕关"
   const subtitleDisplayLines = useMemo(() => formatSubtitleLines(subtitleState.text), [subtitleState.text])
   const llmConfigured = capabilitiesQ.data?.llmConfigured ?? false
+  const playerAiMemberBlocked = authEnabled && (membershipQ.isLoading || Boolean(membershipQ.error) || !membershipQ.data?.isActive)
   const canAskCourseAssistant =
     !!instanceId &&
     !!subtitleSourceKind &&
     llmConfigured &&
+    !playerAiMemberBlocked &&
     (subtitleSourceKind !== "BROWSER_LOCAL" || directoryBinding.permission === "granted")
   const deferredCaptureReferenceQuery = useDeferredValue(captureReferencePicker?.query.trim() ?? "")
   const captureReferenceSearchQ = useQuery({
@@ -910,6 +916,10 @@ export function VideoPane({
       setAssistantError("当前还没有配置可用的 LLM 服务。")
       return
     }
+    if (playerAiMemberBlocked) {
+      setAssistantError("视频助手是会员专属功能，请先前往会员中心开通会员。")
+      return
+    }
     if (subtitleSourceKind === "BROWSER_LOCAL" && directoryBinding.permission !== "granted") {
       setAssistantError("浏览器还没有本地目录读取权限，视频助手暂时无法读取视频与字幕。")
       return
@@ -993,6 +1003,7 @@ export function VideoPane({
     instanceId,
     isAssistantAsking,
     llmConfigured,
+    playerAiMemberBlocked,
     projectId,
     subtitleSourceKind,
     touchQaActivity,
@@ -2419,7 +2430,14 @@ export function VideoPane({
                         className="min-h-0 flex-1 overflow-y-auto rounded-[1rem] border border-white/10 bg-white/[0.04] p-3"
                         onScroll={touchQaActivity}
                       >
-                        {assistantTurns.length === 0 && !isAssistantAsking ? (
+                        {playerAiMemberBlocked ? (
+                          <MemberOnlyFeatureNotice
+                            compact
+                            title="视频助手是会员专属功能"
+                            message="当前账号还没有有效会员，所以视频播放器里的 AI 问答先不开放。开通后就可以继续围绕当前画面和字幕提问。"
+                            className="border-white/10 bg-white/[0.06] text-left shadow-none [&_h2]:text-white [&_p]:text-white/60"
+                          />
+                        ) : assistantTurns.length === 0 && !isAssistantAsking ? (
                           <div className="flex h-full min-h-[12rem] flex-col items-center justify-center px-4 text-center">
                             <div className="flex h-10 w-10 items-center justify-center rounded-full border border-cyan-200/18 bg-cyan-200/10 text-cyan-100">
                               <Sparkles className="h-4 w-4" />

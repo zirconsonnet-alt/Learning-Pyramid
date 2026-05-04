@@ -8,6 +8,7 @@ PROFILE_API = REPO_ROOT / "frontend" / "src" / "ui" / "api" / "profile.ts"
 GLOBAL_SETTINGS_SYNC = REPO_ROOT / "frontend" / "src" / "ui" / "globalSettingsSync.ts"
 POMODORO_PAGE = REPO_ROOT / "frontend" / "src" / "views" / "pomodoro" / "PomodoroPage.tsx"
 POMODORO_SETTINGS_PAGE = REPO_ROOT / "frontend" / "src" / "views" / "pomodoro" / "PomodoroSettingsPage.tsx"
+VIDEO_PANE = REPO_ROOT / "frontend" / "src" / "views" / "workbench" / "components" / "VideoPane.tsx"
 POMODORO_ROUTING = REPO_ROOT / "frontend" / "src" / "views" / "pomodoro" / "pomodoroRouting.ts"
 POMODORO_WALLPAPER = REPO_ROOT / "frontend" / "src" / "ui" / "pomodoroWallpaper.ts"
 FRONTEND_ROUTER = REPO_ROOT / "frontend" / "src" / "router.tsx"
@@ -59,7 +60,7 @@ def test_pomodoro_page_exposes_quick_pomodoro_action() -> None:
 def test_quick_pomodoro_feeds_shell_gate_and_fullscreen_previews() -> None:
     app_shell_source = APP_SHELL.read_text(encoding="utf-8")
     gate_source = (REPO_ROOT / "frontend" / "src" / "views" / "pomodoro" / "PomodoroWorkbenchGate.tsx").read_text(encoding="utf-8")
-    video_pane_source = (REPO_ROOT / "frontend" / "src" / "views" / "workbench" / "components" / "VideoPane.tsx").read_text(encoding="utf-8")
+    video_pane_source = VIDEO_PANE.read_text(encoding="utf-8")
 
     assert "const pomodoroQuickPomodoro = usePomodoroStore((state) => state.quickPomodoro)" in app_shell_source
     assert "getPomodoroSnapshot({ enabled: pomodoroEnabled, weeklySchedule: pomodoroWeeklySchedule, quickPomodoro: pomodoroQuickPomodoro }, pomodoroNow)" in app_shell_source
@@ -250,7 +251,7 @@ def test_pomodoro_project_prompt_cards_stay_in_one_horizontal_scroll_row() -> No
 
 
 def test_micro_break_overlay_uses_dark_gradient_backdrop() -> None:
-    video_pane_source = (REPO_ROOT / "frontend" / "src" / "views" / "workbench" / "components" / "VideoPane.tsx").read_text(encoding="utf-8")
+    video_pane_source = VIDEO_PANE.read_text(encoding="utf-8")
     css_source = (REPO_ROOT / "frontend" / "src" / "index.css").read_text(encoding="utf-8")
 
     assert "pomodoro-micro-break-overlay" in video_pane_source
@@ -348,3 +349,37 @@ def test_user_manual_documents_local_rest_music_directory_scope() -> None:
     assert "本地浏览器授权" in manual_source
     assert "不会上传到服务端" in manual_source
     assert "切换到 AI 问答等其他路由会继续播放" in manual_source
+
+
+def test_player_ai_gate_uses_membership_summary_and_member_only_message() -> None:
+    source = VIDEO_PANE.read_text(encoding="utf-8")
+
+    assert "useMembershipSummary" in source
+    assert "playerAiMemberBlocked" in source
+    assert "canAskCourseAssistant =" in source
+    assert "!playerAiMemberBlocked" in source[source.index("const canAskCourseAssistant ="):source.index("const deferredCaptureReferenceQuery")]
+    assert "视频助手是会员专属功能" in source
+
+
+def test_pomodoro_pages_gate_non_members_and_preserve_member_controls() -> None:
+    pomodoro_source = POMODORO_PAGE.read_text(encoding="utf-8")
+    settings_source = POMODORO_SETTINGS_PAGE.read_text(encoding="utf-8")
+
+    for source in (pomodoro_source, settings_source):
+        assert "useMembershipSummary" in source
+        assert "MemberOnlyFeatureNotice" in source
+        assert "pomodoroMemberBlocked" in source
+
+    assert "开启番茄钟" in pomodoro_source
+    assert "新建小番茄" in pomodoro_source
+    assert "保存设置" in settings_source
+
+
+def test_member_only_gate_is_limited_to_protected_frontend_surfaces() -> None:
+    router_source = FRONTEND_ROUTER.read_text(encoding="utf-8")
+    app_shell_source = APP_SHELL.read_text(encoding="utf-8")
+
+    assert "MemberOnlyFeatureNotice" not in router_source
+    assert "useMembershipSummary" not in router_source
+    assert "MemberOnlyFeatureNotice" not in app_shell_source
+    assert "useMembershipSummary" not in app_shell_source

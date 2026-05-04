@@ -15,6 +15,7 @@ import {
   describeMembershipCouponSource,
   describeMembershipCouponStatus,
   formatMembershipApiError,
+  formatMembershipCouponValue,
   formatMembershipDateTime,
   formatMembershipPrice,
   StatusPill,
@@ -46,7 +47,7 @@ function CouponOptionCard(props: {
         <StatusPill tone={coupon.status === "available" ? "accent" : "default"}>{describeMembershipCouponStatus(coupon.status)}</StatusPill>
       </div>
       <div className="mt-3 flex items-end justify-between gap-4">
-        <div className="text-2xl font-semibold tracking-tight text-foreground">-{formatMembershipPrice(coupon.amountCent)}</div>
+        <div className="text-2xl font-semibold tracking-tight text-foreground">{formatMembershipCouponValue(coupon)}</div>
         <div className="text-right text-xs text-muted-foreground">
           <div>到期时间</div>
           <div>{formatMembershipDateTime(coupon.expiresAt)}</div>
@@ -310,7 +311,7 @@ export function MembershipPurchaseDialog(props: {
 
               {availableCoupons.length === 0 ? (
                 <div className="theme-subtle-surface border-dashed px-4 py-8 text-center text-sm leading-6">
-                  当前没有可用优惠券。好友完成首单后，你会收到 5 元优惠券。
+                  当前没有可用优惠券。绑定好友邀请码后，你会收到 7.5 折会员券。
                 </div>
               ) : null}
             </div>

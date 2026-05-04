@@ -22,6 +22,7 @@ import {
 } from "@/ui/localMedia/projectDirectory"
 import { readPomodoroWallpaperBlob } from "@/ui/pomodoroWallpaper"
 import { useCurrentUser } from "@/ui/queries/auth"
+import { useMembershipSummary } from "@/ui/queries/membership"
 import { useProject, useProjects } from "@/ui/queries/projects"
 import { useUpdateMyGlobalSettings } from "@/ui/queries/profile"
 import { useSystemCapabilities } from "@/ui/queries/system"
@@ -50,6 +51,7 @@ import {
 } from "@/ui/store/pomodoroStore"
 import { useThemeStore } from "@/ui/store/themeStore"
 import { cn } from "@/ui/utils"
+import { MemberOnlyFeatureNotice } from "@/views/membership/membershipUi"
 import { buildPomodoroEditPath, buildPomodoroPath, buildPomodoroSettingsPath } from "@/views/pomodoro/pomodoroRouting"
 
 type PomodoroPlanDraft = {
@@ -512,6 +514,8 @@ export function PomodoroPage() {
   const currentUserQ = useCurrentUser(authEnabled)
   const updateGlobalSettings = useUpdateMyGlobalSettings()
   const shouldSyncRemotely = authEnabled && Boolean(currentUserQ.data?.userId)
+  const membershipQ = useMembershipSummary(authEnabled)
+  const pomodoroMemberBlocked = authEnabled && (membershipQ.isLoading || Boolean(membershipQ.error) || !membershipQ.data?.isActive)
   const projectTitleMap = useMemo(
     () => new Map((projectsQ.data ?? []).map((project) => [project.projectId, project.title] as const)),
     [projectsQ.data],
@@ -767,6 +771,17 @@ export function PomodoroPage() {
       quick.projectId
         ? "10 秒后开始 25 分钟学习，系统会进入当前选中项目的工作台。"
         : "10 秒后开始 25 分钟学习。",
+    )
+  }
+
+  if (pomodoroMemberBlocked) {
+    return (
+      <div data-pomodoro-wallpaper-scope="page" className="relative z-10 mx-auto flex w-full max-w-3xl flex-col gap-6">
+        <MemberOnlyFeatureNotice
+          title="番茄钟是会员专属功能"
+          message="当前账号还没有有效会员，所以这里先不开放番茄钟。开通会员后，就可以继续使用排程、小番茄和相关设置。"
+        />
+      </div>
     )
   }
 

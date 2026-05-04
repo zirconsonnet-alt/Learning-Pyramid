@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 
 from adapter.auth import SESSION_COOKIE_NAME, require_request_auth_user
-from adapter.deps import get_api, get_auth_store
+from adapter.deps import get_api, get_auth_store, get_membership_store, require_active_membership
 from adapter.schemas import (
     ChangePasswordRequest,
     LearningPlansPayloadDTO,
@@ -26,6 +26,7 @@ from backend.system.auth_store import (
     _pomodoro_micro_break_settings_to_json,
     _pomodoro_weekly_schedule_to_json,
 )
+from backend.system.membership_store import MembershipStore
 from backend.system.baidu_netdisk_client import BAIDU_NETDISK_PROVIDER
 
 router = APIRouter()
@@ -174,7 +175,9 @@ def get_my_llm_settings(
     request: Request,
     auth_store: AuthStore = Depends(get_auth_store),
     api: SystemAPI = Depends(get_api),
+    membership_store: MembershipStore = Depends(get_membership_store),
 ) -> dict:
+    require_active_membership(request, membership_store)
     user = require_request_auth_user(request)
     return {"ok": True, "data": api.get_user_llm_status(auth_store=auth_store, user_id=user.user_id)}
 
@@ -185,7 +188,9 @@ def update_my_llm_settings(
     request: Request,
     auth_store: AuthStore = Depends(get_auth_store),
     api: SystemAPI = Depends(get_api),
+    membership_store: MembershipStore = Depends(get_membership_store),
 ) -> dict:
+    require_active_membership(request, membership_store)
     user = require_request_auth_user(request)
     return {
         "ok": True,

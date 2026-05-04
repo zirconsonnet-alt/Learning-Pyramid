@@ -1,19 +1,24 @@
-import { ChevronLeft, Copy, Ticket, Users } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
+import { ChevronLeft, Copy, Ticket, Users, Wallet } from "lucide-react"
+import { type FormEvent, useEffect, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 
 import type { CouponRecord, InviteReferral, MembershipCreateOrderResult, MembershipOrder } from "@/ui/api/membership"
 import { ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/ui/components/ui/dialog"
+import { Input } from "@/ui/components/ui/input"
+import { Label } from "@/ui/components/ui/label"
 import {
   useCloseMembershipOrder,
+  useCommissionSummary,
+  useCommissionWithdrawals,
   useConfirmMembershipPayment,
   useCreateMembershipOrder,
   useMembershipCoupons,
   useMembershipOrderPreview,
   useMembershipOrders,
   useMembershipSummary,
+  useRequestCommissionWithdrawal,
   useSyncMembershipPayment,
   useInviteSummary,
 } from "@/ui/queries/membership"
@@ -21,10 +26,13 @@ import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore
 import { MembershipPurchaseDialog } from "@/views/membership/components/MembershipPurchaseDialog"
 import {
   copyTextToClipboard,
+  describeCommissionStatus,
   describeInviteRecordStatus,
   describeMembershipCouponSource,
   describeMembershipCouponStatus,
+  describeWithdrawalStatus,
   formatMembershipApiError,
+  formatMembershipCouponValue,
   formatMembershipDateTime,
   formatMembershipPrice,
   StatusPill,
@@ -67,7 +75,7 @@ function CouponBagDialog(props: {
         <div className="max-h-[68vh] space-y-3 overflow-y-auto px-6 py-6 sm:px-8">
           {coupons.length === 0 ? (
             <div className="theme-subtle-surface rounded-[1.4rem] border-dashed px-5 py-10 text-center text-sm leading-7 text-[color:var(--theme-subtle-text)]">
-              暂时还没有优惠券。好友完成首单后，你会收到邀请奖励券。
+              暂时还没有优惠券。绑定邀请码后会获得 7.5 折会员券。
             </div>
           ) : (
             coupons.map((coupon) => {
@@ -91,7 +99,7 @@ function CouponBagDialog(props: {
                       </div>
                     </div>
                     <div className="shrink-0 text-right">
-                      <div className="text-2xl font-semibold tracking-tight text-foreground">-{formatMembershipPrice(coupon.amountCent)}</div>
+                      <div className="text-2xl font-semibold tracking-tight text-foreground">{formatMembershipCouponValue(coupon)}</div>
                       <div className="mt-1 text-xs text-muted-foreground">
                         {coupon.status === "used" && coupon.usedAt
                           ? `已于 ${formatMembershipDateTime(coupon.usedAt)} 使用`
@@ -117,17 +125,22 @@ export function MembershipPage() {
   const [purchaseOpen, setPurchaseOpen] = useState(false)
   const [couponBagOpen, setCouponBagOpen] = useState(false)
   const [latestCheckout, setLatestCheckout] = useState<MembershipCreateOrderResult | null>(null)
+  const [withdrawAmountYuan, setWithdrawAmountYuan] = useState("5")
+  const [withdrawWechatOpenId, setWithdrawWechatOpenId] = useState("")
 
   const shouldAutoRefresh = latestCheckout?.order.provider === "wechat_native" && latestCheckout.order.status === "pending"
   const summaryQ = useMembershipSummary(true, shouldAutoRefresh ? 5_000 : false)
   const couponsQ = useMembershipCoupons(20)
   const inviteSummaryQ = useInviteSummary()
+  const commissionQ = useCommissionSummary()
+  const withdrawalsQ = useCommissionWithdrawals()
   const previewQ = useMembershipOrderPreview(selectedCouponId || undefined)
   const ordersQ = useMembershipOrders(20, true, shouldAutoRefresh ? 5_000 : false)
   const createOrder = useCreateMembershipOrder()
   const confirmPayment = useConfirmMembershipPayment()
   const syncPayment = useSyncMembershipPayment()
   const closeOrder = useCloseMembershipOrder()
+  const requestWithdrawal = useRequestCommissionWithdrawal()
 
   const coupons = couponsQ.data ?? []
   const availableCoupons = coupons.filter((item) => item.status === "available")
@@ -310,6 +323,30 @@ export function MembershipPage() {
     }
   }
 
+  async function onRequestWithdrawal(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const amountCent = Math.round(Number(withdrawAmountYuan) * 100)
+    if (!Number.isFinite(amountCent) || amountCent <= 0) {
+      showErrorFeedback("提交提现失败", "请输入有效的提现金额。")
+      return
+    }
+    try {
+      const result = await requestWithdrawal.mutateAsync({
+        amountCent,
+        wechatOpenId: withdrawWechatOpenId,
+      })
+      showSuccessFeedback(
+        result.status === "failed" ? "提现请求已退回" : "提现请求已提交",
+        result.status === "failed"
+          ? result.failureReason || "提现失败，金额已退回可提现余额。"
+          : `已提交 ${formatMembershipPrice(result.amountCent)} 到微信收款账户。`,
+      )
+      setWithdrawAmountYuan("5")
+    } catch (err) {
+      showErrorFeedback("提交提现失败", formatMembershipApiError(err))
+    }
+  }
+
   if (summaryQ.isLoading && !summaryQ.data) {
     return <LoadingNotice title="正在加载会员中心" message="稍等一下，我们正在整理你的会员状态和权益信息。" />
   }
@@ -320,6 +357,9 @@ export function MembershipPage() {
 
   const summary = summaryQ.data
   const preview = previewQ.data
+  const commissionAccount = commissionQ.data?.account
+  const recentCommissions = commissionQ.data?.recentCommissions ?? []
+  const recentWithdrawals = withdrawalsQ.data ?? []
   const membershipState = getMembershipState(summary)
   const purchaseDisabled =
     createOrder.isPending || confirmPayment.isPending || syncPayment.isPending || closeOrder.isPending || (supportedProviders.length === 0 && !pendingOrder)
@@ -388,7 +428,7 @@ export function MembershipPage() {
                 <div className="mt-2 text-sm text-muted-foreground">
                   首单 {formatMembershipPrice(summary?.firstOrderPriceCent ?? 0)} · 续费 {formatMembershipPrice(summary?.renewalPriceCent ?? 0)}
                 </div>
-                {selectedCoupon ? <div className="mt-1 text-xs text-[color:var(--theme-warm-text)]">已选券抵扣 -{formatMembershipPrice(selectedCoupon.amountCent)}</div> : null}
+                {selectedCoupon ? <div className="mt-1 text-xs text-[color:var(--theme-warm-text)]">已选 {formatMembershipCouponValue(selectedCoupon)}</div> : null}
               </div>
             </div>
           </div>
@@ -434,13 +474,111 @@ export function MembershipPage() {
                   <div className="mt-2 text-2xl font-semibold tracking-tight text-foreground">{inviteSummaryQ.data?.totalInvitedUsers ?? 0}</div>
                 </div>
                 <div className="theme-soft-surface rounded-[1.2rem] px-4 py-4">
-                  <div className="text-[11px] uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">已转化</div>
-                  <div className="mt-2 text-2xl font-semibold tracking-tight text-foreground">{inviteSummaryQ.data?.rewardedInviteCount ?? 0}</div>
+                  <div className="text-[11px] uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">待结算佣金</div>
+                  <div className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
+                    {formatMembershipPrice(commissionAccount?.pendingCent ?? 0)}
+                  </div>
                 </div>
                 <div className="theme-soft-surface rounded-[1.2rem] px-4 py-4">
-                  <div className="text-[11px] uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">可用券</div>
-                  <div className="mt-2 text-2xl font-semibold tracking-tight text-foreground">{availableCouponCount}</div>
+                  <div className="text-[11px] uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">可提现佣金</div>
+                  <div className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
+                    {formatMembershipPrice(commissionAccount?.withdrawableCent ?? 0)}
+                  </div>
                 </div>
+              </div>
+
+              <div className="theme-soft-surface rounded-[1.3rem] p-4">
+                <div className="flex items-center gap-2">
+                  <Wallet className="h-4 w-4 text-primary" />
+                  <div className="text-sm font-semibold text-foreground">邀请佣金</div>
+                </div>
+                {commissionQ.error ? <div className="mt-3 text-sm text-destructive">{formatMembershipApiError(commissionQ.error)}</div> : null}
+                {!commissionQ.error ? (
+                  <div className="mt-4 space-y-4">
+                    <div className="grid gap-3 sm:grid-cols-4">
+                      <div className="theme-subtle-surface px-3 py-3">
+                        <div className="text-xs text-muted-foreground">待结算</div>
+                        <div className="mt-1 text-sm font-semibold text-foreground">{formatMembershipPrice(commissionAccount?.pendingCent ?? 0)}</div>
+                      </div>
+                      <div className="theme-subtle-surface px-3 py-3">
+                        <div className="text-xs text-muted-foreground">可提现</div>
+                        <div className="mt-1 text-sm font-semibold text-foreground">{formatMembershipPrice(commissionAccount?.withdrawableCent ?? 0)}</div>
+                      </div>
+                      <div className="theme-subtle-surface px-3 py-3">
+                        <div className="text-xs text-muted-foreground">提现中</div>
+                        <div className="mt-1 text-sm font-semibold text-foreground">{formatMembershipPrice(commissionAccount?.reservedCent ?? 0)}</div>
+                      </div>
+                      <div className="theme-subtle-surface px-3 py-3">
+                        <div className="text-xs text-muted-foreground">已到账</div>
+                        <div className="mt-1 text-sm font-semibold text-foreground">{formatMembershipPrice(commissionAccount?.paidOutCent ?? 0)}</div>
+                      </div>
+                    </div>
+
+                    <form className="grid gap-3 md:grid-cols-[120px_minmax(0,1fr)_auto]" onSubmit={(event) => void onRequestWithdrawal(event)}>
+                      <div className="space-y-2">
+                        <Label htmlFor="commission-withdraw-amount">提现金额</Label>
+                        <Input
+                          id="commission-withdraw-amount"
+                          type="number"
+                          min="0.01"
+                          step="0.01"
+                          value={withdrawAmountYuan}
+                          onChange={(event) => setWithdrawAmountYuan(event.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="commission-withdraw-openid">微信收款 OpenID</Label>
+                        <Input
+                          id="commission-withdraw-openid"
+                          value={withdrawWechatOpenId}
+                          onChange={(event) => setWithdrawWechatOpenId(event.target.value)}
+                          placeholder="填写本人微信支付收款 OpenID"
+                        />
+                      </div>
+                      <div className="flex items-end">
+                        <Button type="submit" disabled={requestWithdrawal.isPending || (commissionAccount?.withdrawableCent ?? 0) <= 0}>
+                          {requestWithdrawal.isPending ? "提交中..." : "申请提现"}
+                        </Button>
+                      </div>
+                    </form>
+
+                    {recentCommissions.length > 0 ? (
+                      <div className="space-y-2">
+                        <div className="text-xs font-medium text-muted-foreground">最近佣金</div>
+                        {recentCommissions.slice(0, 3).map((commission) => (
+                          <div key={commission.commissionId} className="theme-subtle-surface px-3 py-3 text-sm leading-6">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span>{formatMembershipPrice(commission.commissionAmountCent)}</span>
+                              <StatusPill tone={commission.status === "settled" ? "accent" : commission.status === "pending" ? "warm" : "default"}>
+                                {describeCommissionStatus(commission.status)}
+                              </StatusPill>
+                            </div>
+                            <div className="mt-1 text-xs text-muted-foreground">订单 {commission.sourceOrderId}</div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    {recentWithdrawals.length > 0 ? (
+                      <div className="space-y-2">
+                        <div className="text-xs font-medium text-muted-foreground">提现记录</div>
+                        {recentWithdrawals.slice(0, 3).map((withdrawal) => (
+                          <div key={withdrawal.withdrawalId} className="theme-subtle-surface px-3 py-3 text-sm leading-6">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span>{formatMembershipPrice(withdrawal.amountCent)}</span>
+                              <StatusPill tone={withdrawal.status === "succeeded" ? "accent" : withdrawal.status === "failed" ? "default" : "warm"}>
+                                {describeWithdrawalStatus(withdrawal.status)}
+                              </StatusPill>
+                            </div>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              {withdrawal.wechatOpenIdMasked} · {formatMembershipDateTime(withdrawal.createdAt)}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
 
               {inviteSummaryQ.error ? <div className="text-sm text-destructive">{formatMembershipApiError(inviteSummaryQ.error)}</div> : null}
@@ -526,7 +664,7 @@ export function MembershipPage() {
 
               {!couponsQ.error && coupons.length === 0 ? (
                 <div className="theme-subtle-surface rounded-[1.4rem] border-dashed px-5 py-10 text-center text-sm leading-7 text-[color:var(--theme-subtle-text)]">
-                  暂时还没有优惠券。好友完成首单后，你会收到邀请奖励券。
+                  暂时还没有优惠券。绑定好友邀请码后会收到 7.5 折会员券。
                 </div>
               ) : null}
 
@@ -553,7 +691,7 @@ export function MembershipPage() {
                             </div>
                           </div>
                           <div className="shrink-0 text-right text-xs leading-6 text-muted-foreground">
-                            <div className="text-2xl font-semibold tracking-tight text-foreground">-{formatMembershipPrice(coupon.amountCent)}</div>
+                            <div className="text-2xl font-semibold tracking-tight text-foreground">{formatMembershipCouponValue(coupon)}</div>
                             <div className="mt-1">
                               {coupon.status === "used" && coupon.usedAt
                                 ? `已于 ${formatMembershipDateTime(coupon.usedAt)} 使用`
