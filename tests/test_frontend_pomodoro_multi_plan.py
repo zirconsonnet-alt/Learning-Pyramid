@@ -178,8 +178,8 @@ def test_pomodoro_session_controls_keep_settings_entry_visible() -> None:
     assert "snapshot.canUseWorkbench && preferredWorkbenchPath" in session_controls
     assert "<RestMusicPlayer isRestPhase={isRestPhase} />" in page_source
 
-    assert "buildPomodoroSettingsPath" in app_shell_source
-    assert 'aria-label="打开番茄钟设置"' in app_shell_source
+    assert "buildPomodoroSettingsPath" not in app_shell_source
+    assert 'aria-label="打开番茄钟设置"' not in app_shell_source
 
 
 def test_pomodoro_settings_page_edits_random_micro_break_preferences() -> None:
