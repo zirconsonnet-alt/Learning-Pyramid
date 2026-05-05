@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useQueries } from "@tanstack/react-query"
 import { Settings2, TriangleAlert } from "lucide-react"
 import { useLocation, useNavigate, useParams } from "react-router-dom"
@@ -101,18 +101,14 @@ function describeDirectoryPermissionTone(permission: "unsupported" | "missing" |
   return "theme-pill-default"
 }
 
+function describeDirectorySummary(permission: "unsupported" | "missing" | "prompt" | "granted" | "denied") {
+  return `本地素材目录 · ${describeDirectoryPermission(permission)}`
+}
+
 function getRollUpStrategyLabel(strategy: RollUpStrategy) {
   if (strategy === "MANUAL") return "仅手动上推"
   if (strategy === "LEARNING_OBJECT_ISOMORPHIC") return "学习对象树同构上推"
   return "阈值自动上推"
-}
-
-function getRollUpStrategyDescription(strategy: RollUpStrategy) {
-  if (strategy === "MANUAL") return "系统不会自动推进层级，只在你手动触发时推进。"
-  if (strategy === "LEARNING_OBJECT_ISOMORPHIC") {
-    return "只要某个学习对象节点下的实例都已有活跃复述点，系统就会把这个对象节点推进到对应层级。"
-  }
-  return "达到节点数或复述点阈值后，系统会自动进入聚合周期。"
 }
 
 function isDirectoryPickerAbort(err: unknown) {
@@ -614,48 +610,47 @@ export function ProjectSettingsPage() {
                   showErrorFeedback("更新项目名称失败", formatApiError(err))
                 }
               }}
-              layerConfigSection={
-                <LayerConfigEditor
-                  key={layerConfigVersion}
-                  embedded
-                  canSave={!!pid}
-                  existingLayerIndexes={existingLayerIndexes}
-                  initialConfig={effectiveLayerConfig}
-                  knownLayerIndexes={knownLayerIndexes}
-                  layersError={layersQ.error}
-                  mutationError={setLayerConfigM.error}
-                  projectConfigError={projectConfigQ.error}
-                  rollUpStrategy={currentRollUpStrategy}
-                  selectedLayerIndex={effectiveConfigLayerIndex}
-                  saving={setLayerConfigM.isPending}
-                  onSave={async ({ kNode, kPoint, reviewChainTemplate, thresholdRollUpEnabled }) => {
-                    try {
-                      await setLayerConfigM.mutateAsync({
-                        layerIndex: effectiveConfigLayerIndex,
-                        kNode,
-                        kPoint,
-                        reviewChainTemplate,
-                        thresholdRollUpEnabled,
-                      })
-                      showSuccessFeedback(
-                        selectedLayerExists ? "层配置已保存" : "未来层预配置已保存",
-                        selectedLayerExists
-                          ? currentRollUpStrategy === "THRESHOLD_AUTO"
-                            ? `第 ${effectiveConfigLayerIndex} 层现在使用 ${reviewChainTemplate.length} 个模板步骤，节点阈值 ${kNode}，复述点阈值 ${kPoint}，阈值自动上推已${thresholdRollUpEnabled ? "开启" : "关闭"}。`
-                            : `第 ${effectiveConfigLayerIndex} 层现在使用 ${reviewChainTemplate.length} 个模板步骤；阈值参数也已保存，等切回“阈值自动上推”时会继续沿用。`
-                          : currentRollUpStrategy === "THRESHOLD_AUTO"
-                            ? `第 ${effectiveConfigLayerIndex} 层还不存在，已先保存预配置；等它被创建时会自动使用这 ${reviewChainTemplate.length} 个模板步骤、当前阈值和阈值自动上推${thresholdRollUpEnabled ? "开启" : "关闭"}状态。`
-                            : `第 ${effectiveConfigLayerIndex} 层还不存在，已先保存预配置；等它被创建时会自动使用这 ${reviewChainTemplate.length} 个模板步骤，并保留当前阈值参数。`,
-                      )
-                    } catch (err) {
-                      showErrorFeedback("保存层配置失败", formatApiError(err))
-                    }
-                  }}
-                  onSelectedLayerIndexChange={setConfigLayerIndex}
-                />
-              }
             />
           )}
+
+          {!isSubjectSettingsScope ? (
+            <LayerConfigEditor
+              key={layerConfigVersion}
+              canSave={!!pid}
+              existingLayerIndexes={existingLayerIndexes}
+              initialConfig={effectiveLayerConfig}
+              knownLayerIndexes={knownLayerIndexes}
+              layersError={layersQ.error}
+              mutationError={setLayerConfigM.error}
+              projectConfigError={projectConfigQ.error}
+              selectedLayerIndex={effectiveConfigLayerIndex}
+              saving={setLayerConfigM.isPending}
+              onSave={async ({ kNode, kPoint, reviewChainTemplate, thresholdRollUpEnabled }) => {
+                try {
+                  await setLayerConfigM.mutateAsync({
+                    layerIndex: effectiveConfigLayerIndex,
+                    kNode,
+                    kPoint,
+                    reviewChainTemplate,
+                    thresholdRollUpEnabled,
+                  })
+                  showSuccessFeedback(
+                    selectedLayerExists ? "层配置已保存" : "未来层预配置已保存",
+                    selectedLayerExists
+                      ? currentRollUpStrategy === "THRESHOLD_AUTO"
+                        ? `第 ${effectiveConfigLayerIndex} 层现在使用 ${reviewChainTemplate.length} 个模板步骤，节点阈值 ${kNode}，复述点阈值 ${kPoint}，阈值自动上推已${thresholdRollUpEnabled ? "开启" : "关闭"}。`
+                        : `第 ${effectiveConfigLayerIndex} 层现在使用 ${reviewChainTemplate.length} 个模板步骤；阈值参数也已保存，等切回“阈值自动上推”时会继续沿用。`
+                      : currentRollUpStrategy === "THRESHOLD_AUTO"
+                        ? `第 ${effectiveConfigLayerIndex} 层还不存在，已先保存预配置；等它被创建时会自动使用这 ${reviewChainTemplate.length} 个模板步骤、当前阈值和阈值自动上推${thresholdRollUpEnabled ? "开启" : "关闭"}状态。`
+                        : `第 ${effectiveConfigLayerIndex} 层还不存在，已先保存预配置；等它被创建时会自动使用这 ${reviewChainTemplate.length} 个模板步骤，并保留当前阈值参数。`,
+                  )
+                } catch (err) {
+                  showErrorFeedback("保存层配置失败", formatApiError(err))
+                }
+              }}
+              onSelectedLayerIndexChange={setConfigLayerIndex}
+            />
+          ) : null}
 
           {!isSubjectSettingsScope && projectType === "BOOK" ? (
             <div id="settings-book-outline">
@@ -1060,7 +1055,6 @@ function BasicInfoCard({
   onImportAuthorizedDirectory,
   onRequestDirectoryPermission,
   onSave,
-  layerConfigSection,
 }: {
   actionableMissingInstanceCount: number
   baiduNetdiskEnabled: boolean
@@ -1097,9 +1091,10 @@ function BasicInfoCard({
   onImportAuthorizedDirectory: (silentSuccess?: boolean) => Promise<void>
   onRequestDirectoryPermission: () => Promise<void>
   onSave: (title: string) => Promise<void>
-  layerConfigSection: ReactNode
 }) {
   const [titleDraft, setTitleDraft] = useState(entityTitle)
+  const subjectSummary = isSubjectRoot ? `${formatStudyMaterialTypeLabel(materialType)} · ${formatProjectTypeLabel(projectType)}` : formatStudyMaterialTypeLabel(materialType)
+  const directorySummary = describeDirectorySummary(directoryPermission)
 
   useEffect(() => {
     setTitleDraft(entityTitle)
@@ -1161,9 +1156,11 @@ function BasicInfoCard({
                 </>
               ) : (
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
                     <div className="text-sm font-semibold text-foreground">{subjectTitle || "当前学科"}</div>
-                    <div className="mt-1 text-xs text-muted-foreground">当前项目类型：{formatStudyMaterialTypeLabel(materialType)}</div>
+                    <span className="theme-pill-default inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold">
+                      {subjectSummary}
+                    </span>
                   </div>
                   {onOpenSubjectSettings ? (
                     <Button type="button" variant="outline" size="sm" onClick={onOpenSubjectSettings}>
@@ -1179,8 +1176,15 @@ function BasicInfoCard({
         <div className="border-t border-border/60" />
 
         <section className="space-y-3">
-          <div className="space-y-1">
+          <div className="flex flex-wrap items-center gap-3">
             <div className="text-sm font-semibold text-foreground">{isSubjectRoot ? "默认项目" : `当前${formatStudyMaterialTypeLabel(materialType)}项目`}</div>
+            {projectType === "COURSE" && browserLocalMediaEnabled ? (
+              <span
+                className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${describeDirectoryPermissionTone(directoryPermission)}`}
+              >
+                {directorySummary}
+              </span>
+            ) : null}
           </div>
 
           {projectType === "COURSE" ? (
@@ -1189,14 +1193,6 @@ function BasicInfoCard({
                 <div className="theme-status-surface rounded-[1.35rem] border border-border/70 p-4">
                   <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                     <div className="space-y-2">
-                      <div className="flex flex-wrap items-center gap-3">
-                        <span className="theme-meta-strong">本地素材目录</span>
-                        <span
-                          className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${describeDirectoryPermissionTone(directoryPermission)}`}
-                        >
-                          {describeDirectoryPermission(directoryPermission)}
-                        </span>
-                      </div>
                       <div className="text-sm text-foreground">
                         {directoryBinding.handleName ? directoryBinding.handleName : `当前${isSubjectRoot ? "默认项目" : "项目"}还没有绑定浏览器目录。`}
                       </div>
@@ -1313,9 +1309,6 @@ function BasicInfoCard({
         <section className="space-y-4">
           <div className="space-y-1">
             <div className="text-sm font-semibold text-foreground">上推策略</div>
-            <p className="text-sm text-muted-foreground">
-              当前项目使用“{getRollUpStrategyLabel(rollUpStrategy)}”。{getRollUpStrategyDescription(rollUpStrategy)}
-            </p>
           </div>
 
           <div>
@@ -1345,9 +1338,6 @@ function BasicInfoCard({
           {rollUpStrategyError ? <p className="text-sm text-destructive">{formatApiError(rollUpStrategyError)}</p> : null}
         </section>
 
-        <div className="border-t border-border/60" />
-
-        {layerConfigSection}
       </CardContent>
     </Card>
   )
@@ -1405,7 +1395,6 @@ function DangerZoneCard(props: {
 
 function LayerConfigEditor({
   canSave,
-  embedded: _embedded = false,
   existingLayerIndexes,
   initialConfig,
   knownLayerIndexes,
@@ -1414,12 +1403,10 @@ function LayerConfigEditor({
   onSave,
   onSelectedLayerIndexChange,
   projectConfigError,
-  rollUpStrategy,
   saving,
   selectedLayerIndex,
 }: {
   canSave: boolean
-  embedded?: boolean
   existingLayerIndexes: number[]
   initialConfig: {
     reviewChainTemplate: ReviewChainTemplateItem[]
@@ -1438,7 +1425,6 @@ function LayerConfigEditor({
   }) => Promise<void>
   onSelectedLayerIndexChange: (layerIndex: number) => void
   projectConfigError: unknown
-  rollUpStrategy: RollUpStrategy
   saving: boolean
   selectedLayerIndex: number
 }) {
@@ -1448,7 +1434,6 @@ function LayerConfigEditor({
   const [cfgTemplateItems, setCfgTemplateItems] = useState<TemplateEditorItem[]>(() => toTemplateEditorItems(initialConfig.reviewChainTemplate))
   const [cfgErr, setCfgErr] = useState<string | null>(null)
   const [pendingTemplateKind, setPendingTemplateKind] = useState<"" | "CONVERGENCE" | "REVIEW_TASK">("")
-  const thresholdControlsActive = rollUpStrategy === "THRESHOLD_AUTO"
 
   function onAppendTemplateItem() {
     if (!pendingTemplateKind) return
@@ -1503,7 +1488,7 @@ function LayerConfigEditor({
   const header = (
     <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
       <div className="space-y-1">
-        {_embedded ? <div className="text-sm font-semibold text-foreground">层配置</div> : <CardTitle>层配置</CardTitle>}
+        <CardTitle>层配置</CardTitle>
       </div>
 
       <div className="w-full max-w-[360px] shrink-0 space-y-3">
@@ -1533,11 +1518,6 @@ function LayerConfigEditor({
 
   const content = (
     <div className="space-y-4 text-sm">
-      {!thresholdControlsActive ? (
-        <div className="rounded-[1.1rem] border border-amber-200 bg-amber-50/80 p-4 text-sm text-amber-900">
-          当前项目使用“{getRollUpStrategyLabel(rollUpStrategy)}”。下面的阈值参数会继续保存，但只有切回“阈值自动上推”时才会参与自动推进。
-        </div>
-      ) : null}
       <div className="grid gap-4">
         <div className="grid gap-4 rounded-[1.2rem] border border-border/70 bg-muted/15 p-4 md:grid-cols-2">
           <div className="space-y-2">
@@ -1668,15 +1648,6 @@ function LayerConfigEditor({
       </div>
     </div>
   )
-
-  if (_embedded) {
-    return (
-      <section className="space-y-4">
-        {header}
-        {content}
-      </section>
-    )
-  }
 
   return (
     <Card className="theme-card">
