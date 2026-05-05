@@ -1,4 +1,6 @@
+import { type ReactNode } from "react"
 import { useQueries } from "@tanstack/react-query"
+import { ChevronLeft, RefreshCw } from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
@@ -14,9 +16,8 @@ import {
   formatReviewTaskReference,
 } from "@/ui/displayIdentifiers"
 import { useProject } from "@/ui/queries/projects"
-import { useReviewChain } from "@/ui/queries/reviewChains"
+import { useReviewChain, useReviewChainBinding } from "@/ui/queries/reviewChains"
 import { cn } from "@/ui/utils"
-import { ReviewTaskSummaryCard } from "@/views/reviewTasks/components/ReviewTaskSummaryCard"
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -72,6 +73,7 @@ export function ReviewChainPage() {
   const chainId = reviewChainId ?? ""
   const { projectTitle } = useProject(pid)
   const chainQ = useReviewChain(pid, chainId)
+  const bindingQ = useReviewChainBinding(pid, chainId)
 
   const itemDetails = useQueries({
     queries:
@@ -106,183 +108,257 @@ export function ReviewChainPage() {
   const headItem = chainQ.data && chainQ.data.headIndex < queue.length ? queue[chainQ.data.headIndex] : null
   const headReviewTaskPath = headItem?.kind === "REVIEW_TASK" ? reviewTaskDetailPath(pid, headItem.id) : null
   const headConvergencePath = headItem?.kind === "CONVERGENCE" ? convergenceDetailPath(pid, headItem.id) : null
+  const headLabel = headItem ? `${describeQueueItemKind(headItem.kind)} · ${formatQueueItemReference(headItem.kind, headItem.id)}` : "已完成"
+  const headValue = headItem ? (
+    headReviewTaskPath ? (
+      <Link className="text-primary underline-offset-4 hover:underline" to={headReviewTaskPath}>
+        {headLabel}
+      </Link>
+    ) : headConvergencePath ? (
+      <Link className="text-primary underline-offset-4 hover:underline" to={headConvergencePath}>
+        {headLabel}
+      </Link>
+    ) : (
+      headLabel
+    )
+  ) : (
+    "已完成"
+  )
+  const entryValue = bindingQ.data ? (
+    <Link
+      className="text-primary underline-offset-4 hover:underline"
+      to={`/p/${pid}/learning-task-nodes/${bindingQ.data.entryNodeId}`}
+    >
+      {bindingQ.data.entryNodeTitle}
+    </Link>
+  ) : bindingQ.isLoading ? (
+    "读取中..."
+  ) : (
+    "暂未关联"
+  )
+  const backAction = (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      className="-ml-2 h-8 rounded-full px-2 text-[#60748c] hover:bg-[#f3f7fb] hover:text-foreground"
+      asChild
+    >
+      <Link to={`/p/${pid}/workbench`}>
+        <ChevronLeft className="h-4 w-4" />
+        返回工作台
+      </Link>
+    </Button>
+  )
+  const summaryPanel = chainQ.data ? (
+    <div className="space-y-3">
+      <ReviewChainSummaryCard
+        topAction={backAction}
+        header={<h1 className="truncate text-lg font-semibold">复习链</h1>}
+        description={
+          <>
+            项目：<span className="font-medium text-foreground">{projectTitle}</span>
+          </>
+        }
+        items={[
+          { label: "状态", value: describeReviewChainState(chainQ.data.state) },
+          { label: "当前引用", value: formatReviewChainReference(chainId) },
+          { label: "队列长度", value: chainQ.data.queue.length },
+          { label: "当前 head", value: headValue },
+          { label: "关联入口", value: entryValue },
+          {
+            label: "目标层级",
+            value: bindingQ.data ? `L${bindingQ.data.targetLayerIndex}` : bindingQ.isLoading ? "读取中..." : "-",
+          },
+        ]}
+      />
+      {bindingQ.error ? <ErrorNotice title="复习链绑定加载失败" message={formatApiError(bindingQ.error)} /> : null}
+      <Button variant="outline" className="w-full rounded-full" onClick={() => void chainQ.refetch()} disabled={chainQ.isFetching}>
+        <RefreshCw className="h-4 w-4" />
+        {chainQ.isFetching ? "刷新中..." : "刷新"}
+      </Button>
+    </div>
+  ) : null
 
   return (
     <div className="space-y-4">
-      <div className="space-y-1">
-        <h1 className="text-lg font-semibold">复习链</h1>
-        <p className="text-sm text-muted-foreground">
-          项目：<span className="font-medium text-foreground">{projectTitle}</span>
-        </p>
-        <p className="text-sm text-muted-foreground">
-          当前引用：<span className="font-medium text-foreground">{formatReviewChainReference(chainId)}</span>
-        </p>
-      </div>
+      {chainQ.isLoading ? <LoadingNotice title="正在加载复习链" message="正在读取队列 head、执行状态以及各个队列项详情。" /> : null}
+      {chainQ.error ? <ErrorNotice title="复习链加载失败" message={formatApiError(chainQ.error)} /> : null}
+      {!chainQ.isLoading && !chainQ.error && !chainQ.data ? (
+        <ContentNotice
+          title="未找到这条复习链"
+          message="这条复习链可能已经被清理，或当前入口已失效。请返回工作台继续处理当前项目。"
+          action={
+            <Button variant="outline" asChild>
+              <Link to={`/p/${pid}/workbench`}>返回工作台</Link>
+            </Button>
+          }
+        />
+      ) : null}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>链状态</CardTitle>
-          <CardDescription>查看当前 head、队列长度和每个队列项的详情。</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3 text-sm">
-          {chainQ.isLoading ? <LoadingNotice title="正在加载复习链" message="正在读取队列 head、执行状态以及各个队列项详情。" /> : null}
-          {chainQ.error ? <ErrorNotice title="复习链加载失败" message={formatApiError(chainQ.error)} /> : null}
-          {!chainQ.isLoading && !chainQ.error && !chainQ.data ? (
-            <ContentNotice
-              title="未找到这条复习链"
-              message="这条复习链可能已经被清理，或当前入口已失效。请返回工作台继续处理当前项目。"
-              action={
-                <Button variant="outline" asChild>
-                  <Link to={`/p/${pid}/workbench`}>返回工作台</Link>
-                </Button>
-              }
-            />
-          ) : null}
+      {chainQ.data ? (
+        <div className="grid gap-4 xl:grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)] xl:items-start">
+          {summaryPanel ? <aside className="xl:sticky xl:top-28 xl:self-start">{summaryPanel}</aside> : <div />}
+          <div className="min-w-0">
+            <ReviewChainQueueListCard
+              title="复习链队列"
+              description="按推进顺序查看每个复习任务或收敛步骤，以及当前 head 所在位置。"
+            >
+              {queue.map((item, index) => {
+                const detailQ = itemDetails[index]
+                const isDone = index < chainQ.data.headIndex
+                const isHead = index === chainQ.data.headIndex
+                const reviewTask = item.kind === "REVIEW_TASK" ? (detailQ?.data as ReviewTask | undefined) : undefined
+                const convergence = item.kind === "CONVERGENCE" ? (detailQ?.data as Convergence | undefined) : undefined
+                const detailPath =
+                  item.kind === "REVIEW_TASK" ? reviewTaskDetailPath(pid, item.id) : convergenceDetailPath(pid, item.id)
 
-          {chainQ.data ? (
-            <>
-              <div className="grid gap-3 md:grid-cols-3">
-                <div className="rounded-md border bg-muted/30 p-3">
-                  <div className="text-xs text-muted-foreground">状态</div>
-                  <div className="mt-1 font-medium text-foreground">{describeReviewChainState(chainQ.data.state)}</div>
-                </div>
-                <div className="rounded-md border bg-muted/30 p-3">
-                  <div className="text-xs text-muted-foreground">队列长度</div>
-                  <div className="mt-1 font-medium text-foreground">{chainQ.data.queue.length}</div>
-                </div>
-                <div className="rounded-md border bg-muted/30 p-3">
-                  <div className="text-xs text-muted-foreground">当前 head</div>
-                  <div className="mt-1 font-medium text-foreground">
-                    {headItem ? (
-                      headReviewTaskPath ? (
-                        <Link className="text-primary hover:underline" to={headReviewTaskPath}>
-                          {describeQueueItemKind(headItem.kind)} · {formatQueueItemReference(headItem.kind, headItem.id)}
-                        </Link>
-                      ) : headConvergencePath ? (
-                        <Link className="text-primary hover:underline" to={headConvergencePath}>
-                          {describeQueueItemKind(headItem.kind)} · {formatQueueItemReference(headItem.kind, headItem.id)}
-                        </Link>
-                      ) : (
-                        `${describeQueueItemKind(headItem.kind)} · ${formatQueueItemReference(headItem.kind, headItem.id)}`
-                      )
-                    ) : (
-                      "已完成"
+                return (
+                  <div
+                    key={`${item.kind}:${item.id}`}
+                    className={cn(
+                      "rounded-[1rem] border border-[#dbe4ee] bg-[#fbfdff] p-4 shadow-[0_12px_28px_-28px_rgba(15,23,42,0.6)]",
+                      isHead && "border-primary bg-primary/5",
+                      isDone && "opacity-70",
                     )}
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                {queue.map((item, index) => {
-                  const detailQ = itemDetails[index]
-                  const isDone = index < chainQ.data.headIndex
-                  const isHead = index === chainQ.data.headIndex
-                  const reviewTask = item.kind === "REVIEW_TASK" ? (detailQ?.data as ReviewTask | undefined) : undefined
-                  const convergence = item.kind === "CONVERGENCE" ? (detailQ?.data as Convergence | undefined) : undefined
-
-                  if (item.kind === "REVIEW_TASK" && reviewTask) {
-                    return (
-                      <ReviewTaskSummaryCard
-                        key={`${item.kind}:${item.id}`}
-                        className={cn(
-                          isHead && "border-primary bg-primary/5",
-                          isDone && "opacity-70",
-                        )}
-                        fields={[
-                          { label: "创建时间", value: formatTs(reviewTask.createdAt) },
-                          { label: "执行时间", value: formatTs(reviewTask.executedAt) },
-                          { label: "输入范围", value: formatRangeReference(reviewTask.inputRangeId) },
-                        ]}
-                        kicker={`队列位次 #${index + 1}`}
-                        projectId={pid}
-                        reviewTaskId={item.id}
-                        stateLabel={describeReviewTaskState(reviewTask.state)}
-                        statusText={isHead ? "当前 head" : isDone ? "已推进" : "待执行"}
-                        tag={describeQueueItemKind(item.kind)}
-                      />
-                    )
-                  }
-
-                  return (
-                    <div
-                      key={`${item.kind}:${item.id}`}
-                      className={cn(
-                        "rounded-md border p-3",
-                        isHead && "border-primary bg-primary/5",
-                        isDone && "opacity-70",
-                      )}
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <div className="text-xs text-muted-foreground">队列位次 #{index + 1}</div>
-                          <div className="mt-1 flex items-center gap-2">
-                            <span className="rounded-full border px-2 py-0.5 text-xs">{describeQueueItemKind(item.kind)}</span>
-                            {item.kind === "REVIEW_TASK" ? (
-                              <Link
-                                className="text-xs font-medium text-primary hover:underline"
-                                to={reviewTaskDetailPath(pid, item.id)}
-                              >
-                                {formatQueueItemReference(item.kind, item.id)}
-                              </Link>
-                            ) : item.kind === "CONVERGENCE" ? (
-                              <Link
-                                className="text-xs font-medium text-primary hover:underline"
-                                to={convergenceDetailPath(pid, item.id)}
-                              >
-                                {formatQueueItemReference(item.kind, item.id)}
-                              </Link>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">{formatQueueItemReference(item.kind, item.id)}</span>
+                  >
+                    <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                      <div className="min-w-0 flex-1 space-y-3">
+                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                          <span className="rounded-full bg-[#eef5ff] px-2.5 py-1 font-medium text-primary">
+                            第 {index + 1} 项
+                          </span>
+                          <span className="rounded-full border border-[#dbe4ee] bg-[#f8fafc] px-2.5 py-1 font-medium text-slate-600">
+                            {describeQueueItemKind(item.kind)}
+                          </span>
+                          <span
+                            className={cn(
+                              "rounded-full border px-2.5 py-1 font-medium",
+                              isHead
+                                ? "border-blue-200 bg-blue-50 text-blue-700"
+                                : isDone
+                                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                  : "border-slate-200 bg-slate-50 text-slate-600",
                             )}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <div className="text-xs text-muted-foreground">
+                          >
                             {isHead ? "当前 head" : isDone ? "已推进" : "待执行"}
-                          </div>
-                          {item.kind === "REVIEW_TASK" ? (
-                            <Button size="sm" variant="outline" asChild>
-                              <Link to={reviewTaskDetailPath(pid, item.id)}>查看详情</Link>
-                            </Button>
-                          ) : item.kind === "CONVERGENCE" ? (
-                            <Button size="sm" variant="outline" asChild>
-                              <Link to={convergenceDetailPath(pid, item.id)}>查看详情</Link>
-                            </Button>
-                          ) : null}
+                          </span>
+                          <Link className="rounded-full border border-[#dbe4ee] bg-white px-2.5 py-1 font-medium text-primary hover:underline" to={detailPath}>
+                            {formatQueueItemReference(item.kind, item.id)}
+                          </Link>
                         </div>
+
+                        {detailQ?.isLoading ? <p className="text-xs text-muted-foreground">加载详情中...</p> : null}
+                        {detailQ?.error ? <p className="text-xs text-destructive">{formatApiError(detailQ.error)}</p> : null}
+
+                        {item.kind === "REVIEW_TASK" && reviewTask ? (
+                          <div className="grid gap-3 text-xs text-muted-foreground md:grid-cols-3">
+                            <QueueItemMetric label="状态" value={describeReviewTaskState(reviewTask.state)} />
+                            <QueueItemMetric label="输入范围" value={formatRangeReference(reviewTask.inputRangeId)} />
+                            <QueueItemMetric label="执行时间" value={formatTs(reviewTask.executedAt)} />
+                          </div>
+                        ) : null}
+
+                        {item.kind === "CONVERGENCE" && convergence ? (
+                          <div className="grid gap-3 text-xs text-muted-foreground md:grid-cols-3">
+                            <QueueItemMetric label="状态" value={describeConvergenceState(convergence.state)} />
+                            <QueueItemMetric label="轮次" value={convergence.roundCount} />
+                            <QueueItemMetric label="种子范围" value={formatRangeReference(convergence.seedRangeId)} />
+                          </div>
+                        ) : null}
                       </div>
 
-                      {detailQ?.isLoading ? <p className="mt-2 text-xs text-muted-foreground">加载详情中...</p> : null}
-                      {detailQ?.error ? <p className="mt-2 text-xs text-destructive">{formatApiError(detailQ.error)}</p> : null}
-
-                      {item.kind === "CONVERGENCE" && convergence ? (
-                        <div className="mt-2 grid gap-2 text-xs text-muted-foreground md:grid-cols-3">
-                          <div>状态：<span className="text-foreground">{describeConvergenceState(convergence.state)}</span></div>
-                          <div>轮次：<span className="text-foreground">{convergence.roundCount}</span></div>
-                          <div>种子范围：<span className="text-foreground">{formatRangeReference(convergence.seedRangeId)}</span></div>
-                        </div>
-                      ) : null}
+                      <div className="flex shrink-0 flex-wrap gap-2 md:w-[11rem] md:flex-col md:items-stretch">
+                        <Button size="sm" className="rounded-full md:w-full" asChild>
+                          <Link to={detailPath}>查看详情</Link>
+                        </Button>
+                      </div>
                     </div>
-                  )
-                })}
+                  </div>
+                )
+              })}
 
-                {queue.length === 0 ? (
-                  <ContentEmptyState
-                    title="当前复习链还没有队列项"
-                    message="这个项目生成复习任务或收敛步骤后，队列会显示在这里。"
-                  />
-                ) : null}
-              </div>
+              {queue.length === 0 ? (
+                <ContentEmptyState
+                  title="当前复习链还没有队列项"
+                  message="这个项目生成复习任务或收敛步骤后，队列会显示在这里。"
+                />
+              ) : null}
+            </ReviewChainQueueListCard>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
 
-              <div className="pt-1">
-                <Button variant="outline" asChild>
-                  <Link to={`/p/${pid}/workbench`}>返回工作台</Link>
-                </Button>
-              </div>
-            </>
-          ) : null}
-        </CardContent>
-      </Card>
+type SummaryItem = {
+  label: string
+  value: ReactNode
+}
+
+function ReviewChainSummaryCard({
+  description,
+  header,
+  items,
+  topAction,
+}: {
+  description?: ReactNode
+  header: ReactNode
+  items: SummaryItem[]
+  topAction?: ReactNode
+}) {
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        {topAction ? <div className="flex items-center">{topAction}</div> : null}
+        <div className="min-w-0">{header}</div>
+        {description ? <CardDescription>{description}</CardDescription> : null}
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-wrap gap-3">
+          {items.map((item) => (
+            <div
+              key={item.label}
+              className="min-w-[10rem] flex-1 rounded-xl border border-[#dbe4ee] bg-[#f8fafc] px-4 py-3 shadow-[0_10px_24px_-24px_rgba(15,23,42,0.6)]"
+            >
+              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#64748b]">{item.label}</div>
+              <div className="mt-1.5 break-words text-sm font-semibold text-slate-900">{item.value}</div>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function ReviewChainQueueListCard({
+  children,
+  description,
+  title,
+}: {
+  children: ReactNode
+  description?: string
+  title: string
+}) {
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle>{title}</CardTitle>
+        {description ? <CardDescription>{description}</CardDescription> : null}
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-3">{children}</div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function QueueItemMetric({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="rounded-xl border border-[#dbe4ee] bg-[#f8fafc] p-3">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#64748b]">{label}</div>
+      <div className="mt-1.5 break-words text-sm font-semibold text-slate-900">{value}</div>
     </div>
   )
 }

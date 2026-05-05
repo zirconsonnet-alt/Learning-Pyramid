@@ -337,20 +337,33 @@ function parseAnchorPositionMs(position: string | null | undefined) {
   return Number.isFinite(value) ? value : null
 }
 
+function getTaskSidebarChildIds(node: LearningTaskNode) {
+  if (node.kind !== "container") return []
+  return node.displayChildNodeIds ?? node.children
+}
+
 function buildTaskSidebarTree(nodes: LearningTaskNode[]): SidebarTreeData {
+  const displayParentById: Record<string, string> = {}
+  for (const node of nodes) {
+    if (node.kind !== "container") continue
+    for (const childId of getTaskSidebarChildIds(node)) {
+      displayParentById[childId] = node.nodeId
+    }
+  }
+
   const nodeById: Record<string, SidebarNode> = {}
   for (const node of nodes) {
     nodeById[node.nodeId] = {
       nodeId: node.nodeId,
-      parentId: node.parentId,
+      parentId: displayParentById[node.nodeId] ?? node.parentId,
       title: formatLearningTaskNodeDisplayTitle(node.title),
       kind: node.kind,
-      children: node.kind === "container" ? node.children : [],
+      children: node.kind === "container" ? getTaskSidebarChildIds(node) : [],
     }
   }
 
   const rootIds = nodes
-    .filter((node) => node.parentId === null)
+    .filter((node) => (displayParentById[node.nodeId] ?? node.parentId) === null)
     .map((node) => node.nodeId)
     .sort((left, right) => (nodeById[left]?.title ?? left).localeCompare(nodeById[right]?.title ?? right, "zh-Hans-CN", { numeric: true }))
 
@@ -1766,10 +1779,7 @@ export function AiChatPage() {
             ) : null}
 
             {llmConfigured && !aiChatMemberBlocked && !activeNodeId ? (
-              <ContentNotice
-                title="先选择一个节点"
-                message="从左侧选择一个学习任务节点、学习对象节点或复述点上下文，AI 会优先围绕该上下文来回答。"
-              />
+              <div className="mx-auto max-w-3xl px-2 pt-2 text-sm leading-7 text-muted-foreground">请从左侧选择一个节点</div>
             ) : null}
 
             {chatError ? <ErrorNotice title="本轮问答失败" message={chatError} className="mx-auto mb-5 max-w-3xl" /> : null}

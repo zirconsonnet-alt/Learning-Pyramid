@@ -4,6 +4,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TASK_TREE_PAGE = REPO_ROOT / "frontend" / "src" / "views" / "trees" / "TaskTreePage.tsx"
 TASK_TREE_CANVAS = REPO_ROOT / "frontend" / "src" / "views" / "trees" / "components" / "LearningTaskTreeCanvas.tsx"
+AI_CHAT_PAGE = REPO_ROOT / "frontend" / "src" / "views" / "ai" / "AiChatPage.tsx"
 
 
 def test_task_tree_leaf_nodes_do_not_render_leaf_label() -> None:
@@ -33,3 +34,12 @@ def test_task_tree_uses_display_children_for_object_mirror_edges() -> None:
     assert "displayChildNodeIds: z.array(z.string()).nullable().optional().default(null)" in api_source
     assert "getTaskTreeChildIds(node)" in page_source
     assert "node.displayChildNodeIds ?? node.children" in page_source
+
+
+def test_ai_chat_task_sidebar_uses_display_children_for_object_mirror_edges() -> None:
+    page_source = AI_CHAT_PAGE.read_text(encoding="utf-8")
+
+    assert "getTaskSidebarChildIds(node)" in page_source
+    assert "node.displayChildNodeIds ?? node.children" in page_source
+    assert "displayParentById[childId] = node.nodeId" in page_source
+    assert "displayParentById[node.nodeId] ?? node.parentId" in page_source

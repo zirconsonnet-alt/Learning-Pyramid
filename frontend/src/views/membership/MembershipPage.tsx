@@ -1,4 +1,4 @@
-import { ChevronLeft, Copy, Ticket, Users, Wallet } from "lucide-react"
+import { ChevronLeft, Copy, History, Ticket, Users, Wallet } from "lucide-react"
 import { type FormEvent, useEffect, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { QRCodeSVG } from "qrcode.react"
@@ -30,7 +30,6 @@ import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore
 import { MembershipPurchaseDialog } from "@/views/membership/components/MembershipPurchaseDialog"
 import {
   copyTextToClipboard,
-  describeCommissionStatus,
   describeInviteRecordStatus,
   describeMembershipCouponSource,
   describeMembershipCouponStatus,
@@ -161,11 +160,132 @@ function CouponBagDialog(props: {
   )
 }
 
+function InviteRecordsDialog(props: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  invites: InviteReferral[]
+  totalInvitedUsers: number
+}) {
+  const { open, onOpenChange, invites, totalInvitedUsers } = props
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl rounded-[2rem] border-[color:var(--theme-soft-border)] [background:var(--theme-card-main-bg)] p-0">
+        <div className="border-b border-[color:var(--theme-soft-border)] px-6 py-6 sm:px-8">
+          <DialogHeader className="space-y-3 text-left">
+            <div className="flex items-center gap-2">
+              <StatusPill tone="accent">{totalInvitedUsers} 人</StatusPill>
+            </div>
+            <DialogTitle className="text-2xl tracking-tight text-foreground">我邀请的人</DialogTitle>
+            <DialogDescription className="max-w-xl leading-7 text-muted-foreground">查看已绑定邀请码的用户和首单转化状态。</DialogDescription>
+          </DialogHeader>
+        </div>
+
+        <div className="max-h-[68vh] space-y-3 overflow-y-auto px-6 py-6 sm:px-8">
+          {invites.length === 0 ? (
+            <div className="theme-subtle-surface rounded-[1.4rem] border-dashed px-5 py-10 text-center text-sm leading-7 text-[color:var(--theme-subtle-text)]">
+              还没有邀请记录。把邀请码发给朋友后，这里会列出已绑定和已转化的用户。
+            </div>
+          ) : (
+            invites.map((invite) => (
+              <div key={`${invite.inviteeUserId}-${invite.boundAt}`} className="theme-soft-surface rounded-[1.3rem] p-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="text-sm font-semibold text-foreground">{getInviteDisplayName(invite)}</div>
+                      <StatusPill tone={invite.status === "rewarded" ? "accent" : "default"}>{describeInviteRecordStatus(invite.status)}</StatusPill>
+                    </div>
+                    {invite.inviteePublicUid ? <div className="mt-1 font-mono text-xs text-[color:var(--theme-subtle-text)]">UID {invite.inviteePublicUid}</div> : null}
+                    <div className="mt-2 text-sm leading-6 text-muted-foreground">绑定时间：{formatMembershipDateTime(invite.boundAt)}</div>
+                  </div>
+                  <div className="shrink-0 text-right text-xs leading-6 text-muted-foreground">
+                    {invite.rewardedAt ? (
+                      <>
+                        <div>奖励触发</div>
+                        <div>{formatMembershipDateTime(invite.rewardedAt)}</div>
+                      </>
+                    ) : (
+                      <>
+                        <div>当前状态</div>
+                        <div>等待首单转化</div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+          {totalInvitedUsers > invites.length ? (
+            <div className="text-xs leading-6 text-[color:var(--theme-subtle-text)]">当前展示最近 {invites.length} 条邀请记录，共 {totalInvitedUsers} 人。</div>
+          ) : null}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function WithdrawalRecordsDialog(props: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  withdrawals: CommissionWithdrawal[]
+  onResumeWithdrawalConfirmation: (withdrawal: CommissionWithdrawal) => void
+}) {
+  const { open, onOpenChange, withdrawals, onResumeWithdrawalConfirmation } = props
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl rounded-[2rem] border-[color:var(--theme-soft-border)] [background:var(--theme-card-main-bg)] p-0">
+        <div className="border-b border-[color:var(--theme-soft-border)] px-6 py-6 sm:px-8">
+          <DialogHeader className="space-y-3 text-left">
+            <div className="flex items-center gap-2">
+              <StatusPill tone="warm">{withdrawals.length} 条</StatusPill>
+            </div>
+            <DialogTitle className="text-2xl tracking-tight text-foreground">提现记录</DialogTitle>
+            <DialogDescription className="max-w-xl leading-7 text-muted-foreground">查看提现申请状态，需要微信确认的记录也可以在这里继续处理。</DialogDescription>
+          </DialogHeader>
+        </div>
+
+        <div className="max-h-[68vh] space-y-3 overflow-y-auto px-6 py-6 sm:px-8">
+          {withdrawals.length === 0 ? (
+            <div className="theme-subtle-surface rounded-[1.4rem] border-dashed px-5 py-10 text-center text-sm leading-7 text-[color:var(--theme-subtle-text)]">
+              暂时还没有提现记录。
+            </div>
+          ) : (
+            withdrawals.map((withdrawal) => (
+              <div key={withdrawal.withdrawalId} className="theme-soft-surface rounded-[1.3rem] p-4 text-sm leading-6">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-base font-semibold text-foreground">{formatMembershipPrice(withdrawal.amountCent)}</span>
+                  <StatusPill tone={withdrawal.status === "succeeded" ? "accent" : withdrawal.status === "failed" ? "default" : "warm"}>
+                    {describeWithdrawalStatus(withdrawal.status)}
+                  </StatusPill>
+                </div>
+                <div className="mt-2 text-xs text-muted-foreground">
+                  {withdrawal.identityMaskedLabel || "微信收款身份"} · {formatMembershipDateTime(withdrawal.createdAt)}
+                </div>
+                {withdrawal.status === "awaiting_confirmation" && withdrawal.confirmation?.mode === "wechat_jsapi_requestMerchantTransfer" ? (
+                  <div className="mt-3 flex flex-wrap items-center gap-3">
+                    <Button type="button" variant="outline" size="sm" onClick={() => onResumeWithdrawalConfirmation(withdrawal)}>
+                      继续微信确认
+                    </Button>
+                    <div className="text-xs text-muted-foreground">请在微信客户端内继续确认收款。</div>
+                  </div>
+                ) : null}
+              </div>
+            ))
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 export function MembershipPage() {
   const [selectedCouponId, setSelectedCouponId] = useState("")
   const [selectedProvider, setSelectedProvider] = useState("")
   const [purchaseOpen, setPurchaseOpen] = useState(false)
   const [couponBagOpen, setCouponBagOpen] = useState(false)
+  const [inviteRecordsOpen, setInviteRecordsOpen] = useState(false)
+  const [withdrawalRecordsOpen, setWithdrawalRecordsOpen] = useState(false)
   const [latestCheckout, setLatestCheckout] = useState<MembershipCreateOrderResult | null>(null)
   const [withdrawAmountYuan, setWithdrawAmountYuan] = useState("5")
   const [activeBindingAttemptId, setActiveBindingAttemptId] = useState("")
@@ -487,7 +607,6 @@ export function MembershipPage() {
   const preview = previewQ.data
   const commissionAccount = commissionQ.data?.account
   const payoutReadiness = commissionQ.data?.payoutReadiness ?? payoutIdentityQ.data
-  const recentCommissions = commissionQ.data?.recentCommissions ?? []
   const recentWithdrawals = withdrawalsQ.data ?? []
   const membershipState = getMembershipState(summary)
   const purchaseDisabled =
@@ -498,6 +617,18 @@ export function MembershipPage() {
   return (
     <>
       <CouponBagDialog open={couponBagOpen} onOpenChange={setCouponBagOpen} coupons={coupons} inviteLabelsByUserId={inviteLabelsByUserId} />
+      <InviteRecordsDialog
+        open={inviteRecordsOpen}
+        onOpenChange={setInviteRecordsOpen}
+        invites={recentInvites}
+        totalInvitedUsers={inviteSummaryQ.data?.totalInvitedUsers ?? 0}
+      />
+      <WithdrawalRecordsDialog
+        open={withdrawalRecordsOpen}
+        onOpenChange={setWithdrawalRecordsOpen}
+        withdrawals={recentWithdrawals}
+        onResumeWithdrawalConfirmation={(withdrawal) => void onResumeWithdrawalConfirmation(withdrawal)}
+      />
 
       <Dialog open={withdrawalConfirmationDialogOpen} onOpenChange={setWithdrawalConfirmationDialogOpen}>
         <DialogContent className="max-w-md">
@@ -612,11 +743,6 @@ export function MembershipPage() {
             </div>
 
             <div className="space-y-5 px-6 py-6 sm:px-8">
-              <div className="flex items-center gap-2">
-                <Users className="h-4 w-4 text-primary" />
-                <div className="text-sm font-semibold text-foreground">我邀请的人</div>
-              </div>
-
               <div className="grid gap-3 sm:grid-cols-3">
                 <div className="theme-soft-surface rounded-[1.2rem] px-4 py-4">
                   <div className="text-[11px] uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">已邀请</div>
@@ -636,14 +762,51 @@ export function MembershipPage() {
                 </div>
               </div>
 
-              <div className="theme-soft-surface rounded-[1.3rem] p-4">
-                <div className="flex items-center gap-2">
-                  <Wallet className="h-4 w-4 text-primary" />
-                  <div className="text-sm font-semibold text-foreground">邀请佣金</div>
-                </div>
-                {commissionQ.error ? <div className="mt-3 text-sm text-destructive">{formatMembershipApiError(commissionQ.error)}</div> : null}
+              <div className="grid gap-3 sm:grid-cols-2">
+                <button
+                  type="button"
+                  className="theme-soft-surface flex items-center justify-between rounded-[1.2rem] px-4 py-4 text-left transition hover:-translate-y-px"
+                  onClick={() => setInviteRecordsOpen(true)}
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <Users className="h-4 w-4 text-primary" />
+                      <div className="text-sm font-semibold text-foreground">邀请的人</div>
+                    </div>
+                    <div className="mt-2 text-sm leading-6 text-muted-foreground">
+                      {inviteSummaryQ.error
+                        ? formatMembershipApiError(inviteSummaryQ.error)
+                        : recentInvites.length > 0
+                          ? `最近展示 ${recentInvites.length} 条记录`
+                          : "暂无邀请记录"}
+                    </div>
+                  </div>
+                  <StatusPill tone="accent">{inviteSummaryQ.data?.totalInvitedUsers ?? 0} 人</StatusPill>
+                </button>
+
+                <button
+                  type="button"
+                  className="theme-soft-surface flex items-center justify-between rounded-[1.2rem] px-4 py-4 text-left transition hover:-translate-y-px"
+                  onClick={() => setWithdrawalRecordsOpen(true)}
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <History className="h-4 w-4 text-primary" />
+                      <div className="text-sm font-semibold text-foreground">提现记录</div>
+                    </div>
+                    <div className="mt-2 text-sm leading-6 text-muted-foreground">
+                      {recentWithdrawals.length > 0 ? `${recentWithdrawals.length} 条提现申请` : "暂无提现记录"}
+                    </div>
+                  </div>
+                  <StatusPill tone="warm">{recentWithdrawals.length} 条</StatusPill>
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                {commissionQ.error ? <div className="text-sm text-destructive">{formatMembershipApiError(commissionQ.error)}</div> : null}
+
                 {!commissionQ.error ? (
-                  <div className="mt-4 space-y-4">
+                  <>
                     <div className="grid gap-3 sm:grid-cols-4">
                       <div className="theme-subtle-surface px-3 py-3">
                         <div className="text-xs text-muted-foreground">待结算</div>
@@ -664,7 +827,10 @@ export function MembershipPage() {
                     </div>
 
                     <div className="theme-subtle-surface px-3 py-3 text-sm leading-6">
-                      <div className="font-medium text-foreground">微信收款身份</div>
+                      <div className="flex items-center gap-2">
+                        <Wallet className="h-4 w-4 text-primary" />
+                        <div className="font-medium text-foreground">微信收款身份</div>
+                      </div>
                       <div className="mt-1 text-muted-foreground">
                         {payoutReadiness?.status === "ready"
                           ? `已绑定 ${payoutReadiness.maskedLabel}`
@@ -703,100 +869,9 @@ export function MembershipPage() {
                         </Button>
                       </div>
                     </form>
-
-                    {recentCommissions.length > 0 ? (
-                      <div className="space-y-2">
-                        <div className="text-xs font-medium text-muted-foreground">最近佣金</div>
-                        {recentCommissions.slice(0, 3).map((commission) => (
-                          <div key={commission.commissionId} className="theme-subtle-surface px-3 py-3 text-sm leading-6">
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <span>{formatMembershipPrice(commission.commissionAmountCent)}</span>
-                              <StatusPill tone={commission.status === "settled" ? "accent" : commission.status === "pending" ? "warm" : "default"}>
-                                {describeCommissionStatus(commission.status)}
-                              </StatusPill>
-                            </div>
-                            <div className="mt-1 text-xs text-muted-foreground">订单 {commission.sourceOrderId}</div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : null}
-
-                    {recentWithdrawals.length > 0 ? (
-                      <div className="space-y-2">
-                        <div className="text-xs font-medium text-muted-foreground">提现记录</div>
-                        {recentWithdrawals.slice(0, 3).map((withdrawal) => (
-                          <div key={withdrawal.withdrawalId} className="theme-subtle-surface px-3 py-3 text-sm leading-6">
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <span>{formatMembershipPrice(withdrawal.amountCent)}</span>
-                              <StatusPill tone={withdrawal.status === "succeeded" ? "accent" : withdrawal.status === "failed" ? "default" : "warm"}>
-                                {describeWithdrawalStatus(withdrawal.status)}
-                              </StatusPill>
-                            </div>
-                            <div className="mt-1 text-xs text-muted-foreground">
-                              {withdrawal.identityMaskedLabel || "微信收款身份"} · {formatMembershipDateTime(withdrawal.createdAt)}
-                            </div>
-                            {withdrawal.status === "awaiting_confirmation" && withdrawal.confirmation?.mode === "wechat_jsapi_requestMerchantTransfer" ? (
-                              <div className="mt-3 flex flex-wrap items-center gap-3">
-                                <Button type="button" variant="outline" size="sm" onClick={() => void onResumeWithdrawalConfirmation(withdrawal)}>
-                                  继续微信确认
-                                </Button>
-                                <div className="text-xs text-muted-foreground">请在微信客户端内继续确认收款。</div>
-                              </div>
-                            ) : null}
-                          </div>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
+                  </>
                 ) : null}
               </div>
-
-              {inviteSummaryQ.error ? <div className="text-sm text-destructive">{formatMembershipApiError(inviteSummaryQ.error)}</div> : null}
-
-              {!inviteSummaryQ.error && recentInvites.length === 0 ? (
-                <div className="theme-subtle-surface rounded-[1.4rem] border-dashed px-5 py-10 text-center text-sm leading-7 text-[color:var(--theme-subtle-text)]">
-                  还没有邀请记录。把邀请码发给朋友后，这里会列出已绑定和已转化的用户。
-                </div>
-              ) : null}
-
-              {recentInvites.length > 0 ? (
-                <div className="space-y-3">
-                  {recentInvites.map((invite) => (
-                    <div key={`${invite.inviteeUserId}-${invite.boundAt}`} className="theme-soft-surface rounded-[1.3rem] p-4">
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <div className="text-sm font-semibold text-foreground">{getInviteDisplayName(invite)}</div>
-                            <StatusPill tone={invite.status === "rewarded" ? "accent" : "default"}>{describeInviteRecordStatus(invite.status)}</StatusPill>
-                          </div>
-                          {invite.inviteePublicUid ? (
-                            <div className="mt-1 font-mono text-xs text-[color:var(--theme-subtle-text)]">UID {invite.inviteePublicUid}</div>
-                          ) : null}
-                          <div className="mt-2 text-sm leading-6 text-muted-foreground">绑定时间：{formatMembershipDateTime(invite.boundAt)}</div>
-                        </div>
-                        <div className="shrink-0 text-right text-xs leading-6 text-muted-foreground">
-                          {invite.rewardedAt ? (
-                            <>
-                              <div>奖励触发</div>
-                              <div>{formatMembershipDateTime(invite.rewardedAt)}</div>
-                            </>
-                          ) : (
-                            <>
-                              <div>当前状态</div>
-                              <div>等待首单转化</div>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                  {inviteSummaryQ.data && inviteSummaryQ.data.totalInvitedUsers > recentInvites.length ? (
-                    <div className="text-xs leading-6 text-[color:var(--theme-subtle-text)]">
-                      当前展示最近 {recentInvites.length} 条邀请记录，共 {inviteSummaryQ.data.totalInvitedUsers} 人。
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
             </div>
           </div>
 

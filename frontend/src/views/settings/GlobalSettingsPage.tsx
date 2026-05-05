@@ -2,7 +2,7 @@ import { type CSSProperties } from "react"
 import { Palette } from "lucide-react"
 
 import { ApiError } from "@/ui/api/http"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import { useCurrentUser } from "@/ui/queries/auth"
 import { useMembershipSummary } from "@/ui/queries/membership"
 import { useMyLlmSettings, useUpdateMyGlobalSettings, useUpdateMyLlmSettings } from "@/ui/queries/profile"
@@ -142,7 +142,6 @@ export function GlobalSettingsPage() {
             </div>
             <div className="min-w-0">
               <CardTitle>界面主题</CardTitle>
-              <CardDescription className="mt-1">原本右上角的主题选择已经迁到这里。番茄钟则已经独立成固定功能页。</CardDescription>
             </div>
           </div>
         </CardHeader>

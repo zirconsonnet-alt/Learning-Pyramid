@@ -706,10 +706,11 @@ def test_admin_can_finish_refund_pending_wechat_order_after_refund_window(
     assert synced_payment.status_code == 200
     assert synced_payment.json()["data"]["order"]["status"] == "paid"
 
-    requested_refund = admin_client.post(
-        f"/api/admin/membership/orders/{order_id}/refund",
-        json={"reason": "wechat refund request"},
-    )
+    with patch("backend.system.membership_store._utc_now", return_value=datetime.fromisoformat("2026-05-04T08:30:00+00:00")):
+        requested_refund = admin_client.post(
+            f"/api/admin/membership/orders/{order_id}/refund",
+            json={"reason": "wechat refund request"},
+        )
     assert requested_refund.status_code == 200
     assert requested_refund.json()["data"]["order"]["status"] == "refund_pending"
 

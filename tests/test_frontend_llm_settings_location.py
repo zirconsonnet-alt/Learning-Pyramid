@@ -177,3 +177,13 @@ def test_new_subject_creation_no_longer_applies_global_review_template() -> None
     assert "defaultProjectReviewTemplate" not in projects_source
     assert "setLayerConfig(res.compatibilityProjectId, 0" not in projects_source
     assert "默认复习模板未自动套用" not in projects_source
+
+
+def test_global_theme_card_removes_legacy_location_description() -> None:
+    global_source = GLOBAL_SETTINGS_PAGE.read_text(encoding="utf-8")
+    section_start = global_source.index("<CardTitle>界面主题</CardTitle>")
+    section_end = global_source.index("<CardContent", section_start)
+    section = global_source[section_start:section_end]
+
+    assert "原本右上角的主题选择已经迁到这里。番茄钟则已经独立成固定功能页。" not in global_source
+    assert "<CardDescription" not in section

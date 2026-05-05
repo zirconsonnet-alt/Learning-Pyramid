@@ -66,6 +66,7 @@ def test_homepage_removes_standalone_feature_section() -> None:
 
 def test_homepage_method_cards_use_requested_short_body_copy() -> None:
     source = HOME_PAGE.read_text(encoding="utf-8")
+    css = INDEX_CSS.read_text(encoding="utf-8")
     section_start = source.index("const mechanismCards = [")
     section_end = source.index("] as const", section_start)
     section = source[section_start:section_end]
@@ -105,6 +106,18 @@ def test_homepage_method_cards_use_requested_short_body_copy() -> None:
     assert len(list(ASSETS_DIR.glob("method-*.webp"))) == 3
     for asset in ASSETS_DIR.glob("method-*.webp"):
         assert asset.stat().st_size <= 120_000
+
+    render_start = source.index('id="method"')
+    render_end = source.index('id="onboarding"', render_start)
+    render_section = source[render_start:render_end]
+    assert '<h3>{item.title}</h3>' in render_section
+    assert '<p>{item.body}</p>' in render_section
+    assert render_section.index('<h3>{item.title}</h3>') < render_section.index('<p>{item.body}</p>') < render_section.index(
+        'className="lp-showcase-method-card-visual"',
+    )
+    assert 'className="lp-showcase-method-card-copy"' in render_section
+    assert ".lp-showcase-method-card-copy p" in css
+    assert "align-self: center;" in css
 
 
 def test_homepage_problem_cards_use_short_titles_and_previous_titles_as_symptoms() -> None:

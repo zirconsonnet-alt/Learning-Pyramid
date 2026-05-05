@@ -29,6 +29,32 @@ function Get-RepoRoot {
     return (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 }
 
+function Get-Sha256FileHash {
+    param([string]$Path)
+    if (-not (Test-Path $Path)) {
+        throw "Cannot hash missing file: $Path"
+    }
+    $getFileHash = Get-Command Get-FileHash -ErrorAction SilentlyContinue
+    if ($getFileHash) {
+        return (Get-FileHash -Path $Path -Algorithm SHA256).Hash.ToUpperInvariant()
+    }
+
+    $stream = [System.IO.File]::OpenRead((Resolve-Path $Path).Path)
+    try {
+        $sha256 = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $bytes = $sha256.ComputeHash($stream)
+            return (($bytes | ForEach-Object { $_.ToString("x2") }) -join "").ToUpperInvariant()
+        }
+        finally {
+            $sha256.Dispose()
+        }
+    }
+    finally {
+        $stream.Dispose()
+    }
+}
+
 function Resolve-SshKeyPath {
     param([string]$ConfiguredPath)
     $candidates = @()
@@ -661,8 +687,8 @@ Write-Host "Selected self-host bundle: $bundlePath (${bundleSizeMb} MB)"
 if ($SkipBuild -and -not $IncludePublicDownloads -and $bundleItem.Length -gt 100MB) {
     Write-Warning "The latest bundle is still very large. It was probably built earlier with public-downloads included. Re-run once without -SkipBuild to generate a smaller deploy bundle."
 }
-$bundleHash = (Get-FileHash -Path $bundlePath -Algorithm SHA256).Hash.ToUpperInvariant()
-$localFrontendDistFingerprint = (Get-FileHash -Path (Join-Path $repoRoot "frontend/dist/index.html") -Algorithm SHA256).Hash.ToUpperInvariant()
+$bundleHash = Get-Sha256FileHash -Path $bundlePath
+$localFrontendDistFingerprint = Get-Sha256FileHash -Path (Join-Path $repoRoot "frontend/dist/index.html")
 $localFrontendEntryAssetName = Get-LocalBuiltFrontendEntryAssetName -RepoRoot $repoRoot
 Write-Host "Expected frontend entry asset from local build: $localFrontendEntryAssetName"
 $includePublicDownloadsValue = if ($IncludePublicDownloads) { "1" } else { "0" }

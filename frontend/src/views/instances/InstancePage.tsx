@@ -1,5 +1,6 @@
-import { useMemo } from "react"
+import { useCallback, useMemo, type ReactNode } from "react"
 import { useQueries, useQuery } from "@tanstack/react-query"
+import { ChevronLeft } from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
@@ -8,9 +9,10 @@ import { listLearningObjectNodes } from "@/ui/api/learningObjects"
 import { getRecallPoint, type RecallPoint } from "@/ui/api/review"
 import { ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader } from "@/ui/components/ui/card"
 import { formatInstanceReference, formatMaterialReference } from "@/ui/displayIdentifiers"
 import { RecallPointListCard } from "@/views/recallPoints/components/RecallPointListCard"
+import { VideoPane } from "@/views/workbench/components/VideoPane"
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -30,6 +32,7 @@ export function InstancePage() {
   const navigate = useNavigate()
   const pid = projectId ?? ""
   const iid = instanceId ?? ""
+  const setCurrentMs = useCallback((_value: number) => undefined, [])
 
   const instancesQ = useQuery({
     queryKey: ["instances", pid],
@@ -79,6 +82,43 @@ export function InstancePage() {
   )
   const recallPointsLoading = recallPointIdsQ.isLoading || recallPointQs.some((query) => query.isLoading)
   const recallPointsError = recallPointIdsQ.error ?? recallPointQs.find((query) => query.error)?.error ?? null
+  const boundObjectNodeValue = boundObjectNode ? (
+    <Link className="text-primary underline-offset-4 hover:underline" to={`/p/${pid}/learning-object-nodes/${boundObjectNode.nodeId}`}>
+      {boundObjectNode.title}
+    </Link>
+  ) : objectNodesQ.isLoading ? (
+    "读取中..."
+  ) : (
+    "未绑定对象节点"
+  )
+  const backAction = (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="-ml-2 h-8 rounded-full px-2 text-[#60748c] hover:bg-[#f3f7fb] hover:text-foreground"
+      asChild
+    >
+      <Link to={`/p/${pid}/object-tree`}>
+        <ChevronLeft className="h-4 w-4" />
+        返回学习对象树
+      </Link>
+    </Button>
+  )
+  const summaryPanel = instance ? (
+    <InstanceSummaryCard
+      topAction={backAction}
+      header={<h1 className="truncate text-lg font-semibold">{instance.materialDisplayName}</h1>}
+      description="查看这个内容实例的播放、对象树绑定与复述点引用。"
+      items={[
+        { label: "状态", value: instance.presence === "MISSING" ? "缺失" : "正常" },
+        { label: "当前引用", value: formatInstanceReference(iid) },
+        { label: "复述点", value: recallPointIdsQ.data?.recallPointIds.length ?? "-" },
+        { label: "内容引用", value: formatMaterialReference(instance.materialId) },
+        { label: "最近看到", value: formatTimestamp(instance.lastSeenAt) },
+        { label: "对象树绑定", value: boundObjectNodeValue },
+      ]}
+    />
+  ) : null
 
   if (!pid || !iid) {
     return (
@@ -94,93 +134,87 @@ export function InstancePage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-lg font-semibold">{instance?.materialDisplayName ?? formatInstanceReference(iid)}</h1>
-          <p className="text-sm text-muted-foreground">查看内容实例信息、对象树绑定与复述点引用。</p>
+      {instancesQ.isLoading ? <LoadingNotice title="正在加载实例详情" message="正在读取内容实例、对象树绑定和复述点引用情况。" /> : null}
+      {instancesQ.error ? <ErrorNotice title="实例详情加载失败" message={formatApiError(instancesQ.error)} /> : null}
+      {objectNodesQ.error ? <ErrorNotice title="对象树绑定加载失败" message={formatApiError(objectNodesQ.error)} /> : null}
+      {recallPointIdsQ.error ? <ErrorNotice title="复述点引用加载失败" message={formatApiError(recallPointIdsQ.error)} /> : null}
+
+      {!instancesQ.isLoading && !instancesQ.error && !instance ? (
+        <ContentNotice
+          title="未找到这个实例"
+          message="这个实例可能已经被移除，或当前入口已失效。请返回对象树重新选择。"
+          action={
+            <Button variant="outline" asChild>
+              <Link to={`/p/${pid}/object-tree`}>返回学习对象树</Link>
+            </Button>
+          }
+        />
+      ) : null}
+
+      {instance ? (
+        <div className="grid gap-4 xl:grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)] xl:items-start">
+          {summaryPanel ? <aside className="xl:sticky xl:top-28 xl:self-start">{summaryPanel}</aside> : <div />}
+          <div className="min-w-0 space-y-4">
+            <VideoPane
+              key={instance.instanceId}
+              projectId={pid}
+              instance={instance}
+              setCurrentMs={setCurrentMs}
+              queueHasGate={false}
+              allowCaptureDrafts={false}
+            />
+            <RecallPointListCard
+              projectId={pid}
+              items={recallPoints}
+              instanceTitleById={instanceTitleById}
+              isLoading={recallPointsLoading}
+              error={recallPointsError}
+              title="相关复述点"
+              description="所有锚定到这个实例的复述点都会显示在这里。"
+            />
+          </div>
         </div>
-        <Button variant="outline" asChild>
-          <Link to={`/p/${pid}/object-tree`}>返回学习对象树</Link>
-        </Button>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>实例概览</CardTitle>
-          <CardDescription>实例是学习对象树叶子节点绑定到的具体内容实例。</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {instancesQ.isLoading ? <LoadingNotice title="正在加载实例详情" message="正在读取内容实例、对象树绑定和复述点引用情况。" /> : null}
-          {instancesQ.error ? <ErrorNotice title="实例详情加载失败" message={formatApiError(instancesQ.error)} /> : null}
-          {objectNodesQ.error ? <ErrorNotice title="对象树绑定加载失败" message={formatApiError(objectNodesQ.error)} /> : null}
-          {recallPointIdsQ.error ? <ErrorNotice title="复述点引用加载失败" message={formatApiError(recallPointIdsQ.error)} /> : null}
-
-          {instance ? (
-            <>
-              <div className="grid gap-3 md:grid-cols-3">
-                <div className="rounded-md border bg-muted/30 p-3">
-                  <div className="text-xs text-muted-foreground">内容名</div>
-                  <div className="mt-1 font-medium text-foreground">{instance.materialDisplayName}</div>
-                </div>
-                <div className="rounded-md border bg-muted/30 p-3">
-                  <div className="text-xs text-muted-foreground">内容状态</div>
-                  <div className="mt-1 font-medium text-foreground">{instance.presence === "MISSING" ? "缺失" : "正常"}</div>
-                </div>
-                <div className="rounded-md border bg-muted/30 p-3">
-                  <div className="text-xs text-muted-foreground">复述点数量</div>
-                  <div className="mt-1 font-medium text-foreground">{recallPointIdsQ.data?.recallPointIds.length ?? "-"}</div>
-                </div>
-              </div>
-
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="rounded-md border p-4">
-                  <div className="text-xs text-muted-foreground">内容引用</div>
-                  <div className="mt-1 break-all text-sm font-medium text-foreground">{formatMaterialReference(instance.materialId)}</div>
-                </div>
-                <div className="rounded-md border p-4">
-                  <div className="text-xs text-muted-foreground">最近看到时间</div>
-                  <div className="mt-1 text-sm font-medium text-foreground">{formatTimestamp(instance.lastSeenAt)}</div>
-                </div>
-              </div>
-
-              <div className="rounded-md border p-4">
-                <div className="text-xs text-muted-foreground">对象树绑定</div>
-                <div className="mt-1 text-sm font-medium text-foreground">{boundObjectNode?.title || "未绑定对象节点"}</div>
-              </div>
-
-              <div className="flex flex-wrap gap-3">
-                {boundObjectNode ? (
-                  <Button variant="outline" asChild>
-                    <Link to={`/p/${pid}/learning-object-nodes/${boundObjectNode.nodeId}`}>查看对象节点</Link>
-                  </Button>
-                ) : null}
-              </div>
-            </>
-          ) : (
-            !instancesQ.isLoading && !instancesQ.error && (
-              <ContentNotice
-                title="未找到这个实例"
-                message="这个实例可能已经被移除，或当前入口已失效。请返回对象树重新选择。"
-                action={
-                  <Button variant="outline" asChild>
-                    <Link to={`/p/${pid}/object-tree`}>返回学习对象树</Link>
-                  </Button>
-                }
-              />
-            )
-          )}
-        </CardContent>
-      </Card>
-
-      <RecallPointListCard
-        projectId={pid}
-        items={recallPoints}
-        instanceTitleById={instanceTitleById}
-        isLoading={recallPointsLoading}
-        error={recallPointsError}
-        title="相关复述点"
-        description="所有锚定到这个实例的复述点都会显示在这里。"
-      />
+      ) : null}
     </div>
+  )
+}
+
+type SummaryItem = {
+  label: string
+  value: ReactNode
+}
+
+function InstanceSummaryCard({
+  description,
+  header,
+  items,
+  topAction,
+}: {
+  description?: string
+  header: ReactNode
+  items: SummaryItem[]
+  topAction?: ReactNode
+}) {
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        {topAction ? <div className="flex items-center">{topAction}</div> : null}
+        <div className="min-w-0">{header}</div>
+        {description ? <CardDescription>{description}</CardDescription> : null}
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-wrap gap-3">
+          {items.map((item) => (
+            <div
+              key={item.label}
+              className="min-w-[10rem] flex-1 rounded-xl border border-[#dbe4ee] bg-[#f8fafc] px-4 py-3 shadow-[0_10px_24px_-24px_rgba(15,23,42,0.6)]"
+            >
+              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#64748b]">{item.label}</div>
+              <div className="mt-1.5 break-words text-sm font-semibold text-slate-900">{item.value}</div>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
   )
 }

@@ -313,6 +313,7 @@ export function VideoPane({
   onSeekApplied,
   onDurationResolved,
   queueHasGate,
+  allowCaptureDrafts = true,
 }: {
   projectId: string
   instance: Instance | null
@@ -321,6 +322,7 @@ export function VideoPane({
   onSeekApplied?: (nonce: number) => void
   onDurationResolved?: (instanceId: string, durationMs: number) => void
   queueHasGate: boolean
+  allowCaptureDrafts?: boolean
 }) {
   const playerShellRef = useRef<HTMLDivElement | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -467,7 +469,7 @@ export function VideoPane({
         { q: deferredCaptureReferenceQuery || undefined, limit: MAX_CAPTURE_REFERENCE_PICKER_ITEMS * 4 },
         { signal },
       ),
-    enabled: !!projectId && isCapturePanelOpen && capturePanelMode === "capture" && !!captureReferencePicker,
+    enabled: allowCaptureDrafts && !!projectId && isCapturePanelOpen && capturePanelMode === "capture" && !!captureReferencePicker,
     placeholderData: (previous) => previous,
     staleTime: 30_000,
   })
@@ -841,6 +843,10 @@ export function VideoPane({
 
   const openCapturePanel = useCallback(
     async (anchorMs?: number, keepFullscreen = false, mode: CapturePanelMode = "capture") => {
+      if (mode === "capture" && !allowCaptureDrafts) {
+        showInfoFeedback("当前页面仅支持播放", "请回到工作台录入新的复述点。")
+        return
+      }
       if (mode === "capture" && queueHasGate) {
         showInfoFeedback("当前处于复习模式", "请先完成复习，再继续录入新的复述点。")
         return
@@ -876,6 +882,7 @@ export function VideoPane({
       wakeChrome()
     },
     [
+      allowCaptureDrafts,
       instanceId,
       persistPlaybackPosition,
       queueHasGate,
@@ -1010,7 +1017,7 @@ export function VideoPane({
   ])
 
   const captureCurrentFrameIntoAnswer = useCallback(async () => {
-    if (capturePanelMode !== "capture" || !isCapturePanelOpen || isFrameCaptureUploading) return
+    if (!allowCaptureDrafts || capturePanelMode !== "capture" || !isCapturePanelOpen || isFrameCaptureUploading) return
     const video = videoRef.current
     if (!video || video.readyState < 2) {
       setCaptureError("当前视频帧尚未就绪，稍等一秒再截取。")
@@ -1031,9 +1038,13 @@ export function VideoPane({
     } finally {
       setIsFrameCaptureUploading(false)
     }
-  }, [capturePanelMode, isCapturePanelOpen, isFrameCaptureUploading, projectId, touchComposeActivity])
+  }, [allowCaptureDrafts, capturePanelMode, isCapturePanelOpen, isFrameCaptureUploading, projectId, touchComposeActivity])
 
   const saveCaptureDraft = useCallback(() => {
+    if (!allowCaptureDrafts) {
+      setCaptureError("当前页面不能录入复述点。")
+      return
+    }
     if (!instanceId) {
       setCaptureError("当前还没有选中视频实例。")
       return
@@ -1064,6 +1075,7 @@ export function VideoPane({
     closeCapturePanel()
   }, [
     addDraft,
+    allowCaptureDrafts,
     answerContent,
     captureAnchorMs,
     captureReferenceIds,
@@ -1551,6 +1563,7 @@ export function VideoPane({
 
   useEffect(() => {
     function handleFullscreenFrameCaptureShortcut(event: KeyboardEvent) {
+      if (!allowCaptureDrafts) return false
       const isFrameCaptureModifierKey =
         event.key === "Control" ||
         event.key === "Alt" ||
@@ -1635,7 +1648,7 @@ export function VideoPane({
         return
       }
 
-      if ((event.key === "Enter" || event.code === "NumpadEnter") && !isCapturePanelOpen) {
+      if (allowCaptureDrafts && (event.key === "Enter" || event.code === "NumpadEnter") && !isCapturePanelOpen) {
         event.preventDefault()
         if (event.repeat || !instanceId) return
         void openCapturePanel(undefined, true)
@@ -1668,6 +1681,7 @@ export function VideoPane({
       document.removeEventListener("keyup", handleFullscreenKeyUp, true)
     }
   }, [
+    allowCaptureDrafts,
     captureCurrentFrameIntoAnswer,
     capturePanelMode,
     closeCapturePanel,
@@ -2287,18 +2301,20 @@ export function VideoPane({
                       >
                         {isBarrageEnabled ? "弹幕开" : "弹幕关"}
                       </Button>
-                      <Button
-                        type="button"
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7 rounded-full text-white hover:bg-white/10"
-                        onClick={() => void openCapturePanel(undefined, true, "capture")}
-                        disabled={!instanceId || queueHasGate}
-                        title="记复述点 (Enter)"
-                      >
-                        <NotebookPen className="h-3.5 w-3.5" />
-                        <span className="sr-only">记复述点</span>
-                      </Button>
+                      {allowCaptureDrafts ? (
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7 rounded-full text-white hover:bg-white/10"
+                          onClick={() => void openCapturePanel(undefined, true, "capture")}
+                          disabled={!instanceId || queueHasGate}
+                          title="记复述点 (Enter)"
+                        >
+                          <NotebookPen className="h-3.5 w-3.5" />
+                          <span className="sr-only">记复述点</span>
+                        </Button>
+                      ) : null}
                       <Button
                         type="button"
                         size="icon"

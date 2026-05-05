@@ -391,12 +391,12 @@ export function HomePage() {
                     <div className="lp-showcase-method-card-copy">
                       <div className="lp-showcase-feature-icon">{item.icon}</div>
                       <h3>{item.title}</h3>
+                      <p>{item.body}</p>
                     </div>
                     <div className="lp-showcase-method-card-visual">
                       <img src={item.imageSrc} alt={`${item.title}示意图`} loading="lazy" />
                     </div>
                   </div>
-                  <p>{item.body}</p>
                 </article>
               ))}
             </div>

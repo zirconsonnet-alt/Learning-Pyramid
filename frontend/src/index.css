@@ -1490,10 +1490,9 @@
 
   .lp-showcase-method-card-head {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: space-between;
     gap: 18px;
-    margin-bottom: 18px;
   }
 
   .lp-showcase-method-card-copy {
@@ -1501,7 +1500,12 @@
     flex: 1 1 0;
   }
 
+  .lp-showcase-method-card-copy p {
+    margin-top: 12px;
+  }
+
   .lp-showcase-method-card-visual {
+    align-self: center;
     flex: 0 0 44%;
     min-width: 180px;
     max-width: 260px;
