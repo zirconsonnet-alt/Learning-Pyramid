@@ -3,7 +3,6 @@ import { BellRing, FolderOpen, Music2, PanelsTopLeft, Pause, Play, Plus, Refresh
 import { Link, useLocation, useNavigate } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
-import type { ReviewChainTemplateItem } from "@/ui/api/projectConfig"
 import { playPomodoroTransitionSound, playPomodoroVoicePrompt, unlockPomodoroAudio } from "@/ui/pomodoroAudio"
 import {
   getPomodoroRestMusicPlayerSnapshot,
@@ -29,7 +28,6 @@ import { useSystemCapabilities } from "@/ui/queries/system"
 import { usePageMeta } from "@/ui/seo/usePageMeta"
 import { useAppStore } from "@/ui/store/appStore"
 import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
-import { useGlobalConfigStore } from "@/ui/store/globalConfigStore"
 import {
   POMODORO_WEEKDAYS,
   POMODORO_WEEKDAY_LABELS,
@@ -482,7 +480,6 @@ export function PomodoroPage() {
   const { projectTitle: selectedProjectTitle } = useProject(selectedProjectId ?? "", { enabled: Boolean(selectedProjectId) })
   const projectsQ = useProjects(true)
   const selectedTheme = useThemeStore((state) => state.theme)
-  const defaultProjectReviewTemplate = useGlobalConfigStore((state) => state.defaultProjectReviewTemplate)
   const enabled = usePomodoroStore((state) => state.enabled)
   const weeklySchedule = usePomodoroStore((state) => state.weeklySchedule)
   const quickPomodoro = usePomodoroStore((state) => state.quickPomodoro)
@@ -652,7 +649,6 @@ export function PomodoroPage() {
         defaultBreakPrompt,
         microBreaks,
       },
-      defaultProjectReviewTemplate: defaultProjectReviewTemplate as ReviewChainTemplateItem[],
     }
     if (shouldSyncRemotely) {
       await updateGlobalSettings.mutateAsync(payload)

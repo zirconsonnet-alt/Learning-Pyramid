@@ -188,6 +188,7 @@ class WeChatPayoutConfig:
     api_base_url: str
     transfer_scene_id: str
     transfer_remark: str
+    user_recv_perception: str
     notify_url: str | None
     oauth_authorize_url: str
     oauth_token_url: str
@@ -245,8 +246,8 @@ def current_wechat_payout_config() -> WeChatPayoutConfig:
         provider_mode = PAYMENT_PROVIDER_WECHAT_NATIVE
     raw_scene_infos = _env_text("PLM_WECHAT_PAY_TRANSFER_SCENE_REPORT_INFOS_JSON")
     scene_infos: tuple[dict[str, str], ...] = (
-        {"info_type": "活动名称", "info_content": "LearningPyramid 邀请佣金"},
-        {"info_type": "奖励说明", "info_content": "会员邀请佣金提现"},
+        {"info_type": "岗位类型", "info_content": "推广员"},
+        {"info_type": "报酬说明", "info_content": "会员邀请佣金"},
     )
     if raw_scene_infos:
         try:
@@ -269,6 +270,7 @@ def current_wechat_payout_config() -> WeChatPayoutConfig:
         api_base_url=native.api_base_url,
         transfer_scene_id=_env_text("PLM_WECHAT_PAY_TRANSFER_SCENE_ID"),
         transfer_remark=_env_text("PLM_WECHAT_PAY_TRANSFER_REMARK") or "会员邀请佣金提现",
+        user_recv_perception=_env_text("PLM_WECHAT_PAY_USER_RECV_PERCEPTION"),
         notify_url=_env_text("PLM_WECHAT_PAY_TRANSFER_NOTIFY_URL") or None,
         oauth_authorize_url=_env_text("PLM_WECHAT_PAY_OAUTH_AUTHORIZE_URL") or "https://open.weixin.qq.com/connect/oauth2/authorize",
         oauth_token_url=_env_text("PLM_WECHAT_PAY_OAUTH_TOKEN_URL") or "https://api.weixin.qq.com/sns/oauth2/access_token",
@@ -703,8 +705,9 @@ class MembershipPaymentService:
             "openid": str(withdrawal.wechat_open_id),
             "transfer_amount": int(withdrawal.amount_cent),
             "transfer_remark": config.transfer_remark[:32],
-            "user_recv_perception": "会员邀请佣金提现",
         }
+        if config.user_recv_perception:
+            request_body["user_recv_perception"] = config.user_recv_perception[:32]
         if config.notify_url:
             request_body["notify_url"] = config.notify_url
         if config.scene_report_infos:
@@ -723,10 +726,7 @@ class MembershipPaymentService:
         normalized_out_bill_no = str(out_bill_no or "").strip()
         if not normalized_out_bill_no:
             raise PreconditionFailure("wechat payout outBillNo must be non-empty")
-        uri = (
-            f"/v3/fund-app/mch-transfer/transfer-bills/out-bill-no/{quote(normalized_out_bill_no, safe='')}"
-            f"?mchid={quote(config.mch_id, safe='')}"
-        )
+        uri = f"/v3/fund-app/mch-transfer/transfer-bills/out-bill-no/{quote(normalized_out_bill_no, safe='')}"
         response_body = self._wechat_request_json("GET", uri)
         return self._wechat_transfer_status_from_payload(
             withdrawal_id=str(withdrawal_id or ""),

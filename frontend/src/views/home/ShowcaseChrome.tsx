@@ -12,7 +12,7 @@ type ShowcaseNavItem = {
 }
 
 const SHOWCASE_SCROLL_SPY_OFFSET = 156
-const BRAND_LOGO_SRC = "/favicon-logo-white-v2-192.png"
+const BRAND_LOGO_SRC = "/product-logo-192.png"
 
 function buildHomeSectionHref(sectionId: string, homeSectionPrefix: string) {
   return `${homeSectionPrefix}#${sectionId}`
@@ -27,7 +27,6 @@ function getSectionIdFromHref(href: string) {
 export function getShowcaseNavItems(homeSectionPrefix = ""): ShowcaseNavItem[] {
   return [
     { href: buildHomeSectionHref("method", homeSectionPrefix), label: "方法" },
-    { href: buildHomeSectionHref("features", homeSectionPrefix), label: "功能" },
     { href: buildHomeSectionHref("onboarding", homeSectionPrefix), label: "上手路径" },
     { href: buildHomeSectionHref("membership", homeSectionPrefix), label: "会员" },
     { href: buildHomeSectionHref("faq", homeSectionPrefix), label: "常见问题" },

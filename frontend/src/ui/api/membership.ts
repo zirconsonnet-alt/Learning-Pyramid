@@ -275,6 +275,7 @@ export const CommissionWithdrawalSchema = z.object({
       packageInfo: z.string(),
     })
     .nullable(),
+  confirmationUrl: z.string().nullable().optional(),
   failureReason: z.string(),
   createdAt: z.string(),
   reservedAt: z.string().nullable(),
@@ -284,6 +285,22 @@ export const CommissionWithdrawalSchema = z.object({
 })
 
 export type CommissionWithdrawal = z.infer<typeof CommissionWithdrawalSchema>
+
+export const CommissionWithdrawalConfirmationSchema = z.object({
+  withdrawalId: z.string(),
+  amountCent: z.number(),
+  identityMaskedLabel: z.string(),
+  status: z.enum(["created", "awaiting_confirmation", "processing", "succeeded", "failed", "canceled", "needs_attention"]),
+  providerState: z.string(),
+  confirmation: z.object({
+    mode: z.literal("wechat_jsapi_requestMerchantTransfer"),
+    mchId: z.string(),
+    appId: z.string(),
+    packageInfo: z.string(),
+  }),
+})
+
+export type CommissionWithdrawalConfirmation = z.infer<typeof CommissionWithdrawalConfirmationSchema>
 
 export function getMembershipSummary() {
   return apiRequest({
@@ -410,7 +427,7 @@ export function pollPayoutBindingAttempt(params: { bindingAttemptId: string }) {
 
 export function openMobilePayoutBinding(params: { bindingAttemptId: string; state: string }) {
   return apiRequest({
-    path: `/commissions/payout-identity/wechat/mobile-bind?attempt=${encodeURIComponent(params.bindingAttemptId)}&state=${encodeURIComponent(params.state)}`,
+    path: `/commissions/payout-identity/wechat/mobile-bind?attempt=${encodeURIComponent(params.bindingAttemptId)}&state=${encodeURIComponent(params.state)}&response=json`,
     responseSchema: PayoutBindingAttemptSchema,
   })
 }
@@ -456,5 +473,12 @@ export function requestCommissionWithdrawal(params: { amountCent: number }) {
       amountCent: params.amountCent,
     },
     responseSchema: CommissionWithdrawalSchema,
+  })
+}
+
+export function getCommissionWithdrawalWechatConfirmation(params: { withdrawalId: string; token: string }) {
+  return apiRequest({
+    path: `/commissions/withdrawals/${encodeURIComponent(params.withdrawalId)}/wechat-confirmation?token=${encodeURIComponent(params.token)}`,
+    responseSchema: CommissionWithdrawalConfirmationSchema,
   })
 }

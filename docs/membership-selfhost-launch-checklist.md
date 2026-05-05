@@ -85,11 +85,16 @@ PLM_PIP_RETRIES=10
 - `PLM_WECHAT_PAY_BINDING_QR_TTL_MINUTES`：桌面绑定二维码有效期，默认 `10`，允许 `1` 到 `60`
 - `PLM_WECHAT_PAY_TRANSFER_SCENE_ID`：微信支付商户平台配置的转账场景 ID
 - `PLM_WECHAT_PAY_TRANSFER_REMARK`：可选，默认 `会员邀请佣金提现`
+- `PLM_WECHAT_PAY_USER_RECV_PERCEPTION`：可选，默认留空；微信会按已开通的转账场景展示收款感知，不要随意填写，否则可能被微信以 `暂不支持展示当前传入的用户收款感知` 拒单
 - `PLM_WECHAT_PAY_TRANSFER_NOTIFY_URL`：推荐显式配置为公网 HTTPS 的 `/api/payments/wechat/transfer-notify`
 - `PLM_WECHAT_PAY_TRANSFER_SCENE_REPORT_INFOS_JSON`：可选，按微信支付场景要求填写 JSON 数组
 - `PLM_WECHAT_PAY_OAUTH_AUTHORIZE_URL` / `PLM_WECHAT_PAY_OAUTH_TOKEN_URL`：通常使用默认微信地址，只有代理或沙箱环境需要覆盖
 
-用户提现前必须先绑定微信收款身份。生产环境应通过微信授权拿到当前 AppID 下的 OpenID；本地验收可以在开启 `PLM_ENABLE_MANUAL_TEST_PAYMENT=true` 时使用 `manual_test` 绑定和提现模拟。
+当前邀请佣金提现使用微信支付商家转账场景 `1005`（佣金报酬）。该场景的默认报备信息为 `岗位类型=推广员`、`报酬说明=会员邀请佣金`。用户收款感知默认不主动传给微信，由微信按商户已开通场景展示。
+
+用户提现前必须先绑定微信收款身份。生产环境应通过微信授权拿到当前 AppID 下的 OpenID；本地验收可以在开启 `PLM_ENABLE_MANUAL_TEST_PAYMENT=true` 时使用 `manual_test` 绑定和提现模拟。电脑端已登录用户发起绑定后，二维码会指向公网后端入口 `/api/commissions/payout-identity/wechat/mobile-bind?attempt=...&state=...`；手机微信扫码后由后端校验一次性绑定 token，再跳转微信网页授权，授权完成后回到手机确认页。手机端不需要再次登录 LearningPyramid。
+
+注意：`wechat_native` 支付能下单成功，不代表提现绑定链路也已经配置完成。普通支付使用微信支付商户 API 和支付二维码；收款身份绑定还依赖公众号网页授权域名与 `PLM_WECHAT_PAY_APP_ID` / `PLM_WECHAT_PAY_APP_SECRET`；商家转账还依赖商户号开通转账能力、`PLM_WECHAT_PAY_TRANSFER_SCENE_ID` 和微信客户端内的确认收款能力。如果手机授权页提示 `redirect_uri域名与后台配置不一致，错误码:10003`，优先检查微信公众平台/开放平台里该 AppID 的网页授权回调域名是否包含当前公网域名，例如 `plm.xuebao.chat`。
 
 佣金默认在支付成功后 `24 小时` 退款窗口结束才进入可提现。本地或预发验收需要快速走通提现时，可以临时设置 `PLM_MEMBERSHIP_COMMISSION_REFUND_WINDOW_MINUTES=1`；生产环境建议保持默认 `1440`。
 

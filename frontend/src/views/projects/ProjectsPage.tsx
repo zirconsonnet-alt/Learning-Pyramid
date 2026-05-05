@@ -5,7 +5,6 @@ import { useNavigate } from "react-router-dom"
 
 import { listAuditLogEvents, type AuditLogEvent } from "@/ui/api/auditLog"
 import { ApiError } from "@/ui/api/http"
-import { setLayerConfig } from "@/ui/api/projectConfig"
 import { getSystemDataSafetyStatus } from "@/ui/api/system"
 import type { Subject } from "@/ui/api/subjects"
 import { Button } from "@/ui/components/ui/button"
@@ -23,8 +22,7 @@ import { Label } from "@/ui/components/ui/label"
 import { completeGuideWalkthroughStep } from "@/ui/guideWalkthrough/guideWalkthroughController"
 import { useCreateSubject, useDeleteSubject, useSubjects } from "@/ui/queries/subjects"
 import { useAppStore } from "@/ui/store/appStore"
-import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
-import { useGlobalConfigStore } from "@/ui/store/globalConfigStore"
+import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { useWorkbenchStore } from "@/ui/store/workbenchStore"
 import { cn } from "@/ui/utils"
 
@@ -110,7 +108,6 @@ export function ProjectsPage() {
   const recentProjectIds = useAppStore((s) => s.recentProjectIds)
   const setSelectedProjectId = useAppStore((s) => s.setSelectedProjectId)
   const removeRecentProjectId = useAppStore((s) => s.removeRecentProjectId)
-  const defaultProjectReviewTemplate = useGlobalConfigStore((s) => s.defaultProjectReviewTemplate)
 
   const subjects = data ?? []
   const dataSafety = useQuery({
@@ -192,11 +189,6 @@ export function ProjectsPage() {
       const res = await create.mutateAsync({
         title: t,
       })
-      try {
-        await setLayerConfig(res.compatibilityProjectId, 0, { reviewChainTemplate: defaultProjectReviewTemplate })
-      } catch (templateErr) {
-        showInfoFeedback("学科已创建，但默认复习模板未自动套用", formatApiError(templateErr))
-      }
       setTitle("")
       setSelectedProjectId(res.compatibilityProjectId)
       setCreateOpen(false)

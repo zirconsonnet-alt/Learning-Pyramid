@@ -40,6 +40,14 @@ function lazyRoute<TModule>(loader: () => Promise<TModule>, pick: (mod: TModule)
 const AuthPage = lazyRoute(() => import("@/views/auth/AuthPage"), (mod) => mod.AuthPage)
 const HomePage = lazyRoute(() => import("@/views/home/HomePage"), (mod) => mod.HomePage)
 const GuidePage = lazyRoute(() => import("@/views/guide/GuidePage"), (mod) => mod.GuidePage)
+const CreateSubjectProjectDemoPage = lazyRoute(
+  () => import("@/views/guide/CreateSubjectProjectDemoPage"),
+  (mod) => mod.CreateSubjectProjectDemoPage,
+)
+const StudyReviewDemoWorkbenchPage = lazyRoute(
+  () => import("@/views/guide/StudyReviewDemoWorkbenchPage"),
+  (mod) => mod.StudyReviewDemoWorkbenchPage,
+)
 const InstancePage = lazyRoute(() => import("@/views/instances/InstancePage"), (mod) => mod.InstancePage)
 const ConvergencePage = lazyRoute(() => import("@/views/convergences/ConvergencePage"), (mod) => mod.ConvergencePage)
 const AdminPage = lazyRoute(() => import("@/views/admin/AdminPage"), (mod) => mod.AdminPage)
@@ -52,6 +60,10 @@ const LearningObjectNodePage = lazyRoute(() => import("@/views/learningObjects/L
 const LearningTaskNodePage = lazyRoute(() => import("@/views/learningTasks/LearningTaskNodePage"), (mod) => mod.LearningTaskNodePage)
 const MembershipPage = lazyRoute(() => import("@/views/membership/MembershipPage"), (mod) => mod.MembershipPage)
 const WechatPayoutBindingPage = lazyRoute(() => import("@/views/membership/WechatPayoutBindingPage"), (mod) => mod.WechatPayoutBindingPage)
+const WechatWithdrawalConfirmationPage = lazyRoute(
+  () => import("@/views/membership/WechatWithdrawalConfirmationPage"),
+  (mod) => mod.WechatWithdrawalConfirmationPage,
+)
 const ProjectsPage = lazyRoute(() => import("@/views/projects/ProjectsPage"), (mod) => mod.ProjectsPage)
 const ProfilePage = lazyRoute(() => import("@/views/profile/ProfilePage"), (mod) => mod.ProfilePage)
 const RecallPointPage = lazyRoute(() => import("@/views/recallPoints/RecallPointPage"), (mod) => mod.RecallPointPage)
@@ -94,11 +106,18 @@ export const router = createBrowserRouter([
     errorElement: <RouteErrorPage />,
   },
   {
+    path: "/membership/wechat-payout-confirm",
+    element: lazyElement(<WechatWithdrawalConfirmationPage />),
+    errorElement: <RouteErrorPage />,
+  },
+  {
     element: <AppShell />,
     errorElement: <RouteErrorPage />,
     children: [
       { path: "/docs", element: <Navigate to="/guide" replace /> },
       { path: "/guide", element: lazyElement(<GuidePage />) },
+      { path: "/guide/demo/create-subject-project", element: lazyElement(<CreateSubjectProjectDemoPage />) },
+      { path: "/guide/demo/study-review", element: lazyElement(<StudyReviewDemoWorkbenchPage />) },
       { path: "/projects", element: lazyElement(<ProjectsPage />) },
       { path: "/subjects/:subjectId", element: lazyElement(<SubjectDashboardPage />) },
       { path: "/friends", element: lazyElement(<FriendsPage />) },

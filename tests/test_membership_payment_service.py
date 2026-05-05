@@ -155,7 +155,7 @@ def test_wechat_merchant_transfer_wait_user_confirm_maps_confirmation_payload(
     tmp_path: Path,
 ) -> None:
     _enable_wechat_native(monkeypatch, tmp_path)
-    monkeypatch.setenv("PLM_WECHAT_PAY_TRANSFER_SCENE_ID", "1001")
+    monkeypatch.setenv("PLM_WECHAT_PAY_TRANSFER_SCENE_ID", "1005")
     service = MembershipPaymentService()
     captured: dict[str, object] = {}
 
@@ -177,6 +177,12 @@ def test_wechat_merchant_transfer_wait_user_confirm_maps_confirmation_payload(
     assert captured["uri"] == "/v3/fund-app/mch-transfer/transfer-bills"
     assert captured["body"]["out_bill_no"] == "LPWD202605050001"
     assert captured["body"]["openid"] == "openid_inviter_001"
+    assert captured["body"]["transfer_scene_id"] == "1005"
+    assert "user_recv_perception" not in captured["body"]
+    assert captured["body"]["transfer_scene_report_infos"] == [
+        {"info_type": "岗位类型", "info_content": "推广员"},
+        {"info_type": "报酬说明", "info_content": "会员邀请佣金"},
+    ]
     assert result.remote_status == "awaiting_confirmation"
     assert result.provider_state == "WAIT_USER_CONFIRM"
     assert result.provider_transfer_no == "133000007110099999118202605050001"
@@ -198,7 +204,7 @@ def test_wechat_merchant_transfer_query_maps_terminal_failure(
 
     def fake_wechat_request_json(method: str, uri: str, body: dict[str, object] | None = None) -> dict[str, object]:
         assert method == "GET"
-        assert "/v3/fund-app/mch-transfer/transfer-bills/out-bill-no/LPWD202605050001" in uri
+        assert uri == "/v3/fund-app/mch-transfer/transfer-bills/out-bill-no/LPWD202605050001"
         return {
             "out_bill_no": "LPWD202605050001",
             "transfer_bill_no": "133000007110099999118202605050001",

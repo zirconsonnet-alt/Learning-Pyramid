@@ -1,11 +1,11 @@
-import { type ReactNode, useMemo, useRef, useState } from "react"
+import { type ReactNode, useMemo, useState } from "react"
 import { Copy, Mail, Sparkles, Trophy, UserMinus, UserPlus } from "lucide-react"
 
 import type { Friend, FriendLeaderboardEntry, FriendRequest } from "@/ui/api/friends"
 import { ApiError } from "@/ui/api/http"
 import { ContentEmptyState, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/ui/components/ui/dialog"
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
@@ -110,9 +110,7 @@ export function FriendsPage() {
   const [addOpen, setAddOpen] = useState(false)
   const [targetUid, setTargetUid] = useState("")
   const [requestMessage, setRequestMessage] = useState("")
-  const [leaderboardPulse, setLeaderboardPulse] = useState(false)
   const [profileFriend, setProfileFriend] = useState<Friend | null>(null)
-  const leaderboardRef = useRef<HTMLDivElement | null>(null)
 
   const friendProfileQ = useFriendProfile(profileFriend?.userId, Boolean(profileFriend))
   const friends = friendsQ.data ?? []
@@ -200,14 +198,6 @@ export function FriendsPage() {
     }
   }
 
-  function onShowLeaderboard() {
-    if (leaderboardRef.current) {
-      leaderboardRef.current.scrollIntoView({ behavior: "smooth", block: "center" })
-    }
-    setLeaderboardPulse(true)
-    window.setTimeout(() => setLeaderboardPulse(false), 1600)
-  }
-
   const profileSummary = friendProfileQ.data ?? profileFriend
 
   return (
@@ -218,7 +208,6 @@ export function FriendsPage() {
             <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
               <div className="space-y-1">
                 <CardTitle className="text-2xl">好友中心</CardTitle>
-                <CardDescription className="max-w-2xl">发送申请、处理申请和查看好友资料都在这里，保留最常用的入口就够了。</CardDescription>
               </div>
               <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto">
                 <div className="w-full sm:w-72">
@@ -277,10 +266,6 @@ export function FriendsPage() {
             <div className="space-y-4">
               <div className="flex flex-wrap items-center justify-end gap-2">
                 {hasFilterText ? <MetaTag>结果 {filteredFriends.length}</MetaTag> : null}
-                <Button type="button" size="sm" variant="ghost" onClick={onShowLeaderboard}>
-                  <Sparkles className="h-4 w-4" />
-                  学习排行
-                </Button>
               </div>
 
               {friendsQ.isLoading ? <LoadingNotice title="正在加载好友列表" message="请稍候，正在同步你的好友关系。" /> : null}
@@ -337,8 +322,8 @@ export function FriendsPage() {
         </Card>
       </div>
 
-      <div ref={leaderboardRef} className="mt-4">
-        <FriendLeaderboard entries={leaderboardQ.data ?? []} loading={leaderboardQ.isLoading} error={leaderboardQ.error} pulse={leaderboardPulse} />
+      <div className="mt-4">
+        <FriendLeaderboard entries={leaderboardQ.data ?? []} loading={leaderboardQ.isLoading} error={leaderboardQ.error} />
       </div>
 
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
@@ -552,23 +537,16 @@ function FriendLeaderboard(props: {
   entries: FriendLeaderboardEntry[]
   loading: boolean
   error: unknown
-  pulse: boolean
 }) {
-  const { entries, loading, error, pulse } = props
+  const { entries, loading, error } = props
 
   return (
-    <Card
-      className={cn(
-        "theme-card-main overflow-hidden",
-        pulse && "ring-2 ring-primary/30 ring-offset-2 ring-offset-background transition shadow-[0_0_0_4px_hsl(var(--primary)/0.15)]",
-      )}
-    >
+    <Card className="theme-card-main overflow-hidden">
       <CardHeader className="theme-card-header">
         <CardTitle className="flex items-center gap-2">
           <Trophy className="h-5 w-5 text-amber-500" />
           好友学习排行榜
         </CardTitle>
-        <CardDescription>按有效学习时长排序，同分时参考学习动作、活跃天数和最近学习时间。</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {loading ? <LoadingNotice title="正在计算排行榜" message="请稍候..." /> : null}

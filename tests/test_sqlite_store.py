@@ -54,6 +54,7 @@ from backend.system.api import SystemAPI
 from backend.system.inmemory_system import InMemorySystem
 from backend.system.membership_commission_store import (
     WITHDRAWAL_STATUS_AWAITING_CONFIRMATION,
+    WITHDRAWAL_STATUS_CREATED,
     WITHDRAWAL_STATUS_FAILED,
     WITHDRAWAL_STATUS_PROCESSING,
     WITHDRAWAL_STATUS_SUCCEEDED,
@@ -2015,6 +2016,74 @@ def test_membership_commission_refund_window_can_be_shortened_for_testing(
     assert early.settled_count == 0
     due = store.settle_due_commissions(now=paid_at + timedelta(minutes=1, seconds=1), limit=10)
     assert due.settled_count == 1
+
+
+def test_membership_withdrawal_migrates_legacy_status_check_constraint(tmp_path: Path) -> None:
+    db_path = tmp_path / "membership.sqlite3"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE commission_withdrawal_requests (
+                withdrawal_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                amount_cent INTEGER NOT NULL,
+                target_type TEXT NOT NULL,
+                wechat_open_id TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL CHECK(status IN ('pending', 'processing', 'succeeded', 'failed', 'canceled')),
+                provider_transfer_no TEXT,
+                failure_reason TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                submitted_at TEXT,
+                completed_at TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO commission_withdrawal_requests (
+                withdrawal_id, user_id, amount_cent, target_type, wechat_open_id, status, created_at
+            )
+            VALUES ('legacy_withdrawal_001', 'legacy_user', 100, 'wechat_pay', 'legacy_openid', 'pending', '2026-05-04T00:00:00+00:00')
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    store = MembershipCommissionStore(db_path)
+    legacy = store.get_withdrawal_request("legacy_withdrawal_001")
+    assert legacy is not None
+    assert legacy.status == WITHDRAWAL_STATUS_CREATED
+
+    paid_at = datetime(2026, 5, 4, 0, 0, tzinfo=timezone.utc)
+    store.create_pending_commission(
+        inviter_user_id="user_inviter",
+        invitee_user_id="user_invitee",
+        source_order_id="order_legacy_withdraw_check_001",
+        source_payment_amount_cent=2000,
+        paid_at=paid_at.isoformat(),
+    )
+    store.settle_due_commissions(now=paid_at + timedelta(hours=24, seconds=1), limit=10)
+    attempt = store.create_payout_binding_attempt(
+        "user_inviter",
+        channel="manual_test",
+        state="state-legacy-withdraw-check",
+        expires_at="2026-05-05T00:10:00+00:00",
+    )
+    identity = store.complete_payout_binding_attempt(
+        "user_inviter",
+        binding_attempt_id=attempt.binding_attempt_id,
+        authorization_code="manual_openid_legacy_check",
+        state="state-legacy-withdraw-check",
+        openid="openid_inviter_legacy_check",
+        appid="wx-test-app",
+        completed_at="2026-05-05T00:01:00+00:00",
+    )
+
+    withdrawal = store.create_withdrawal_request("user_inviter", amount_cent=500, identity_id=identity.identity_id)
+
+    assert withdrawal.status == WITHDRAWAL_STATUS_CREATED
 
 
 def test_membership_withdrawal_reserves_balance_and_applies_provider_result_once(tmp_path: Path) -> None:

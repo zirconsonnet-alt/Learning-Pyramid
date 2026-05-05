@@ -11,6 +11,8 @@ MEMBERSHIP_QUERIES = REPO_ROOT / "frontend" / "src" / "ui" / "queries" / "member
 ADMIN_API = REPO_ROOT / "frontend" / "src" / "ui" / "api" / "admin.ts"
 ADMIN_QUERIES = REPO_ROOT / "frontend" / "src" / "ui" / "queries" / "admin.ts"
 ADMIN_MEMBERSHIP_PAGE = REPO_ROOT / "frontend" / "src" / "views" / "admin" / "AdminMembershipPage.tsx"
+LLM_SETTINGS_CARDS = REPO_ROOT / "frontend" / "src" / "views" / "settings" / "components" / "LlmSettingsCards.tsx"
+PROJECTS_PAGE = REPO_ROOT / "frontend" / "src" / "views" / "projects" / "ProjectsPage.tsx"
 
 
 def test_llm_settings_live_in_global_settings_below_access_center() -> None:
@@ -21,6 +23,8 @@ def test_llm_settings_live_in_global_settings_below_access_center() -> None:
     assert "大模型配置" in global_source
     assert "UserLlmSettingsCard" in global_source
     assert "GlobalLlmSettingsCard" in global_source
+    assert "新建项目默认复习模板" not in global_source
+    assert "默认复习模板" not in global_source
 
 
 def test_project_settings_no_longer_owns_llm_configuration() -> None:
@@ -150,3 +154,26 @@ def test_membership_and_admin_api_schemas_expose_invite_discount_and_commission_
     assert "syncAdminMembershipWithdrawal" in admin_api_source
     assert "acknowledgeAdminWithdrawalWarning" in admin_api_source
     assert "identityMaskedLabel" in admin_api_source
+
+
+def test_llm_settings_form_no_longer_wraps_fields_in_inner_capsule() -> None:
+    llm_settings_source = LLM_SETTINGS_CARDS.read_text(encoding="utf-8")
+
+    assert "theme-status-surface" not in llm_settings_source
+    assert '<div className="space-y-3">' in llm_settings_source
+    assert '<div className="grid gap-3">' in llm_settings_source
+
+
+def test_llm_settings_card_uses_standard_header_divider() -> None:
+    llm_settings_source = LLM_SETTINGS_CARDS.read_text(encoding="utf-8")
+
+    assert '<CardHeader className="theme-card-header">' in llm_settings_source
+
+
+def test_new_subject_creation_no_longer_applies_global_review_template() -> None:
+    projects_source = PROJECTS_PAGE.read_text(encoding="utf-8")
+
+    assert "useGlobalConfigStore" not in projects_source
+    assert "defaultProjectReviewTemplate" not in projects_source
+    assert "setLayerConfig(res.compatibilityProjectId, 0" not in projects_source
+    assert "默认复习模板未自动套用" not in projects_source

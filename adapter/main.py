@@ -65,6 +65,7 @@ def _is_public_api_path(path: str) -> bool:
         "/api/redoc",
         "/api/system/capabilities",
         "/api/system/public-downloads",
+        "/api/guide/demo-media/study-review",
     }
     if path in public_paths:
         return True
@@ -77,6 +78,8 @@ def _is_public_api_path(path: str) -> bool:
     if path == "/api/commissions/payout-identity/wechat/mobile-bind":
         return True
     if path == "/api/commissions/payout-identity/wechat/bind":
+        return True
+    if path.startswith("/api/commissions/withdrawals/") and path.endswith("/wechat-confirmation"):
         return True
     if path.startswith("/api/public/asr-bridge/"):
         return True

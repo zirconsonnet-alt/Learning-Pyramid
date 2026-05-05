@@ -1,6 +1,7 @@
 import { z } from "zod"
 
 import { apiRequest } from "@/ui/api/http"
+import { DEFAULT_PROJECT_REVIEW_TEMPLATE } from "@/ui/store/globalConfigStore"
 import { ReviewChainTemplateItemSchema } from "@/ui/api/projectConfig"
 
 const UserPomodoroPlanSchema = z.object({
@@ -272,12 +273,15 @@ export function updateMyGlobalSettings(params: {
       sun: z.input<typeof UserPomodoroDaySchema>
     }
   }
-  defaultProjectReviewTemplate: Array<{ kind: "CONVERGENCE" | "REVIEW_TASK"; count?: number }>
+  defaultProjectReviewTemplate?: Array<{ kind: "CONVERGENCE" | "REVIEW_TASK"; count?: number }>
 }) {
   return apiRequest({
     path: "/profile/me/global-settings",
     method: "PUT",
-    body: params,
+    body: {
+      ...params,
+      defaultProjectReviewTemplate: params.defaultProjectReviewTemplate ?? DEFAULT_PROJECT_REVIEW_TEMPLATE,
+    },
     responseSchema: UserGlobalSettingsSchema,
   })
 }

@@ -7,6 +7,7 @@ import {
   confirmMembershipPayment,
   createMembershipOrder,
   getCommissionSummary,
+  getCommissionWithdrawalWechatConfirmation,
   getInviteSummary,
   getMembershipSummary,
   getPayoutIdentity,
@@ -172,6 +173,12 @@ export function useRequestCommissionWithdrawal() {
       await qc.invalidateQueries({ queryKey: ["membership", "withdrawals"] })
       await qc.invalidateQueries({ queryKey: ["membership", "invites"] })
     },
+  })
+}
+
+export function useCommissionWithdrawalWechatConfirmation() {
+  return useMutation({
+    mutationFn: getCommissionWithdrawalWechatConfirmation,
   })
 }
 

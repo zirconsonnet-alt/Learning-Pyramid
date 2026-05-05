@@ -223,7 +223,7 @@ function LlmSettingsDraftForm({
   const canClearApiKey = !isLoading && !isPending && !!settings?.savedApiKeyConfigured
 
   return (
-    <div className="theme-status-surface space-y-3 rounded-[1.2rem] border border-border/70 p-4">
+    <div className="space-y-3">
       <div className="grid gap-3">
         <div className="space-y-2">
           <Label htmlFor={`${idPrefix}BaseUrl`}>Base URL</Label>
@@ -338,7 +338,7 @@ function LlmSettingsCard({
 }) {
   return (
     <Card className="theme-card">
-      <CardHeader>
+      <CardHeader className="theme-card-header">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-4">
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border [border-color:var(--theme-icon-border)] [background:var(--theme-icon-bg)] [color:var(--theme-icon-text)]">

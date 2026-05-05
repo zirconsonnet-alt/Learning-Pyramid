@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import mimetypes
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
@@ -13,9 +14,37 @@ from backend.system.api import SystemAPI
 from backend.system.auth_store import AuthStore
 from backend.system.material_paths import resolve_material_file_path
 from backend.system.runtime_features import require_server_media_stream_enabled
+from backend.system.runtime_env import resource_root
 
 
 router = APIRouter()
+
+
+def _guide_demo_media_path(demo_id: str) -> Path:
+    assets = {
+        "study-review": "study-review-demo.mp4",
+    }
+    filename = assets.get(demo_id)
+    if filename is None:
+        raise PreconditionFailure("guide demo media not found")
+    return resource_root() / "backend" / "system" / "guide_demo_assets" / filename
+
+
+@router.get("/guide/demo-media/{demoId}")
+def stream_guide_demo_media(demoId: str) -> FileResponse:
+    file_path = _guide_demo_media_path(demoId)
+    if not file_path.exists():
+        raise PreconditionFailure(f"guide demo media file not found: {file_path}")
+    if not file_path.is_file():
+        raise PreconditionFailure(f"guide demo media is not a file: {file_path}")
+
+    media_type, _ = mimetypes.guess_type(str(file_path))
+    return FileResponse(
+        path=str(file_path),
+        media_type=media_type or "video/mp4",
+        filename=file_path.name,
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
 
 
 @router.post("/projects/{projectId}/media-assets")

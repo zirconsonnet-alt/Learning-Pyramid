@@ -3,7 +3,7 @@ import { type FormEvent, useEffect, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { QRCodeSVG } from "qrcode.react"
 
-import type { CouponRecord, InviteReferral, MembershipCreateOrderResult, MembershipOrder } from "@/ui/api/membership"
+import type { CommissionWithdrawal, CouponRecord, InviteReferral, MembershipCreateOrderResult, MembershipOrder } from "@/ui/api/membership"
 import { ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/ui/components/ui/dialog"
@@ -50,6 +50,44 @@ function getMembershipState(summary: ReturnType<typeof useMembershipSummary>["da
 
 function getInviteDisplayName(invite: InviteReferral) {
   return invite.inviteeNickname?.trim() || invite.inviteePublicUid?.trim() || "未命名用户"
+}
+
+type WechatMerchantTransferConfirmation = {
+  mchId: string
+  appId: string
+  packageInfo: string
+}
+
+type WeixinBridge = {
+  invoke: (name: string, params: Record<string, string>, callback: () => void) => void
+}
+
+function getWeixinBridge() {
+  return typeof window !== "undefined"
+    ? (window as unknown as { WeixinJSBridge?: WeixinBridge }).WeixinJSBridge
+    : undefined
+}
+
+async function waitForWeixinBridge(timeoutMs = 1500) {
+  const existing = getWeixinBridge()
+  if (existing?.invoke || typeof window === "undefined" || typeof document === "undefined") {
+    return existing
+  }
+  return await new Promise<WeixinBridge | undefined>((resolve) => {
+    const onReady = () => {
+      cleanup()
+      resolve(getWeixinBridge())
+    }
+    const cleanup = () => {
+      window.clearTimeout(timer)
+      document.removeEventListener("WeixinJSBridgeReady", onReady)
+    }
+    const timer = window.setTimeout(() => {
+      cleanup()
+      resolve(getWeixinBridge())
+    }, timeoutMs)
+    document.addEventListener("WeixinJSBridgeReady", onReady, false)
+  })
 }
 
 function CouponBagDialog(props: {
@@ -133,6 +171,8 @@ export function MembershipPage() {
   const [activeBindingAttemptId, setActiveBindingAttemptId] = useState("")
   const [activeBindingQrPayload, setActiveBindingQrPayload] = useState("")
   const [bindingDialogOpen, setBindingDialogOpen] = useState(false)
+  const [withdrawalConfirmationUrl, setWithdrawalConfirmationUrl] = useState("")
+  const [withdrawalConfirmationDialogOpen, setWithdrawalConfirmationDialogOpen] = useState(false)
 
   const shouldAutoRefresh = latestCheckout?.order.provider === "wechat_native" && latestCheckout.order.status === "pending"
   const summaryQ = useMembershipSummary(true, shouldAutoRefresh ? 5_000 : false)
@@ -357,15 +397,24 @@ export function MembershipPage() {
       const result = await requestWithdrawal.mutateAsync({
         amountCent,
       })
+      let confirmationInvoked = false
       if (result.confirmation?.mode === "wechat_jsapi_requestMerchantTransfer") {
-        await requestMerchantTransfer(result.confirmation)
+        confirmationInvoked = await requestMerchantTransfer(result.confirmation)
+      }
+      if (!confirmationInvoked && result.status === "awaiting_confirmation" && result.confirmationUrl) {
+        setWithdrawalConfirmationUrl(result.confirmationUrl)
+        setWithdrawalConfirmationDialogOpen(true)
       }
       showSuccessFeedback(
-        result.status === "failed" ? "提现请求已退回" : "提现请求已提交",
+        result.status === "failed" ? "提现请求已退回" : result.status === "awaiting_confirmation" ? "提现等待微信确认" : "提现请求已提交",
         result.status === "failed"
           ? result.failureReason || "提现失败，金额已退回可提现余额。"
           : result.status === "awaiting_confirmation"
-            ? "请在微信内完成收款确认，最终到账状态会由微信通知或后台对账更新。"
+            ? confirmationInvoked
+              ? "请在微信内完成收款确认，最终到账状态会由微信通知或后台对账更新。"
+              : result.confirmationUrl
+                ? "请用手机微信扫描弹窗二维码确认收款。"
+                : "提现申请已创建。请在微信客户端里打开会员页，并在提现记录中点击“继续微信确认”。"
             : `已提交 ${formatMembershipPrice(result.amountCent)} 到微信收款账户。`,
       )
       setWithdrawAmountYuan("5")
@@ -374,18 +423,11 @@ export function MembershipPage() {
     }
   }
 
-  async function requestMerchantTransfer(confirmation: { mchId: string; appId: string; packageInfo: string }) {
-    const bridge =
-      typeof window !== "undefined"
-        ? (window as unknown as {
-            WeixinJSBridge?: {
-              invoke: (name: string, params: Record<string, string>, callback: () => void) => void
-            }
-          }).WeixinJSBridge
-        : undefined
+  async function requestMerchantTransfer(confirmation: WechatMerchantTransferConfirmation) {
+    const bridge = await waitForWeixinBridge()
     if (!bridge?.invoke) {
       showErrorFeedback("需要在微信内确认", "当前浏览器不支持微信收款确认，请在微信客户端中打开后继续。")
-      return
+      return false
     }
     await new Promise<void>((resolve) => {
       bridge.invoke(
@@ -398,6 +440,24 @@ export function MembershipPage() {
         () => resolve(),
       )
     })
+    return true
+  }
+
+  async function onResumeWithdrawalConfirmation(withdrawal: CommissionWithdrawal) {
+    if (withdrawal.confirmation?.mode !== "wechat_jsapi_requestMerchantTransfer") {
+      showErrorFeedback("继续确认失败", "这条提现记录暂时没有可用的微信确认参数，请刷新页面后再试。")
+      return
+    }
+    const invoked = await requestMerchantTransfer(withdrawal.confirmation)
+    if (!invoked && withdrawal.confirmationUrl) {
+      setWithdrawalConfirmationUrl(withdrawal.confirmationUrl)
+      setWithdrawalConfirmationDialogOpen(true)
+      showSuccessFeedback("请用微信扫码确认", "用手机微信扫描弹窗二维码后继续确认收款。")
+      return
+    }
+    if (invoked) {
+      showSuccessFeedback("已重新发起微信确认", "请在当前微信会话里完成收款确认，到账状态会自动刷新。")
+    }
   }
 
   async function onStartPayoutBinding() {
@@ -438,6 +498,26 @@ export function MembershipPage() {
   return (
     <>
       <CouponBagDialog open={couponBagOpen} onOpenChange={setCouponBagOpen} coupons={coupons} inviteLabelsByUserId={inviteLabelsByUserId} />
+
+      <Dialog open={withdrawalConfirmationDialogOpen} onOpenChange={setWithdrawalConfirmationDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>微信扫码确认收款</DialogTitle>
+            <DialogDescription>请用收款微信扫描二维码，在手机微信里完成确认。确认后到账状态会自动同步。</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4">
+            <div className="mx-auto rounded-lg border bg-white p-4">
+              {withdrawalConfirmationUrl ? <QRCodeSVG value={withdrawalConfirmationUrl} size={192} level="M" includeMargin /> : null}
+            </div>
+            <div className="break-all text-center text-xs leading-5 text-muted-foreground">{withdrawalConfirmationUrl}</div>
+            <div className="flex justify-end">
+              <Button type="button" variant="outline" onClick={() => setWithdrawalConfirmationDialogOpen(false)}>
+                稍后确认
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <MembershipPurchaseDialog
         open={purchaseOpen}
@@ -655,6 +735,14 @@ export function MembershipPage() {
                             <div className="mt-1 text-xs text-muted-foreground">
                               {withdrawal.identityMaskedLabel || "微信收款身份"} · {formatMembershipDateTime(withdrawal.createdAt)}
                             </div>
+                            {withdrawal.status === "awaiting_confirmation" && withdrawal.confirmation?.mode === "wechat_jsapi_requestMerchantTransfer" ? (
+                              <div className="mt-3 flex flex-wrap items-center gap-3">
+                                <Button type="button" variant="outline" size="sm" onClick={() => void onResumeWithdrawalConfirmation(withdrawal)}>
+                                  继续微信确认
+                                </Button>
+                                <div className="text-xs text-muted-foreground">请在微信客户端内继续确认收款。</div>
+                              </div>
+                            ) : null}
                           </div>
                         ))}
                       </div>

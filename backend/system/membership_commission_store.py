@@ -59,7 +59,7 @@ def _normalize_limit(limit: int, *, default: int = 20, maximum: int = 100) -> in
     return max(1, min(value, maximum))
 
 
-def _commission_refund_window_minutes() -> int:
+def commission_refund_window_minutes() -> int:
     raw = str(os.getenv(COMMISSION_REFUND_WINDOW_ENV) or "").strip()
     if not raw:
         return COMMISSION_REFUND_WINDOW_HOURS * 60
@@ -290,6 +290,90 @@ class MembershipCommissionStore:
             if name not in existing:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
 
+    @classmethod
+    def _ensure_withdrawal_status_schema(cls, conn: sqlite3.Connection) -> None:
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'commission_withdrawal_requests' LIMIT 1"
+        ).fetchone()
+        table_sql = "" if row is None or row["sql"] is None else str(row["sql"]).lower()
+        if not table_sql:
+            return
+        has_legacy_check = "check" in table_sql and "status" in table_sql and "'pending'" in table_sql
+        has_legacy_pending_rows = (
+            conn.execute("SELECT 1 FROM commission_withdrawal_requests WHERE status = 'pending' LIMIT 1").fetchone() is not None
+        )
+        if not has_legacy_check:
+            if has_legacy_pending_rows:
+                conn.execute("UPDATE commission_withdrawal_requests SET status = ? WHERE status = 'pending'", (WITHDRAWAL_STATUS_CREATED,))
+            return
+
+        legacy_table = f"commission_withdrawal_requests_legacy_{uuid.uuid4().hex}"
+        for index_name in (
+            "idx_commission_withdrawal_user",
+            "idx_commission_withdrawal_status",
+            "idx_commission_withdrawal_out_bill_no",
+        ):
+            conn.execute(f"DROP INDEX IF EXISTS {index_name}")
+        conn.execute(f"ALTER TABLE commission_withdrawal_requests RENAME TO {legacy_table}")
+        conn.execute(
+            """
+            CREATE TABLE commission_withdrawal_requests (
+                withdrawal_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                amount_cent INTEGER NOT NULL,
+                target_type TEXT NOT NULL,
+                wechat_open_id TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL,
+                provider_transfer_no TEXT,
+                failure_reason TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                submitted_at TEXT,
+                completed_at TEXT,
+                identity_id TEXT,
+                identity_masked_label TEXT NOT NULL DEFAULT '',
+                out_bill_no TEXT NOT NULL DEFAULT '',
+                transfer_bill_no TEXT,
+                package_info TEXT,
+                provider_state TEXT NOT NULL DEFAULT '',
+                reserved_at TEXT,
+                confirmation_requested_at TEXT
+            )
+            """
+        )
+        conn.execute(
+            f"""
+            INSERT INTO commission_withdrawal_requests (
+                withdrawal_id, user_id, amount_cent, target_type, wechat_open_id, status,
+                provider_transfer_no, failure_reason, created_at, submitted_at, completed_at,
+                identity_id, identity_masked_label, out_bill_no, transfer_bill_no, package_info,
+                provider_state, reserved_at, confirmation_requested_at
+            )
+            SELECT
+                withdrawal_id,
+                user_id,
+                amount_cent,
+                target_type,
+                COALESCE(wechat_open_id, ''),
+                CASE status WHEN 'pending' THEN ? ELSE status END,
+                provider_transfer_no,
+                COALESCE(failure_reason, ''),
+                created_at,
+                submitted_at,
+                completed_at,
+                identity_id,
+                COALESCE(identity_masked_label, ''),
+                COALESCE(out_bill_no, ''),
+                transfer_bill_no,
+                package_info,
+                COALESCE(provider_state, ''),
+                reserved_at,
+                confirmation_requested_at
+            FROM {legacy_table}
+            """,
+            (WITHDRAWAL_STATUS_CREATED,),
+        )
+        conn.execute(f"DROP TABLE {legacy_table}")
+
     def _init_db(self) -> None:
         with self._lock:
             conn = self._connect()
@@ -451,6 +535,19 @@ class MembershipCommissionStore:
                         "reserved_at": "TEXT",
                         "confirmation_requested_at": "TEXT",
                     },
+                )
+                self._ensure_withdrawal_status_schema(conn)
+                conn.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_commission_withdrawal_user
+                    ON commission_withdrawal_requests (user_id, created_at DESC)
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_commission_withdrawal_status
+                    ON commission_withdrawal_requests (status, created_at DESC)
+                    """
                 )
                 self._ensure_columns(
                     conn,
@@ -656,7 +753,7 @@ class MembershipCommissionStore:
         if normalized_amount < COMMISSION_THRESHOLD_AMOUNT_CENT:
             return None
         paid_at_dt = _parse_dt(paid_at)
-        refund_window_ends_at = (paid_at_dt + timedelta(minutes=_commission_refund_window_minutes())).replace(microsecond=0).isoformat()
+        refund_window_ends_at = (paid_at_dt + timedelta(minutes=commission_refund_window_minutes())).replace(microsecond=0).isoformat()
         created_at = _utc_now().isoformat()
         with self._lock:
             conn = self._connect()

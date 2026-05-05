@@ -388,7 +388,6 @@ export function AuthPage() {
               <div className="grid gap-2">
                 <div className="flex items-center justify-between gap-3">
                   <Label htmlFor="inviteCode">邀请码</Label>
-                  <span className="text-xs text-muted-foreground">{signupInviteRequired ? "当前注册策略下必填" : "可选，填写后可绑定邀请关系"}</span>
                 </div>
                 <Input
                   id="inviteCode"
@@ -400,7 +399,7 @@ export function AuthPage() {
                 <p className="text-xs leading-5 text-muted-foreground">
                   {signupInviteRequired
                     ? "当前部署仍要求邀请码注册；只有部署时配置的引导管理员邮箱可以留空完成初始化。"
-                    : "当前允许自由注册；如果填写邀请码，会额外绑定邀请关系。"}
+                    : "绑定邀请码可获7.5折券"}
                 </p>
               </div>
             ) : null}

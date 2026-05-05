@@ -2,9 +2,26 @@ import { useEffect, useState } from "react"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import { Link } from "react-router-dom"
 
-import methodFocusCompression from "@/assets/method-focus-compression.png"
-import methodInterleavedReview from "@/assets/method-interleaved-review.png"
-import methodLayeredReview from "@/assets/method-layered-review.png"
+import carouselAiQa from "@/assets/carousel-ai-qa.webp"
+import carouselBlindRepeat from "@/assets/carousel-blind-repeat.webp"
+import carouselChooseFocus from "@/assets/carousel-choose-focus.webp"
+import carouselEbbinghaus from "@/assets/carousel-ebbinghaus.webp"
+import carouselFocusCompression from "@/assets/carousel-focus-compression.webp"
+import carouselForgettingAfterLearning from "@/assets/carousel-forgetting-after-learning.webp"
+import carouselInefficientRepeat from "@/assets/carousel-inefficient-repeat.webp"
+import carouselLayeredReview from "@/assets/carousel-layered-review.webp"
+import carouselLearnAndNote from "@/assets/carousel-learn-and-note.webp"
+import carouselNeuralReplay from "@/assets/carousel-neural-replay.webp"
+import carouselNotePush from "@/assets/carousel-note-push.webp"
+import carouselPomodoro from "@/assets/carousel-pomodoro.webp"
+import carouselProgressAnxiety from "@/assets/carousel-progress-anxiety.webp"
+import carouselQuickNote from "@/assets/carousel-quick-note.webp"
+import carouselReviewConfusion from "@/assets/carousel-review-confusion.webp"
+import carouselTakeNotes from "@/assets/carousel-take-notes.webp"
+import methodFocusCompression from "@/assets/method-focus-compression.webp"
+import methodInterleavedReview from "@/assets/method-interleaved-review.webp"
+import methodLayeredReview from "@/assets/method-layered-review.webp"
+import { startGuideWalkthrough } from "@/ui/guideWalkthrough/guideWalkthroughController"
 import { usePageMeta } from "@/ui/seo/usePageMeta"
 import { ShowcaseFooter, ShowcaseSiteHeader, useShowcaseEntryPaths } from "@/views/home/ShowcaseChrome"
 
@@ -12,43 +29,20 @@ const mechanismCards = [
   {
     icon: "A",
     title: "重点压缩",
-    body: "先做一次当前层的全量筛选，把“现在讲不出来”的内容收成重点集合；下一轮不再回到全量，而是只复习这个重点集合，并继续递缩，直到这一层封顶。",
+    body: "这次只复习上次忘掉的，下次只复习这次忘掉的",
     imageSrc: methodFocusCompression,
   },
   {
     icon: "B",
     title: "分层复习",
-    body: "当内容范围扩大、时间间隔拉长，原来的重点会漂移。系统要求你回到更大范围重新筛选，用当前状态重定位重点，避免漏掉已经重新变生疏的内容。",
+    body: "每一节、每一章，都有独立的复习组织机制",
     imageSrc: methodLayeredReview,
   },
   {
     icon: "C",
     title: "穿插复习",
-    body: "系统不会把学习和复习拆成互不相干的两段，而是在学习任务之间及时插入复习任务。你刚学完，就会接上该复习的内容，避免一路只学不回头，最后把压力堆到后面。",
+    body: "缺失的复习就像债务，而系统不会让你债台高筑",
     imageSrc: methodInterleavedReview,
-  },
-] as const
-
-const featureCards = [
-  {
-    icon: "01",
-    title: "本地素材目录接入",
-    body: "一个项目对应一个你自己管理的视频目录。系统通过目录授权与导入，自动识别视频文件与层级结构，而不是让你在界面里手工搭树。",
-  },
-  {
-    icon: "02",
-    title: "学习结构化视图",
-    body: "左侧学习对象树来自目录扫描结果，学习任务树与时间线则帮助你回看项目运行过程。它们一起把内容结构、任务推进和层级位置展示清楚，而不是只给你一批零散卡片。",
-  },
-  {
-    icon: "03",
-    title: "视频锚点式复述点",
-    body: "在工作台里暂停视频，点击添加复述点，系统自动记录当前时间锚点。随后填写问题与答案，逐步把内容里的关键记忆目标录进去。",
-  },
-  {
-    icon: "04",
-    title: "学习任务与复习任务切换",
-    body: "当系统已排出待做复习时，工作台中间区域会从“复述点录入”切到“复习”。你需要先写下自己的答案，提交或跳过后核对展开的答案，最后诚实判断“记得 / 不记得”。",
   },
 ] as const
 
@@ -76,28 +70,27 @@ const onboardingSteps = [
 ] as const
 
 const inviteBullets = [
-  "好友绑定你的邀请码后，会获得 1 张会员 7.5 折券。",
-  "好友实际支付满 15 元并过 24 小时退款窗口后，你会获得 5 元佣金。",
-  "已结算佣金可在会员中心申请提现到本人微信支付账户。",
-  "会员中心可以统一查看邀请码、折扣券、佣金、提现和订单记录。",
+  "绑定邀请码获7.5元券",
+  "被邀请者有效充值满15元，获5元佣金",
+  "已结算佣金满20，随时提现",
 ] as const
 
 const faqItems = [
   {
-    title: "为什么左侧“学习对象”还是空的？",
-    body: "优先检查四件事：有没有点导入内容目录、目录是否已授权、根目录是否选对、当前浏览器是否支持或保留了目录授权。",
+    title: "创建项目前需要干什么？",
+    body: "请在本地准备好你的视频或其他学习资料",
   },
   {
-    title: "为什么视频区域提示找不到本地文件？",
-    body: "最常见原因是授权了错误目录、文件后来被移动、目录变了但没有重新导入，或者浏览器站点权限已经失效。先回项目设置处理，不要急着删项目。",
+    title: "为什么佣金不立即生效？",
+    body: "用户充值后有3天退款期，退款期过后才视为有效",
   },
   {
-    title: "什么时候要再回“项目设置”？",
-    body: "第一次上手、换电脑、换浏览器、文件被移动或重命名、需要补授权、需要重新导入内容目录、或者要确认项目路径与同步策略时，都应该先回项目设置。",
+    title: "购买会员立刻就能使用AI功能吗？",
+    body: "购买会员仅代表获得AI使用能力，实际使用前还需设置您的API供系统调用",
   },
   {
-    title: "它适合哪些学习内容？",
-    body: "专业课、概念体系、题型模板、论证骨架、听力内容都可以。只要你能给出明确的“会”标准，系统就能围绕它组织筛选和复习。",
+    title: "我的视频资料没有字幕怎么办？",
+    body: "可以免费下载我们的字幕工具，下载后导入目录，稍作等待，即可生成字幕",
   },
 ] as const
 
@@ -105,35 +98,39 @@ const graduateReasons = [
   {
     index: "01",
     tag: "问题",
-    title: "你为什么学得这么累",
+    title: "你为什么这么累？",
     intro: "很多考研的疲惫，不是因为你不努力，而是因为学过的内容没有被记录、筛选和定期回收。",
     points: [
       {
-        title: "视频越刷越多，心里却越来越慌",
+        title: "进度焦虑",
+        imageSrc: carouselProgressAnxiety,
         lines: [
-          { label: "现象", text: "你一遍遍刷同一节课，总担心某个知识点会漏掉。" },
-          { label: "原因", text: "因为你没有把从视频里真正学到的内容沉淀下来，它们只停留在“我好像听过”。" },
+          { label: "现象", text: "视频刷的越多，心里越慌" },
+          { label: "原因", text: "你没有强制自己看完视频必须产出点什么" },
         ],
       },
       {
-        title: "知道该复习，却不知道从哪里开始",
+        title: "不会复习",
+        imageSrc: carouselReviewConfusion,
         lines: [
-          { label: "现象", text: "你知道复习重要，但总不知道该什么时候复习、复习哪一部分。" },
-          { label: "原因", text: "因为你还没有形成一个稳定、可持续的学习与复习节奏。" },
+          { label: "现象", text: "知道复习很重要，却只是拿来当口号" },
+          { label: "原因", text: "你缺乏复习组织能力，不知道哪些是现在最应该复习的" },
         ],
       },
       {
-        title: "时间都花在熟悉内容上",
+        title: "低效重复",
+        imageSrc: carouselInefficientRepeat,
         lines: [
-          { label: "现象", text: "你明明有很多不会的地方，却总在重复那些早就熟了的知识点。" },
-          { label: "原因", text: "因为你还没有从庞杂内容里筛出此刻最该处理的重点。" },
+          { label: "现象", text: "虽然不会的只是一小撮，可你还是一遍遍重刷全部内容" },
+          { label: "原因", text: "你不知道哪些是重点，只能再刷一遍求心理安慰" },
         ],
       },
       {
-        title: "前面学得好，往后推进又忘了",
+        title: "学完就忘",
+        imageSrc: carouselForgettingAfterLearning,
         lines: [
-          { label: "现象", text: "这段时间你对章节 A 掌握得很好，可学到章节 D 时，前面的内容又开始松动。" },
-          { label: "原因", text: "因为你缺少一个“回到全集做检查”的机制，不知道什么时候该重新做一轮完整捕捞。" },
+          { label: "现象", text: "第一章学得很好，可学到第六章的时候忘光了" },
+          { label: "原因", text: "你没有以章为复习单位组织复习" },
         ],
       },
     ],
@@ -141,35 +138,39 @@ const graduateReasons = [
   {
     index: "02",
     tag: "建议",
-    title: "常见建议为什么很难真正解决问题",
+    title: "这些建议帮到你了吗？",
     intro: "很多建议本身没错，问题是它们太抽象，或者对执行力要求太高，最后很难落到每天的学习动作里。",
     points: [
       {
         title: "记笔记",
+        imageSrc: carouselTakeNotes,
         lines: [
-          { label: "是否有用", text: "有用，但对大多数人来说，这件事很难长期稳定坚持。" },
-          { label: "你需要什么", text: "你更需要一个随时能回看、并且和视频内容一一对应的知识仓库。" },
-        ],
-      },
-      {
-        title: "艾宾浩斯式学习方法",
-        lines: [
-          { label: "是否有用", text: "理论上成立，但现实里很难坚持。复习量会越滚越大，一旦断一天，节奏就很容易崩掉。" },
-          { label: "你需要什么", text: "你真正需要的是学完就能接上复习，并且清楚知道“现在该复习什么”的节律。" },
+          { label: "理论优点", text: "强化学习效果，提供复习锚点" },
+          { label: "实践难题", text: "笔记与视频资源无法绑定，难以找到来源" },
         ],
       },
       {
         title: "挑重点",
+        imageSrc: carouselChooseFocus,
         lines: [
-          { label: "是否有用", text: "方向是对的，但太抽象了，很多人根本不知道重点到底该怎么挑。" },
-          { label: "你需要什么", text: "你需要的是可执行的重点压缩机制，从重要内容里继续筛出更重要的部分。" },
+          { label: "理论优点", text: "效率高，方向对" },
+          { label: "实践难题", text: "你知道什么是重点吗？" },
         ],
       },
       {
-        title: "重新学一遍 A",
+        title: "艾宾浩斯",
+        imageSrc: carouselEbbinghaus,
         lines: [
-          { label: "是否有用", text: "通常不合理，因为重学整章的成本太高，也很难长期接受。" },
-          { label: "你需要什么", text: "你需要的是固定学完 N 个章节后，对它们的全集做一次全量捕捞，不是重学，而是重新检查一遍所有知识点。" },
+          { label: "理论优点", text: "抗遗忘效果强" },
+          { label: "实践难题", text: "一日摆烂，满盘皆输" },
+        ],
+      },
+      {
+        title: "无脑重复",
+        imageSrc: carouselBlindRepeat,
+        lines: [
+          { label: "理论优点", text: "无" },
+          { label: "实践难题", text: "时间真的够吗？" },
         ],
       },
     ],
@@ -177,67 +178,77 @@ const graduateReasons = [
   {
     index: "03",
     tag: "系统",
-    title: "我们的系统到底做了什么",
+    title: "我们的系统做了什么？",
     intro: "LearningPyramid 不是一句“更高效复习”的口号，而是把记录、复习、筛选和回捞拆成了一条能每天执行的流程。",
     points: [
       {
-        title: "看视频时顺手留下复述点",
+        title: "边看边记",
+        imageSrc: carouselLearnAndNote,
         lines: [
-          { label: "做法", text: "看课时随手记录复述点，一边强化记忆，一边留下“我学过什么”的痕迹。" },
-          { label: "流程", text: "看视频 -> 暂停 -> 记录时间锚点 -> 写下问题和答案 -> 留下之后可复习的知识单元。" },
+          { label: "做法", text: "看视频快速记录复述点" },
+          { label: "解决了什么", text: "看完不再觉得什么都没留下" },
         ],
       },
       {
-        title: "学完立即进入复习",
+        title: "笔记推送",
+        imageSrc: carouselNotePush,
         lines: [
-          { label: "做法", text: "每次提交学习后，系统都会立即接上复习，而且复习内容来自你的历史记忆表现。" },
-          { label: "流程", text: "提交学习 -> 生成复习任务 -> 先手写答案或跳过 -> 答案自动展开 -> 标记记得或不记得。" },
+          { label: "做法", text: "以复述点为单位组织你的复习" },
+          { label: "解决了什么", text: "学完不再困惑到底该复习什么" },
         ],
       },
       {
-        title: "下一轮只盯住上次不会的内容",
+        title: "重点压缩",
+        imageSrc: carouselFocusCompression,
         lines: [
-          { label: "做法", text: "新的复习任务优先来自你上一次标记为不会的部分。" },
-          { label: "流程", text: "不会 -> 进入下一轮重点集合 -> 再复习 -> 继续筛掉会的，只留下仍然不会的内容。" },
+          { label: "做法", text: "每次只推你最该复习的内容" },
+          { label: "解决了什么", text: "高效复习，节省不必要的重复" },
         ],
       },
       {
-        title: "用上推机制和分层任务树递归复习",
+        title: "分层复习",
+        imageSrc: carouselLayeredReview,
         lines: [
-          { label: "做法", text: "系统通过上推机制和分层学习任务树，把复习做成递归推进，而不是零散补漏。" },
-          { label: "流程", text: "小范围筛重点 -> 逐层压缩 -> 到一定阶段回到更大范围重新捕捞 -> 再继续递缩。" },
+          { label: "做法", text: "小节、章都有自己的复习推送节奏" },
+          { label: "解决了什么", text: "缓解了大跨度层面的遗忘" },
         ],
       },
     ],
   },
   {
     index: "04",
-    tag: "结语",
-    title: "现在开始，最合适的方式是什么",
+    tag: "功能",
+    title: "用它看视频有什么不同？",
     intro: "不要等到完全理解系统再开始。先用一门最焦虑、最容易遗忘的科目跑通一轮，你就会知道它到底适不适合你。",
+    ctaLabel: "立即体验",
+    guideDocSlug: "study-review",
     points: [
       {
-        title: "先选一门最需要减负的科目",
+        title: "微休息神经重放",
+        imageSrc: carouselNeuralReplay,
         lines: [
-          { label: "建议", text: "不要一上来四科并行。先拿最容易遗忘、最需要压重复的那一科做样板。" },
+          { label: "介绍", text: "视频播放时，每隔几分钟强制休息10秒，神经重放的同时强化对学习的渴望" },
         ],
       },
       {
-        title: "建立项目并接入资料目录",
+        title: "AI问答",
+        imageSrc: carouselAiQa,
         lines: [
-          { label: "建议", text: "先让视频、章节和学习对象形成稳定结构，后面的复习节律才有地方承接。" },
+          { label: "介绍", text: "视频播放时，随时举手提问，AI会结合视频关键帧和字幕回答你的问题，课后也可选择范围继续提问" },
         ],
       },
       {
-        title: "看课时边学边留复述点",
+        title: "快捷记笔记",
+        imageSrc: carouselQuickNote,
         lines: [
-          { label: "建议", text: "不要只把课听过去。遇到关键知识点就停一下，留下之后能回忆、能复习的记录。" },
+          { label: "介绍", text: "视频播放时，使用回车等快捷键记录复述点，截取视频内容，双手无需离开键盘" },
         ],
       },
       {
-        title: "学完后立刻进入第一次复习",
+        title: "番茄钟",
+        imageSrc: carouselPomodoro,
         lines: [
-          { label: "建议", text: "让系统第一次根据你的会/不会来安排节律，你会立刻体会到“终于知道该复习什么”的区别。" },
+          { label: "介绍", text: "你只能在一个番茄的时间内学习指定的项目，或许这会让你更加珍惜学习的时光" },
         ],
       },
     ],
@@ -314,22 +325,43 @@ export function HomePage() {
                         </span>
                       </div>
                       <h3>{item.title}</h3>
-                      <p className="lp-showcase-carousel-intro">{item.intro}</p>
                       <div className="lp-showcase-carousel-points">
-                        {item.points.map((point) => (
-                          <div key={point.title} className="lp-showcase-carousel-point">
-                            <h4>{point.title}</h4>
-                            <div className="lp-showcase-carousel-point-lines">
-                              {point.lines.map((line) => (
-                                <p key={line.label}>
-                                  <strong>{line.label}：</strong>
-                                  {line.text}
-                                </p>
-                              ))}
+                        {item.points.map((point) => {
+                          const pointImageSrc = "imageSrc" in point ? point.imageSrc : undefined
+
+                          return (
+                            <div key={point.title} className={`lp-showcase-carousel-point${pointImageSrc ? " lp-showcase-carousel-point-with-image" : ""}`}>
+                              <div className="lp-showcase-carousel-point-copy">
+                                <h4>{point.title}</h4>
+                                <div className="lp-showcase-carousel-point-lines">
+                                  {point.lines.map((line) => (
+                                    <p key={line.label}>
+                                      <strong>{line.label}：</strong>
+                                      {line.text}
+                                    </p>
+                                  ))}
+                                </div>
+                              </div>
+                              {pointImageSrc ? (
+                                <div className="lp-showcase-carousel-point-visual">
+                                  <img src={pointImageSrc} alt={`${point.title}示意图`} loading="lazy" />
+                                </div>
+                              ) : null}
                             </div>
-                          </div>
-                        ))}
+                          )
+                        })}
                       </div>
+                      {"ctaLabel" in item ? (
+                        <div className="lp-showcase-carousel-slide-actions">
+                          <button
+                            type="button"
+                            className="lp-showcase-carousel-slide-action lp-showcase-carousel-slide-action-member"
+                            onClick={() => startGuideWalkthrough(item.guideDocSlug)}
+                          >
+                            {item.ctaLabel}
+                          </button>
+                        </div>
+                      ) : null}
                     </article>
                   ))}
                 </div>
@@ -371,23 +403,6 @@ export function HomePage() {
           </div>
         </section>
 
-        <section id="features" className="lp-showcase-section">
-          <div className="lp-showcase-container">
-            <div className="lp-showcase-section-head">
-              <h2>功能</h2>
-            </div>
-            <div className="lp-showcase-grid-2">
-              {featureCards.map((item) => (
-                <article key={item.title} className="lp-showcase-feature">
-                  <div className="lp-showcase-feature-icon">{item.icon}</div>
-                  <h3>{item.title}</h3>
-                  <p>{item.body}</p>
-                </article>
-              ))}
-            </div>
-          </div>
-        </section>
-
         <section id="onboarding" className="lp-showcase-section">
           <div className="lp-showcase-container">
             <div className="lp-showcase-section-head">
@@ -413,10 +428,21 @@ export function HomePage() {
             </div>
             <div className="lp-showcase-pricing-grid">
               <article className="lp-showcase-pricing-card lp-showcase-pricing-card-primary">
-                <h3>月会员</h3>
-                <div className="lp-showcase-price">
-                  <strong>¥20</strong>
-                  <span>/ 月</span>
+                <div className="lp-showcase-membership-card-top">
+                  <div className="lp-showcase-membership-price-block">
+                    <h3>月会员</h3>
+                    <div className="lp-showcase-price">
+                      <strong>¥20</strong>
+                      <span>/ 月</span>
+                    </div>
+                  </div>
+                  <div className="lp-showcase-membership-benefits">
+                    <h4>会员权益</h4>
+                    <ul>
+                      <li>番茄钟：学习规划与督促</li>
+                      <li>AI交互：你的助理及良师</li>
+                    </ul>
+                  </div>
                 </div>
                 <div className="lp-showcase-price-note">邀请码 7.5 折券可让首单实付 ¥15</div>
                 <div className="lp-showcase-hero-actions lp-showcase-membership-actions">

@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 from unittest.mock import patch
 
 import pytest
@@ -20,7 +21,12 @@ from adapter.deps import (
     get_membership_store,
 )
 from adapter.main import create_app
-from backend.system.membership_payment_service import CommissionPayoutStatus, MembershipRemotePaymentStatus, MembershipRemoteRefundStatus
+from backend.system.membership_payment_service import (
+    CommissionPayoutStatus,
+    MembershipRemotePaymentStatus,
+    MembershipRemoteRefundStatus,
+    PayoutConfirmationPayload,
+)
 
 
 def _reset_caches() -> None:
@@ -164,7 +170,7 @@ def test_desktop_qr_payout_binding_can_complete_from_mobile_without_desktop_sess
     mobile_client = TestClient(app)
 
     registered = desktop_client.post("/api/auth/register", json={"email": "inviter@example.com", "password": "password123"})
-    assert registered.status_code == 200
+    assert registered.status_code == 200, registered.text
     user_id = registered.json()["data"]["userId"]
 
     started = desktop_client.post(
@@ -174,7 +180,7 @@ def test_desktop_qr_payout_binding_can_complete_from_mobile_without_desktop_sess
     assert started.status_code == 200
     attempt = started.json()["data"]
     assert attempt["status"] == "created"
-    assert attempt["qrCodePayload"].startswith("http://testserver/membership/wechat-payout-bind?")
+    assert attempt["qrCodePayload"].startswith("http://testserver/api/commissions/payout-identity/wechat/mobile-bind?")
     assert attempt["mobileBindingUrl"] == attempt["qrCodePayload"]
     assert attempt["pollAfterMs"] == 2000
 
@@ -227,6 +233,101 @@ def test_desktop_qr_payout_binding_can_complete_from_mobile_without_desktop_sess
     assert readiness.status_code == 200
     assert readiness.json()["data"]["status"] == "ready"
     assert readiness.json()["data"]["identityId"] == identity["identityId"]
+
+
+def test_desktop_qr_payout_binding_repeated_confirmation_is_idempotent(auth_env: None) -> None:
+    app = create_app()
+    desktop_client = TestClient(app)
+    mobile_client = TestClient(app)
+
+    registered = desktop_client.post("/api/auth/register", json={"email": "inviter@example.com", "password": "password123"})
+    assert registered.status_code == 200, registered.text
+    user_id = registered.json()["data"]["userId"]
+
+    started = desktop_client.post(
+        "/api/commissions/payout-identity/wechat/binding-attempts",
+        json={"channel": "desktop_qr_official_account_h5", "returnUrl": "http://testserver/membership"},
+    )
+    assert started.status_code == 200
+    attempt = started.json()["data"]
+
+    opened = mobile_client.get(
+        "/api/commissions/payout-identity/wechat/mobile-bind",
+        params={"attempt": attempt["bindingAttemptId"], "state": attempt["state"]},
+    )
+    assert opened.status_code == 200
+
+    payload = {
+        "bindingAttemptId": attempt["bindingAttemptId"],
+        "authorizationCode": "openid_inviter_001",
+        "state": attempt["state"],
+        "confirmedLearningPyramidUserId": user_id,
+    }
+    with patch("backend.system.membership_payment_service.MembershipPaymentService.resolve_wechat_payout_openid") as resolve_openid:
+        resolve_openid.return_value = ("openid_inviter_001", "wx-test-app")
+        completed = mobile_client.post("/api/commissions/payout-identity/wechat/bind", json=payload)
+        assert completed.status_code == 200, completed.text
+        repeated = mobile_client.post("/api/commissions/payout-identity/wechat/bind", json=payload)
+        assert repeated.status_code == 200, repeated.text
+        assert resolve_openid.call_count == 1
+
+    assert repeated.json()["data"]["identityId"] == completed.json()["data"]["identityId"]
+
+
+def test_production_desktop_qr_mobile_entry_redirects_through_wechat_authorization(
+    auth_env: None,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _enable_wechat_native(monkeypatch, tmp_path)
+    monkeypatch.setenv("PLM_ENABLE_MANUAL_TEST_PAYMENT", "false")
+    monkeypatch.setenv("PLM_WECHAT_PAY_APP_SECRET", "secret-for-oauth")
+    monkeypatch.setenv("PLM_WECHAT_PAY_TRANSFER_SCENE_ID", "1001")
+    monkeypatch.setenv("PLM_WECHAT_PAY_PAYOUT_PROVIDER_MODE", "wechat_native")
+    monkeypatch.setenv("PLM_PUBLIC_ORIGIN", "https://plm.xuebao.chat")
+    monkeypatch.setenv("PLM_TRUSTED_HOSTS", "testserver,plm.xuebao.chat")
+    _reset_caches()
+
+    app = create_app()
+    desktop_client = TestClient(app)
+    mobile_client = TestClient(app)
+
+    registered = desktop_client.post("/api/auth/register", json={"email": "inviter@example.com", "password": "password123"})
+    assert registered.status_code == 200, registered.text
+
+    started = desktop_client.post(
+        "/api/commissions/payout-identity/wechat/binding-attempts",
+        json={"channel": "desktop_qr_official_account_h5", "returnUrl": "https://plm.xuebao.chat/membership"},
+    )
+    assert started.status_code == 200
+    attempt = started.json()["data"]
+    assert attempt["qrCodePayload"].startswith("https://plm.xuebao.chat/api/commissions/payout-identity/wechat/mobile-bind?")
+
+    parsed_qr = urlsplit(attempt["qrCodePayload"])
+    scanned = mobile_client.get(f"{parsed_qr.path}?{parsed_qr.query}", follow_redirects=False)
+    assert scanned.status_code == 302
+    authorization = scanned.headers["location"]
+    parsed_authorization = urlsplit(authorization)
+    auth_query = parse_qs(parsed_authorization.query)
+    assert f"{parsed_authorization.scheme}://{parsed_authorization.netloc}{parsed_authorization.path}" == "https://open.weixin.qq.com/connect/oauth2/authorize"
+    assert auth_query["appid"] == ["wx-test-app"]
+    assert auth_query["scope"] == ["snsapi_base"]
+    assert auth_query["state"] == [attempt["state"]]
+    assert auth_query["redirect_uri"] == [attempt["mobileBindingUrl"]]
+
+    returned_from_wechat = mobile_client.get(
+        parsed_qr.path,
+        params={"attempt": attempt["bindingAttemptId"], "state": attempt["state"], "code": "wx-code-001"},
+        follow_redirects=False,
+    )
+    assert returned_from_wechat.status_code == 302
+    confirmation_url = returned_from_wechat.headers["location"]
+    parsed_confirmation = urlsplit(confirmation_url)
+    confirmation_query = parse_qs(parsed_confirmation.query)
+    assert parsed_confirmation.path == "/membership/wechat-payout-bind"
+    assert confirmation_query["attempt"] == [attempt["bindingAttemptId"]]
+    assert confirmation_query["state"] == [attempt["state"]]
+    assert confirmation_query["code"] == ["wx-code-001"]
 
 
 def test_membership_purchase_immediately_enables_protected_llm_access(auth_env: None) -> None:
@@ -659,6 +760,57 @@ def test_invite_commission_settles_once_after_refund_window(auth_env: None) -> N
     assert settled_again.json()["data"]["settledCount"] == 0
 
 
+def test_invite_commission_uses_configured_short_refund_window_on_payment_confirmation(
+    auth_env: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PLM_MEMBERSHIP_COMMISSION_REFUND_WINDOW_MINUTES", "1")
+    _reset_caches()
+
+    app = create_app()
+    admin_client = TestClient(app)
+    inviter_client = TestClient(app)
+    invitee_client = TestClient(app)
+
+    admin_register = admin_client.post("/api/auth/register", json={"email": "admin@example.com", "password": "password123"})
+    assert admin_register.status_code == 200
+    inviter_register = inviter_client.post("/api/auth/register", json={"email": "inviter@example.com", "password": "password123"})
+    assert inviter_register.status_code == 200
+    inviter_public_uid = inviter_register.json()["data"]["publicUid"]
+
+    invitee_register = invitee_client.post(
+        "/api/auth/register",
+        json={"email": "invitee@example.com", "password": "password123", "inviteCode": inviter_public_uid},
+    )
+    assert invitee_register.status_code == 200
+    coupon_id = invitee_client.get("/api/coupons/me").json()["data"][0]["couponId"]
+
+    with patch("backend.system.membership_store._utc_now", return_value=datetime.fromisoformat("2026-05-04T00:00:00+00:00")):
+        invitee_order = invitee_client.post("/api/membership/orders", json={"provider": "manual_test", "couponId": coupon_id})
+        assert invitee_order.status_code == 200
+        invitee_order_id = invitee_order.json()["data"]["order"]["orderId"]
+        invitee_confirm = invitee_client.post(
+            "/api/payments/membership/callback/manual_test",
+            json={"orderId": invitee_order_id, "providerTradeNo": f"manual_{invitee_order_id}"},
+        )
+    assert invitee_confirm.status_code == 200
+
+    with patch("backend.system.membership_commission_store._utc_now", return_value=datetime.fromisoformat("2026-05-04T00:00:59+00:00")):
+        early_settle = admin_client.post("/api/admin/membership/commissions/settle")
+    assert early_settle.status_code == 200
+    assert early_settle.json()["data"]["settledCount"] == 0
+
+    with patch("backend.system.membership_commission_store._utc_now", return_value=datetime.fromisoformat("2026-05-04T00:01:01+00:00")):
+        settled = admin_client.post("/api/admin/membership/commissions/settle")
+    assert settled.status_code == 200
+    assert settled.json()["data"]["settledCount"] == 1
+
+    after = inviter_client.get("/api/commissions/me")
+    assert after.status_code == 200
+    assert after.json()["data"]["account"]["pendingCent"] == 0
+    assert after.json()["data"]["account"]["withdrawableCent"] == 500
+
+
 def test_commission_withdrawal_request_reserves_balance_and_lists_history(auth_env: None) -> None:
     app = create_app()
     admin_client = TestClient(app)
@@ -714,6 +866,100 @@ def test_commission_withdrawal_request_reserves_balance_and_lists_history(auth_e
     assert history.json()["data"][0]["withdrawalId"] == withdrawal["withdrawalId"]
     assert history.json()["data"][0]["status"] == "processing"
     assert history.json()["data"][0]["identityMaskedLabel"].startswith("openid_")
+
+
+def test_commission_withdrawal_history_includes_wechat_confirmation_payload(
+    auth_env: None,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _enable_wechat_native(monkeypatch, tmp_path)
+    monkeypatch.setenv("PLM_MEDIA_ACCESS_TOKEN_SECRET", "test-transfer-confirmation-secret")
+    monkeypatch.setenv("PLM_WECHAT_PAY_TRANSFER_SCENE_ID", "1005")
+    monkeypatch.setenv("PLM_WECHAT_PAY_PAYOUT_PROVIDER_MODE", "wechat_native")
+    _reset_caches()
+
+    app = create_app()
+    admin_client = TestClient(app)
+    inviter_client = TestClient(app)
+
+    admin_register = admin_client.post("/api/auth/register", json={"email": "admin@example.com", "password": "password123"})
+    assert admin_register.status_code == 200
+    inviter_register = inviter_client.post("/api/auth/register", json={"email": "inviter@example.com", "password": "password123"})
+    assert inviter_register.status_code == 200
+    inviter_public_uid = inviter_register.json()["data"]["publicUid"]
+
+    _create_settled_invited_membership(
+        app,
+        admin_client,
+        inviter_public_uid,
+        invitee_email="invitee@example.com",
+        paid_at=datetime.fromisoformat("2026-05-04T00:00:00+00:00"),
+    )
+
+    monkeypatch.setenv("PLM_ENABLE_MANUAL_TEST_PAYMENT", "false")
+    _reset_caches()
+    _bind_manual_payout_identity(inviter_client)
+
+    with patch("backend.system.membership_payment_service.MembershipPaymentService.request_commission_payout") as request_payout:
+        request_payout.return_value = CommissionPayoutStatus(
+            withdrawal_id="",
+            out_bill_no="LPWD202605050001",
+            remote_status="awaiting_confirmation",
+            provider_state="WAIT_USER_CONFIRM",
+            provider_transfer_no="133000007110099999118202605050001",
+            failure_reason="",
+            raw_payload_json='{"state":"WAIT_USER_CONFIRM"}',
+            package_info="merchant-transfer-package",
+            confirmation=PayoutConfirmationPayload(
+                mode="wechat_jsapi_requestMerchantTransfer",
+                mch_id="1900000109",
+                app_id="wx-test-app",
+                package_info="merchant-transfer-package",
+            ),
+        )
+        requested = inviter_client.post("/api/commissions/withdrawals", json={"amountCent": 500})
+
+    assert requested.status_code == 200, requested.text
+    payload = requested.json()["data"]
+    assert payload["status"] == "awaiting_confirmation"
+    assert payload["confirmation"] == {
+        "mode": "wechat_jsapi_requestMerchantTransfer",
+        "mchId": "1900000109",
+        "appId": "wx-test-app",
+        "packageInfo": "merchant-transfer-package",
+    }
+    confirmation_url = payload["confirmationUrl"]
+    parsed_confirmation_url = urlsplit(confirmation_url)
+    confirmation_query = parse_qs(parsed_confirmation_url.query)
+    assert parsed_confirmation_url.path == "/membership/wechat-payout-confirm"
+    assert confirmation_query["withdrawal"] == [payload["withdrawalId"]]
+    assert confirmation_query["token"][0]
+
+    history = inviter_client.get("/api/commissions/withdrawals")
+    assert history.status_code == 200
+    assert history.json()["data"][0]["withdrawalId"] == payload["withdrawalId"]
+    assert history.json()["data"][0]["status"] == "awaiting_confirmation"
+    assert history.json()["data"][0]["confirmation"] == payload["confirmation"]
+    assert history.json()["data"][0]["confirmationUrl"] == confirmation_url
+
+    public_confirmation = TestClient(app).get(
+        f"/api/commissions/withdrawals/{payload['withdrawalId']}/wechat-confirmation",
+        params={"token": confirmation_query["token"][0]},
+    )
+    assert public_confirmation.status_code == 200
+    confirmation_payload = public_confirmation.json()["data"]
+    assert confirmation_payload["withdrawalId"] == payload["withdrawalId"]
+    assert confirmation_payload["amountCent"] == 500
+    assert confirmation_payload["identityMaskedLabel"].startswith("openid_")
+    assert confirmation_payload["confirmation"] == payload["confirmation"]
+
+    bad_confirmation = TestClient(app).get(
+        f"/api/commissions/withdrawals/{payload['withdrawalId']}/wechat-confirmation",
+        params={"token": "bad-token"},
+    )
+    assert bad_confirmation.status_code == 400
+    assert bad_confirmation.json()["error"]["code"] == "NOT_FOUND"
 
 
 def test_commission_withdrawal_rejects_insufficient_balance_and_missing_wechat_identity(auth_env: None) -> None:

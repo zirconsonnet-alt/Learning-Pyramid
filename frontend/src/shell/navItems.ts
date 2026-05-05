@@ -12,7 +12,7 @@ export type NavItem = {
 
 const BASE_GLOBAL_NAV_ITEMS: NavItem[] = [
   { to: "/projects", label: "学科中心", icon: FolderKanban },
-  { to: "/friends", label: "好友", icon: UsersRound },
+  { to: "/friends", label: "好友中心", icon: UsersRound },
   { to: "/guide", label: "用户指南", icon: BookOpenText },
   { to: buildGlobalSettingsPath(), label: "全局设置", icon: Settings2 },
 ]

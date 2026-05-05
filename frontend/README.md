@@ -14,7 +14,7 @@ Project-level release and runtime instructions live in the repository root [READ
 
 ## WeChat payout verification
 
-Desktop users bind a receiving identity from the membership page by opening a QR modal; the QR points to `/membership/wechat-payout-bind` and should be scanned in the user's mobile WeChat so the mobile page can confirm the LearningPyramid account before binding.
+Desktop users bind a receiving identity from the membership page by opening a QR modal; the QR points to the public backend entry `/api/commissions/payout-identity/wechat/mobile-bind?attempt=...&state=...`. Mobile WeChat scans that one-time URL, the backend validates the desktop attempt, redirects through WeChat OAuth, and then lands on `/membership/wechat-payout-bind` so the user can confirm the LearningPyramid account before binding. The user does not need to log in to LearningPyramid on the phone.
 
 Commission withdrawal confirmation must be tested inside a supported WeChat client when production merchant transfer is enabled. The frontend calls `WeixinJSBridge.invoke("requestMerchantTransfer", ...)` only when the backend returns a confirmation package; that callback means the user confirmation UI returned, not that the transfer has succeeded.
 

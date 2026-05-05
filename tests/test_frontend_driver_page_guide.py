@@ -13,6 +13,8 @@ PROJECT_SETTINGS_PAGE = SRC / "views" / "settings" / "ProjectSettingsPage.tsx"
 LEARNING_OBJECT_TREE = SRC / "views" / "workbench" / "components" / "LearningObjectTree.tsx"
 COMPOSE_PANE = SRC / "views" / "workbench" / "components" / "ComposePane.tsx"
 REVIEW_PANE = SRC / "views" / "workbench" / "components" / "ReviewPane.tsx"
+GUIDE_DEMO_WORKBENCH_PAGE = SRC / "views" / "guide" / "StudyReviewDemoWorkbenchPage.tsx"
+GUIDE_DEMO_CREATE_SUBJECT_PROJECT_PAGE = SRC / "views" / "guide" / "CreateSubjectProjectDemoPage.tsx"
 APP_SHELL = SRC / "shell" / "AppShell.tsx"
 NAV_ITEMS = SRC / "shell" / "navItems.ts"
 MAIN_NAV = SRC / "shell" / "MainNav.tsx"
@@ -214,8 +216,10 @@ def test_walkthrough_steps_are_split_by_current_document():
     assert "resolveGuideWalkthroughCopy(step.sourceRef, options.getDocSlug())" in controller
 
 
-def test_create_subject_project_guide_ends_before_workbench_to_avoid_pomodoro_gate():
+def test_create_subject_project_guide_uses_transient_virtual_project_route_and_actions():
     steps = read(STEPS_MODULE)
+    router = read(SRC / "router.tsx")
+    demo_page = read(GUIDE_DEMO_CREATE_SUBJECT_PROJECT_PAGE)
     create_doc_steps = re.search(
         r"CREATE_SUBJECT_PROJECT_GUIDE_STEPS: GuideWalkthroughStep\[\] = \[(.*?)\]\s*\n\nexport const STUDY_REVIEW_GUIDE_STEPS",
         steps,
@@ -224,53 +228,41 @@ def test_create_subject_project_guide_ends_before_workbench_to_avoid_pomodoro_ga
 
     assert create_doc_steps
     create_doc_block = create_doc_steps.group(1)
+    assert GUIDE_DEMO_CREATE_SUBJECT_PROJECT_PAGE.exists()
+    assert 'path: "/guide/demo/create-subject-project"' in router
+    assert 'routeHint: "/guide/demo/create-subject-project"' in create_doc_block
+    assert "/projects" not in create_doc_block
+    assert "/subjects/:subjectId" not in create_doc_block
+    assert "/p/:projectId/project-settings" not in create_doc_block
     assert 'id: "import-directory"' in create_doc_block
     assert 'id: "open-workbench"' not in create_doc_block
     assert 'routeHint: "/p/:projectId/workbench"' not in create_doc_block
     assert 'targetAnchor: "workbench-nav"' not in create_doc_block
+    for anchor in [
+        "new-subject-button",
+        "create-subject-submit",
+        "subject-project-settings-entry",
+        "authorize-directory-button",
+        "import-directory-button",
+    ]:
+        assert f'data-guide-tour="{anchor}"' in demo_page
+    for step_id in [
+        "create-subject",
+        "create-subject-submit",
+        "choose-project",
+        "authorize-directory",
+        "import-directory",
+    ]:
+        assert f'completeGuideWalkthroughStep("{step_id}")' in demo_page
 
-
-def test_create_subject_project_guide_opens_default_project_settings_directly():
-    steps = read(STEPS_MODULE)
-    subject_dashboard = read(SUBJECT_DASHBOARD_PAGE)
-    create_doc_steps = re.search(
-        r"CREATE_SUBJECT_PROJECT_GUIDE_STEPS: GuideWalkthroughStep\[\] = \[(.*?)\]\s*\n\nexport const STUDY_REVIEW_GUIDE_STEPS",
-        steps,
-        flags=re.DOTALL,
-    )
-
-    assert create_doc_steps
-    create_doc_block = create_doc_steps.group(1)
-    choose_project_step = re.search(r'\{\s*id:\s*"choose-project".+?popoverSide:\s*"right",\s*\}', create_doc_block, flags=re.DOTALL)
-    assert choose_project_step
-    assert 'targetAnchor: "subject-project-settings-entry"' in choose_project_step.group(0)
-    assert 'id: "open-project-settings"' not in create_doc_block
-    assert 'targetAnchor: "subject-project-entry"' not in create_doc_block
-    assert 'targetAnchor: "project-settings-nav"' not in create_doc_block
-    assert 'data-guide-tour="subject-project-settings-entry"' in subject_dashboard
-    assert 'data-guide-tour="subject-project-entry"' not in subject_dashboard
-
-
-def test_create_subject_project_guide_uses_project_settings_route_not_subject_settings_route():
-    steps = read(STEPS_MODULE)
-    create_doc_steps = re.search(
-        r"CREATE_SUBJECT_PROJECT_GUIDE_STEPS: GuideWalkthroughStep\[\] = \[(.*?)\]\s*\n\nexport const STUDY_REVIEW_GUIDE_STEPS",
-        steps,
-        flags=re.DOTALL,
-    )
-
-    assert create_doc_steps
-    create_doc_block = create_doc_steps.group(1)
-    for step_id in ["authorize-directory", "import-directory"]:
-        step = re.search(r'\{\s*id:\s*"' + re.escape(step_id) + r'".+?popoverSide:\s*"[a-z]+",\s*\}', create_doc_block, flags=re.DOTALL)
-        assert step, step_id
-        assert 'routeHint: "/p/:projectId/project-settings"' in step.group(0)
-        assert 'routeHint: "/p/:projectId/settings"' not in step.group(0)
+    assert "createProject" not in demo_page
+    assert "useCreateSubject" not in demo_page
+    assert "importLearningObjectsFromBrowser" not in demo_page
+    assert "useImportLearningObjectsFromBrowser" not in demo_page
 
 
 def test_create_subject_project_guide_sync_step_waits_for_directory_authorization_completion():
     steps = read(STEPS_MODULE)
-    project_settings_page = read(PROJECT_SETTINGS_PAGE)
     create_subject_project_doc = read(CREATE_SUBJECT_PROJECT_DOC)
 
     authorize_step = re.search(r'\{\s*id:\s*"authorize-directory".+?popoverSide:\s*"left",\s*\}', steps, flags=re.DOTALL)
@@ -282,11 +274,6 @@ def test_create_subject_project_guide_sync_step_waits_for_directory_authorizatio
     assert 'advanceOn: "target-click"' not in authorize_step.group(0)
     assert 'heading: "第 3 步：同步目录内容"' in import_step.group(0)
     assert 'targetAnchor: "import-directory-button"' in import_step.group(0)
-
-    assert "completeGuideWalkthroughStep" in project_settings_page
-    assert 'completeGuideWalkthroughStep("authorize-directory")' in project_settings_page
-    assert 'data-guide-tour="import-directory-button"' in project_settings_page
-    assert "同步目录内容" in project_settings_page
 
     assert "## 第 3 步：同步目录内容" in create_subject_project_doc
     assert "点击“同步目录内容”" in create_subject_project_doc
@@ -304,12 +291,11 @@ def test_create_subject_step_source_and_initial_drive_call():
     assert ".drive(" in controller
 
 
-def test_study_review_guide_resolves_current_project_workbench_route_and_binds_real_actions():
+def test_study_review_guide_uses_transient_virtual_project_route_and_actions():
     steps = read(STEPS_MODULE)
     controller = read(CONTROLLER_MODULE)
-    learning_object_tree = read(LEARNING_OBJECT_TREE)
-    compose_pane = read(COMPOSE_PANE)
-    review_pane = read(REVIEW_PANE)
+    router = read(SRC / "router.tsx")
+    demo_workbench = read(GUIDE_DEMO_WORKBENCH_PAGE)
 
     study_doc_steps = re.search(
         r"STUDY_REVIEW_GUIDE_STEPS: GuideWalkthroughStep\[\] = \[(.*?)\]\s*\n\nexport const GUIDE_WALKTHROUGH_STEPS_BY_DOC",
@@ -319,7 +305,11 @@ def test_study_review_guide_resolves_current_project_workbench_route_and_binds_r
     assert study_doc_steps
     study_doc_block = study_doc_steps.group(1)
 
-    assert 'routeHint: "/p/:projectId/workbench"' in study_doc_block
+    assert GUIDE_DEMO_WORKBENCH_PAGE.exists()
+    assert 'path: "/guide/demo/study-review"' in router
+    assert 'routeHint: "/guide/demo/study-review"' in study_doc_block
+    assert 'routeHint: "/p/:projectId/workbench"' not in study_doc_block
+    assert "/p/:projectId/workbench" not in study_doc_block
     assert 'targetAnchor: "learning-object-tree-item"' in study_doc_block
     study_step_ids = re.findall(r'id:\s*"([^"]+)"', study_doc_block)
     assert study_step_ids == [
@@ -348,28 +338,26 @@ def test_study_review_guide_resolves_current_project_workbench_route_and_binds_r
         assert 'advanceOn: "completion-event"' in step.group(0)
 
     assert "resolveGuideRouteHint" in controller
-    assert "useAppStore.getState()" in controller
-    assert "selectedProjectId" in controller
-    assert "recentProjectIds" in controller
-    assert '.replace(":projectId",' in controller
+    assert "completeGuideWalkthroughStep" in demo_workbench
+    for anchor in [
+        "learning-object-tree-item",
+        "add-recall-point-button",
+        "recall-question-editor",
+        "recall-answer-editor",
+        "submit-learning-button",
+        "submit-review-answer-button",
+        "review-memory-choice-buttons",
+        "submit-review-button",
+    ]:
+        assert f'data-guide-tour="{anchor}"' in demo_workbench
+    for step_id in study_step_ids:
+        assert f'completeGuideWalkthroughStep("{step_id}")' in demo_workbench
 
-    assert 'data-guide-tour="learning-object-tree-item"' in learning_object_tree
-
-    assert "completeGuideWalkthroughStep" in compose_pane
-    assert 'completeGuideWalkthroughStep("add-recall-point")' in compose_pane
-    assert 'data-guide-tour="recall-question-editor"' in compose_pane
-    assert 'data-guide-tour="recall-answer-editor"' in compose_pane
-    assert 'completeGuideWalkthroughStep("fill-recall-question")' in compose_pane
-    assert 'completeGuideWalkthroughStep("fill-recall-answer")' in compose_pane
-    assert 'completeGuideWalkthroughStep("submit-learning")' in compose_pane
-
-    assert "completeGuideWalkthroughStep" in review_pane
-    assert 'data-guide-tour="submit-review-answer-button"' in review_pane
-    assert 'data-guide-tour="review-memory-choice-buttons"' in review_pane
-    assert 'data-guide-tour="submit-review-button"' in review_pane
-    assert 'completeGuideWalkthroughStep("submit-review-answer")' in review_pane
-    assert 'completeGuideWalkthroughStep("mark-review-result")' in review_pane
-    assert 'completeGuideWalkthroughStep("submit-review")' in review_pane
+    assert "/api/guide/demo-media/study-review" in demo_workbench
+    assert "submitLearningTask" not in demo_workbench
+    assert "commitReviewTask" not in demo_workbench
+    assert "useSubmitLearningTask" not in demo_workbench
+    assert "useCommitReviewTask" not in demo_workbench
 
 
 def test_all_source_references_resolve_in_manual():
@@ -454,7 +442,7 @@ def test_controller_contains_missing_target_fallback_route_hint_and_cleanup():
 def test_walkthrough_action_steps_advance_from_user_actions():
     steps = read(STEPS_MODULE)
     controller = read(CONTROLLER_MODULE)
-    projects_page = read(PROJECTS_PAGE)
+    demo_create_page = read(GUIDE_DEMO_CREATE_SUBJECT_PROJECT_PAGE)
 
     create_subject_step = re.search(r'\{\s*id:\s*"create-subject".+?popoverSide:\s*"bottom",\s*\}', steps, flags=re.DOTALL)
     create_submit_step = re.search(r'\{\s*id:\s*"create-subject-submit".+?popoverSide:\s*"top",\s*\}', steps, flags=re.DOTALL)
@@ -469,8 +457,8 @@ def test_walkthrough_action_steps_advance_from_user_actions():
     assert "ACTION_STEP_BUTTONS" in controller
     assert '["close"]' in controller
 
-    assert "completeGuideWalkthroughStep" in projects_page
-    assert 'completeGuideWalkthroughStep("create-subject-submit")' in projects_page
+    assert "completeGuideWalkthroughStep" in demo_create_page
+    assert 'completeGuideWalkthroughStep("create-subject-submit")' in demo_create_page
 
 
 def test_controller_refreshes_active_steps_without_orphaning_popovers():
@@ -515,11 +503,11 @@ def test_walkthrough_can_run_during_pomodoro_and_stops_before_locked_workbench()
 
 def test_create_subject_submit_step_has_distinct_copy_and_dialog_target():
     steps = read(STEPS_MODULE)
-    projects_page = read(PROJECTS_PAGE)
+    demo_create_page = read(GUIDE_DEMO_CREATE_SUBJECT_PROJECT_PAGE)
     create_subject_project_doc = read(CREATE_SUBJECT_PROJECT_DOC)
 
     create_submit_step = re.search(r'\{\s*id:\s*"create-subject-submit".+?popoverSide:\s*"top",\s*\}', steps, flags=re.DOTALL)
     assert create_submit_step
     assert 'popoverTitle: "第 2 步：填写标题并创建学科"' in create_submit_step.group(0)
     assert "填写学科标题后，点击“创建学科”。" in create_subject_project_doc
-    assert re.search(r"<DialogContent[^>]+data-guide-tour=\"create-subject-submit\"", projects_page)
+    assert 'data-guide-tour="create-subject-submit"' in demo_create_page

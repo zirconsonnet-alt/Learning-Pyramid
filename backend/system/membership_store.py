@@ -26,7 +26,7 @@ from backend.system.membership_marketing_store import (
     REWARD_STATUS_ISSUED,
     REWARD_STATUS_REVOKED,
 )
-from backend.system.membership_commission_store import MembershipCommissionStore
+from backend.system.membership_commission_store import MembershipCommissionStore, commission_refund_window_minutes
 from backend.system.membership_payment_service import (
     MembershipRemotePaymentStatus,
     PAYMENT_PROVIDER_MANUAL_TEST,
@@ -1725,7 +1725,7 @@ class MembershipStore:
         if order.payable_amount_cent < 1500:
             return
         commission_id = f"mcom_{uuid.uuid4().hex}"
-        refund_window_ends_at = (confirmed_at_dt + timedelta(hours=REFUND_WINDOW_HOURS)).isoformat()
+        refund_window_ends_at = (confirmed_at_dt + timedelta(minutes=commission_refund_window_minutes())).isoformat()
         inviter_user_id = str(invite_binding_row["inviter_user_id"])
         conn.execute(
             """

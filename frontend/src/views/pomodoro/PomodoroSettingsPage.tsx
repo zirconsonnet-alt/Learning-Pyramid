@@ -3,7 +3,6 @@ import { ArrowLeft, FolderOpen, ImageOff, ImagePlus, Music2, RotateCcw, Save, Tr
 import { Link } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
-import type { ReviewChainTemplateItem } from "@/ui/api/projectConfig"
 import { Button } from "@/ui/components/ui/button"
 import { Label } from "@/ui/components/ui/label"
 import { type DirectoryBindingPermission, usePomodoroRestMusicDirectoryBinding } from "@/ui/localMedia/projectDirectory"
@@ -19,7 +18,6 @@ import { useUpdateMyGlobalSettings } from "@/ui/queries/profile"
 import { useSystemCapabilities } from "@/ui/queries/system"
 import { usePageMeta } from "@/ui/seo/usePageMeta"
 import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
-import { useGlobalConfigStore } from "@/ui/store/globalConfigStore"
 import {
   DEFAULT_RANDOM_MICRO_BREAK_SETTINGS,
   normalizePomodoroPromptText,
@@ -110,7 +108,6 @@ export function PomodoroSettingsPage() {
   const microBreaks = usePomodoroStore((state) => state.microBreaks)
   const setDefaultPrompts = usePomodoroStore((state) => state.setDefaultPrompts)
   const setMicroBreakSettings = usePomodoroStore((state) => state.setMicroBreakSettings)
-  const defaultProjectReviewTemplate = useGlobalConfigStore((state) => state.defaultProjectReviewTemplate)
   const [focusPromptDraft, setFocusPromptDraft] = useState(defaultFocusPrompt)
   const [breakPromptDraft, setBreakPromptDraft] = useState(defaultBreakPrompt)
   const [microBreakDraft, setMicroBreakDraft] = useState(() => toMicroBreakDraft(microBreaks))
@@ -209,7 +206,6 @@ export function PomodoroSettingsPage() {
         defaultBreakPrompt: nextBreakPrompt,
         microBreaks: nextMicroBreaks,
       },
-      defaultProjectReviewTemplate: defaultProjectReviewTemplate as ReviewChainTemplateItem[],
     }
     if (shouldSyncRemotely) {
       await updateGlobalSettings.mutateAsync(payload)

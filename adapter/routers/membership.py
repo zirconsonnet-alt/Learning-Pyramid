@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
+import os
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
+from urllib.parse import urlencode, urlsplit, urlunsplit
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse
 
 from adapter.auth import require_request_auth_user
 from adapter.deps import get_auth_store, get_membership_commission_store, get_membership_marketing_store, get_membership_payment_service, get_membership_store
@@ -29,6 +33,11 @@ from backend.system.membership_marketing_store import (
     MembershipMarketingStore,
 )
 from backend.system.membership_commission_store import (
+    BINDING_STATUS_AUTHORIZED,
+    BINDING_STATUS_BOUND,
+    BINDING_STATUS_CONFIRMED,
+    BINDING_STATUS_CREATED,
+    BINDING_STATUS_SCANNED,
     WITHDRAWAL_STATUS_AWAITING_CONFIRMATION,
     WITHDRAWAL_STATUS_CANCELED,
     WITHDRAWAL_STATUS_FAILED,
@@ -49,6 +58,7 @@ from backend.system.membership_payment_service import (
     MembershipRemotePaymentStatus,
     PAYMENT_PROVIDER_MANUAL_TEST,
     PayoutConfirmationPayload,
+    current_wechat_payout_config,
 )
 from backend.system.membership_store import (
     MembershipOrderCloseResult,
@@ -300,7 +310,82 @@ def _mask_wechat_open_id(value: str) -> str:
     return f"{text[:7]}***"
 
 
+def _public_origin_from_request(request: Request | None = None) -> str:
+    public_origin = (current_http_runtime_config().public_origin or "").rstrip("/")
+    if public_origin:
+        return public_origin
+    if request is None:
+        return ""
+    return str(request.base_url).rstrip("/")
+
+
+def _transfer_confirmation_secret() -> str:
+    return str(
+        os.getenv("PLM_WECHAT_PAY_TRANSFER_CONFIRMATION_SECRET")
+        or os.getenv("PLM_MEDIA_ACCESS_TOKEN_SECRET")
+        or os.getenv("PLM_TOKEN_ENCRYPTION_KEY")
+        or ""
+    ).strip()
+
+
+def _transfer_confirmation_token(item: WithdrawalRequest) -> str:
+    secret = _transfer_confirmation_secret()
+    if not secret:
+        return ""
+    message = "|".join(
+        (
+            item.withdrawal_id,
+            item.user_id,
+            item.out_bill_no,
+            str(item.amount_cent),
+            item.created_at,
+        )
+    )
+    return hmac.new(secret.encode("utf-8"), message.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _verify_transfer_confirmation_token(item: WithdrawalRequest, token: str) -> bool:
+    expected = _transfer_confirmation_token(item)
+    return bool(expected and hmac.compare_digest(expected, str(token or "").strip()))
+
+
+def _transfer_confirmation_url(item: WithdrawalRequest, request: Request | None = None) -> str | None:
+    token = _transfer_confirmation_token(item)
+    if item.status != WITHDRAWAL_STATUS_AWAITING_CONFIRMATION or not item.package_info or not token:
+        return None
+    base = _public_origin_from_request(request)
+    path = "/membership/wechat-payout-confirm"
+    query = urlencode({"withdrawal": item.withdrawal_id, "token": token})
+    return f"{base}{path}?{query}" if base else f"{path}?{query}"
+
+
+def _withdrawal_can_confirm(item: WithdrawalRequest) -> bool:
+    if item.status != WITHDRAWAL_STATUS_AWAITING_CONFIRMATION or not item.package_info:
+        return False
+    if not item.confirmation_requested_at:
+        return True
+    try:
+        requested_at = datetime.fromisoformat(item.confirmation_requested_at)
+    except Exception:
+        return True
+    if requested_at.tzinfo is None:
+        requested_at = requested_at.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - requested_at <= timedelta(hours=24)
+
+
 def _withdrawal_to_dto(item: WithdrawalRequest) -> dict[str, object]:
+    confirmation = None
+    if _withdrawal_can_confirm(item):
+        payout_config = current_wechat_payout_config()
+        if payout_config.enabled:
+            confirmation = _payout_confirmation_to_dto(
+                PayoutConfirmationPayload(
+                    mode="wechat_jsapi_requestMerchantTransfer",
+                    mch_id=payout_config.mch_id,
+                    app_id=payout_config.app_id,
+                    package_info=item.package_info,
+                )
+            )
     return {
         "withdrawalId": item.withdrawal_id,
         "userId": item.user_id,
@@ -314,7 +399,8 @@ def _withdrawal_to_dto(item: WithdrawalRequest) -> dict[str, object]:
         "outBillNo": item.out_bill_no,
         "transferBillNo": item.transfer_bill_no or item.provider_transfer_no,
         "providerState": item.provider_state,
-        "confirmation": None,
+        "confirmation": confirmation,
+        "confirmationUrl": _transfer_confirmation_url(item),
         "failureReason": item.failure_reason,
         "createdAt": item.created_at,
         "reservedAt": item.reserved_at,
@@ -414,6 +500,23 @@ def _desktop_binding_url(return_url: str, *, binding_attempt_id: str, state: str
         base = base.split("?", 1)[0]
     base = base.rstrip("/") or "/membership"
     return f"{base}/wechat-payout-bind?attempt={binding_attempt_id}&state={state}"
+
+
+def _mobile_binding_entry_url(return_url: str, *, binding_attempt_id: str, state: str) -> str:
+    parsed = urlsplit(str(return_url or "").strip())
+    if parsed.scheme and parsed.netloc:
+        origin = urlunsplit((parsed.scheme, parsed.netloc, "", "", "")).rstrip("/")
+    else:
+        origin = current_http_runtime_config().public_origin.rstrip("/")
+    path = "/api/commissions/payout-identity/wechat/mobile-bind"
+    query = urlencode({"attempt": binding_attempt_id, "state": state})
+    return f"{origin}{path}?{query}" if origin else f"{path}?{query}"
+
+
+def _mobile_binding_confirmation_url(return_url: str, *, binding_attempt_id: str, state: str, code: str) -> str:
+    base = _desktop_binding_url(return_url, binding_attempt_id=binding_attempt_id, state=state)
+    separator = "&" if "?" in base else "?"
+    return f"{base}{separator}{urlencode({'code': code})}"
 
 
 def _resolve_coupon_aware_preview(
@@ -707,7 +810,7 @@ def start_my_wechat_payout_binding(
         expires_at=(now + timedelta(minutes=payout_config.binding_qr_ttl_minutes)).isoformat(),
         desktop_return_url=req.returnUrl,
     )
-    mobile_binding_url = _desktop_binding_url(req.returnUrl, binding_attempt_id=attempt.binding_attempt_id, state=attempt.state)
+    mobile_binding_url = _mobile_binding_entry_url(req.returnUrl, binding_attempt_id=attempt.binding_attempt_id, state=attempt.state)
     attempt = membership_commission_store.update_payout_binding_attempt_urls(
         attempt.binding_attempt_id,
         desktop_return_url=req.returnUrl,
@@ -749,15 +852,35 @@ def poll_my_wechat_payout_binding(
 def open_wechat_payout_mobile_binding(
     attempt: str,
     state: str,
+    code: str | None = None,
+    response: str | None = None,
     membership_commission_store: MembershipCommissionStore = Depends(get_membership_commission_store),
     membership_payment_service: MembershipPaymentService = Depends(get_membership_payment_service),
-) -> dict:
+):
     scanned = membership_commission_store.mark_payout_binding_attempt_scanned(attempt, state=state)
+    wants_json = str(response or "").strip().lower() == "json"
+    if code:
+        if wants_json:
+            payload = _binding_attempt_to_dto(scanned)
+            payload["learningPyramidUserId"] = scanned.user_id
+            payload["confirmedLearningPyramidUserId"] = scanned.user_id
+            return {"ok": True, "data": payload}
+        return RedirectResponse(
+            _mobile_binding_confirmation_url(
+                scanned.desktop_return_url,
+                binding_attempt_id=scanned.binding_attempt_id,
+                state=scanned.state,
+                code=code,
+            ),
+            status_code=302,
+        )
     authorization_url = membership_payment_service.build_wechat_payout_binding_authorization_url(
         state=scanned.state,
         return_url=scanned.mobile_binding_url or scanned.desktop_return_url,
         channel=scanned.channel,
     )
+    if not wants_json and authorization_url.lower().startswith(("http://", "https://")):
+        return RedirectResponse(authorization_url, status_code=302)
     payload = _binding_attempt_to_dto(scanned)
     payload["learningPyramidUserId"] = scanned.user_id
     payload["confirmedLearningPyramidUserId"] = scanned.user_id
@@ -775,11 +898,41 @@ def complete_my_wechat_payout_binding(
     attempt = membership_commission_store.get_payout_binding_attempt(req.bindingAttemptId)
     if attempt is None:
         raise NotFound("payout binding attempt")
-    if req.confirmedLearningPyramidUserId:
-        user_id = attempt.user_id
-    else:
+
+    confirmed_user_id = str(req.confirmedLearningPyramidUserId or "").strip()
+    if str(req.state or "") != attempt.state:
+        raise PreconditionFailure("payout binding state is invalid")
+    if confirmed_user_id and confirmed_user_id != attempt.user_id:
+        raise PreconditionFailure("confirmed account does not match payout binding attempt")
+    if not confirmed_user_id:
         user = require_request_auth_user(request)
         user_id = user.user_id
+        if attempt.user_id != user_id:
+            raise NotFound("payout binding attempt")
+    else:
+        user_id = attempt.user_id
+
+    if attempt.status == BINDING_STATUS_BOUND:
+        if not attempt.identity_id:
+            raise PreconditionFailure("payout binding attempt has already been consumed")
+        identity = membership_commission_store.get_payout_identity(attempt.identity_id)
+        if identity is None or identity.user_id != attempt.user_id:
+            raise NotFound("payout identity")
+        return {"ok": True, "data": _payout_identity_to_dto(identity)}
+
+    if attempt.status not in {
+        BINDING_STATUS_CREATED,
+        BINDING_STATUS_SCANNED,
+        BINDING_STATUS_AUTHORIZED,
+        BINDING_STATUS_CONFIRMED,
+    }:
+        raise PreconditionFailure("payout binding attempt has already been consumed")
+    if attempt.channel == "desktop_qr_official_account_h5":
+        if not confirmed_user_id:
+            raise PreconditionFailure("confirmed account is required for desktop QR payout binding")
+        if attempt.status == BINDING_STATUS_CREATED:
+            raise PreconditionFailure("payout binding attempt must be scanned before confirmation")
+
     openid, appid = membership_payment_service.resolve_wechat_payout_openid(
         authorization_code=req.authorizationCode,
         channel=attempt.channel,
@@ -867,6 +1020,31 @@ def list_my_commission_withdrawals(
     user = require_request_auth_user(request)
     items = membership_commission_store.list_user_withdrawals(user.user_id, limit=limit)
     return {"ok": True, "data": [_withdrawal_to_dto(item) for item in items]}
+
+
+@router.get("/commissions/withdrawals/{withdrawal_id}/wechat-confirmation")
+def get_wechat_transfer_confirmation(
+    withdrawal_id: str,
+    token: str,
+    membership_commission_store: MembershipCommissionStore = Depends(get_membership_commission_store),
+) -> dict:
+    withdrawal = membership_commission_store.get_withdrawal_request(withdrawal_id)
+    if withdrawal is None or not _verify_transfer_confirmation_token(withdrawal, token):
+        raise NotFound("commission withdrawal")
+    if not _withdrawal_can_confirm(withdrawal):
+        raise PreconditionFailure("wechat transfer confirmation is unavailable")
+    payload = _withdrawal_to_dto(withdrawal)
+    return {
+        "ok": True,
+        "data": {
+            "withdrawalId": payload["withdrawalId"],
+            "amountCent": payload["amountCent"],
+            "identityMaskedLabel": payload["identityMaskedLabel"],
+            "status": payload["status"],
+            "providerState": payload["providerState"],
+            "confirmation": payload["confirmation"],
+        },
+    }
 
 
 @router.post("/payments/wechat/transfer-notify")

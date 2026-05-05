@@ -299,6 +299,28 @@ def test_public_health_endpoint_does_not_require_auth_store(monkeypatch, tmp_pat
     _reset_caches()
 
 
+def test_guide_demo_media_is_public_and_does_not_require_project_access(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PLM_APP_MODE", "hosted")
+    monkeypatch.setenv("PLM_ENABLE_AUTH", "true")
+    monkeypatch.setenv("PLM_ENABLE_ASR", "false")
+    monkeypatch.setenv("PLM_ENABLE_SERVER_MEDIA_STREAM", "false")
+    monkeypatch.setenv("PLM_STORE_PATH", "")
+    monkeypatch.setenv("PLM_LEGACY_STORE_PATH", "")
+    monkeypatch.setenv("PLM_STORE_DB_PATH", str(tmp_path / "plm_store.sqlite3"))
+    monkeypatch.setenv("PLM_AUTH_DB_PATH", str(tmp_path / "plm_auth.sqlite3"))
+    _reset_caches()
+
+    with patch("adapter.main.get_auth_store", side_effect=AssertionError("guide demo media should not use project auth")):
+        client = TestClient(create_app(), raise_server_exceptions=False)
+        resp = client.get("/api/guide/demo-media/study-review")
+
+    assert resp.status_code == 200
+    assert resp.content
+    assert resp.headers["content-type"].startswith("video/")
+    assert resp.headers["cache-control"] == "public, max-age=3600"
+    _reset_caches()
+
+
 def test_global_llm_settings_endpoint_updates_runtime_capabilities(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("PLM_APP_MODE", "local")
     monkeypatch.setenv("PLM_ENABLE_AUTH", "false")

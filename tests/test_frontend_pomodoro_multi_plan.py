@@ -204,21 +204,18 @@ def test_pomodoro_settings_payloads_preserve_random_micro_breaks() -> None:
     global_settings_source = GLOBAL_SETTINGS_PAGE.read_text(encoding="utf-8")
 
     assert "const microBreaks = usePomodoroStore((state) => state.microBreaks)" in page_source
-    assert "microBreaks," in page_source[
-        page_source.index("pomodoro: {"):page_source.index("defaultProjectReviewTemplate", page_source.index("pomodoro: {"))
-    ]
+    page_pomodoro_payload = page_source[page_source.index("pomodoro: {"):page_source.index("}", page_source.index("pomodoro: {"))]
+    assert "microBreaks," in page_pomodoro_payload
     assert "setSettings({ enabled, weeklySchedule: draftSchedule, transitionSoundEnabled, microBreaks })" in page_source
 
     assert "microBreaks: nextMicroBreaks" in settings_source
     assert "setMicroBreakSettings(nextMicroBreaks)" in settings_source
 
     assert "const microBreaks = usePomodoroStore((state) => state.microBreaks)" in global_settings_source
-    assert "microBreaks," in global_settings_source[
-        global_settings_source.index("pomodoro: {"):global_settings_source.index(
-            "defaultProjectReviewTemplate",
-            global_settings_source.index("pomodoro: {"),
-        )
+    global_pomodoro_payload = global_settings_source[
+        global_settings_source.index("pomodoro: {"):global_settings_source.index("}", global_settings_source.index("pomodoro: {"))
     ]
+    assert "microBreaks," in global_pomodoro_payload
 
 
 def test_pomodoro_entry_stays_as_header_shortcut_not_global_menu_item() -> None:

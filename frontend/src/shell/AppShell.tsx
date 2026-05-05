@@ -39,7 +39,7 @@ function formatApiError(err: unknown) {
   return "未知错误"
 }
 
-const BRAND_LOGO_SRC = "/favicon-logo-white-v2-192.png"
+const BRAND_LOGO_SRC = "/product-logo-192.png"
 
 function describeArea(
   pathname: string,

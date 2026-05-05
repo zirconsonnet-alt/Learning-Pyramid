@@ -2,7 +2,6 @@ import { Download } from "lucide-react"
 
 import { usePublicDownloads } from "@/ui/queries/system"
 import { usePageMeta } from "@/ui/seo/usePageMeta"
-import { cn } from "@/ui/utils"
 import { ShowcaseFooter, ShowcaseSiteHeader } from "@/views/home/ShowcaseChrome"
 
 const subtitleToolQuickGuide = [
@@ -41,25 +40,8 @@ function formatPublishedAt(value: string | null | undefined) {
 export function SubtitleToolPage() {
   const publicDownloadsQ = usePublicDownloads()
   const recommendedDownload = publicDownloadsQ.data?.items.find((item) => item.recommended) ?? publicDownloadsQ.data?.items[0] ?? null
-  const downloadErrorMessage = publicDownloadsQ.error instanceof Error ? publicDownloadsQ.error.message : ""
-  const downloadStatusTone = publicDownloadsQ.isError ? "error" : !recommendedDownload && !publicDownloadsQ.isLoading ? "warning" : "ready"
-  const downloadStatusLabel = publicDownloadsQ.isLoading
-    ? "正在同步最新构建"
-    : publicDownloadsQ.isError
-      ? "公开下载目录暂时不可达"
-      : recommendedDownload
-        ? "可以直接下载"
-        : publicDownloadsQ.data?.generatedAt
-          ? "已同步清单，但没有有效构建"
-          : "服务端还没加载到公开构建目录"
-  const downloadSummary = recommendedDownload?.summary
-    ?? (publicDownloadsQ.isError
-      ? "当前页面没有拿到公开下载接口的返回，所以这里显示的不是“没有构建”，而是“暂时读不到构建信息”。"
-      : publicDownloadsQ.data?.generatedAt
-        ? "服务端已经读到构建清单，但这份清单里暂时没有解析出可下载的 ZIP。通常需要检查 catalog.json 里的 assetPath 和实际文件是否一致。"
-        : "当前运行中的服务端还没有加载到 public-downloads/ 目录，所以页面暂时拿不到可下载构建。")
   const downloadNote = publicDownloadsQ.isError
-    ? `接口报错：${downloadErrorMessage || "请检查当前站点是否能访问 /api/system/public-downloads。"}`
+    ? `接口报错：${publicDownloadsQ.error instanceof Error ? publicDownloadsQ.error.message : "请检查当前站点是否能访问 /api/system/public-downloads。"}`
     : !recommendedDownload && !publicDownloadsQ.isLoading
       ? publicDownloadsQ.data?.generatedAt
         ? "如果你已经完成打包，请确认 ZIP 文件已经跟着 catalog.json 一起放到服务端可读目录。"
@@ -90,16 +72,6 @@ export function SubtitleToolPage() {
         <section className="lp-showcase-section lp-subtitle-tool-section">
           <div className="lp-showcase-container lp-subtitle-tool-shell">
             <article className="lp-subtitle-tool-card">
-              <div
-                className={cn(
-                  "lp-subtitle-tool-status",
-                  downloadStatusTone === "warning" && "is-warning",
-                  downloadStatusTone === "error" && "is-error",
-                )}
-              >
-                {downloadStatusLabel}
-              </div>
-
               <div className="lp-subtitle-tool-head">
                 <h1>字幕工具</h1>
                 <p>本机离线批量生成同目录同名 `.srt` 字幕。</p>
@@ -129,8 +101,7 @@ export function SubtitleToolPage() {
                 </div>
               ) : null}
 
-              <p className="lp-subtitle-tool-flow">下载 → 选目录 → 生成 → 回到 LearningPyramid</p>
-              <p className="lp-subtitle-tool-summary">{downloadSummary}</p>
+              <p className="lp-subtitle-tool-flow">准备资源 → 选择目录 → 生成 → 回到 LearningPyramid</p>
 
               {downloadNote ? <div className="lp-subtitle-tool-note">{downloadNote}</div> : null}
 
