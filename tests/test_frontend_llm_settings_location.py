@@ -121,8 +121,19 @@ def test_membership_and_admin_api_schemas_expose_invite_discount_and_commission_
     assert "CommissionWithdrawalSchema" in membership_api_source
     assert "requestCommissionWithdrawal" in membership_api_source
     assert "listCommissionWithdrawals" in membership_api_source
-    assert "wechatOpenIdMasked" in membership_api_source
+    assert "PayoutIdentitySchema" in membership_api_source
+    assert "getPayoutIdentity" in membership_api_source
+    assert "startPayoutBindingAttempt" in membership_api_source
+    assert "pollPayoutBindingAttempt" in membership_api_source
+    assert "openMobilePayoutBinding" in membership_api_source
+    assert "completePayoutBinding" in membership_api_source
+    assert "qrCodePayload" in membership_api_source
+    assert "mobileBindingUrl" in membership_api_source
+    assert "confirmedLearningPyramidUserId" in membership_api_source
+    assert "identityMaskedLabel" in membership_api_source
+    assert "wechatOpenId" not in membership_api_source
     assert "processing" in membership_api_source
+    assert "awaiting_confirmation" in membership_api_source
     assert "succeeded" in membership_api_source
     assert "failed" in membership_api_source
 
@@ -134,4 +145,8 @@ def test_membership_and_admin_api_schemas_expose_invite_discount_and_commission_
     assert "AdminMembershipWithdrawalSchema" in admin_api_source
     assert "listAdminMembershipWithdrawals" in admin_api_source
     assert "resolveAdminMembershipWithdrawal" in admin_api_source
-    assert "wechatOpenIdMasked" in admin_api_source
+    assert "AdminPayoutIdentitySchema" in admin_api_source
+    assert "listAdminPayoutIdentities" in admin_api_source
+    assert "syncAdminMembershipWithdrawal" in admin_api_source
+    assert "acknowledgeAdminWithdrawalWarning" in admin_api_source
+    assert "identityMaskedLabel" in admin_api_source

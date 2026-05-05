@@ -29,8 +29,9 @@
 对于可以在 1～3 个文件内以最小改动完成、且不会影响公共接口或配置的任务，默认直接实施，不要重复征求确认。
 
 <!-- SPECKIT START -->
-Current Spec Kit plan: `specs/008-invite-commission/plan.md`.
-For invite discount and commission work, use that plan for the active requirements,
-project structure, validation approach, 7.5-discount coupon behavior, fixed 5 yuan commission,
-refund-window settlement, and WeChat Pay withdrawal handling.
+Current Spec Kit plan: `specs/009-wechat-payout-automation/plan.md`.
+For unattended invite commission settlement and WeChat payout work, use that plan for
+the active requirements, project structure, validation approach, verified WeChat
+desktop QR receiving identity binding, automatic refund-window settlement, merchant
+transfer confirmation, callback/query reconciliation, and exception handling.
 <!-- SPECKIT END -->

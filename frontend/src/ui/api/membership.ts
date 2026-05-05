@@ -193,6 +193,43 @@ export const CommissionAccountSchema = z.object({
 
 export type CommissionAccount = z.infer<typeof CommissionAccountSchema>
 
+export const PayoutBindingAttemptSchema = z.object({
+  bindingAttemptId: z.string(),
+  provider: z.string(),
+  channel: z.string(),
+  status: z.string(),
+  state: z.string().optional(),
+  authorizationUrl: z.string().optional(),
+  desktopReturnUrl: z.string().optional(),
+  mobileBindingUrl: z.string().optional(),
+  qrCodePayload: z.string().optional(),
+  pollAfterMs: z.number().optional(),
+  qrExpiresAt: z.string().nullable().optional(),
+  scannedAt: z.string().nullable().optional(),
+  confirmedAt: z.string().nullable().optional(),
+  nextAction: z.string().optional(),
+  learningPyramidUserId: z.string().optional(),
+  confirmedLearningPyramidUserId: z.string().optional(),
+  createdAt: z.string(),
+  completedAt: z.string().nullable(),
+  expiresAt: z.string(),
+  failureReason: z.string(),
+})
+
+export type PayoutBindingAttempt = z.infer<typeof PayoutBindingAttemptSchema>
+
+export const PayoutIdentitySchema = z.object({
+  provider: z.string(),
+  status: z.enum(["unbound", "binding", "ready", "invalid", "provider_unavailable"]).or(z.string()),
+  identityId: z.string().nullable(),
+  maskedLabel: z.string().nullable(),
+  verifiedAt: z.string().nullable(),
+  nextAction: z.string().optional(),
+  latestBindingAttempt: PayoutBindingAttemptSchema.nullable().optional(),
+})
+
+export type PayoutIdentity = z.infer<typeof PayoutIdentitySchema>
+
 export const CommissionRecordSchema = z.object({
   commissionId: z.string(),
   inviteeUserId: z.string(),
@@ -212,6 +249,7 @@ export type CommissionRecord = z.infer<typeof CommissionRecordSchema>
 
 export const CommissionSummarySchema = z.object({
   account: CommissionAccountSchema,
+  payoutReadiness: PayoutIdentitySchema,
   recentCommissions: z.array(CommissionRecordSchema),
 })
 
@@ -222,12 +260,26 @@ export const CommissionWithdrawalSchema = z.object({
   userId: z.string(),
   amountCent: z.number(),
   targetType: z.literal("wechat_pay"),
-  wechatOpenIdMasked: z.string(),
-  status: z.enum(["pending", "processing", "succeeded", "failed", "canceled"]),
+  identityId: z.string().nullable(),
+  identityMaskedLabel: z.string(),
+  status: z.enum(["created", "awaiting_confirmation", "processing", "succeeded", "failed", "canceled", "needs_attention"]),
   providerTransferNo: z.string().nullable(),
+  outBillNo: z.string(),
+  transferBillNo: z.string().nullable(),
+  providerState: z.string(),
+  confirmation: z
+    .object({
+      mode: z.literal("wechat_jsapi_requestMerchantTransfer"),
+      mchId: z.string(),
+      appId: z.string(),
+      packageInfo: z.string(),
+    })
+    .nullable(),
   failureReason: z.string(),
   createdAt: z.string(),
+  reservedAt: z.string().nullable(),
   submittedAt: z.string().nullable(),
+  confirmationRequestedAt: z.string().nullable(),
   completedAt: z.string().nullable(),
 })
 
@@ -326,6 +378,69 @@ export function getCommissionSummary(limit = 20) {
   })
 }
 
+export function getPayoutIdentity() {
+  return apiRequest({
+    path: "/commissions/payout-identity",
+    responseSchema: PayoutIdentitySchema,
+  })
+}
+
+export function startPayoutBindingAttempt(params: { channel?: string; returnUrl: string }) {
+  return apiRequest({
+    path: "/commissions/payout-identity/wechat/binding-attempts",
+    method: "POST",
+    body: {
+      channel: params.channel ?? "desktop_qr_official_account_h5",
+      returnUrl: params.returnUrl,
+    },
+    responseSchema: PayoutBindingAttemptSchema,
+  })
+}
+
+export function pollPayoutBindingAttempt(params: { bindingAttemptId: string }) {
+  return apiRequest({
+    path: `/commissions/payout-identity/wechat/binding-attempts/${encodeURIComponent(params.bindingAttemptId)}`,
+    responseSchema: PayoutBindingAttemptSchema.extend({
+      identityId: z.string().optional(),
+      maskedLabel: z.string().optional(),
+      verifiedAt: z.string().optional(),
+    }),
+  })
+}
+
+export function openMobilePayoutBinding(params: { bindingAttemptId: string; state: string }) {
+  return apiRequest({
+    path: `/commissions/payout-identity/wechat/mobile-bind?attempt=${encodeURIComponent(params.bindingAttemptId)}&state=${encodeURIComponent(params.state)}`,
+    responseSchema: PayoutBindingAttemptSchema,
+  })
+}
+
+export function completePayoutBinding(params: {
+  bindingAttemptId: string
+  authorizationCode: string
+  state: string
+  confirmedLearningPyramidUserId?: string
+}) {
+  return apiRequest({
+    path: "/commissions/payout-identity/wechat/bind",
+    method: "POST",
+    body: {
+      bindingAttemptId: params.bindingAttemptId,
+      authorizationCode: params.authorizationCode.trim(),
+      state: params.state,
+      confirmedLearningPyramidUserId: params.confirmedLearningPyramidUserId,
+    },
+    responseSchema: z.object({
+      identityId: z.string(),
+      provider: z.string(),
+      status: z.string(),
+      maskedLabel: z.string(),
+      verifiedAt: z.string(),
+      failureReason: z.string(),
+    }),
+  })
+}
+
 export function listCommissionWithdrawals(limit = 20) {
   return apiRequest({
     path: `/commissions/withdrawals?limit=${encodeURIComponent(String(limit))}`,
@@ -333,13 +448,12 @@ export function listCommissionWithdrawals(limit = 20) {
   })
 }
 
-export function requestCommissionWithdrawal(params: { amountCent: number; wechatOpenId: string }) {
+export function requestCommissionWithdrawal(params: { amountCent: number }) {
   return apiRequest({
     path: "/commissions/withdrawals",
     method: "POST",
     body: {
       amountCent: params.amountCent,
-      wechatOpenId: params.wechatOpenId.trim(),
     },
     responseSchema: CommissionWithdrawalSchema,
   })

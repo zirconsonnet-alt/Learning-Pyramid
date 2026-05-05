@@ -3,16 +3,21 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   bindInviteCode,
   closeMembershipOrder,
+  completePayoutBinding,
   confirmMembershipPayment,
   createMembershipOrder,
   getCommissionSummary,
   getInviteSummary,
   getMembershipSummary,
+  getPayoutIdentity,
   listCommissionWithdrawals,
   listCoupons,
   listMembershipOrders,
+  openMobilePayoutBinding,
+  pollPayoutBindingAttempt,
   previewMembershipOrder,
   requestCommissionWithdrawal,
+  startPayoutBindingAttempt,
   syncMembershipPayment,
 } from "@/ui/api/membership"
 
@@ -120,6 +125,15 @@ export function useCommissionSummary(limit = 20, enabled = true) {
   })
 }
 
+export function usePayoutIdentity(enabled = true) {
+  return useQuery({
+    queryKey: ["membership", "payout-identity"],
+    queryFn: getPayoutIdentity,
+    enabled,
+    staleTime: 10_000,
+  })
+}
+
 export function useCommissionWithdrawals(limit = 20, enabled = true) {
   return useQuery({
     queryKey: ["membership", "withdrawals", limit],
@@ -157,6 +171,45 @@ export function useRequestCommissionWithdrawal() {
       await qc.invalidateQueries({ queryKey: ["membership", "commissions"] })
       await qc.invalidateQueries({ queryKey: ["membership", "withdrawals"] })
       await qc.invalidateQueries({ queryKey: ["membership", "invites"] })
+    },
+  })
+}
+
+export function usePayoutBindingAttempt(bindingAttemptId: string, enabled = true, refetchInterval: number | false = false) {
+  return useQuery({
+    queryKey: ["membership", "payout-binding-attempt", bindingAttemptId],
+    queryFn: () => pollPayoutBindingAttempt({ bindingAttemptId }),
+    enabled: enabled && Boolean(bindingAttemptId),
+    staleTime: 0,
+    refetchInterval,
+  })
+}
+
+export function useOpenMobilePayoutBinding() {
+  return useMutation({
+    mutationFn: openMobilePayoutBinding,
+  })
+}
+
+export function useStartPayoutBindingAttempt() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: startPayoutBindingAttempt,
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["membership", "payout-identity"] })
+      await qc.invalidateQueries({ queryKey: ["membership", "commissions"] })
+    },
+  })
+}
+
+export function useCompletePayoutBinding() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: completePayoutBinding,
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["membership", "payout-identity"] })
+      await qc.invalidateQueries({ queryKey: ["membership", "payout-binding-attempt"] })
+      await qc.invalidateQueries({ queryKey: ["membership", "commissions"] })
     },
   })
 }

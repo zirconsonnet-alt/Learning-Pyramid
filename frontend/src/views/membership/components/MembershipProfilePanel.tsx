@@ -2,7 +2,7 @@ import { ArrowRight, Copy, Gift, Ticket } from "lucide-react"
 import { Link } from "react-router-dom"
 
 import { Button } from "@/ui/components/ui/button"
-import { useCommissionSummary, useInviteSummary, useMembershipCoupons, useMembershipSummary } from "@/ui/queries/membership"
+import { useCommissionSummary, useInviteSummary, useMembershipCoupons, useMembershipSummary, usePayoutIdentity } from "@/ui/queries/membership"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import {
   copyTextToClipboard,
@@ -19,10 +19,12 @@ export function MembershipProfilePanel() {
   const inviteSummaryQ = useInviteSummary()
   const couponsQ = useMembershipCoupons(6)
   const commissionQ = useCommissionSummary(3)
+  const payoutIdentityQ = usePayoutIdentity()
 
   const summary = summaryQ.data
   const inviteSummary = inviteSummaryQ.data
   const commissionAccount = commissionQ.data?.account
+  const payoutIdentity = payoutIdentityQ.data
   const availableCoupons = (couponsQ.data ?? []).filter((item) => item.status === "available").slice(0, 3)
 
   async function onCopyInviteCode() {
@@ -71,6 +73,9 @@ export function MembershipProfilePanel() {
                 <div className="theme-subtle-surface px-3 py-3 text-sm">
                   <div>首单价：{formatMembershipPrice(summary?.firstOrderPriceCent ?? 0)}</div>
                   <div className="mt-1">续费价：{formatMembershipPrice(summary?.renewalPriceCent ?? 0)}</div>
+                  <div className="mt-1">
+                    微信收款：{payoutIdentity?.status === "ready" ? payoutIdentity.maskedLabel : "未绑定"}
+                  </div>
                 </div>
               </div>
             ) : null}

@@ -11,6 +11,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import Mapping, Protocol
 from urllib.parse import quote, urlsplit, urlunsplit
+from urllib.parse import urlencode
 
 import qrcode
 import qrcode.image.svg
@@ -24,6 +25,12 @@ from backend.system.runtime_features import current_runtime_features
 
 PAYMENT_PROVIDER_MANUAL_TEST = "manual_test"
 PAYMENT_PROVIDER_WECHAT_NATIVE = "wechat_native"
+PAYOUT_STATUS_AWAITING_CONFIRMATION = "awaiting_confirmation"
+PAYOUT_STATUS_PROCESSING = "processing"
+PAYOUT_STATUS_SUCCEEDED = "succeeded"
+PAYOUT_STATUS_FAILED = "failed"
+PAYOUT_STATUS_CANCELED = "canceled"
+PAYOUT_STATUS_NEEDS_ATTENTION = "needs_attention"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 logger = logging.getLogger("learningpyramid.wechatpay")
 
@@ -50,6 +57,17 @@ def _env_bool(name: str, default: bool) -> bool:
     if value in {"0", "false", "no", "off"}:
         return False
     return bool(default)
+
+
+def _env_int(name: str, default: int, *, min_value: int, max_value: int) -> int:
+    raw = _env_text(name)
+    if not raw:
+        return default
+    try:
+        parsed = int(raw)
+    except Exception:
+        return default
+    return min(max(parsed, min_value), max_value)
 
 
 def manual_test_payment_enabled() -> bool:
@@ -162,6 +180,27 @@ class WeChatNativePaymentConfig:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class WeChatPayoutConfig:
+    app_id: str
+    mch_id: str
+    app_secret: str
+    api_base_url: str
+    transfer_scene_id: str
+    transfer_remark: str
+    notify_url: str | None
+    oauth_authorize_url: str
+    oauth_token_url: str
+    scene_report_infos: tuple[dict[str, str], ...]
+    binding_qr_ttl_minutes: int
+    provider_mode: str
+
+    @property
+    def enabled(self) -> bool:
+        native = current_wechat_native_payment_config()
+        return native.enabled and bool(self.transfer_scene_id) and self.provider_mode == PAYMENT_PROVIDER_WECHAT_NATIVE
+
+
 def current_wechat_native_payment_config() -> WeChatNativePaymentConfig:
     api_base_url = _env_text("PLM_WECHAT_PAY_API_BASE_URL") or "https://api.mch.weixin.qq.com"
     raw_timeout = _env_text("PLM_WECHAT_PAY_TIMEOUT_SECONDS") or "10"
@@ -199,6 +238,46 @@ def current_wechat_native_payment_config() -> WeChatNativePaymentConfig:
     )
 
 
+def current_wechat_payout_config() -> WeChatPayoutConfig:
+    native = current_wechat_native_payment_config()
+    provider_mode = _env_text("PLM_WECHAT_PAY_PAYOUT_PROVIDER_MODE") or PAYMENT_PROVIDER_WECHAT_NATIVE
+    if provider_mode not in {PAYMENT_PROVIDER_WECHAT_NATIVE, PAYMENT_PROVIDER_MANUAL_TEST, "disabled"}:
+        provider_mode = PAYMENT_PROVIDER_WECHAT_NATIVE
+    raw_scene_infos = _env_text("PLM_WECHAT_PAY_TRANSFER_SCENE_REPORT_INFOS_JSON")
+    scene_infos: tuple[dict[str, str], ...] = (
+        {"info_type": "活动名称", "info_content": "LearningPyramid 邀请佣金"},
+        {"info_type": "奖励说明", "info_content": "会员邀请佣金提现"},
+    )
+    if raw_scene_infos:
+        try:
+            parsed = json.loads(raw_scene_infos)
+            if isinstance(parsed, list):
+                scene_infos = tuple(
+                    {
+                        "info_type": str(item.get("info_type") or item.get("type") or "").strip(),
+                        "info_content": str(item.get("info_content") or item.get("content") or "").strip(),
+                    }
+                    for item in parsed
+                    if isinstance(item, dict)
+                )
+        except Exception:
+            scene_infos = scene_infos
+    return WeChatPayoutConfig(
+        app_id=native.app_id,
+        mch_id=native.mch_id,
+        app_secret=_env_text("PLM_WECHAT_PAY_APP_SECRET"),
+        api_base_url=native.api_base_url,
+        transfer_scene_id=_env_text("PLM_WECHAT_PAY_TRANSFER_SCENE_ID"),
+        transfer_remark=_env_text("PLM_WECHAT_PAY_TRANSFER_REMARK") or "会员邀请佣金提现",
+        notify_url=_env_text("PLM_WECHAT_PAY_TRANSFER_NOTIFY_URL") or None,
+        oauth_authorize_url=_env_text("PLM_WECHAT_PAY_OAUTH_AUTHORIZE_URL") or "https://open.weixin.qq.com/connect/oauth2/authorize",
+        oauth_token_url=_env_text("PLM_WECHAT_PAY_OAUTH_TOKEN_URL") or "https://api.weixin.qq.com/sns/oauth2/access_token",
+        scene_report_infos=tuple(item for item in scene_infos if item["info_type"] and item["info_content"]),
+        binding_qr_ttl_minutes=_env_int("PLM_WECHAT_PAY_BINDING_QR_TTL_MINUTES", 10, min_value=1, max_value=60),
+        provider_mode=provider_mode,
+    )
+
+
 def list_supported_membership_payment_providers() -> tuple[str, ...]:
     providers: set[str] = set()
     if manual_test_payment_enabled():
@@ -230,6 +309,7 @@ class CommissionWithdrawalLike(Protocol):
     user_id: str
     amount_cent: int
     wechat_open_id: str
+    out_bill_no: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -278,6 +358,20 @@ class CommissionPayoutStatus:
     remote_status: str
     failure_reason: str
     raw_payload_json: str
+    out_bill_no: str = ""
+    provider_state: str = ""
+    package_info: str | None = None
+    amount_cent: int | None = None
+    appid: str | None = None
+    confirmation: "PayoutConfirmationPayload | None" = None
+
+
+@dataclass(frozen=True, slots=True)
+class PayoutConfirmationPayload:
+    mode: str
+    mch_id: str
+    app_id: str
+    package_info: str
 
 
 class MembershipPaymentService:
@@ -288,6 +382,9 @@ class MembershipPaymentService:
 
     def supported_providers(self) -> tuple[str, ...]:
         return list_supported_membership_payment_providers()
+
+    def current_wechat_payout_config(self) -> WeChatPayoutConfig:
+        return current_wechat_payout_config()
 
     def create_payment_payload(
         self,
@@ -369,7 +466,7 @@ class MembershipPaymentService:
         return self._parse_wechat_refund_notification(headers=headers, body_text=body_text)
 
     def request_commission_payout(self, withdrawal: CommissionWithdrawalLike) -> CommissionPayoutStatus:
-        if manual_test_payment_enabled() and not current_wechat_native_payment_config().enabled:
+        if manual_test_payment_enabled() and not current_wechat_payout_config().enabled:
             provider_transfer_no = f"manual_{withdrawal.withdrawal_id}"
             return CommissionPayoutStatus(
                 withdrawal_id=withdrawal.withdrawal_id,
@@ -381,13 +478,69 @@ class MembershipPaymentService:
                         "mode": "manual_test",
                         "withdrawalId": withdrawal.withdrawal_id,
                         "providerTransferNo": provider_transfer_no,
+                        "outBillNo": getattr(withdrawal, "out_bill_no", ""),
                     },
                     ensure_ascii=False,
                     separators=(",", ":"),
                     sort_keys=True,
                 ),
+                out_bill_no=getattr(withdrawal, "out_bill_no", ""),
+                provider_state="PROCESSING",
+                amount_cent=int(withdrawal.amount_cent),
+                appid="manual_test",
             )
         return self._request_wechat_commission_payout(withdrawal)
+
+    def build_wechat_payout_binding_authorization_url(self, *, state: str, return_url: str, channel: str) -> str:
+        if str(channel or "").strip().lower() == PAYMENT_PROVIDER_MANUAL_TEST or manual_test_payment_enabled():
+            return f"manual_test://wechat-payout-bind?{urlencode({'state': state, 'returnUrl': return_url})}"
+        config = current_wechat_payout_config()
+        if not config.app_id:
+            raise PreconditionFailure("wechat payout appid is not configured in this deployment")
+        redirect_uri = str(return_url or "").strip()
+        if not redirect_uri:
+            raise PreconditionFailure("wechat binding returnUrl is required")
+        query = urlencode(
+            {
+                "appid": config.app_id,
+                "redirect_uri": redirect_uri,
+                "response_type": "code",
+                "scope": "snsapi_base",
+                "state": str(state),
+            }
+        )
+        return f"{config.oauth_authorize_url}?{query}#wechat_redirect"
+
+    def resolve_wechat_payout_openid(self, *, authorization_code: str, channel: str) -> tuple[str, str]:
+        code = str(authorization_code or "").strip()
+        if not code:
+            raise PreconditionFailure("wechat authorizationCode is required")
+        config = current_wechat_payout_config()
+        if str(channel or "").strip().lower() == PAYMENT_PROVIDER_MANUAL_TEST or (manual_test_payment_enabled() and not config.enabled):
+            return code, config.app_id or "manual_test"
+        if not config.app_id or not config.app_secret:
+            raise PreconditionFailure("wechat payout OAuth appid/app secret is not configured")
+        response = self._session.get(
+            config.oauth_token_url,
+            params={
+                "appid": config.app_id,
+                "secret": config.app_secret,
+                "code": code,
+                "grant_type": "authorization_code",
+            },
+            timeout=current_wechat_native_payment_config().timeout_seconds,
+        )
+        if not response.ok:
+            raise PreconditionFailure(f"wechat OAuth request failed with HTTP {response.status_code}: {(response.text or '')[:400]}")
+        try:
+            payload = response.json()
+        except Exception as exc:
+            raise PreconditionFailure("wechat OAuth returned a non-JSON response") from exc
+        openid = str(payload.get("openid") or "").strip()
+        if not openid:
+            err = str(payload.get("errmsg") or payload.get("errcode") or "wechat OAuth did not return openid")
+            raise PreconditionFailure(err)
+        return openid, config.app_id
 
     def _create_wechat_native_payload(
         self,
@@ -540,43 +693,73 @@ class MembershipPaymentService:
         )
 
     def _request_wechat_commission_payout(self, withdrawal: CommissionWithdrawalLike) -> CommissionPayoutStatus:
-        config = current_wechat_native_payment_config()
+        config = current_wechat_payout_config()
         if not config.enabled:
             raise PreconditionFailure("wechat payout is not configured in this deployment")
-        provider_transfer_no = f"wxt_{uuid.uuid4().hex}"
         request_body: dict[str, object] = {
             "appid": config.app_id,
-            "out_batch_no": provider_transfer_no,
-            "batch_name": "LearningPyramid 佣金提现",
-            "batch_remark": "会员邀请佣金提现",
-            "total_amount": int(withdrawal.amount_cent),
-            "total_num": 1,
-            "transfer_detail_list": [
-                {
-                    "out_detail_no": str(withdrawal.withdrawal_id),
-                    "transfer_amount": int(withdrawal.amount_cent),
-                    "transfer_remark": "会员邀请佣金提现",
-                    "openid": str(withdrawal.wechat_open_id),
-                }
-            ],
+            "out_bill_no": str(withdrawal.out_bill_no),
+            "transfer_scene_id": config.transfer_scene_id,
+            "openid": str(withdrawal.wechat_open_id),
+            "transfer_amount": int(withdrawal.amount_cent),
+            "transfer_remark": config.transfer_remark[:32],
+            "user_recv_perception": "会员邀请佣金提现",
         }
-        response_body = self._wechat_request_json("POST", "/v3/transfer/batches", request_body)
-        resolved_transfer_no = str(response_body.get("batch_id") or response_body.get("out_batch_no") or provider_transfer_no).strip() or provider_transfer_no
-        status_value = str(response_body.get("batch_status") or response_body.get("status") or "ACCEPTED").strip().upper()
-        remote_status = "processing"
-        failure_reason = ""
-        if status_value in {"FINISHED", "SUCCESS"}:
-            remote_status = "succeeded"
-        elif status_value in {"CLOSED", "FAIL", "FAILED"}:
-            remote_status = "failed"
-            failure_reason = str(response_body.get("fail_reason") or response_body.get("reason") or "wechat payout failed").strip()
-        return CommissionPayoutStatus(
+        if config.notify_url:
+            request_body["notify_url"] = config.notify_url
+        if config.scene_report_infos:
+            request_body["transfer_scene_report_infos"] = list(config.scene_report_infos)
+        response_body = self._wechat_request_json("POST", "/v3/fund-app/mch-transfer/transfer-bills", request_body)
+        return self._wechat_transfer_status_from_payload(
             withdrawal_id=str(withdrawal.withdrawal_id),
-            provider_transfer_no=resolved_transfer_no,
-            remote_status=remote_status,
-            failure_reason=failure_reason,
-            raw_payload_json=json.dumps(response_body, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
+            fallback_out_bill_no=str(withdrawal.out_bill_no),
+            payload=response_body,
         )
+
+    def query_commission_payout(self, out_bill_no: str, *, withdrawal_id: str = "") -> CommissionPayoutStatus:
+        config = current_wechat_payout_config()
+        if not config.enabled:
+            raise PreconditionFailure("wechat payout is not configured in this deployment")
+        normalized_out_bill_no = str(out_bill_no or "").strip()
+        if not normalized_out_bill_no:
+            raise PreconditionFailure("wechat payout outBillNo must be non-empty")
+        uri = (
+            f"/v3/fund-app/mch-transfer/transfer-bills/out-bill-no/{quote(normalized_out_bill_no, safe='')}"
+            f"?mchid={quote(config.mch_id, safe='')}"
+        )
+        response_body = self._wechat_request_json("GET", uri)
+        return self._wechat_transfer_status_from_payload(
+            withdrawal_id=str(withdrawal_id or ""),
+            fallback_out_bill_no=normalized_out_bill_no,
+            payload=response_body,
+        )
+
+    def parse_transfer_notification(
+        self,
+        *,
+        headers: Mapping[str, str],
+        body_text: str,
+    ) -> CommissionPayoutStatus:
+        config = current_wechat_payout_config()
+        if not config.enabled:
+            raise PreconditionFailure("wechat payout is not configured in this deployment")
+        self._verify_wechat_signature(headers=headers, body_text=body_text)
+        try:
+            envelope = json.loads(body_text)
+        except Exception as exc:
+            raise PreconditionFailure("wechat transfer notification body must be valid JSON") from exc
+        resource = envelope.get("resource")
+        if not isinstance(resource, dict):
+            raise PreconditionFailure("wechat transfer notification is missing its encrypted resource")
+        decrypted = self._decrypt_wechat_resource(resource)
+        payload = dict(decrypted)
+        payload["_raw_payload_json"] = json.dumps(
+            {"notification": envelope, "resource": decrypted},
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        return self._wechat_transfer_status_from_payload(withdrawal_id="", fallback_out_bill_no="", payload=payload)
 
     def _query_wechat_refund(
         self,
@@ -885,3 +1068,67 @@ class MembershipPaymentService:
         if normalized_status in {"CLOSED", "ABNORMAL"}:
             return "failed"
         return "unknown"
+
+    @staticmethod
+    def _map_wechat_transfer_state(state: str) -> str:
+        normalized_state = str(state or "").strip().upper()
+        if normalized_state == "WAIT_USER_CONFIRM":
+            return PAYOUT_STATUS_AWAITING_CONFIRMATION
+        if normalized_state in {"ACCEPTED", "PROCESSING", "TRANSFERRING"}:
+            return PAYOUT_STATUS_PROCESSING
+        if normalized_state == "SUCCESS":
+            return PAYOUT_STATUS_SUCCEEDED
+        if normalized_state in {"FAIL", "FAILED"}:
+            return PAYOUT_STATUS_FAILED
+        if normalized_state in {"CANCELING", "CANCELLED", "CANCELED"}:
+            return PAYOUT_STATUS_CANCELED
+        return PAYOUT_STATUS_NEEDS_ATTENTION
+
+    @staticmethod
+    def _wechat_transfer_status_from_payload(
+        *,
+        withdrawal_id: str,
+        fallback_out_bill_no: str,
+        payload: Mapping[str, object],
+    ) -> CommissionPayoutStatus:
+        state = str(payload.get("state") or payload.get("transfer_state") or payload.get("status") or "PROCESSING").strip().upper()
+        mapped = MembershipPaymentService._map_wechat_transfer_state(state)
+        transfer_bill_no = str(payload.get("transfer_bill_no") or payload.get("transfer_bill_no") or "").strip()
+        out_bill_no = str(payload.get("out_bill_no") or fallback_out_bill_no).strip()
+        package_info = str(payload.get("package_info") or "").strip() or None
+        raw_payload_json = str(payload.get("_raw_payload_json") or "")
+        if not raw_payload_json:
+            raw_payload_json = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+        amount_value = payload.get("transfer_amount")
+        amount_cent: int | None = None
+        if amount_value is not None:
+            try:
+                amount_cent = int(amount_value)
+            except Exception:
+                amount_cent = None
+        appid = str(payload.get("appid") or "").strip() or None
+        confirmation = None
+        if mapped == PAYOUT_STATUS_AWAITING_CONFIRMATION and package_info:
+            config = current_wechat_payout_config()
+            confirmation = PayoutConfirmationPayload(
+                mode="wechat_jsapi_requestMerchantTransfer",
+                mch_id=config.mch_id,
+                app_id=config.app_id,
+                package_info=package_info,
+            )
+        failure_reason = ""
+        if mapped in {PAYOUT_STATUS_FAILED, PAYOUT_STATUS_CANCELED, PAYOUT_STATUS_NEEDS_ATTENTION}:
+            failure_reason = str(payload.get("fail_reason") or payload.get("reason") or payload.get("remark") or "").strip()
+        return CommissionPayoutStatus(
+            withdrawal_id=str(withdrawal_id),
+            provider_transfer_no=transfer_bill_no or None,
+            remote_status=mapped,
+            failure_reason=failure_reason,
+            raw_payload_json=raw_payload_json,
+            out_bill_no=out_bill_no,
+            provider_state=state,
+            package_info=package_info,
+            amount_cent=amount_cent,
+            appid=appid,
+            confirmation=confirmation,
+        )

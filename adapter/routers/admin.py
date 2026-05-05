@@ -10,6 +10,7 @@ from adapter.schemas import (
     AdminRefundMembershipOrderRequest,
     AdminResolveCommissionWithdrawalRequest,
     AdminVoidMembershipCouponRequest,
+    SyncCommissionWithdrawalRequest,
     UpdateUserRoleRequest,
     UpdateUserStatusRequest,
 )
@@ -26,7 +27,22 @@ from backend.system.membership_marketing_store import (
     MembershipMarketingAdminOverview,
     MembershipMarketingStore,
 )
-from backend.system.membership_commission_store import CommissionAdminOverview, CommissionRecord, CommissionSettlementResult, MembershipCommissionStore, WithdrawalRequest
+from backend.system.membership_commission_store import (
+    WITHDRAWAL_STATUS_AWAITING_CONFIRMATION,
+    WITHDRAWAL_STATUS_CANCELED,
+    WITHDRAWAL_STATUS_FAILED,
+    WITHDRAWAL_STATUS_NEEDS_ATTENTION,
+    WITHDRAWAL_STATUS_PROCESSING,
+    WITHDRAWAL_STATUS_SUCCEEDED,
+    CommissionAdminOverview,
+    CommissionRecord,
+    CommissionSettlementResult,
+    MembershipCommissionStore,
+    PayoutIdentity,
+    PayoutProviderEvent,
+    ReconciliationWarning,
+    WithdrawalRequest,
+)
 from backend.system.membership_payment_service import MembershipPaymentService, MembershipRemotePaymentStatus
 from backend.system.membership_store import (
     MembershipAdminOverview,
@@ -327,6 +343,10 @@ def _admin_commission_to_dto(item: CommissionRecord, auth_store: AuthStore) -> d
         "settledAt": item.settled_at,
         "canceledAt": item.canceled_at,
         "cancelReason": item.cancel_reason,
+        "settlementMode": item.settlement_mode,
+        "lastSettlementCheckedAt": item.last_settlement_checked_at,
+        "settlementRunId": item.settlement_run_id,
+        "settlementFailureReason": item.settlement_failure_reason,
     }
 
 
@@ -347,12 +367,67 @@ def _admin_withdrawal_to_dto(item: WithdrawalRequest, auth_store: AuthStore) -> 
         "amountCent": item.amount_cent,
         "targetType": item.target_type,
         "wechatOpenIdMasked": _mask_wechat_open_id(item.wechat_open_id),
+        "identityId": item.identity_id,
+        "identityMaskedLabel": item.identity_masked_label or _mask_wechat_open_id(item.wechat_open_id),
         "status": item.status,
         "providerTransferNo": item.provider_transfer_no,
+        "outBillNo": item.out_bill_no,
+        "transferBillNo": item.transfer_bill_no or item.provider_transfer_no,
+        "providerState": item.provider_state,
         "failureReason": item.failure_reason,
         "createdAt": item.created_at,
+        "reservedAt": item.reserved_at,
         "submittedAt": item.submitted_at,
+        "confirmationRequestedAt": item.confirmation_requested_at,
         "completedAt": item.completed_at,
+    }
+
+
+def _admin_payout_identity_to_dto(item: PayoutIdentity, auth_store: AuthStore) -> dict[str, object]:
+    return {
+        "identityId": item.identity_id,
+        "user": _admin_user_ref_to_dto(item.user_id, auth_store),
+        "userId": item.user_id,
+        "provider": item.provider,
+        "appid": item.appid,
+        "maskedLabel": item.masked_openid,
+        "status": item.status,
+        "verifiedAt": item.verified_at,
+        "revokedAt": item.revoked_at,
+        "latestBindingAttemptId": item.latest_binding_attempt_id,
+        "failureReason": item.failure_reason,
+        "createdAt": item.created_at,
+        "updatedAt": item.updated_at,
+    }
+
+
+def _admin_provider_event_to_dto(item: PayoutProviderEvent) -> dict[str, object]:
+    return {
+        "eventId": item.event_id,
+        "withdrawalId": item.withdrawal_id,
+        "eventType": item.event_type,
+        "provider": item.provider,
+        "providerEventId": item.provider_event_id,
+        "outBillNo": item.out_bill_no,
+        "transferBillNo": item.transfer_bill_no,
+        "providerState": item.provider_state,
+        "mappedStatus": item.mapped_status,
+        "rawPayloadJson": item.raw_payload_json,
+        "signatureVerified": item.signature_verified,
+        "createdAt": item.created_at,
+    }
+
+
+def _admin_reconciliation_warning_to_dto(item: ReconciliationWarning) -> dict[str, object]:
+    return {
+        "warningId": item.warning_id,
+        "withdrawalId": item.withdrawal_id,
+        "severity": item.severity,
+        "reasonCode": item.reason_code,
+        "message": item.message,
+        "status": item.status,
+        "createdAt": item.created_at,
+        "resolvedAt": item.resolved_at,
     }
 
 
@@ -722,7 +797,77 @@ def settle_admin_membership_commissions(
         target_id="batch",
         summary=f"Settled {result.settled_count} commissions, canceled {result.canceled_count}, skipped {result.skipped_count}",
     )
-    return {"ok": True, "data": {"settledCount": result.settled_count, "canceledCount": result.canceled_count, "skippedCount": result.skipped_count}}
+    return {
+        "ok": True,
+        "data": {
+            "runId": result.run_id,
+            "scannedCount": result.scanned_count,
+            "settledCount": result.settled_count,
+            "canceledCount": result.canceled_count,
+            "skippedCount": result.skipped_count,
+            "errorCount": result.error_count,
+        },
+    }
+
+
+@router.get("/admin/membership/payout-identities")
+def list_admin_membership_payout_identities(
+    request: Request,
+    search: str | None = None,
+    status: str | None = None,
+    limit: int = 100,
+    auth_store: AuthStore = Depends(get_auth_store),
+    membership_commission_store: MembershipCommissionStore = Depends(get_membership_commission_store),
+) -> dict:
+    require_admin_user(request, auth_store)
+    user_ids = _resolve_admin_user_search_ids(auth_store, search)
+    items = membership_commission_store.list_admin_payout_identities(status=status, search_user_ids=user_ids, limit=limit)
+    return {"ok": True, "data": [_admin_payout_identity_to_dto(item, auth_store) for item in items]}
+
+
+@router.get("/admin/membership/withdrawals/events")
+def list_admin_membership_withdrawal_events(
+    request: Request,
+    withdrawalId: str | None = None,
+    limit: int = 100,
+    auth_store: AuthStore = Depends(get_auth_store),
+    membership_commission_store: MembershipCommissionStore = Depends(get_membership_commission_store),
+) -> dict:
+    require_admin_user(request, auth_store)
+    items = membership_commission_store.list_payout_provider_events(withdrawal_id=withdrawalId, limit=limit)
+    return {"ok": True, "data": [_admin_provider_event_to_dto(item) for item in items]}
+
+
+@router.get("/admin/membership/withdrawals/warnings")
+def list_admin_membership_withdrawal_warnings(
+    request: Request,
+    status: str | None = None,
+    limit: int = 100,
+    auth_store: AuthStore = Depends(get_auth_store),
+    membership_commission_store: MembershipCommissionStore = Depends(get_membership_commission_store),
+) -> dict:
+    require_admin_user(request, auth_store)
+    items = membership_commission_store.list_reconciliation_warnings(status=status, limit=limit)
+    return {"ok": True, "data": [_admin_reconciliation_warning_to_dto(item) for item in items]}
+
+
+@router.post("/admin/membership/withdrawals/warnings/{warningId}/ack")
+def acknowledge_admin_membership_withdrawal_warning(
+    warningId: str,
+    request: Request,
+    auth_store: AuthStore = Depends(get_auth_store),
+    membership_commission_store: MembershipCommissionStore = Depends(get_membership_commission_store),
+) -> dict:
+    actor = require_admin_user(request, auth_store)
+    warning = membership_commission_store.resolve_reconciliation_warning(warningId)
+    auth_store.record_admin_action(
+        actor_user_id=actor.user_id,
+        action_type="membership.withdrawal_warning_acknowledged",
+        target_kind="membership_withdrawal_warning",
+        target_id=warning.warning_id,
+        summary=f"Acknowledged withdrawal warning {warning.warning_id} for {warning.withdrawal_id}",
+    )
+    return {"ok": True, "data": _admin_reconciliation_warning_to_dto(warning)}
 
 
 @router.get("/admin/membership/withdrawals")
@@ -773,6 +918,63 @@ def resolve_admin_membership_withdrawal(
         summary=f"Marked withdrawal {item.withdrawal_id} as {item.status}",
     )
     return {"ok": True, "data": _admin_withdrawal_to_dto(item, auth_store)}
+
+
+@router.post("/admin/membership/withdrawals/{withdrawalId}/sync")
+def sync_admin_membership_withdrawal(
+    withdrawalId: str,
+    request: Request,
+    req: SyncCommissionWithdrawalRequest | None = None,
+    auth_store: AuthStore = Depends(get_auth_store),
+    membership_commission_store: MembershipCommissionStore = Depends(get_membership_commission_store),
+    membership_payment_service: MembershipPaymentService = Depends(get_membership_payment_service),
+) -> dict:
+    actor = require_admin_user(request, auth_store)
+    withdrawal = membership_commission_store.get_withdrawal_request(withdrawalId)
+    if withdrawal is None:
+        raise NotFound("withdrawal request")
+    remote = membership_payment_service.query_commission_payout(withdrawal.out_bill_no, withdrawal_id=withdrawal.withdrawal_id)
+    if remote.remote_status in {
+        WITHDRAWAL_STATUS_SUCCEEDED,
+        WITHDRAWAL_STATUS_FAILED,
+        WITHDRAWAL_STATUS_CANCELED,
+        WITHDRAWAL_STATUS_NEEDS_ATTENTION,
+        WITHDRAWAL_STATUS_AWAITING_CONFIRMATION,
+        WITHDRAWAL_STATUS_PROCESSING,
+    }:
+        updated = membership_commission_store.apply_withdrawal_provider_result(
+            out_bill_no=withdrawal.out_bill_no,
+            provider_state=remote.provider_state,
+            mapped_status=remote.remote_status,
+            transfer_bill_no=remote.provider_transfer_no,
+            amount_cent=remote.amount_cent,
+            appid=remote.appid,
+            raw_payload_json=remote.raw_payload_json,
+            provider_event_id=remote.provider_transfer_no or withdrawal.out_bill_no,
+            event_type="query",
+            failure_reason=remote.failure_reason,
+            signature_verified=True,
+        )
+    else:
+        updated = withdrawal
+    auth_store.record_admin_action(
+        actor_user_id=actor.user_id,
+        action_type="membership.withdrawal_synced",
+        target_kind="membership_withdrawal",
+        target_id=updated.withdrawal_id,
+        summary=f"Synced withdrawal {updated.withdrawal_id}, {withdrawal.status} -> {updated.status}",
+    )
+    return {
+        "ok": True,
+        "data": {
+            "withdrawalId": updated.withdrawal_id,
+            "previousStatus": withdrawal.status,
+            "currentStatus": updated.status,
+            "providerState": remote.provider_state,
+            "action": f"marked_{updated.status}" if updated.status != withdrawal.status else f"kept_{updated.status}",
+            "withdrawal": _admin_withdrawal_to_dto(updated, auth_store),
+        },
+    }
 
 
 @router.post("/admin/membership/coupons/grant")

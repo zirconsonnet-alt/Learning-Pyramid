@@ -78,12 +78,28 @@ PLM_PIP_RETRIES=10
 
 佣金提现使用同一套微信支付商户号、证书和签名配置发起转账请求。上线前需要确认商户号已经具备对应的微信支付转账能力；如果提现请求进入 `processing` 后无法自动获得最终结果，可在后台提现列表中根据微信支付商户后台结果手动标记成功或失败。
 
+生产提现还需要配置微信支付商家转账到零钱场景：
+
+- `PLM_WECHAT_PAY_APP_SECRET`：用于微信授权换取绑定收款身份的 OpenID
+- `PLM_WECHAT_PAY_PAYOUT_PROVIDER_MODE`：生产使用 `wechat_native`；本地模拟可配合 `PLM_ENABLE_MANUAL_TEST_PAYMENT=true`
+- `PLM_WECHAT_PAY_BINDING_QR_TTL_MINUTES`：桌面绑定二维码有效期，默认 `10`，允许 `1` 到 `60`
+- `PLM_WECHAT_PAY_TRANSFER_SCENE_ID`：微信支付商户平台配置的转账场景 ID
+- `PLM_WECHAT_PAY_TRANSFER_REMARK`：可选，默认 `会员邀请佣金提现`
+- `PLM_WECHAT_PAY_TRANSFER_NOTIFY_URL`：推荐显式配置为公网 HTTPS 的 `/api/payments/wechat/transfer-notify`
+- `PLM_WECHAT_PAY_TRANSFER_SCENE_REPORT_INFOS_JSON`：可选，按微信支付场景要求填写 JSON 数组
+- `PLM_WECHAT_PAY_OAUTH_AUTHORIZE_URL` / `PLM_WECHAT_PAY_OAUTH_TOKEN_URL`：通常使用默认微信地址，只有代理或沙箱环境需要覆盖
+
+用户提现前必须先绑定微信收款身份。生产环境应通过微信授权拿到当前 AppID 下的 OpenID；本地验收可以在开启 `PLM_ENABLE_MANUAL_TEST_PAYMENT=true` 时使用 `manual_test` 绑定和提现模拟。
+
+佣金默认在支付成功后 `24 小时` 退款窗口结束才进入可提现。本地或预发验收需要快速走通提现时，可以临时设置 `PLM_MEMBERSHIP_COMMISSION_REFUND_WINDOW_MINUTES=1`；生产环境建议保持默认 `1440`。
+
 ## 3. 公网回调地址
 
 上线后必须从公网可访问：
 
 - `POST /api/payments/wechat/notify`
 - `POST /api/payments/wechat/refund-notify`
+- `POST /api/payments/wechat/transfer-notify`
 
 推荐至少人工验证一次：
 
@@ -107,10 +123,12 @@ PLM_PIP_RETRIES=10
 
 佣金提现链路建议至少人工验证一次：
 
-1. 使用有可提现佣金的邀请人发起提现
-2. 确认提现金额从可提现余额转入冻结/处理中余额
-3. 根据微信支付返回或商户后台结果，将提现标记为成功或失败
-4. 成功时确认金额进入已打款余额；失败时确认金额退回可提现余额
+1. 使用有可提现佣金的邀请人完成微信收款身份绑定，页面只应显示脱敏身份
+2. 发起提现，确认请求体不再要求手输 OpenID
+3. 如果微信返回待用户确认，必须在微信客户端内触发 `requestMerchantTransfer`
+4. 确认提现金额从可提现余额转入冻结/处理中余额
+5. 通过微信转账通知或主动对账同步最终状态
+6. 成功时确认金额进入已打款余额；失败/取消时确认金额退回可提现余额
 
 ## 4. 巡检任务
 
@@ -141,12 +159,23 @@ python tools/reconcile_membership_payments.py --min-age-minutes 10 --limit 200
 - `PLM_MEMBERSHIP_PENDING_PAYMENT_RECONCILE_MIN_AGE_MINUTES`
 - `PLM_MEMBERSHIP_PENDING_PAYMENT_RECONCILE_LIMIT`
 
+邀请佣金和提现自动化还需要两个定时任务：
+
+```bash
+python tools/settle_membership_commissions.py --limit 200
+python tools/reconcile_commission_withdrawals.py --min-age-minutes 2 --limit 100
+```
+
+建议每 5 分钟执行一次。第一个脚本会把超过 24 小时退款窗口且未退款的待结算佣金转入可提现；第二个脚本会按商户提现单号查询微信转账状态，补齐漏掉的通知结果，并保留对账运行摘要和告警。
+
 ## 5. Windows 计划任务示例
 
 如果你是 Windows 自托管，可以用任务计划程序每 5 分钟执行一次：
 
 ```powershell
 python i:\Projects\LearningPyramid\tools\reconcile_membership_payments.py --min-age-minutes 5 --limit 100
+python i:\Projects\LearningPyramid\tools\settle_membership_commissions.py --limit 200
+python i:\Projects\LearningPyramid\tools\reconcile_commission_withdrawals.py --min-age-minutes 2 --limit 100
 ```
 
 建议：
@@ -160,6 +189,8 @@ python i:\Projects\LearningPyramid\tools\reconcile_membership_payments.py --min-
 
 ```cron
 */5 * * * * cd /srv/learningpyramid && /usr/bin/python3 tools/reconcile_membership_payments.py --min-age-minutes 5 --limit 100 >> /var/log/learningpyramid-membership-reconcile.log 2>&1
+*/5 * * * * cd /srv/learningpyramid && /usr/bin/python3 tools/settle_membership_commissions.py --limit 200 >> /var/log/learningpyramid-commission-settle.log 2>&1
+*/5 * * * * cd /srv/learningpyramid && /usr/bin/python3 tools/reconcile_commission_withdrawals.py --min-age-minutes 2 --limit 100 >> /var/log/learningpyramid-withdrawal-reconcile.log 2>&1
 ```
 
 ## 7. 上线后首日重点观察
@@ -168,6 +199,8 @@ python i:\Projects\LearningPyramid\tools\reconcile_membership_payments.py --min-
 - 是否出现支付成功但本地没有发会员的情况
 - 是否出现退款成功但本地仍停留在 `refund_pending`
 - 是否出现超过 `24 小时` 的已支付订单仍能发起新退款
+- 是否出现提现长期停留在 `awaiting_confirmation` / `processing`
+- 是否出现对账告警未处理或同一商户单反复异常
 - 被邀请人绑定邀请码后是否只获得一张 `7.5 折会员券`
 - 邀请人是否不再获得新的 `邀请奖励 5 元券`
 - 邀请佣金是否在首单支付后进入待结算，并只在 `24 小时` 退款窗口结束后转入可提现
@@ -198,6 +231,9 @@ python i:\Projects\LearningPyramid\tools\reconcile_membership_payments.py --min-
 - `POST /api/membership/orders/{orderId}/sync-payment`
 - `POST /api/membership/orders/{orderId}/close`
 - `GET /api/commissions/me`
+- `GET /api/commissions/payout-identity`
+- `POST /api/commissions/payout-identity/wechat/binding-attempts`
+- `POST /api/commissions/payout-identity/wechat/bind`
 - `GET /api/commissions/withdrawals`
 - `POST /api/commissions/withdrawals`
 
@@ -205,6 +241,7 @@ python i:\Projects\LearningPyramid\tools\reconcile_membership_payments.py --min-
 
 - `POST /api/payments/wechat/notify`
 - `POST /api/payments/wechat/refund-notify`
+- `POST /api/payments/wechat/transfer-notify`
 
 后台：
 
@@ -218,4 +255,9 @@ python i:\Projects\LearningPyramid\tools\reconcile_membership_payments.py --min-
 - `GET /api/admin/membership/commissions`
 - `POST /api/admin/membership/commissions/settle`
 - `GET /api/admin/membership/withdrawals`
+- `GET /api/admin/membership/payout-identities`
+- `GET /api/admin/membership/withdrawals/events`
+- `GET /api/admin/membership/withdrawals/warnings`
+- `POST /api/admin/membership/withdrawals/warnings/{warningId}/ack`
+- `POST /api/admin/membership/withdrawals/{withdrawalId}/sync`
 - `POST /api/admin/membership/withdrawals/{withdrawalId}/resolve`

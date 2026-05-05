@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import uuid
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import PlainTextResponse
@@ -9,10 +11,12 @@ from adapter.auth import require_request_auth_user
 from adapter.deps import get_auth_store, get_membership_commission_store, get_membership_marketing_store, get_membership_payment_service, get_membership_store
 from adapter.schemas import (
     BindInviteCodeRequest,
+    CompleteWeChatPayoutBindingRequest,
     ConfirmMembershipPaymentRequest,
     CreateCommissionWithdrawalRequest,
     CreateMembershipOrderRequest,
     PreviewMembershipOrderRequest,
+    StartWeChatPayoutBindingRequest,
 )
 from backend.models.errors import NotFound, PreconditionFailure
 from backend.system.auth_store import AuthStore
@@ -24,12 +28,27 @@ from backend.system.membership_marketing_store import (
     InviteSummary,
     MembershipMarketingStore,
 )
-from backend.system.membership_commission_store import CommissionAccountSummary, CommissionRecord, MembershipCommissionStore, WithdrawalRequest
+from backend.system.membership_commission_store import (
+    WITHDRAWAL_STATUS_AWAITING_CONFIRMATION,
+    WITHDRAWAL_STATUS_CANCELED,
+    WITHDRAWAL_STATUS_FAILED,
+    WITHDRAWAL_STATUS_NEEDS_ATTENTION,
+    WITHDRAWAL_STATUS_PROCESSING,
+    WITHDRAWAL_STATUS_SUCCEEDED,
+    CommissionAccountSummary,
+    CommissionRecord,
+    MembershipCommissionStore,
+    PayoutBindingAttempt,
+    PayoutIdentity,
+    WithdrawalRequest,
+    _utc_now as commission_utc_now,
+)
 from backend.system.membership_payment_service import (
     MembershipPaymentPayload,
     MembershipPaymentService,
     MembershipRemotePaymentStatus,
     PAYMENT_PROVIDER_MANUAL_TEST,
+    PayoutConfirmationPayload,
 )
 from backend.system.membership_store import (
     MembershipOrderCloseResult,
@@ -265,6 +284,10 @@ def _commission_record_to_dto(item: CommissionRecord) -> dict[str, object]:
         "settledAt": item.settled_at,
         "canceledAt": item.canceled_at,
         "cancelReason": item.cancel_reason,
+        "settlementMode": item.settlement_mode,
+        "lastSettlementCheckedAt": item.last_settlement_checked_at,
+        "settlementRunId": item.settlement_run_id,
+        "settlementFailureReason": item.settlement_failure_reason,
     }
 
 
@@ -284,13 +307,113 @@ def _withdrawal_to_dto(item: WithdrawalRequest) -> dict[str, object]:
         "amountCent": item.amount_cent,
         "targetType": item.target_type,
         "wechatOpenIdMasked": _mask_wechat_open_id(item.wechat_open_id),
+        "identityId": item.identity_id,
+        "identityMaskedLabel": item.identity_masked_label or _mask_wechat_open_id(item.wechat_open_id),
         "status": item.status,
         "providerTransferNo": item.provider_transfer_no,
+        "outBillNo": item.out_bill_no,
+        "transferBillNo": item.transfer_bill_no or item.provider_transfer_no,
+        "providerState": item.provider_state,
+        "confirmation": None,
         "failureReason": item.failure_reason,
         "createdAt": item.created_at,
+        "reservedAt": item.reserved_at,
         "submittedAt": item.submitted_at,
+        "confirmationRequestedAt": item.confirmation_requested_at,
         "completedAt": item.completed_at,
     }
+
+
+def _payout_confirmation_to_dto(item: PayoutConfirmationPayload | None) -> dict[str, object] | None:
+    if item is None:
+        return None
+    return {
+        "mode": item.mode,
+        "mchId": item.mch_id,
+        "appId": item.app_id,
+        "packageInfo": item.package_info,
+    }
+
+
+def _binding_attempt_to_dto(item: PayoutBindingAttempt) -> dict[str, object]:
+    next_action = "wait_for_scan"
+    if item.status == "scanned":
+        next_action = "wait_for_mobile_confirmation"
+    elif item.status == "bound":
+        next_action = "withdraw"
+    elif item.status in {"failed", "expired", "canceled"}:
+        next_action = "retry_binding"
+    return {
+        "bindingAttemptId": item.binding_attempt_id,
+        "provider": item.provider,
+        "channel": item.channel,
+        "status": item.status,
+        "state": item.state,
+        "desktopReturnUrl": item.desktop_return_url,
+        "mobileBindingUrl": item.mobile_binding_url,
+        "qrCodePayload": item.mobile_binding_url,
+        "pollAfterMs": 2000,
+        "qrExpiresAt": item.qr_expires_at,
+        "scannedAt": item.scanned_at,
+        "confirmedAt": item.confirmed_at,
+        "nextAction": next_action,
+        "createdAt": item.created_at,
+        "completedAt": item.completed_at,
+        "expiresAt": item.expires_at,
+        "failureReason": item.failure_reason,
+    }
+
+
+def _payout_identity_to_dto(item: PayoutIdentity) -> dict[str, object]:
+    return {
+        "identityId": item.identity_id,
+        "provider": item.provider,
+        "status": item.status,
+        "maskedLabel": item.masked_openid,
+        "verifiedAt": item.verified_at,
+        "failureReason": item.failure_reason,
+    }
+
+
+def _payout_readiness_to_dto(
+    *,
+    identity: PayoutIdentity | None,
+    latest_attempt: PayoutBindingAttempt | None,
+    provider_available: bool = True,
+) -> dict[str, object]:
+    if not provider_available:
+        status = "provider_unavailable"
+        next_action = "wait"
+    elif identity is not None:
+        status = "ready"
+        next_action = "withdraw"
+    elif latest_attempt is not None and latest_attempt.status in {"created", "scanned", "authorized", "confirmed"}:
+        status = "binding"
+        next_action = "wait_for_mobile_confirmation" if latest_attempt.status == "scanned" else "complete_binding"
+    elif latest_attempt is not None and latest_attempt.status in {"failed", "expired", "canceled"}:
+        status = "invalid"
+        next_action = "bind"
+    else:
+        status = "unbound"
+        next_action = "bind"
+    payload = {
+        "provider": "wechat_pay",
+        "status": status,
+        "identityId": None if identity is None else identity.identity_id,
+        "maskedLabel": None if identity is None else identity.masked_openid,
+        "verifiedAt": None if identity is None else identity.verified_at,
+        "nextAction": next_action,
+        "latestBindingAttempt": None if latest_attempt is None else _binding_attempt_to_dto(latest_attempt),
+    }
+    return payload
+
+
+def _desktop_binding_url(return_url: str, *, binding_attempt_id: str, state: str) -> str:
+    base = str(return_url or "").strip().split("#", 1)[0]
+    if "?" in base:
+        base = base.split("?", 1)[0]
+    base = base.rstrip("/") or "/membership"
+    return f"{base}/wechat-payout-bind?attempt={binding_attempt_id}&state={state}"
 
 
 def _resolve_coupon_aware_preview(
@@ -543,13 +666,134 @@ def get_my_commissions(
     user = require_request_auth_user(request)
     account = membership_commission_store.get_user_account(user.user_id)
     recent = membership_commission_store.list_user_commissions(user.user_id, limit=limit)
+    identity = membership_commission_store.get_active_payout_identity(user.user_id)
+    latest_attempt = membership_commission_store.get_latest_payout_binding_attempt(user.user_id)
     return {
         "ok": True,
         "data": {
             "account": _commission_account_to_dto(account),
+            "payoutReadiness": _payout_readiness_to_dto(identity=identity, latest_attempt=latest_attempt),
             "recentCommissions": [_commission_record_to_dto(item) for item in recent],
         },
     }
+
+
+@router.get("/commissions/payout-identity")
+def get_my_payout_identity(
+    request: Request,
+    membership_commission_store: MembershipCommissionStore = Depends(get_membership_commission_store),
+) -> dict:
+    user = require_request_auth_user(request)
+    identity = membership_commission_store.get_active_payout_identity(user.user_id)
+    latest_attempt = membership_commission_store.get_latest_payout_binding_attempt(user.user_id)
+    return {"ok": True, "data": _payout_readiness_to_dto(identity=identity, latest_attempt=latest_attempt)}
+
+
+@router.post("/commissions/payout-identity/wechat/binding-attempts")
+def start_my_wechat_payout_binding(
+    req: StartWeChatPayoutBindingRequest,
+    request: Request,
+    membership_commission_store: MembershipCommissionStore = Depends(get_membership_commission_store),
+    membership_payment_service: MembershipPaymentService = Depends(get_membership_payment_service),
+) -> dict:
+    user = require_request_auth_user(request)
+    now = commission_utc_now()
+    state = uuid.uuid4().hex
+    payout_config = membership_payment_service.current_wechat_payout_config()
+    attempt = membership_commission_store.create_payout_binding_attempt(
+        user.user_id,
+        channel=req.channel,
+        state=state,
+        expires_at=(now + timedelta(minutes=payout_config.binding_qr_ttl_minutes)).isoformat(),
+        desktop_return_url=req.returnUrl,
+    )
+    mobile_binding_url = _desktop_binding_url(req.returnUrl, binding_attempt_id=attempt.binding_attempt_id, state=attempt.state)
+    attempt = membership_commission_store.update_payout_binding_attempt_urls(
+        attempt.binding_attempt_id,
+        desktop_return_url=req.returnUrl,
+        mobile_binding_url=mobile_binding_url,
+    )
+    authorization_url = membership_payment_service.build_wechat_payout_binding_authorization_url(
+        state=attempt.state,
+        return_url=attempt.mobile_binding_url or req.returnUrl,
+        channel=attempt.channel,
+    )
+    payload = _binding_attempt_to_dto(attempt)
+    payload["authorizationUrl"] = authorization_url
+    return {"ok": True, "data": payload}
+
+
+@router.get("/commissions/payout-identity/wechat/binding-attempts/{bindingAttemptId}")
+def poll_my_wechat_payout_binding(
+    bindingAttemptId: str,
+    request: Request,
+    membership_commission_store: MembershipCommissionStore = Depends(get_membership_commission_store),
+) -> dict:
+    user = require_request_auth_user(request)
+    attempt = membership_commission_store.get_payout_binding_attempt(bindingAttemptId)
+    if attempt is None:
+        raise NotFound("payout binding attempt")
+    if attempt.user_id != user.user_id:
+        raise NotFound("payout binding attempt")
+    identity = membership_commission_store.get_active_payout_identity(user.user_id)
+    payload = _binding_attempt_to_dto(attempt)
+    if identity is not None and identity.latest_binding_attempt_id == attempt.binding_attempt_id:
+        payload["identityId"] = identity.identity_id
+        payload["maskedLabel"] = identity.masked_openid
+        payload["verifiedAt"] = identity.verified_at
+        payload["nextAction"] = "withdraw"
+    return {"ok": True, "data": payload}
+
+
+@router.get("/commissions/payout-identity/wechat/mobile-bind")
+def open_wechat_payout_mobile_binding(
+    attempt: str,
+    state: str,
+    membership_commission_store: MembershipCommissionStore = Depends(get_membership_commission_store),
+    membership_payment_service: MembershipPaymentService = Depends(get_membership_payment_service),
+) -> dict:
+    scanned = membership_commission_store.mark_payout_binding_attempt_scanned(attempt, state=state)
+    authorization_url = membership_payment_service.build_wechat_payout_binding_authorization_url(
+        state=scanned.state,
+        return_url=scanned.mobile_binding_url or scanned.desktop_return_url,
+        channel=scanned.channel,
+    )
+    payload = _binding_attempt_to_dto(scanned)
+    payload["learningPyramidUserId"] = scanned.user_id
+    payload["confirmedLearningPyramidUserId"] = scanned.user_id
+    payload["authorizationUrl"] = authorization_url
+    return {"ok": True, "data": payload}
+
+
+@router.post("/commissions/payout-identity/wechat/bind")
+def complete_my_wechat_payout_binding(
+    req: CompleteWeChatPayoutBindingRequest,
+    request: Request,
+    membership_commission_store: MembershipCommissionStore = Depends(get_membership_commission_store),
+    membership_payment_service: MembershipPaymentService = Depends(get_membership_payment_service),
+) -> dict:
+    attempt = membership_commission_store.get_payout_binding_attempt(req.bindingAttemptId)
+    if attempt is None:
+        raise NotFound("payout binding attempt")
+    if req.confirmedLearningPyramidUserId:
+        user_id = attempt.user_id
+    else:
+        user = require_request_auth_user(request)
+        user_id = user.user_id
+    openid, appid = membership_payment_service.resolve_wechat_payout_openid(
+        authorization_code=req.authorizationCode,
+        channel=attempt.channel,
+    )
+    identity = membership_commission_store.complete_payout_binding_attempt(
+        user_id,
+        binding_attempt_id=req.bindingAttemptId,
+        authorization_code=req.authorizationCode,
+        state=req.state,
+        openid=openid,
+        appid=appid,
+        confirmed_learning_pyramid_user_id=req.confirmedLearningPyramidUserId,
+    )
+    return {"ok": True, "data": _payout_identity_to_dto(identity)}
 
 
 @router.post("/commissions/withdrawals")
@@ -563,7 +807,6 @@ def request_my_commission_withdrawal(
     withdrawal = membership_commission_store.create_withdrawal_request(
         user.user_id,
         amount_cent=req.amountCent,
-        wechat_open_id=req.wechatOpenId or "",
     )
     try:
         payout = membership_payment_service.request_commission_payout(withdrawal)
@@ -581,12 +824,38 @@ def request_my_commission_withdrawal(
             provider_transfer_no=payout.provider_transfer_no,
             failure_reason=payout.failure_reason or "wechat payout failed",
         )
+    elif payout.remote_status == WITHDRAWAL_STATUS_AWAITING_CONFIRMATION:
+        withdrawal = membership_commission_store.mark_withdrawal_awaiting_confirmation(
+            withdrawal.withdrawal_id,
+            transfer_bill_no=payout.provider_transfer_no,
+            provider_state=payout.provider_state,
+            package_info=payout.package_info or "",
+            raw_payload_json=payout.raw_payload_json,
+        )
+    elif payout.remote_status in {WITHDRAWAL_STATUS_CANCELED, WITHDRAWAL_STATUS_NEEDS_ATTENTION}:
+        withdrawal = membership_commission_store.apply_withdrawal_provider_result(
+            out_bill_no=withdrawal.out_bill_no,
+            provider_state=payout.provider_state,
+            mapped_status=payout.remote_status,
+            transfer_bill_no=payout.provider_transfer_no,
+            amount_cent=payout.amount_cent,
+            appid=payout.appid,
+            raw_payload_json=payout.raw_payload_json,
+            provider_event_id=payout.provider_transfer_no or withdrawal.out_bill_no,
+            event_type="create_response",
+            failure_reason=payout.failure_reason,
+            signature_verified=False,
+        )
     else:
         withdrawal = membership_commission_store.mark_withdrawal_processing(
             withdrawal.withdrawal_id,
             provider_transfer_no=payout.provider_transfer_no,
+            provider_state=payout.provider_state or WITHDRAWAL_STATUS_PROCESSING,
+            raw_payload_json=payout.raw_payload_json,
         )
-    return {"ok": True, "data": _withdrawal_to_dto(withdrawal)}
+    payload = _withdrawal_to_dto(withdrawal)
+    payload["confirmation"] = _payout_confirmation_to_dto(payout.confirmation)
+    return {"ok": True, "data": payload}
 
 
 @router.get("/commissions/withdrawals")
@@ -598,3 +867,36 @@ def list_my_commission_withdrawals(
     user = require_request_auth_user(request)
     items = membership_commission_store.list_user_withdrawals(user.user_id, limit=limit)
     return {"ok": True, "data": [_withdrawal_to_dto(item) for item in items]}
+
+
+@router.post("/payments/wechat/transfer-notify")
+async def receive_wechat_transfer_notification(
+    request: Request,
+    membership_commission_store: MembershipCommissionStore = Depends(get_membership_commission_store),
+    membership_payment_service: MembershipPaymentService = Depends(get_membership_payment_service),
+) -> PlainTextResponse:
+    body_text = (await request.body()).decode("utf-8")
+    try:
+        remote_status = membership_payment_service.parse_transfer_notification(
+            headers=request.headers,
+            body_text=body_text,
+        )
+    except Exception:
+        logger.exception("failed to parse wechat transfer notification")
+        raise
+    out_bill_no = remote_status.out_bill_no
+    if out_bill_no:
+        membership_commission_store.apply_withdrawal_provider_result(
+            out_bill_no=out_bill_no,
+            provider_state=remote_status.provider_state,
+            mapped_status=remote_status.remote_status,
+            transfer_bill_no=remote_status.provider_transfer_no,
+            amount_cent=remote_status.amount_cent,
+            appid=remote_status.appid,
+            raw_payload_json=remote_status.raw_payload_json,
+            provider_event_id=remote_status.provider_transfer_no or out_bill_no,
+            event_type="notify",
+            failure_reason=remote_status.failure_reason,
+            signature_verified=True,
+        )
+    return PlainTextResponse("success")

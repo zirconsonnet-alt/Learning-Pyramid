@@ -89,11 +89,14 @@ export function describeCommissionStatus(value: string) {
 }
 
 export function describeWithdrawalStatus(value: string) {
-  if (value === "pending") return "待提交"
+  if (value === "created") return "已预留"
+  if (value === "pending") return "已预留"
+  if (value === "awaiting_confirmation") return "待微信确认"
   if (value === "processing") return "处理中"
   if (value === "succeeded") return "已到账"
   if (value === "failed") return "失败退回"
   if (value === "canceled") return "已取消"
+  if (value === "needs_attention") return "需人工处理"
   return value
 }
 

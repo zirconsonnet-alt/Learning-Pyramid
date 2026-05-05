@@ -72,13 +72,22 @@ def _is_public_api_path(path: str) -> bool:
         return True
     if path == "/api/payments/wechat/refund-notify":
         return True
+    if path == "/api/payments/wechat/transfer-notify":
+        return True
+    if path == "/api/commissions/payout-identity/wechat/mobile-bind":
+        return True
+    if path == "/api/commissions/payout-identity/wechat/bind":
+        return True
     if path.startswith("/api/public/asr-bridge/"):
         return True
     return path.startswith("/api/auth/")
 
 
 def _public_api_path_supports_optional_auth(path: str) -> bool:
-    return path == "/api/system/capabilities"
+    return path in {
+        "/api/system/capabilities",
+        "/api/commissions/payout-identity/wechat/bind",
+    }
 
 
 def _extract_project_id(path: str) -> str | None:

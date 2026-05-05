@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
 import {
+  useAcknowledgeAdminWithdrawalWarning,
   useCloseAdminMembershipOrder,
   useAdminMembershipCoupons,
   useAdminMembershipCommissions,
@@ -17,11 +18,15 @@ import {
   useAdminMembershipOrders,
   useAdminMembershipOverview,
   useAdminMembershipWithdrawals,
+  useAdminPayoutIdentities,
+  useAdminWithdrawalEvents,
+  useAdminWithdrawalWarnings,
   useGrantAdminMembershipCoupon,
   useGrantAdminMembershipMonths,
   useRefundAdminMembershipOrder,
   useResolveAdminMembershipWithdrawal,
   useSettleAdminMembershipCommissions,
+  useSyncAdminMembershipWithdrawal,
   useSyncAdminMembershipOrderPayment,
   useVoidAdminMembershipCoupon,
 } from "@/ui/queries/admin"
@@ -258,6 +263,9 @@ export function AdminMembershipPage() {
     },
     true,
   )
+  const payoutIdentitiesQ = useAdminPayoutIdentities({ limit: 30 }, true)
+  const withdrawalEventsQ = useAdminWithdrawalEvents({ limit: 50 }, true)
+  const withdrawalWarningsQ = useAdminWithdrawalWarnings({ status: "open", limit: 50 }, true)
   const orderDetailQ = useAdminMembershipOrderDetail(selectedOrderId, Boolean(selectedOrderId))
   const grantCoupon = useGrantAdminMembershipCoupon()
   const grantMembership = useGrantAdminMembershipMonths()
@@ -267,6 +275,8 @@ export function AdminMembershipPage() {
   const voidCoupon = useVoidAdminMembershipCoupon()
   const settleCommissions = useSettleAdminMembershipCommissions()
   const resolveWithdrawal = useResolveAdminMembershipWithdrawal()
+  const syncWithdrawal = useSyncAdminMembershipWithdrawal()
+  const acknowledgeWarning = useAcknowledgeAdminWithdrawalWarning()
   const autoRefreshIntervalMs = 5_000
   const activeOrderStatuses = new Set(["pending", "refund_pending"])
   const selectedOrderStatus = orderDetailQ.data?.order.status ?? ""
@@ -295,6 +305,8 @@ export function AdminMembershipPage() {
         grantMembership.isPending ||
         settleCommissions.isPending ||
         resolveWithdrawal.isPending ||
+        syncWithdrawal.isPending ||
+        acknowledgeWarning.isPending ||
         voidCoupon.isPending
       ) {
         return
@@ -306,6 +318,9 @@ export function AdminMembershipPage() {
         queryClient.invalidateQueries({ queryKey: ["admin", "membership", "coupons"] }),
         queryClient.invalidateQueries({ queryKey: ["admin", "membership", "commissions"] }),
         queryClient.invalidateQueries({ queryKey: ["admin", "membership", "withdrawals"] }),
+        queryClient.invalidateQueries({ queryKey: ["admin", "membership", "payout-identities"] }),
+        queryClient.invalidateQueries({ queryKey: ["admin", "membership", "withdrawal-events"] }),
+        queryClient.invalidateQueries({ queryKey: ["admin", "membership", "withdrawal-warnings"] }),
         selectedOrderId
           ? queryClient.invalidateQueries({ queryKey: ["admin", "membership", "order-detail", selectedOrderId] })
           : Promise.resolve(),
@@ -314,6 +329,7 @@ export function AdminMembershipPage() {
     return () => window.clearInterval(timer)
   }, [
     autoRefreshIntervalMs,
+    acknowledgeWarning.isPending,
     closeOrder.isPending,
     grantCoupon.isPending,
     grantMembership.isPending,
@@ -323,6 +339,7 @@ export function AdminMembershipPage() {
     resolveWithdrawal.isPending,
     selectedOrderId,
     settleCommissions.isPending,
+    syncWithdrawal.isPending,
     syncPayment.isPending,
     voidCoupon.isPending,
   ])
@@ -555,6 +572,27 @@ export function AdminMembershipPage() {
     }
   }
 
+  async function onSyncWithdrawal(withdrawalId: string) {
+    try {
+      const result = await syncWithdrawal.mutateAsync({ withdrawalId })
+      showSuccessFeedback(
+        "提现状态已同步",
+        `商户单状态 ${result.providerState || "unknown"}，本地当前为 ${describeWithdrawalStatus(result.currentStatus)}。`,
+      )
+    } catch (err) {
+      showErrorFeedback("同步提现状态失败", formatApiError(err))
+    }
+  }
+
+  async function onAcknowledgeWarning(warningId: string) {
+    try {
+      await acknowledgeWarning.mutateAsync({ warningId })
+      showSuccessFeedback("对账告警已处理", "这条告警已从开放列表中移除。")
+    } catch (err) {
+      showErrorFeedback("处理告警失败", formatApiError(err))
+    }
+  }
+
   if (overviewQ.isLoading && !overviewQ.data) {
     return <LoadingNotice title="正在加载会员后台" message="稍等一下，我们正在汇总订单、邀请和优惠券数据。" />
   }
@@ -759,7 +797,7 @@ export function AdminMembershipPage() {
         <Card>
           <CardHeader>
             <CardTitle>佣金提现</CardTitle>
-            <CardDescription>查看用户提现到微信支付的请求，并回填 provider 成功或失败结果。</CardDescription>
+            <CardDescription>查看用户提现到微信支付的请求、商户单号和自动对账状态。</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_160px]">
@@ -774,9 +812,12 @@ export function AdminMembershipPage() {
                 className="rounded-xl border border-input bg-background px-3 py-2 text-sm"
               >
                 <option value="all">全部状态</option>
+                <option value="awaiting_confirmation">待用户确认</option>
                 <option value="processing">处理中</option>
                 <option value="succeeded">已到账</option>
                 <option value="failed">失败退回</option>
+                <option value="canceled">已取消</option>
+                <option value="needs_attention">需处理</option>
               </select>
             </div>
             {withdrawalsQ.error ? <ErrorNotice title="提现列表加载失败" message={formatApiError(withdrawalsQ.error)} /> : null}
@@ -793,11 +834,11 @@ export function AdminMembershipPage() {
                       <div className="min-w-0">
                         <div className="text-sm font-semibold text-foreground">{formatMembershipPrice(item.amountCent)}</div>
                         <div className="mt-1 text-xs leading-5 text-muted-foreground">
-                          {owner.title} · {item.wechatOpenIdMasked}
+                          {owner.title} · {item.identityMaskedLabel}
                         </div>
                         <div className="mt-1 break-all text-xs leading-5 text-muted-foreground">
-                          提现单 {item.withdrawalId}
-                          {item.providerTransferNo ? ` · provider ${item.providerTransferNo}` : ""}
+                          提现单 {item.withdrawalId} · 商户单 {item.outBillNo}
+                          {item.transferBillNo ? ` · 微信单 ${item.transferBillNo}` : ""}
                         </div>
                       </div>
                       <StatusPill tone={item.status === "succeeded" ? "accent" : item.status === "failed" ? "default" : "warm"}>
@@ -805,8 +846,17 @@ export function AdminMembershipPage() {
                       </StatusPill>
                     </div>
                     {item.failureReason ? <div className="mt-2 text-xs text-destructive">{item.failureReason}</div> : null}
-                    {item.status === "processing" || item.status === "pending" ? (
+                    {item.status === "processing" || item.status === "awaiting_confirmation" || item.status === "created" || item.status === "needs_attention" ? (
                       <div className="mt-3 flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void onSyncWithdrawal(item.withdrawalId)}
+                          disabled={syncWithdrawal.isPending}
+                        >
+                          同步微信
+                        </Button>
                         <Button
                           type="button"
                           size="sm"
@@ -830,6 +880,109 @@ export function AdminMembershipPage() {
                 )
               })}
             </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-3">
+        <Card>
+          <CardHeader>
+            <CardTitle>收款身份</CardTitle>
+            <CardDescription>查看用户已绑定的微信收款身份，只展示脱敏标签。</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {payoutIdentitiesQ.error ? <ErrorNotice title="收款身份加载失败" message={formatApiError(payoutIdentitiesQ.error)} /> : null}
+            {!payoutIdentitiesQ.error && payoutIdentitiesQ.isLoading ? <LoadingNotice title="正在加载收款身份" message="后台正在读取绑定记录。" /> : null}
+            {!payoutIdentitiesQ.error && !payoutIdentitiesQ.isLoading && (payoutIdentitiesQ.data?.length ?? 0) === 0 ? (
+              <ContentEmptyState title="暂无收款身份" message="当前还没有用户完成微信收款身份绑定。" />
+            ) : null}
+            {payoutIdentitiesQ.data?.map((item) => {
+              const owner = userLabel(item.user)
+              return (
+                <div key={item.identityId} className="theme-soft-surface rounded-2xl p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-foreground">{owner.title}</div>
+                      <div className="mt-1 break-all text-xs leading-5 text-muted-foreground">
+                        {item.maskedLabel} · appid {item.appid}
+                      </div>
+                    </div>
+                    <StatusPill tone={item.status === "active" ? "accent" : "default"}>{item.status}</StatusPill>
+                  </div>
+                  <div className="mt-2 text-xs text-muted-foreground">验证时间 {formatMembershipDateTime(item.verifiedAt)}</div>
+                </div>
+              )
+            })}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>转账事件</CardTitle>
+            <CardDescription>查看微信通知、主动查询和人工处理写入的 provider 事件。</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {withdrawalEventsQ.error ? <ErrorNotice title="转账事件加载失败" message={formatApiError(withdrawalEventsQ.error)} /> : null}
+            {!withdrawalEventsQ.error && withdrawalEventsQ.isLoading ? <LoadingNotice title="正在加载转账事件" message="后台正在读取 provider 事件。" /> : null}
+            {!withdrawalEventsQ.error && !withdrawalEventsQ.isLoading && (withdrawalEventsQ.data?.length ?? 0) === 0 ? (
+              <ContentEmptyState title="暂无转账事件" message="还没有提现通知、查询或人工处理事件。" />
+            ) : null}
+            {withdrawalEventsQ.data?.slice(0, 12).map((item) => (
+              <div key={item.eventId} className="theme-soft-surface rounded-2xl p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-foreground">{item.eventType}</div>
+                    <div className="mt-1 break-all text-xs leading-5 text-muted-foreground">
+                      商户单 {item.outBillNo}
+                      {item.transferBillNo ? ` · 微信单 ${item.transferBillNo}` : ""}
+                    </div>
+                  </div>
+                  <StatusPill tone={item.mappedStatus === "succeeded" ? "accent" : item.mappedStatus === "failed" ? "danger" : "warm"}>
+                    {describeWithdrawalStatus(item.mappedStatus)}
+                  </StatusPill>
+                </div>
+                <div className="mt-2 text-xs text-muted-foreground">
+                  {item.providerState || "unknown"} · {formatMembershipDateTime(item.createdAt)}
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>对账告警</CardTitle>
+            <CardDescription>查看需要财务或客服复核的提现自动化异常。</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {withdrawalWarningsQ.error ? <ErrorNotice title="对账告警加载失败" message={formatApiError(withdrawalWarningsQ.error)} /> : null}
+            {!withdrawalWarningsQ.error && withdrawalWarningsQ.isLoading ? <LoadingNotice title="正在加载对账告警" message="后台正在读取异常记录。" /> : null}
+            {!withdrawalWarningsQ.error && !withdrawalWarningsQ.isLoading && (withdrawalWarningsQ.data?.length ?? 0) === 0 ? (
+              <ContentEmptyState title="暂无开放告警" message="当前没有需要处理的提现对账异常。" />
+            ) : null}
+            {withdrawalWarningsQ.data?.map((item) => (
+              <div key={item.warningId} className="theme-soft-surface rounded-2xl p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-foreground">{item.reasonCode}</div>
+                    <div className="mt-1 break-all text-xs leading-5 text-muted-foreground">提现单 {item.withdrawalId}</div>
+                  </div>
+                  <StatusPill tone={item.severity === "error" ? "danger" : "warm"}>{item.severity}</StatusPill>
+                </div>
+                <div className="mt-2 text-xs leading-5 text-muted-foreground">{item.message}</div>
+                <div className="mt-3">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void onAcknowledgeWarning(item.warningId)}
+                    disabled={acknowledgeWarning.isPending}
+                  >
+                    标记已处理
+                  </Button>
+                </div>
+              </div>
+            ))}
           </CardContent>
         </Card>
       </div>

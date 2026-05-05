@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from backend.system.membership_maintenance import reconcile_pending_wechat_membership_payments
+from backend.system.membership_commission_store import MembershipCommissionStore
+from backend.system.membership_maintenance import (
+    reconcile_commission_withdrawals,
+    reconcile_pending_wechat_membership_payments,
+    settle_due_membership_commissions,
+)
 from backend.system.membership_payment_service import MembershipRemotePaymentStatus, MembershipPaymentService
 from backend.system.membership_store import MembershipStore
 
@@ -69,7 +75,7 @@ def test_reconcile_pending_wechat_membership_payments_confirms_and_closes(
                 provider_trade_no="4200000000000000000100",
                 remote_status="paid",
                 paid_at="2026-03-26T10:00:00+08:00",
-                amount_cent=1490,
+                amount_cent=paid_order.payable_amount_cent,
                 payer_id="wx-openid-paid",
                 raw_payload_json='{"trade_state":"SUCCESS"}',
             )
@@ -141,3 +147,98 @@ def test_reconcile_pending_wechat_membership_payments_records_item_errors(
     assert summary.items[0].action == "error"
     assert "network timeout" in str(summary.items[0].error)
     assert store.get_order(order.order_id).status == "pending"
+
+
+def test_settle_due_membership_commissions_returns_run_summary(membership_env: None, tmp_path: Path) -> None:
+    store = MembershipCommissionStore()
+    paid_at = "2026-05-04T00:00:00+00:00"
+    store.create_pending_commission(
+        inviter_user_id="user_inviter",
+        invitee_user_id="user_invitee",
+        source_order_id="order_auto_settle_001",
+        source_payment_amount_cent=2000,
+        paid_at=paid_at,
+    )
+
+    summary = settle_due_membership_commissions(
+        store,
+        limit=50,
+        now=datetime.fromisoformat("2026-05-05T00:00:01+00:00"),
+    )
+
+    assert summary.run_type == "commission_settlement"
+    assert summary.scanned_count == 1
+    assert summary.settled_count == 1
+    assert summary.error_count == 0
+    assert summary.to_dict()["runId"].startswith("run_")
+
+
+def test_reconcile_commission_withdrawals_applies_provider_success(membership_env: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = MembershipCommissionStore()
+    payment_service = MembershipPaymentService()
+    paid_at = "2026-05-04T00:00:00+00:00"
+    store.create_pending_commission(
+        inviter_user_id="user_inviter",
+        invitee_user_id="user_invitee",
+        source_order_id="order_reconcile_withdraw_001",
+        source_payment_amount_cent=2000,
+        paid_at=paid_at,
+    )
+    store.settle_due_commissions(now=datetime.fromisoformat("2026-05-05T00:00:01+00:00"), limit=10)
+    attempt = store.create_payout_binding_attempt(
+        "user_inviter",
+        channel="manual_test",
+        state="state-reconcile",
+        expires_at="2026-05-05T00:10:00+00:00",
+    )
+    identity = store.complete_payout_binding_attempt(
+        "user_inviter",
+        binding_attempt_id=attempt.binding_attempt_id,
+        authorization_code="manual_openid_001",
+        state="state-reconcile",
+        openid="openid_inviter_001",
+        appid="wx-test-app",
+        completed_at="2026-05-05T00:01:00+00:00",
+    )
+    withdrawal = store.create_withdrawal_request("user_inviter", amount_cent=500, identity_id=identity.identity_id)
+    store.mark_withdrawal_processing(
+        withdrawal.withdrawal_id,
+        provider_transfer_no="transfer_bill_reconcile_001",
+        provider_state="PROCESSING",
+        raw_payload_json='{"state":"PROCESSING"}',
+    )
+
+    def fake_query(out_bill_no: str, *, withdrawal_id: str = ""):
+        assert out_bill_no == withdrawal.out_bill_no
+        assert withdrawal_id == withdrawal.withdrawal_id
+        return type(
+            "PayoutResult",
+            (),
+            {
+                "withdrawal_id": withdrawal.withdrawal_id,
+                "out_bill_no": withdrawal.out_bill_no,
+                "provider_transfer_no": "transfer_bill_reconcile_001",
+                "provider_state": "SUCCESS",
+                "remote_status": "succeeded",
+                "failure_reason": "",
+                "raw_payload_json": '{"state":"SUCCESS"}',
+                "amount_cent": 500,
+                "appid": "wx-test-app",
+                "confirmation": None,
+            },
+        )()
+
+    monkeypatch.setattr(payment_service, "query_commission_payout", fake_query)
+
+    summary = reconcile_commission_withdrawals(
+        store,
+        payment_service,
+        min_age_minutes=0,
+        limit=10,
+        now=datetime.fromisoformat("2026-05-05T00:02:00+00:00"),
+    )
+
+    assert summary.scanned_count == 1
+    assert summary.succeeded_count == 1
+    assert summary.error_count == 0
+    assert store.get_withdrawal_request(withdrawal.withdrawal_id).status == "succeeded"

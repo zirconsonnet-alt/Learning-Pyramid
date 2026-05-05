@@ -20,7 +20,7 @@ from adapter.deps import (
     get_membership_store,
 )
 from adapter.main import create_app
-from backend.system.membership_payment_service import MembershipRemotePaymentStatus, MembershipRemoteRefundStatus
+from backend.system.membership_payment_service import CommissionPayoutStatus, MembershipRemotePaymentStatus, MembershipRemoteRefundStatus
 
 
 def _reset_caches() -> None:
@@ -126,6 +126,107 @@ def _create_settled_invited_membership(
     assert settled.status_code == 200
     assert settled.json()["data"]["settledCount"] == 1
     return invitee_client
+
+
+def _bind_manual_payout_identity(client: TestClient, *, openid: str = "openid_inviter_001") -> dict:
+    readiness = client.get("/api/commissions/payout-identity")
+    assert readiness.status_code == 200
+    assert readiness.json()["data"]["status"] == "unbound"
+
+    started = client.post(
+        "/api/commissions/payout-identity/wechat/binding-attempts",
+        json={"channel": "manual_test", "returnUrl": "http://testserver/membership"},
+    )
+    assert started.status_code == 200
+    attempt = started.json()["data"]
+    assert attempt["bindingAttemptId"].startswith("wpbind_")
+    assert attempt["authorizationUrl"]
+
+    completed = client.post(
+        "/api/commissions/payout-identity/wechat/bind",
+        json={
+            "bindingAttemptId": attempt["bindingAttemptId"],
+            "authorizationCode": openid,
+            "state": attempt["state"],
+        },
+    )
+    assert completed.status_code == 200
+    identity = completed.json()["data"]
+    assert identity["identityId"].startswith("wpid_")
+    assert identity["maskedLabel"].startswith("openid_")
+    assert "openid" not in identity
+    return identity
+
+
+def test_desktop_qr_payout_binding_can_complete_from_mobile_without_desktop_session(auth_env: None) -> None:
+    app = create_app()
+    desktop_client = TestClient(app)
+    mobile_client = TestClient(app)
+
+    registered = desktop_client.post("/api/auth/register", json={"email": "inviter@example.com", "password": "password123"})
+    assert registered.status_code == 200
+    user_id = registered.json()["data"]["userId"]
+
+    started = desktop_client.post(
+        "/api/commissions/payout-identity/wechat/binding-attempts",
+        json={"channel": "desktop_qr_official_account_h5", "returnUrl": "http://testserver/membership"},
+    )
+    assert started.status_code == 200
+    attempt = started.json()["data"]
+    assert attempt["status"] == "created"
+    assert attempt["qrCodePayload"].startswith("http://testserver/membership/wechat-payout-bind?")
+    assert attempt["mobileBindingUrl"] == attempt["qrCodePayload"]
+    assert attempt["pollAfterMs"] == 2000
+
+    polled_before_scan = desktop_client.get(f"/api/commissions/payout-identity/wechat/binding-attempts/{attempt['bindingAttemptId']}")
+    assert polled_before_scan.status_code == 200
+    assert polled_before_scan.json()["data"]["status"] == "created"
+
+    opened = mobile_client.get(
+        "/api/commissions/payout-identity/wechat/mobile-bind",
+        params={"attempt": attempt["bindingAttemptId"], "state": attempt["state"]},
+    )
+    assert opened.status_code == 200
+    mobile_payload = opened.json()["data"]
+    assert mobile_payload["status"] == "scanned"
+    assert mobile_payload["learningPyramidUserId"] == user_id
+    assert mobile_payload["authorizationUrl"]
+
+    polled_after_scan = desktop_client.get(f"/api/commissions/payout-identity/wechat/binding-attempts/{attempt['bindingAttemptId']}")
+    assert polled_after_scan.status_code == 200
+    assert polled_after_scan.json()["data"]["status"] == "scanned"
+    assert polled_after_scan.json()["data"]["nextAction"] == "wait_for_mobile_confirmation"
+
+    rejected = mobile_client.post(
+        "/api/commissions/payout-identity/wechat/bind",
+        json={
+            "bindingAttemptId": attempt["bindingAttemptId"],
+            "authorizationCode": "openid_inviter_001",
+            "state": attempt["state"],
+            "confirmedLearningPyramidUserId": "other_user",
+        },
+    )
+    assert rejected.status_code == 400
+    assert rejected.json()["error"]["message"] == "confirmed account does not match payout binding attempt"
+
+    completed = mobile_client.post(
+        "/api/commissions/payout-identity/wechat/bind",
+        json={
+            "bindingAttemptId": attempt["bindingAttemptId"],
+            "authorizationCode": "openid_inviter_001",
+            "state": attempt["state"],
+            "confirmedLearningPyramidUserId": user_id,
+        },
+    )
+    assert completed.status_code == 200
+    identity = completed.json()["data"]
+    assert identity["identityId"].startswith("wpid_")
+    assert identity["maskedLabel"].startswith("openid_")
+
+    readiness = desktop_client.get("/api/commissions/payout-identity")
+    assert readiness.status_code == 200
+    assert readiness.json()["data"]["status"] == "ready"
+    assert readiness.json()["data"]["identityId"] == identity["identityId"]
 
 
 def test_membership_purchase_immediately_enables_protected_llm_access(auth_env: None) -> None:
@@ -536,7 +637,8 @@ def test_invite_commission_settles_once_after_refund_window(auth_env: None) -> N
     assert before.json()["data"]["account"]["pendingCent"] == 500
     assert before.json()["data"]["account"]["withdrawableCent"] == 0
 
-    early_settle = admin_client.post("/api/admin/membership/commissions/settle")
+    with patch("backend.system.membership_commission_store._utc_now", return_value=datetime.fromisoformat("2026-05-04T01:00:00+00:00")):
+        early_settle = admin_client.post("/api/admin/membership/commissions/settle")
     assert early_settle.status_code == 200
     assert early_settle.json()["data"]["settledCount"] == 0
 
@@ -580,19 +682,25 @@ def test_commission_withdrawal_request_reserves_balance_and_lists_history(auth_e
     assert before.status_code == 200
     assert before.json()["data"]["account"]["withdrawableCent"] == 500
     assert before.json()["data"]["account"]["reservedCent"] == 0
+    assert before.json()["data"]["payoutReadiness"]["status"] == "unbound"
+
+    identity = _bind_manual_payout_identity(inviter_client)
 
     requested = inviter_client.post(
         "/api/commissions/withdrawals",
-        json={"amountCent": 500, "wechatOpenId": "openid_inviter_001"},
+        json={"amountCent": 500},
     )
     assert requested.status_code == 200
     withdrawal = requested.json()["data"]
     assert withdrawal["withdrawalId"].startswith("mwd_")
     assert withdrawal["amountCent"] == 500
     assert withdrawal["targetType"] == "wechat_pay"
-    assert withdrawal["wechatOpenIdMasked"].startswith("openid_")
+    assert withdrawal["identityId"] == identity["identityId"]
+    assert withdrawal["identityMaskedLabel"].startswith("openid_")
     assert withdrawal["status"] == "processing"
-    assert withdrawal["providerTransferNo"].startswith("manual_")
+    assert withdrawal["outBillNo"].startswith("LPWD")
+    assert withdrawal["transferBillNo"].startswith("manual_")
+    assert withdrawal["confirmation"] is None
 
     after = inviter_client.get("/api/commissions/me")
     assert after.status_code == 200
@@ -605,6 +713,7 @@ def test_commission_withdrawal_request_reserves_balance_and_lists_history(auth_e
     assert len(history.json()["data"]) == 1
     assert history.json()["data"][0]["withdrawalId"] == withdrawal["withdrawalId"]
     assert history.json()["data"][0]["status"] == "processing"
+    assert history.json()["data"][0]["identityMaskedLabel"].startswith("openid_")
 
 
 def test_commission_withdrawal_rejects_insufficient_balance_and_missing_wechat_identity(auth_env: None) -> None:
@@ -621,13 +730,10 @@ def test_commission_withdrawal_rejects_insufficient_balance_and_missing_wechat_i
     empty_register = empty_client.post("/api/auth/register", json={"email": "member@example.com", "password": "password123"})
     assert empty_register.status_code == 200
 
-    insufficient = empty_client.post(
-        "/api/commissions/withdrawals",
-        json={"amountCent": 500, "wechatOpenId": "openid_empty"},
-    )
+    insufficient = empty_client.post("/api/commissions/withdrawals", json={"amountCent": 500})
     assert insufficient.status_code == 400
     assert insufficient.json()["error"]["code"] == "PRECONDITION"
-    assert insufficient.json()["error"]["message"] == "withdrawal amount exceeds withdrawable commission balance"
+    assert insufficient.json()["error"]["message"] == "wechat receiving identity is required"
 
     _create_settled_invited_membership(
         app,
@@ -641,6 +747,12 @@ def test_commission_withdrawal_rejects_insufficient_balance_and_missing_wechat_i
     assert missing_identity.status_code == 400
     assert missing_identity.json()["error"]["code"] == "PRECONDITION"
     assert missing_identity.json()["error"]["message"] == "wechat receiving identity is required"
+
+    _bind_manual_payout_identity(inviter_client)
+    excessive = inviter_client.post("/api/commissions/withdrawals", json={"amountCent": 600})
+    assert excessive.status_code == 400
+    assert excessive.json()["error"]["code"] == "PRECONDITION"
+    assert excessive.json()["error"]["message"] == "withdrawal amount exceeds withdrawable commission balance"
 
 
 def test_commission_withdrawal_provider_results_are_idempotent(auth_env: None) -> None:
@@ -661,9 +773,10 @@ def test_commission_withdrawal_provider_results_are_idempotent(auth_env: None) -
         invitee_email="invitee-one@example.com",
         paid_at=datetime.fromisoformat("2026-05-04T00:00:00+00:00"),
     )
+    _bind_manual_payout_identity(inviter_client)
     first = inviter_client.post(
         "/api/commissions/withdrawals",
-        json={"amountCent": 500, "wechatOpenId": "openid_inviter_001"},
+        json={"amountCent": 500},
     )
     assert first.status_code == 200
     first_withdrawal_id = first.json()["data"]["withdrawalId"]
@@ -696,7 +809,7 @@ def test_commission_withdrawal_provider_results_are_idempotent(auth_env: None) -
     )
     second = inviter_client.post(
         "/api/commissions/withdrawals",
-        json={"amountCent": 500, "wechatOpenId": "openid_inviter_001"},
+        json={"amountCent": 500},
     )
     assert second.status_code == 200
     second_withdrawal_id = second.json()["data"]["withdrawalId"]
@@ -720,6 +833,61 @@ def test_commission_withdrawal_provider_results_are_idempotent(auth_env: None) -
     assert after_failure.json()["data"]["account"]["reservedCent"] == 0
     assert after_failure.json()["data"]["account"]["withdrawableCent"] == 500
     assert after_failure.json()["data"]["account"]["paidOutCent"] == 500
+
+
+def test_wechat_transfer_notify_endpoint_is_public_and_idempotent(auth_env: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    app = create_app()
+    admin_client = TestClient(app)
+    inviter_client = TestClient(app)
+    notify_client = TestClient(app)
+    payment_service = get_membership_payment_service()
+
+    admin_register = admin_client.post("/api/auth/register", json={"email": "admin@example.com", "password": "password123"})
+    assert admin_register.status_code == 200
+    inviter_register = inviter_client.post("/api/auth/register", json={"email": "inviter@example.com", "password": "password123"})
+    assert inviter_register.status_code == 200
+    inviter_public_uid = inviter_register.json()["data"]["publicUid"]
+
+    _create_settled_invited_membership(
+        app,
+        admin_client,
+        inviter_public_uid,
+        invitee_email="invitee-notify@example.com",
+        paid_at=datetime.fromisoformat("2026-05-04T00:00:00+00:00"),
+    )
+    _bind_manual_payout_identity(inviter_client)
+    created = inviter_client.post("/api/commissions/withdrawals", json={"amountCent": 500})
+    assert created.status_code == 200
+    withdrawal = created.json()["data"]
+
+    monkeypatch.setattr(
+        payment_service,
+        "parse_transfer_notification",
+        lambda headers, body_text: CommissionPayoutStatus(
+            withdrawal_id="",
+            out_bill_no=withdrawal["outBillNo"],
+            provider_transfer_no="transfer_notify_001",
+            remote_status="succeeded",
+            failure_reason="",
+            raw_payload_json='{"event":"TRANSFER.SUCCESS"}',
+            provider_state="SUCCESS",
+            amount_cent=500,
+            appid="manual_test",
+        ),
+    )
+
+    first = notify_client.post("/api/payments/wechat/transfer-notify", content='{"id":"evt_transfer_001"}')
+    repeated = notify_client.post("/api/payments/wechat/transfer-notify", content='{"id":"evt_transfer_001"}')
+
+    assert first.status_code == 200
+    assert first.text == "success"
+    assert repeated.status_code == 200
+    assert repeated.text == "success"
+
+    after = inviter_client.get("/api/commissions/me")
+    assert after.status_code == 200
+    assert after.json()["data"]["account"]["reservedCent"] == 0
+    assert after.json()["data"]["account"]["paidOutCent"] == 500
 
 
 def test_invite_code_cannot_be_bound_after_first_paid_order(auth_env: None) -> None:
@@ -1285,10 +1453,11 @@ def test_admin_wechat_refund_flows_from_pending_to_refunded(
     assert synced_payment.status_code == 200
     assert synced_payment.json()["data"]["order"]["status"] == "paid"
 
-    requested_refund = admin_client.post(
-        f"/api/admin/membership/orders/{created_order_id}/refund",
-        json={"reason": "wechat refund request"},
-    )
+    with patch("backend.system.membership_store._utc_now", return_value=datetime.fromisoformat("2026-05-04T06:00:00+00:00")):
+        requested_refund = admin_client.post(
+            f"/api/admin/membership/orders/{created_order_id}/refund",
+            json={"reason": "wechat refund request"},
+        )
     assert requested_refund.status_code == 200
     requested_payload = requested_refund.json()["data"]
     assert requested_payload["order"]["status"] == "refund_pending"
@@ -1442,10 +1611,11 @@ def test_refund_pending_wechat_order_can_finish_after_24_hour_window(
     assert synced_payment.status_code == 200
     assert synced_payment.json()["data"]["order"]["status"] == "paid"
 
-    requested_refund = admin_client.post(
-        f"/api/admin/membership/orders/{created_order_id}/refund",
-        json={"reason": "wechat refund request"},
-    )
+    with patch("backend.system.membership_store._utc_now", return_value=datetime.fromisoformat("2026-05-04T06:00:00+00:00")):
+        requested_refund = admin_client.post(
+            f"/api/admin/membership/orders/{created_order_id}/refund",
+            json={"reason": "wechat refund request"},
+        )
     assert requested_refund.status_code == 200
     assert requested_refund.json()["data"]["order"]["status"] == "refund_pending"
 
@@ -1525,10 +1695,11 @@ def test_wechat_refund_notify_endpoint_is_public(
     synced_payment = member_client.post(f"/api/membership/orders/{created_order_id}/sync-payment")
     assert synced_payment.status_code == 200
 
-    requested_refund = admin_client.post(
-        f"/api/admin/membership/orders/{created_order_id}/refund",
-        json={"reason": "wechat refund request"},
-    )
+    with patch("backend.system.membership_store._utc_now", return_value=datetime.fromisoformat("2026-05-04T07:00:00+00:00")):
+        requested_refund = admin_client.post(
+            f"/api/admin/membership/orders/{created_order_id}/refund",
+            json={"reason": "wechat refund request"},
+        )
     assert requested_refund.status_code == 200
     assert requested_refund.json()["data"]["order"]["status"] == "refund_pending"
 

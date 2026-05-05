@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import {
+  acknowledgeAdminWithdrawalWarning,
   closeAdminMembershipOrder,
   getAdminMembershipOrderDetail,
   getAdminMembershipOverview,
@@ -15,8 +16,12 @@ import {
   listAdminMembershipInvites,
   listAdminMembershipOrders,
   listAdminMembershipWithdrawals,
+  listAdminPayoutIdentities,
+  listAdminWithdrawalEvents,
+  listAdminWithdrawalWarnings,
   listAdminUsers,
   syncAdminMembershipOrderPayment,
+  syncAdminMembershipWithdrawal,
   resolveAdminMembershipWithdrawal,
   settleAdminMembershipCommissions,
   updateAdminUserRole,
@@ -106,6 +111,30 @@ export function useAdminMembershipWithdrawals(params?: { search?: string; status
   return useQuery({
     queryKey: ["admin", "membership", "withdrawals", params?.search ?? "", params?.status ?? "", params?.limit ?? 100],
     queryFn: () => listAdminMembershipWithdrawals(params),
+    enabled,
+  })
+}
+
+export function useAdminPayoutIdentities(params?: { search?: string; status?: string; limit?: number }, enabled = true) {
+  return useQuery({
+    queryKey: ["admin", "membership", "payout-identities", params?.search ?? "", params?.status ?? "", params?.limit ?? 100],
+    queryFn: () => listAdminPayoutIdentities(params),
+    enabled,
+  })
+}
+
+export function useAdminWithdrawalEvents(params?: { withdrawalId?: string; limit?: number }, enabled = true) {
+  return useQuery({
+    queryKey: ["admin", "membership", "withdrawal-events", params?.withdrawalId ?? "", params?.limit ?? 100],
+    queryFn: () => listAdminWithdrawalEvents(params),
+    enabled,
+  })
+}
+
+export function useAdminWithdrawalWarnings(params?: { status?: string; limit?: number }, enabled = true) {
+  return useQuery({
+    queryKey: ["admin", "membership", "withdrawal-warnings", params?.status ?? "", params?.limit ?? 100],
+    queryFn: () => listAdminWithdrawalWarnings(params),
     enabled,
   })
 }
@@ -228,6 +257,32 @@ export function useResolveAdminMembershipWithdrawal() {
       await qc.invalidateQueries({ queryKey: ["admin", "membership", "withdrawals"] })
       await qc.invalidateQueries({ queryKey: ["admin", "activity"] })
       await qc.invalidateQueries({ queryKey: ["membership"] })
+    },
+  })
+}
+
+export function useSyncAdminMembershipWithdrawal() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: syncAdminMembershipWithdrawal,
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["admin", "membership", "overview"] })
+      await qc.invalidateQueries({ queryKey: ["admin", "membership", "withdrawals"] })
+      await qc.invalidateQueries({ queryKey: ["admin", "membership", "withdrawal-events"] })
+      await qc.invalidateQueries({ queryKey: ["admin", "membership", "withdrawal-warnings"] })
+      await qc.invalidateQueries({ queryKey: ["admin", "activity"] })
+      await qc.invalidateQueries({ queryKey: ["membership"] })
+    },
+  })
+}
+
+export function useAcknowledgeAdminWithdrawalWarning() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: acknowledgeAdminWithdrawalWarning,
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["admin", "membership", "withdrawal-warnings"] })
+      await qc.invalidateQueries({ queryKey: ["admin", "activity"] })
     },
   })
 }

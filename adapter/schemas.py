@@ -87,7 +87,22 @@ class BindInviteCodeRequest(BaseModel):
 
 class CreateCommissionWithdrawalRequest(BaseModel):
     amountCent: int = Field(ge=1)
-    wechatOpenId: Optional[str] = Field(default=None, max_length=128)
+
+
+class StartWeChatPayoutBindingRequest(BaseModel):
+    channel: str = Field(default="desktop_qr_official_account_h5", min_length=1, max_length=64)
+    returnUrl: str = Field(min_length=1, max_length=2048)
+
+
+class CompleteWeChatPayoutBindingRequest(BaseModel):
+    bindingAttemptId: str = Field(min_length=1)
+    authorizationCode: str = Field(min_length=1, max_length=512)
+    state: str = Field(min_length=1, max_length=512)
+    confirmedLearningPyramidUserId: Optional[str] = Field(default=None, max_length=128)
+
+
+class SyncCommissionWithdrawalRequest(BaseModel):
+    reason: Optional[str] = Field(default="", max_length=200)
 
 
 class AdminResolveCommissionWithdrawalRequest(BaseModel):

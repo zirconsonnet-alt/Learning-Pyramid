@@ -5,7 +5,10 @@ from pathlib import Path
 import pytest
 
 from backend.models.errors import PreconditionFailure
-from backend.system.membership_payment_service import MembershipPaymentService
+from backend.system.membership_payment_service import (
+    PayoutConfirmationPayload,
+    MembershipPaymentService,
+)
 
 
 class _FakeResponse:
@@ -121,3 +124,128 @@ def test_get_wechat_public_key_loads_once_and_caches(
     assert service._get_wechat_public_key() is sentinel
     assert service._get_wechat_public_key() is sentinel
     assert calls["count"] == 1
+
+
+class _Withdrawal:
+    withdrawal_id = "mwd_test_001"
+    user_id = "user_inviter"
+    amount_cent = 500
+    wechat_open_id = "openid_inviter_001"
+    out_bill_no = "LPWD202605050001"
+
+
+def test_wechat_payout_config_reads_provider_mode_and_binding_qr_ttl(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _enable_wechat_native(monkeypatch, tmp_path)
+    monkeypatch.setenv("PLM_WECHAT_PAY_TRANSFER_SCENE_ID", "1001")
+    monkeypatch.setenv("PLM_WECHAT_PAY_PAYOUT_PROVIDER_MODE", "disabled")
+    monkeypatch.setenv("PLM_WECHAT_PAY_BINDING_QR_TTL_MINUTES", "15")
+
+    config = MembershipPaymentService().current_wechat_payout_config()
+
+    assert config.provider_mode == "disabled"
+    assert config.binding_qr_ttl_minutes == 15
+    assert config.enabled is False
+
+
+def test_wechat_merchant_transfer_wait_user_confirm_maps_confirmation_payload(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _enable_wechat_native(monkeypatch, tmp_path)
+    monkeypatch.setenv("PLM_WECHAT_PAY_TRANSFER_SCENE_ID", "1001")
+    service = MembershipPaymentService()
+    captured: dict[str, object] = {}
+
+    def fake_wechat_request_json(method: str, uri: str, body: dict[str, object] | None = None) -> dict[str, object]:
+        captured["method"] = method
+        captured["uri"] = uri
+        captured["body"] = body or {}
+        return {
+            "out_bill_no": "LPWD202605050001",
+            "transfer_bill_no": "133000007110099999118202605050001",
+            "state": "WAIT_USER_CONFIRM",
+            "package_info": "merchant-transfer-package",
+        }
+
+    monkeypatch.setattr(service, "_wechat_request_json", fake_wechat_request_json)
+
+    result = service.request_commission_payout(_Withdrawal())
+
+    assert captured["uri"] == "/v3/fund-app/mch-transfer/transfer-bills"
+    assert captured["body"]["out_bill_no"] == "LPWD202605050001"
+    assert captured["body"]["openid"] == "openid_inviter_001"
+    assert result.remote_status == "awaiting_confirmation"
+    assert result.provider_state == "WAIT_USER_CONFIRM"
+    assert result.provider_transfer_no == "133000007110099999118202605050001"
+    assert result.confirmation == PayoutConfirmationPayload(
+        mode="wechat_jsapi_requestMerchantTransfer",
+        mch_id="1900000109",
+        app_id="wx-test-app",
+        package_info="merchant-transfer-package",
+    )
+
+
+def test_wechat_merchant_transfer_query_maps_terminal_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _enable_wechat_native(monkeypatch, tmp_path)
+    monkeypatch.setenv("PLM_WECHAT_PAY_TRANSFER_SCENE_ID", "1001")
+    service = MembershipPaymentService()
+
+    def fake_wechat_request_json(method: str, uri: str, body: dict[str, object] | None = None) -> dict[str, object]:
+        assert method == "GET"
+        assert "/v3/fund-app/mch-transfer/transfer-bills/out-bill-no/LPWD202605050001" in uri
+        return {
+            "out_bill_no": "LPWD202605050001",
+            "transfer_bill_no": "133000007110099999118202605050001",
+            "state": "FAIL",
+            "fail_reason": "ACCOUNT_FROZEN",
+            "transfer_amount": 500,
+        }
+
+    monkeypatch.setattr(service, "_wechat_request_json", fake_wechat_request_json)
+
+    result = service.query_commission_payout("LPWD202605050001")
+
+    assert result.remote_status == "failed"
+    assert result.provider_state == "FAIL"
+    assert result.failure_reason == "ACCOUNT_FROZEN"
+    assert result.amount_cent == 500
+
+
+def test_wechat_merchant_transfer_notification_maps_terminal_success(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _enable_wechat_native(monkeypatch, tmp_path)
+    monkeypatch.setenv("PLM_WECHAT_PAY_TRANSFER_SCENE_ID", "1001")
+    service = MembershipPaymentService()
+
+    monkeypatch.setattr(service, "_verify_wechat_signature", lambda *, headers, body_text: None)
+    monkeypatch.setattr(
+        service,
+        "_decrypt_wechat_resource",
+        lambda resource: {
+            "out_bill_no": "LPWD202605050001",
+            "transfer_bill_no": "133000007110099999118202605050001",
+            "state": "SUCCESS",
+            "transfer_amount": 500,
+            "appid": "wx-test-app",
+        },
+    )
+
+    result = service.parse_transfer_notification(
+        headers={"wechatpay-serial": "PUB_KEY_ID_TEST"},
+        body_text='{"id":"evt_transfer_001","resource":{"ciphertext":"encrypted"}}',
+    )
+
+    assert result.out_bill_no == "LPWD202605050001"
+    assert result.provider_transfer_no == "133000007110099999118202605050001"
+    assert result.remote_status == "succeeded"
+    assert result.provider_state == "SUCCESS"
+    assert result.amount_cent == 500
+    assert result.appid == "wx-test-app"

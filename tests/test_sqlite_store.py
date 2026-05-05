@@ -4,7 +4,10 @@ import json
 import sqlite3
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
+
+import pytest
 
 from backend.models.aggregation_event import AggregationEvent
 from backend.models.aggregation_queue import AggregationQueue
@@ -49,6 +52,14 @@ from backend.models.types import ConvergenceRuleId, MediaAssetId, id_canonical_t
 from backend.repositories.persistence_interfaces import ProjectSnapshotRecord, SystemStateRecord
 from backend.system.api import SystemAPI
 from backend.system.inmemory_system import InMemorySystem
+from backend.system.membership_commission_store import (
+    WITHDRAWAL_STATUS_AWAITING_CONFIRMATION,
+    WITHDRAWAL_STATUS_FAILED,
+    WITHDRAWAL_STATUS_PROCESSING,
+    WITHDRAWAL_STATUS_SUCCEEDED,
+    MembershipCommissionStore,
+)
+from backend.models.errors import PreconditionFailure
 from backend.system.persistence_json import SCHEMA_VERSION, decode_project_payload, encode_project_payload, encode_project_shell_payload
 from backend.system.persistence_store import JsonSnapshotStore, SQLiteSnapshotStore
 
@@ -1818,3 +1829,320 @@ def test_system_api_reads_project_views_from_sqlite_project_rows(tmp_path: Path)
     assert str(entry_reg.entry_node) == str(task_node.node_id)
     assert agg_queue_ids == tuple()
     assert [str(event.event_id) for event in agg_events] == [str(aggregation_event.event_id)]
+
+
+def test_membership_payout_binding_attempt_replaces_active_identity(tmp_path: Path) -> None:
+    store = MembershipCommissionStore(tmp_path / "membership.sqlite3")
+
+    first = store.create_payout_binding_attempt(
+        "user_inviter",
+        channel="manual_test",
+        state="state-1",
+        expires_at="2026-05-05T00:10:00+00:00",
+    )
+    identity = store.complete_payout_binding_attempt(
+        "user_inviter",
+        binding_attempt_id=first.binding_attempt_id,
+        authorization_code="manual_openid_001",
+        state="state-1",
+        openid="openid_inviter_001",
+        appid="wx-test-app",
+        completed_at="2026-05-05T00:01:00+00:00",
+    )
+
+    assert identity.masked_openid == "openid_***"
+    assert store.get_active_payout_identity("user_inviter").identity_id == identity.identity_id
+
+    second = store.create_payout_binding_attempt(
+        "user_inviter",
+        channel="manual_test",
+        state="state-2",
+        expires_at="2026-05-05T00:20:00+00:00",
+    )
+    replacement = store.complete_payout_binding_attempt(
+        "user_inviter",
+        binding_attempt_id=second.binding_attempt_id,
+        authorization_code="manual_openid_002",
+        state="state-2",
+        openid="openid_inviter_002",
+        appid="wx-test-app",
+        completed_at="2026-05-05T00:11:00+00:00",
+    )
+
+    identities = store.list_admin_payout_identities(status="all")
+    assert [item.status for item in identities] == ["active", "replaced"]
+    assert store.get_active_payout_identity("user_inviter").identity_id == replacement.identity_id
+
+
+def test_membership_desktop_qr_payout_binding_requires_mobile_confirmation(tmp_path: Path) -> None:
+    store = MembershipCommissionStore(tmp_path / "membership.sqlite3")
+
+    attempt = store.create_payout_binding_attempt(
+        "user_inviter",
+        channel="desktop_qr_official_account_h5",
+        state="state-qr",
+        expires_at="2026-05-05T00:10:00+00:00",
+        desktop_return_url="https://learningpyramid.test/membership",
+        mobile_binding_url="https://learningpyramid.test/membership/wechat-payout-bind?attempt=wpbind&state=state-qr",
+    )
+
+    assert attempt.status == "created"
+    assert attempt.desktop_return_url == "https://learningpyramid.test/membership"
+    assert "wechat-payout-bind" in attempt.mobile_binding_url
+    assert attempt.scanned_at is None
+    assert attempt.confirmed_at is None
+
+    scanned = store.mark_payout_binding_attempt_scanned(
+        attempt.binding_attempt_id,
+        state="state-qr",
+        scanned_at="2026-05-05T00:01:00+00:00",
+    )
+    assert scanned.status == "scanned"
+    assert scanned.scanned_at == "2026-05-05T00:01:00+00:00"
+    assert store.get_active_payout_identity("user_inviter") is None
+
+    with pytest.raises(PreconditionFailure, match="confirmed account does not match"):
+        store.complete_payout_binding_attempt(
+            "user_inviter",
+            binding_attempt_id=attempt.binding_attempt_id,
+            authorization_code="manual_openid_001",
+            state="state-qr",
+            openid="openid_inviter_001",
+            appid="wx-test-app",
+            confirmed_learning_pyramid_user_id="other_user",
+            completed_at="2026-05-05T00:02:00+00:00",
+        )
+
+    identity = store.complete_payout_binding_attempt(
+        "user_inviter",
+        binding_attempt_id=attempt.binding_attempt_id,
+        authorization_code="manual_openid_001",
+        state="state-qr",
+        openid="openid_inviter_001",
+        appid="wx-test-app",
+        confirmed_learning_pyramid_user_id="user_inviter",
+        completed_at="2026-05-05T00:02:00+00:00",
+    )
+
+    assert identity.identity_id.startswith("wpid_")
+    completed = store.get_payout_binding_attempt(attempt.binding_attempt_id)
+    assert completed is not None
+    assert completed.status == "bound"
+    assert completed.confirmed_at == "2026-05-05T00:02:00+00:00"
+
+    with pytest.raises(PreconditionFailure, match="already been consumed"):
+        store.mark_payout_binding_attempt_scanned(
+            attempt.binding_attempt_id,
+            state="state-qr",
+            scanned_at="2026-05-05T00:03:00+00:00",
+        )
+
+
+def test_membership_desktop_qr_payout_binding_expires_without_identity(tmp_path: Path) -> None:
+    store = MembershipCommissionStore(tmp_path / "membership.sqlite3")
+    attempt = store.create_payout_binding_attempt(
+        "user_inviter",
+        channel="desktop_qr_official_account_h5",
+        state="state-expired",
+        expires_at="2026-05-05T00:10:00+00:00",
+        desktop_return_url="https://learningpyramid.test/membership",
+        mobile_binding_url="https://learningpyramid.test/membership/wechat-payout-bind?attempt=wpbind&state=state-expired",
+    )
+
+    with pytest.raises(PreconditionFailure, match="expired"):
+        store.mark_payout_binding_attempt_scanned(
+            attempt.binding_attempt_id,
+            state="state-expired",
+            scanned_at="2026-05-05T00:11:00+00:00",
+        )
+
+    expired = store.get_payout_binding_attempt(attempt.binding_attempt_id)
+    assert expired is not None
+    assert expired.status == "expired"
+    assert store.get_active_payout_identity("user_inviter") is None
+
+
+def test_membership_automatic_settlement_records_run_metadata(tmp_path: Path) -> None:
+    store = MembershipCommissionStore(tmp_path / "membership.sqlite3")
+    paid_at = datetime(2026, 5, 4, 0, 0, tzinfo=timezone.utc)
+    commission = store.create_pending_commission(
+        inviter_user_id="user_inviter",
+        invitee_user_id="user_invitee",
+        source_order_id="order_settle_001",
+        source_payment_amount_cent=2000,
+        paid_at=paid_at.isoformat(),
+    )
+    assert commission is not None
+
+    result = store.settle_due_commissions(now=paid_at + timedelta(hours=24, seconds=1), limit=10)
+
+    assert result.settled_count == 1
+    assert result.canceled_count == 0
+    assert result.skipped_count == 0
+    assert result.error_count == 0
+    assert result.run_id.startswith("run_")
+
+    updated = store.get_commission_for_order("order_settle_001")
+    assert updated is not None
+    assert updated.status == "settled"
+    assert updated.settlement_mode == "automatic"
+    assert updated.settlement_run_id == result.run_id
+
+    again = store.settle_due_commissions(now=paid_at + timedelta(hours=24, seconds=2), limit=10)
+    assert again.settled_count == 0
+    assert again.skipped_count == 0
+
+
+def test_membership_commission_refund_window_can_be_shortened_for_testing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("PLM_MEMBERSHIP_COMMISSION_REFUND_WINDOW_MINUTES", "1")
+    store = MembershipCommissionStore(tmp_path / "membership.sqlite3")
+    paid_at = datetime(2026, 5, 4, 0, 0, tzinfo=timezone.utc)
+
+    commission = store.create_pending_commission(
+        inviter_user_id="user_inviter",
+        invitee_user_id="user_invitee",
+        source_order_id="order_short_refund_window_001",
+        source_payment_amount_cent=2000,
+        paid_at=paid_at.isoformat(),
+    )
+
+    assert commission is not None
+    assert commission.refund_window_ends_at == (paid_at + timedelta(minutes=1)).isoformat()
+    early = store.settle_due_commissions(now=paid_at + timedelta(seconds=59), limit=10)
+    assert early.settled_count == 0
+    due = store.settle_due_commissions(now=paid_at + timedelta(minutes=1, seconds=1), limit=10)
+    assert due.settled_count == 1
+
+
+def test_membership_withdrawal_reserves_balance_and_applies_provider_result_once(tmp_path: Path) -> None:
+    store = MembershipCommissionStore(tmp_path / "membership.sqlite3")
+    paid_at = datetime(2026, 5, 4, 0, 0, tzinfo=timezone.utc)
+    store.create_pending_commission(
+        inviter_user_id="user_inviter",
+        invitee_user_id="user_invitee",
+        source_order_id="order_withdraw_001",
+        source_payment_amount_cent=2000,
+        paid_at=paid_at.isoformat(),
+    )
+    store.settle_due_commissions(now=paid_at + timedelta(hours=24, seconds=1), limit=10)
+    attempt = store.create_payout_binding_attempt(
+        "user_inviter",
+        channel="manual_test",
+        state="state-withdraw",
+        expires_at="2026-05-05T00:10:00+00:00",
+    )
+    identity = store.complete_payout_binding_attempt(
+        "user_inviter",
+        binding_attempt_id=attempt.binding_attempt_id,
+        authorization_code="manual_openid_001",
+        state="state-withdraw",
+        openid="openid_inviter_001",
+        appid="wx-test-app",
+        completed_at="2026-05-05T00:01:00+00:00",
+    )
+
+    withdrawal = store.create_withdrawal_request("user_inviter", amount_cent=500, identity_id=identity.identity_id)
+
+    assert withdrawal.status == "created"
+    assert withdrawal.out_bill_no.startswith("LPWD")
+    assert store.get_user_account("user_inviter").reserved_cent == 500
+    assert store.get_user_account("user_inviter").withdrawable_cent == 0
+
+    awaiting = store.mark_withdrawal_awaiting_confirmation(
+        withdrawal.withdrawal_id,
+        transfer_bill_no="transfer_bill_001",
+        provider_state="WAIT_USER_CONFIRM",
+        package_info="package-info",
+        raw_payload_json='{"state":"WAIT_USER_CONFIRM"}',
+    )
+    assert awaiting.status == WITHDRAWAL_STATUS_AWAITING_CONFIRMATION
+
+    succeeded = store.apply_withdrawal_provider_result(
+        out_bill_no=withdrawal.out_bill_no,
+        provider_state="SUCCESS",
+        mapped_status=WITHDRAWAL_STATUS_SUCCEEDED,
+        transfer_bill_no="transfer_bill_001",
+        amount_cent=500,
+        appid="wx-test-app",
+        raw_payload_json='{"state":"SUCCESS"}',
+        provider_event_id="notify_001",
+        event_type="notify",
+    )
+    repeated = store.apply_withdrawal_provider_result(
+        out_bill_no=withdrawal.out_bill_no,
+        provider_state="SUCCESS",
+        mapped_status=WITHDRAWAL_STATUS_SUCCEEDED,
+        transfer_bill_no="transfer_bill_001",
+        amount_cent=500,
+        appid="wx-test-app",
+        raw_payload_json='{"state":"SUCCESS"}',
+        provider_event_id="notify_001",
+        event_type="notify",
+    )
+
+    assert succeeded.status == WITHDRAWAL_STATUS_SUCCEEDED
+    assert repeated.status == WITHDRAWAL_STATUS_SUCCEEDED
+    assert store.get_user_account("user_inviter").reserved_cent == 0
+    assert store.get_user_account("user_inviter").paid_out_cent == 500
+
+    events = store.list_payout_provider_events(withdrawal_id=withdrawal.withdrawal_id)
+    assert len(events) == 2
+    notify_events = [event for event in events if event.event_type == "notify"]
+    assert len(notify_events) == 1
+    assert notify_events[0].provider_event_id == "notify_001"
+
+
+def test_membership_withdrawal_failure_returns_reserved_balance(tmp_path: Path) -> None:
+    store = MembershipCommissionStore(tmp_path / "membership.sqlite3")
+    paid_at = datetime(2026, 5, 4, 0, 0, tzinfo=timezone.utc)
+    store.create_pending_commission(
+        inviter_user_id="user_inviter",
+        invitee_user_id="user_invitee",
+        source_order_id="order_withdraw_failed_001",
+        source_payment_amount_cent=2000,
+        paid_at=paid_at.isoformat(),
+    )
+    store.settle_due_commissions(now=paid_at + timedelta(hours=24, seconds=1), limit=10)
+    attempt = store.create_payout_binding_attempt(
+        "user_inviter",
+        channel="manual_test",
+        state="state-failed",
+        expires_at="2026-05-05T00:10:00+00:00",
+    )
+    identity = store.complete_payout_binding_attempt(
+        "user_inviter",
+        binding_attempt_id=attempt.binding_attempt_id,
+        authorization_code="manual_openid_001",
+        state="state-failed",
+        openid="openid_inviter_001",
+        appid="wx-test-app",
+        completed_at="2026-05-05T00:01:00+00:00",
+    )
+    withdrawal = store.create_withdrawal_request("user_inviter", amount_cent=500, identity_id=identity.identity_id)
+    store.mark_withdrawal_processing(
+        withdrawal.withdrawal_id,
+        provider_transfer_no="transfer_bill_002",
+        provider_state="PROCESSING",
+        raw_payload_json='{"state":"PROCESSING"}',
+    )
+
+    failed = store.apply_withdrawal_provider_result(
+        out_bill_no=withdrawal.out_bill_no,
+        provider_state="FAIL",
+        mapped_status=WITHDRAWAL_STATUS_FAILED,
+        transfer_bill_no="transfer_bill_002",
+        amount_cent=500,
+        appid="wx-test-app",
+        raw_payload_json='{"state":"FAIL"}',
+        provider_event_id="notify_002",
+        event_type="notify",
+        failure_reason="provider rejected",
+    )
+
+    assert failed.status == WITHDRAWAL_STATUS_FAILED
+    assert failed.failure_reason == "provider rejected"
+    assert store.get_user_account("user_inviter").reserved_cent == 0
+    assert store.get_user_account("user_inviter").withdrawable_cent == 500

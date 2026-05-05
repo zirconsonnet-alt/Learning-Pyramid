@@ -87,6 +87,25 @@ def _create_settled_invited_membership(
     return invitee_client
 
 
+def _bind_manual_payout_identity(client: TestClient, *, openid: str = "openid_inviter_001") -> dict:
+    started = client.post(
+        "/api/commissions/payout-identity/wechat/binding-attempts",
+        json={"channel": "manual_test", "returnUrl": "http://testserver/membership"},
+    )
+    assert started.status_code == 200
+    attempt = started.json()["data"]
+    completed = client.post(
+        "/api/commissions/payout-identity/wechat/bind",
+        json={
+            "bindingAttemptId": attempt["bindingAttemptId"],
+            "authorizationCode": openid,
+            "state": attempt["state"],
+        },
+    )
+    assert completed.status_code == 200
+    return completed.json()["data"]
+
+
 def _enable_wechat_native(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     public_key = private_key.public_key()
@@ -433,10 +452,11 @@ def test_admin_can_audit_and_resolve_membership_withdrawals(auth_env: None) -> N
         invitee_email="invitee@example.com",
         paid_at=datetime.fromisoformat("2026-05-04T00:00:00+00:00"),
     )
+    identity = _bind_manual_payout_identity(inviter_client)
 
     requested = inviter_client.post(
         "/api/commissions/withdrawals",
-        json={"amountCent": 500, "wechatOpenId": "openid_inviter_001"},
+        json={"amountCent": 500},
     )
     assert requested.status_code == 200
     withdrawal_id = requested.json()["data"]["withdrawalId"]
@@ -454,7 +474,29 @@ def test_admin_can_audit_and_resolve_membership_withdrawals(auth_env: None) -> N
     assert processing.json()["data"][0]["user"]["publicUid"] == inviter_public_uid
     assert processing.json()["data"][0]["amountCent"] == 500
     assert processing.json()["data"][0]["targetType"] == "wechat_pay"
-    assert processing.json()["data"][0]["wechatOpenIdMasked"].startswith("openid_")
+    assert processing.json()["data"][0]["identityId"] == identity["identityId"]
+    assert processing.json()["data"][0]["identityMaskedLabel"].startswith("openid_")
+    assert processing.json()["data"][0]["outBillNo"].startswith("LPWD")
+
+    identities = admin_client.get(f"/api/admin/membership/payout-identities?search={inviter_public_uid}")
+    assert identities.status_code == 200
+    assert len(identities.json()["data"]) == 1
+    assert identities.json()["data"][0]["identityId"] == identity["identityId"]
+
+    warning = get_membership_commission_store().create_reconciliation_warning(
+        withdrawal_id,
+        severity="warning",
+        reason_code="stale_processing",
+        message="withdrawal has stayed processing for too long",
+    )
+    warnings = admin_client.get("/api/admin/membership/withdrawals/warnings?status=open")
+    assert warnings.status_code == 200
+    assert warnings.json()["data"][0]["warningId"] == warning.warning_id
+
+    acknowledged = admin_client.post(f"/api/admin/membership/withdrawals/warnings/{warning.warning_id}/ack", json={})
+    assert acknowledged.status_code == 200
+    assert acknowledged.json()["data"]["status"] == "resolved"
+    assert acknowledged.json()["data"]["resolvedAt"] is not None
 
     resolved = admin_client.post(
         f"/api/admin/membership/withdrawals/{withdrawal_id}/resolve",

@@ -51,6 +51,7 @@ const AiChatPage = lazyRoute(() => import("@/views/ai/AiChatPage"), (mod) => mod
 const LearningObjectNodePage = lazyRoute(() => import("@/views/learningObjects/LearningObjectNodePage"), (mod) => mod.LearningObjectNodePage)
 const LearningTaskNodePage = lazyRoute(() => import("@/views/learningTasks/LearningTaskNodePage"), (mod) => mod.LearningTaskNodePage)
 const MembershipPage = lazyRoute(() => import("@/views/membership/MembershipPage"), (mod) => mod.MembershipPage)
+const WechatPayoutBindingPage = lazyRoute(() => import("@/views/membership/WechatPayoutBindingPage"), (mod) => mod.WechatPayoutBindingPage)
 const ProjectsPage = lazyRoute(() => import("@/views/projects/ProjectsPage"), (mod) => mod.ProjectsPage)
 const ProfilePage = lazyRoute(() => import("@/views/profile/ProfilePage"), (mod) => mod.ProfilePage)
 const RecallPointPage = lazyRoute(() => import("@/views/recallPoints/RecallPointPage"), (mod) => mod.RecallPointPage)
@@ -104,6 +105,7 @@ export const router = createBrowserRouter([
       { path: "/groups", element: <Navigate to="/friends" replace /> },
       { path: "/groups/:groupId", element: <Navigate to="/friends" replace /> },
       { path: "/membership", element: lazyElement(<MembershipPage />) },
+      { path: "/membership/wechat-payout-bind", element: lazyElement(<WechatPayoutBindingPage />) },
       { path: "/profile", element: lazyElement(<ProfilePage />) },
       { path: "/settings/global", element: lazyElement(<GlobalSettingsPage />) },
       { path: "/admin", element: lazyElement(<AdminPage />) },

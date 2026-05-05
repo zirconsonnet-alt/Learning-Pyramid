@@ -217,9 +217,12 @@ export const AdminMembershipCommissionSchema = z.object({
 export type AdminMembershipCommission = z.infer<typeof AdminMembershipCommissionSchema>
 
 export const AdminCommissionSettlementSchema = z.object({
+  runId: z.string().default(""),
+  scannedCount: z.number().default(0),
   settledCount: z.number(),
   canceledCount: z.number(),
   skippedCount: z.number(),
+  errorCount: z.number().default(0),
 })
 
 export type AdminCommissionSettlement = z.infer<typeof AdminCommissionSettlementSchema>
@@ -230,16 +233,81 @@ export const AdminMembershipWithdrawalSchema = z.object({
   userId: z.string(),
   amountCent: z.number(),
   targetType: z.literal("wechat_pay"),
-  wechatOpenIdMasked: z.string(),
-  status: z.enum(["pending", "processing", "succeeded", "failed", "canceled"]),
+  identityId: z.string().nullable(),
+  identityMaskedLabel: z.string(),
+  status: z.enum(["created", "awaiting_confirmation", "processing", "succeeded", "failed", "canceled", "needs_attention"]),
   providerTransferNo: z.string().nullable(),
+  outBillNo: z.string(),
+  transferBillNo: z.string().nullable(),
+  providerState: z.string(),
   failureReason: z.string(),
   createdAt: z.string(),
+  reservedAt: z.string().nullable(),
   submittedAt: z.string().nullable(),
+  confirmationRequestedAt: z.string().nullable(),
   completedAt: z.string().nullable(),
 })
 
 export type AdminMembershipWithdrawal = z.infer<typeof AdminMembershipWithdrawalSchema>
+
+export const AdminPayoutIdentitySchema = z.object({
+  identityId: z.string(),
+  user: AdminMembershipUserRefSchema,
+  userId: z.string(),
+  provider: z.string(),
+  appid: z.string(),
+  maskedLabel: z.string(),
+  status: z.string(),
+  verifiedAt: z.string(),
+  revokedAt: z.string().nullable(),
+  latestBindingAttemptId: z.string().nullable(),
+  failureReason: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+})
+
+export type AdminPayoutIdentity = z.infer<typeof AdminPayoutIdentitySchema>
+
+export const AdminPayoutProviderEventSchema = z.object({
+  eventId: z.string(),
+  withdrawalId: z.string(),
+  eventType: z.string(),
+  provider: z.string(),
+  providerEventId: z.string(),
+  outBillNo: z.string(),
+  transferBillNo: z.string().nullable(),
+  providerState: z.string(),
+  mappedStatus: z.string(),
+  rawPayloadJson: z.string(),
+  signatureVerified: z.boolean(),
+  createdAt: z.string(),
+})
+
+export type AdminPayoutProviderEvent = z.infer<typeof AdminPayoutProviderEventSchema>
+
+export const AdminReconciliationWarningSchema = z.object({
+  warningId: z.string(),
+  withdrawalId: z.string(),
+  severity: z.string(),
+  reasonCode: z.string(),
+  message: z.string(),
+  status: z.string(),
+  createdAt: z.string(),
+  resolvedAt: z.string().nullable(),
+})
+
+export type AdminReconciliationWarning = z.infer<typeof AdminReconciliationWarningSchema>
+
+export const AdminWithdrawalSyncSchema = z.object({
+  withdrawalId: z.string(),
+  previousStatus: z.string(),
+  currentStatus: z.string(),
+  providerState: z.string(),
+  action: z.string(),
+  withdrawal: AdminMembershipWithdrawalSchema,
+})
+
+export type AdminWithdrawalSync = z.infer<typeof AdminWithdrawalSyncSchema>
 
 export const AdminMembershipOrderOperationsSchema = z.object({
   hasPaymentRecord: z.boolean(),
@@ -335,6 +403,9 @@ const AdminMembershipInviteListSchema = z.array(AdminMembershipInviteSchema)
 const AdminMembershipCouponListSchema = z.array(AdminMembershipCouponSchema)
 const AdminMembershipCommissionListSchema = z.array(AdminMembershipCommissionSchema)
 const AdminMembershipWithdrawalListSchema = z.array(AdminMembershipWithdrawalSchema)
+const AdminPayoutIdentityListSchema = z.array(AdminPayoutIdentitySchema)
+const AdminPayoutProviderEventListSchema = z.array(AdminPayoutProviderEventSchema)
+const AdminReconciliationWarningListSchema = z.array(AdminReconciliationWarningSchema)
 
 function buildAdminListPath(path: string, params?: { search?: string; status?: string; role?: string; limit?: number }) {
   const query = new URLSearchParams()
@@ -456,6 +527,49 @@ export function listAdminMembershipWithdrawals(params?: { search?: string; statu
   return apiRequest({
     path: buildAdminListPath("/admin/membership/withdrawals", params),
     responseSchema: AdminMembershipWithdrawalListSchema,
+  })
+}
+
+export function listAdminPayoutIdentities(params?: { search?: string; status?: string; limit?: number }) {
+  return apiRequest({
+    path: buildAdminListPath("/admin/membership/payout-identities", params),
+    responseSchema: AdminPayoutIdentityListSchema,
+  })
+}
+
+export function listAdminWithdrawalEvents(params?: { withdrawalId?: string; limit?: number }) {
+  const query = new URLSearchParams()
+  if (params?.withdrawalId) query.set("withdrawalId", params.withdrawalId)
+  if (typeof params?.limit === "number") query.set("limit", String(params.limit))
+  const suffix = query.toString()
+  return apiRequest({
+    path: suffix ? `/admin/membership/withdrawals/events?${suffix}` : "/admin/membership/withdrawals/events",
+    responseSchema: AdminPayoutProviderEventListSchema,
+  })
+}
+
+export function listAdminWithdrawalWarnings(params?: { status?: string; limit?: number }) {
+  return apiRequest({
+    path: buildAdminListPath("/admin/membership/withdrawals/warnings", params),
+    responseSchema: AdminReconciliationWarningListSchema,
+  })
+}
+
+export function acknowledgeAdminWithdrawalWarning(params: { warningId: string }) {
+  return apiRequest({
+    path: `/admin/membership/withdrawals/warnings/${encodeURIComponent(params.warningId)}/ack`,
+    method: "POST",
+    body: {},
+    responseSchema: AdminReconciliationWarningSchema,
+  })
+}
+
+export function syncAdminMembershipWithdrawal(params: { withdrawalId: string }) {
+  return apiRequest({
+    path: `/admin/membership/withdrawals/${encodeURIComponent(params.withdrawalId)}/sync`,
+    method: "POST",
+    body: {},
+    responseSchema: AdminWithdrawalSyncSchema,
   })
 }
 

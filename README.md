@@ -96,6 +96,26 @@ docker compose \
 
 See [docs/self-host.md](docs/self-host.md) for the runtime shape and deployment notes.
 
+### Membership WeChat payouts
+
+The membership invite commission flow now supports unattended refund-window settlement and WeChat Pay merchant transfer reconciliation. Production payout setup requires:
+
+- WeChat Pay native payment credentials plus merchant transfer capability.
+- `PLM_PUBLIC_ORIGIN` and public HTTPS callbacks for `/api/payments/wechat/notify`, `/api/payments/wechat/refund-notify`, and `/api/payments/wechat/transfer-notify`.
+- `PLM_WECHAT_PAY_TRANSFER_SCENE_ID` and, when required by the transfer scene, `PLM_WECHAT_PAY_TRANSFER_SCENE_REPORT_INFOS_JSON`.
+- `PLM_WECHAT_PAY_APP_SECRET` for the mobile WeChat authorization step used by the desktop QR receiving identity binding flow.
+- A real WeChat receiving identity binding flow with public HTTPS access to `/membership/wechat-payout-bind`; local tests can use `manual_test` when `PLM_ENABLE_MANUAL_TEST_PAYMENT=true`.
+
+Run these scheduler jobs every few minutes in self-hosted production:
+
+```bash
+python tools/reconcile_membership_payments.py --min-age-minutes 5 --limit 100
+python tools/settle_membership_commissions.py --limit 200
+python tools/reconcile_commission_withdrawals.py --min-age-minutes 2 --limit 100
+```
+
+See [docs/membership-selfhost-launch-checklist.md](docs/membership-selfhost-launch-checklist.md) for the full launch checklist and verification flow.
+
 If you need a simple local fallback or a compatibility path, SQLite is still supported:
 
 ```bash
