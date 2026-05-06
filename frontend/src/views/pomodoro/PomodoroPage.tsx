@@ -763,11 +763,8 @@ export function PomodoroPage() {
         <div data-pomodoro-wallpaper-scope="page" className="relative z-10 mx-auto flex w-full max-w-5xl flex-col gap-8">
           <section data-pomodoro-plan-detail className="space-y-6">
             <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div className="text-sm font-medium text-muted-foreground">番茄计划详情</div>
-                <div className="mt-1 text-2xl font-semibold text-foreground">
-                  {activePomodoroDraft ? `计划 ${activePomodoroDraftIndex + 1}` : "计划不存在"}
-                </div>
+              <div className="text-2xl font-semibold text-foreground">
+                {activePomodoroDraft ? `计划 ${activePomodoroDraftIndex + 1}` : "计划不存在"}
               </div>
               <Button asChild variant="outline">
                 <Link to={buildPomodoroPath()}>返回番茄计划</Link>
@@ -790,23 +787,8 @@ export function PomodoroPage() {
               const draftPomodoroCount = normalizeCountInput(pomodoroDraft.pomodoroCount, 4)
               const draftProjectIds = normalizeDraftProjectIds(pomodoroDraft.projectIds, draftPomodoroCount)
               const draftFocusPrompts = normalizeDraftFocusPrompts(pomodoroDraft.focusPrompts, draftPomodoroCount)
-              const draftActiveDaySummary = formatActiveDaySummary(pomodoroDraft.activeDays)
-              const draftIndex = activePomodoroDraftIndex
               return (
                 <div key={pomodoroDraft.id} className="space-y-5 border-t border-border/60 pt-5">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-medium text-foreground">计划 {draftIndex + 1}</div>
-                      <div className="mt-1 text-sm text-muted-foreground">
-                        {normalizePomodoroStartTime(pomodoroDraft.startTime)} · {draftActiveDaySummary}
-                      </div>
-                    </div>
-                    <Button type="button" variant="ghost" size="sm" onClick={() => removePomodoroDraftPlan(pomodoroDraft.id)}>
-                      <Trash2 className="h-4 w-4" />
-                      删除计划
-                    </Button>
-                  </div>
-
                   <div className="flex flex-wrap gap-3">
                     <Button
                       type="button"
@@ -1111,17 +1093,29 @@ export function PomodoroPage() {
             })}
 
             {activePomodoroDraft ? (
-              <div className="flex flex-wrap gap-3">
-                <Button onClick={savePomodoroConfig} disabled={updateGlobalSettings.isPending || planConflictMessages.length > 0}>
-                  <Save className="h-4 w-4" />
-                  保存
-                </Button>
-                <Button variant="outline" onClick={() => setPomodoroDrafts(toPomodoroPlanDrafts(weeklySchedule))}>
-                  <RotateCcw className="h-4 w-4" />
-                  恢复
-                </Button>
-                <Button asChild variant="ghost">
-                  <Link to={buildPomodoroPath()}>返回</Link>
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-5">
+                <div className="flex flex-wrap gap-3">
+                  <Button onClick={savePomodoroConfig} disabled={updateGlobalSettings.isPending || planConflictMessages.length > 0}>
+                    <Save className="h-4 w-4" />
+                    保存
+                  </Button>
+                  <Button variant="outline" onClick={() => setPomodoroDrafts(toPomodoroPlanDrafts(weeklySchedule))}>
+                    <RotateCcw className="h-4 w-4" />
+                    恢复
+                  </Button>
+                  <Button asChild variant="ghost">
+                    <Link to={buildPomodoroPath()}>返回</Link>
+                  </Button>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  onClick={() => removePomodoroDraftPlan(activePomodoroDraft.id)}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  删除计划
                 </Button>
               </div>
             ) : null}

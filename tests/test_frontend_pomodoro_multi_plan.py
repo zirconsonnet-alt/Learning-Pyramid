@@ -153,6 +153,10 @@ def test_pomodoro_plan_detail_route_omits_timer_overview_shell() -> None:
     assert "MetricTile label=" not in detail_route_source
     assert "<RestMusicPlayer" not in detail_route_source
     assert "返回番茄计划" in detail_route_source
+    assert "番茄计划详情" not in detail_route_source
+    assert "draftActiveDaySummary" not in detail_route_source
+    assert "normalizePomodoroStartTime(pomodoroDraft.startTime)} ·" not in detail_route_source
+    assert detail_route_source.index("番茄项目 / 提示词") < detail_route_source.index("删除计划")
 
 
 def test_pomodoro_settings_use_dedicated_route_and_default_prompts() -> None:
