@@ -174,15 +174,18 @@ def test_pomodoro_plan_selects_projects_inside_selected_subject() -> None:
     assert "normalizeDraftSubjectId" in page_source
     assert '.filter((material) => material.projectId)' in page_source
     assert "material.projectId !== subject.subjectProjectId" not in page_source
-    assert "请选择学科（必选）" in page_source
-    assert "先为这个计划选择学科" in page_source
     assert "validPomodoroProjectIds" in page_source
     assert "validPomodoroProjectIds.has(snapshot.currentProjectId)" in page_source
     assert "projectBindingMessages" in page_source
-    assert "请选择项目（必选）" in page_source
-    assert "先选择这个计划的学科，再选择该学科下的项目。" in page_source
-    assert "番茄项目未选择完整" in page_source
-    assert "updateGlobalSettings.isPending || planConflictMessages.length > 0 || projectBindingMessages.length > 0" in page_source
+    assert "请选择项目" in page_source
+    assert "请选择项目（必选）" not in page_source
+    assert "请选择学科（必选）" not in page_source
+    assert "先选择这个计划的学科，再选择该学科下的项目。" not in page_source
+    assert "先为这个计划选择学科。" not in page_source
+    assert "番茄项目未选择完整：" not in page_source
+    assert "border-destructive/60 text-destructive focus-visible:ring-destructive" not in page_source
+    assert "updateGlobalSettings.isPending || planConflictMessages.length > 0 || projectBindingMessages.length > 0" not in page_source
+    assert "disabled={updateGlobalSettings.isPending || planConflictMessages.length > 0}" in page_source
     assert "draftSubjectId" in page_source
     assert 'id={`pomodoro-subject-${pomodoroDraft.id}`}' in page_source
     assert 'id={`pomodoro-project-${pomodoroDraft.id}-${index}`}' in page_source

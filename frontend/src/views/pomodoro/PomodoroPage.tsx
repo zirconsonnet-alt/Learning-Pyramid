@@ -846,10 +846,6 @@ export function PomodoroPage() {
       showErrorFeedback("计划时间冲突", planConflictMessages.join("；"))
       return
     }
-    if (projectBindingMessages.length > 0) {
-      showErrorFeedback("番茄项目未选择完整", projectBindingMessages.join("；"))
-      return
-    }
     try {
       await persistPomodoroSettings({ weeklySchedule: draftSchedule })
       setSettings({ enabled, weeklySchedule: draftSchedule, transitionSoundEnabled, microBreaks })
@@ -868,7 +864,7 @@ export function PomodoroPage() {
       return
     }
     if (projectBindingMessages.length > 0) {
-      showErrorFeedback("番茄项目未选择完整", projectBindingMessages.join("；"))
+      showInfoFeedback("先补全番茄项目", "开启番茄钟前，需要给学习时段选好项目。")
       return
     }
     const nextEnabled = !enabled
@@ -973,12 +969,6 @@ export function PomodoroPage() {
                 计划时间冲突：{planConflictMessages.join("；")}
               </div>
             ) : null}
-            {projectBindingMessages.length > 0 ? (
-              <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                番茄项目未选择完整：{projectBindingMessages.join("；")}
-              </div>
-            ) : null}
-
             {!activePomodoroDraft ? (
               <div className="rounded-lg border border-dashed border-[color:var(--theme-soft-border)] px-4 py-8 text-sm text-muted-foreground">
                 这个番茄计划不存在，可能已经被删除。
@@ -1178,10 +1168,7 @@ export function PomodoroPage() {
                       <Label htmlFor={`pomodoro-subject-${pomodoroDraft.id}`}>学科</Label>
                       <select
                         id={`pomodoro-subject-${pomodoroDraft.id}`}
-                        className={cn(
-                          "theme-select h-10 w-full rounded-xl px-3 text-sm",
-                          !draftSubjectId ? "border-destructive/60 text-destructive focus-visible:ring-destructive" : "",
-                        )}
+                        className="theme-select h-10 w-full rounded-xl px-3 text-sm"
                         value={draftSubjectId}
                         onChange={(event) => {
                           const nextSubjectId = event.target.value
@@ -1196,16 +1183,13 @@ export function PomodoroPage() {
                           }))
                         }}
                       >
-                        <option value="">请选择学科（必选）</option>
+                        <option value="">请选择学科</option>
                         {(subjectsQ.data ?? []).map((subject) => (
                           <option key={subject.subjectId} value={subject.subjectId}>
                             {subject.title}
                           </option>
                         ))}
                       </select>
-                      {!draftSubjectId ? (
-                        <div className="text-xs text-destructive">先为这个计划选择学科。</div>
-                      ) : null}
                     </div>
 
                     {availablePomodoroProjects.length === 0 && !pomodoroProjectOptionsLoading ? (
@@ -1215,10 +1199,6 @@ export function PomodoroPage() {
                     <div className="pomodoro-project-prompt-scroll flex flex-nowrap gap-3 overflow-x-auto pb-2">
                       {draftProjectIds.map((projectId, index) => {
                         const promptKey = `${pomodoroDraft.id}:focus:${index}`
-                        const projectSelectionInvalid =
-                          !projectId ||
-                          !validPomodoroProjectIds.has(projectId) ||
-                          projectSubjectIdByProjectId.get(projectId) !== draftSubjectId
                         return (
                           <div
                             key={`${pomodoroDraft.id}-project-${index}`}
@@ -1228,10 +1208,7 @@ export function PomodoroPage() {
                               <Label htmlFor={`pomodoro-project-${pomodoroDraft.id}-${index}`}>番茄 {index + 1}</Label>
                               <select
                                 id={`pomodoro-project-${pomodoroDraft.id}-${index}`}
-                                className={cn(
-                                  "theme-select h-10 w-full rounded-xl px-3 text-sm",
-                                  projectSelectionInvalid ? "border-destructive/60 text-destructive focus-visible:ring-destructive" : "",
-                                )}
+                                className="theme-select h-10 w-full rounded-xl px-3 text-sm"
                                 value={projectId && validPomodoroProjectIds.has(projectId) ? projectId : ""}
                                 disabled={!draftSubjectId}
                                 onChange={(event) =>
@@ -1249,16 +1226,13 @@ export function PomodoroPage() {
                                   })
                                 }
                               >
-                                <option value="">请选择项目（必选）</option>
+                                <option value="">请选择项目</option>
                                 {selectableProjects.map((project) => (
                                   <option key={project.projectId} value={project.projectId}>
                                     {getPomodoroSubjectProjectOptionLabel(project)}
                                   </option>
                                 ))}
                               </select>
-                              {projectSelectionInvalid ? (
-                                <div className="text-xs text-destructive">先选择这个计划的学科，再选择该学科下的项目。</div>
-                              ) : null}
                             </div>
 
                             <div className="space-y-2">
@@ -1345,7 +1319,7 @@ export function PomodoroPage() {
             {activePomodoroDraft ? (
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-5">
                 <div className="flex flex-wrap gap-3">
-                  <Button onClick={savePomodoroConfig} disabled={updateGlobalSettings.isPending || planConflictMessages.length > 0 || projectBindingMessages.length > 0}>
+                  <Button onClick={savePomodoroConfig} disabled={updateGlobalSettings.isPending || planConflictMessages.length > 0}>
                     <Save className="h-4 w-4" />
                     保存
                   </Button>
@@ -1387,7 +1361,7 @@ export function PomodoroPage() {
               <div className="text-3xl font-semibold tracking-[-0.04em] text-foreground sm:text-4xl">{headlineCountdown}</div>
             </div>
             <div className="flex flex-wrap gap-3">
-              <Button variant={enabled ? "outline" : "default"} onClick={handleTogglePomodoro} disabled={updateGlobalSettings.isPending || planConflictMessages.length > 0 || projectBindingMessages.length > 0}>
+              <Button variant={enabled ? "outline" : "default"} onClick={handleTogglePomodoro} disabled={updateGlobalSettings.isPending || planConflictMessages.length > 0}>
                 <TimerReset className="h-4 w-4" />
                 {enabled ? "关闭番茄钟" : "开启番茄钟"}
               </Button>
@@ -1522,12 +1496,6 @@ export function PomodoroPage() {
               计划时间冲突：{planConflictMessages.join("；")}
             </div>
           ) : null}
-          {projectBindingMessages.length > 0 ? (
-            <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              番茄项目未选择完整：{projectBindingMessages.join("；")}
-            </div>
-          ) : null}
-
           {pomodoroDrafts.length === 0 ? (
             <div className="rounded-lg border border-dashed border-[color:var(--theme-soft-border)] px-4 py-8 text-sm text-muted-foreground">
               还没有计划，新增一组后再进入详情设置。
