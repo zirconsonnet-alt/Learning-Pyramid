@@ -139,6 +139,22 @@ def test_pomodoro_plan_editing_uses_dedicated_route() -> None:
     assert "setIsScheduleDetailOpen" not in page_source
 
 
+def test_pomodoro_plan_detail_route_omits_timer_overview_shell() -> None:
+    page_source = POMODORO_PAGE.read_text(encoding="utf-8")
+    detail_return_start = page_source.index("if (activePlanId) {")
+    overview_start = page_source.index("data-pomodoro-session-controls")
+    detail_route_source = page_source[detail_return_start:overview_start]
+
+    assert detail_return_start < overview_start
+    assert "return (" in detail_route_source
+    assert "data-pomodoro-plan-detail" in detail_route_source
+    assert "<PhaseBadge snapshot={snapshot} />" not in detail_route_source
+    assert "{headlineCountdown}" not in detail_route_source
+    assert "MetricTile label=" not in detail_route_source
+    assert "<RestMusicPlayer" not in detail_route_source
+    assert "返回番茄计划" in detail_route_source
+
+
 def test_pomodoro_settings_use_dedicated_route_and_default_prompts() -> None:
     store_source = POMODORO_STORE.read_text(encoding="utf-8")
     routing_source = POMODORO_ROUTING.read_text(encoding="utf-8")
@@ -193,6 +209,24 @@ def test_pomodoro_session_controls_keep_settings_entry_visible() -> None:
 
     assert "buildPomodoroSettingsPath" not in app_shell_source
     assert 'aria-label="打开番茄钟设置"' not in app_shell_source
+
+
+def test_pomodoro_header_keeps_phase_label_next_to_countdown_without_extra_summary() -> None:
+    page_source = POMODORO_PAGE.read_text(encoding="utf-8")
+    session_controls = page_source[
+        page_source.index("data-pomodoro-session-controls"):page_source.index('<MetricTile label="今日开始"')
+    ]
+    header_block = session_controls[
+        session_controls.index("<PhaseBadge snapshot={snapshot} />"):session_controls.index('className="flex flex-wrap gap-3"')
+    ]
+
+    assert header_block.index("<PhaseBadge snapshot={snapshot} />") < header_block.index("{headlineCountdown}")
+    assert "`剩余 ${headlineCountdown}`" not in session_controls
+    assert "`距离开始 ${headlineCountdown}`" not in session_controls
+    assert '"按排程运行"' not in session_controls
+    assert '"铃声开"' not in session_controls
+    assert '"铃声关"' not in session_controls
+    assert "describeProjectLabel(snapshot.currentProjectId" not in session_controls
 
 
 def test_pomodoro_settings_page_edits_random_micro_break_preferences() -> None:

@@ -284,11 +284,6 @@ function formatDateTime(ms: number | null) {
   }).format(ms)
 }
 
-function describeProjectLabel(projectId: string | null, projectTitleMap: Map<string, string>) {
-  if (!projectId) return "未指定项目"
-  return projectTitleMap.get(projectId) || "已删除或无权限项目"
-}
-
 function RestMusicPlayer(props: { isRestPhase: boolean }) {
   const { isRestPhase } = props
   const musicDirectory = usePomodoroRestMusicDirectoryBinding()
@@ -735,6 +730,22 @@ export function PomodoroPage() {
     )
   }
 
+  const wallpaperBackdrop = wallpaperUrl ? (
+    <div
+      data-pomodoro-wallpaper-backdrop
+      className="pointer-events-none fixed inset-x-0 bottom-0 top-[4.5rem] z-0 bg-cover bg-center"
+      style={{ backgroundImage: `url(${wallpaperUrl})` }}
+    >
+      <div
+        className="absolute inset-0 backdrop-blur-[1px]"
+        style={{
+          background:
+            "linear-gradient(180deg, hsl(var(--background) / 0.58) 0%, hsl(var(--background) / 0.72) 48%, hsl(var(--background) / 0.82) 100%)",
+        }}
+      />
+    </div>
+  ) : null
+
   if (pomodoroMemberBlocked) {
     return (
       <div data-pomodoro-wallpaper-scope="page" className="relative z-10 mx-auto flex w-full max-w-3xl flex-col gap-6">
@@ -746,40 +757,392 @@ export function PomodoroPage() {
     )
   }
 
+  if (activePlanId) {
+    return (
+      <>
+        {wallpaperBackdrop}
+        <div data-pomodoro-wallpaper-scope="page" className="relative z-10 mx-auto flex w-full max-w-5xl flex-col gap-8">
+          <section data-pomodoro-plan-detail className="space-y-6">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-medium text-muted-foreground">番茄计划详情</div>
+                <div className="mt-1 text-2xl font-semibold text-foreground">
+                  {activePomodoroDraft ? `计划 ${activePomodoroDraftIndex + 1}` : "计划不存在"}
+                </div>
+              </div>
+              <Button asChild variant="outline">
+                <Link to={buildPomodoroPath()}>返回番茄计划</Link>
+              </Button>
+            </div>
+
+            {planConflictMessages.length > 0 ? (
+              <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                计划时间冲突：{planConflictMessages.join("；")}
+              </div>
+            ) : null}
+
+            {!activePomodoroDraft ? (
+              <div className="rounded-lg border border-dashed border-[color:var(--theme-soft-border)] px-4 py-8 text-sm text-muted-foreground">
+                这个番茄计划不存在，可能已经被删除。
+              </div>
+            ) : null}
+
+            {(activePomodoroDraft ? [activePomodoroDraft] : []).map((pomodoroDraft) => {
+              const draftPomodoroCount = normalizeCountInput(pomodoroDraft.pomodoroCount, 4)
+              const draftProjectIds = normalizeDraftProjectIds(pomodoroDraft.projectIds, draftPomodoroCount)
+              const draftFocusPrompts = normalizeDraftFocusPrompts(pomodoroDraft.focusPrompts, draftPomodoroCount)
+              const draftActiveDaySummary = formatActiveDaySummary(pomodoroDraft.activeDays)
+              const draftIndex = activePomodoroDraftIndex
+              return (
+                <div key={pomodoroDraft.id} className="space-y-5 border-t border-border/60 pt-5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-medium text-foreground">计划 {draftIndex + 1}</div>
+                      <div className="mt-1 text-sm text-muted-foreground">
+                        {normalizePomodoroStartTime(pomodoroDraft.startTime)} · {draftActiveDaySummary}
+                      </div>
+                    </div>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => removePomodoroDraftPlan(pomodoroDraft.id)}>
+                      <Trash2 className="h-4 w-4" />
+                      删除计划
+                    </Button>
+                  </div>
+
+                  <div className="flex flex-wrap gap-3">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() =>
+                        updatePomodoroDraft(pomodoroDraft.id, (draft) => ({
+                          ...draft,
+                          activeDays: ["mon", "tue", "wed", "thu", "fri"],
+                        }))
+                      }
+                    >
+                      工作日生效
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() =>
+                        updatePomodoroDraft(pomodoroDraft.id, (draft) => ({
+                          ...draft,
+                          activeDays: ["sat", "sun"],
+                        }))
+                      }
+                    >
+                      周末生效
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() =>
+                        updatePomodoroDraft(pomodoroDraft.id, (draft) => ({
+                          ...draft,
+                          activeDays: [...POMODORO_WEEKDAYS],
+                        }))
+                      }
+                    >
+                      每天生效
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() =>
+                        updatePomodoroDraft(pomodoroDraft.id, (draft) => ({
+                          ...draft,
+                          activeDays: [],
+                        }))
+                      }
+                    >
+                      全部关闭
+                    </Button>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-sm font-medium text-foreground">生效星期</div>
+                      <div className="text-xs text-muted-foreground">
+                        {pomodoroDraft.activeDays.length}/{POMODORO_WEEKDAYS.length}
+                      </div>
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-4 lg:grid-cols-7">
+                      {POMODORO_WEEKDAYS.map((day) => {
+                        const checked = pomodoroDraft.activeDays.includes(day)
+                        return (
+                          <label
+                            key={day}
+                            className={cn(
+                              "flex min-h-12 cursor-pointer items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm transition-colors",
+                              checked
+                                ? "border-primary/40 bg-[hsl(var(--primary)/0.10)] text-primary"
+                                : "border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] text-muted-foreground",
+                            )}
+                          >
+                            <input
+                              type="checkbox"
+                              className="sr-only"
+                              checked={checked}
+                              onChange={(event) =>
+                                updatePomodoroDraft(pomodoroDraft.id, (draft) => {
+                                  const nextActiveDays = new Set(draft.activeDays)
+                                  if (event.target.checked) {
+                                    nextActiveDays.add(day)
+                                  } else {
+                                    nextActiveDays.delete(day)
+                                  }
+                                  return {
+                                    ...draft,
+                                    activeDays: POMODORO_WEEKDAYS.filter((item) => nextActiveDays.has(item)),
+                                  }
+                                })
+                              }
+                            />
+                            <span>{POMODORO_WEEKDAY_LABELS[day]}</span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <div className="space-y-2">
+                      <Label htmlFor={`pomodoro-start-${pomodoroDraft.id}`}>开始时间</Label>
+                      <Input
+                        id={`pomodoro-start-${pomodoroDraft.id}`}
+                        type="time"
+                        value={pomodoroDraft.startTime}
+                        onChange={(event) =>
+                          updatePomodoroDraft(pomodoroDraft.id, (draft) => ({
+                            ...draft,
+                            startTime: event.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor={`pomodoro-focus-${pomodoroDraft.id}`}>学习 M</Label>
+                      <Input
+                        id={`pomodoro-focus-${pomodoroDraft.id}`}
+                        type="number"
+                        min={1}
+                        max={180}
+                        value={pomodoroDraft.focusMinutes}
+                        onChange={(event) =>
+                          updatePomodoroDraft(pomodoroDraft.id, (draft) => ({
+                            ...draft,
+                            focusMinutes: event.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor={`pomodoro-break-${pomodoroDraft.id}`}>间歇 N</Label>
+                      <Input
+                        id={`pomodoro-break-${pomodoroDraft.id}`}
+                        type="number"
+                        min={1}
+                        max={60}
+                        value={pomodoroDraft.breakMinutes}
+                        onChange={(event) =>
+                          updatePomodoroDraft(pomodoroDraft.id, (draft) => ({
+                            ...draft,
+                            breakMinutes: event.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor={`pomodoro-count-${pomodoroDraft.id}`}>番茄数</Label>
+                      <Input
+                        id={`pomodoro-count-${pomodoroDraft.id}`}
+                        type="number"
+                        min={1}
+                        max={12}
+                        value={pomodoroDraft.pomodoroCount}
+                        onChange={(event) =>
+                          updatePomodoroDraft(pomodoroDraft.id, (draft) => {
+                            const nextCount = normalizeCountInput(
+                              event.target.value,
+                              normalizeCountInput(draft.pomodoroCount, 4),
+                            )
+                            return {
+                              ...draft,
+                              pomodoroCount: event.target.value,
+                              projectIds: normalizeDraftProjectIds(draft.projectIds, nextCount),
+                              focusPrompts: normalizeDraftFocusPrompts(draft.focusPrompts, nextCount),
+                            }
+                          })
+                        }
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-sm font-medium text-foreground">番茄项目 / 提示词</div>
+                      <div className="text-xs text-muted-foreground">
+                        {draftProjectIds.filter(Boolean).length}/{draftPomodoroCount}
+                      </div>
+                    </div>
+
+                    {availableProjects.length === 0 && !projectsQ.isLoading ? (
+                      <div className="mt-3 text-sm text-muted-foreground">暂无可绑定项目</div>
+                    ) : null}
+
+                    <div className="pomodoro-project-prompt-scroll flex flex-nowrap gap-3 overflow-x-auto pb-2">
+                      {draftProjectIds.map((projectId, index) => {
+                        const promptKey = `${pomodoroDraft.id}:focus:${index}`
+                        return (
+                          <div
+                            key={`${pomodoroDraft.id}-project-${index}`}
+                            className="min-w-[20rem] flex-1 basis-[20rem] shrink-0 space-y-3 border-t border-border/60 pt-3 sm:min-w-[22rem] sm:basis-[22rem] lg:min-w-[24rem] lg:basis-[24rem]"
+                          >
+                            <div className="space-y-2">
+                              <Label htmlFor={`pomodoro-project-${pomodoroDraft.id}-${index}`}>番茄 {index + 1}</Label>
+                              <select
+                                id={`pomodoro-project-${pomodoroDraft.id}-${index}`}
+                                className="theme-select h-10 w-full rounded-xl px-3 text-sm"
+                                value={projectId ?? ""}
+                                onChange={(event) =>
+                                  updatePomodoroDraft(pomodoroDraft.id, (draft) => {
+                                    const nextProjectIds = normalizeDraftProjectIds(
+                                      draft.projectIds,
+                                      normalizeCountInput(draft.pomodoroCount, 4),
+                                    )
+                                    nextProjectIds[index] = event.target.value.trim() || null
+                                    return {
+                                      ...draft,
+                                      projectIds: nextProjectIds,
+                                    }
+                                  })
+                                }
+                              >
+                                <option value="">未指定项目</option>
+                                {availableProjects.map((project) => (
+                                  <option key={project.projectId} value={project.projectId}>
+                                    {project.title}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <Label htmlFor={`pomodoro-focus-prompt-${pomodoroDraft.id}-${index}`}>学习前提示词</Label>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => void handleTestPrompt(draftFocusPrompts[index] ?? "", promptKey)}
+                                  disabled={
+                                    testingPromptKey === promptKey ||
+                                    !normalizeDraftPromptText(draftFocusPrompts[index]).trim()
+                                  }
+                                >
+                                  <Volume2 className="h-3.5 w-3.5" />
+                                  试听
+                                </Button>
+                              </div>
+                              <textarea
+                                id={`pomodoro-focus-prompt-${pomodoroDraft.id}-${index}`}
+                                maxLength={200}
+                                rows={3}
+                                className="min-h-20 w-full resize-y rounded-xl border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-input-bg)] px-3 py-2 text-sm leading-6 text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                                placeholder="学习前提示"
+                                value={draftFocusPrompts[index] ?? ""}
+                                onChange={(event) =>
+                                  updatePomodoroDraft(pomodoroDraft.id, (draft) => {
+                                    const nextFocusPrompts = normalizeDraftFocusPrompts(
+                                      draft.focusPrompts,
+                                      normalizeCountInput(draft.pomodoroCount, 4),
+                                    )
+                                    nextFocusPrompts[index] = event.target.value
+                                    return {
+                                      ...draft,
+                                      focusPrompts: nextFocusPrompts,
+                                    }
+                                  })
+                                }
+                              />
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="text-sm font-medium text-foreground">休息前提示词</div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void handleTestPrompt(pomodoroDraft.breakPrompt, `${pomodoroDraft.id}:break`)}
+                        disabled={
+                          testingPromptKey === `${pomodoroDraft.id}:break` ||
+                          !normalizeDraftPromptText(pomodoroDraft.breakPrompt).trim()
+                        }
+                      >
+                        <Volume2 className="h-4 w-4" />
+                        试听休息提示
+                      </Button>
+                    </div>
+                    <textarea
+                      id={`pomodoro-break-prompt-${pomodoroDraft.id}`}
+                      maxLength={200}
+                      rows={3}
+                      className="min-h-20 w-full resize-y rounded-xl border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-input-bg)] px-3 py-2 text-sm leading-6 text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                      placeholder="休息前提示"
+                      value={pomodoroDraft.breakPrompt}
+                      onChange={(event) =>
+                        updatePomodoroDraft(pomodoroDraft.id, (draft) => ({
+                          ...draft,
+                          breakPrompt: event.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+                </div>
+              )
+            })}
+
+            {activePomodoroDraft ? (
+              <div className="flex flex-wrap gap-3">
+                <Button onClick={savePomodoroConfig} disabled={updateGlobalSettings.isPending || planConflictMessages.length > 0}>
+                  <Save className="h-4 w-4" />
+                  保存
+                </Button>
+                <Button variant="outline" onClick={() => setPomodoroDrafts(toPomodoroPlanDrafts(weeklySchedule))}>
+                  <RotateCcw className="h-4 w-4" />
+                  恢复
+                </Button>
+                <Button asChild variant="ghost">
+                  <Link to={buildPomodoroPath()}>返回</Link>
+                </Button>
+              </div>
+            ) : null}
+          </section>
+        </div>
+      </>
+    )
+  }
+
   return (
     <>
-      {wallpaperUrl ? (
-        <div
-          data-pomodoro-wallpaper-backdrop
-          className="pointer-events-none fixed inset-x-0 bottom-0 top-[4.5rem] z-0 bg-cover bg-center"
-          style={{ backgroundImage: `url(${wallpaperUrl})` }}
-        >
-          <div
-            className="absolute inset-0 backdrop-blur-[1px]"
-            style={{
-              background:
-                "linear-gradient(180deg, hsl(var(--background) / 0.58) 0%, hsl(var(--background) / 0.72) 48%, hsl(var(--background) / 0.82) 100%)",
-            }}
-          />
-        </div>
-      ) : null}
+      {wallpaperBackdrop}
       <div data-pomodoro-wallpaper-scope="page" className="relative z-10 mx-auto flex w-full max-w-5xl flex-col gap-8">
       <section data-pomodoro-session-controls className="space-y-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0 flex-1 space-y-5">
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
+            <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
               <PhaseBadge snapshot={snapshot} />
-              <span>
-                {snapshot.status === "running" ? `剩余 ${headlineCountdown}` : snapshot.idleReason === "waiting" ? `距离开始 ${headlineCountdown}` : "按排程运行"}
-              </span>
-              <span>{transitionSoundEnabled ? "铃声开" : "铃声关"}</span>
-              {snapshot.currentProjectId ? (
-                <span>
-                  {describeProjectLabel(snapshot.currentProjectId, projectTitleMap)}
-                </span>
-              ) : null}
+              <div className="text-3xl font-semibold tracking-[-0.04em] text-foreground sm:text-4xl">{headlineCountdown}</div>
             </div>
-            <div className="text-3xl font-semibold tracking-[-0.04em] text-foreground sm:text-4xl">{headlineCountdown}</div>
             <div className="flex flex-wrap gap-3">
               <Button variant={enabled ? "outline" : "default"} onClick={handleTogglePomodoro} disabled={updateGlobalSettings.isPending}>
                 <TimerReset className="h-4 w-4" />
@@ -818,437 +1181,67 @@ export function PomodoroPage() {
       <RestMusicPlayer isRestPhase={isRestPhase} />
 
       <section className="space-y-4 border-t border-border/60 pt-6">
-        {activePlanId ? (
-          <>
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div className="text-sm font-medium text-muted-foreground">番茄计划详情</div>
-                <div className="mt-1 text-xl font-semibold text-foreground">
-                  {activePomodoroDraft ? `计划 ${activePomodoroDraftIndex + 1}` : "计划不存在"}
-                </div>
+        <div data-pomodoro-plan-overview className="space-y-5">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <div className="text-sm font-medium text-muted-foreground">番茄计划</div>
+              <div className="mt-2 text-3xl font-semibold tracking-[-0.04em] text-foreground">
+                {enabledDraftCount > 0 ? `${enabledDraftCount} 组` : "未启用"}
               </div>
-              <Button asChild variant="outline">
-                <Link to={buildPomodoroPath()}>返回番茄计划</Link>
-              </Button>
+              <div className="mt-2 text-sm leading-6 text-[color:var(--theme-soft-text-strong)]">
+                {draftStartTimes.length > 0 ? draftStartTimes.join("、") : "还没有开始时间"}
+              </div>
+              <div className="mt-1 text-sm text-muted-foreground">
+                {enabledUnassignedPomodoros > 0 ? `${enabledUnassignedPomodoros} 个番茄未绑定项目` : "项目已配置"} · {activeDaySummary}
+              </div>
             </div>
+            <Button type="button" variant="outline" onClick={addPomodoroDraftPlan}>
+              <Plus className="h-4 w-4" />
+              新增计划
+            </Button>
+          </div>
 
-            {planConflictMessages.length > 0 ? (
-              <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                计划时间冲突：{planConflictMessages.join("；")}
-              </div>
-            ) : null}
-
-            {!activePomodoroDraft ? (
-              <div className="rounded-lg border border-dashed border-[color:var(--theme-soft-border)] px-4 py-8 text-sm text-muted-foreground">
-                这个番茄计划不存在，可能已经被删除。
-              </div>
-            ) : null}
-
-            <div data-pomodoro-plan-detail className="space-y-8">
-              {(activePomodoroDraft ? [activePomodoroDraft] : []).map((pomodoroDraft) => {
-                const draftPomodoroCount = normalizeCountInput(pomodoroDraft.pomodoroCount, 4)
-                const draftProjectIds = normalizeDraftProjectIds(pomodoroDraft.projectIds, draftPomodoroCount)
-                const draftFocusPrompts = normalizeDraftFocusPrompts(pomodoroDraft.focusPrompts, draftPomodoroCount)
-                const draftActiveDaySummary = formatActiveDaySummary(pomodoroDraft.activeDays)
-                const draftIndex = activePomodoroDraftIndex
-                return (
-                  <div key={pomodoroDraft.id} className="space-y-5 border-t border-border/60 pt-5">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-medium text-foreground">计划 {draftIndex + 1}</div>
-                        <div className="mt-1 text-sm text-muted-foreground">
-                          {normalizePomodoroStartTime(pomodoroDraft.startTime)} · {draftActiveDaySummary}
-                        </div>
-                      </div>
-                      <Button type="button" variant="ghost" size="sm" onClick={() => removePomodoroDraftPlan(pomodoroDraft.id)}>
-                        <Trash2 className="h-4 w-4" />
-                        删除计划
-                      </Button>
-                    </div>
-
-                    <div className="flex flex-wrap gap-3">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() =>
-                          updatePomodoroDraft(pomodoroDraft.id, (draft) => ({
-                            ...draft,
-                            activeDays: ["mon", "tue", "wed", "thu", "fri"],
-                          }))
-                        }
-                      >
-                        工作日生效
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() =>
-                          updatePomodoroDraft(pomodoroDraft.id, (draft) => ({
-                            ...draft,
-                            activeDays: ["sat", "sun"],
-                          }))
-                        }
-                      >
-                        周末生效
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() =>
-                          updatePomodoroDraft(pomodoroDraft.id, (draft) => ({
-                            ...draft,
-                            activeDays: [...POMODORO_WEEKDAYS],
-                          }))
-                        }
-                      >
-                        每天生效
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        onClick={() =>
-                          updatePomodoroDraft(pomodoroDraft.id, (draft) => ({
-                            ...draft,
-                            activeDays: [],
-                          }))
-                        }
-                      >
-                        全部关闭
-                      </Button>
-                    </div>
-
-                    <div className="space-y-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="text-sm font-medium text-foreground">生效星期</div>
-                        <div className="text-xs text-muted-foreground">
-                          {pomodoroDraft.activeDays.length}/{POMODORO_WEEKDAYS.length}
-                        </div>
-                      </div>
-                      <div className="grid gap-2 sm:grid-cols-4 lg:grid-cols-7">
-                        {POMODORO_WEEKDAYS.map((day) => {
-                          const checked = pomodoroDraft.activeDays.includes(day)
-                          return (
-                            <label
-                              key={day}
-                              className={cn(
-                                "flex min-h-12 cursor-pointer items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm transition-colors",
-                                checked
-                                  ? "border-primary/40 bg-[hsl(var(--primary)/0.10)] text-primary"
-                                  : "border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] text-muted-foreground",
-                              )}
-                            >
-                              <input
-                                type="checkbox"
-                                className="sr-only"
-                                checked={checked}
-                                onChange={(event) =>
-                                  updatePomodoroDraft(pomodoroDraft.id, (draft) => {
-                                    const nextActiveDays = new Set(draft.activeDays)
-                                    if (event.target.checked) {
-                                      nextActiveDays.add(day)
-                                    } else {
-                                      nextActiveDays.delete(day)
-                                    }
-                                    return {
-                                      ...draft,
-                                      activeDays: POMODORO_WEEKDAYS.filter((item) => nextActiveDays.has(item)),
-                                    }
-                                  })
-                                }
-                              />
-                              <span>{POMODORO_WEEKDAY_LABELS[day]}</span>
-                            </label>
-                          )
-                        })}
-                      </div>
-                    </div>
-
-                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                      <div className="space-y-2">
-                        <Label htmlFor={`pomodoro-start-${pomodoroDraft.id}`}>开始时间</Label>
-                        <Input
-                          id={`pomodoro-start-${pomodoroDraft.id}`}
-                          type="time"
-                          value={pomodoroDraft.startTime}
-                          onChange={(event) =>
-                            updatePomodoroDraft(pomodoroDraft.id, (draft) => ({
-                              ...draft,
-                              startTime: event.target.value,
-                            }))
-                          }
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor={`pomodoro-focus-${pomodoroDraft.id}`}>学习 M</Label>
-                        <Input
-                          id={`pomodoro-focus-${pomodoroDraft.id}`}
-                          type="number"
-                          min={1}
-                          max={180}
-                          value={pomodoroDraft.focusMinutes}
-                          onChange={(event) =>
-                            updatePomodoroDraft(pomodoroDraft.id, (draft) => ({
-                              ...draft,
-                              focusMinutes: event.target.value,
-                            }))
-                          }
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor={`pomodoro-break-${pomodoroDraft.id}`}>间歇 N</Label>
-                        <Input
-                          id={`pomodoro-break-${pomodoroDraft.id}`}
-                          type="number"
-                          min={1}
-                          max={60}
-                          value={pomodoroDraft.breakMinutes}
-                          onChange={(event) =>
-                            updatePomodoroDraft(pomodoroDraft.id, (draft) => ({
-                              ...draft,
-                              breakMinutes: event.target.value,
-                            }))
-                          }
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor={`pomodoro-count-${pomodoroDraft.id}`}>番茄数</Label>
-                        <Input
-                          id={`pomodoro-count-${pomodoroDraft.id}`}
-                          type="number"
-                          min={1}
-                          max={12}
-                          value={pomodoroDraft.pomodoroCount}
-                          onChange={(event) =>
-                            updatePomodoroDraft(pomodoroDraft.id, (draft) => {
-                              const nextCount = normalizeCountInput(
-                                event.target.value,
-                                normalizeCountInput(draft.pomodoroCount, 4),
-                              )
-                              return {
-                                ...draft,
-                                pomodoroCount: event.target.value,
-                                projectIds: normalizeDraftProjectIds(draft.projectIds, nextCount),
-                                focusPrompts: normalizeDraftFocusPrompts(draft.focusPrompts, nextCount),
-                              }
-                            })
-                          }
-                        />
-                      </div>
-                    </div>
-
-                    <div className="space-y-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="text-sm font-medium text-foreground">番茄项目 / 提示词</div>
-                        <div className="text-xs text-muted-foreground">
-                          {draftProjectIds.filter(Boolean).length}/{draftPomodoroCount}
-                        </div>
-                      </div>
-
-                      {availableProjects.length === 0 && !projectsQ.isLoading ? (
-                        <div className="mt-3 text-sm text-muted-foreground">暂无可绑定项目</div>
-                      ) : null}
-
-                      <div className="pomodoro-project-prompt-scroll flex flex-nowrap gap-3 overflow-x-auto pb-2">
-                        {draftProjectIds.map((projectId, index) => {
-                          const promptKey = `${pomodoroDraft.id}:focus:${index}`
-                          return (
-                            <div
-                              key={`${pomodoroDraft.id}-project-${index}`}
-                              className="min-w-[20rem] flex-1 basis-[20rem] shrink-0 space-y-3 border-t border-border/60 pt-3 sm:min-w-[22rem] sm:basis-[22rem] lg:min-w-[24rem] lg:basis-[24rem]"
-                            >
-                              <div className="space-y-2">
-                                <Label htmlFor={`pomodoro-project-${pomodoroDraft.id}-${index}`}>番茄 {index + 1}</Label>
-                                <select
-                                  id={`pomodoro-project-${pomodoroDraft.id}-${index}`}
-                                  className="theme-select h-10 w-full rounded-xl px-3 text-sm"
-                                  value={projectId ?? ""}
-                                  onChange={(event) =>
-                                    updatePomodoroDraft(pomodoroDraft.id, (draft) => {
-                                      const nextProjectIds = normalizeDraftProjectIds(
-                                        draft.projectIds,
-                                        normalizeCountInput(draft.pomodoroCount, 4),
-                                      )
-                                      nextProjectIds[index] = event.target.value.trim() || null
-                                      return {
-                                        ...draft,
-                                        projectIds: nextProjectIds,
-                                      }
-                                    })
-                                  }
-                                >
-                                  <option value="">未指定项目</option>
-                                  {availableProjects.map((project) => (
-                                    <option key={project.projectId} value={project.projectId}>
-                                      {project.title}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-
-                              <div className="space-y-2">
-                                <div className="flex items-center justify-between gap-2">
-                                  <Label htmlFor={`pomodoro-focus-prompt-${pomodoroDraft.id}-${index}`}>学习前提示词</Label>
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => void handleTestPrompt(draftFocusPrompts[index] ?? "", promptKey)}
-                                    disabled={
-                                      testingPromptKey === promptKey ||
-                                      !normalizeDraftPromptText(draftFocusPrompts[index]).trim()
-                                    }
-                                  >
-                                    <Volume2 className="h-3.5 w-3.5" />
-                                    试听
-                                  </Button>
-                                </div>
-                                <textarea
-                                  id={`pomodoro-focus-prompt-${pomodoroDraft.id}-${index}`}
-                                  maxLength={200}
-                                  rows={3}
-                                  className="min-h-20 w-full resize-y rounded-xl border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-input-bg)] px-3 py-2 text-sm leading-6 text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                                  placeholder="学习前提示"
-                                  value={draftFocusPrompts[index] ?? ""}
-                                  onChange={(event) =>
-                                    updatePomodoroDraft(pomodoroDraft.id, (draft) => {
-                                      const nextFocusPrompts = normalizeDraftFocusPrompts(
-                                        draft.focusPrompts,
-                                        normalizeCountInput(draft.pomodoroCount, 4),
-                                      )
-                                      nextFocusPrompts[index] = event.target.value
-                                      return {
-                                        ...draft,
-                                        focusPrompts: nextFocusPrompts,
-                                      }
-                                    })
-                                  }
-                                />
-                              </div>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    </div>
-
-                    <div className="space-y-3">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div className="text-sm font-medium text-foreground">休息前提示词</div>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => void handleTestPrompt(pomodoroDraft.breakPrompt, `${pomodoroDraft.id}:break`)}
-                          disabled={
-                            testingPromptKey === `${pomodoroDraft.id}:break` ||
-                            !normalizeDraftPromptText(pomodoroDraft.breakPrompt).trim()
-                          }
-                        >
-                          <Volume2 className="h-4 w-4" />
-                          试听休息提示
-                        </Button>
-                      </div>
-                      <textarea
-                        id={`pomodoro-break-prompt-${pomodoroDraft.id}`}
-                        maxLength={200}
-                        rows={3}
-                        className="min-h-20 w-full resize-y rounded-xl border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-input-bg)] px-3 py-2 text-sm leading-6 text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                        placeholder="休息前提示"
-                        value={pomodoroDraft.breakPrompt}
-                        onChange={(event) =>
-                          updatePomodoroDraft(pomodoroDraft.id, (draft) => ({
-                            ...draft,
-                            breakPrompt: event.target.value,
-                          }))
-                        }
-                      />
-                    </div>
-                  </div>
-                )
-              })}
+          {planConflictMessages.length > 0 ? (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              计划时间冲突：{planConflictMessages.join("；")}
             </div>
-          </>
-        ) : (
-              <div data-pomodoro-plan-overview className="space-y-5">
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div>
-                    <div className="text-sm font-medium text-muted-foreground">番茄计划</div>
-                    <div className="mt-2 text-3xl font-semibold tracking-[-0.04em] text-foreground">
-                      {enabledDraftCount > 0 ? `${enabledDraftCount} 组` : "未启用"}
-                    </div>
-                    <div className="mt-2 text-sm leading-6 text-[color:var(--theme-soft-text-strong)]">
-                      {draftStartTimes.length > 0 ? draftStartTimes.join("、") : "还没有开始时间"}
-                    </div>
-                    <div className="mt-1 text-sm text-muted-foreground">
-                      {enabledUnassignedPomodoros > 0 ? `${enabledUnassignedPomodoros} 个番茄未绑定项目` : "项目已配置"} · {activeDaySummary}
-                    </div>
-                  </div>
-                  <Button type="button" variant="outline" onClick={addPomodoroDraftPlan}>
-                    <Plus className="h-4 w-4" />
-                    新增计划
-                  </Button>
-                </div>
+          ) : null}
 
-                {planConflictMessages.length > 0 ? (
-                  <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                    计划时间冲突：{planConflictMessages.join("；")}
-                  </div>
-                ) : null}
-
-                {pomodoroDrafts.length === 0 ? (
-                  <div className="rounded-lg border border-dashed border-[color:var(--theme-soft-border)] px-4 py-8 text-sm text-muted-foreground">
-                    还没有计划，新增一组后再进入详情设置。
-                  </div>
-                ) : null}
-
-                <div className="grid gap-3 md:grid-cols-2">
-                  {pomodoroDrafts.map((pomodoroDraft, draftIndex) => {
-                    const draftPomodoroCount = normalizeCountInput(pomodoroDraft.pomodoroCount, 4)
-                    const draftProjectIds = normalizeDraftProjectIds(pomodoroDraft.projectIds, draftPomodoroCount)
-                    const assignedProjectCount = draftProjectIds.filter(Boolean).length
-                    return (
-                      <Link
-                        key={pomodoroDraft.id}
-                        to={buildPomodoroPlanPath(pomodoroDraft.id)}
-                        className="block space-y-3 rounded-[1.1rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] px-4 py-4 text-foreground shadow-[var(--theme-soft-shadow)] transition hover:-translate-y-px hover:border-primary/25"
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <div className="text-sm font-medium text-muted-foreground">计划 {draftIndex + 1}</div>
-                            <div className="mt-1 text-xl font-semibold">{normalizePomodoroStartTime(pomodoroDraft.startTime)}</div>
-                          </div>
-                          <span className="rounded-full border border-[color:var(--theme-soft-border)] px-2.5 py-1 text-xs text-muted-foreground">详情</span>
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          {formatActiveDaySummary(pomodoroDraft.activeDays)} · {draftPomodoroCount} 个番茄
-                        </div>
-                        <div className="text-sm text-[color:var(--theme-soft-text-strong)]">
-                          项目 {assignedProjectCount}/{draftPomodoroCount} · 学习 {normalizeFocusInput(pomodoroDraft.focusMinutes, 25)} 分钟 · 间歇 {normalizeBreakInput(pomodoroDraft.breakMinutes, 5)} 分钟
-                        </div>
-                      </Link>
-                    )
-                  })}
-                </div>
-              </div>
-        )}
-
-        {activePlanId && activePomodoroDraft ? (
-            <div className="flex flex-wrap gap-3">
-              <Button onClick={savePomodoroConfig} disabled={updateGlobalSettings.isPending || planConflictMessages.length > 0}>
-                <Save className="h-4 w-4" />
-                保存
-              </Button>
-              <Button variant="outline" onClick={() => setPomodoroDrafts(toPomodoroPlanDrafts(weeklySchedule))}>
-                <RotateCcw className="h-4 w-4" />
-                恢复
-              </Button>
-              <Button asChild variant="ghost">
-                <Link to={buildPomodoroPath()}>返回</Link>
-              </Button>
+          {pomodoroDrafts.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-[color:var(--theme-soft-border)] px-4 py-8 text-sm text-muted-foreground">
+              还没有计划，新增一组后再进入详情设置。
             </div>
-        ) : null}
+          ) : null}
+
+          <div className="grid gap-3 md:grid-cols-2">
+            {pomodoroDrafts.map((pomodoroDraft, draftIndex) => {
+              const draftPomodoroCount = normalizeCountInput(pomodoroDraft.pomodoroCount, 4)
+              const draftProjectIds = normalizeDraftProjectIds(pomodoroDraft.projectIds, draftPomodoroCount)
+              const assignedProjectCount = draftProjectIds.filter(Boolean).length
+              return (
+                <Link
+                  key={pomodoroDraft.id}
+                  to={buildPomodoroPlanPath(pomodoroDraft.id)}
+                  className="block space-y-3 rounded-[1.1rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] px-4 py-4 text-foreground shadow-[var(--theme-soft-shadow)] transition hover:-translate-y-px hover:border-primary/25"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-medium text-muted-foreground">计划 {draftIndex + 1}</div>
+                      <div className="mt-1 text-xl font-semibold">{normalizePomodoroStartTime(pomodoroDraft.startTime)}</div>
+                    </div>
+                    <span className="rounded-full border border-[color:var(--theme-soft-border)] px-2.5 py-1 text-xs text-muted-foreground">详情</span>
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    {formatActiveDaySummary(pomodoroDraft.activeDays)} · {draftPomodoroCount} 个番茄
+                  </div>
+                  <div className="text-sm text-[color:var(--theme-soft-text-strong)]">
+                    项目 {assignedProjectCount}/{draftPomodoroCount} · 学习 {normalizeFocusInput(pomodoroDraft.focusMinutes, 25)} 分钟 · 间歇 {normalizeBreakInput(pomodoroDraft.breakMinutes, 5)} 分钟
+                  </div>
+                </Link>
+              )
+            })}
+          </div>
+        </div>
       </section>
       </div>
     </>
