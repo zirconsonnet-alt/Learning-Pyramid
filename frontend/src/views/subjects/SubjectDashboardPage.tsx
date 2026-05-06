@@ -268,10 +268,7 @@ export function SubjectDashboardPage() {
             <div className="theme-icon-surface h-14 w-14 rounded-3xl transition-transform duration-200 group-hover:scale-105">
               <Plus className="h-6 w-6" />
             </div>
-            <div className="space-y-2">
-              <div className="text-xl font-semibold text-foreground">新建项目</div>
-              <div className="text-sm leading-6 text-muted-foreground">像学科中心一样，从这里新建网课、书本或零散知识点项目。</div>
-            </div>
+            <div className="text-xl font-semibold text-foreground">新建项目</div>
           </button>
         </div>
       </section>

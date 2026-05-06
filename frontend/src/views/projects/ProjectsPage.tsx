@@ -21,6 +21,7 @@ import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
 import { completeGuideWalkthroughStep } from "@/ui/guideWalkthrough/guideWalkthroughController"
 import { useCreateSubject, useDeleteSubject, useSubjects } from "@/ui/queries/subjects"
+import { listSubjectMaterials } from "@/ui/api/subjects"
 import { useAppStore } from "@/ui/store/appStore"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { useWorkbenchStore } from "@/ui/store/workbenchStore"
@@ -134,6 +135,14 @@ export function ProjectsPage() {
       refetchInterval: 60_000,
     })),
   })
+  const subjectMaterialQs = useQueries({
+    queries: subjects.map((subject) => ({
+      queryKey: ["subjectMaterials", subject.subjectId],
+      queryFn: () => listSubjectMaterials(subject.subjectId),
+      enabled: !isLoading && !error,
+      staleTime: 60_000,
+    })),
+  })
 
   const lastStudyByProjectId = useMemo(() => {
     const entries = subjects.map((subject, index) => [subject.subjectId, getProjectLastStudyAt(projectActivityQs[index]?.data)] as const)
@@ -143,6 +152,10 @@ export function ProjectsPage() {
     const entries = subjects.map((subject, index) => [subject.subjectId, Boolean(projectActivityQs[index]?.isLoading)] as const)
     return Object.fromEntries(entries)
   }, [projectActivityQs, subjects])
+  const subjectMaterialCountBySubjectId = useMemo(() => {
+    const entries = subjects.map((subject, index) => [subject.subjectId, subjectMaterialQs[index]?.data?.length ?? 0] as const)
+    return Object.fromEntries(entries)
+  }, [subjectMaterialQs, subjects])
 
   const sortedSubjects = useMemo(() => {
     const items = [...subjects]
@@ -271,6 +284,7 @@ export function ProjectsPage() {
                 (() => {
                   const lastStudyDisplay = formatLastStudyText(lastStudyByProjectId[p.subjectId] ?? null)
                   const activityLoading = activityLoadingByProjectId[p.subjectId]
+                  const subjectProjectCountText = `${subjectMaterialCountBySubjectId[p.subjectId] ?? 0} 个项目`
                   return (
                     <Card
                       key={p.subjectId}
@@ -284,6 +298,7 @@ export function ProjectsPage() {
                           <div className="min-w-0 space-y-2">
                             <CardTitle className="truncate text-xl">{p.title}</CardTitle>
                             <CardDescription className="flex flex-wrap items-center gap-2 text-xs">
+                              <span className="font-medium text-[color:var(--theme-soft-text-strong)]">{subjectProjectCountText}</span>
                               <span className={cn("font-medium", activityLoading ? "text-muted-foreground" : lastStudyDisplay.className)}>
                                 {activityLoading ? "学习记录载入中" : lastStudyDisplay.text}
                               </span>
@@ -361,9 +376,6 @@ export function ProjectsPage() {
                 autoFocus
               />
             </div>
-            <DialogDescription className="rounded-xl border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-4 py-3 text-sm leading-6 text-muted-foreground">
-              学科是复习、复述点、层推进和统计的共享空间。网课、书本和零散知识会作为项目挂在学科下面；当前版本会先创建一个默认项目。
-            </DialogDescription>
           </div>
           <DialogFooter>
             <Button variant="secondary" onClick={() => setCreateOpen(false)}>

@@ -7,7 +7,7 @@ export function formatStudyMaterialTypeLabel(materialType: StudyMaterialType) {
 }
 
 export function describeStudyMaterialHint(materialType: StudyMaterialType) {
-  if (materialType === "BOOK") return "创建后会直接进入项目设置，你可以空白开始、粘贴目录，或稍后补一键复用网课树。"
+  if (materialType === "BOOK") return "适合看书记笔记，做题"
   if (materialType === "LOOSE_POINTS") return "适合临时知识、补充例题和碎片整理。"
   return "适合视频课、直播回放和章节式课程。"
 }
