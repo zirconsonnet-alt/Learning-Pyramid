@@ -125,6 +125,8 @@ export function ProjectsPage() {
   const [deleteTarget, setDeleteTarget] = useState<Subject | null>(null)
   const [deleteConfirmation, setDeleteConfirmation] = useState("")
   const deleteExpectedText = deleteTarget?.title ?? ""
+  const deleteDialogHint =
+    "删除前建议确认是否还有未处理的内容绑定、草稿或工作流入口需要保留。该操作完成后，当前浏览器会同步清掉这个学科的本地上下文。"
   const deleteMatches = deleteConfirmation.trim() === deleteExpectedText
   const projectActivityQs = useQueries({
     queries: subjects.map((subject) => ({
@@ -408,17 +410,13 @@ export function ProjectsPage() {
                 </div>
               </div>
 
-              <div className="theme-status-surface px-4 py-4 text-sm text-muted-foreground">
-                删除前建议确认是否还有未处理的内容绑定、草稿或工作流入口需要保留。该操作完成后，当前浏览器会同步清掉这个学科的本地上下文。
-              </div>
-
               <div className="grid gap-2">
                 <Label htmlFor="delete-project-confirmation">输入学科标题以确认删除</Label>
                 <Input
                   id="delete-project-confirmation"
                   value={deleteConfirmation}
                   onChange={(event) => setDeleteConfirmation(event.target.value)}
-                  placeholder={deleteExpectedText || "输入学科标题"}
+                  placeholder={deleteDialogHint}
                   autoFocus
                 />
                 <p className="text-xs text-muted-foreground">

@@ -40,3 +40,13 @@ def test_subject_project_pages_avoid_compatibility_project_wording() -> None:
         assert "兼容项目" not in source
         assert "兼容工作台" not in source
         assert "兼容入口" not in source
+
+
+def test_delete_subject_dialog_uses_warning_as_confirmation_placeholder() -> None:
+    source = PROJECTS_PAGE.read_text(encoding="utf-8")
+
+    dialog_source = source[source.index('<Dialog open={Boolean(deleteTarget)}') : source.index("</Dialog>", source.index('<Dialog open={Boolean(deleteTarget)}'))]
+
+    assert "theme-status-surface" not in dialog_source
+    assert "placeholder={deleteDialogHint}" in source
+    assert 'placeholder={deleteExpectedText || "输入学科标题"}' not in source
