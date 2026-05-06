@@ -2,7 +2,7 @@ import { useMemo } from "react"
 
 import { ApiError } from "@/ui/api/http"
 import { ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import { useRecallPointReviewProjection } from "@/ui/queries/reviewRecommendations"
 
 function formatApiError(err: unknown) {
@@ -23,14 +23,73 @@ function formatReviewResult(value: "CAN_RECALL" | "CANNOT_RECALL" | null) {
   return "未复习"
 }
 
+function formatXAxisDate(value: number) {
+  return new Date(value).toLocaleDateString(undefined, { month: "numeric", day: "numeric" })
+}
+
+function buildXAxisTicks(xMin: number, xMax: number) {
+  if (!Number.isFinite(xMin) || !Number.isFinite(xMax)) return []
+  if (xMax <= xMin) return [{ at: xMin, label: formatXAxisDate(xMin) }]
+  return Array.from({ length: 4 }, (_, index) => {
+    const ratio = index / 3
+    const at = xMin + (xMax - xMin) * ratio
+    return { at, label: formatXAxisDate(at) }
+  })
+}
+
+function buildConvolvedReviewCurve(props: {
+  calculatedAtMs: number
+  estimatedMemoryStrength: number
+  forgettingCurveDecayPerDay: number
+  historyPoints: Array<{ at: number; value: number; result: "CAN_RECALL" | "CANNOT_RECALL" }>
+}) {
+  const { calculatedAtMs, estimatedMemoryStrength, forgettingCurveDecayPerDay, historyPoints } = props
+  if (!Number.isFinite(calculatedAtMs) || historyPoints.length === 0) return []
+
+  const firstHistoryAtMs = historyPoints[0]?.at
+  if (!Number.isFinite(firstHistoryAtMs)) return []
+
+  const endMs = Math.max(firstHistoryAtMs, calculatedAtMs)
+  const sampleCount = Math.max(96, historyPoints.length * 24)
+  const curvePoints = Array.from({ length: sampleCount }, (_, index) => {
+    const ratio = sampleCount <= 1 ? 0 : index / (sampleCount - 1)
+    const at = firstHistoryAtMs + (endMs - firstHistoryAtMs) * ratio
+    const recordsAtPoint = historyPoints.filter((item) => item.at <= at)
+    if (recordsAtPoint.length === 0) return { at, value: 0 }
+
+    let successWeight = 0
+    let totalWeight = 0
+    for (const record of recordsAtPoint) {
+      const ageDays = Math.max(0, (at - record.at) / 86400000)
+      const weight = Math.exp(-forgettingCurveDecayPerDay * ageDays)
+      totalWeight += weight
+      if (record.result === "CAN_RECALL") successWeight += weight
+    }
+
+    const weightedSuccessRatio = totalWeight <= 0 ? 0 : successWeight / totalWeight
+    const lastRecordAt = recordsAtPoint[recordsAtPoint.length - 1]?.at ?? at
+    const freshnessAgeDays = Math.max(0, (at - lastRecordAt) / 86400000)
+    const freshness = Math.exp(-forgettingCurveDecayPerDay * freshnessAgeDays)
+    const value = Math.max(0, Math.min(1, weightedSuccessRatio * freshness))
+    return { at, value }
+  })
+
+  const lastPoint = curvePoints[curvePoints.length - 1]
+  if (lastPoint && Number.isFinite(estimatedMemoryStrength)) {
+    lastPoint.value = Math.max(0, Math.min(1, estimatedMemoryStrength))
+  }
+  return curvePoints
+}
+
 function ReviewCurveChart(props: {
   weightedSuccessRatio: number
+  estimatedMemoryStrength: number
   forgettingCurveDecayPerDay: number
   calculatedAt: string
   lastReviewedAt: string | null
   history: Array<{ occurredAt: string; result: "CAN_RECALL" | "CANNOT_RECALL" }>
 }) {
-  const { weightedSuccessRatio, forgettingCurveDecayPerDay, calculatedAt, lastReviewedAt, history } = props
+  const { estimatedMemoryStrength, forgettingCurveDecayPerDay, calculatedAt, history } = props
 
   const chart = useMemo(() => {
     const width = 720
@@ -44,11 +103,18 @@ function ReviewCurveChart(props: {
         result: item.result,
       }))
       .filter((item) => Number.isFinite(item.at))
-    const curveStartMs = lastReviewedAt ? new Date(lastReviewedAt).getTime() : Number.NaN
+      .sort((a, b) => a.at - b.at)
+
+    const curvePoints = buildConvolvedReviewCurve({
+      calculatedAtMs,
+      estimatedMemoryStrength,
+      forgettingCurveDecayPerDay,
+      historyPoints,
+    })
 
     const validTimes = [
       ...historyPoints.map((item) => item.at),
-      Number.isFinite(curveStartMs) ? curveStartMs : null,
+      ...curvePoints.map((item) => item.at),
       Number.isFinite(calculatedAtMs) ? calculatedAtMs : null,
     ].filter((value): value is number => value !== null)
 
@@ -57,30 +123,20 @@ function ReviewCurveChart(props: {
     const xMin = Math.min(...validTimes)
     let xMax = Math.max(...validTimes)
     if (xMax <= xMin) xMax = xMin + 1
+    const xAxisTicks = buildXAxisTicks(xMin, xMax)
 
     const plotWidth = width - padding.left - padding.right
     const plotHeight = height - padding.top - padding.bottom
     const x = (value: number) => padding.left + ((value - xMin) / (xMax - xMin)) * plotWidth
     const y = (value: number) => padding.top + (1 - value) * plotHeight
 
-    const curvePoints =
-      Number.isFinite(curveStartMs) && curveStartMs <= calculatedAtMs
-        ? Array.from({ length: 24 }, (_, index) => {
-            const ratio = index / 23
-            const at = curveStartMs + (calculatedAtMs - curveStartMs) * ratio
-            const ageDays = (at - curveStartMs) / 86400000
-            const value = Math.max(0, Math.min(1, weightedSuccessRatio * Math.exp(-forgettingCurveDecayPerDay * ageDays)))
-            return { at, value }
-          })
-        : []
-
     const path =
       curvePoints.length > 1
         ? curvePoints.map((point, index) => `${index === 0 ? "M" : "L"} ${x(point.at).toFixed(2)} ${y(point.value).toFixed(2)}`).join(" ")
         : ""
 
-    return { width, height, padding, x, y, historyPoints, curvePoints, path, xMin, xMax }
-  }, [calculatedAt, forgettingCurveDecayPerDay, history, lastReviewedAt, weightedSuccessRatio])
+    return { width, height, padding, x, y, historyPoints, curvePoints, path, xMin, xMax, xAxisTicks }
+  }, [calculatedAt, estimatedMemoryStrength, forgettingCurveDecayPerDay, history])
 
   if (!chart) return null
 
@@ -108,10 +164,24 @@ function ReviewCurveChart(props: {
               strokeWidth="2"
             />
           ))}
+          {chart.xAxisTicks.map((tick, index) => (
+            <g key={`${tick.at}-${index}`}>
+              <line x1={chart.x(tick.at)} x2={chart.x(tick.at)} y1={chart.height - chart.padding.bottom} y2={chart.height - chart.padding.bottom + 5} stroke="#d7e1ec" />
+              <text
+                x={chart.x(tick.at)}
+                y={chart.height - 8}
+                textAnchor={index === 0 ? "start" : index === chart.xAxisTicks.length - 1 ? "end" : "middle"}
+                fontSize="11"
+                fill="#64748b"
+              >
+                {tick.label}
+              </text>
+            </g>
+          ))}
         </svg>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
-        <span>绿色点表示“会”，橙色点表示“不会”，蓝线表示按最近一次正式复习往当前时刻衰减的记忆曲线。</span>
+        <span>绿色点表示“会”，橙色点表示“不会”，蓝线表示从第一次复习到现在的卷积记忆曲线。</span>
         <span>基于最近 {history.length} 条参与计算的记录。</span>
       </div>
     </div>
@@ -127,7 +197,6 @@ export function ReviewProjectionCard(props: { projectId: string; recallPointId: 
     <Card className="theme-card-main overflow-hidden">
       <CardHeader className="theme-card-header">
         <CardTitle>复习曲线与推荐指数</CardTitle>
-        <CardDescription>基于遗忘曲线加权法，按最近正式复习记录估算当前记忆强度与复习紧迫度。</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4 pt-5">
         {projectionQ.isLoading ? <LoadingNotice title="正在计算复习曲线" message="正在读取历史会/不会记录并生成当前推荐指数。" /> : null}
@@ -182,32 +251,12 @@ export function ReviewProjectionCard(props: { projectId: string; recallPointId: 
               <ReviewCurveChart
                 calculatedAt={projection.calculatedAt}
                 lastReviewedAt={projection.lastReviewedAt}
+                estimatedMemoryStrength={projection.estimatedMemoryStrength}
                 weightedSuccessRatio={projection.weightedSuccessRatio}
                 forgettingCurveDecayPerDay={projection.forgettingCurveDecayPerDay}
                 history={projection.history}
               />
             )}
-
-            <div className="space-y-2">
-              <div className="text-sm font-medium text-foreground">参与计算的历史记录</div>
-              <div className="space-y-2">
-                {projection.history.length === 0 ? (
-                  <div className="text-sm text-muted-foreground">暂无正式复习历史。</div>
-                ) : (
-                  projection.history.map((item, index) => (
-                    <div
-                      key={`${item.reviewTaskId}-${item.occurredAt}-${index}`}
-                      className="theme-soft-surface flex flex-wrap items-center justify-between gap-2 rounded-[1rem] px-3 py-3 text-sm"
-                    >
-                      <div className="text-muted-foreground">
-                        #{index + 1} · {formatDateTime(item.occurredAt)}
-                      </div>
-                      <div className="font-medium text-foreground">{formatReviewResult(item.result)}</div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
           </>
         ) : null}
       </CardContent>

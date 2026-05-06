@@ -356,6 +356,20 @@ def test_pomodoro_settings_page_edits_random_micro_break_preferences() -> None:
     assert "恢复微休息默认值" in settings_source
 
 
+def test_pomodoro_settings_default_prompts_are_separate_from_micro_breaks() -> None:
+    settings_source = POMODORO_SETTINGS_PAGE.read_text(encoding="utf-8")
+
+    micro_heading = '<h2 className="text-lg font-semibold text-foreground">随机微休息</h2>'
+    prompts_heading = '<h2 className="text-lg font-semibold text-foreground">提示词设置</h2>'
+
+    assert prompts_heading in settings_source
+    assert settings_source.index(micro_heading) < settings_source.index(prompts_heading)
+
+    micro_section = settings_source[settings_source.index(micro_heading):settings_source.index(prompts_heading)]
+    assert "默认学习提示词" not in micro_section
+    assert "默认休息提示词" not in micro_section
+
+
 def test_pomodoro_settings_page_uses_concise_local_resource_copy() -> None:
     settings_source = POMODORO_SETTINGS_PAGE.read_text(encoding="utf-8")
 

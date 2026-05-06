@@ -584,6 +584,10 @@ export function PomodoroSettingsPage() {
           </Button>
         </div>
 
+        <div className="space-y-4">
+          <h2 className="text-lg font-semibold text-foreground">提示词设置</h2>
+        </div>
+
         <div className="space-y-2">
           <Label htmlFor="pomodoro-default-focus-prompt">默认学习提示词</Label>
           <textarea

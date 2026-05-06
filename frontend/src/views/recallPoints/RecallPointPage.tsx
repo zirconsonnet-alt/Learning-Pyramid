@@ -19,9 +19,8 @@ import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
-import { formatInstanceReference, formatRecallPointReference } from "@/ui/displayIdentifiers"
 import { projectTypeRequiresAnchor } from "@/ui/projectTypes"
-import { useProjectConfig } from "@/ui/queries/workbench"
+import { useInstances, useProjectConfig } from "@/ui/queries/workbench"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { buildAiChatPath } from "@/views/ai/chatRouting"
 import { ReviewProjectionCard } from "@/views/recallPoints/components/ReviewProjectionCard"
@@ -37,6 +36,28 @@ function parseAnchorMs(position: string): number | null {
   if (!match) return null
   const value = Number(match[1])
   return Number.isFinite(value) ? value : null
+}
+
+function parseClockAnchorMs(value: string): number | null {
+  const parts = value.trim().split(":")
+  if (parts.length < 2 || parts.length > 3) return null
+  if (!parts.every((part) => /^\d+$/.test(part))) return null
+
+  const numbers = parts.map((part) => Number(part))
+  if (numbers.some((part) => !Number.isFinite(part))) return null
+
+  const [hours, minutes, seconds] = parts.length === 3 ? numbers : [0, numbers[0], numbers[1]]
+  if (minutes < 0 || minutes > 59 || seconds < 0 || seconds > 59) return null
+  return ((hours * 3600) + (minutes * 60) + seconds) * 1000
+}
+
+function normalizeAnchorInputToPosition(value: string): string {
+  const normalized = value.trim()
+  if (!normalized) return ""
+  const existingPositionMs = parseAnchorMs(normalized)
+  if (existingPositionMs !== null) return `t=${existingPositionMs}`
+  const clockMs = parseClockAnchorMs(normalized)
+  return clockMs === null ? normalized : `t=${clockMs}`
 }
 
 function msToClock(ms: number) {
@@ -55,6 +76,10 @@ function formatAnchorPosition(position: string | null | undefined) {
   if (!normalized) return "-"
   const ms = parseAnchorMs(normalized)
   return ms === null ? normalized : msToClock(ms)
+}
+
+function buildRecallPointDetailPath(projectId: string, recallPointId: string) {
+  return `/p/${projectId}/recall-points/${recallPointId}`
 }
 
 function renderRichContentPreview(projectId: string, value: RichContent, emptyText: string) {
@@ -135,11 +160,13 @@ function RecallPointDetailLayout({
   const navigate = useNavigate()
   const qc = useQueryClient()
   const projectConfigQ = useProjectConfig(projectId)
+  const instancesQ = useInstances(projectId)
   const projectType = projectConfigQ.data?.projectType ?? "COURSE"
   const requiresAnchor = projectTypeRequiresAnchor(projectType)
   const [question, setQuestion] = useState<RichContent>(() => recallPoint.question)
   const [answer, setAnswer] = useState<RichContent>(() => recallPoint.answer)
   const [positionText, setPositionText] = useState(() => recallPoint.anchor?.position ?? "")
+  const [anchorDraft, setAnchorDraft] = useState(() => formatAnchorPosition(recallPoint.anchor?.position))
   const [editingAnchor, setEditingAnchor] = useState(false)
   const [editingContent, setEditingContent] = useState(false)
   const referenceRecallPointQs = useQueries({
@@ -149,6 +176,10 @@ function RecallPointDetailLayout({
       enabled: !!projectId,
     })),
   })
+  const referenceRecallPoints = useMemo(
+    () => recallPoint.references.map((referenceId, index) => ({ referenceId, recallPoint: referenceRecallPointQs[index]?.data ?? null })),
+    [recallPoint.references, referenceRecallPointQs],
+  )
 
   const deleteM = useMutation({
     mutationFn: () => deleteRecallPoint(projectId, recallPointId),
@@ -173,7 +204,7 @@ function RecallPointDetailLayout({
 
   const editM = useMutation({
     mutationFn: async () => {
-      const pos = positionText.trim()
+      const pos = normalizeAnchorInputToPosition(editingAnchor ? anchorDraft : positionText)
       if (!richContentHasMeaning(question) || !richContentHasMeaning(answer)) return
       if (requiresAnchor && (!recallPoint.anchor || !pos)) return
       await editRecallPoint(projectId, recallPointId, {
@@ -201,15 +232,28 @@ function RecallPointDetailLayout({
     recallPoint.state === "ACTIVE" &&
     richContentHasMeaning(question) &&
     richContentHasMeaning(answer) &&
-    (!requiresAnchor || !!positionText.trim())
+    (!requiresAnchor || !!normalizeAnchorInputToPosition(editingAnchor ? anchorDraft : positionText))
+  const anchorInstance = useMemo(
+    () => (recallPoint.anchor ? (instancesQ.data ?? []).find((instance) => instance.instanceId === recallPoint.anchor?.instanceId) ?? null : null),
+    [instancesQ.data, recallPoint.anchor],
+  )
+  const anchorInstanceValue = recallPoint.anchor ? (
+    <Link className="text-primary underline-offset-4 hover:underline" to={`/p/${projectId}/instances/${recallPoint.anchor.instanceId}`}>
+      {anchorInstance?.materialDisplayName ?? (instancesQ.isLoading ? "读取中..." : "未找到内容实例")}
+    </Link>
+  ) : (
+    "未绑定内容实例"
+  )
 
   function openAnchorEditor() {
     if (!canEdit || !requiresAnchor) return
+    setAnchorDraft(formatAnchorPosition(positionText))
     setEditingAnchor(true)
   }
 
   function cancelAnchorEditor() {
     setPositionText(recallPoint.anchor?.position ?? "")
+    setAnchorDraft(formatAnchorPosition(recallPoint.anchor?.position))
     setEditingAnchor(false)
   }
 
@@ -226,6 +270,7 @@ function RecallPointDetailLayout({
 
   async function saveChanges() {
     await editM.mutateAsync()
+    if (editingAnchor) setPositionText(normalizeAnchorInputToPosition(anchorDraft))
     setEditingAnchor(false)
     setEditingContent(false)
   }
@@ -249,25 +294,47 @@ function RecallPointDetailLayout({
           <RecallPointSummaryCard
             topAction={backAction}
             header={<h1 className="truncate text-lg font-semibold">复述点详情</h1>}
-            description="元信息、锚点和复习状态集中在这里。"
             items={[
-              { label: "当前引用", value: formatRecallPointReference(recallPointId) },
               {
                 label: "内容实例",
-                value: recallPoint.anchor ? formatInstanceReference(recallPoint.anchor.instanceId, undefined, "未关联内容实例") : "未绑定内容实例",
+                value: anchorInstanceValue,
               },
               {
                 label: "锚点",
                 value:
                   requiresAnchor ? (
-                    <button
-                      type="button"
-                      className="rounded-full px-2 py-1 text-sm font-semibold text-foreground transition hover:bg-primary/5 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      onClick={openAnchorEditor}
-                      disabled={!canEdit}
-                    >
-                      {formatAnchorPosition(positionText)}
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {editingAnchor ? (
+                        <>
+                          <Input
+                            value={anchorDraft}
+                            onChange={(event) => setAnchorDraft(event.target.value)}
+                            disabled={!canEdit}
+                            placeholder="0:43"
+                            aria-label="锚点时间"
+                            className="h-9 max-w-[7.5rem] rounded-full border-[#dbe4ee] bg-white px-3 text-sm font-semibold"
+                          />
+                          <Button size="sm" onClick={() => void saveChanges()} disabled={!canSave || editM.isPending} className="rounded-full">
+                            <Save className="h-4 w-4" />
+                            {editM.isPending ? "保存中..." : "保存锚点"}
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={cancelAnchorEditor} disabled={editM.isPending} className="rounded-full">
+                            <X className="h-4 w-4" />
+                            取消
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <span className="rounded-full bg-primary/8 px-2.5 py-1 text-sm font-semibold text-primary">{formatAnchorPosition(positionText)}</span>
+                          {canEdit ? (
+                            <Button type="button" size="sm" variant="outline" onClick={openAnchorEditor} className="rounded-full">
+                              <PencilLine className="h-4 w-4" />
+                              修改锚点
+                            </Button>
+                          ) : null}
+                        </>
+                      )}
+                    </div>
                   ) : (
                     "未绑定锚点"
                   ),
@@ -275,24 +342,7 @@ function RecallPointDetailLayout({
             ]}
           />
 
-          {requiresAnchor && editingAnchor ? (
-            <Card>
-              <CardContent className="space-y-3 pt-5">
-                <Label htmlFor="anchorPos" className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">锚点</Label>
-                <Input id="anchorPos" value={positionText} onChange={(event) => setPositionText(event.target.value)} disabled={!canEdit} className="h-11 rounded-xl border-[color:var(--theme-soft-border)] bg-background" />
-                <div className="flex flex-wrap gap-2">
-                  <Button size="sm" onClick={() => void saveChanges()} disabled={!canSave || editM.isPending}>
-                    <Save className="h-4 w-4" />
-                    {editM.isPending ? "保存中..." : "保存"}
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={cancelAnchorEditor} disabled={editM.isPending}>
-                    <X className="h-4 w-4" />
-                    取消
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ) : !requiresAnchor ? (
+          {!requiresAnchor ? (
             <Card>
               <CardContent className="pt-5 text-sm text-muted-foreground">
                 当前项目类型不要求为复述点绑定锚点，所以这条记录会以项目级零散知识点形式保存。
@@ -333,13 +383,10 @@ function RecallPointDetailLayout({
           projectId={projectId}
           question={question}
           answer={answer}
-          requiresAnchor={requiresAnchor}
-          positionText={positionText}
-          recallPoint={recallPoint}
+          referenceRecallPoints={referenceRecallPoints}
           onAppendAnswerImage={(assetId) => setAnswer((prev) => appendImageBlock(prev, assetId))}
           onAppendQuestionImage={(assetId) => setQuestion((prev) => appendImageBlock(prev, assetId))}
           onCancelContentEditor={cancelContentEditor}
-          onOpenAnchorEditor={openAnchorEditor}
           onOpenContentEditor={openContentEditor}
           onRemoveAnswerImage={(imageIndex) => setAnswer((prev) => removeImageBlockAt(prev, imageIndex))}
           onRemoveQuestionImage={(imageIndex) => setQuestion((prev) => removeImageBlockAt(prev, imageIndex))}
@@ -348,60 +395,11 @@ function RecallPointDetailLayout({
           onSetQuestionText={(text) => setQuestion((prev) => setRichContentText(prev, text))}
         />
 
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle>引用关系</CardTitle>
-            <CardDescription>这条复述点引用到的其他复述点不会写进题面或答案文本里。</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {recallPoint.references.length === 0 ? (
-              <div className="text-sm text-muted-foreground">暂无引用关系。</div>
-            ) : (
-              recallPoint.references.map((referenceId, index) => {
-                const query = referenceRecallPointQs[index]
-                const referenced = query?.data
-                return (
-                  <div key={referenceId} className="rounded-[1rem] border border-[#dbe4ee] bg-[#fbfdff] p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="text-xs text-muted-foreground">引用 #{index + 1}</div>
-                        <div className="mt-1 text-sm font-medium text-foreground">{formatRecallPointReference(referenceId)}</div>
-                      </div>
-                      <Button asChild type="button" variant="outline" size="sm" className="rounded-full">
-                        <Link to={`/p/${projectId}/recall-points/${referenceId}`}>打开</Link>
-                      </Button>
-                    </div>
-                    {query?.isLoading ? <div className="mt-3 text-sm text-muted-foreground">正在加载引用内容...</div> : null}
-                    {query?.error ? <div className="mt-3 text-sm text-destructive">加载失败：{formatApiError(query.error)}</div> : null}
-                    {referenced ? (
-                      <div className="mt-3 space-y-3">
-                        <div>
-                          <div className="text-xs text-muted-foreground">题面</div>
-                          <div className="mt-1 text-sm leading-6 text-foreground">
-                            {renderRichContentPreview(projectId, referenced.question, "题面为空。")}
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-xs text-muted-foreground">答案</div>
-                          <div className="mt-1 text-sm leading-6 text-foreground">
-                            {renderRichContentPreview(projectId, referenced.answer, "答案为空。")}
-                          </div>
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                )
-              })
-            )}
-          </CardContent>
-        </Card>
-
         <ReviewProjectionCard projectId={projectId} recallPointId={recallPointId} />
 
         <Card>
           <CardHeader className="pb-3">
             <CardTitle>历史理解</CardTitle>
-            <CardDescription>正式复习时追加的理解会沉淀在这里。</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             {recallPoint.insights.length === 0 ? (
@@ -468,18 +466,15 @@ function RecallPointContentCard({
   onAppendAnswerImage,
   onAppendQuestionImage,
   onCancelContentEditor,
-  onOpenAnchorEditor,
   onOpenContentEditor,
   onRemoveAnswerImage,
   onRemoveQuestionImage,
   onSaveChanges,
   onSetAnswerText,
   onSetQuestionText,
-  positionText,
   projectId,
   question,
-  recallPoint,
-  requiresAnchor,
+  referenceRecallPoints,
 }: {
   answer: RichContent
   canEdit: boolean
@@ -490,26 +485,24 @@ function RecallPointContentCard({
   onAppendAnswerImage: (assetId: string) => void
   onAppendQuestionImage: (assetId: string) => void
   onCancelContentEditor: () => void
-  onOpenAnchorEditor: () => void
   onOpenContentEditor: () => void
   onRemoveAnswerImage: (imageIndex: number) => void
   onRemoveQuestionImage: (imageIndex: number) => void
   onSaveChanges: () => Promise<void>
   onSetAnswerText: (text: string) => void
   onSetQuestionText: (text: string) => void
-  positionText: string
   projectId: string
   question: RichContent
-  recallPoint: RecallPoint
-  requiresAnchor: boolean
+  referenceRecallPoints: Array<{ referenceId: string; recallPoint: RecallPoint | null }>
 }) {
+  const referencesCount = referenceRecallPoints.length
+
   return (
     <Card>
       <CardHeader className="pb-3">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <CardTitle>当前内容</CardTitle>
-            <CardDescription>按复习任务里的阅读顺序展示题面和答案。</CardDescription>
           </div>
           {canEdit && !editingContent ? (
             <Button size="sm" variant="outline" className="rounded-full" onClick={onOpenContentEditor}>
@@ -546,11 +539,6 @@ function RecallPointContentCard({
             <div className="rounded-[1rem] border border-[#dbe4ee] bg-[#fbfdff] p-4">
               <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#64748b]">
                 <span>题面</span>
-                {requiresAnchor ? (
-                  <button type="button" className="rounded-full border border-[#dbe4ee] bg-white px-2.5 py-1 normal-case tracking-normal text-slate-900 transition hover:bg-primary/5 hover:text-primary" onClick={onOpenAnchorEditor} disabled={!canEdit}>
-                    {formatAnchorPosition(positionText)}
-                  </button>
-                ) : null}
               </div>
               <div className="mt-3 text-[15px] font-semibold leading-7 text-foreground">
                 {renderRichContentPreview(projectId, question, "题面为空。")}
@@ -560,14 +548,35 @@ function RecallPointContentCard({
             <div className="rounded-[1rem] border border-[#dbe4ee] bg-[#fbfdff] p-4">
               <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#64748b]">
                 <span>答案</span>
-                <span className="rounded-full border border-[#dbe4ee] bg-white px-2.5 py-1 normal-case tracking-normal text-slate-900">
-                  {recallPoint.anchor ? formatInstanceReference(recallPoint.anchor.instanceId, undefined, "未关联内容实例") : "未绑定内容实例"}
-                </span>
+                {referencesCount > 0 ? (
+                  <span className="rounded-full border border-[#dbe4ee] bg-white px-2.5 py-1 normal-case tracking-normal text-slate-900">
+                    引用 {referencesCount}
+                  </span>
+                ) : null}
               </div>
               <div className="mt-3 text-sm leading-6 text-foreground">
                 {renderRichContentPreview(projectId, answer, "答案为空。")}
               </div>
             </div>
+
+            {referencesCount > 0 ? (
+              <div className="rounded-[1rem] border border-[#dbe4ee] bg-[#fbfdff] p-4">
+                <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#64748b]">
+                  <span>引用</span>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {referenceRecallPoints.map((item, index) => (
+                    <Link
+                      key={item.referenceId}
+                      to={buildRecallPointDetailPath(projectId, item.referenceId)}
+                      className="rounded-full border border-[#dbe4ee] bg-white px-3 py-1.5 text-sm font-medium text-slate-900 transition hover:bg-primary/5 hover:text-primary"
+                    >
+                      引用 {index + 1}
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </>
         )}
         {editError ? <p className="text-sm text-destructive">{formatApiError(editError)}</p> : null}
