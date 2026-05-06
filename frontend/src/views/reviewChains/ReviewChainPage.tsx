@@ -12,7 +12,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/
 import {
   formatConvergenceReference,
   formatRangeReference,
-  formatReviewChainReference,
   formatReviewTaskReference,
 } from "@/ui/displayIdentifiers"
 import { useProject } from "@/ui/queries/projects"
@@ -162,7 +161,6 @@ export function ReviewChainPage() {
         }
         items={[
           { label: "状态", value: describeReviewChainState(chainQ.data.state) },
-          { label: "当前引用", value: formatReviewChainReference(chainId) },
           { label: "队列长度", value: chainQ.data.queue.length },
           { label: "当前 head", value: headValue },
           { label: "关联入口", value: entryValue },
@@ -200,10 +198,7 @@ export function ReviewChainPage() {
         <div className="grid gap-4 xl:grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)] xl:items-start">
           {summaryPanel ? <aside className="xl:sticky xl:top-28 xl:self-start">{summaryPanel}</aside> : <div />}
           <div className="min-w-0">
-            <ReviewChainQueueListCard
-              title="复习链队列"
-              description="按推进顺序查看每个复习任务或收敛步骤，以及当前 head 所在位置。"
-            >
+            <ReviewChainQueueListCard title="复习链队列">
               {queue.map((item, index) => {
                 const detailQ = itemDetails[index]
                 const isDone = index < chainQ.data.headIndex

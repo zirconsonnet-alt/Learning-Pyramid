@@ -14,6 +14,8 @@ def test_review_chain_page_uses_task_detail_layout() -> None:
     assert "ReviewChainSummaryCard" in source
     assert "ReviewChainQueueListCard" in source
     assert "复习链队列" in source
+    assert "当前引用" not in source
+    assert "按推进顺序查看每个复习任务或收敛步骤，以及当前 head 所在位置。" not in source
     assert "describeQueueItemKind(item.kind)" in source
     assert '/learning-task-nodes/${bindingQ.data.entryNodeId}' in source
     assert '/task-tree/${bindingQ.data.entryNodeId}' not in source
