@@ -161,31 +161,34 @@ def test_pomodoro_plan_detail_route_omits_timer_overview_shell() -> None:
     assert detail_route_source.index("番茄项目 / 提示词") < detail_route_source.index("删除计划")
 
 
-def test_pomodoro_plan_requires_real_projects_not_subject_compatibility_projects() -> None:
+def test_pomodoro_plan_selects_projects_inside_selected_subject() -> None:
     page_source = POMODORO_PAGE.read_text(encoding="utf-8")
     app_shell_source = APP_SHELL.read_text(encoding="utf-8")
     gate_source = (REPO_ROOT / "frontend" / "src" / "views" / "pomodoro" / "PomodoroWorkbenchGate.tsx").read_text(encoding="utf-8")
     manual_source = USER_MANUAL.read_text(encoding="utf-8")
 
-    assert 'import { useSubjects } from "@/ui/queries/subjects"' in page_source
-    assert "subjectRootProjectIds" in page_source
-    assert "availablePomodoroProjects" in page_source
-    assert "filter((project) => !subjectRootProjectIds.has(project.projectId))" in page_source
+    assert 'import { useQueries } from "@tanstack/react-query"' in page_source
+    assert 'listSubjectMaterials' in page_source
+    assert "subjectProjectOptions" in page_source
+    assert "selectedSubjectIdByProjectId" in page_source
+    assert "请选择学科（必选）" in page_source
     assert "validPomodoroProjectIds" in page_source
     assert "validPomodoroProjectIds.has(snapshot.currentProjectId)" in page_source
     assert "projectBindingMessages" in page_source
     assert "请选择项目（必选）" in page_source
-    assert "必须选择具体项目，不能直接选择学科。" in page_source
+    assert "先选择学科，再选择这个学科下面的项目。" in page_source
     assert "番茄项目未选择完整" in page_source
     assert "updateGlobalSettings.isPending || planConflictMessages.length > 0 || projectBindingMessages.length > 0" in page_source
 
+    assert "pomodoroAccessibleProjects" in app_shell_source
     assert "subjectRootProjectIds" in app_shell_source
     assert "filter((project) => !subjectRootProjectIds.has(project.projectId))" in app_shell_source
     assert "const completedProjectId =" in app_shell_source
     assert "previousSnapshot.segment.projectId && accessibleProjectIds.has(previousSnapshot.segment.projectId)" in app_shell_source
+    assert 'import { useSubjects } from "@/ui/queries/subjects"' in gate_source
     assert "subjectRootProjectIds" in gate_source
     assert "filter((project) => !subjectRootProjectIds.has(project.projectId))" in gate_source
-    assert "每个番茄必须绑定具体项目，不能直接选择学科。" in manual_source
+    assert "每个番茄先选择学科，再绑定该学科下的具体项目。" in manual_source
 
 
 def test_pomodoro_settings_use_dedicated_route_and_default_prompts() -> None:

@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useQueries } from "@tanstack/react-query"
 import { BarChart3, FolderOpen, Music2, PanelsTopLeft, Pause, Play, Plus, RefreshCw, RotateCcw, Save, Settings2, SkipForward, TimerReset, Trash2, Volume2 } from "lucide-react"
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
+import { listSubjectMaterials, type StudyMaterial, type Subject } from "@/ui/api/subjects"
 import { playPomodoroVoicePrompt, unlockPomodoroAudio } from "@/ui/pomodoroAudio"
 import {
   getPomodoroRestMusicPlayerSnapshot,
@@ -49,6 +51,7 @@ import {
   usePomodoroNow,
   usePomodoroStore,
 } from "@/ui/store/pomodoroStore"
+import { formatStudyMaterialTypeLabel } from "@/ui/subjects/studyMaterials"
 import { useThemeStore } from "@/ui/store/themeStore"
 import { cn } from "@/ui/utils"
 import { MemberOnlyFeatureNotice } from "@/views/membership/membershipUi"
@@ -64,6 +67,14 @@ type PomodoroPlanDraft = {
   projectIds: Array<string | null>
   breakPrompt: string
   focusPrompts: string[]
+}
+
+type PomodoroSubjectProjectOption = {
+  subjectId: string
+  subjectTitle: string
+  projectId: string
+  title: string
+  materialType: StudyMaterial["materialType"]
 }
 
 function createPomodoroDraftId() {
@@ -114,6 +125,56 @@ function normalizeDraftFocusPrompts(focusPrompts: string[] | undefined, pomodoro
   const normalizedCount = clampInteger(pomodoroCount, 1, 12)
   const fallbackPrompt = normalizeDraftPromptText(defaultFocusPrompt)
   return Array.from({ length: normalizedCount }, (_, index) => normalizeDraftPromptText(focusPrompts?.[index] ?? fallbackPrompt))
+}
+
+function getPomodoroProjectSlotKey(draftId: string, index: number) {
+  return `${draftId}:${index}`
+}
+
+function getPomodoroSubjectProjectOptionLabel(option: PomodoroSubjectProjectOption) {
+  return `${option.title}（${formatStudyMaterialTypeLabel(option.materialType)}）`
+}
+
+function inferPomodoroSubjectIdForProject(
+  projectId: string | null,
+  projectSubjectIdByProjectId: Map<string, string>,
+  subjectIdByRootProjectId: Map<string, string>,
+) {
+  if (!projectId) return ""
+  return projectSubjectIdByProjectId.get(projectId) ?? subjectIdByRootProjectId.get(projectId) ?? ""
+}
+
+function buildPomodoroSubjectProjectOptions(
+  subjects: Subject[],
+  materialResults: Array<StudyMaterial[] | undefined>,
+  projectTitleById: Map<string, string>,
+) {
+  const subjectProjectOptions = new Map<string, PomodoroSubjectProjectOption[]>()
+  const projectSubjectIdByProjectId = new Map<string, string>()
+  const projectTitleByProjectId = new Map<string, string>()
+
+  subjects.forEach((subject, index) => {
+    const options = (materialResults[index] ?? [])
+      .filter((material) => material.projectId && material.projectId !== subject.subjectProjectId)
+      .map((material) => {
+        const projectId = material.projectId ?? ""
+        return {
+          subjectId: subject.subjectId,
+          subjectTitle: subject.title,
+          projectId,
+          title: material.title || projectTitleById.get(projectId) || "未命名项目",
+          materialType: material.materialType,
+        }
+      })
+
+    for (const option of options) {
+      projectSubjectIdByProjectId.set(option.projectId, option.subjectId)
+      projectTitleByProjectId.set(option.projectId, option.title)
+    }
+    subjectProjectOptions.set(subject.subjectId, options)
+  })
+
+  return { subjectProjectOptions, projectSubjectIdByProjectId, projectTitleByProjectId }
 }
 
 function clonePomodoroPlanDraft(draft: PomodoroPlanDraft): PomodoroPlanDraft {
@@ -535,6 +596,7 @@ export function PomodoroPage() {
   const now = usePomodoroNow(enabled || quickPomodoroClockActive)
   const { fromPath } = useMemo(() => readLocationState(location.state), [location.state])
   const [pomodoroDrafts, setPomodoroDrafts] = useState<PomodoroPlanDraft[]>(() => toPomodoroPlanDrafts(weeklySchedule))
+  const [selectedPomodoroSubjectIds, setSelectedPomodoroSubjectIds] = useState<Record<string, string>>({})
   const [pomodoroOverviewMode, setPomodoroOverviewMode] = useState<"plans" | "stats">("plans")
   const [testingPromptKey, setTestingPromptKey] = useState("")
   const [wallpaperUrl, setWallpaperUrl] = useState("")
@@ -558,18 +620,51 @@ export function PomodoroPage() {
     () => new Map((projectsQ.data ?? []).map((project) => [project.projectId, project.title] as const)),
     [projectsQ.data],
   )
+  const subjectMaterialQs = useQueries({
+    queries: (subjectsQ.data ?? []).map((subject) => ({
+      queryKey: ["subjectMaterials", subject.subjectId],
+      queryFn: () => listSubjectMaterials(subject.subjectId),
+      enabled: !subjectsQ.isLoading && !subjectsQ.error,
+      staleTime: 60_000,
+    })),
+  })
   const subjectRootProjectIds = useMemo(
     () => new Set((subjectsQ.data ?? []).map((subject) => subject.subjectProjectId).filter(Boolean)),
     [subjectsQ.data],
   )
+  const subjectIdByRootProjectId = useMemo(
+    () => new Map((subjectsQ.data ?? []).map((subject) => [subject.subjectProjectId, subject.subjectId] as const).filter(([projectId]) => Boolean(projectId))),
+    [subjectsQ.data],
+  )
+  const materialResults = subjectMaterialQs.map((query) => query.data)
+  const { subjectProjectOptions, projectSubjectIdByProjectId, projectTitleByProjectId } = useMemo(
+    () => buildPomodoroSubjectProjectOptions(subjectsQ.data ?? [], materialResults, projectTitleMap),
+    [materialResults, projectTitleMap, subjectsQ.data],
+  )
+  const selectedSubjectIdByProjectId = projectSubjectIdByProjectId
   const availablePomodoroProjects = useMemo(
-    () => (projectsQ.data ?? []).filter((project) => !subjectRootProjectIds.has(project.projectId)),
-    [projectsQ.data, subjectRootProjectIds],
+    () => Array.from(subjectProjectOptions.values()).flat(),
+    [subjectProjectOptions],
   )
   const validPomodoroProjectIds = useMemo(
     () => new Set(availablePomodoroProjects.map((project) => project.projectId)),
     [availablePomodoroProjects],
   )
+  const pomodoroProjectOptionsLoading =
+    subjectsQ.isLoading ||
+    projectsQ.isLoading ||
+    subjectMaterialQs.some((query) => query.isLoading)
+  const selectableSubjectIdsBySlotKey = useMemo(() => {
+    const next = new Map<string, string>()
+    pomodoroDrafts.forEach((draft) => {
+      normalizeDraftProjectIds(draft.projectIds, normalizeCountInput(draft.pomodoroCount, 4)).forEach((projectId, index) => {
+        const slotKey = getPomodoroProjectSlotKey(draft.id, index)
+        const inferredSubjectId = inferPomodoroSubjectIdForProject(projectId, projectSubjectIdByProjectId, subjectIdByRootProjectId)
+        next.set(slotKey, selectedPomodoroSubjectIds[slotKey] || inferredSubjectId)
+      })
+    })
+    return next
+  }, [pomodoroDrafts, projectSubjectIdByProjectId, selectedPomodoroSubjectIds, subjectIdByRootProjectId])
   const defaultPrompts = useMemo(
     () => ({ focusPrompt: defaultFocusPrompt, breakPrompt: defaultBreakPrompt }),
     [defaultBreakPrompt, defaultFocusPrompt],
@@ -600,7 +695,7 @@ export function PomodoroPage() {
   const isFocusRunning = snapshot.status === "running" && snapshot.phase === "focus"
   const hasFocusProject = Boolean(snapshot.currentProjectId && validPomodoroProjectIds.has(snapshot.currentProjectId))
   const focusProjectTitle =
-    snapshot.currentProjectId && hasFocusProject ? projectTitleMap.get(snapshot.currentProjectId) ?? "" : ""
+    snapshot.currentProjectId && hasFocusProject ? projectTitleByProjectId.get(snapshot.currentProjectId) ?? projectTitleMap.get(snapshot.currentProjectId) ?? "" : ""
   const rememberedWorkbenchPath = fromPath.startsWith("/p/") && fromPath.includes("/workbench") ? fromPath : ""
   const focusWorkbenchPath =
     snapshot.currentProjectId && hasFocusProject ? `/p/${snapshot.currentProjectId}/workbench` : ""
@@ -616,6 +711,7 @@ export function PomodoroPage() {
 
   useEffect(() => {
     setPomodoroDrafts(toPomodoroPlanDrafts(weeklySchedule))
+    setSelectedPomodoroSubjectIds({})
   }, [weeklySchedule])
 
   useEffect(() => {
@@ -652,16 +748,18 @@ export function PomodoroPage() {
   const activeDaySummary = formatActiveDaySummary(draftActiveDays)
   const enabledDraftCount = pomodoroDrafts.filter((draft) => draft.activeDays.length > 0).length
   const projectBindingMessages = useMemo(
-    () =>
-      pomodoroDrafts.flatMap((draft, draftIndex) =>
+    () => {
+      if (pomodoroProjectOptionsLoading) return []
+      return pomodoroDrafts.flatMap((draft, draftIndex) =>
         normalizeDraftProjectIds(draft.projectIds, normalizeCountInput(draft.pomodoroCount, 4)).flatMap((projectId, pomodoroIndex) => {
           if (!projectId) return [`计划 ${draftIndex + 1} 的番茄 ${pomodoroIndex + 1} 还没有选择项目`]
-          if (subjectRootProjectIds.has(projectId)) return [`计划 ${draftIndex + 1} 的番茄 ${pomodoroIndex + 1} 不能直接选择学科`]
+          if (subjectRootProjectIds.has(projectId)) return [`计划 ${draftIndex + 1} 的番茄 ${pomodoroIndex + 1} 需要先选择学科下的项目`]
           if (!validPomodoroProjectIds.has(projectId)) return [`计划 ${draftIndex + 1} 的番茄 ${pomodoroIndex + 1} 需要重新选择项目`]
           return []
         }),
-      ),
-    [pomodoroDrafts, subjectRootProjectIds, validPomodoroProjectIds],
+      )
+    },
+    [pomodoroDrafts, pomodoroProjectOptionsLoading, subjectRootProjectIds, validPomodoroProjectIds],
   )
   const activePomodoroDraft = activePlanId ? pomodoroDrafts.find((draft) => draft.id === activePlanId) ?? null : null
   const activePomodoroDraftIndex = activePomodoroDraft ? pomodoroDrafts.findIndex((draft) => draft.id === activePomodoroDraft.id) : -1
@@ -1064,13 +1162,19 @@ export function PomodoroPage() {
                       </div>
                     </div>
 
-                    {availablePomodoroProjects.length === 0 && !projectsQ.isLoading ? (
-                      <div className="mt-3 text-sm text-muted-foreground">暂无可绑定项目。每个番茄必须绑定具体项目，不能直接选择学科。</div>
+                    {availablePomodoroProjects.length === 0 && !pomodoroProjectOptionsLoading ? (
+                      <div className="mt-3 text-sm text-muted-foreground">暂无可绑定项目。请先到学科中心，在学科下创建项目。</div>
                     ) : null}
 
                     <div className="pomodoro-project-prompt-scroll flex flex-nowrap gap-3 overflow-x-auto pb-2">
                       {draftProjectIds.map((projectId, index) => {
                         const promptKey = `${pomodoroDraft.id}:focus:${index}`
+                        const slotKey = getPomodoroProjectSlotKey(pomodoroDraft.id, index)
+                        const selectedSubjectId =
+                          selectedSubjectIdByProjectId.get(projectId ?? "") ??
+                          selectableSubjectIdsBySlotKey.get(slotKey) ??
+                          ""
+                        const selectableProjects = selectedSubjectId ? subjectProjectOptions.get(selectedSubjectId) ?? [] : []
                         const projectSelectionInvalid = !projectId || subjectRootProjectIds.has(projectId) || !validPomodoroProjectIds.has(projectId)
                         return (
                           <div
@@ -1080,12 +1184,46 @@ export function PomodoroPage() {
                             <div className="space-y-2">
                               <Label htmlFor={`pomodoro-project-${pomodoroDraft.id}-${index}`}>番茄 {index + 1}</Label>
                               <select
+                                id={`pomodoro-subject-${slotKey}`}
+                                className={cn(
+                                  "theme-select h-10 w-full rounded-xl px-3 text-sm",
+                                  !selectedSubjectId ? "border-destructive/60 text-destructive focus-visible:ring-destructive" : "",
+                                )}
+                                value={selectedSubjectId}
+                                onChange={(event) => {
+                                  const nextSubjectId = event.target.value
+                                  setSelectedPomodoroSubjectIds((prev) => ({
+                                    ...prev,
+                                    [slotKey]: nextSubjectId,
+                                  }))
+                                  updatePomodoroDraft(pomodoroDraft.id, (draft) => {
+                                    const nextProjectIds = normalizeDraftProjectIds(
+                                      draft.projectIds,
+                                      normalizeCountInput(draft.pomodoroCount, 4),
+                                    )
+                                    nextProjectIds[index] = null
+                                    return {
+                                      ...draft,
+                                      projectIds: nextProjectIds,
+                                    }
+                                  })
+                                }}
+                              >
+                                <option value="">请选择学科（必选）</option>
+                                {(subjectsQ.data ?? []).map((subject) => (
+                                  <option key={subject.subjectId} value={subject.subjectId}>
+                                    {subject.title}
+                                  </option>
+                                ))}
+                              </select>
+                              <select
                                 id={`pomodoro-project-${pomodoroDraft.id}-${index}`}
                                 className={cn(
                                   "theme-select h-10 w-full rounded-xl px-3 text-sm",
                                   projectSelectionInvalid ? "border-destructive/60 text-destructive focus-visible:ring-destructive" : "",
                                 )}
                                 value={projectId && validPomodoroProjectIds.has(projectId) ? projectId : ""}
+                                disabled={!selectedSubjectId}
                                 onChange={(event) =>
                                   updatePomodoroDraft(pomodoroDraft.id, (draft) => {
                                     const nextProjectIds = normalizeDraftProjectIds(
@@ -1101,14 +1239,14 @@ export function PomodoroPage() {
                                 }
                               >
                                 <option value="">请选择项目（必选）</option>
-                                {availablePomodoroProjects.map((project) => (
+                                {selectableProjects.map((project) => (
                                   <option key={project.projectId} value={project.projectId}>
-                                    {project.title}
+                                    {getPomodoroSubjectProjectOptionLabel(project)}
                                   </option>
                                 ))}
                               </select>
                               {projectSelectionInvalid ? (
-                                <div className="text-xs text-destructive">必须选择具体项目，不能直接选择学科。</div>
+                                <div className="text-xs text-destructive">先选择学科，再选择这个学科下面的项目。</div>
                               ) : null}
                             </div>
 
