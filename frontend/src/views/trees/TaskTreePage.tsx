@@ -71,7 +71,7 @@ function deriveTaskNodeLayers(nodes: LearningTaskNode[], events: AggregationEven
 
 function getTaskTreeChildIds(node: LearningTaskNode) {
   if (node.kind !== "container") return []
-  return node.displayChildNodeIds ?? node.children
+  return node.children
 }
 
 function formatDisplayTitle(rawTitle: string, uiType: TaskTreeVisualType, _layerIndex: number) {
@@ -83,7 +83,6 @@ function formatDisplayTitle(rawTitle: string, uiType: TaskTreeVisualType, _layer
 
 function classifyTaskNode(node: LearningTaskNode, event: AggregationEvent | undefined): TaskTreeVisualType {
   if (node.kind === "leaf") return "task"
-  if (node.nodeOrigin === "OBJECT_MIRROR") return "chapter"
 
   const title = node.title.trim()
   if (isDefaultAggregationTitle(title)) return "aggregation"

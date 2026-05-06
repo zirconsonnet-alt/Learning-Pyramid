@@ -339,7 +339,7 @@ function parseAnchorPositionMs(position: string | null | undefined) {
 
 function getTaskSidebarChildIds(node: LearningTaskNode) {
   if (node.kind !== "container") return []
-  return node.displayChildNodeIds ?? node.children
+  return node.children
 }
 
 function buildTaskSidebarTree(nodes: LearningTaskNode[]): SidebarTreeData {

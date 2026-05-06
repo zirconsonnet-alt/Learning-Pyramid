@@ -26,7 +26,6 @@ from backend.models.enums import (
     LearningTaskNodeOrigin,
     MaterialSourceKind,
     MediaAssetKind,
-    ObjectMirrorStatus,
     ProjectState,
     ProjectType,
     RecallPointState,
@@ -754,8 +753,6 @@ def _encode_learning_task_node(n: LearningTaskNode) -> dict[str, Any]:
         "children": [str(x) for x in n.children],
         "title": n.title,
         "nodeOrigin": n.node_origin.value,
-        "boundLearningObjectNodeId": None if n.bound_learning_object_node_id is None else str(n.bound_learning_object_node_id),
-        "objectMirrorStatus": None if n.object_mirror_status is None else n.object_mirror_status.value,
     }
 
 
@@ -776,17 +773,7 @@ def _decode_learning_task_node(d: dict[str, Any]) -> LearningTaskNode:
             parent_id=None if d.get("parentId") is None else LearningTaskNodeId(d["parentId"]),
             children=tuple(LearningTaskNodeId(x) for x in d.get("children", [])),
             title=d["title"],
-            node_origin=LearningTaskNodeOrigin(str(d.get("nodeOrigin") or LearningTaskNodeOrigin.AGGREGATION.value)),
-            bound_learning_object_node_id=(
-                None
-                if d.get("boundLearningObjectNodeId") is None
-                else LearningObjectNodeId(str(d["boundLearningObjectNodeId"]))
-            ),
-            object_mirror_status=(
-                None
-                if d.get("objectMirrorStatus") is None
-                else ObjectMirrorStatus(str(d["objectMirrorStatus"]))
-            ),
+            node_origin=LearningTaskNodeOrigin.AGGREGATION,
         )
     raise ValueError(f"Unknown LearningTaskNode kind: {kind}")
 

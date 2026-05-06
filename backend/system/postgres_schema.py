@@ -359,7 +359,7 @@ def _store_instance_media_binding_index_sql() -> str:
 def _store_learning_task_node_object_mirror_sql() -> str:
     return "\n".join(
         (
-            "-- Add learning task node object mirror metadata",
+            "-- Add legacy learning task node metadata columns",
             "ALTER TABLE learning_task_node_index",
             "ADD COLUMN IF NOT EXISTS node_origin TEXT NOT NULL DEFAULT 'AGGREGATION';",
             "ALTER TABLE learning_task_node_index",

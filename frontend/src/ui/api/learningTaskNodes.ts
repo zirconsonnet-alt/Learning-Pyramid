@@ -21,11 +21,8 @@ export const LearningTaskContainerSchema = z.object({
   parentId: z.string().nullable(),
   children: z.array(z.string()),
   title: z.string(),
-  nodeOrigin: z.enum(["AGGREGATION", "OBJECT_MIRROR"]).default("AGGREGATION"),
-  boundLearningObjectNodeId: z.string().nullable().optional().default(null),
-  objectMirrorStatus: z.enum(["ACTIVE", "ORPHANED"]).nullable().optional().default(null),
+  nodeOrigin: z.enum(["AGGREGATION"]).default("AGGREGATION"),
   targetLayerIndex: z.number().int().nullable().optional().default(null),
-  displayChildNodeIds: z.array(z.string()).nullable().optional().default(null),
 })
 
 export const LearningTaskNodeSchema = z.discriminatedUnion("kind", [

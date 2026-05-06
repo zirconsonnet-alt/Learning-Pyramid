@@ -213,7 +213,7 @@ export function RollupPane({
         {!layersLoading && !layersError && layers.length === 0 ? (
           <ContentEmptyState
             icon={Sparkles}
-            title={isIsomorphicStrategy ? "当前还没有对象镜像层" : "当前还没有层配置"}
+            title={isIsomorphicStrategy ? "当前还没有自动上推层" : "当前还没有层配置"}
             message={isIsomorphicStrategy ? "继续学习后，系统会按学习对象树自动生成对应层级；你也可以点击上方按钮重新扫描。" : "等学习任务逐步形成层级结构后，这里就会出现可推进的层。"}
           />
         ) : null}

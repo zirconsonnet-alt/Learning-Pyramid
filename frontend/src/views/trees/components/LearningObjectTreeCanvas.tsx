@@ -38,9 +38,10 @@ const RAIL_WIDTH = 110
 const CANVAS_PADDING_X = 28
 const TOP_PADDING = 24
 const BOTTOM_PADDING = 28
-const COLUMN_WIDTH = 196
-const ROW_HEIGHT = 168
+const COLUMN_WIDTH = 240
+const ROW_HEIGHT = 188
 const NODE_HEIGHT = 108
+const SIBLING_GAP = 28
 
 function getVisual(uiType?: ObjectTreeVisualType): {
   cardClass: string
@@ -209,7 +210,12 @@ function buildLayout(
       if (!layout || !node) continue
 
       const visual = getVisual(node.uiType)
-      const centerX = RAIL_WIDTH + CANVAS_PADDING_X + layout.start * COLUMN_WIDTH + layout.span * COLUMN_WIDTH * 0.5
+      const centerX =
+        RAIL_WIDTH +
+        CANVAS_PADDING_X +
+        layout.start * (COLUMN_WIDTH + SIBLING_GAP) +
+        layout.span * COLUMN_WIDTH * 0.5 +
+        Math.max(layout.span - 1, 0) * SIBLING_GAP * 0.5
 
       rectById[nodeId] = {
         nodeId,
@@ -225,7 +231,7 @@ function buildLayout(
 
   return {
     canvasHeight: TOP_PADDING + rows.length * ROW_HEIGHT + BOTTOM_PADDING,
-    canvasWidth: RAIL_WIDTH + CANVAS_PADDING_X * 2 + totalColumns * COLUMN_WIDTH,
+    canvasWidth: RAIL_WIDTH + CANVAS_PADDING_X * 2 + totalColumns * COLUMN_WIDTH + Math.max(totalColumns - 1, 0) * SIBLING_GAP,
     edges,
     parentById,
     rectById,
@@ -310,12 +316,12 @@ export function LearningObjectTreeCanvas({
             const startY = parentRect.top + parentRect.height
             const endX = childRect.centerX
             const endY = childRect.top
-            const midY = startY + (endY - startY) / 2
+            const branchY = startY + 26
 
             return (
               <path
                 key={`${edge.parentId}-${edge.childId}`}
-                d={`M ${startX} ${startY} V ${midY} H ${endX} V ${endY}`}
+                d={`M ${startX} ${startY} V ${branchY} H ${endX} V ${endY}`}
                 fill="none"
                 stroke={isActive ? "rgba(44, 83, 122, 0.92)" : "rgba(97, 122, 150, 0.58)"}
                 strokeLinecap="round"

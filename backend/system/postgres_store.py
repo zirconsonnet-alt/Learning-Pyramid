@@ -1285,7 +1285,7 @@ class PostgresStore(SQLiteSnapshotStore):
             node_rows = list(
                 conn.execute(
                     """
-                    SELECT node_id, node_kind, bound_learning_task_id, children_json, node_origin, bound_learning_object_node_id
+                    SELECT node_id, node_kind, bound_learning_task_id, children_json
                     FROM learning_task_node_index
                     WHERE project_id = %s
                     """,
@@ -1308,23 +1308,11 @@ class PostgresStore(SQLiteSnapshotStore):
                 "kind": str(row["node_kind"]),
                 "bound_learning_task_id": None if row["bound_learning_task_id"] is None else str(row["bound_learning_task_id"]),
                 "children": tuple(json.loads(str(row["children_json"]))) if row["children_json"] is not None else tuple(),
-                "node_origin": str(row["node_origin"] or LearningTaskNodeOrigin.AGGREGATION.value),
-                "bound_learning_object_node_id": None
-                if row["bound_learning_object_node_id"] is None
-                else str(row["bound_learning_object_node_id"]),
             }
             for row in node_rows
         }
         if str(node_id) not in node_map:
             return tuple()
-
-        selected = node_map[str(node_id)]
-        if (
-            selected.get("kind") == "CONTAINER"
-            and selected.get("node_origin") == LearningTaskNodeOrigin.OBJECT_MIRROR.value
-            and selected.get("bound_learning_object_node_id")
-        ):
-            return self.list_recall_points_by_learning_object_node(project_id, str(selected["bound_learning_object_node_id"]))
 
         task_map = {
             str(row["learning_task_id"]): tuple(RecallPointId(str(item)) for item in json.loads(str(row["recall_point_ids_json"])))

@@ -17,7 +17,6 @@ from backend.models.enums import (
     LayerMode,
     LearningTaskNodeOrigin,
     MaterialSourceKind,
-    ObjectMirrorStatus,
     ProjectType,
     RecallPointReviewResult,
     RecallPointState,
@@ -150,11 +149,11 @@ class _SpecAlignmentBackendMixin:
                 api.sys.rollback(session)
             raise
 
-    def _list_object_mirror_nodes(self, api: SystemAPI, project_id: object) -> list[LearningTaskContainer]:
+    def _list_non_aggregation_task_containers(self, api: SystemAPI, project_id: object) -> list[LearningTaskContainer]:
         return [
             node
             for node in api.list_learning_task_nodes(project_id)
-            if isinstance(node, LearningTaskContainer) and node.node_origin == LearningTaskNodeOrigin.OBJECT_MIRROR
+            if isinstance(node, LearningTaskContainer) and node.node_origin != LearningTaskNodeOrigin.AGGREGATION
         ]
 
     def _list_task_containers_by_title(
@@ -434,7 +433,7 @@ class _SpecAlignmentBackendMixin:
                 title="Blocked task",
             )
 
-    def test_learning_object_isomorphic_roll_up_creates_object_mirror_layers(self) -> None:
+    def test_learning_object_isomorphic_roll_up_uses_shared_landing_for_real_parent_nodes(self) -> None:
         api, root = self._new_api()
         project_root, _ = self._make_project_dirs(root, "manual-tree")
         project_id = api.create_project("manual", project_root.as_posix(), initial_source_kind=MaterialSourceKind.MANUAL)
@@ -456,26 +455,33 @@ class _SpecAlignmentBackendMixin:
             title="第一章学习",
         )
 
-        mirror_nodes = [
-            node
-            for node in api.list_learning_task_nodes(project_id)
-            if isinstance(node, LearningTaskContainer) and node.node_origin == LearningTaskNodeOrigin.OBJECT_MIRROR
-        ]
-        self.assertEqual(len(mirror_nodes), 2)
+        containers = [node for node in api.list_learning_task_nodes(project_id) if isinstance(node, LearningTaskContainer)]
+        self.assertTrue(all(node.node_origin == LearningTaskNodeOrigin.AGGREGATION for node in containers))
+        chapter_node = next(node for node in containers if node.title == "第一章")
+        self.assertEqual(len(chapter_node.children), 1)
+        chapter_reg = api.get_learning_task_node_entry_registration(project_id, chapter_node.node_id)
+        self.assertEqual(chapter_reg.target_layer_index, 1)
 
-        mirror_by_object = {
-            str(node.bound_learning_object_node_id): node
-            for node in mirror_nodes
-        }
-        self.assertEqual(mirror_by_object[str(chapter_node_id)].object_mirror_status, ObjectMirrorStatus.ACTIVE)
-        self.assertEqual(mirror_by_object[str(root_node_id)].object_mirror_status, ObjectMirrorStatus.ACTIVE)
-        self.assertEqual(mirror_by_object[str(chapter_node_id)].parent_id, mirror_by_object[str(root_node_id)].node_id)
-        self.assertEqual(mirror_by_object[str(root_node_id)].children, (mirror_by_object[str(chapter_node_id)].node_id,))
+        events = api.list_aggregation_events(project_id)
+        self.assertEqual(events[0].title, "第一章")
+        self.assertTrue(all(event.child_node_ids for event in events))
 
-        chapter_reg = api.get_learning_task_node_entry_registration(project_id, mirror_by_object[str(chapter_node_id)].node_id)
-        root_reg = api.get_learning_task_node_entry_registration(project_id, mirror_by_object[str(root_node_id)].node_id)
+        self._clear_review_queue(api, project_id)
+        api._best_effort_drive_idle_orchestration(project_id)
+
+        containers = [node for node in api.list_learning_task_nodes(project_id) if isinstance(node, LearningTaskContainer)]
+        chapter_node = next(node for node in containers if node.title == "第一章")
+        root_node = next(node for node in containers if node.title == "课程")
+        self.assertEqual(chapter_node.parent_id, root_node.node_id)
+        self.assertEqual(root_node.children, (chapter_node.node_id,))
+
+        chapter_reg = api.get_learning_task_node_entry_registration(project_id, chapter_node.node_id)
+        root_reg = api.get_learning_task_node_entry_registration(project_id, root_node.node_id)
         self.assertEqual(chapter_reg.target_layer_index, 1)
         self.assertEqual(root_reg.target_layer_index, 2)
+
+        events = api.list_aggregation_events(project_id)
+        self.assertEqual([event.title for event in events], ["第一章", "课程"])
 
     def test_learning_object_isomorphic_roll_up_consumes_covered_lower_layer_candidates(self) -> None:
         api, root = self._new_api()
@@ -503,18 +509,17 @@ class _SpecAlignmentBackendMixin:
         )
 
         self.assertEqual(api.get_aggregation_queue_current(project_id, 0), tuple())
-        layer_one_candidates = api.get_aggregation_queue_current(project_id, 1)
-        self.assertEqual(len(layer_one_candidates), 1)
-        chapter_two_mirror = api.get_learning_task_node(project_id, layer_one_candidates[0])
-        self.assertIsInstance(chapter_two_mirror, LearningTaskContainer)
-        assert isinstance(chapter_two_mirror, LearningTaskContainer)
-        self.assertEqual(chapter_two_mirror.title, "第二章")
-        self.assertEqual(chapter_two_mirror.node_origin, LearningTaskNodeOrigin.OBJECT_MIRROR)
-        self.assertEqual(chapter_two_mirror.bound_learning_object_node_id, chapter_two_id)
+        containers = [node for node in api.list_learning_task_nodes(project_id) if isinstance(node, LearningTaskContainer)]
+        chapter_two_parent = next(node for node in containers if node.title == "第二章")
+        self.assertEqual(chapter_two_parent.title, "第二章")
+        self.assertEqual(chapter_two_parent.node_origin, LearningTaskNodeOrigin.AGGREGATION)
+        self.assertEqual(len(chapter_two_parent.children), 1)
+        chapter_two_reg = api.get_learning_task_node_entry_registration(project_id, chapter_two_parent.node_id)
+        self.assertEqual(chapter_two_reg.target_layer_index, 1)
 
-    def test_learning_object_isomorphic_roll_up_prunes_stale_lower_layer_candidates(self) -> None:
+    def test_learning_object_isomorphic_roll_up_keeps_new_candidates_after_existing_mirror(self) -> None:
         api, root = self._new_api()
-        project_root, _ = self._make_project_dirs(root, "manual-stale-queue-tree")
+        project_root, _ = self._make_project_dirs(root, "manual-existing-mirror-new-candidate-tree")
         project_id = api.create_project("manual", project_root.as_posix(), initial_source_kind=MaterialSourceKind.MANUAL)
 
         root_node_id = api.add_learning_object_container(project_id, parent_id=None, children=tuple(), title="课程")
@@ -525,7 +530,7 @@ class _SpecAlignmentBackendMixin:
         api.add_learning_object_leaf(project_id, parent_id=chapter_two_id, instance_id=lesson_b, title="2.2")
 
         api.set_project_roll_up_strategy(project_id, RollUpStrategy.LEARNING_OBJECT_ISOMORPHIC)
-        entry_node_id = api.submit_learning_task(
+        first_entry_node_id = api.submit_learning_task(
             project_id,
             items=[
                 (rich_text("Q1"), rich_text("A1"), Anchor(lesson_a, position="t=1000")),
@@ -539,7 +544,6 @@ class _SpecAlignmentBackendMixin:
             _, review_task_ids = api.get_queue(project_id)
             for review_task_id in review_task_ids:
                 api.sys.queue_repo.remove_by_id(session, review_task_id)
-            api.sys.aggq_repo.enqueue(session, 0, entry_node_id)
             api.sys.commit(session)
         except Exception:
             if session.state == "OPEN":
@@ -547,11 +551,23 @@ class _SpecAlignmentBackendMixin:
             raise
 
         self.assertEqual(api.get_queue(project_id), (None, tuple()))
-        self.assertEqual(api.get_aggregation_queue_current(project_id, 0), (entry_node_id,))
-
-        api.set_project_roll_up_strategy(project_id, RollUpStrategy.LEARNING_OBJECT_ISOMORPHIC)
-
         self.assertEqual(api.get_aggregation_queue_current(project_id, 0), tuple())
+        self.assertIsNotNone(first_entry_node_id)
+        self.assertEqual(self._list_non_aggregation_task_containers(api, project_id), [])
+
+        second_entry_node_id = api.submit_learning_task(
+            project_id,
+            items=[
+                (rich_text("Q3"), rich_text("A3"), Anchor(lesson_a, position="t=3000")),
+            ],
+            title="第二章后续学习",
+        )
+
+        self._clear_review_queue(api, project_id)
+        self.assertEqual(api.get_aggregation_queue_current(project_id, 0), tuple())
+        chapter_two_parents = self._list_task_containers_by_title(api, project_id, "第二章")
+        self.assertEqual(len(chapter_two_parents), 2)
+        self.assertTrue(any(tuple(parent.children) == (second_entry_node_id,) for parent in chapter_two_parents))
 
     def test_learning_object_isomorphic_roll_up_does_not_duplicate_after_manual_roll_up(self) -> None:
         api, root = self._new_api()
@@ -584,7 +600,7 @@ class _SpecAlignmentBackendMixin:
         api.set_project_roll_up_strategy(project_id, RollUpStrategy.LEARNING_OBJECT_ISOMORPHIC)
 
         self.assertEqual(api.get_aggregation_queue_current(project_id, 0), tuple())
-        self.assertEqual(self._list_object_mirror_nodes(api, project_id), [])
+        self.assertEqual(self._list_non_aggregation_task_containers(api, project_id), [])
         self.assertEqual(len(self._list_task_containers_by_title(api, project_id, "第一章")), 1)
 
     def test_learning_object_isomorphic_roll_up_noops_with_empty_source_queue(self) -> None:
@@ -607,7 +623,7 @@ class _SpecAlignmentBackendMixin:
         self.assertEqual(api.get_aggregation_queue_current(project_id, 0), tuple())
         with self.assertRaises(NotFound):
             api.get_aggregation_queue_current(project_id, 1)
-        self.assertEqual(self._list_object_mirror_nodes(api, project_id), [])
+        self.assertEqual(self._list_non_aggregation_task_containers(api, project_id), [])
 
     def test_create_project_auto_creates_project_dir_under_workspace_data_root(self) -> None:
         api, root = self._new_api()
@@ -1971,6 +1987,76 @@ class _SpecAlignmentBackendMixin:
         self.assertGreater(projection.weighted_success_ratio, 0.99)
         self.assertGreaterEqual(projection.review_recommendation_index, 0.0)
         self.assertLessEqual(projection.review_recommendation_index, 100.0)
+
+    def test_review_mastery_uses_probabilistic_bayesian_updates(self) -> None:
+        api, root = self._new_api()
+        project_root, learning_root = self._make_project_dirs(root, "bayes")
+        (learning_root / "lesson.mp4").write_text("video", encoding="utf-8")
+
+        project_id = api.create_project("ml", project_root.as_posix())
+        api.sync_learning_objects_from_fs(project_id)
+        instance = api.list_instances(project_id)[0]
+        entry_node_id = api.submit_learning_task(
+            project_id,
+            items=[
+                (rich_text("Q1"), rich_text("A1"), Anchor(instance.instance_id, position="t=0")),
+                (rich_text("Q2"), rich_text("A2"), Anchor(instance.instance_id, position="t=1000")),
+            ],
+            title="Bayes lesson",
+        )
+        learning_task = api.get_learning_task(project_id, api.get_learning_task_node(project_id, entry_node_id).bound_learning_task_id)  # type: ignore[attr-defined]
+        known_rp, unknown_rp = tuple(learning_task.recall_point_ids)
+
+        api.set_review_recommendation_config(project_id, min_recall_points_to_enable=0)
+
+        system = api.sys
+        occurred_at = now_utc_ms()
+        session = system.begin_session(project_id, SessionMode.READ_WRITE)
+        try:
+            for review_task_id, rp_id, result in (
+                ("rt_bayes_known", known_rp, RecallPointReviewResult.CAN_RECALL),
+                ("rt_bayes_unknown", unknown_rp, RecallPointReviewResult.CANNOT_RECALL),
+            ):
+                input_range_id = system.range_repo.intern(session, (rp_id,))
+                system.review_task_repo.add(
+                    session,
+                    ReviewTask(
+                        project_id=project_id,
+                        review_task_id=review_task_id,
+                        input_range_id=input_range_id,
+                        created_at=occurred_at,
+                        state=ReviewTaskState.DONE,
+                        executed_at=occurred_at,
+                        result_range_id=None,
+                    ),
+                )
+                system.recall_point_review_record_repo.append(
+                    session,
+                    RecallPointReviewRecord(
+                        project_id=project_id,
+                        record_id=f"record_{review_task_id}",
+                        recall_point_id=rp_id,
+                        review_task_id=review_task_id,
+                        occurred_at=occurred_at,
+                        result=result,
+                    ),
+                )
+            system.commit(session)
+        except Exception:
+            if session.state == "OPEN":
+                system.rollback(session)
+            raise
+
+        known_projection = api.get_recall_point_review_projection(project_id, known_rp)
+        unknown_projection = api.get_recall_point_review_projection(project_id, unknown_rp)
+
+        self.assertGreater(known_projection.estimated_memory_strength, 0.5)
+        self.assertLess(known_projection.estimated_memory_strength, 0.99)
+        self.assertGreater(known_projection.review_recommendation_index, 1.0)
+
+        self.assertGreater(unknown_projection.estimated_memory_strength, 0.03)
+        self.assertLess(unknown_projection.estimated_memory_strength, known_projection.estimated_memory_strength)
+        self.assertLess(unknown_projection.review_recommendation_index, 100.0)
 
     def test_export_asr_by_learning_task_node_returns_scoped_artifacts(self) -> None:
         api, root = self._new_api()

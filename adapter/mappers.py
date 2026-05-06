@@ -355,7 +355,6 @@ def learning_task_node_to_dto(
     n: LearningTaskNode,
     *,
     target_layer_index: int | None = None,
-    display_child_node_ids: Sequence[str] | None = None,
 ) -> Dict[str, Any]:
     if isinstance(n, LearningTaskLeaf):
         return {
@@ -376,10 +375,7 @@ def learning_task_node_to_dto(
             "children": [str(x) for x in n.children],
             "title": n.title,
             "nodeOrigin": _jsonable(n.node_origin),
-            "boundLearningObjectNodeId": None if n.bound_learning_object_node_id is None else str(n.bound_learning_object_node_id),
-            "objectMirrorStatus": _jsonable(n.object_mirror_status),
             "targetLayerIndex": target_layer_index,
-            "displayChildNodeIds": None if display_child_node_ids is None else [str(x) for x in display_child_node_ids],
         }
     raise TypeError(f"Unknown LearningTaskNode type: {type(n)}")
 

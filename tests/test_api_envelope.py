@@ -1238,7 +1238,7 @@ def test_learning_task_node_patch_endpoint_updates_container_title(monkeypatch, 
     _reset_caches()
 
 
-def test_learning_task_node_list_includes_entry_target_layer_for_object_mirrors(monkeypatch, tmp_path: Path) -> None:
+def test_learning_task_node_list_includes_isomorphic_parent_target_layer(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("PLM_APP_MODE", "local")
     monkeypatch.setenv("PLM_ENABLE_AUTH", "false")
     monkeypatch.setenv("PLM_STORE_PATH", "")
@@ -1273,17 +1273,20 @@ def test_learning_task_node_list_includes_entry_target_layer_for_object_mirrors(
 
     resp = client.get(f"/api/projects/{project_id}/learning-task-nodes")
     assert resp.status_code == 200
-    mirror = next(
+    parent = next(
         item
         for item in resp.json()["data"]
-        if item.get("nodeOrigin") == "OBJECT_MIRROR" and item.get("boundLearningObjectNodeId") == str(chapter_node_id)
+        if item.get("kind") == "container" and item.get("title") == "第一章"
     )
-    assert mirror["title"] == "第一章"
-    assert mirror["targetLayerIndex"] == 1
+    assert parent["nodeOrigin"] == "AGGREGATION"
+    assert "boundLearningObjectNodeId" not in parent
+    assert "objectMirrorStatus" not in parent
+    assert "displayChildNodeIds" not in parent
+    assert parent["targetLayerIndex"] == 1
     _reset_caches()
 
 
-def test_learning_task_node_list_includes_display_children_for_object_mirrors(monkeypatch, tmp_path: Path) -> None:
+def test_learning_task_node_list_does_not_virtualize_children_for_isomorphic_roll_up(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("PLM_APP_MODE", "local")
     monkeypatch.setenv("PLM_ENABLE_AUTH", "false")
     monkeypatch.setenv("PLM_STORE_PATH", "")
@@ -1307,7 +1310,7 @@ def test_learning_task_node_list_includes_display_children_for_object_mirrors(mo
     api.add_learning_object_leaf(project_id, parent_id=chapter_node_id, instance_id=lesson_b, title="1.2")
 
     api.set_project_roll_up_strategy(project_id, RollUpStrategy.LEARNING_OBJECT_ISOMORPHIC)
-    entry_node_id = api.submit_learning_task(
+    api.submit_learning_task(
         project_id,
         items=[
             (rich_text("Q1"), rich_text("A1"), Anchor(lesson_a, position="t=1000")),
@@ -1318,14 +1321,14 @@ def test_learning_task_node_list_includes_display_children_for_object_mirrors(mo
 
     resp = client.get(f"/api/projects/{project_id}/learning-task-nodes")
     assert resp.status_code == 200
-    mirror = next(
+    parent = next(
         item
         for item in resp.json()["data"]
-        if item.get("nodeOrigin") == "OBJECT_MIRROR" and item.get("boundLearningObjectNodeId") == str(chapter_node_id)
+        if item.get("kind") == "container" and item.get("title") == "第一章"
     )
-    assert mirror["targetLayerIndex"] == 1
-    assert mirror["children"] == []
-    assert mirror["displayChildNodeIds"] == [str(entry_node_id)]
+    assert parent["targetLayerIndex"] == 1
+    assert parent["children"]
+    assert "displayChildNodeIds" not in parent
     _reset_caches()
 
 

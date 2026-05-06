@@ -29,7 +29,7 @@ function formatApiError(err: unknown) {
 
 function getLearningTaskNodeDisplayChildIds(node: LearningTaskNode | undefined) {
   if (!node || node.kind !== "container") return []
-  return node.displayChildNodeIds ?? node.children
+  return node.children
 }
 
 export function LearningTaskNodePage() {

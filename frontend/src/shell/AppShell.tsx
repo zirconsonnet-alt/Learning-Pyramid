@@ -502,7 +502,6 @@ export function AppShell() {
         }
       : null,
   )
-  const showPomodoroShortcut = pomodoroEnabled || Boolean(activePomodoroQuickSession)
   const pomodoroShortcutText =
     pomodoroSnapshot.status === "running"
       ? `${pomodoroSnapshot.phase === "focus" ? "学习" : "间歇"} ${formatPomodoroCountdown(pomodoroSnapshot.segmentRemainingMs)}`
@@ -727,20 +726,18 @@ export function AppShell() {
             </div>
 
             <div className="flex min-w-0 items-center gap-2">
-              {showPomodoroShortcut ? (
-                <Link
-                  to={buildPomodoroPath()}
-                  className={cn(
-                    "hidden h-10 items-center gap-2 rounded-xl border px-3 text-[13px] [box-shadow:var(--theme-soft-shadow)] sm:inline-flex",
-                    pomodoroSnapshot.phase === "break"
-                      ? "border-amber-200 bg-amber-50 text-amber-900"
-                      : "border-primary/15 bg-[hsl(var(--primary)/0.08)] text-foreground",
-                  )}
-                >
-                  <TimerReset className={cn("h-4 w-4", pomodoroSnapshot.phase === "break" ? "text-amber-700" : "text-primary")} />
-                  <span>{pomodoroShortcutText}</span>
-                </Link>
-              ) : null}
+              <Link
+                to={buildPomodoroPath()}
+                className={cn(
+                  "hidden h-10 items-center gap-2 rounded-xl border px-3 text-[13px] [box-shadow:var(--theme-soft-shadow)] sm:inline-flex",
+                  pomodoroSnapshot.phase === "break"
+                    ? "border-amber-200 bg-amber-50 text-amber-900"
+                    : "border-primary/15 bg-[hsl(var(--primary)/0.08)] text-foreground",
+                )}
+              >
+                <TimerReset className={cn("h-4 w-4", pomodoroSnapshot.phase === "break" ? "text-amber-700" : "text-primary")} />
+                <span>{pomodoroShortcutText}</span>
+              </Link>
 
               <div className="flex min-w-0 items-center gap-2">
                 <HeaderNavDropdown
@@ -820,7 +817,6 @@ export function AppShell() {
                     aria-expanded={accountMenuOpen}
                     aria-haspopup="menu"
                     aria-label="打开账号菜单"
-                    title={currentUserQ.data.nickname || currentUserQ.data.email}
                   >
                     {currentUserQ.data.avatarUrl ? (
                       <img src={currentUserQ.data.avatarUrl} alt={currentUserQ.data.nickname} className="h-full w-full object-cover" />

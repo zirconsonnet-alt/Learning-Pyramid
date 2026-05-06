@@ -5,6 +5,28 @@ import { ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import { useRecallPointReviewProjection } from "@/ui/queries/reviewRecommendations"
 
+const DAY_MS = 24 * 60 * 60 * 1000
+
+const memoryCfg = {
+  floor: 0.03,
+  falsePositive: 0.12,
+  falseNegative: 0.08,
+  learnKnown: 0.04,
+  learnUnknown: 0.35,
+  grow: 0.8,
+  shrink: 0.65,
+  minHalfLife: 0.1,
+  maxHalfLife: 365,
+  initialMastery: 0.55,
+  initialHalfLife: 1,
+}
+
+type MemoryState = {
+  m0: number
+  halfLife: number
+  lastAt: number
+}
+
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
   if (err instanceof Error) return err.message
@@ -37,59 +59,101 @@ function buildXAxisTicks(xMin: number, xMax: number) {
   })
 }
 
-function buildConvolvedReviewCurve(props: {
+function clamp(value: number, minimum: number, maximum: number) {
+  return Math.max(minimum, Math.min(maximum, value))
+}
+
+function masteryAt(state: MemoryState, now: number) {
+  const dt = Math.max(0, (now - state.lastAt) / DAY_MS)
+  const decay = Math.pow(0.5, dt / Math.max(memoryCfg.minHalfLife, state.halfLife))
+  return clamp(memoryCfg.floor + (state.m0 - memoryCfg.floor) * decay, 0, 1)
+}
+
+function bayesUpdate(prior: number, known: boolean) {
+  const p = clamp(prior, 0, 1)
+  if (known) {
+    const numerator = p * (1 - memoryCfg.falseNegative)
+    const denominator = numerator + (1 - p) * memoryCfg.falsePositive
+    return denominator === 0 ? p : clamp(numerator / denominator, 0, 1)
+  }
+
+  const numerator = p * memoryCfg.falseNegative
+  const denominator = numerator + (1 - p) * (1 - memoryCfg.falsePositive)
+  return denominator === 0 ? p : clamp(numerator / denominator, 0, 1)
+}
+
+function reviewMemoryState(state: MemoryState, known: boolean, now: number) {
+  const prior = masteryAt(state, now)
+  const post = bayesUpdate(prior, known)
+  const learn = known ? memoryCfg.learnKnown : memoryCfg.learnUnknown
+  const m0 = clamp(post + (1 - post) * learn, memoryCfg.floor, 0.99)
+  const halfLife = known
+    ? state.halfLife * (1 + memoryCfg.grow * (1 - prior))
+    : state.halfLife * (1 - memoryCfg.shrink * prior)
+
+  return {
+    m0,
+    halfLife: clamp(halfLife, memoryCfg.minHalfLife, memoryCfg.maxHalfLife),
+    lastAt: now,
+  }
+}
+
+function buildProbabilisticReviewCurve(props: {
   calculatedAtMs: number
   estimatedMemoryStrength: number
-  forgettingCurveDecayPerDay: number
-  historyPoints: Array<{ at: number; value: number; result: "CAN_RECALL" | "CANNOT_RECALL" }>
+  historyPoints: Array<{ at: number; result: "CAN_RECALL" | "CANNOT_RECALL" }>
 }) {
-  const { calculatedAtMs, estimatedMemoryStrength, forgettingCurveDecayPerDay, historyPoints } = props
-  if (!Number.isFinite(calculatedAtMs) || historyPoints.length === 0) return []
+  const { calculatedAtMs, estimatedMemoryStrength, historyPoints } = props
+  if (!Number.isFinite(calculatedAtMs) || historyPoints.length === 0) return { curvePoints: [], reviewPoints: [] }
 
   const firstHistoryAtMs = historyPoints[0]?.at
-  if (!Number.isFinite(firstHistoryAtMs)) return []
+  if (!Number.isFinite(firstHistoryAtMs)) return { curvePoints: [], reviewPoints: [] }
+
+  let state: MemoryState = {
+    m0: memoryCfg.initialMastery,
+    halfLife: memoryCfg.initialHalfLife,
+    lastAt: firstHistoryAtMs,
+  }
+  const reviewPoints: Array<{ at: number; value: number; result: "CAN_RECALL" | "CANNOT_RECALL" }> = []
+  for (const item of historyPoints) {
+    state = reviewMemoryState(state, item.result === "CAN_RECALL", item.at)
+    reviewPoints.push({ at: item.at, value: state.m0, result: item.result })
+  }
 
   const endMs = Math.max(firstHistoryAtMs, calculatedAtMs)
   const sampleCount = Math.max(96, historyPoints.length * 24)
+  let sampleState: MemoryState = {
+    m0: memoryCfg.initialMastery,
+    halfLife: memoryCfg.initialHalfLife,
+    lastAt: firstHistoryAtMs,
+  }
+  let nextReviewIndex = 0
   const curvePoints = Array.from({ length: sampleCount }, (_, index) => {
     const ratio = sampleCount <= 1 ? 0 : index / (sampleCount - 1)
     const at = firstHistoryAtMs + (endMs - firstHistoryAtMs) * ratio
-    const recordsAtPoint = historyPoints.filter((item) => item.at <= at)
-    if (recordsAtPoint.length === 0) return { at, value: 0 }
-
-    let successWeight = 0
-    let totalWeight = 0
-    for (const record of recordsAtPoint) {
-      const ageDays = Math.max(0, (at - record.at) / 86400000)
-      const weight = Math.exp(-forgettingCurveDecayPerDay * ageDays)
-      totalWeight += weight
-      if (record.result === "CAN_RECALL") successWeight += weight
+    while (nextReviewIndex < historyPoints.length && historyPoints[nextReviewIndex].at <= at) {
+      const item = historyPoints[nextReviewIndex]
+      sampleState = reviewMemoryState(sampleState, item.result === "CAN_RECALL", item.at)
+      nextReviewIndex += 1
     }
-
-    const weightedSuccessRatio = totalWeight <= 0 ? 0 : successWeight / totalWeight
-    const lastRecordAt = recordsAtPoint[recordsAtPoint.length - 1]?.at ?? at
-    const freshnessAgeDays = Math.max(0, (at - lastRecordAt) / 86400000)
-    const freshness = Math.exp(-forgettingCurveDecayPerDay * freshnessAgeDays)
-    const value = Math.max(0, Math.min(1, weightedSuccessRatio * freshness))
-    return { at, value }
+    return { at, value: masteryAt(sampleState, at) }
   })
 
   const lastPoint = curvePoints[curvePoints.length - 1]
   if (lastPoint && Number.isFinite(estimatedMemoryStrength)) {
-    lastPoint.value = Math.max(0, Math.min(1, estimatedMemoryStrength))
+    lastPoint.value = clamp(estimatedMemoryStrength, 0, 1)
   }
-  return curvePoints
+  return { curvePoints, reviewPoints }
 }
 
 function ReviewCurveChart(props: {
   weightedSuccessRatio: number
   estimatedMemoryStrength: number
-  forgettingCurveDecayPerDay: number
   calculatedAt: string
   lastReviewedAt: string | null
   history: Array<{ occurredAt: string; result: "CAN_RECALL" | "CANNOT_RECALL" }>
 }) {
-  const { estimatedMemoryStrength, forgettingCurveDecayPerDay, calculatedAt, history } = props
+  const { estimatedMemoryStrength, calculatedAt, history } = props
 
   const chart = useMemo(() => {
     const width = 720
@@ -99,16 +163,14 @@ function ReviewCurveChart(props: {
     const historyPoints = history
       .map((item) => ({
         at: new Date(item.occurredAt).getTime(),
-        value: item.result === "CAN_RECALL" ? 1 : 0,
         result: item.result,
       }))
       .filter((item) => Number.isFinite(item.at))
       .sort((a, b) => a.at - b.at)
 
-    const curvePoints = buildConvolvedReviewCurve({
+    const { curvePoints, reviewPoints } = buildProbabilisticReviewCurve({
       calculatedAtMs,
       estimatedMemoryStrength,
-      forgettingCurveDecayPerDay,
       historyPoints,
     })
 
@@ -135,8 +197,8 @@ function ReviewCurveChart(props: {
         ? curvePoints.map((point, index) => `${index === 0 ? "M" : "L"} ${x(point.at).toFixed(2)} ${y(point.value).toFixed(2)}`).join(" ")
         : ""
 
-    return { width, height, padding, x, y, historyPoints, curvePoints, path, xMin, xMax, xAxisTicks }
-  }, [calculatedAt, estimatedMemoryStrength, forgettingCurveDecayPerDay, history])
+    return { width, height, padding, x, y, reviewPoints, path, xAxisTicks }
+  }, [calculatedAt, estimatedMemoryStrength, history])
 
   if (!chart) return null
 
@@ -153,7 +215,7 @@ function ReviewCurveChart(props: {
             </g>
           ))}
           {chart.path ? <path d={chart.path} fill="none" stroke="#0284c7" strokeWidth="3" strokeLinecap="round" /> : null}
-          {chart.historyPoints.map((point, index) => (
+          {chart.reviewPoints.map((point, index) => (
             <circle
               key={`${point.at}-${index}`}
               cx={chart.x(point.at)}
@@ -181,7 +243,7 @@ function ReviewCurveChart(props: {
         </svg>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
-        <span>绿色点表示“会”，橙色点表示“不会”，蓝线表示从第一次复习到现在的卷积记忆曲线。</span>
+        <span>绿色点表示“会”，橙色点表示“不会”，蓝线表示模型估计的掌握概率。</span>
         <span>基于最近 {history.length} 条参与计算的记录。</span>
       </div>
     </div>
@@ -235,8 +297,8 @@ export function ReviewProjectionCard(props: { projectId: string; recallPointId: 
                 </div>
               </div>
               <div className="theme-soft-surface rounded-[1.1rem] p-4 text-sm">
-                <div className="text-xs text-muted-foreground">衰减率 λ / 天</div>
-                <div className="mt-1 font-medium text-foreground">{projection.forgettingCurveDecayPerDay.toFixed(2)}</div>
+                <div className="text-xs text-muted-foreground">半衰期模型</div>
+                <div className="mt-1 font-medium text-foreground">贝叶斯更新</div>
               </div>
             </div>
 
@@ -253,7 +315,6 @@ export function ReviewProjectionCard(props: { projectId: string; recallPointId: 
                 lastReviewedAt={projection.lastReviewedAt}
                 estimatedMemoryStrength={projection.estimatedMemoryStrength}
                 weightedSuccessRatio={projection.weightedSuccessRatio}
-                forgettingCurveDecayPerDay={projection.forgettingCurveDecayPerDay}
                 history={projection.history}
               />
             )}

@@ -82,12 +82,6 @@ class RollUpStrategy(str, Enum):
 
 class LearningTaskNodeOrigin(str, Enum):
     AGGREGATION = "AGGREGATION"
-    OBJECT_MIRROR = "OBJECT_MIRROR"
-
-
-class ObjectMirrorStatus(str, Enum):
-    ACTIVE = "ACTIVE"
-    ORPHANED = "ORPHANED"
 
 
 class ClientRuntimeKind(str, Enum):

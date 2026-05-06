@@ -43,10 +43,8 @@ from backend.models.enums import (
     FsSyncPolicy,
     InstancePresence,
     LayerMode,
-    LearningTaskNodeOrigin,
     MediaAssetKind,
     MaterialSourceKind,
-    ObjectMirrorStatus,
     ProjectState,
     ProjectType,
     RecallPointState,
@@ -169,6 +167,18 @@ ASR_PUBLIC_BRIDGE_TTL_SEC: int = _env_int("PLM_ASR_PUBLIC_BRIDGE_TTL_SEC", 15 * 
 DASHSCOPE_ASR_TASK_TIMEOUT_SEC: int = _env_int("PLM_DASHSCOPE_ASR_TASK_TIMEOUT_SEC", 10 * 60)
 DASHSCOPE_ASR_TASK_POLL_INTERVAL_SEC: int = _env_int("PLM_DASHSCOPE_ASR_TASK_POLL_INTERVAL_SEC", 2)
 _ASR_SERVER_FFMPEG_SEMAPHORE = threading.BoundedSemaphore(ASR_SERVER_FFMPEG_MAX_CONCURRENCY)
+
+_MEMORY_MASTERY_FLOOR = 0.03
+_MEMORY_FALSE_POSITIVE = 0.12
+_MEMORY_FALSE_NEGATIVE = 0.08
+_MEMORY_LEARN_KNOWN = 0.04
+_MEMORY_LEARN_UNKNOWN = 0.35
+_MEMORY_HALFLIFE_GROW = 0.8
+_MEMORY_HALFLIFE_SHRINK = 0.65
+_MEMORY_MIN_HALFLIFE_DAYS = 0.1
+_MEMORY_MAX_HALFLIFE_DAYS = 365.0
+_MEMORY_INITIAL_MASTERY = 0.55
+_MEMORY_INITIAL_HALFLIFE_DAYS = 1.0
 
 
 def _is_resolvable_course_anchor_position(position: str) -> bool:
@@ -3582,7 +3592,9 @@ class SystemAPI:
             self.sys.layer_repo.add(s, layer)
             last_mode = layer.layer_mode
 
-    def _scan_learning_object_isomorphic_roll_up_once(self, s: MutationSession) -> Optional[LearningTaskNodeId]:
+    def _detect_learning_object_isomorphic_roll_up_once(
+        self, s: MutationSession
+    ) -> Optional[tuple[int, Tuple[LearningTaskNodeId, ...], str]]:
         if not self._is_learning_object_isomorphic_roll_up_enabled(s):
             return None
         if not self.sys.queue_repo.is_empty(s):
@@ -3660,40 +3672,6 @@ class SystemAPI:
             eligible_cache[node_key] = result
             return result
 
-        mirror_nodes = sorted(
-            (
-                node
-                for node in self.sys.learning_task_node_repo.all(s)
-                if isinstance(node, LearningTaskContainer)
-                and node.node_origin == LearningTaskNodeOrigin.OBJECT_MIRROR
-                and node.bound_learning_object_node_id is not None
-            ),
-            key=lambda item: id_canonical_text(item.node_id),
-        )
-        mirror_by_object_key: dict[str, LearningTaskContainer] = {}
-        for node in mirror_nodes:
-            mirror_by_object_key.setdefault(id_canonical_text(node.bound_learning_object_node_id), node)  # type: ignore[arg-type]
-
-        for node in mirror_nodes:
-            bound_key = id_canonical_text(node.bound_learning_object_node_id)  # type: ignore[arg-type]
-            if bound_key in object_nodes:
-                continue
-            if node.object_mirror_status == ObjectMirrorStatus.ORPHANED:
-                continue
-            updated = LearningTaskContainer(
-                project_id=node.project_id,
-                node_id=node.node_id,
-                parent_id=node.parent_id,
-                children=tuple(node.children),
-                title=node.title,
-                node_origin=node.node_origin,
-                bound_learning_object_node_id=node.bound_learning_object_node_id,
-                object_mirror_status=ObjectMirrorStatus.ORPHANED,
-            )
-            updated.validate_write_time()
-            self.sys.learning_task_node_repo.update(s, updated)
-            mirror_by_object_key[bound_key] = updated
-
         eligible_object_keys = sorted(
             [
                 node_key
@@ -3722,6 +3700,8 @@ class SystemAPI:
 
             selected: list[LearningTaskNodeId] = []
             for candidate_id in current_ids:
+                if self.sys.learning_task_node_repo.get(s, candidate_id).parent_id is not None:
+                    continue
                 candidate_instance_keys: set[str] = set()
                 for rp_id in self.sys.learning_task_node_repo.covered_rp_ids(s, candidate_id):
                     try:
@@ -3736,143 +3716,12 @@ class SystemAPI:
 
         for node_key in eligible_object_keys:
             node = object_nodes[node_key]
-            existing = mirror_by_object_key.get(node_key)
-            if existing is not None:
-                continue
             target_layer_index = logical_level(node_key)
             if int(target_layer_index) <= 0:
                 continue
-            if not source_queue_candidate_ids_for_object_node(node_key, int(target_layer_index)):
-                continue
-            created = LearningTaskContainer(
-                project_id=s.project_id,
-                node_id=self.idgen.new_learning_task_node_id(s.project_id),
-                parent_id=None,
-                children=tuple(),
-                title=node.title,
-                node_origin=LearningTaskNodeOrigin.OBJECT_MIRROR,
-                bound_learning_object_node_id=node.node_id,
-                object_mirror_status=ObjectMirrorStatus.ACTIVE,
-            )
-            created.validate_write_time()
-            self.sys.learning_task_node_repo.add(s, created)
-            mirror_by_object_key[node_key] = created
-
-        current_mirror_keys = {
-            node_key
-            for node_key, mirror in mirror_by_object_key.items()
-            if mirror.bound_learning_object_node_id is not None and node_key in object_nodes
-        }
-
-        def direct_child_mirror_keys(node_key: str) -> Tuple[str, ...]:
-            node = object_nodes[node_key]
-            if not isinstance(node, LearningObjectContainer):
-                return tuple()
-            out: list[str] = []
-            seen: set[str] = set()
-            for child_id in node.children:
-                child_key = id_canonical_text(child_id)
-                child = object_nodes.get(child_key)
-                if child is None or isinstance(child, LearningObjectLeaf):
-                    continue
-                if self._is_synthetic_files_container_node(child):
-                    for nested_key in direct_child_mirror_keys(child_key):
-                        if nested_key not in seen:
-                            out.append(nested_key)
-                            seen.add(nested_key)
-                    continue
-                if child_key in current_mirror_keys:
-                    if child_key not in seen:
-                        out.append(child_key)
-                        seen.add(child_key)
-                    continue
-                for nested_key in direct_child_mirror_keys(child_key):
-                    if nested_key not in seen:
-                        out.append(nested_key)
-                        seen.add(nested_key)
-            return tuple(out)
-
-        def parent_mirror_key(node_key: str) -> Optional[str]:
-            current = object_nodes[node_key]
-            parent_id = current.parent_id
-            while parent_id is not None:
-                current_key = id_canonical_text(parent_id)
-                parent = object_nodes.get(current_key)
-                if parent is None:
-                    return None
-                if isinstance(parent, LearningObjectContainer) and self._is_synthetic_files_container_node(parent):
-                    parent_id = parent.parent_id
-                    continue
-                if current_key in current_mirror_keys:
-                    return current_key
-                parent_id = parent.parent_id
-            return None
-
-        def prune_source_queue_for_object_node(node_key: str, target_layer_index: int) -> bool:
-            remove_keys = {
-                id_canonical_text(candidate_id)
-                for candidate_id in source_queue_candidate_ids_for_object_node(node_key, target_layer_index)
-            }
-            if not remove_keys:
-                return False
-            source_layer_index = int(target_layer_index) - 1
-            try:
-                queue = self.sys.aggq_repo.get(s, source_layer_index)
-            except NotFound:
-                return False
-            current_ids = queue.current_ids()
-            if not current_ids:
-                return False
-            historical_ids = tuple(queue.node_ids[: queue.head_index])
-            remaining_current_ids = tuple(
-                node_id for node_id in current_ids if id_canonical_text(node_id) not in remove_keys
-            )
-            updated_queue = AggregationQueue(
-                project_id=queue.project_id,
-                layer_index=queue.layer_index,
-                node_ids=historical_ids + remaining_current_ids,
-                head_index=queue.head_index,
-            )
-            updated_queue.validate_local_invariants()
-            s._staged.aggregation_queues[source_layer_index] = updated_queue
-            return True
-
-        for node_key in sorted(current_mirror_keys, key=lambda item: (logical_level(item), str(object_nodes[item].relative_path), item)):
-            node = object_nodes[node_key]
-            mirror = mirror_by_object_key[node_key]
-            parent_key = parent_mirror_key(node_key)
-            parent_node_id = None if parent_key is None else mirror_by_object_key[parent_key].node_id
-            child_node_ids = tuple(mirror_by_object_key[item].node_id for item in direct_child_mirror_keys(node_key))
-            updated = LearningTaskContainer(
-                project_id=mirror.project_id,
-                node_id=mirror.node_id,
-                parent_id=parent_node_id,
-                children=child_node_ids,
-                title=node.title,
-                node_origin=LearningTaskNodeOrigin.OBJECT_MIRROR,
-                bound_learning_object_node_id=mirror.bound_learning_object_node_id,
-                object_mirror_status=ObjectMirrorStatus.ACTIVE,
-            )
-            if updated != mirror:
-                updated.validate_write_time()
-                self.sys.learning_task_node_repo.update(s, updated)
-                mirror_by_object_key[node_key] = updated
-
-        for node_key in eligible_object_keys:
-            mirror = mirror_by_object_key[node_key]
-            target_layer_index = logical_level(node_key)
-            if int(target_layer_index) <= 0:
-                continue
-            if not source_queue_candidate_ids_for_object_node(node_key, int(target_layer_index)):
-                continue
-            if self.sys.entry_repo.maybe_get(s, mirror.node_id) is not None:
-                if prune_source_queue_for_object_node(node_key, int(target_layer_index)):
-                    return mirror.node_id
-                continue
-            self._ensure_layers_through(s, int(target_layer_index))
-            self._task_register(s, mirror.node_id, int(target_layer_index))
-            prune_source_queue_for_object_node(node_key, int(target_layer_index))
-            return mirror.node_id
+            candidate_ids = source_queue_candidate_ids_for_object_node(node_key, int(target_layer_index))
+            if candidate_ids:
+                return int(target_layer_index) - 1, candidate_ids, node.title
 
         return None
 
@@ -3887,18 +3736,21 @@ class SystemAPI:
         """
         Spec 4.4.2 T1: if thresholds are met, enter/keep CLEARING.
         """
+        if not self._threshold_roll_up_enabled(s, layer_index):
+            return False
+        return self._enter_clearing_if_auto_roll_up_available(s, layer_index)
+
+    def _enter_clearing_if_auto_roll_up_available(self, s: MutationSession, layer_index: int) -> bool:
         if not self.sys.queue_repo.is_empty(s):
             return False
         if self._actionable_missing_instance_ids(s):
             return False
-        if not self._threshold_roll_up_enabled(s, layer_index):
-            return False
-        cur = self._get_aggregation_cycle_state(s, layer_index)
-        if cur != AggregationCycleState.DONE:
+        if self._get_aggregation_cycle_state(s, layer_index) != AggregationCycleState.DONE:
             return False
         if self._get_pending_roll_up_parent_node_id(s, layer_index) is not None:
             return False
-        if self._aggregation_threshold_met(s, layer_index):
+
+        if self._threshold_roll_up_enabled(s, layer_index) and self._aggregation_threshold_met(s, layer_index):
             auto_title = self._next_default_aggregation_title(s, layer_index)
             parent_node_id, candidates, created = self._roll_up_phase_a(
                 s, target_layer_index=layer_index, title=auto_title
@@ -3913,7 +3765,31 @@ class SystemAPI:
                     title=auto_title,
                 )
                 return True
-        return False
+
+        detected = self._detect_learning_object_isomorphic_roll_up_once(s)
+        if detected is None:
+            return False
+        source_layer_index, candidate_ids, title = detected
+        if int(source_layer_index) != int(layer_index):
+            return False
+
+        parent_node_id, candidates, created = self._roll_up_phase_a_for_candidates(
+            s,
+            source_layer_index=source_layer_index,
+            candidate_node_ids=candidate_ids,
+            title=title,
+        )
+        if not created or parent_node_id is None:
+            return False
+        self._append_aggregation_event(
+            s,
+            layer_index=source_layer_index,
+            parent_node_id=parent_node_id,
+            candidate_node_ids=candidates,
+            reason=AggregationEventReason.THRESHOLD_DRAIN,
+            title=title,
+        )
+        return True
 
     def _append_aggregation_event(
         self,
@@ -5581,11 +5457,39 @@ class SystemAPI:
             return (pending, tuple(), False)
 
         candidates = self.sys.aggq_repo.current_ids(s, target_layer_index)
-        if not candidates:
+        return self._roll_up_phase_a_for_candidates(
+            s,
+            source_layer_index=target_layer_index,
+            candidate_node_ids=tuple(candidates),
+            title=title,
+        )
+
+    def _roll_up_phase_a_for_candidates(
+        self,
+        s: MutationSession,
+        source_layer_index: int,
+        candidate_node_ids: Tuple[LearningTaskNodeId, ...],
+        title: str,
+    ) -> tuple[Optional[LearningTaskNodeId], Tuple[LearningTaskNodeId, ...], bool]:
+        self.sys.layer_repo.get_by_index(s, source_layer_index)
+
+        pending = self._get_pending_roll_up_parent_node_id(s, source_layer_index)
+        if pending is not None:
+            return (pending, tuple(), False)
+
+        if not candidate_node_ids:
             return (None, tuple(), False)
 
-        candidate_set = set(candidates)
-        for nid in candidates:
+        current_ids = self.sys.aggq_repo.current_ids(s, source_layer_index)
+        current_keys = {id_canonical_text(nid) for nid in current_ids}
+        candidate_keys = [id_canonical_text(nid) for nid in candidate_node_ids]
+        if len(candidate_keys) != len(set(candidate_keys)):
+            raise PreconditionFailure("candidate_node_ids must not contain duplicates")
+        if not set(candidate_keys).issubset(current_keys):
+            raise PreconditionFailure("candidate_node_ids must be subset of source aggregation queue current ids")
+
+        candidate_set = set(candidate_node_ids)
+        for nid in candidate_node_ids:
             cur = self.sys.learning_task_node_repo.get(s, nid)
             while cur.parent_id is not None:
                 pid = cur.parent_id
@@ -5593,16 +5497,28 @@ class SystemAPI:
                     raise PreconditionFailure("candidate_node_ids contains ancestor/descendant mix")
                 cur = self.sys.learning_task_node_repo.get(s, pid)
 
-        self.sys.aggq_repo.clear_current(s, target_layer_index)
+        queue = self.sys.aggq_repo.get(s, source_layer_index)
+        historical_ids = tuple(queue.node_ids[: queue.head_index])
+        remaining_current_ids = tuple(
+            node_id for node_id in current_ids if id_canonical_text(node_id) not in set(candidate_keys)
+        )
+        updated_queue = AggregationQueue(
+            project_id=queue.project_id,
+            layer_index=queue.layer_index,
+            node_ids=historical_ids + remaining_current_ids,
+            head_index=queue.head_index,
+        )
+        updated_queue.validate_local_invariants()
+        s._staged.aggregation_queues[source_layer_index] = updated_queue
 
-        parent_title = title.strip() if title and title.strip() else self._next_default_aggregation_title(s, target_layer_index)
+        parent_title = title.strip() if title and title.strip() else self._next_default_aggregation_title(s, source_layer_index)
         parent_node_id = self.sys.learning_task_node_repo.push_up(
-            s, candidate_child_ids=tuple(candidates), title=parent_title
+            s, candidate_child_ids=tuple(candidate_node_ids), title=parent_title
         )
 
-        self._set_pending_roll_up_parent_node_id(s, target_layer_index, parent_node_id)
-        self._set_aggregation_cycle_state(s, target_layer_index, AggregationCycleState.CLEARING)
-        return (parent_node_id, tuple(candidates), True)
+        self._set_pending_roll_up_parent_node_id(s, source_layer_index, parent_node_id)
+        self._set_aggregation_cycle_state(s, source_layer_index, AggregationCycleState.CLEARING)
+        return (parent_node_id, tuple(candidate_node_ids), True)
 
     def _roll_up_phase_b(self, s: MutationSession, layer_index: int) -> None:
         """
@@ -5697,6 +5613,13 @@ class SystemAPI:
                 return
 
         while self.sys.queue_repo.is_empty(s):
+            for layer in self.sys.layer_repo.all(s):
+                if self._get_aggregation_cycle_state(s, layer.layer_index) != AggregationCycleState.CLEARING:
+                    continue
+                if self._get_pending_roll_up_parent_node_id(s, layer.layer_index) is not None:
+                    self._set_aggregation_cycle_state(s, layer.layer_index, AggregationCycleState.ROLL_UP)
+                    return
+
             chosen_layer_index: Optional[int] = None
 
             # Choose the first CLEARING layer (lowest layer_index) that is eligible for Tick.
@@ -5752,8 +5675,12 @@ class SystemAPI:
                     self.sys.commit(s)
                     continue
 
-                did_object_scan = self._scan_learning_object_isomorphic_roll_up_once(s)
-                if did_object_scan is not None:
+                did_auto_roll_up = False
+                for layer in self.sys.layer_repo.all(s):
+                    if self._enter_clearing_if_auto_roll_up_available(s, layer.layer_index):
+                        did_auto_roll_up = True
+                        break
+                if did_auto_roll_up:
                     self.sys.commit(s)
                     continue
 
@@ -6049,8 +5976,6 @@ class SystemAPI:
                 children=tuple(node.children),
                 title=str(title).strip(),
                 node_origin=node.node_origin,
-                bound_learning_object_node_id=node.bound_learning_object_node_id,
-                object_mirror_status=node.object_mirror_status,
             )
             updated_node.validate_write_time()
 
@@ -6386,24 +6311,6 @@ class SystemAPI:
             if not self.sys.queue_repo.is_empty(s):
                 raise PreconditionFailure("manual_roll_up gate: queue not empty")
             self._raise_if_actionable_missing_instances(s)
-            if self._is_learning_object_isomorphic_roll_up_enabled(s):
-                entry_node_id = self._scan_learning_object_isomorphic_roll_up_once(s)
-                if entry_node_id is None:
-                    self.sys.rollback(s)
-                    return None
-                self._append_audit_event(
-                    s,
-                    kind=AuditEventKind.MANUAL_ROLL_UP,
-                    api_name="manual_roll_up",
-                    payload={
-                        "strategy": RollUpStrategy.LEARNING_OBJECT_ISOMORPHIC.value,
-                        "entryNodeId": str(entry_node_id),
-                    },
-                )
-                self.sys.commit(s)
-                self._best_effort_drive_idle_orchestration(project_id)
-                return entry_node_id
-
             try:
                 parent_node_id, candidates, created = self._roll_up_phase_a(
                     s,
@@ -6465,6 +6372,78 @@ class SystemAPI:
             return 0.0
         return float(seconds) / 86400.0
 
+    @staticmethod
+    def _clamp_probability(value: float, minimum: float = 0.0, maximum: float = 1.0) -> float:
+        return max(float(minimum), min(float(maximum), float(value)))
+
+    @staticmethod
+    def _mastery_at(*, mastery_after_review: float, half_life_days: float, last_reviewed_at: datetime, now: datetime) -> float:
+        dt_days = SystemAPI._age_days(last_reviewed_at, now)
+        decay = math.pow(0.5, dt_days / max(float(half_life_days), _MEMORY_MIN_HALFLIFE_DAYS))
+        return SystemAPI._clamp_probability(
+            _MEMORY_MASTERY_FLOOR + (float(mastery_after_review) - _MEMORY_MASTERY_FLOOR) * decay
+        )
+
+    @staticmethod
+    def _bayes_update(prior: float, *, can_recall: bool) -> float:
+        prior = SystemAPI._clamp_probability(prior)
+        if can_recall:
+            numerator = prior * (1.0 - _MEMORY_FALSE_NEGATIVE)
+            denominator = numerator + (1.0 - prior) * _MEMORY_FALSE_POSITIVE
+        else:
+            numerator = prior * _MEMORY_FALSE_NEGATIVE
+            denominator = numerator + (1.0 - prior) * (1.0 - _MEMORY_FALSE_POSITIVE)
+        if denominator <= 0:
+            return prior
+        return SystemAPI._clamp_probability(numerator / denominator)
+
+    def _compute_probabilistic_memory_metrics(
+        self,
+        *,
+        records: Sequence[RecallPointReviewRecord],
+        calculated_at: datetime,
+    ) -> tuple[float, float]:
+        if not records:
+            return 0.0, 0.0
+
+        mastery_after_review = float(_MEMORY_INITIAL_MASTERY)
+        half_life_days = float(_MEMORY_INITIAL_HALFLIFE_DAYS)
+        previous_at = records[0].occurred_at
+        known_count = 0
+
+        for record in records:
+            recall_before_review = self._mastery_at(
+                mastery_after_review=mastery_after_review,
+                half_life_days=half_life_days,
+                last_reviewed_at=previous_at,
+                now=record.occurred_at,
+            )
+            can_recall = record.result == RecallPointReviewResult.CAN_RECALL
+            post_observation = self._bayes_update(recall_before_review, can_recall=can_recall)
+            learning_gain = _MEMORY_LEARN_KNOWN if can_recall else _MEMORY_LEARN_UNKNOWN
+            mastery_after_review = self._clamp_probability(
+                post_observation + (1.0 - post_observation) * learning_gain,
+                _MEMORY_MASTERY_FLOOR,
+                0.99,
+            )
+
+            if can_recall:
+                known_count += 1
+                half_life_days *= 1.0 + _MEMORY_HALFLIFE_GROW * (1.0 - recall_before_review)
+            else:
+                half_life_days *= 1.0 - _MEMORY_HALFLIFE_SHRINK * recall_before_review
+            half_life_days = max(_MEMORY_MIN_HALFLIFE_DAYS, min(_MEMORY_MAX_HALFLIFE_DAYS, half_life_days))
+            previous_at = record.occurred_at
+
+        estimated_memory_strength = self._mastery_at(
+            mastery_after_review=mastery_after_review,
+            half_life_days=half_life_days,
+            last_reviewed_at=previous_at,
+            now=calculated_at,
+        )
+        weighted_success_ratio = float(known_count) / float(len(records))
+        return float(weighted_success_ratio), float(estimated_memory_strength)
+
     def _compute_recall_point_review_metrics(
         self,
         s: MutationSession,
@@ -6487,20 +6466,11 @@ class SystemAPI:
         if not records:
             return 0.0, 0.0, None, None, total_review_count, tuple()
 
-        decay_per_day = float(cfg.push_config.forgetting_curve_decay_per_day)
-        success_weight = 0.0
-        total_weight = 0.0
-        for record in records:
-            age_days = self._age_days(record.occurred_at, calculated_at)
-            weight = math.exp(-decay_per_day * age_days)
-            total_weight += weight
-            if record.result == RecallPointReviewResult.CAN_RECALL:
-                success_weight += weight
-
-        weighted_success_ratio = 0.0 if total_weight <= 0 else success_weight / total_weight
+        weighted_success_ratio, estimated_memory_strength = self._compute_probabilistic_memory_metrics(
+            records=records,
+            calculated_at=calculated_at,
+        )
         last_record = records[-1]
-        freshness = math.exp(-decay_per_day * self._age_days(last_record.occurred_at, calculated_at))
-        estimated_memory_strength = max(0.0, min(1.0, weighted_success_ratio * freshness))
         return (
             float(weighted_success_ratio),
             float(estimated_memory_strength),

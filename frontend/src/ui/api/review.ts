@@ -183,6 +183,21 @@ export function listReviewRecommendations(projectId: string, params?: { offset?:
   })
 }
 
+export async function listAllReviewRecommendations(projectId: string, params?: { limit?: number }) {
+  const limit = params?.limit ?? 500
+  const items: ReviewRecommendationItem[] = []
+  let offset = 0
+
+  for (;;) {
+    const page = await listReviewRecommendations(projectId, { offset, limit })
+    items.push(...page.items)
+    if (page.nextOffset == null) {
+      return { ...page, items, offset: 0, limit }
+    }
+    offset = page.nextOffset
+  }
+}
+
 export function editRecallPoint(
   projectId: string,
   recallPointId: string,

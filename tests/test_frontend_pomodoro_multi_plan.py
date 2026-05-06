@@ -67,7 +67,9 @@ def test_quick_pomodoro_feeds_shell_gate_and_fullscreen_previews() -> None:
     assert "const pomodoroQuickPomodoro = usePomodoroStore((state) => state.quickPomodoro)" in app_shell_source
     assert "getPomodoroSnapshot({ enabled: pomodoroEnabled, weeklySchedule: pomodoroWeeklySchedule, quickPomodoro: pomodoroQuickPomodoro }, pomodoroNow)" in app_shell_source
     assert "getPomodoroUpcomingSegmentPreview({ enabled: pomodoroEnabled, weeklySchedule: pomodoroWeeklySchedule, quickPomodoro: pomodoroQuickPomodoro }, pomodoroNow)" in app_shell_source
-    assert "const showPomodoroShortcut = pomodoroEnabled || Boolean(activePomodoroQuickSession)" in app_shell_source
+    assert "const pomodoroShortcutText =" in app_shell_source
+    assert "已关闭" in app_shell_source
+    assert "showPomodoroShortcut" not in app_shell_source
 
     assert "const quickPomodoro = usePomodoroStore((state) => state.quickPomodoro)" in gate_source
     assert "const pomodoroActive = enabled || Boolean(activeQuickPomodoro)" in gate_source
@@ -75,6 +77,16 @@ def test_quick_pomodoro_feeds_shell_gate_and_fullscreen_previews() -> None:
 
     assert "const pomodoroQuickPomodoro = usePomodoroStore((state) => state.quickPomodoro)" in video_pane_source
     assert "getPomodoroUpcomingSegmentPreview({ enabled: pomodoroEnabled, weeklySchedule: pomodoroWeeklySchedule, quickPomodoro: pomodoroQuickPomodoro }, pomodoroNow)" in video_pane_source
+
+
+def test_pomodoro_shell_shortcut_stays_visible_when_disabled() -> None:
+    app_shell_source = APP_SHELL.read_text(encoding="utf-8")
+
+    assert "to={buildPomodoroPath()}" in app_shell_source
+    assert "const pomodoroShortcutText =" in app_shell_source
+    assert "已关闭" in app_shell_source
+    assert "const showPomodoroShortcut =" not in app_shell_source
+    assert "showPomodoroShortcut ? (" not in app_shell_source
 
 
 def test_pomodoro_store_supports_random_micro_break_settings() -> None:

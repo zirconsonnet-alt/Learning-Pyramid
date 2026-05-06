@@ -42,10 +42,14 @@ def test_recall_point_detail_drops_explanatory_copy() -> None:
 def test_recall_point_review_curve_uses_full_history_convolution() -> None:
     projection_source = (REPO_ROOT / "frontend" / "src" / "views" / "recallPoints" / "components" / "ReviewProjectionCard.tsx").read_text(encoding="utf-8")
 
-    assert "buildConvolvedReviewCurve" in projection_source
+    assert "buildProbabilisticReviewCurve" in projection_source
     assert "firstHistoryAtMs" in projection_source
-    assert "recordsAtPoint" in projection_source
     assert "estimatedMemoryStrength" in projection_source
+    assert "bayesUpdate" in projection_source
+    assert "masteryAt" in projection_source
+    assert "reviewMemoryState" in projection_source
+    assert "point.value" in projection_source
+    assert 'value: item.result === "CAN_RECALL" ? 1 : 0' not in projection_source
     assert "curveStartMs = lastReviewedAt" not in projection_source
     assert "最近一次正式复习往当前时刻衰减" not in projection_source
 

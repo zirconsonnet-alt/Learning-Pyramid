@@ -1291,24 +1291,6 @@ class LearningTaskNodeRepository:
                 if rp.state == RecallPointState.ACTIVE:
                     out.append(rp_id)
             return tuple(out)
-        if (
-            n.node_origin == LearningTaskNodeOrigin.OBJECT_MIRROR
-            and n.bound_learning_object_node_id is not None
-            and self.learning_object_repo.maybe_get(session, n.bound_learning_object_node_id) is not None
-        ):
-            inst_ids = self.learning_object_repo.covered_instance_id_sequence(session, n.bound_learning_object_node_id)
-            inst_keys = {id_canonical_text(item) for item in inst_ids}
-            if not inst_keys:
-                return tuple()
-            out = [
-                rp.recall_point_id
-                for rp in self.recall_point_repo.all(session)
-                if rp.state == RecallPointState.ACTIVE
-                and rp.anchor is not None
-                and id_canonical_text(rp.anchor.instance_id) in inst_keys
-            ]
-            out.sort(key=id_canonical_text)
-            return tuple(out)
         out: list[RecallPointId] = []
         for cid in n.children:
             out.extend(self._covered_rp_ids_no_validate(session, cid))
@@ -1365,8 +1347,6 @@ class LearningTaskNodeRepository:
                 children=tuple(next_children),
                 title=gp.title,
                 node_origin=gp.node_origin,
-                bound_learning_object_node_id=gp.bound_learning_object_node_id,
-                object_mirror_status=gp.object_mirror_status,
             )
 
         parent = LearningTaskContainer(
@@ -1396,8 +1376,6 @@ class LearningTaskNodeRepository:
                     children=ch.children,
                     title=ch.title,
                     node_origin=ch.node_origin,
-                    bound_learning_object_node_id=ch.bound_learning_object_node_id,
-                    object_mirror_status=ch.object_mirror_status,
                 )
             updated_children.append(updated)
 

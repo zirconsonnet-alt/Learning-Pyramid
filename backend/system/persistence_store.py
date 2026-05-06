@@ -27,7 +27,6 @@ from backend.models.enums import (
     LearningTaskNodeOrigin,
     MaterialSourceKind,
     MediaAssetKind,
-    ObjectMirrorStatus,
     ProjectState,
     RecallPointState,
     RecallPointReviewResult,
@@ -1160,11 +1159,9 @@ class SQLiteSnapshotStore:
                     None
                     if node_payload.get("boundLearningTaskId") is None
                     else str(node_payload.get("boundLearningTaskId")),
-                    str(node_payload.get("nodeOrigin", LearningTaskNodeOrigin.AGGREGATION.value)),
-                    None
-                    if node_payload.get("boundLearningObjectNodeId") is None
-                    else str(node_payload.get("boundLearningObjectNodeId")),
-                    None if node_payload.get("objectMirrorStatus") is None else str(node_payload.get("objectMirrorStatus")),
+                    LearningTaskNodeOrigin.AGGREGATION.value,
+                    None,
+                    None,
                     str(node_payload.get("title", "")),
                     len(children),
                     None if not children else json.dumps(children, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
@@ -1685,11 +1682,7 @@ class SQLiteSnapshotStore:
         else:
             children_raw = str(row["children_json"]) if row["children_json"] is not None else "[]"
             payload["children"] = list(json.loads(children_raw))
-            payload["nodeOrigin"] = str(row["node_origin"] or LearningTaskNodeOrigin.AGGREGATION.value)
-            payload["boundLearningObjectNodeId"] = (
-                None if row["bound_learning_object_node_id"] is None else str(row["bound_learning_object_node_id"])
-            )
-            payload["objectMirrorStatus"] = None if row["object_mirror_status"] is None else str(row["object_mirror_status"])
+            payload["nodeOrigin"] = LearningTaskNodeOrigin.AGGREGATION.value
         return payload
 
     @staticmethod
@@ -1889,17 +1882,7 @@ class SQLiteSnapshotStore:
             parent_id=None if payload.get("parentId") is None else LearningTaskNodeId(str(payload["parentId"])),
             children=tuple(LearningTaskNodeId(str(item)) for item in list(payload.get("children", []))),
             title=str(payload["title"]),
-            node_origin=LearningTaskNodeOrigin(str(payload.get("nodeOrigin") or LearningTaskNodeOrigin.AGGREGATION.value)),
-            bound_learning_object_node_id=(
-                None
-                if payload.get("boundLearningObjectNodeId") is None
-                else LearningObjectNodeId(str(payload["boundLearningObjectNodeId"]))
-            ),
-            object_mirror_status=(
-                None
-                if payload.get("objectMirrorStatus") is None
-                else ObjectMirrorStatus(str(payload["objectMirrorStatus"]))
-            ),
+            node_origin=LearningTaskNodeOrigin.AGGREGATION,
         )
 
     @classmethod
@@ -3390,7 +3373,7 @@ class SQLiteSnapshotStore:
         try:
             node_rows = conn.execute(
                 """
-                SELECT node_id, node_kind, bound_learning_task_id, children_json, node_origin, bound_learning_object_node_id
+                SELECT node_id, node_kind, bound_learning_task_id, children_json
                 FROM learning_task_node_index
                 WHERE project_id = ?
                 """,
@@ -3414,23 +3397,11 @@ class SQLiteSnapshotStore:
                 if row["bound_learning_task_id"] is None
                 else str(row["bound_learning_task_id"]),
                 "children": tuple(json.loads(str(row["children_json"]))) if row["children_json"] is not None else tuple(),
-                "node_origin": str(row["node_origin"] or LearningTaskNodeOrigin.AGGREGATION.value),
-                "bound_learning_object_node_id": None
-                if row["bound_learning_object_node_id"] is None
-                else str(row["bound_learning_object_node_id"]),
             }
             for row in node_rows
         }
         if str(node_id) not in node_map:
             return tuple()
-
-        selected = node_map[str(node_id)]
-        if (
-            selected.get("kind") == "CONTAINER"
-            and selected.get("node_origin") == LearningTaskNodeOrigin.OBJECT_MIRROR.value
-            and selected.get("bound_learning_object_node_id")
-        ):
-            return self.list_recall_points_by_learning_object_node(project_id, str(selected["bound_learning_object_node_id"]))
 
         task_map = {
             str(row["learning_task_id"]): tuple(
