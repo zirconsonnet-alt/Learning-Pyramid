@@ -249,7 +249,7 @@ function PhaseBadge(props: { snapshot: PomodoroSnapshot }) {
         : snapshot.phase === "break"
           ? "text-amber-700"
           : "text-[color:var(--theme-subtle-text)]"
-  return <span className={cn("text-sm font-semibold", className)}>{label}</span>
+  return <span className={cn("text-3xl font-semibold tracking-[-0.04em] sm:text-4xl", className)}>{label}</span>
 }
 
 function MetricTile(props: { label: string; value: string }) {
@@ -596,7 +596,6 @@ export function PomodoroPage() {
       ),
     0,
   )
-  const draftStartTimes = [...new Set(pomodoroDrafts.map((draft) => normalizePomodoroStartTime(draft.startTime)))].sort()
   const activePomodoroDraft = activePlanId ? pomodoroDrafts.find((draft) => draft.id === activePlanId) ?? null : null
   const activePomodoroDraftIndex = activePomodoroDraft ? pomodoroDrafts.findIndex((draft) => draft.id === activePomodoroDraft.id) : -1
 
@@ -1187,12 +1186,6 @@ export function PomodoroPage() {
               <div className="text-sm font-medium text-muted-foreground">番茄计划</div>
               <div className="mt-2 text-3xl font-semibold tracking-[-0.04em] text-foreground">
                 {enabledDraftCount > 0 ? `${enabledDraftCount} 组` : "未启用"}
-              </div>
-              <div className="mt-2 text-sm leading-6 text-[color:var(--theme-soft-text-strong)]">
-                {draftStartTimes.length > 0 ? draftStartTimes.join("、") : "还没有开始时间"}
-              </div>
-              <div className="mt-1 text-sm text-muted-foreground">
-                {enabledUnassignedPomodoros > 0 ? `${enabledUnassignedPomodoros} 个番茄未绑定项目` : "项目已配置"} · {activeDaySummary}
               </div>
             </div>
             <Button type="button" variant="outline" onClick={addPomodoroDraftPlan}>

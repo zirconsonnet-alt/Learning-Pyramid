@@ -213,6 +213,7 @@ def test_pomodoro_session_controls_keep_settings_entry_visible() -> None:
 
 def test_pomodoro_header_keeps_phase_label_next_to_countdown_without_extra_summary() -> None:
     page_source = POMODORO_PAGE.read_text(encoding="utf-8")
+    phase_badge_source = page_source[page_source.index("function PhaseBadge"):page_source.index("function MetricTile")]
     session_controls = page_source[
         page_source.index("data-pomodoro-session-controls"):page_source.index('<MetricTile label="今日开始"')
     ]
@@ -220,6 +221,8 @@ def test_pomodoro_header_keeps_phase_label_next_to_countdown_without_extra_summa
         session_controls.index("<PhaseBadge snapshot={snapshot} />"):session_controls.index('className="flex flex-wrap gap-3"')
     ]
 
+    assert "text-3xl" in phase_badge_source
+    assert "sm:text-4xl" in phase_badge_source
     assert header_block.index("<PhaseBadge snapshot={snapshot} />") < header_block.index("{headlineCountdown}")
     assert "`剩余 ${headlineCountdown}`" not in session_controls
     assert "`距离开始 ${headlineCountdown}`" not in session_controls
@@ -227,6 +230,19 @@ def test_pomodoro_header_keeps_phase_label_next_to_countdown_without_extra_summa
     assert '"铃声开"' not in session_controls
     assert '"铃声关"' not in session_controls
     assert "describeProjectLabel(snapshot.currentProjectId" not in session_controls
+
+
+def test_pomodoro_plan_overview_hides_secondary_summary_lines() -> None:
+    page_source = POMODORO_PAGE.read_text(encoding="utf-8")
+    plan_overview_start = page_source.index("data-pomodoro-plan-overview")
+    plan_overview_conflict_start = page_source.index("planConflictMessages.length > 0", plan_overview_start)
+    plan_overview = page_source[plan_overview_start:plan_overview_conflict_start]
+
+    assert "draftStartTimes" not in plan_overview
+    assert "还没有开始时间" not in plan_overview
+    assert "enabledUnassignedPomodoros" not in plan_overview
+    assert "项目已配置" not in plan_overview
+    assert "activeDaySummary" not in plan_overview
 
 
 def test_pomodoro_settings_page_edits_random_micro_break_preferences() -> None:
