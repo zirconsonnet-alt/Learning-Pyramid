@@ -1,24 +1,22 @@
-import { type ReactNode, useEffect, useMemo, useState } from "react"
+import { type ReactNode } from "react"
 import { useQueries } from "@tanstack/react-query"
-import { ArrowRight, CheckCircle2, ChevronLeft, RefreshCw, XCircle } from "lucide-react"
+import { ChevronLeft, RefreshCw } from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
-import type { RecallPoint, ReviewTask } from "@/ui/api/review"
-import { getRangeSnapshot, getRecallPoint, getReviewTask } from "@/ui/api/review"
-import { RichContentRenderer } from "@/ui/components/RichContentRenderer"
+import type { ReviewTask } from "@/ui/api/review"
+import { getRangeSnapshot, getReviewTask } from "@/ui/api/review"
 import { ContentEmptyState, ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import {
   formatConvergenceReference,
-  formatInstanceReference,
   formatRangeReference,
-  formatRecallPointReference,
   formatReviewTaskReference,
 } from "@/ui/displayIdentifiers"
 import { useProject } from "@/ui/queries/projects"
 import { useConvergence } from "@/ui/queries/reviewChains"
+import { cn } from "@/ui/utils"
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -45,23 +43,12 @@ function describeReviewTaskState(state: string) {
   return state
 }
 
-function formatReviewOutcome(value: "remembered" | "forgotten" | null) {
-  if (value === "remembered") return "最近一次：会"
-  if (value === "forgotten") return "最近一次：不会"
-  return "还没有正式复习记录"
-}
-
-function formatAnchorLabel(recallPoint: RecallPoint) {
-  if (!recallPoint.anchor) return "未绑定锚点"
-  return `${formatInstanceReference(recallPoint.anchor.instanceId)} · ${recallPoint.anchor.position}`
-}
-
-type ConvergenceReviewEntry = {
-  recallPoint: RecallPoint
+type ConvergenceRoundEntry = {
+  inputCount: number | null
+  resultCount: number | null
   reviewTask: ReviewTask
   reviewTaskId: string
   roundIndex: number
-  outcome: "remembered" | "forgotten" | null
 }
 
 export function ConvergencePage() {
@@ -71,8 +58,6 @@ export function ConvergencePage() {
   const cid = convergenceId ?? ""
   const { projectTitle } = useProject(pid)
   const convergenceQ = useConvergence(pid, cid)
-  const [activeRecallPointId, setActiveRecallPointId] = useState<string | null>(null)
-  const [revealedAnswerIds, setRevealedAnswerIds] = useState<Record<string, boolean>>({})
 
   const reviewTaskQs = useQueries({
     queries:
@@ -102,23 +87,6 @@ export function ConvergencePage() {
       }
     }),
   })
-  const reviewRecallPointRefs = useMemo(
-    () =>
-      inputRangeQs.flatMap((query, roundIndex) =>
-        (query.data?.recallPointIds ?? []).map((recallPointId) => ({
-          recallPointId,
-          roundIndex,
-        })),
-      ),
-    [inputRangeQs],
-  )
-  const recallPointQs = useQueries({
-    queries: reviewRecallPointRefs.map((item) => ({
-      queryKey: ["recallPoint", pid, item.recallPointId],
-      queryFn: () => getRecallPoint(pid, item.recallPointId),
-      enabled: !!pid && !!item.recallPointId,
-    })),
-  })
 
   if (!pid || !cid) {
     return (
@@ -133,63 +101,25 @@ export function ConvergencePage() {
   }
 
   const reviewTaskIds = convergenceQ.data?.reviewTaskIds ?? []
-  const reviewEntries = useMemo<ConvergenceReviewEntry[]>(() => {
-    return reviewRecallPointRefs.flatMap((item, index) => {
-      const reviewTask = reviewTaskQs[item.roundIndex]?.data
-      const recallPoint = recallPointQs[index]?.data
-      if (!reviewTask || !recallPoint) return []
-      const resultRecallPointIds = new Set(resultRangeQs[item.roundIndex]?.data?.recallPointIds ?? [])
-      const outcome =
-        reviewTask.state === "DONE"
-          ? resultRecallPointIds.has(recallPoint.recallPointId)
-            ? "forgotten"
-            : "remembered"
-          : null
-      return [{
-        recallPoint,
+  const roundEntries: ConvergenceRoundEntry[] = reviewTaskQs.flatMap((query, roundIndex) => {
+    const reviewTask = query.data
+    if (!reviewTask) return []
+    return [
+      {
+        inputCount: inputRangeQs[roundIndex]?.data?.recallPointIds.length ?? null,
+        resultCount: reviewTask.resultRangeId ? (resultRangeQs[roundIndex]?.data?.recallPointIds.length ?? null) : null,
         reviewTask,
-        reviewTaskId: reviewTaskIds[item.roundIndex] ?? reviewTask.reviewTaskId,
-        roundIndex: item.roundIndex,
-        outcome,
-      }]
-    })
-  }, [recallPointQs, resultRangeQs, reviewRecallPointRefs, reviewTaskIds, reviewTaskQs])
-  const activeEntry =
-    reviewEntries.find((entry) => entry.recallPoint.recallPointId === activeRecallPointId) ??
-    reviewEntries[0] ??
-    null
-  const activeEntryIndex = activeEntry
-    ? reviewEntries.findIndex((entry) => entry.recallPoint.recallPointId === activeEntry.recallPoint.recallPointId)
-    : -1
-  const reviewWorkspaceLoading =
-    reviewTaskQs.some((query) => query.isLoading) ||
-    inputRangeQs.some((query) => query.isLoading) ||
-    recallPointQs.some((query) => query.isLoading)
-  const reviewWorkspaceError =
+        reviewTaskId: reviewTaskIds[roundIndex] ?? reviewTask.reviewTaskId,
+        roundIndex,
+      },
+    ]
+  })
+  const roundListLoading = reviewTaskQs.some((query) => query.isLoading) || inputRangeQs.some((query) => query.isLoading)
+  const roundListError =
     reviewTaskQs.find((query) => query.error)?.error ??
     inputRangeQs.find((query) => query.error)?.error ??
-    recallPointQs.find((query) => query.error)?.error ??
+    resultRangeQs.find((query) => query.error)?.error ??
     null
-
-  useEffect(() => {
-    if (reviewEntries.length === 0) {
-      setActiveRecallPointId(null)
-      return
-    }
-    if (!activeRecallPointId || !reviewEntries.some((entry) => entry.recallPoint.recallPointId === activeRecallPointId)) {
-      setActiveRecallPointId(reviewEntries[0].recallPoint.recallPointId)
-    }
-  }, [activeRecallPointId, reviewEntries])
-
-  function goToReviewEntry(index: number) {
-    const next = reviewEntries[index]
-    if (!next) return
-    setActiveRecallPointId(next.recallPoint.recallPointId)
-  }
-
-  function revealAnswer(recallPointId: string) {
-    setRevealedAnswerIds((current) => ({ ...current, [recallPointId]: true }))
-  }
 
   const backAction = (
     <Button
@@ -244,26 +174,19 @@ export function ConvergencePage() {
         <div className="grid gap-4 xl:grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)] xl:items-start">
           {summaryPanel ? <aside className="xl:sticky xl:top-28 xl:self-start">{summaryPanel}</aside> : <div />}
           <div className="min-w-0">
-            <ConvergenceReviewWorkspaceCard
-              title="复习工作区"
-              description="按轮次顺序查看这一步收敛已经产出的复习任务，并进入每一轮的复习详情。"
-              isLoading={reviewWorkspaceLoading}
-              error={reviewWorkspaceError}
+            <ConvergenceRoundListCard
+              title="复习轮次"
+              isLoading={roundListLoading}
+              error={roundListError}
               emptyState={
-                reviewTaskIds.length === 0 || (!reviewWorkspaceLoading && reviewEntries.length === 0) ? (
+                reviewTaskIds.length === 0 || (!roundListLoading && roundEntries.length === 0) ? (
                   <ContentEmptyState
                     title="这一步收敛还没有生成复习任务"
-                    message="首次推进收敛后，生成出来的第 1 轮及后续各轮复习任务会按顺序显示在这里。"
+                    message="首次推进收敛后，生成出来的第 1 轮及后续轮次会按顺序显示在这里。"
                   />
                 ) : null
               }
-              activeEntry={activeEntry}
-              activeEntryIndex={activeEntryIndex}
-              entryCount={reviewEntries.length}
-              revealed={activeEntry ? Boolean(revealedAnswerIds[activeEntry.recallPoint.recallPointId]) : false}
-              onPrevious={() => goToReviewEntry(activeEntryIndex - 1)}
-              onNext={() => goToReviewEntry(activeEntryIndex + 1)}
-              onRevealAnswer={() => activeEntry ? revealAnswer(activeEntry.recallPoint.recallPointId) : undefined}
+              entries={roundEntries}
               projectId={pid}
             />
           </div>
@@ -313,135 +236,96 @@ function ConvergenceSummaryCard({
   )
 }
 
-function ConvergenceReviewWorkspaceCard({
-  activeEntry,
-  activeEntryIndex,
+function ConvergenceRoundListCard({
   description,
   emptyState,
-  entryCount,
+  entries,
   error,
   isLoading,
-  onNext,
-  onPrevious,
-  onRevealAnswer,
   projectId,
-  revealed,
   title,
 }: {
-  activeEntry: ConvergenceReviewEntry | null
-  activeEntryIndex: number
   description?: string
   emptyState?: ReactNode
-  entryCount: number
+  entries: ConvergenceRoundEntry[]
   error?: unknown
   isLoading?: boolean
-  onNext: () => void
-  onPrevious: () => void
-  onRevealAnswer: () => void
   projectId: string
-  revealed: boolean
   title: string
 }) {
   return (
-    <Card className="theme-card-main">
-      <CardHeader className="theme-card-header flex-col gap-4 space-y-0 sm:flex-row sm:items-center sm:justify-between">
+    <Card>
+      <CardHeader className="pb-3">
         <div>
           <CardTitle>{title}</CardTitle>
-          <CardDescription>
-            {activeEntry
-              ? `当前 ${activeEntryIndex + 1}/${entryCount} · ${formatRecallPointReference(activeEntry.recallPoint.recallPointId)}`
-              : description}
-          </CardDescription>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={onPrevious} disabled={activeEntryIndex <= 0}>
-            <ChevronLeft className="h-4 w-4" />
-            上一个
-          </Button>
-          <Button variant="outline" size="sm" onClick={onNext} disabled={activeEntryIndex < 0 || activeEntryIndex >= entryCount - 1}>
-            下一个
-            <ArrowRight className="h-4 w-4" />
-          </Button>
+          {description ? <CardDescription>{description}</CardDescription> : null}
         </div>
       </CardHeader>
       <CardContent>
         {isLoading ? <LoadingNotice title="正在加载轮次任务" message="正在读取每一轮复习任务的状态和时间信息。" /> : null}
-        {error ? <ErrorNotice title="复习工作区加载失败" message={formatApiError(error)} /> : null}
+        {error ? <ErrorNotice title="复习轮次加载失败" message={formatApiError(error)} /> : null}
         {!isLoading && !error && emptyState ? emptyState : null}
-        {!isLoading && !error && activeEntry ? (
-          <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(16rem,0.72fr)]">
-            <section className="space-y-4">
-              <div className="space-y-2 border-t border-border/60 pt-4 first:border-t-0">
-                <div className="text-xs font-medium text-muted-foreground">问题</div>
-                <RichContentRenderer projectId={projectId} value={activeEntry.recallPoint.question} />
-              </div>
-
-              <div className="space-y-3 border-t border-border/60 pt-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-xs font-medium text-muted-foreground">答案</div>
-                  {!revealed ? (
-                    <Button type="button" size="sm" variant="outline" onClick={onRevealAnswer}>
-                      显示答案
-                    </Button>
-                  ) : null}
-                </div>
-                {revealed ? (
-                  <RichContentRenderer projectId={projectId} value={activeEntry.recallPoint.answer} />
-                ) : (
-                  <div className="text-sm text-muted-foreground">先在脑中复述，再点开答案核对。</div>
+        {!isLoading && !error && entries.length > 0 ? (
+          <div className="space-y-3">
+            {entries.map((entry) => (
+              <div
+                key={entry.reviewTaskId}
+                className={cn(
+                  "rounded-[1rem] border border-[#dbe4ee] bg-[#fbfdff] p-4 shadow-[0_12px_28px_-28px_rgba(15,23,42,0.6)]",
+                  entry.reviewTask.state === "DONE" && "bg-emerald-50/40",
                 )}
-              </div>
-            </section>
-
-            <section className="space-y-5 border-t border-border/60 pt-4 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
-              <div className="space-y-3">
-                <div className="text-sm font-medium">复习判断</div>
-                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
-                  <Button type="button" variant={activeEntry.outcome === "remembered" ? "default" : "outline"}>
-                    <CheckCircle2 className="h-4 w-4" />
-                    记得
-                  </Button>
-                  <Button type="button" variant={activeEntry.outcome === "forgotten" ? "destructive" : "outline"}>
-                    <XCircle className="h-4 w-4" />
-                    不记得
-                  </Button>
-                </div>
-              </div>
-
-              <div className="space-y-3 text-sm">
-                <div className="flex items-center justify-between gap-3 border-t border-border/60 pt-3">
-                  <span className="text-muted-foreground">来源</span>
-                  <span className="font-medium text-foreground">第 {activeEntry.roundIndex + 1} 轮</span>
-                </div>
-                <div className="flex items-center justify-between gap-3 border-t border-border/60 pt-3">
-                  <span className="text-muted-foreground">复习任务</span>
-                  <Link className="font-medium text-primary underline-offset-4 hover:underline" to={`/p/${projectId}/review-tasks/${activeEntry.reviewTaskId}`}>
-                    {formatReviewTaskReference(activeEntry.reviewTaskId)}
-                  </Link>
-                </div>
-                <div className="flex items-center justify-between gap-3 border-t border-border/60 pt-3">
-                  <span className="text-muted-foreground">任务状态</span>
-                  <span className="font-medium text-foreground">{describeReviewTaskState(activeEntry.reviewTask.state)}</span>
-                </div>
-                <div className="border-t border-border/60 pt-3">
-                  <div className="text-muted-foreground">最近复习</div>
-                  <div className="mt-1 font-medium text-foreground">
-                    {formatReviewOutcome(activeEntry.outcome)} · {formatTs(activeEntry.reviewTask.executedAt)}
+              >
+                <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                  <div className="min-w-0 flex-1 space-y-3">
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <span className="rounded-full bg-[#eef5ff] px-2.5 py-1 font-medium text-primary">
+                        第 {entry.roundIndex + 1} 轮
+                      </span>
+                      <span className="rounded-full border border-[#dbe4ee] bg-white px-2.5 py-1 font-medium text-slate-600">
+                        {formatReviewTaskReference(entry.reviewTaskId)}
+                      </span>
+                      <span
+                        className={cn(
+                          "rounded-full border px-2.5 py-1 font-medium",
+                          entry.reviewTask.state === "DONE"
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                            : "border-slate-200 bg-slate-50 text-slate-600",
+                        )}
+                      >
+                        {describeReviewTaskState(entry.reviewTask.state)}
+                      </span>
+                    </div>
+                    <div className="grid gap-3 text-xs text-muted-foreground md:grid-cols-4">
+                      <RoundMetric label="输入范围" value={formatRangeReference(entry.reviewTask.inputRangeId)} />
+                      <RoundMetric label="输入题数" value={entry.inputCount ?? "读取中..."} />
+                      <RoundMetric
+                        label="结果范围"
+                        value={entry.reviewTask.resultRangeId ? formatRangeReference(entry.reviewTask.resultRangeId) : "-"}
+                      />
+                      <RoundMetric label="结果题数" value={entry.resultCount ?? (entry.reviewTask.resultRangeId ? "读取中..." : "-")} />
+                      <RoundMetric label="执行时间" value={formatTs(entry.reviewTask.executedAt)} />
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 flex-wrap gap-2 md:w-[11rem] md:flex-col md:items-stretch">
+                    <Button size="sm" className="rounded-full md:w-full" asChild>
+                      <Link to={`/p/${projectId}/review-tasks/${entry.reviewTaskId}`}>查看复习任务</Link>
+                    </Button>
                   </div>
                 </div>
-                <div className="border-t border-border/60 pt-3">
-                  <div className="text-muted-foreground">锚点</div>
-                  <div className="mt-1 font-medium text-foreground">{formatAnchorLabel(activeEntry.recallPoint)}</div>
-                </div>
               </div>
-
-              <Button variant="outline" size="sm" asChild>
-                <Link to={`/p/${projectId}/recall-points/${activeEntry.recallPoint.recallPointId}`}>打开复述点详情</Link>
-              </Button>
-            </section>
+            ))}
           </div>
         ) : null}
       </CardContent>
     </Card>
+  )
+}
+
+function RoundMetric({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="rounded-xl border border-[#dbe4ee] bg-[#f8fafc] p-3">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#64748b]">{label}</div>
+      <div className="mt-1.5 break-words text-sm font-semibold text-slate-900">{value}</div>
+    </div>
   )
 }
