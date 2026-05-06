@@ -165,7 +165,7 @@ function buildPomodoroSubjectProjectOptions(
 
   subjects.forEach((subject, index) => {
     const options = (materialResults[index] ?? [])
-      .filter((material) => material.projectId && material.projectId !== subject.subjectProjectId)
+      .filter((material) => material.projectId)
       .map((material) => {
         const projectId = material.projectId ?? ""
         return {
@@ -641,10 +641,6 @@ export function PomodoroPage() {
       staleTime: 60_000,
     })),
   })
-  const subjectRootProjectIds = useMemo(
-    () => new Set((subjectsQ.data ?? []).map((subject) => subject.subjectProjectId).filter(Boolean)),
-    [subjectsQ.data],
-  )
   const materialResults = subjectMaterialQs.map((query) => query.data)
   const { subjectProjectOptions, projectSubjectIdByProjectId, projectTitleByProjectId } = useMemo(
     () => buildPomodoroSubjectProjectOptions(subjectsQ.data ?? [], materialResults, projectTitleMap),
@@ -767,14 +763,13 @@ export function PomodoroPage() {
         if (!draftSubjectId) return [`计划 ${draftIndex + 1} 需要先为这个计划选择学科`]
         return draftProjectIds.flatMap((projectId, pomodoroIndex) => {
           if (!projectId) return [`计划 ${draftIndex + 1} 的番茄 ${pomodoroIndex + 1} 还没有选择项目`]
-          if (subjectRootProjectIds.has(projectId)) return [`计划 ${draftIndex + 1} 的番茄 ${pomodoroIndex + 1} 需要先选择学科下的项目`]
           if (!validPomodoroProjectIds.has(projectId)) return [`计划 ${draftIndex + 1} 的番茄 ${pomodoroIndex + 1} 需要重新选择项目`]
           if (projectSubjectIdByProjectId.get(projectId) !== draftSubjectId) return [`计划 ${draftIndex + 1} 的番茄 ${pomodoroIndex + 1} 需要重新选择这个学科下的项目`]
           return []
         })
       })
     },
-    [pomodoroDrafts, pomodoroProjectOptionsLoading, projectSubjectIdByProjectId, subjectRootProjectIds, validPomodoroProjectIds],
+    [pomodoroDrafts, pomodoroProjectOptionsLoading, projectSubjectIdByProjectId, validPomodoroProjectIds],
   )
   const activePomodoroDraft = activePlanId ? pomodoroDrafts.find((draft) => draft.id === activePlanId) ?? null : null
   const activePomodoroDraftIndex = activePomodoroDraft ? pomodoroDrafts.findIndex((draft) => draft.id === activePomodoroDraft.id) : -1
@@ -1222,7 +1217,6 @@ export function PomodoroPage() {
                         const promptKey = `${pomodoroDraft.id}:focus:${index}`
                         const projectSelectionInvalid =
                           !projectId ||
-                          subjectRootProjectIds.has(projectId) ||
                           !validPomodoroProjectIds.has(projectId) ||
                           projectSubjectIdByProjectId.get(projectId) !== draftSubjectId
                         return (

@@ -331,7 +331,6 @@ export function AppShell() {
   const subjectContextQ = useSubjectContext(effectiveProjectId, canAccessApp && Boolean(effectiveProjectId))
   const { projectTitle } = useProject(effectiveProjectId, { enabled: canAccessApp && Boolean(effectiveProjectId) })
   const projectsQ = useProjects(canAccessApp)
-  const allSubjectsQ = useSubjects(canAccessApp)
   const projectConfigQ = useProjectConfig(canAccessApp && effectiveProjectId ? effectiveProjectId : "")
   const logout = useLogout()
   const pomodoroEnabled = usePomodoroStore((state) => state.enabled)
@@ -412,17 +411,13 @@ export function AppShell() {
       getPomodoroUpcomingSegmentPreview({ enabled: pomodoroEnabled, weeklySchedule: pomodoroWeeklySchedule, quickPomodoro: pomodoroQuickPomodoro }, pomodoroNow),
     [pomodoroEnabled, pomodoroNow, pomodoroQuickPomodoro, pomodoroWeeklySchedule],
   )
-  const subjectRootProjectIds = useMemo(
-    () => new Set((allSubjectsQ.data ?? []).map((subject) => subject.subjectProjectId).filter(Boolean)),
-    [allSubjectsQ.data],
-  )
   const pomodoroAccessibleProjects = useMemo(
-    () => (projectsQ.data ?? []).filter((project) => !subjectRootProjectIds.has(project.projectId)),
-    [projectsQ.data, subjectRootProjectIds],
+    () => projectsQ.data ?? [],
+    [projectsQ.data],
   )
   const accessibleProjectIds = useMemo(
-    () => new Set(pomodoroAccessibleProjects.map((project) => project.projectId)),
-    [pomodoroAccessibleProjects],
+    () => new Set((projectsQ.data ?? []).map((project) => project.projectId)),
+    [projectsQ.data],
   )
   const pomodoroFocusProjectId =
     pomodoroSnapshot.currentProjectId && accessibleProjectIds.has(pomodoroSnapshot.currentProjectId)

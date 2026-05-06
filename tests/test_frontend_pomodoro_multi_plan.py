@@ -172,6 +172,8 @@ def test_pomodoro_plan_selects_projects_inside_selected_subject() -> None:
     assert "subjectProjectOptions" in page_source
     assert "selectedSubjectIdByPlanId" in page_source
     assert "normalizeDraftSubjectId" in page_source
+    assert '.filter((material) => material.projectId)' in page_source
+    assert "material.projectId !== subject.subjectProjectId" not in page_source
     assert "请选择学科（必选）" in page_source
     assert "先为这个计划选择学科" in page_source
     assert "validPomodoroProjectIds" in page_source
@@ -184,15 +186,16 @@ def test_pomodoro_plan_selects_projects_inside_selected_subject() -> None:
     assert "draftSubjectId" in page_source
     assert 'id={`pomodoro-subject-${pomodoroDraft.id}`}' in page_source
     assert 'id={`pomodoro-project-${pomodoroDraft.id}-${index}`}' in page_source
+    assert "subjectRootProjectIds.has(projectId)" not in page_source
 
     assert "pomodoroAccessibleProjects" in app_shell_source
-    assert "subjectRootProjectIds" in app_shell_source
-    assert "filter((project) => !subjectRootProjectIds.has(project.projectId))" in app_shell_source
+    assert "subjectRootProjectIds" not in app_shell_source
+    assert "new Set((projectsQ.data ?? []).map((project) => project.projectId))" in app_shell_source
     assert "const completedProjectId =" in app_shell_source
     assert "previousSnapshot.segment.projectId && accessibleProjectIds.has(previousSnapshot.segment.projectId)" in app_shell_source
-    assert 'import { useSubjects } from "@/ui/queries/subjects"' in gate_source
-    assert "subjectRootProjectIds" in gate_source
-    assert "filter((project) => !subjectRootProjectIds.has(project.projectId))" in gate_source
+    assert 'import { useSubjects } from "@/ui/queries/subjects"' not in gate_source
+    assert "subjectRootProjectIds" not in gate_source
+    assert "new Set((projectsQ.data ?? []).map((item) => item.projectId))" in gate_source
     assert "每个番茄计划先选择一个学科，再给计划里的每个番茄绑定该学科下的具体项目。" in manual_source
 
 
