@@ -15,6 +15,15 @@ import { formatMaterialReference, formatRecallPointReference } from "@/ui/displa
 import { completeGuideWalkthroughStep } from "@/ui/guideWalkthrough/guideWalkthroughController"
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/ui/components/ui/dialog"
 import { scanProjectDirectoryMedia, useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
 import { formatProjectTypeLabel } from "@/ui/projectTypes"
 import { useProject } from "@/ui/queries/projects"
@@ -221,11 +230,13 @@ export function ProjectSettingsPage() {
   const sourceCourseMaterials = subjectMaterials.filter(
     (material) => material.materialType === "COURSE" && material.compatibilityProjectId && material.compatibilityProjectId !== pid,
   )
+  const deleteActionRemovesSubject = isSubjectRoot
   const canDeleteCurrentMaterial =
     !isSubjectSettingsScope &&
     currentMaterial !== null &&
     currentMaterial.compatibilityProjectId !== null &&
     currentMaterial.compatibilityProjectId !== subjectProjectId
+  const showDangerZone = deleteActionRemovesSubject || canDeleteCurrentMaterial
 
   const existingLayerIndexes = useMemo(() => (layersQ.data ?? []).map((l) => l.layerIndex).sort((a, b) => a - b), [layersQ.data])
   const defaultLayerConfig = useMemo(
@@ -671,21 +682,21 @@ export function ProjectSettingsPage() {
             </div>
           ) : null}
 
-          {isSubjectSettingsScope || canDeleteCurrentMaterial ? (
+          {showDangerZone ? (
             <DangerZoneCard
-              actionLabel={isSubjectSettingsScope ? "删除学科" : "删除当前项目"}
-              actionPendingLabel={isSubjectSettingsScope ? "删除学科中..." : "删除项目中..."}
-              confirmationLabel={isSubjectSettingsScope ? "输入学科标题以确认删除" : "输入项目名称以确认删除"}
+              actionLabel={deleteActionRemovesSubject ? "删除学科" : "删除当前项目"}
+              actionPendingLabel={deleteActionRemovesSubject ? "删除学科中..." : "删除项目中..."}
+              confirmationLabel={deleteActionRemovesSubject ? "输入学科标题以确认删除" : "输入项目名称以确认删除"}
               deleteError={deleteMutationError}
               description={
-                isSubjectSettingsScope
+                deleteActionRemovesSubject
                   ? `删除学科会一起移除当前学科和下面的 ${Math.max(0, subjectMaterials.length - 1)} 个项目兼容入口，本地工作台缓存也会一并清理。`
                   : `删除项目只会移除“${currentMaterialTitle || "当前项目"}”和它的兼容工作台，学科“${subjectTitle || "当前学科"}”以及其他项目会保留。`
               }
               isPending={deleteMutationPending}
               onDelete={async () => {
                 try {
-                  if (isSubjectSettingsScope) {
+                  if (deleteActionRemovesSubject) {
                     const relatedProjectIds = [subjectProjectId, ...subjectMaterials.map((material) => material.compatibilityProjectId ?? "")]
                     await deleteSubjectM.mutateAsync(subjectProjectId)
                     clearProjectLocalState(relatedProjectIds)
@@ -704,10 +715,10 @@ export function ProjectSettingsPage() {
                   showSuccessFeedback("项目已删除", `“${currentMaterial.title}” 已从“${subjectTitle || "当前学科"}”下移除。`)
                   navigate(`/p/${subjectProjectId}/settings`)
                 } catch (err) {
-                  showErrorFeedback(isSubjectSettingsScope ? "删除学科失败" : "删除项目失败", formatApiError(err))
+                  showErrorFeedback(deleteActionRemovesSubject ? "删除学科失败" : "删除项目失败", formatApiError(err))
                 }
               }}
-              targetTitle={isSubjectSettingsScope ? subjectTitle : currentMaterialTitle}
+              targetTitle={deleteActionRemovesSubject ? subjectTitle : currentMaterialTitle}
             />
           ) : null}
 
@@ -1354,42 +1365,65 @@ function DangerZoneCard(props: {
   targetTitle: string
 }) {
   const { actionLabel, actionPendingLabel, confirmationLabel, deleteError, description, isPending, onDelete, targetTitle } = props
+  const [open, setOpen] = useState(false)
   const [confirmationDraft, setConfirmationDraft] = useState({ targetTitle, value: "" })
   const confirmation = confirmationDraft.targetTitle === targetTitle ? confirmationDraft.value : ""
 
   const matches = confirmation.trim() === targetTitle.trim()
 
+  async function handleDelete() {
+    await onDelete()
+  }
+
   return (
-    <Card className="theme-card border-destructive/20">
-      <CardHeader>
-        <CardTitle>危险操作</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4 pt-0 text-sm">
-        <div className="rounded-[1.2rem] border border-destructive/15 bg-destructive/5 px-4 py-4 text-muted-foreground">{description}</div>
-
-        <div className="grid gap-2">
-          <Label htmlFor="danger-zone-confirmation">{confirmationLabel}</Label>
-          <Input
-            id="danger-zone-confirmation"
-            value={confirmation}
-            onChange={(event) => setConfirmationDraft({ targetTitle, value: event.target.value })}
-            placeholder={targetTitle || confirmationLabel}
-            disabled={isPending}
-          />
-          <p className="text-xs text-muted-foreground">
-            请输入 <span className="font-semibold text-foreground">{targetTitle}</span> 完成确认。
-          </p>
-        </div>
-
-        <div className="flex justify-end">
-          <Button type="button" variant="destructive" disabled={isPending || !matches || !targetTitle.trim()} onClick={() => void onDelete()}>
-            {isPending ? actionPendingLabel : actionLabel}
+    <div className="flex justify-end">
+      <Dialog
+        open={open}
+        onOpenChange={(nextOpen) => {
+          setOpen(nextOpen)
+          if (!nextOpen && !isPending) {
+            setConfirmationDraft({ targetTitle, value: "" })
+          }
+        }}
+      >
+        <DialogTrigger asChild>
+          <Button type="button" variant="destructive">
+            {actionLabel}
           </Button>
-        </div>
+        </DialogTrigger>
+        <DialogContent className="max-w-xl rounded-[1.6rem] border-destructive/20 bg-background">
+          <DialogHeader>
+            <DialogTitle>危险操作</DialogTitle>
+            <DialogDescription>{description}</DialogDescription>
+          </DialogHeader>
 
-        {deleteError ? <p className="text-sm text-destructive">{formatApiError(deleteError)}</p> : null}
-      </CardContent>
-    </Card>
+          <div className="grid gap-2">
+            <Label htmlFor="danger-zone-confirmation">{confirmationLabel}</Label>
+            <Input
+              id="danger-zone-confirmation"
+              value={confirmation}
+              onChange={(event) => setConfirmationDraft({ targetTitle, value: event.target.value })}
+              placeholder={targetTitle || confirmationLabel}
+              disabled={isPending}
+            />
+            <p className="text-xs text-muted-foreground">
+              请输入 <span className="font-semibold text-foreground">{targetTitle}</span> 完成确认。
+            </p>
+          </div>
+
+          {deleteError ? <p className="text-sm text-destructive">{formatApiError(deleteError)}</p> : null}
+
+          <DialogFooter>
+            <Button type="button" variant="outline" disabled={isPending} onClick={() => setOpen(false)}>
+              取消
+            </Button>
+            <Button type="button" variant="destructive" disabled={isPending || !matches || !targetTitle.trim()} onClick={() => void handleDelete()}>
+              {isPending ? actionPendingLabel : actionLabel}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
   )
 }
 
@@ -1517,9 +1551,10 @@ function LayerConfigEditor({
   )
 
   const content = (
-    <div className="space-y-4 text-sm">
-      <div className="grid gap-4">
-        <div className="grid gap-4 rounded-[1.2rem] border border-border/70 bg-muted/15 p-4 md:grid-cols-2">
+    <div className="space-y-5 text-sm">
+      <section className="space-y-3">
+        <div className="text-sm font-semibold text-foreground">阈值参数</div>
+        <div className="grid gap-4 md:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="kNode">节点阈值</Label>
             <Input id="kNode" value={cfgKNode} onChange={(e) => setCfgKNode(e.target.value)} disabled={saving} />
@@ -1529,123 +1564,121 @@ function LayerConfigEditor({
             <Input id="kPoint" value={cfgKPoint} onChange={(e) => setCfgKPoint(e.target.value)} disabled={saving} />
           </div>
         </div>
+      </section>
 
-        <div className="space-y-3 rounded-[1.2rem] border border-border/70 bg-muted/15 p-4">
-          <Label>复习链模板</Label>
+      <div className="border-t border-border/60" />
 
-          <div className="overflow-hidden rounded-[1.1rem] border border-border/70 bg-background/90">
-            {cfgTemplateItems.length === 0 ? (
-              <div className="px-4 py-6 text-sm text-muted-foreground">
-                还没有模板步骤，请在下方选择步骤类型后点击加号。
-              </div>
-            ) : null}
+      <section className="space-y-3">
+        <div className="text-sm font-semibold text-foreground">复习链模板</div>
 
-            {cfgTemplateItems.map((item, index) => (
-              <div
-                key={item.id}
-                className="border-t border-border/70 p-4 first:border-t-0"
-              >
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                  <div className="flex items-start gap-3">
-                    <span className="theme-pill-default inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold">
-                        第 {index + 1} 步
-                    </span>
-                    <div className="space-y-1">
-                      <div className="text-sm font-medium text-foreground">{item.kind === "CONVERGENCE" ? "收敛" : "复习任务"}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {item.kind === "CONVERGENCE"
-                          ? "完成一轮后决定是否继续生成复习任务。"
-                          : "在当前范围上直接生成待执行复习任务。"}
-                      </div>
+        <div className="overflow-hidden rounded-[1.1rem] border border-border/70 bg-background">
+          {cfgTemplateItems.length === 0 ? (
+            <div className="px-4 py-6 text-sm text-muted-foreground">
+              还没有模板步骤，请在下方选择步骤类型后点击加号。
+            </div>
+          ) : null}
+
+          {cfgTemplateItems.map((item, index) => (
+            <div key={item.id} className="border-t border-border/70 p-4 first:border-t-0">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex items-start gap-3">
+                  <span className="theme-pill-default inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold">
+                    第 {index + 1} 步
+                  </span>
+                  <div className="space-y-1">
+                    <div className="text-sm font-medium text-foreground">{item.kind === "CONVERGENCE" ? "收敛" : "复习任务"}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {item.kind === "CONVERGENCE"
+                        ? "完成一轮后决定是否继续生成复习任务。"
+                        : "在当前范围上直接生成待执行复习任务。"}
                     </div>
                   </div>
+                </div>
 
-                  <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-                    {item.kind === "REVIEW_TASK" ? (
-                      <div className="w-full max-w-[220px] space-y-2">
-                        <Label htmlFor={`template-count-${item.id}`}>次数</Label>
-                        <Input
-                          id={`template-count-${item.id}`}
-                          inputMode="numeric"
-                          value={item.count}
-                          onChange={(e) =>
-                            setCfgTemplateItems((prev) =>
-                              prev.map((current) =>
-                                current.id === item.id
-                                  ? {
-                                      ...current,
-                                      count: e.target.value,
-                                    }
-                                  : current,
-                              ),
-                            )
-                          }
-                          disabled={saving}
-                        />
-                      </div>
-                    ) : (
-                      <div className="theme-pill-default rounded-full border px-3 py-1.5 text-xs font-medium">这个步骤没有额外参数</div>
-                    )}
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+                  {item.kind === "REVIEW_TASK" ? (
+                    <div className="w-full max-w-[220px] space-y-2">
+                      <Label htmlFor={`template-count-${item.id}`}>次数</Label>
+                      <Input
+                        id={`template-count-${item.id}`}
+                        inputMode="numeric"
+                        value={item.count}
+                        onChange={(e) =>
+                          setCfgTemplateItems((prev) =>
+                            prev.map((current) =>
+                              current.id === item.id
+                                ? {
+                                    ...current,
+                                    count: e.target.value,
+                                  }
+                                : current,
+                            ),
+                          )
+                        }
+                        disabled={saving}
+                      />
+                    </div>
+                  ) : (
+                    <div className="text-xs text-muted-foreground">这个步骤没有额外参数</div>
+                  )}
 
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setCfgTemplateItems((prev) => prev.filter((current) => current.id !== item.id))}
-                      disabled={saving}
-                    >
-                      删除
-                    </Button>
-                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setCfgTemplateItems((prev) => prev.filter((current) => current.id !== item.id))}
+                    disabled={saving}
+                  >
+                    删除
+                  </Button>
                 </div>
               </div>
-            ))}
-          </div>
-
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              className="shrink-0"
-              onClick={onAppendTemplateItem}
-              disabled={saving || !pendingTemplateKind}
-              aria-label="追加模板步骤"
-            >
-              <span className="text-lg leading-none">+</span>
-            </Button>
-            <div className="w-full sm:max-w-[220px]">
-              <Label htmlFor="pendingTemplateKind" className="sr-only">
-                选择步骤类型
-              </Label>
-              <select
-                id="pendingTemplateKind"
-                aria-label="选择步骤类型"
-                className="h-10 w-full rounded-xl border bg-background px-4 text-sm"
-                value={pendingTemplateKind}
-                onChange={(e) => setPendingTemplateKind(e.target.value as "" | "CONVERGENCE" | "REVIEW_TASK")}
-                disabled={saving}
-              >
-                <option value="">选择类型</option>
-                <option value="CONVERGENCE">收敛</option>
-                <option value="REVIEW_TASK">复习任务</option>
-              </select>
             </div>
-          </div>
-
+          ))}
         </div>
 
-        <div className="flex justify-end">
-          <Button onClick={() => void onSaveLayerConfig()} disabled={saving || !canSave}>
-            {saving ? "保存中..." : "保存配置"}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            className="shrink-0"
+            onClick={onAppendTemplateItem}
+            disabled={saving || !pendingTemplateKind}
+            aria-label="追加模板步骤"
+          >
+            <span className="text-lg leading-none">+</span>
           </Button>
+          <div className="w-full sm:max-w-[220px]">
+            <Label htmlFor="pendingTemplateKind" className="sr-only">
+              选择步骤类型
+            </Label>
+            <select
+              id="pendingTemplateKind"
+              aria-label="选择步骤类型"
+              className="h-10 w-full rounded-xl border bg-background px-4 text-sm"
+              value={pendingTemplateKind}
+              onChange={(e) => setPendingTemplateKind(e.target.value as "" | "CONVERGENCE" | "REVIEW_TASK")}
+              disabled={saving}
+            >
+              <option value="">选择类型</option>
+              <option value="CONVERGENCE">收敛</option>
+              <option value="REVIEW_TASK">复习任务</option>
+            </select>
+          </div>
         </div>
+      </section>
 
-        {layersError ? <p className="text-sm text-destructive">{formatApiError(layersError)}</p> : null}
-        {projectConfigError ? <p className="text-sm text-destructive">{formatApiError(projectConfigError)}</p> : null}
-        {cfgErr ? <p className="text-sm text-destructive">{cfgErr}</p> : null}
-        {mutationError ? <p className="text-sm text-destructive">{formatApiError(mutationError)}</p> : null}
+      <div className="flex justify-end">
+        <Button onClick={() => void onSaveLayerConfig()} disabled={saving || !canSave}>
+          {saving ? "保存中..." : "保存配置"}
+        </Button>
       </div>
+
+      {layersError ? <p className="text-sm text-destructive">{formatApiError(layersError)}</p> : null}
+      {projectConfigError ? <p className="text-sm text-destructive">{formatApiError(projectConfigError)}</p> : null}
+      {cfgErr ? <p className="text-sm text-destructive">{cfgErr}</p> : null}
+      {mutationError ? <p className="text-sm text-destructive">{formatApiError(mutationError)}</p> : null}
     </div>
   )
 

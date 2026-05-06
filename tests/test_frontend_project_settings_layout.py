@@ -28,3 +28,34 @@ def test_project_settings_renders_layer_config_as_peer_card() -> None:
     assert "layerConfigSection" not in source
     assert "<LayerConfigEditor" in source
     assert "embedded" not in source[source.index("<LayerConfigEditor"):source.index("/>", source.index("<LayerConfigEditor"))]
+
+
+def test_project_settings_layer_config_avoids_nested_capsule_sections() -> None:
+    source = PROJECT_SETTINGS_PAGE.read_text(encoding="utf-8")
+    layer_editor_source = source[source.index("function LayerConfigEditor"):]
+
+    assert 'className="grid gap-4 rounded-[1.2rem] border border-border/70 bg-muted/15 p-4 md:grid-cols-2"' not in layer_editor_source
+    assert 'className="space-y-3 rounded-[1.2rem] border border-border/70 bg-muted/15 p-4"' not in layer_editor_source
+    assert '<div className="border-t border-border/60" />' in layer_editor_source
+    assert '<section className="space-y-3">' in layer_editor_source
+
+
+def test_project_settings_danger_zone_uses_dialog_confirmation() -> None:
+    source = PROJECT_SETTINGS_PAGE.read_text(encoding="utf-8")
+    danger_zone_source = source[source.index("function DangerZoneCard"):source.index("function LayerConfigEditor")]
+
+    assert '<Card className="theme-card border-destructive/20">' not in danger_zone_source
+    assert "<Dialog" in danger_zone_source
+    assert "<DialogTrigger asChild>" in danger_zone_source
+    assert "<DialogContent" in danger_zone_source
+    assert 'id="danger-zone-confirmation"' in danger_zone_source
+    assert "请输入 <span" in danger_zone_source
+
+
+def test_project_settings_keeps_delete_button_for_default_project_scope() -> None:
+    source = PROJECT_SETTINGS_PAGE.read_text(encoding="utf-8")
+
+    assert "const deleteActionRemovesSubject = isSubjectRoot" in source
+    assert "const showDangerZone = deleteActionRemovesSubject || canDeleteCurrentMaterial" in source
+    assert 'actionLabel={deleteActionRemovesSubject ? "删除学科" : "删除当前项目"}' in source
+    assert 'confirmationLabel={deleteActionRemovesSubject ? "输入学科标题以确认删除" : "输入项目名称以确认删除"}' in source

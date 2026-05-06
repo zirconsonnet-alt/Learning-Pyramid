@@ -7,7 +7,7 @@ export function MainNav(props: { items: NavItem[]; onNavigate?: () => void; clas
   const { items, onNavigate, className } = props
 
   return (
-    <nav className={cn("flex w-full flex-col gap-1 text-sm", className)}>
+    <nav className={cn("flex w-full flex-col text-sm", className)}>
       {items.map((item) => {
         const Icon = item.icon
         return (
@@ -21,17 +21,17 @@ export function MainNav(props: { items: NavItem[]; onNavigate?: () => void; clas
               <div
                 data-guide-tour={item.guideTourAnchor}
                 className={cn(
-                  "group flex min-h-11 w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition-all duration-200",
+                  "group flex min-h-11 w-full items-center gap-3 border-b border-border/55 px-1 py-3 text-sm transition-colors duration-200 last:border-b-0",
                   isActive
-                    ? "bg-primary text-primary-foreground shadow-[0_18px_36px_-28px_hsl(var(--primary)/0.42)]"
-                    : "text-[color:var(--theme-subtle-text)] hover:[background:var(--theme-soft-bg)] hover:text-foreground",
+                    ? "text-primary"
+                    : "text-[color:var(--theme-subtle-text)] hover:text-foreground",
                 )}
               >
                 <span
                   className={cn(
                     "flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border transition-colors",
                     isActive
-                      ? "border-white/15 bg-white/12 text-white"
+                      ? "border-primary/20 bg-primary/10 text-primary"
                       : "[border-color:var(--theme-icon-border)] [background:var(--theme-icon-bg)] [color:var(--theme-icon-text)] group-hover:bg-white",
                   )}
                 >

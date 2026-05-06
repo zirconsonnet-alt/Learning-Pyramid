@@ -125,11 +125,17 @@ def test_pomodoro_plan_editing_uses_dedicated_route() -> None:
     router_source = FRONTEND_ROUTER.read_text(encoding="utf-8")
     page_source = POMODORO_PAGE.read_text(encoding="utf-8")
 
-    assert "buildPomodoroEditPath" in routing_source
-    assert 'return "/pomodoro/edit"' in routing_source
-    assert 'path: "/pomodoro/edit"' in router_source
-    assert "to={buildPomodoroEditPath({ addPlan: true })}" in page_source
-    assert "to={buildPomodoroEditPath()}" in page_source
+    assert "buildPomodoroPlanPath" in routing_source
+    assert 'return `/pomodoro/plans/${encodeURIComponent(planId)}`' in routing_source
+    assert 'path: "/pomodoro/plans/:planId"' in router_source
+    assert "useParams" in page_source
+    assert "const activePomodoroDraft =" in page_source
+    assert 'data-pomodoro-plan-overview' in page_source
+    assert 'data-pomodoro-plan-detail' in page_source
+    assert "to={buildPomodoroPlanPath(pomodoroDraft.id)}" in page_source
+    assert "nav(buildPomodoroPlanPath(nextDraft.id))" in page_source
+    assert "isScheduleEditRoute" not in page_source
+    assert "to={buildPomodoroEditPath()}" not in page_source
     assert "setIsScheduleDetailOpen" not in page_source
 
 
@@ -172,10 +178,16 @@ def test_pomodoro_session_controls_keep_settings_entry_visible() -> None:
     session_controls = page_source[
         page_source.index("data-pomodoro-session-controls"):page_source.index('<MetricTile label="今日开始"')
     ]
+    primary_buttons = session_controls[session_controls.index('className="flex flex-wrap gap-3"'):]
 
     assert 'aria-label="打开番茄钟设置"' in session_controls
     assert "to={buildPomodoroSettingsPath()}" in session_controls
     assert "Settings2" in session_controls
+    assert primary_buttons.index("{quickPomodoroButtonLabel}") < primary_buttons.index("番茄钟设置")
+    assert "handleToggleTransitionSound" not in session_controls
+    assert "handleTestSound" not in session_controls
+    assert "关闭铃声" not in session_controls
+    assert "测试铃声" not in session_controls
     assert "snapshot.canUseWorkbench && preferredWorkbenchPath" in session_controls
     assert "<RestMusicPlayer isRestPhase={isRestPhase} />" in page_source
 

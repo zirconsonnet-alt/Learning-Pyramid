@@ -226,11 +226,11 @@ function HeaderNavDropdown(props: {
           className="absolute right-0 top-full z-30 w-[min(22rem,calc(100vw-1rem))] pt-2.5"
         >
           <div className="overflow-hidden rounded-[1.6rem] border [border-color:var(--theme-soft-border)] [background:radial-gradient(circle_at_top_left,hsl(var(--primary)/0.08),transparent_34%),var(--theme-card-main-bg)] shadow-[0_24px_60px_-30px_rgba(15,23,42,0.24)] backdrop-blur-2xl">
-            <div className="max-h-[min(70vh,calc(100dvh-5.5rem))] overflow-y-auto overscroll-contain p-3 [-webkit-overflow-scrolling:touch]">
-              <div className="theme-soft-surface p-3">
+            <div className="max-h-[min(70vh,calc(100dvh-5.5rem))] overflow-y-auto overscroll-contain px-4 py-4 [-webkit-overflow-scrolling:touch]">
+              <div className="px-1">
                 <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">{section}</div>
                 <div className="mt-1 truncate text-sm font-medium text-foreground">{title}</div>
-                <div className="mt-3">
+                <div className="mt-3 border-t border-border/60 pt-2">
                   <MainNav items={items} onNavigate={onClose} />
                 </div>
               </div>
