@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { useQueries } from "@tanstack/react-query"
-import { Settings2, TriangleAlert } from "lucide-react"
+import { BookOpen, Boxes, FolderTree, Settings2, TriangleAlert, Wrench } from "lucide-react"
+import type { LucideIcon } from "lucide-react"
 import { useLocation, useNavigate, useParams } from "react-router-dom"
 
 import { listRecallPointsByInstance, type Instance } from "@/ui/api/instances"
@@ -15,27 +16,15 @@ import { formatMaterialReference, formatRecallPointReference } from "@/ui/displa
 import { completeGuideWalkthroughStep } from "@/ui/guideWalkthrough/guideWalkthroughController"
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/ui/components/ui/dialog"
 import { scanProjectDirectoryMedia, useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
 import { formatProjectTypeLabel } from "@/ui/projectTypes"
 import { useProject } from "@/ui/queries/projects"
 import {
-  useDeleteSubject,
-  useDeleteSubjectMaterial,
   useEditSubject,
   useEditSubjectMaterial,
   useSubjectContext,
 } from "@/ui/queries/subjects"
 import { useSystemCapabilities } from "@/ui/queries/system"
-import { useAppStore } from "@/ui/store/appStore"
 import {
   useBulkRemapRecallPointsInstance,
   useImportLearningObjectsFromBrowser,
@@ -48,7 +37,6 @@ import {
   useSetLayerConfig,
 } from "@/ui/queries/workbench"
 import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
-import { useWorkbenchStore } from "@/ui/store/workbenchStore"
 import { formatStudyMaterialTypeLabel } from "@/ui/subjects/studyMaterials"
 import { cn } from "@/ui/utils"
 import { BaiduNetdiskImportDialog } from "@/views/settings/components/BaiduNetdiskImportDialog"
@@ -62,6 +50,19 @@ type TemplateEditorItem = {
 }
 
 type SettingsPanelKey = "basic" | "missing"
+
+function SettingsCardTitle({ icon: Icon, title }: { icon: LucideIcon; title: string }) {
+  return (
+    <div className="flex flex-wrap items-center gap-4">
+      <div className="theme-icon-surface h-11 w-11 shrink-0">
+        <Icon className="h-5 w-5" />
+      </div>
+      <div className="min-w-0">
+        <CardTitle>{title}</CardTitle>
+      </div>
+    </div>
+  )
+}
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -190,9 +191,7 @@ export function ProjectSettingsPage() {
   const projectQ = useProject(pid, { enabled: !!pid })
   const subjectContextQ = useSubjectContext(pid, !!pid)
   const editSubjectM = useEditSubject()
-  const deleteSubjectM = useDeleteSubject()
   const editSubjectMaterialM = useEditSubjectMaterial()
-  const deleteSubjectMaterialM = useDeleteSubjectMaterial()
   const capabilitiesQ = useSystemCapabilities()
   const directoryBinding = useProjectDirectoryBinding(pid)
   const directoryPermission = directoryBinding.permission
@@ -210,8 +209,6 @@ export function ProjectSettingsPage() {
   const bulkRemapM = useBulkRemapRecallPointsInstance(pid)
   const projectType = projectConfigQ.data?.projectType ?? "COURSE"
   const currentRollUpStrategy = projectConfigQ.data?.rollUpStrategy ?? "THRESHOLD_AUTO"
-  const setSelectedProjectId = useAppStore((state) => state.setSelectedProjectId)
-  const removeRecentProjectId = useAppStore((state) => state.removeRecentProjectId)
   const subjectContext = subjectContextQ.data
   const subjectProjectId = subjectContext?.subjectProjectId ?? pid
   const isSubjectRoot = subjectContext?.isSubjectRoot ?? true
@@ -230,13 +227,6 @@ export function ProjectSettingsPage() {
   const sourceCourseMaterials = subjectMaterials.filter(
     (material) => material.materialType === "COURSE" && material.projectId && material.projectId !== pid,
   )
-  const deleteActionRemovesSubject = isSubjectRoot
-  const canDeleteCurrentMaterial =
-    !isSubjectSettingsScope &&
-    currentMaterial !== null &&
-    currentMaterial.projectId !== null &&
-    currentMaterial.projectId !== subjectProjectId
-  const showDangerZone = deleteActionRemovesSubject || canDeleteCurrentMaterial
 
   const existingLayerIndexes = useMemo(() => (layersQ.data ?? []).map((l) => l.layerIndex).sort((a, b) => a - b), [layersQ.data])
   const defaultLayerConfig = useMemo(
@@ -351,14 +341,6 @@ export function ProjectSettingsPage() {
       setActivePanel("basic")
     }
   }, [activePanel, isSubjectSettingsScope, supportsMissingInstanceRepair])
-
-  function clearProjectLocalState(projectIds: string[]) {
-    const uniqueProjectIds = Array.from(new Set(projectIds.filter(Boolean)))
-    for (const projectId of uniqueProjectIds) {
-      useWorkbenchStore.getState().resetProject(projectId)
-      removeRecentProjectId(projectId)
-    }
-  }
 
   async function onRemapMissingInstance(fromInstanceId: string) {
     const sourceInstance = actionableMissingInstances.find((item) => item.instanceId === fromInstanceId) ?? missingInstances.find((item) => item.instanceId === fromInstanceId)
@@ -497,8 +479,6 @@ export function ProjectSettingsPage() {
 
   const renameMutationError = isSubjectSettingsScope ? editSubjectM.error : editSubjectMaterialM.error
   const renameMutationPending = isSubjectSettingsScope ? editSubjectM.isPending : editSubjectMaterialM.isPending
-  const deleteMutationError = isSubjectSettingsScope ? deleteSubjectM.error : deleteSubjectMaterialM.error
-  const deleteMutationPending = isSubjectSettingsScope ? deleteSubjectM.isPending : deleteSubjectMaterialM.isPending
 
   if (!pid) {
     return (
@@ -516,8 +496,8 @@ export function ProjectSettingsPage() {
     <div className="space-y-5">
       {!isSubjectSettingsScope ? (
         <Card className="theme-card">
-          <CardHeader className="pb-4">
-            <CardTitle>设置分区</CardTitle>
+          <CardHeader className="theme-card-header pb-4">
+            <SettingsCardTitle icon={Settings2} title="设置分区" />
           </CardHeader>
           <CardContent className={cn("grid gap-3", supportsMissingInstanceRepair ? "md:grid-cols-2" : "md:grid-cols-1")}>
             <SettingsPanelSwitchCard
@@ -682,46 +662,6 @@ export function ProjectSettingsPage() {
             </div>
           ) : null}
 
-          {showDangerZone ? (
-            <DangerZoneCard
-              actionLabel={deleteActionRemovesSubject ? "删除学科" : "删除当前项目"}
-              actionPendingLabel={deleteActionRemovesSubject ? "删除学科中..." : "删除项目中..."}
-              confirmationLabel={deleteActionRemovesSubject ? "输入学科标题以确认删除" : "输入项目名称以确认删除"}
-              deleteError={deleteMutationError}
-              description={
-                deleteActionRemovesSubject
-                  ? `删除学科会一起移除当前学科和下面的 ${Math.max(0, subjectMaterials.length - 1)} 个项目入口，本地工作台缓存也会一并清理。`
-                  : `删除项目只会移除“${currentMaterialTitle || "当前项目"}”和它的工作台，学科“${subjectTitle || "当前学科"}”以及其他项目会保留。`
-              }
-              isPending={deleteMutationPending}
-              onDelete={async () => {
-                try {
-                  if (deleteActionRemovesSubject) {
-                    const relatedProjectIds = [subjectProjectId, ...subjectMaterials.map((material) => material.projectId ?? "")]
-                    await deleteSubjectM.mutateAsync(subjectProjectId)
-                    clearProjectLocalState(relatedProjectIds)
-                    setSelectedProjectId("")
-                    showSuccessFeedback("学科已删除", `“${subjectTitle || "当前学科"}”和它下面的项目入口都已移除。`)
-                    navigate("/projects")
-                    return
-                  }
-                  if (!currentMaterial) {
-                    showInfoFeedback("项目信息仍在加载", "等项目上下文同步完成后再试一次。")
-                    return
-                  }
-                  await deleteSubjectMaterialM.mutateAsync({ subjectId: subjectProjectId, materialId: currentMaterial.materialId })
-                  clearProjectLocalState([pid])
-                  setSelectedProjectId(subjectProjectId)
-                  showSuccessFeedback("项目已删除", `“${currentMaterial.title}” 已从“${subjectTitle || "当前学科"}”下移除。`)
-                  navigate(`/p/${subjectProjectId}/settings`)
-                } catch (err) {
-                  showErrorFeedback(deleteActionRemovesSubject ? "删除学科失败" : "删除项目失败", formatApiError(err))
-                }
-              }}
-              targetTitle={deleteActionRemovesSubject ? subjectTitle : currentMaterialTitle}
-            />
-          ) : null}
-
           {!isSubjectSettingsScope ? (
             <BaiduNetdiskImportDialog
               projectId={pid}
@@ -734,8 +674,8 @@ export function ProjectSettingsPage() {
 
       {!isSubjectSettingsScope && supportsMissingInstanceRepair && activePanel === "missing" ? (
       <Card className="theme-card">
-        <CardHeader>
-          <CardTitle>缺失内容修复</CardTitle>
+        <CardHeader className="theme-card-header">
+          <SettingsCardTitle icon={Wrench} title="缺失内容修复" />
         </CardHeader>
         <CardContent className="space-y-4 text-sm">
           {instancesQ.isLoading ? <p className="text-sm text-muted-foreground">加载实例中...</p> : null}
@@ -863,8 +803,8 @@ function BookOutlineSetupCard({
 
   return (
     <Card className="theme-card">
-      <CardHeader>
-        <CardTitle>书本目录初始化</CardTitle>
+      <CardHeader className="theme-card-header">
+        <SettingsCardTitle icon={BookOpen} title="书本目录初始化" />
       </CardHeader>
       <CardContent className="space-y-4 pt-0 text-sm">
         <div className="rounded-[1.2rem] border border-border/70 bg-muted/15 px-4 py-4 text-muted-foreground">
@@ -988,8 +928,8 @@ function SubjectSettingsInfoCard(props: {
 
   return (
     <Card className="theme-card">
-      <CardHeader>
-        <CardTitle>学科信息</CardTitle>
+      <CardHeader className="theme-card-header">
+        <SettingsCardTitle icon={FolderTree} title="学科信息" />
       </CardHeader>
       <CardContent className="space-y-5 pt-0 text-sm">
         <section className="space-y-3">
@@ -1116,8 +1056,8 @@ function BasicInfoCard({
 
   return (
     <Card className="theme-card">
-      <CardHeader>
-        <CardTitle>基本信息</CardTitle>
+      <CardHeader className="theme-card-header border-b border-[color:var(--theme-soft-border)] pb-6">
+        <SettingsCardTitle icon={Settings2} title="基本信息" />
       </CardHeader>
       <CardContent className="space-y-5 pt-0 text-sm">
         <section className="grid gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(280px,0.75fr)] lg:items-start">
@@ -1354,79 +1294,6 @@ function BasicInfoCard({
   )
 }
 
-function DangerZoneCard(props: {
-  actionLabel: string
-  actionPendingLabel: string
-  confirmationLabel: string
-  deleteError: unknown
-  description: string
-  isPending: boolean
-  onDelete: () => Promise<void>
-  targetTitle: string
-}) {
-  const { actionLabel, actionPendingLabel, confirmationLabel, deleteError, description, isPending, onDelete, targetTitle } = props
-  const [open, setOpen] = useState(false)
-  const [confirmationDraft, setConfirmationDraft] = useState({ targetTitle, value: "" })
-  const confirmation = confirmationDraft.targetTitle === targetTitle ? confirmationDraft.value : ""
-
-  const matches = confirmation.trim() === targetTitle.trim()
-
-  async function handleDelete() {
-    await onDelete()
-  }
-
-  return (
-    <div className="flex justify-end">
-      <Dialog
-        open={open}
-        onOpenChange={(nextOpen) => {
-          setOpen(nextOpen)
-          if (!nextOpen && !isPending) {
-            setConfirmationDraft({ targetTitle, value: "" })
-          }
-        }}
-      >
-        <DialogTrigger asChild>
-          <Button type="button" variant="destructive">
-            {actionLabel}
-          </Button>
-        </DialogTrigger>
-        <DialogContent className="max-w-xl rounded-[1.6rem] border-destructive/20 bg-background">
-          <DialogHeader>
-            <DialogTitle>危险操作</DialogTitle>
-            <DialogDescription>{description}</DialogDescription>
-          </DialogHeader>
-
-          <div className="grid gap-2">
-            <Label htmlFor="danger-zone-confirmation">{confirmationLabel}</Label>
-            <Input
-              id="danger-zone-confirmation"
-              value={confirmation}
-              onChange={(event) => setConfirmationDraft({ targetTitle, value: event.target.value })}
-              placeholder={targetTitle || confirmationLabel}
-              disabled={isPending}
-            />
-            <p className="text-xs text-muted-foreground">
-              请输入 <span className="font-semibold text-foreground">{targetTitle}</span> 完成确认。
-            </p>
-          </div>
-
-          {deleteError ? <p className="text-sm text-destructive">{formatApiError(deleteError)}</p> : null}
-
-          <DialogFooter>
-            <Button type="button" variant="outline" disabled={isPending} onClick={() => setOpen(false)}>
-              取消
-            </Button>
-            <Button type="button" variant="destructive" disabled={isPending || !matches || !targetTitle.trim()} onClick={() => void handleDelete()}>
-              {isPending ? actionPendingLabel : actionLabel}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
-  )
-}
-
 function LayerConfigEditor({
   canSave,
   existingLayerIndexes,
@@ -1521,9 +1388,7 @@ function LayerConfigEditor({
 
   const header = (
     <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-      <div className="space-y-1">
-        <CardTitle>层配置</CardTitle>
-      </div>
+      <SettingsCardTitle icon={Boxes} title="层配置" />
 
       <div className="w-full max-w-[360px] shrink-0 space-y-3">
         <div>
@@ -1684,7 +1549,7 @@ function LayerConfigEditor({
 
   return (
     <Card className="theme-card">
-      <CardHeader className="space-y-4">{header}</CardHeader>
+      <CardHeader className="space-y-4 border-b border-[color:var(--theme-soft-border)] pb-6">{header}</CardHeader>
       <CardContent>{content}</CardContent>
     </Card>
   )

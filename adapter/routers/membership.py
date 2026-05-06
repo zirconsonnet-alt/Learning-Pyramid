@@ -424,16 +424,20 @@ def _payout_confirmation_to_dto(item: PayoutConfirmationPayload | None) -> dict[
 def _binding_attempt_to_dto(item: PayoutBindingAttempt) -> dict[str, object]:
     next_action = "wait_for_scan"
     if item.status == "scanned":
-        next_action = "wait_for_mobile_confirmation"
+        next_action = "authorize_and_withdraw" if item.amount_cent > 0 else "wait_for_mobile_confirmation"
     elif item.status == "bound":
-        next_action = "withdraw"
+        next_action = "confirm_withdrawal" if item.withdrawal_id else "withdraw"
     elif item.status in {"failed", "expired", "canceled"}:
         next_action = "retry_binding"
+    elif item.amount_cent > 0:
+        next_action = "scan_to_withdraw"
     return {
         "bindingAttemptId": item.binding_attempt_id,
         "provider": item.provider,
         "channel": item.channel,
         "status": item.status,
+        "amountCent": item.amount_cent,
+        "withdrawalId": item.withdrawal_id,
         "state": item.state,
         "desktopReturnUrl": item.desktop_return_url,
         "mobileBindingUrl": item.mobile_binding_url,
@@ -492,6 +496,53 @@ def _payout_readiness_to_dto(
         "latestBindingAttempt": None if latest_attempt is None else _binding_attempt_to_dto(latest_attempt),
     }
     return payload
+
+
+def _apply_commission_payout_result(
+    *,
+    withdrawal: WithdrawalRequest,
+    payout,
+    membership_commission_store: MembershipCommissionStore,
+) -> WithdrawalRequest:
+    if payout.remote_status == "succeeded":
+        return membership_commission_store.mark_withdrawal_succeeded(
+            withdrawal.withdrawal_id,
+            provider_transfer_no=payout.provider_transfer_no,
+        )
+    if payout.remote_status == "failed":
+        return membership_commission_store.mark_withdrawal_failed(
+            withdrawal.withdrawal_id,
+            provider_transfer_no=payout.provider_transfer_no,
+            failure_reason=payout.failure_reason or "wechat payout failed",
+        )
+    if payout.remote_status == WITHDRAWAL_STATUS_AWAITING_CONFIRMATION:
+        return membership_commission_store.mark_withdrawal_awaiting_confirmation(
+            withdrawal.withdrawal_id,
+            transfer_bill_no=payout.provider_transfer_no,
+            provider_state=payout.provider_state,
+            package_info=payout.package_info or "",
+            raw_payload_json=payout.raw_payload_json,
+        )
+    if payout.remote_status in {WITHDRAWAL_STATUS_CANCELED, WITHDRAWAL_STATUS_NEEDS_ATTENTION}:
+        return membership_commission_store.apply_withdrawal_provider_result(
+            out_bill_no=withdrawal.out_bill_no,
+            provider_state=payout.provider_state,
+            mapped_status=payout.remote_status,
+            transfer_bill_no=payout.provider_transfer_no,
+            amount_cent=payout.amount_cent,
+            appid=payout.appid,
+            raw_payload_json=payout.raw_payload_json,
+            provider_event_id=payout.provider_transfer_no or withdrawal.out_bill_no,
+            event_type="create_response",
+            failure_reason=payout.failure_reason,
+            signature_verified=False,
+        )
+    return membership_commission_store.mark_withdrawal_processing(
+        withdrawal.withdrawal_id,
+        provider_transfer_no=payout.provider_transfer_no,
+        provider_state=payout.provider_state or WITHDRAWAL_STATUS_PROCESSING,
+        raw_payload_json=payout.raw_payload_json,
+    )
 
 
 def _desktop_binding_url(return_url: str, *, binding_attempt_id: str, state: str) -> str:
@@ -728,6 +779,7 @@ def bind_invite_code(
         inviter_user_id=inviter.user_id,
         invite_code_snapshot=inviter.public_uid,
     )
+    auth_store.create_friendship(user.user_id, inviter.user_id)
     return {"ok": True, "data": _invite_binding_to_dto(binding)}
 
 
@@ -808,6 +860,7 @@ def start_my_wechat_payout_binding(
         channel=req.channel,
         state=state,
         expires_at=(now + timedelta(minutes=payout_config.binding_qr_ttl_minutes)).isoformat(),
+        amount_cent=req.amountCent,
         desktop_return_url=req.returnUrl,
     )
     mobile_binding_url = _mobile_binding_entry_url(req.returnUrl, binding_attempt_id=attempt.binding_attempt_id, state=attempt.state)
@@ -844,7 +897,12 @@ def poll_my_wechat_payout_binding(
         payload["identityId"] = identity.identity_id
         payload["maskedLabel"] = identity.masked_openid
         payload["verifiedAt"] = identity.verified_at
-        payload["nextAction"] = "withdraw"
+        if not attempt.withdrawal_id:
+            payload["nextAction"] = "withdraw"
+    if attempt.withdrawal_id:
+        withdrawal = membership_commission_store.get_withdrawal_request(attempt.withdrawal_id)
+        if withdrawal is not None:
+            payload["withdrawal"] = _withdrawal_to_dto(withdrawal)
     return {"ok": True, "data": payload}
 
 
@@ -918,6 +976,15 @@ def complete_my_wechat_payout_binding(
         identity = membership_commission_store.get_payout_identity(attempt.identity_id)
         if identity is None or identity.user_id != attempt.user_id:
             raise NotFound("payout identity")
+        if attempt.withdrawal_id:
+            withdrawal = membership_commission_store.get_withdrawal_request(attempt.withdrawal_id)
+            return {
+                "ok": True,
+                "data": {
+                    "identity": _payout_identity_to_dto(identity),
+                    "withdrawal": None if withdrawal is None else _withdrawal_to_dto(withdrawal),
+                },
+            }
         return {"ok": True, "data": _payout_identity_to_dto(identity)}
 
     if attempt.status not in {
@@ -946,6 +1013,35 @@ def complete_my_wechat_payout_binding(
         appid=appid,
         confirmed_learning_pyramid_user_id=req.confirmedLearningPyramidUserId,
     )
+    if attempt.amount_cent > 0:
+        withdrawal = membership_commission_store.create_withdrawal_request(
+            user_id,
+            amount_cent=attempt.amount_cent,
+            identity_id=identity.identity_id,
+        )
+        try:
+            payout = membership_payment_service.request_commission_payout(withdrawal)
+        except Exception as exc:
+            membership_commission_store.mark_withdrawal_failed(withdrawal.withdrawal_id, failure_reason=str(exc))
+            raise
+        withdrawal = _apply_commission_payout_result(
+            withdrawal=withdrawal,
+            payout=payout,
+            membership_commission_store=membership_commission_store,
+        )
+        membership_commission_store.attach_withdrawal_to_binding_attempt(
+            req.bindingAttemptId,
+            withdrawal_id=withdrawal.withdrawal_id,
+        )
+        withdrawal_payload = _withdrawal_to_dto(withdrawal)
+        withdrawal_payload["confirmation"] = _payout_confirmation_to_dto(payout.confirmation)
+        return {
+            "ok": True,
+            "data": {
+                "identity": _payout_identity_to_dto(identity),
+                "withdrawal": withdrawal_payload,
+            },
+        }
     return {"ok": True, "data": _payout_identity_to_dto(identity)}
 
 
@@ -966,46 +1062,11 @@ def request_my_commission_withdrawal(
     except Exception as exc:
         membership_commission_store.mark_withdrawal_failed(withdrawal.withdrawal_id, failure_reason=str(exc))
         raise
-    if payout.remote_status == "succeeded":
-        withdrawal = membership_commission_store.mark_withdrawal_succeeded(
-            withdrawal.withdrawal_id,
-            provider_transfer_no=payout.provider_transfer_no,
-        )
-    elif payout.remote_status == "failed":
-        withdrawal = membership_commission_store.mark_withdrawal_failed(
-            withdrawal.withdrawal_id,
-            provider_transfer_no=payout.provider_transfer_no,
-            failure_reason=payout.failure_reason or "wechat payout failed",
-        )
-    elif payout.remote_status == WITHDRAWAL_STATUS_AWAITING_CONFIRMATION:
-        withdrawal = membership_commission_store.mark_withdrawal_awaiting_confirmation(
-            withdrawal.withdrawal_id,
-            transfer_bill_no=payout.provider_transfer_no,
-            provider_state=payout.provider_state,
-            package_info=payout.package_info or "",
-            raw_payload_json=payout.raw_payload_json,
-        )
-    elif payout.remote_status in {WITHDRAWAL_STATUS_CANCELED, WITHDRAWAL_STATUS_NEEDS_ATTENTION}:
-        withdrawal = membership_commission_store.apply_withdrawal_provider_result(
-            out_bill_no=withdrawal.out_bill_no,
-            provider_state=payout.provider_state,
-            mapped_status=payout.remote_status,
-            transfer_bill_no=payout.provider_transfer_no,
-            amount_cent=payout.amount_cent,
-            appid=payout.appid,
-            raw_payload_json=payout.raw_payload_json,
-            provider_event_id=payout.provider_transfer_no or withdrawal.out_bill_no,
-            event_type="create_response",
-            failure_reason=payout.failure_reason,
-            signature_verified=False,
-        )
-    else:
-        withdrawal = membership_commission_store.mark_withdrawal_processing(
-            withdrawal.withdrawal_id,
-            provider_transfer_no=payout.provider_transfer_no,
-            provider_state=payout.provider_state or WITHDRAWAL_STATUS_PROCESSING,
-            raw_payload_json=payout.raw_payload_json,
-        )
+    withdrawal = _apply_commission_payout_result(
+        withdrawal=withdrawal,
+        payout=payout,
+        membership_commission_store=membership_commission_store,
+    )
     payload = _withdrawal_to_dto(withdrawal)
     payload["confirmation"] = _payout_confirmation_to_dto(payout.confirmation)
     return {"ok": True, "data": payload}

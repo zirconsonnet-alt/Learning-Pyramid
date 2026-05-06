@@ -198,6 +198,8 @@ export const PayoutBindingAttemptSchema = z.object({
   provider: z.string(),
   channel: z.string(),
   status: z.string(),
+  amountCent: z.number().default(0),
+  withdrawalId: z.string().nullable().optional(),
   state: z.string().optional(),
   authorizationUrl: z.string().optional(),
   desktopReturnUrl: z.string().optional(),
@@ -229,6 +231,17 @@ export const PayoutIdentitySchema = z.object({
 })
 
 export type PayoutIdentity = z.infer<typeof PayoutIdentitySchema>
+
+export const PayoutIdentityDetailSchema = z.object({
+  identityId: z.string(),
+  provider: z.string(),
+  status: z.string(),
+  maskedLabel: z.string(),
+  verifiedAt: z.string(),
+  failureReason: z.string(),
+})
+
+export type PayoutIdentityDetail = z.infer<typeof PayoutIdentityDetailSchema>
 
 export const CommissionRecordSchema = z.object({
   commissionId: z.string(),
@@ -402,13 +415,14 @@ export function getPayoutIdentity() {
   })
 }
 
-export function startPayoutBindingAttempt(params: { channel?: string; returnUrl: string }) {
+export function startPayoutBindingAttempt(params: { channel?: string; returnUrl: string; amountCent?: number }) {
   return apiRequest({
     path: "/commissions/payout-identity/wechat/binding-attempts",
     method: "POST",
     body: {
       channel: params.channel ?? "desktop_qr_official_account_h5",
       returnUrl: params.returnUrl,
+      amountCent: params.amountCent ?? 0,
     },
     responseSchema: PayoutBindingAttemptSchema,
   })
@@ -421,6 +435,7 @@ export function pollPayoutBindingAttempt(params: { bindingAttemptId: string }) {
       identityId: z.string().optional(),
       maskedLabel: z.string().optional(),
       verifiedAt: z.string().optional(),
+      withdrawal: CommissionWithdrawalSchema.optional(),
     }),
   })
 }
@@ -447,14 +462,13 @@ export function completePayoutBinding(params: {
       state: params.state,
       confirmedLearningPyramidUserId: params.confirmedLearningPyramidUserId,
     },
-    responseSchema: z.object({
-      identityId: z.string(),
-      provider: z.string(),
-      status: z.string(),
-      maskedLabel: z.string(),
-      verifiedAt: z.string(),
-      failureReason: z.string(),
-    }),
+    responseSchema: z.union([
+      PayoutIdentityDetailSchema,
+      z.object({
+        identity: PayoutIdentityDetailSchema,
+        withdrawal: CommissionWithdrawalSchema,
+      }),
+    ]),
   })
 }
 

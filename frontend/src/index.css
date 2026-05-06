@@ -1902,15 +1902,9 @@
   }
 
   .lp-showcase-price-note {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
-    border-radius: 999px;
-    background: var(--lp-warning-bg);
-    border: 1px solid var(--lp-warning-border);
     color: var(--lp-warning-text);
     font-size: 14px;
+    line-height: 1.6;
     margin-top: 10px;
   }
 

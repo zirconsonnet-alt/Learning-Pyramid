@@ -356,6 +356,17 @@ def test_pomodoro_settings_page_edits_random_micro_break_preferences() -> None:
     assert "恢复微休息默认值" in settings_source
 
 
+def test_pomodoro_settings_page_uses_concise_local_resource_copy() -> None:
+    settings_source = POMODORO_SETTINGS_PAGE.read_text(encoding="utf-8")
+
+    assert '<h1 className="mt-1 text-2xl font-semibold tracking-[-0.03em] text-foreground">番茄钟设置</h1>' in settings_source
+    assert "默认提示词</h1>" not in settings_source
+    assert "管理只保存在当前浏览器里的休息音乐目录和番茄钟页壁纸。" not in settings_source
+    assert "这个目录属于本地浏览器授权，音乐文件不会上传到服务端。" not in settings_source
+    assert "壁纸只保存在当前浏览器，不会上传服务器，也不会影响其他页面。" not in settings_source
+    assert "只在番茄钟学习阶段的视频全屏中生效，默认关闭。" not in settings_source
+
+
 def test_pomodoro_settings_payloads_preserve_random_micro_breaks() -> None:
     page_source = POMODORO_PAGE.read_text(encoding="utf-8")
     settings_source = POMODORO_SETTINGS_PAGE.read_text(encoding="utf-8")

@@ -1779,7 +1779,15 @@ export function AiChatPage() {
             ) : null}
 
             {llmConfigured && !aiChatMemberBlocked && !activeNodeId ? (
-              <div className="mx-auto max-w-3xl px-2 pt-2 text-sm leading-7 text-muted-foreground">请从左侧选择一个节点</div>
+              <div className="mx-auto flex max-w-3xl flex-col items-center px-2 pt-16 text-center">
+                <div className="flex h-16 w-16 items-center justify-center rounded-[1.75rem] bg-[linear-gradient(135deg,hsl(var(--primary)),hsl(var(--primary)/0.72))] text-primary-foreground shadow-[0_24px_48px_-26px_hsl(var(--primary)/0.5)]">
+                  <Sparkles className="h-6 w-6" />
+                </div>
+                <h1 className="mt-6 text-3xl font-semibold tracking-tight text-foreground">先选择一个节点开始提问</h1>
+                <p className="mt-3 max-w-2xl text-[15px] leading-7 text-muted-foreground">
+                  请从左侧选择一个学习任务节点或学习对象节点，再围绕当前上下文继续提问、梳理结构，或者让 AI 帮你生成复习建议。
+                </p>
+              </div>
             ) : null}
 
             {chatError ? <ErrorNotice title="本轮问答失败" message={chatError} className="mx-auto mb-5 max-w-3xl" /> : null}

@@ -4,8 +4,7 @@ import { Download, FileJson } from "lucide-react"
 import { ApiError } from "@/ui/api/http"
 import { type RecallPoint } from "@/ui/api/review"
 import { Button } from "@/ui/components/ui/button"
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/ui/components/ui/dialog"
-import { SUPPORTED_SUBTITLE_EXTENSIONS_LABEL } from "@/ui/subtitles/subtitleSupport"
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/ui/components/ui/dialog"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 
 type NodeExportCardProps = {
@@ -84,32 +83,26 @@ export function NodeExportCard(props: NodeExportCardProps) {
           <div className="space-y-5 p-6">
             <DialogHeader className="space-y-2 text-left">
               <DialogTitle>导出复述点</DialogTitle>
-              <DialogDescription>导出当前节点覆盖的复述点数据。视频字幕不再由 ASR 生成，而是直接读取视频同目录下的同名字幕文件。</DialogDescription>
             </DialogHeader>
 
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-3">
               <div className="rounded-[1.1rem] border border-[#dbe4ee] bg-white/90 p-4">
                 <div className="text-xs uppercase tracking-[0.14em] text-[#8a9ab0]">覆盖复述点</div>
                 <div className="mt-2 text-2xl font-semibold tracking-tight text-[#17314b]">{recallPoints.length}</div>
-              </div>
-              <div className="rounded-[1.1rem] border border-[#dbe4ee] bg-white/90 p-4">
-                <div className="text-xs uppercase tracking-[0.14em] text-[#8a9ab0]">字幕来源</div>
-                <div className="mt-2 text-sm font-semibold tracking-tight text-[#17314b]">同目录同名字幕文件</div>
               </div>
             </div>
 
             {statusText ? <div className="rounded-[1rem] border border-[#dbe4ee] bg-white/80 px-4 py-3 text-sm text-[#5c6f86]">{statusText}</div> : null}
             {errorText ? <div className="rounded-[1rem] border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">{errorText}</div> : null}
-
-            <div className="rounded-[1rem] border border-dashed border-[#dbe4ee] bg-[#fbfdff] px-4 py-3 text-xs leading-6 text-[#6a7b90]">
-              系统现在只会识别视频同目录下的同名字幕文件（{SUPPORTED_SUBTITLE_EXTENSIONS_LABEL}），并把它用于播放器字幕或 AI 上下文；不会再用后端 ffmpeg 或浏览器 ffmpeg.wasm 生成转写结果。
-            </div>
           </div>
 
-          <DialogFooter className="border-t border-[#e2e8ef] bg-white/70 px-6 py-4">
+          <DialogFooter className="flex-col items-stretch gap-3 border-t border-[#e2e8ef] bg-white/70 px-6 py-4 sm:items-end">
+            <div className="text-sm text-[#5c6f86]">
+              导出格式：<span className="font-semibold text-[#17314b]">JSON, MD, PDF</span>
+            </div>
             <Button type="button" onClick={() => void onExportRecallPoints()} disabled={isExportingRecall || recallPoints.length === 0}>
               <FileJson className="h-4 w-4" />
-              {isExportingRecall ? "导出中..." : "导出复述点 JSON"}
+              {isExportingRecall ? "导出中..." : "导出"}
             </Button>
           </DialogFooter>
         </DialogContent>

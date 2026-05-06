@@ -42,23 +42,20 @@ def test_project_settings_layer_config_avoids_nested_capsule_sections() -> None:
 
 def test_project_settings_danger_zone_uses_dialog_confirmation() -> None:
     source = PROJECT_SETTINGS_PAGE.read_text(encoding="utf-8")
-    danger_zone_source = source[source.index("function DangerZoneCard"):source.index("function LayerConfigEditor")]
 
-    assert '<Card className="theme-card border-destructive/20">' not in danger_zone_source
-    assert "<Dialog" in danger_zone_source
-    assert "<DialogTrigger asChild>" in danger_zone_source
-    assert "<DialogContent" in danger_zone_source
-    assert 'id="danger-zone-confirmation"' in danger_zone_source
-    assert "请输入 <span" in danger_zone_source
+    assert "function DangerZoneCard" not in source
+    assert 'id="danger-zone-confirmation"' not in source
+    assert "<DangerZoneCard" not in source
 
 
 def test_project_settings_keeps_delete_button_for_default_project_scope() -> None:
     source = PROJECT_SETTINGS_PAGE.read_text(encoding="utf-8")
 
-    assert "const deleteActionRemovesSubject = isSubjectRoot" in source
-    assert "const showDangerZone = deleteActionRemovesSubject || canDeleteCurrentMaterial" in source
-    assert 'actionLabel={deleteActionRemovesSubject ? "删除学科" : "删除当前项目"}' in source
-    assert 'confirmationLabel={deleteActionRemovesSubject ? "输入学科标题以确认删除" : "输入项目名称以确认删除"}' in source
+    assert "showDangerZone" not in source
+    assert "<DangerZoneCard" not in source
+    assert "const showDangerZone = deleteActionRemovesSubject || canDeleteCurrentMaterial" not in source
+    assert 'actionLabel={deleteActionRemovesSubject ? "删除学科" : "删除当前项目"}' not in source
+    assert 'confirmationLabel={deleteActionRemovesSubject ? "输入学科标题以确认删除" : "输入项目名称以确认删除"}' not in source
 
 
 def test_project_settings_uses_clean_subject_project_copy_and_project_id() -> None:
@@ -68,4 +65,21 @@ def test_project_settings_uses_clean_subject_project_copy_and_project_id() -> No
     assert "兼容工作台" not in source
     assert "compatibilityProjectId" not in source
     assert "material.projectId" in source
-    assert "currentMaterial.projectId !== subjectProjectId" in source
+    assert "删除项目只会移除" not in source
+
+
+def test_project_settings_top_level_headers_use_divider_style() -> None:
+    source = PROJECT_SETTINGS_PAGE.read_text(encoding="utf-8")
+
+    assert '<CardHeader className="theme-card-header border-b border-[color:var(--theme-soft-border)] pb-6">' in source
+    assert '<CardHeader className="space-y-4 border-b border-[color:var(--theme-soft-border)] pb-6">{header}</CardHeader>' in source
+
+
+def test_project_and_subject_settings_headers_use_icon_title_pattern() -> None:
+    source = PROJECT_SETTINGS_PAGE.read_text(encoding="utf-8")
+
+    assert "function SettingsCardTitle" in source
+    assert '<div className="theme-icon-surface h-11 w-11 shrink-0">' in source
+    assert '<SettingsCardTitle icon={FolderTree} title="学科信息" />' in source
+    assert '<SettingsCardTitle icon={Settings2} title="基本信息" />' in source
+    assert '<SettingsCardTitle icon={Boxes} title="层配置" />' in source

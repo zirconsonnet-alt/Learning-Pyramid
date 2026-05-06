@@ -167,6 +167,7 @@ def register_auth_user(
                 inviter_user_id=inviter.user_id,
                 invite_code_snapshot=inviter.public_uid,
             )
+            auth_store.create_friendship(user.user_id, inviter.user_id)
         verification_email_sent = False
         if verification_required:
             try:

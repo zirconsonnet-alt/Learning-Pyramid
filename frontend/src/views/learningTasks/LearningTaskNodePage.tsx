@@ -19,11 +19,17 @@ import { buildAiChatPath } from "@/views/ai/chatRouting"
 import { formatLearningTaskNodeDisplayTitle } from "@/views/learningTasks/displayTitle"
 import { RecallPointListCard } from "@/views/recallPoints/components/RecallPointListCard"
 import { NodeExportCard } from "@/views/shared/NodeExportCard"
+import type { LearningTaskNode } from "@/ui/api/learningTaskNodes"
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
   if (err instanceof Error) return err.message
   return "未知错误"
+}
+
+function getLearningTaskNodeDisplayChildIds(node: LearningTaskNode | undefined) {
+  if (!node || node.kind !== "container") return []
+  return node.displayChildNodeIds ?? node.children
 }
 
 export function LearningTaskNodePage() {
@@ -61,7 +67,7 @@ export function LearningTaskNodePage() {
       : Math.max(0, bindingQ.data.targetLayerIndex - 1)
   const title = formatLearningTaskNodeDisplayTitle(nodeQ.data?.title ?? "任务节点", { sourceLayerIndex })
   const isContainer = nodeQ.data?.kind === "container"
-  const childCount = nodeQ.data?.kind === "container" ? nodeQ.data.children.length : null
+  const childCount = isContainer ? getLearningTaskNodeDisplayChildIds(nodeQ.data).length : null
   const instanceTitleById = Object.fromEntries((instancesQ.data ?? []).map((instance) => [instance.instanceId, instance.materialDisplayName])) as Record<string, string>
   const relatedInstanceLabel = (() => {
     const ids = Array.from(new Set((recallPointsQ.data ?? []).flatMap((item) => (item.anchor?.instanceId ? [item.anchor.instanceId] : []))))
@@ -95,7 +101,6 @@ export function LearningTaskNodePage() {
               nodeTitle={nodeQ.data.title}
             />
           }
-          description="先确认这个聚合节点覆盖的规模，再继续查看下方的复述点。"
           items={[
             { label: "节点类型", value: "聚合节点" },
             { label: "子节点数", value: childCount ?? 0 },

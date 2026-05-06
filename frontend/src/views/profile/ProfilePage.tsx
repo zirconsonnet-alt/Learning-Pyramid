@@ -255,7 +255,7 @@ function LearningCurve(props: {
   const xAxisTickIndices = buildAxisTickIndices(points.length, range === "week" ? 7 : 6)
 
   return (
-    <div className="theme-soft-surface rounded-[1.6rem] p-5">
+    <div className="space-y-4">
       <div className="theme-subtle-surface overflow-hidden rounded-[1.4rem] px-3 py-4">
         <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="h-56 w-full" preserveAspectRatio="none" aria-hidden="true">
           <defs>
@@ -331,7 +331,7 @@ function LearningCurve(props: {
         </svg>
       </div>
 
-      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <MetricStatCard label="日均" value={formatLearningMetricAverage(metric, stats.average)} detail="当前范围平均值" />
         <MetricStatCard
           label="峰值日"

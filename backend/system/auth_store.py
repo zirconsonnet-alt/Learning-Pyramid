@@ -2293,6 +2293,32 @@ class SQLiteAuthStore(_AuthStoreImpl):
             finally:
                 conn.close()
 
+    def create_friendship(self, user_a_id: str, user_b_id: str) -> Friendship:
+        left = str(user_a_id).strip()
+        right = str(user_b_id).strip()
+        user_low_id, user_high_id = _friend_pair(left, right)
+        now_text = _utc_now().isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO friendships (user_low_id, user_high_id, created_at, source_request_id)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (user_low_id, user_high_id, now_text, None),
+                )
+                row = conn.execute(
+                    "SELECT * FROM friendships WHERE user_low_id = ? AND user_high_id = ? LIMIT 1",
+                    (user_low_id, user_high_id),
+                ).fetchone()
+                conn.commit()
+                if row is None:
+                    raise NotFound("friendship")
+                return self._row_to_friendship(row)
+            finally:
+                conn.close()
+
     def users_are_friends(self, user_a_id: str, user_b_id: str) -> bool:
         left = str(user_a_id).strip()
         right = str(user_b_id).strip()
@@ -4387,6 +4413,28 @@ class PostgresAuthStore(_AuthStoreImpl):
                 )
                 conn.commit()
 
+    def create_friendship(self, user_a_id: str, user_b_id: str) -> Friendship:
+        left = str(user_a_id).strip()
+        right = str(user_b_id).strip()
+        user_low_id, user_high_id = _friend_pair(left, right)
+        now_text = _utc_now().isoformat()
+        with self._lock:
+            with self._connect() as conn:
+                row = conn.execute(
+                    """
+                    INSERT INTO friendships (user_low_id, user_high_id, created_at, source_request_id)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT(user_low_id, user_high_id) DO UPDATE
+                    SET user_low_id = EXCLUDED.user_low_id
+                    RETURNING *
+                    """,
+                    (user_low_id, user_high_id, now_text, None),
+                ).fetchone()
+                conn.commit()
+                if row is None:
+                    raise NotFound("friendship")
+                return self._row_to_friendship(row)
+
     def users_are_friends(self, user_a_id: str, user_b_id: str) -> bool:
         left = str(user_a_id).strip()
         right = str(user_b_id).strip()
@@ -5994,6 +6042,9 @@ class AuthStore:
 
     def delete_friendship(self, friend_user_id: str, *, actor_user_id: str) -> None:
         self._impl.delete_friendship(friend_user_id, actor_user_id=actor_user_id)
+
+    def create_friendship(self, user_a_id: str, user_b_id: str) -> Friendship:
+        return self._impl.create_friendship(user_a_id, user_b_id)
 
     def users_are_friends(self, user_a_id: str, user_b_id: str) -> bool:
         return self._impl.users_are_friends(user_a_id, user_b_id)

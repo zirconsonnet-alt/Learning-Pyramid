@@ -162,6 +162,8 @@ class PayoutBindingAttempt:
     authorization_code_hash: str
     resolved_openid: str
     identity_id: str | None
+    amount_cent: int
+    withdrawal_id: str | None
     failure_reason: str
     created_at: str
     authorized_at: str | None
@@ -456,6 +458,8 @@ class MembershipCommissionStore:
                         authorization_code_hash TEXT NOT NULL DEFAULT '',
                         resolved_openid TEXT NOT NULL DEFAULT '',
                         identity_id TEXT,
+                        amount_cent INTEGER NOT NULL DEFAULT 0,
+                        withdrawal_id TEXT,
                         failure_reason TEXT NOT NULL DEFAULT '',
                         created_at TEXT NOT NULL,
                         authorized_at TEXT,
@@ -558,6 +562,8 @@ class MembershipCommissionStore:
                         "qr_expires_at": "TEXT",
                         "scanned_at": "TEXT",
                         "confirmed_at": "TEXT",
+                        "amount_cent": "INTEGER NOT NULL DEFAULT 0",
+                        "withdrawal_id": "TEXT",
                     },
                 )
                 conn.execute(
@@ -626,6 +632,8 @@ class MembershipCommissionStore:
             authorization_code_hash=str(row["authorization_code_hash"] or ""),
             resolved_openid=str(row["resolved_openid"] or ""),
             identity_id=None if row["identity_id"] is None else str(row["identity_id"]),
+            amount_cent=int(row["amount_cent"] or 0),
+            withdrawal_id=None if row["withdrawal_id"] is None else str(row["withdrawal_id"]),
             failure_reason=str(row["failure_reason"] or ""),
             created_at=str(row["created_at"]),
             authorized_at=None if row["authorized_at"] is None else str(row["authorized_at"]),
@@ -1068,6 +1076,7 @@ class MembershipCommissionStore:
         channel: str,
         state: str,
         expires_at: str,
+        amount_cent: int = 0,
         desktop_return_url: str = "",
         mobile_binding_url: str = "",
     ) -> PayoutBindingAttempt:
@@ -1081,9 +1090,9 @@ class MembershipCommissionStore:
                     INSERT INTO payout_binding_attempts (
                         binding_attempt_id, user_id, provider, channel, state, status,
                         desktop_return_url, mobile_binding_url, qr_expires_at,
-                        created_at, expires_at
+                        amount_cent, created_at, expires_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         attempt_id,
@@ -1095,6 +1104,7 @@ class MembershipCommissionStore:
                         str(desktop_return_url or ""),
                         str(mobile_binding_url or ""),
                         str(expires_at),
+                        max(0, int(amount_cent or 0)),
                         now,
                         str(expires_at),
                     ),
@@ -1350,6 +1360,25 @@ class MembershipCommissionStore:
                 if updated is None:
                     raise NotFound("payout identity")
                 return self._row_to_identity(updated)
+            finally:
+                conn.close()
+
+    def attach_withdrawal_to_binding_attempt(self, binding_attempt_id: str, *, withdrawal_id: str) -> PayoutBindingAttempt:
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "UPDATE payout_binding_attempts SET withdrawal_id = ? WHERE binding_attempt_id = ?",
+                    (str(withdrawal_id), str(binding_attempt_id)),
+                )
+                row = conn.execute(
+                    "SELECT * FROM payout_binding_attempts WHERE binding_attempt_id = ? LIMIT 1",
+                    (str(binding_attempt_id),),
+                ).fetchone()
+                conn.commit()
+                if row is None:
+                    raise NotFound("payout binding attempt")
+                return self._row_to_binding_attempt(row)
             finally:
                 conn.close()
 

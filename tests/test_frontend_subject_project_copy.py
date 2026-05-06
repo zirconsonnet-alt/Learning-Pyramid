@@ -50,3 +50,24 @@ def test_delete_subject_dialog_uses_warning_as_confirmation_placeholder() -> Non
     assert "theme-status-surface" not in dialog_source
     assert "placeholder={deleteDialogHint}" in source
     assert 'placeholder={deleteExpectedText || "输入学科标题"}' not in source
+
+
+def test_subject_dashboard_project_cards_offer_project_delete_action() -> None:
+    source = SUBJECT_DASHBOARD_PAGE.read_text(encoding="utf-8")
+
+    assert "useDeleteSubjectMaterial" in source
+    assert "openDeleteMaterialDialog(material)" in source
+    assert '<Trash2 className="h-4 w-4" />' in source
+    assert "<DialogTitle>删除项目</DialogTitle>" in source
+    assert "deleteMaterialExpectedText" in source
+
+
+def test_subject_dashboard_project_cards_show_last_study_status() -> None:
+    source = SUBJECT_DASHBOARD_PAGE.read_text(encoding="utf-8")
+    card_description = source[source.index("<CardDescription"):source.index("</CardDescription>", source.index("<CardDescription"))]
+
+    assert "function formatLastStudyText" in source
+    assert "今天已学习" in source
+    assert "materialActivityLoading" in source
+    assert "lastStudyDisplay.text" in card_description
+    assert "formatStudyMaterialTypeLabel(material.materialType)" in card_description

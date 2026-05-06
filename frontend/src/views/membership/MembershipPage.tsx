@@ -1,4 +1,4 @@
-import { ChevronLeft, Copy, History, Ticket, Users, Wallet } from "lucide-react"
+import { ChevronLeft, Copy, History, Ticket, Users } from "lucide-react"
 import { type FormEvent, useEffect, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { QRCodeSVG } from "qrcode.react"
@@ -20,7 +20,6 @@ import {
   useMembershipOrders,
   useMembershipSummary,
   usePayoutBindingAttempt,
-  usePayoutIdentity,
   useRequestCommissionWithdrawal,
   useStartPayoutBindingAttempt,
   useSyncMembershipPayment,
@@ -299,7 +298,6 @@ export function MembershipPage() {
   const couponsQ = useMembershipCoupons(20)
   const inviteSummaryQ = useInviteSummary()
   const commissionQ = useCommissionSummary()
-  const payoutIdentityQ = usePayoutIdentity()
   const bindingAttemptQ = usePayoutBindingAttempt(activeBindingAttemptId, Boolean(activeBindingAttemptId), activeBindingAttemptId ? 2_000 : false)
   const withdrawalsQ = useCommissionWithdrawals()
   const previewQ = useMembershipOrderPreview(selectedCouponId || undefined)
@@ -352,11 +350,18 @@ export function MembershipPage() {
     if (attempt.qrCodePayload && attempt.qrCodePayload !== activeBindingQrPayload) {
       setActiveBindingQrPayload(attempt.qrCodePayload)
     }
-    if (attempt.status === "bound" || attempt.nextAction === "withdraw") {
+    if (attempt.status === "bound" || attempt.nextAction === "withdraw" || attempt.nextAction === "confirm_withdrawal") {
       setBindingDialogOpen(false)
       setActiveBindingAttemptId("")
       setActiveBindingQrPayload("")
-      showSuccessFeedback("微信收款身份已绑定", "提现会使用已验证的微信收款身份，页面只显示脱敏标识。")
+      if (attempt.withdrawal?.confirmationUrl) {
+        setWithdrawalConfirmationUrl(attempt.withdrawal.confirmationUrl)
+        setWithdrawalConfirmationDialogOpen(true)
+      }
+      showSuccessFeedback(
+        attempt.withdrawal ? "提现等待微信确认" : "微信收款身份已绑定",
+        attempt.withdrawal ? "请用手机微信扫描弹窗二维码确认收款。" : "提现会使用已验证的微信收款身份，页面只显示脱敏标识。",
+      )
     }
   }, [activeBindingQrPayload, bindingAttemptQ.data])
 
@@ -513,6 +518,10 @@ export function MembershipPage() {
       showErrorFeedback("提交提现失败", "请输入有效的提现金额。")
       return
     }
+    if (payoutReadiness?.status !== "ready") {
+      await onStartPayoutBinding(amountCent)
+      return
+    }
     try {
       const result = await requestWithdrawal.mutateAsync({
         amountCent,
@@ -580,18 +589,22 @@ export function MembershipPage() {
     }
   }
 
-  async function onStartPayoutBinding() {
+  async function onStartPayoutBinding(amountCent = 0) {
     try {
       const result = await startPayoutBinding.mutateAsync({
         channel: "desktop_qr_official_account_h5",
         returnUrl: typeof window !== "undefined" ? `${window.location.origin}/membership` : "/membership",
+        amountCent,
       })
       setActiveBindingAttemptId(result.bindingAttemptId)
       setActiveBindingQrPayload(result.qrCodePayload ?? result.mobileBindingUrl ?? "")
       setBindingDialogOpen(true)
-      showSuccessFeedback("微信收款身份绑定已开始", "请用本人微信扫描二维码完成收款账号绑定。")
+      showSuccessFeedback(
+        amountCent > 0 ? "提现扫码已开始" : "微信收款身份绑定已开始",
+        amountCent > 0 ? "请用本人微信扫描二维码，手机端会继续完成这笔提现。" : "请用本人微信扫描二维码完成收款账号绑定。",
+      )
     } catch (err) {
-      showErrorFeedback("开始绑定失败", formatMembershipApiError(err))
+      showErrorFeedback(amountCent > 0 ? "启动提现扫码失败" : "开始绑定失败", formatMembershipApiError(err))
     }
   }
 
@@ -606,7 +619,7 @@ export function MembershipPage() {
   const summary = summaryQ.data
   const preview = previewQ.data
   const commissionAccount = commissionQ.data?.account
-  const payoutReadiness = commissionQ.data?.payoutReadiness ?? payoutIdentityQ.data
+  const payoutReadiness = commissionQ.data?.payoutReadiness
   const recentWithdrawals = withdrawalsQ.data ?? []
   const membershipState = getMembershipState(summary)
   const purchaseDisabled =
@@ -723,8 +736,8 @@ export function MembershipPage() {
                   <div className="text-2xl font-semibold tracking-tight text-foreground">{membershipState}</div>
                   {summary?.currentEndsAt ? <div className="text-sm leading-6 text-muted-foreground">有效期至 {formatMembershipDateTime(summary.currentEndsAt)}</div> : null}
                 </div>
-                <div className="flex min-w-[18rem] max-w-xl flex-col gap-3">
-                  <div className="rounded-[1.25rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-4 py-4">
+                <div className="flex w-full max-w-[22rem] flex-col gap-3 md:w-auto">
+                  <div className="rounded-[1.25rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-5 py-4">
                     <div className="text-[11px] uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">邀请码</div>
                     {inviteSummaryQ.error ? <div className="mt-3 text-sm text-destructive">{formatMembershipApiError(inviteSummaryQ.error)}</div> : null}
                     {!inviteSummaryQ.error ? (
@@ -826,28 +839,6 @@ export function MembershipPage() {
                       </div>
                     </div>
 
-                    <div className="theme-subtle-surface px-3 py-3 text-sm leading-6">
-                      <div className="flex items-center gap-2">
-                        <Wallet className="h-4 w-4 text-primary" />
-                        <div className="font-medium text-foreground">微信收款身份</div>
-                      </div>
-                      <div className="mt-1 text-muted-foreground">
-                        {payoutReadiness?.status === "ready"
-                          ? `已绑定 ${payoutReadiness.maskedLabel}`
-                          : payoutReadiness?.status === "binding"
-                            ? "绑定流程进行中"
-                            : "提现前需要先绑定微信收款身份。"}
-                      </div>
-                      {payoutReadiness?.status !== "ready" ? (
-                        <div className="mt-3 space-y-3">
-                          <Button type="button" variant="outline" onClick={() => void onStartPayoutBinding()} disabled={startPayoutBinding.isPending}>
-                            {startPayoutBinding.isPending ? "启动中..." : "绑定微信收款账号"}
-                          </Button>
-                          {activeBindingAttemptId ? <div className="text-xs text-muted-foreground">二维码已生成，请用本人微信扫码确认绑定。</div> : null}
-                        </div>
-                      ) : null}
-                    </div>
-
                     <form className="grid gap-3 md:grid-cols-[120px_auto]" onSubmit={(event) => void onRequestWithdrawal(event)}>
                       <div className="space-y-2">
                         <Label htmlFor="commission-withdraw-amount">提现金额</Label>
@@ -863,9 +854,9 @@ export function MembershipPage() {
                       <div className="flex items-end">
                         <Button
                           type="submit"
-                          disabled={requestWithdrawal.isPending || (commissionAccount?.withdrawableCent ?? 0) <= 0 || payoutReadiness?.status !== "ready"}
+                          disabled={requestWithdrawal.isPending || startPayoutBinding.isPending || (commissionAccount?.withdrawableCent ?? 0) <= 0}
                         >
-                          {requestWithdrawal.isPending ? "提交中..." : "申请提现"}
+                          {requestWithdrawal.isPending ? "提交中..." : startPayoutBinding.isPending ? "启动中..." : "申请提现"}
                         </Button>
                       </div>
                     </form>
@@ -958,8 +949,8 @@ export function MembershipPage() {
       <Dialog open={bindingDialogOpen} onOpenChange={setBindingDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>绑定微信收款账号</DialogTitle>
-            <DialogDescription>请使用本人微信扫码，确认后佣金提现会转入该微信账号。</DialogDescription>
+            <DialogTitle>微信扫码确认提现</DialogTitle>
+            <DialogDescription>请使用本人微信扫码，手机端会确认收款账号并继续完成这笔提现。</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4">
             <div className="mx-auto rounded-lg border bg-white p-4">
@@ -967,7 +958,7 @@ export function MembershipPage() {
             </div>
             <div className="text-center text-sm leading-6 text-muted-foreground">
               {bindingAttemptQ.data?.status === "scanned"
-                ? "已扫码，请在手机微信中确认绑定。"
+                ? "已扫码，请在手机微信中继续确认提现。"
                 : bindingAttemptQ.data?.status === "expired"
                   ? "二维码已过期，请重新发起绑定。"
                   : "二维码短时间内有效，请勿让他人扫码。"}

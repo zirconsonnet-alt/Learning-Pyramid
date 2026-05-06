@@ -217,6 +217,7 @@ export function useCompletePayoutBinding() {
       await qc.invalidateQueries({ queryKey: ["membership", "payout-identity"] })
       await qc.invalidateQueries({ queryKey: ["membership", "payout-binding-attempt"] })
       await qc.invalidateQueries({ queryKey: ["membership", "commissions"] })
+      await qc.invalidateQueries({ queryKey: ["membership", "withdrawals"] })
     },
   })
 }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useQueries } from "@tanstack/react-query"
-import { ArrowLeft, ArrowRight, ArrowUpDown, BookOpenText, ChevronDown, Lightbulb, Plus, Settings2, Video } from "lucide-react"
+import { ArrowLeft, ArrowRight, ArrowUpDown, BookOpenText, ChevronDown, Lightbulb, Plus, Settings2, Trash2, Video } from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 
 import { listAuditLogEvents, type AuditLogEvent } from "@/ui/api/auditLog"
@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
 import { buildProjectSettingsPath, buildProjectWorkbenchPath } from "@/ui/projectPaths"
-import { useCreateSubjectMaterial, useSubjectMaterials, useSubjects } from "@/ui/queries/subjects"
+import { useCreateSubjectMaterial, useDeleteSubjectMaterial, useSubjectMaterials, useSubjects } from "@/ui/queries/subjects"
 import { useAppStore } from "@/ui/store/appStore"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { describeStudyMaterialHint, formatStudyMaterialTypeLabel } from "@/ui/subjects/studyMaterials"
@@ -44,14 +44,66 @@ function getMaterialLastStudyAt(events: AuditLogEvent[] | undefined) {
   return latest
 }
 
+function formatLastStudyText(occurredAt: string | null) {
+  if (!occurredAt) {
+    return {
+      text: "还未开始学习",
+      className: "text-muted-foreground",
+    }
+  }
+
+  const dt = new Date(occurredAt)
+  if (Number.isNaN(dt.getTime())) {
+    return {
+      text: "学习时间未知",
+      className: "text-muted-foreground",
+    }
+  }
+
+  const now = new Date()
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const targetStart = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate())
+  const dayDiff = Math.max(0, Math.floor((todayStart.getTime() - targetStart.getTime()) / 86_400_000))
+
+  if (dayDiff === 0) {
+    return {
+      text: "今天已学习",
+      className: "text-primary",
+    }
+  }
+
+  if (dayDiff === 1) {
+    return {
+      text: "昨天学习过",
+      className: "text-[color:var(--theme-subtle-text)]",
+    }
+  }
+
+  if (dayDiff <= 7) {
+    return {
+      text: `上次学习 ${dayDiff} 天前`,
+      className: "text-[color:var(--theme-subtle-text)]",
+    }
+  }
+
+  return {
+    text: `已 ${dayDiff} 天未学习`,
+    className: "text-[color:var(--theme-warm-text)]",
+  }
+}
+
 export function SubjectDashboardPage() {
   const { subjectId = "" } = useParams()
   const navigate = useNavigate()
   const subjectsQ = useSubjects(Boolean(subjectId))
   const materialsQ = useSubjectMaterials(subjectId)
   const createMaterialM = useCreateSubjectMaterial()
+  const deleteMaterialM = useDeleteSubjectMaterial()
   const setSelectedProjectId = useAppStore((state) => state.setSelectedProjectId)
+  const removeRecentProjectId = useAppStore((state) => state.removeRecentProjectId)
   const [createOpen, setCreateOpen] = useState(false)
+  const [deleteMaterialTarget, setDeleteMaterialTarget] = useState<StudyMaterial | null>(null)
+  const [deleteMaterialConfirmation, setDeleteMaterialConfirmation] = useState("")
   const [sortMode, setSortMode] = useState<MaterialSortMode>("recent")
   const [draftType, setDraftType] = useState<StudyMaterialType | null>(null)
   const [draftTitle, setDraftTitle] = useState("")
@@ -63,6 +115,8 @@ export function SubjectDashboardPage() {
   const subjectTitle = subject?.title ?? "当前学科"
   const subjectProjectId = subject?.subjectProjectId ?? subjectId
   const materials = useMemo(() => materialsQ.data ?? [], [materialsQ.data])
+  const deleteMaterialExpectedText = deleteMaterialTarget?.title ?? ""
+  const deleteMaterialMatches = deleteMaterialConfirmation.trim() === deleteMaterialExpectedText
   const materialActivityQs = useQueries({
     queries: materials.map((material) => ({
       queryKey: ["auditLogEvents", material.projectId ?? material.materialId],
@@ -134,6 +188,19 @@ export function SubjectDashboardPage() {
     setDraftTitle("")
   }
 
+  function openDeleteMaterialDialog(material: StudyMaterial) {
+    deleteMaterialM.reset()
+    setDeleteMaterialTarget(material)
+    setDeleteMaterialConfirmation("")
+  }
+
+  function closeDeleteMaterialDialog() {
+    if (deleteMaterialM.isPending) return
+    deleteMaterialM.reset()
+    setDeleteMaterialTarget(null)
+    setDeleteMaterialConfirmation("")
+  }
+
   async function createMaterial() {
     if (!subjectId || !draftType) return
     const title = draftTitle.trim()
@@ -156,6 +223,22 @@ export function SubjectDashboardPage() {
         ? buildProjectSettingsPath(projectId, { subjectProjectId })
         : buildProjectWorkbenchPath(projectId),
     )
+  }
+
+  async function deleteMaterial() {
+    if (!subjectId || !deleteMaterialTarget || !deleteMaterialMatches) return
+    const projectId = deleteMaterialTarget.projectId
+    try {
+      await deleteMaterialM.mutateAsync({ subjectId, materialId: deleteMaterialTarget.materialId })
+      if (projectId) {
+        removeRecentProjectId(projectId)
+      }
+      setSelectedProjectId(subjectProjectId)
+      showSuccessFeedback("项目已删除", `“${deleteMaterialTarget.title}” 已从“${subjectTitle}”下移除。`)
+      closeDeleteMaterialDialog()
+    } catch (err) {
+      showErrorFeedback("删除项目失败", formatApiError(err))
+    }
   }
 
   if (!subjectId) {
@@ -217,6 +300,10 @@ export function SubjectDashboardPage() {
           {sortedMaterials.map((material) => {
             const Icon = materialIconByType[material.materialType]
             const active = material.projectId === subjectProjectId
+            const canDeleteMaterial = Boolean(material.projectId && material.projectId !== subjectProjectId)
+            const materialActivityIndex = materials.findIndex((item) => item.materialId === material.materialId)
+            const materialActivityLoading = material.projectId ? Boolean(materialActivityQs[materialActivityIndex]?.isLoading) : false
+            const lastStudyDisplay = formatLastStudyText(lastStudyByMaterialId[material.materialId] ?? null)
             return (
               <Card
                 key={material.materialId}
@@ -233,11 +320,27 @@ export function SubjectDashboardPage() {
                       </div>
                       <div className="min-w-0">
                         <CardTitle className="truncate text-lg">{material.title}</CardTitle>
-                        <CardDescription className="mt-1 text-xs">
+                        <CardDescription className="mt-1 flex flex-wrap items-center gap-2 text-xs">
                           <span className="theme-meta-strong">{formatStudyMaterialTypeLabel(material.materialType)}</span>
+                          <span className={cn("font-medium", materialActivityLoading ? "text-muted-foreground" : lastStudyDisplay.className)}>
+                            {materialActivityLoading ? "学习记录载入中" : lastStudyDisplay.text}
+                          </span>
                         </CardDescription>
                       </div>
                     </div>
+                    {canDeleteMaterial ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9 shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                        aria-label={`删除项目 ${material.title}`}
+                        disabled={deleteMaterialM.isPending}
+                        onClick={() => openDeleteMaterialDialog(material)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    ) : null}
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -322,6 +425,52 @@ export function SubjectDashboardPage() {
             </Button>
           </DialogFooter>
           {createMaterialM.error ? <p className="text-sm text-destructive">{formatApiError(createMaterialM.error)}</p> : null}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(deleteMaterialTarget)} onOpenChange={(open) => (!open ? closeDeleteMaterialDialog() : null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>删除项目</DialogTitle>
+            <DialogDescription>
+              {deleteMaterialTarget
+                ? `这会移除“${deleteMaterialTarget.title}”和它的工作台，学科“${subjectTitle}”以及其他项目会保留。`
+                : "确认是否删除当前项目。"}
+            </DialogDescription>
+          </DialogHeader>
+          {deleteMaterialTarget ? (
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-destructive/15 bg-destructive/5 px-4 py-4">
+                <div className="space-y-1.5">
+                  <div className="text-sm font-semibold text-foreground">{deleteMaterialTarget.title}</div>
+                  <div className="text-xs text-muted-foreground">{formatStudyMaterialTypeLabel(deleteMaterialTarget.materialType)}</div>
+                </div>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="delete-material-confirmation">输入项目名称以确认删除</Label>
+                <Input
+                  id="delete-material-confirmation"
+                  value={deleteMaterialConfirmation}
+                  onChange={(event) => setDeleteMaterialConfirmation(event.target.value)}
+                  placeholder="删除前请确认这个项目没有需要保留的内容、草稿或工作流入口。"
+                  autoFocus
+                />
+                <p className="text-xs text-muted-foreground">
+                  请输入 <span className="font-semibold text-foreground">{deleteMaterialExpectedText}</span> 完成确认。
+                </p>
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button variant="secondary" onClick={closeDeleteMaterialDialog} disabled={deleteMaterialM.isPending}>
+              取消
+            </Button>
+            <Button variant="destructive" onClick={() => void deleteMaterial()} disabled={deleteMaterialM.isPending || !deleteMaterialMatches}>
+              {deleteMaterialM.isPending ? "删除中..." : "确认删除"}
+            </Button>
+          </DialogFooter>
+          {deleteMaterialM.error ? <p className="text-sm text-destructive">{formatApiError(deleteMaterialM.error)}</p> : null}
         </DialogContent>
       </Dialog>
     </div>

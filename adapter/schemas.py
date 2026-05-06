@@ -92,6 +92,7 @@ class CreateCommissionWithdrawalRequest(BaseModel):
 class StartWeChatPayoutBindingRequest(BaseModel):
     channel: str = Field(default="desktop_qr_official_account_h5", min_length=1, max_length=64)
     returnUrl: str = Field(min_length=1, max_length=2048)
+    amountCent: int = Field(default=0, ge=0)
 
 
 class CompleteWeChatPayoutBindingRequest(BaseModel):

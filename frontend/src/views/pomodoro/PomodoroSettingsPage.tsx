@@ -366,8 +366,7 @@ export function PomodoroSettingsPage() {
           </Link>
         </Button>
         <div>
-          <div className="text-sm font-medium text-muted-foreground">番茄钟设置</div>
-          <h1 className="mt-1 text-2xl font-semibold tracking-[-0.03em] text-foreground">默认提示词</h1>
+          <h1 className="mt-1 text-2xl font-semibold tracking-[-0.03em] text-foreground">番茄钟设置</h1>
         </div>
       </section>
 
@@ -375,9 +374,6 @@ export function PomodoroSettingsPage() {
         <div className="space-y-4 border-b border-border/60 pb-6">
           <div>
             <h2 className="text-lg font-semibold text-foreground">本地资源</h2>
-            <p className="mt-1 text-sm leading-6 text-muted-foreground">
-              管理只保存在当前浏览器里的休息音乐目录和番茄钟页壁纸。
-            </p>
           </div>
 
           <div className="rounded-xl border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] p-4">
@@ -394,9 +390,6 @@ export function PomodoroSettingsPage() {
                 </div>
                 <div className="mt-2 break-all text-sm text-muted-foreground">
                   {restMusicDirectory.handleName || "还没有绑定本地音乐目录。"}
-                </div>
-                <div className="mt-1 text-xs leading-6 text-[color:var(--theme-subtle-text)]">
-                  这个目录属于本地浏览器授权，音乐文件不会上传到服务端。
                 </div>
                 {restMusicDirectory.error ? (
                   <div className="mt-2 text-sm text-destructive">{restMusicDirectory.error}</div>
@@ -472,9 +465,6 @@ export function PomodoroSettingsPage() {
                     {wallpaperUrl ? "已设置" : "未设置"}
                   </span>
                 </div>
-                <div className="mt-2 text-sm leading-6 text-muted-foreground">
-                  壁纸只保存在当前浏览器，不会上传服务器，也不会影响其他页面。
-                </div>
                 {wallpaperUrl ? (
                   <div
                     className="mt-3 h-24 w-full max-w-xs rounded-xl border border-[color:var(--theme-soft-border)] bg-cover bg-center"
@@ -510,9 +500,6 @@ export function PomodoroSettingsPage() {
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold text-foreground">随机微休息</h2>
-              <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                只在番茄钟学习阶段的视频全屏中生效，默认关闭。
-              </p>
             </div>
             <label className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-lg border border-[color:var(--theme-soft-border)] px-3 py-2 text-sm font-medium">
               <input

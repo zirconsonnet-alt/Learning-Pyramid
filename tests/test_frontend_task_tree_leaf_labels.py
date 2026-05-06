@@ -5,6 +5,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 TASK_TREE_PAGE = REPO_ROOT / "frontend" / "src" / "views" / "trees" / "TaskTreePage.tsx"
 TASK_TREE_CANVAS = REPO_ROOT / "frontend" / "src" / "views" / "trees" / "components" / "LearningTaskTreeCanvas.tsx"
 AI_CHAT_PAGE = REPO_ROOT / "frontend" / "src" / "views" / "ai" / "AiChatPage.tsx"
+LEARNING_TASK_NODE_PAGE = REPO_ROOT / "frontend" / "src" / "views" / "learningTasks" / "LearningTaskNodePage.tsx"
 
 
 def test_task_tree_leaf_nodes_do_not_render_leaf_label() -> None:
@@ -43,3 +44,12 @@ def test_ai_chat_task_sidebar_uses_display_children_for_object_mirror_edges() ->
     assert "node.displayChildNodeIds ?? node.children" in page_source
     assert "displayParentById[childId] = node.nodeId" in page_source
     assert "displayParentById[node.nodeId] ?? node.parentId" in page_source
+
+
+def test_learning_task_node_detail_uses_display_children_count_and_no_helper_copy() -> None:
+    page_source = LEARNING_TASK_NODE_PAGE.read_text(encoding="utf-8")
+
+    assert "getLearningTaskNodeDisplayChildIds(nodeQ.data)" in page_source
+    assert "node.displayChildNodeIds ?? node.children" in page_source
+    assert "nodeQ.data.children.length" not in page_source
+    assert "先确认这个聚合节点覆盖的规模，再继续查看下方的复述点。" not in page_source
