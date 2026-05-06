@@ -39,7 +39,10 @@ def test_task_tree_uses_only_real_children_for_edges() -> None:
 
     assert "getTaskTreeChildIds(node)" in page_source
     assert "childIdsByParentId" in page_source
-    assert "Array.from(new Set([...getTaskTreeChildIds(node), ...(childIdsByParentId[node.nodeId] ?? [])]))" in page_source
+    assert "appendVisualChild(event.parentNodeId, childNodeId)" in page_source
+    assert "nodeIdsWithVisualParent" in page_source
+    assert "const childIds = node.kind === \"container\" ? (childIdsByParentId[node.nodeId] ?? []) : []" in page_source
+    assert ".filter((node) => !nodeIdsWithVisualParent.has(node.nodeId))" in page_source
     assert "displayChildNodeIds" not in api_source
     assert "displayChildNodeIds" not in page_source
     assert "return node.children" in page_source

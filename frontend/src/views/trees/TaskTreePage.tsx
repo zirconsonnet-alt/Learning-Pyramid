@@ -121,24 +121,38 @@ export function TaskTreePage() {
     const rawNodeById: Record<string, LearningTaskNode> = {}
     const eventByParentId: Record<string, AggregationEvent> = {}
     const childIdsByParentId: Record<string, string[]> = {}
+    const nodeIdsWithVisualParent = new Set<string>()
+
+    function appendVisualChild(parentId: string, childId: string) {
+      if (!rawNodeById[parentId] || !rawNodeById[childId]) return
+      childIdsByParentId[parentId] ??= []
+      if (!childIdsByParentId[parentId].includes(childId)) {
+        childIdsByParentId[parentId].push(childId)
+      }
+      nodeIdsWithVisualParent.add(childId)
+    }
 
     for (const node of rawNodes) {
       rawNodeById[node.nodeId] = node
-      if (node.parentId) {
-        childIdsByParentId[node.parentId] ??= []
-        childIdsByParentId[node.parentId].push(node.nodeId)
+    }
+    for (const node of rawNodes) {
+      if (node.kind === "container") {
+        for (const childId of getTaskTreeChildIds(node)) appendVisualChild(node.nodeId, childId)
       }
+      if (node.parentId) appendVisualChild(node.parentId, node.nodeId)
     }
     for (const event of events) {
       eventByParentId[event.parentNodeId] = event
+      for (const childNodeId of event.childNodeIds) appendVisualChild(event.parentNodeId, childNodeId)
     }
 
     const layerById = deriveTaskNodeLayers(rawNodes, events)
     const descendantCountById: Record<string, number> = {}
 
-    function countLeafDescendants(nodeId: string): number {
+    function countLeafDescendants(nodeId: string, visiting = new Set<string>()): number {
       const cached = descendantCountById[nodeId]
       if (cached !== undefined) return cached
+      if (visiting.has(nodeId)) return 0
 
       const node = rawNodeById[nodeId]
       if (!node) return 0
@@ -147,7 +161,12 @@ export function TaskTreePage() {
         return 1
       }
 
-      const total = getTaskTreeChildIds(node).reduce((sum, childId) => sum + countLeafDescendants(childId), 0)
+      visiting.add(nodeId)
+      const total = (childIdsByParentId[node.nodeId] ?? []).reduce(
+        (sum, childId) => sum + countLeafDescendants(childId, visiting),
+        0,
+      )
+      visiting.delete(nodeId)
       descendantCountById[nodeId] = total
       return total
     }
@@ -160,10 +179,7 @@ export function TaskTreePage() {
       const layerIndex = layerById[node.nodeId] ?? 0
       const uiType = classifyTaskNode(node, eventByParentId[node.nodeId])
       const taskSpan = descendantCountById[node.nodeId] ?? 0
-      const childIds =
-        node.kind === "container"
-          ? Array.from(new Set([...getTaskTreeChildIds(node), ...(childIdsByParentId[node.nodeId] ?? [])]))
-          : []
+      const childIds = node.kind === "container" ? (childIdsByParentId[node.nodeId] ?? []) : []
       const childCount = node.kind === "container" ? childIds.length : 0
 
       map[node.nodeId] = {
@@ -185,7 +201,7 @@ export function TaskTreePage() {
     }
 
     const roots = rawNodes
-      .filter((node) => node.parentId === null)
+      .filter((node) => !nodeIdsWithVisualParent.has(node.nodeId))
       .map((node) => node.nodeId)
       .sort((a, b) => a.localeCompare(b))
 
