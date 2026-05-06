@@ -1,6 +1,7 @@
 from dataclasses import replace
 from datetime import timedelta
 import os
+import re
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -2219,6 +2220,41 @@ class _SpecAlignmentBackendMixin:
         next_head, next_queue = api.get_queue(project_id)
         self.assertIsNone(next_head)
         self.assertEqual(next_queue, tuple())
+
+
+def test_retired_compatibility_project_fields_only_remain_in_legacy_fallbacks() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    allowed_locations = {
+        Path("backend/system/persistence_json.py"),
+        Path("tests/test_frontend_llm_settings_location.py"),
+        Path("tests/test_frontend_project_settings_layout.py"),
+        Path("tests/test_frontend_subject_project_copy.py"),
+        Path("tests/test_subjects_api.py"),
+        Path("tests/test_runtime_backup_restore.py"),
+        Path("tests/test_spec_alignment.py"),
+    }
+    retired_pattern = re.compile(r"compatibilityProjectId|compatibility_project_id")
+    frontend_text_extensions = {".css", ".html", ".js", ".jsx", ".json", ".md", ".ts", ".tsx"}
+
+    for relative_path in sorted((repo_root / "backend").rglob("*.py")):
+        _assert_retired_field_usage_allowed(relative_path.relative_to(repo_root), retired_pattern, allowed_locations)
+    for relative_path in sorted((repo_root / "adapter").rglob("*.py")):
+        _assert_retired_field_usage_allowed(relative_path.relative_to(repo_root), retired_pattern, allowed_locations)
+    for relative_path in sorted((repo_root / "frontend" / "src").rglob("*")):
+        if relative_path.is_file() and relative_path.suffix in frontend_text_extensions:
+            _assert_retired_field_usage_allowed(relative_path.relative_to(repo_root), retired_pattern, allowed_locations)
+    for relative_path in sorted((repo_root / "tests").rglob("*.py")):
+        _assert_retired_field_usage_allowed(relative_path.relative_to(repo_root), retired_pattern, allowed_locations)
+
+
+def _assert_retired_field_usage_allowed(
+    relative_path: Path, retired_pattern: re.Pattern[str], allowed_locations: set[Path]
+) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    text = (repo_root / relative_path).read_text(encoding="utf-8")
+    if not retired_pattern.search(text):
+        return
+    assert relative_path in allowed_locations, f"Retired compatibility field leaked into {relative_path.as_posix()}"
 
 
 class TestSpecAlignmentJson(_SpecAlignmentBackendMixin, unittest.TestCase):

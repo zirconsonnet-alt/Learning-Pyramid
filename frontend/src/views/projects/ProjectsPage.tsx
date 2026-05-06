@@ -110,7 +110,7 @@ export function ProjectsPage() {
   const setSelectedProjectId = useAppStore((s) => s.setSelectedProjectId)
   const removeRecentProjectId = useAppStore((s) => s.removeRecentProjectId)
 
-  const subjects = data ?? []
+  const subjects = useMemo(() => data ?? [], [data])
   const dataSafety = useQuery({
     queryKey: ["systemDataSafety"],
     queryFn: () => getSystemDataSafetyStatus(),
@@ -128,8 +128,8 @@ export function ProjectsPage() {
   const deleteMatches = deleteConfirmation.trim() === deleteExpectedText
   const projectActivityQs = useQueries({
     queries: subjects.map((subject) => ({
-      queryKey: ["auditLogEvents", subject.compatibilityProjectId],
-      queryFn: () => listAuditLogEvents(subject.compatibilityProjectId),
+      queryKey: ["auditLogEvents", subject.subjectProjectId],
+      queryFn: () => listAuditLogEvents(subject.subjectProjectId),
       enabled: !isLoading && !error,
       staleTime: 60_000,
       refetchInterval: 60_000,
@@ -203,7 +203,7 @@ export function ProjectsPage() {
         title: t,
       })
       setTitle("")
-      setSelectedProjectId(res.compatibilityProjectId)
+      setSelectedProjectId(res.subjectProjectId)
       setCreateOpen(false)
       showSuccessFeedback("学科已创建", `“${t}” 已准备好。先在项目中心里选择或创建项目。`)
       nav(`/subjects/${res.subjectId}`)
@@ -228,7 +228,7 @@ export function ProjectsPage() {
   }
 
   function openSubject(subject: Subject, target: "dashboard" | "settings") {
-    const projectId = subject.compatibilityProjectId
+    const projectId = subject.subjectProjectId
     setSelectedProjectId(projectId)
     nav(target === "dashboard" ? `/subjects/${subject.subjectId}` : `/p/${projectId}/settings`)
   }

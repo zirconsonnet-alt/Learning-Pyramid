@@ -19,4 +19,4 @@ class StudyMaterial:
     material_type: StudyMaterialType
     title: str
     created_at: Timestamp
-    compatibility_project_id: ProjectId | None = None
+    project_id: ProjectId | None = None

@@ -7,6 +7,7 @@ import { useFeedbackStore } from "@/ui/store/feedbackStore"
 import { useGlobalConfigStore } from "@/ui/store/globalConfigStore"
 import { useLearningPlanStore } from "@/ui/store/learningPlanStore"
 import { usePomodoroDailyReportStore } from "@/ui/store/pomodoroDailyReportStore"
+import { clearAllPomodoroActivityRecords } from "@/ui/store/pomodoroActivityStore"
 import { clearAllPlaybackResumeState } from "@/ui/store/playbackResume"
 import { usePomodoroStore } from "@/ui/store/pomodoroStore"
 import { clearAllStudyPresenceStats } from "@/ui/store/studyPresenceStore"
@@ -41,5 +42,6 @@ export function clearPersistedClientState() {
   clearAllPlaybackResumeState()
   clearAllVideoWatchCoverageState()
   clearAllDailyWorkbenchStats()
+  clearAllPomodoroActivityRecords()
   clearAllStudyPresenceStats()
 }

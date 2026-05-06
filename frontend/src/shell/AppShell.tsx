@@ -22,6 +22,7 @@ import { setPomodoroRestMusicPhaseActive } from "@/ui/pomodoroRestMusicPlayer"
 import { useGuideWalkthroughController } from "@/ui/guideWalkthrough/guideWalkthroughController"
 import { buildProjectSettingsPath } from "@/ui/projectPaths"
 import { useAppStore } from "@/ui/store/appStore"
+import { recordPomodoroActivity } from "@/ui/store/pomodoroActivityStore"
 import {
   formatPomodoroCountdown,
   getPomodoroSnapshot,
@@ -322,14 +323,15 @@ export function AppShell() {
   useLearningPlanRemoteSync(authEnabled && Boolean(currentUserQ.data?.userId), currentUserQ.data?.userId)
   const subjectsQ = useSubjects(canAccessApp && Boolean(routeSubjectId))
   const routeSubject = useMemo(
-    () => (subjectsQ.data ?? []).find((subject) => subject.subjectId === routeSubjectId || subject.compatibilityProjectId === routeSubjectId) ?? null,
+    () => (subjectsQ.data ?? []).find((subject) => subject.subjectId === routeSubjectId) ?? null,
     [routeSubjectId, subjectsQ.data],
   )
-  const routeScopedProjectId = routeSubjectId ? routeSubject?.compatibilityProjectId ?? "" : ""
+  const routeScopedProjectId = routeSubjectId ? routeSubject?.subjectProjectId ?? "" : ""
   const effectiveProjectId = pid || (routeSubjectId ? routeScopedProjectId : isProjectsScope ? "" : selectedProjectId || "")
   const subjectContextQ = useSubjectContext(effectiveProjectId, canAccessApp && Boolean(effectiveProjectId))
   const { projectTitle } = useProject(effectiveProjectId, { enabled: canAccessApp && Boolean(effectiveProjectId) })
   const projectsQ = useProjects(canAccessApp)
+  const allSubjectsQ = useSubjects(canAccessApp)
   const projectConfigQ = useProjectConfig(canAccessApp && effectiveProjectId ? effectiveProjectId : "")
   const logout = useLogout()
   const pomodoroEnabled = usePomodoroStore((state) => state.enabled)
@@ -343,12 +345,12 @@ export function AppShell() {
   const subjectTitle = subjectContextQ.data?.subject.title ?? fallbackSubjectTitle
   const fallbackMaterialTitle = projectTitle || pid || "当前项目"
   const currentMaterialTitle = subjectContextQ.data?.currentMaterial.title ?? fallbackMaterialTitle
-  const resolvedSubjectProjectId = subjectContextQ.data?.subjectProjectId ?? routeSubject?.compatibilityProjectId ?? ""
+  const resolvedSubjectProjectId = subjectContextQ.data?.subjectProjectId ?? routeSubject?.subjectProjectId ?? ""
   const currentProjectContextId = subjectContextQ.data?.currentProjectId ?? pid
   const isSubjectRoot = subjectContextQ.data?.isSubjectRoot ?? (!pid && Boolean(routeSubjectId))
   const isSubjectSettingsScope = isSubjectRoot && !location.pathname.includes("/project-settings")
   const currentMaterialProjectId =
-    subjectContextQ.data?.currentMaterial.compatibilityProjectId ?? (!isSubjectRoot ? currentProjectContextId : "")
+    subjectContextQ.data?.currentMaterial.projectId ?? (!isSubjectRoot ? currentProjectContextId : "")
   const isSubjectDashboardScope = Boolean(routeSubjectId) && !pid
   const hasSubjectContext = Boolean(resolvedSubjectId && resolvedSubjectProjectId)
   const hasProjectContext = Boolean(hasSubjectContext && currentMaterialProjectId && !isSubjectDashboardScope)
@@ -371,6 +373,8 @@ export function AppShell() {
   const accountMenuRef = useRef<HTMLDivElement | null>(null)
   const accountMenuButtonRef = useRef<HTMLButtonElement | null>(null)
   const pomodoroAutoJumpKeyRef = useRef("")
+  const completedPomodoroSegmentKeyRef = useRef("")
+  const previousPomodoroSnapshotRef = useRef<typeof pomodoroSnapshot | null>(null)
   const previousLocationRef = useRef(locationToken)
   const includeObjectTree = projectTypeRequiresLearningObjectTree(
     subjectContextQ.data?.currentMaterial.materialType ?? projectConfigQ.data?.projectType ?? "COURSE",
@@ -408,17 +412,25 @@ export function AppShell() {
       getPomodoroUpcomingSegmentPreview({ enabled: pomodoroEnabled, weeklySchedule: pomodoroWeeklySchedule, quickPomodoro: pomodoroQuickPomodoro }, pomodoroNow),
     [pomodoroEnabled, pomodoroNow, pomodoroQuickPomodoro, pomodoroWeeklySchedule],
   )
+  const subjectRootProjectIds = useMemo(
+    () => new Set((allSubjectsQ.data ?? []).map((subject) => subject.subjectProjectId).filter(Boolean)),
+    [allSubjectsQ.data],
+  )
+  const pomodoroAccessibleProjects = useMemo(
+    () => (projectsQ.data ?? []).filter((project) => !subjectRootProjectIds.has(project.projectId)),
+    [projectsQ.data, subjectRootProjectIds],
+  )
   const accessibleProjectIds = useMemo(
-    () => new Set((projectsQ.data ?? []).map((project) => project.projectId)),
-    [projectsQ.data],
+    () => new Set(pomodoroAccessibleProjects.map((project) => project.projectId)),
+    [pomodoroAccessibleProjects],
   )
   const pomodoroFocusProjectId =
     pomodoroSnapshot.currentProjectId && accessibleProjectIds.has(pomodoroSnapshot.currentProjectId)
       ? pomodoroSnapshot.currentProjectId
       : ""
   const focusProjectTitle =
-    pomodoroFocusProjectId && projectsQ.data
-      ? projectsQ.data.find((project) => project.projectId === pomodoroFocusProjectId)?.title ?? ""
+    pomodoroFocusProjectId
+      ? pomodoroAccessibleProjects.find((project) => project.projectId === pomodoroFocusProjectId)?.title ?? ""
       : ""
   const upcomingJumpProjectId =
     pomodoroUpcomingSegment?.phase === "focus" &&
@@ -427,8 +439,8 @@ export function AppShell() {
       ? pomodoroUpcomingSegment.projectId
       : ""
   const upcomingJumpProjectTitle =
-    upcomingJumpProjectId && projectsQ.data
-      ? projectsQ.data.find((project) => project.projectId === upcomingJumpProjectId)?.title ?? ""
+    upcomingJumpProjectId
+      ? pomodoroAccessibleProjects.find((project) => project.projectId === upcomingJumpProjectId)?.title ?? ""
       : ""
   const upcomingJumpPath = upcomingJumpProjectId ? `/p/${upcomingJumpProjectId}/workbench` : ""
   const shouldShowPomodoroPreJumpNotice =
@@ -453,6 +465,36 @@ export function AppShell() {
       pomodoroSnapshot.status === "running" && pomodoroSnapshot.phase === "break",
     )
   }, [pomodoroSnapshot.phase, pomodoroSnapshot.status])
+  useEffect(() => {
+    const previousSnapshot = previousPomodoroSnapshotRef.current
+    previousPomodoroSnapshotRef.current = pomodoroSnapshot
+    if (!previousSnapshot?.currentPlan || previousSnapshot.startAtMs === null || !previousSnapshot.segment) return
+    if (previousSnapshot.status !== "running" || previousSnapshot.phase !== "focus") return
+
+    const focusEndAtMs = previousSnapshot.startAtMs + previousSnapshot.segment.endOffsetMs
+    if (pomodoroNow < focusEndAtMs) return
+
+    const pomodoroIndex = previousSnapshot.segment.pomodoroIndex
+    const startAtMs = previousSnapshot.startAtMs + previousSnapshot.segment.startOffsetMs
+    const endAtMs = focusEndAtMs
+    const completedSegmentKey = `${previousSnapshot.currentPlan.id}:${previousSnapshot.currentPlanIndex}:${pomodoroIndex}:${startAtMs}:${endAtMs}`
+    if (completedPomodoroSegmentKeyRef.current === completedSegmentKey) return
+    completedPomodoroSegmentKeyRef.current = completedSegmentKey
+    const completedProjectId =
+      previousSnapshot.segment.projectId && accessibleProjectIds.has(previousSnapshot.segment.projectId)
+        ? previousSnapshot.segment.projectId
+        : accessibleProjectIds.has(previousSnapshot.currentPlan.projectIds[pomodoroIndex - 1] ?? "")
+          ? previousSnapshot.currentPlan.projectIds[pomodoroIndex - 1] ?? null
+          : null
+    recordPomodoroActivity({
+      planId: previousSnapshot.currentPlan.id,
+      planIndex: previousSnapshot.currentPlanIndex,
+      pomodoroIndex,
+      projectId: completedProjectId,
+      startAtMs,
+      endAtMs,
+    })
+  }, [accessibleProjectIds, pomodoroNow, pomodoroSnapshot])
   usePomodoroPreTransitionSpeech(
     pomodoroUpcomingSegment &&
       pomodoroUpcomingSegment.startsInMs > 0 &&

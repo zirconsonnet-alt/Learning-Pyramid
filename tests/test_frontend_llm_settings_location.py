@@ -4,6 +4,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GLOBAL_SETTINGS_PAGE = REPO_ROOT / "frontend" / "src" / "views" / "settings" / "GlobalSettingsPage.tsx"
 PROJECT_SETTINGS_PAGE = REPO_ROOT / "frontend" / "src" / "views" / "settings" / "ProjectSettingsPage.tsx"
+APP_SHELL = REPO_ROOT / "frontend" / "src" / "shell" / "AppShell.tsx"
 AI_CHAT_PAGE = REPO_ROOT / "frontend" / "src" / "views" / "ai" / "AiChatPage.tsx"
 MEMBERSHIP_UI = REPO_ROOT / "frontend" / "src" / "views" / "membership" / "membershipUi.tsx"
 HTTP_API = REPO_ROOT / "frontend" / "src" / "ui" / "api" / "http.ts"
@@ -13,6 +14,8 @@ ADMIN_QUERIES = REPO_ROOT / "frontend" / "src" / "ui" / "queries" / "admin.ts"
 ADMIN_MEMBERSHIP_PAGE = REPO_ROOT / "frontend" / "src" / "views" / "admin" / "AdminMembershipPage.tsx"
 LLM_SETTINGS_CARDS = REPO_ROOT / "frontend" / "src" / "views" / "settings" / "components" / "LlmSettingsCards.tsx"
 PROJECTS_PAGE = REPO_ROOT / "frontend" / "src" / "views" / "projects" / "ProjectsPage.tsx"
+SUBJECTS_API = REPO_ROOT / "frontend" / "src" / "ui" / "api" / "subjects.ts"
+SUBJECT_DASHBOARD_PAGE = REPO_ROOT / "frontend" / "src" / "views" / "subjects" / "SubjectDashboardPage.tsx"
 
 
 def test_llm_settings_live_in_global_settings_below_access_center() -> None:
@@ -177,6 +180,39 @@ def test_new_subject_creation_no_longer_applies_global_review_template() -> None
     assert "defaultProjectReviewTemplate" not in projects_source
     assert "setLayerConfig(res.compatibilityProjectId, 0" not in projects_source
     assert "默认复习模板未自动套用" not in projects_source
+
+
+def test_subject_project_contract_no_longer_exposes_compatibility_project_id() -> None:
+    checked_sources = [
+        SUBJECTS_API,
+        APP_SHELL,
+        PROJECTS_PAGE,
+        SUBJECT_DASHBOARD_PAGE,
+        PROJECT_SETTINGS_PAGE,
+        REPO_ROOT / "frontend" / "src" / "views" / "pomodoro" / "PomodoroPage.tsx",
+        REPO_ROOT / "frontend" / "src" / "views" / "pomodoro" / "PomodoroWorkbenchGate.tsx",
+    ]
+
+    for source_path in checked_sources:
+        source = source_path.read_text(encoding="utf-8")
+        assert "compatibilityProjectId" not in source
+
+    subjects_api_source = SUBJECTS_API.read_text(encoding="utf-8")
+    assert "subjectProjectId: z.string()" in subjects_api_source
+    assert "projectId: z.string().nullable()" in subjects_api_source
+    assert "const CreateSubjectResultSchema = z.object({" in subjects_api_source
+
+    projects_source = PROJECTS_PAGE.read_text(encoding="utf-8")
+    assert "subject.subjectProjectId" in projects_source
+    assert "res.subjectProjectId" in projects_source
+
+    subject_dashboard_source = SUBJECT_DASHBOARD_PAGE.read_text(encoding="utf-8")
+    assert "subject?.subjectProjectId" in subject_dashboard_source
+    assert "material.projectId" in subject_dashboard_source
+
+    app_shell_source = APP_SHELL.read_text(encoding="utf-8")
+    assert "routeSubject?.subjectProjectId" in app_shell_source
+    assert "subjectContextQ.data?.currentMaterial.projectId" in app_shell_source
 
 
 def test_global_theme_card_removes_legacy_location_description() -> None:

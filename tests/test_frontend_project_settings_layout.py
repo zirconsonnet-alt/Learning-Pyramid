@@ -59,3 +59,13 @@ def test_project_settings_keeps_delete_button_for_default_project_scope() -> Non
     assert "const showDangerZone = deleteActionRemovesSubject || canDeleteCurrentMaterial" in source
     assert 'actionLabel={deleteActionRemovesSubject ? "删除学科" : "删除当前项目"}' in source
     assert 'confirmationLabel={deleteActionRemovesSubject ? "输入学科标题以确认删除" : "输入项目名称以确认删除"}' in source
+
+
+def test_project_settings_uses_clean_subject_project_copy_and_project_id() -> None:
+    source = PROJECT_SETTINGS_PAGE.read_text(encoding="utf-8")
+
+    assert "兼容入口" not in source
+    assert "兼容工作台" not in source
+    assert "compatibilityProjectId" not in source
+    assert "material.projectId" in source
+    assert "currentMaterial.projectId !== subjectProjectId" in source

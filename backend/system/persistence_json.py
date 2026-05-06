@@ -163,20 +163,23 @@ def _encode_study_material(item: StudyMaterial) -> dict[str, Any]:
         "materialType": item.material_type.value,
         "title": item.title,
         "createdAtMs": _ts_to_ms(item.created_at),
-        "compatibilityProjectId": None if item.compatibility_project_id is None else str(item.compatibility_project_id),
+        "projectId": None if item.project_id is None else str(item.project_id),
     }
 
 
 def _decode_study_material(data: dict[str, Any]) -> StudyMaterial:
+    raw_project_id = (
+        data["projectId"]
+        if "projectId" in data
+        else data.get("compatibilityProjectId", data.get("compatibility_project_id"))
+    )
     return StudyMaterial(
         subject_id=ProjectId(str(data["subjectId"])),
         material_id=str(data["materialId"]),
         material_type=StudyMaterialType(str(data["materialType"])),
         title=str(data["title"]),
         created_at=_ms_to_ts(int(data["createdAtMs"])),
-        compatibility_project_id=(
-            None if data.get("compatibilityProjectId") is None else ProjectId(str(data["compatibilityProjectId"]))
-        ),
+        project_id=None if raw_project_id is None else ProjectId(str(raw_project_id)),
     )
 
 

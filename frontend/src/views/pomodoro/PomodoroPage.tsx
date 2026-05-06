@@ -24,11 +24,12 @@ import { useCurrentUser } from "@/ui/queries/auth"
 import { useMembershipSummary } from "@/ui/queries/membership"
 import { useProject, useProjects } from "@/ui/queries/projects"
 import { useUpdateMyGlobalSettings } from "@/ui/queries/profile"
+import { useSubjects } from "@/ui/queries/subjects"
 import { useSystemCapabilities } from "@/ui/queries/system"
 import { usePageMeta } from "@/ui/seo/usePageMeta"
 import { useAppStore } from "@/ui/store/appStore"
 import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
-import { usePomodoroDailyReportStore, type DailyReportDirection, type PomodoroDailyReport } from "@/ui/store/pomodoroDailyReportStore"
+import { listPomodoroActivityRecords, type PomodoroActivityRecord } from "@/ui/store/pomodoroActivityStore"
 import {
   POMODORO_WEEKDAYS,
   POMODORO_WEEKDAY_LABELS,
@@ -298,39 +299,28 @@ function formatShortDateKey(dateKey: string) {
   return month && day ? `${Number(month)}/${Number(day)}` : dateKey
 }
 
-function describeReportDirection(direction: DailyReportDirection) {
-  if (direction === "progress") return "进步"
-  if (direction === "regress") return "回落"
-  if (direction === "flat") return "持平"
-  return "未标记"
+function formatPomodoroActivityTime(ms: number) {
+  return new Intl.DateTimeFormat("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(ms)
 }
 
-function isMeaningfulPomodoroReport(report: PomodoroDailyReport) {
-  return report.focusScore > 0 || Boolean(report.direction) || Boolean(report.summary.trim()) || Boolean(report.adjustment.trim())
+function formatPomodoroActivityDuration(durationMs: number) {
+  const totalMinutes = Math.max(1, Math.round(durationMs / 60_000))
+  return `${totalMinutes} 分钟`
 }
 
-function getTodayPlanStartAtMs(date: Date, startTime: string) {
-  const [hours = "0", minutes = "0"] = normalizePomodoroStartTime(startTime).split(":")
-  const next = new Date(date)
-  next.setHours(Number(hours), Number(minutes), 0, 0)
-  return next.getTime()
-}
-
-function getTodayPomodoroStats(schedule: PomodoroWeekSchedule, now: number) {
+function getTodayScheduledPomodoroCount(schedule: PomodoroWeekSchedule, now: number) {
   const date = new Date(now)
   const weekday = POMODORO_WEEKDAYS[date.getDay() === 0 ? 6 : date.getDay() - 1]
   const plans = schedule[weekday]?.plans.filter((plan) => plan.enabled) ?? []
-  const total = plans.reduce((sum, plan) => sum + normalizeCountInput(String(plan.pomodoroCount), 4), 0)
-  const completed = plans.reduce((sum, plan) => {
-    const startAtMs = getTodayPlanStartAtMs(date, plan.startTime)
-    const focusMs = normalizeFocusInput(String(plan.focusMinutes), 25) * 60_000
-    const breakMs = normalizeBreakInput(String(plan.breakMinutes), 5) * 60_000
-    const count = normalizeCountInput(String(plan.pomodoroCount), 4)
-    const completedInPlan = Array.from({ length: count }, (_, index) => startAtMs + index * (focusMs + breakMs) + focusMs)
-      .filter((focusEndAtMs) => now >= focusEndAtMs).length
-    return sum + completedInPlan
-  }, 0)
-  const completionPercent = total > 0 ? Math.round((completed / total) * 100) : 0
+  return plans.reduce((sum, plan) => sum + normalizeCountInput(String(plan.pomodoroCount), 4), 0)
+}
+
+function getTodayPomodoroStats(records: PomodoroActivityRecord[], total: number) {
+  const completed = records.length
+  const completionPercent = total > 0 ? Math.min(100, Math.round((completed / total) * 100)) : completed > 0 ? 100 : 0
   return {
     completed,
     total,
@@ -529,6 +519,7 @@ export function PomodoroPage() {
   const selectedProjectId = useAppStore((state) => state.selectedProjectId)
   const { projectTitle: selectedProjectTitle } = useProject(selectedProjectId ?? "", { enabled: Boolean(selectedProjectId) })
   const projectsQ = useProjects(true)
+  const subjectsQ = useSubjects(true)
   const selectedTheme = useThemeStore((state) => state.theme)
   const enabled = usePomodoroStore((state) => state.enabled)
   const weeklySchedule = usePomodoroStore((state) => state.weeklySchedule)
@@ -547,8 +538,8 @@ export function PomodoroPage() {
   const [pomodoroOverviewMode, setPomodoroOverviewMode] = useState<"plans" | "stats">("plans")
   const [testingPromptKey, setTestingPromptKey] = useState("")
   const [wallpaperUrl, setWallpaperUrl] = useState("")
+  const [pomodoroActivityRecords, setPomodoroActivityRecords] = useState<PomodoroActivityRecord[]>(() => listPomodoroActivityRecords())
   const wallpaperObjectUrlRef = useRef("")
-  const reportsByDate = usePomodoroDailyReportStore((state) => state.reportsByDate)
 
   usePageMeta({
     title: activePlanId ? "番茄计划详情 | LearningPyramid" : "番茄钟 | LearningPyramid",
@@ -567,7 +558,18 @@ export function PomodoroPage() {
     () => new Map((projectsQ.data ?? []).map((project) => [project.projectId, project.title] as const)),
     [projectsQ.data],
   )
-  const availableProjects = projectsQ.data ?? []
+  const subjectRootProjectIds = useMemo(
+    () => new Set((subjectsQ.data ?? []).map((subject) => subject.subjectProjectId).filter(Boolean)),
+    [subjectsQ.data],
+  )
+  const availablePomodoroProjects = useMemo(
+    () => (projectsQ.data ?? []).filter((project) => !subjectRootProjectIds.has(project.projectId)),
+    [projectsQ.data, subjectRootProjectIds],
+  )
+  const validPomodoroProjectIds = useMemo(
+    () => new Set(availablePomodoroProjects.map((project) => project.projectId)),
+    [availablePomodoroProjects],
+  )
   const defaultPrompts = useMemo(
     () => ({ focusPrompt: defaultFocusPrompt, breakPrompt: defaultBreakPrompt }),
     [defaultBreakPrompt, defaultFocusPrompt],
@@ -596,7 +598,7 @@ export function PomodoroPage() {
         ? "小番茄进行中"
         : "新建小番茄"
   const isFocusRunning = snapshot.status === "running" && snapshot.phase === "focus"
-  const hasFocusProject = snapshot.currentProjectId ? projectTitleMap.has(snapshot.currentProjectId) : false
+  const hasFocusProject = Boolean(snapshot.currentProjectId && validPomodoroProjectIds.has(snapshot.currentProjectId))
   const focusProjectTitle =
     snapshot.currentProjectId && hasFocusProject ? projectTitleMap.get(snapshot.currentProjectId) ?? "" : ""
   const rememberedWorkbenchPath = fromPath.startsWith("/p/") && fromPath.includes("/workbench") ? fromPath : ""
@@ -615,6 +617,11 @@ export function PomodoroPage() {
   useEffect(() => {
     setPomodoroDrafts(toPomodoroPlanDrafts(weeklySchedule))
   }, [weeklySchedule])
+
+  useEffect(() => {
+    if (pomodoroOverviewMode !== "stats") return
+    setPomodoroActivityRecords(listPomodoroActivityRecords())
+  }, [pomodoroOverviewMode, now])
 
   useEffect(() => {
     let cancelled = false
@@ -644,31 +651,38 @@ export function PomodoroPage() {
   const enabledDayCount = draftActiveDays.length
   const activeDaySummary = formatActiveDaySummary(draftActiveDays)
   const enabledDraftCount = pomodoroDrafts.filter((draft) => draft.activeDays.length > 0).length
-  const enabledUnassignedPomodoros = POMODORO_WEEKDAYS.reduce(
-    (sum, day) =>
-      sum +
-      draftSchedule[day].plans.reduce(
-        (planSum, plan) => planSum + (plan.enabled ? plan.projectIds.filter((projectId) => !projectId).length : 0),
-        0,
+  const projectBindingMessages = useMemo(
+    () =>
+      pomodoroDrafts.flatMap((draft, draftIndex) =>
+        normalizeDraftProjectIds(draft.projectIds, normalizeCountInput(draft.pomodoroCount, 4)).flatMap((projectId, pomodoroIndex) => {
+          if (!projectId) return [`计划 ${draftIndex + 1} 的番茄 ${pomodoroIndex + 1} 还没有选择项目`]
+          if (subjectRootProjectIds.has(projectId)) return [`计划 ${draftIndex + 1} 的番茄 ${pomodoroIndex + 1} 不能直接选择学科`]
+          if (!validPomodoroProjectIds.has(projectId)) return [`计划 ${draftIndex + 1} 的番茄 ${pomodoroIndex + 1} 需要重新选择项目`]
+          return []
+        }),
       ),
-    0,
+    [pomodoroDrafts, subjectRootProjectIds, validPomodoroProjectIds],
   )
   const activePomodoroDraft = activePlanId ? pomodoroDrafts.find((draft) => draft.id === activePlanId) ?? null : null
   const activePomodoroDraftIndex = activePomodoroDraft ? pomodoroDrafts.findIndex((draft) => draft.id === activePomodoroDraft.id) : -1
-  const todayPomodoroStats = useMemo(() => getTodayPomodoroStats(draftSchedule, now), [draftSchedule, now])
-  const recentPomodoroReports = useMemo(
-    () =>
-      Object.values(reportsByDate)
-        .filter(isMeaningfulPomodoroReport)
-        .sort((left, right) => right.dateKey.localeCompare(left.dateKey))
-        .slice(0, 7),
-    [reportsByDate],
+  const todayDateKey = formatDateKey(now)
+  const todayPomodoroRecords = useMemo(
+    () => pomodoroActivityRecords.filter((record) => record.dateKey === todayDateKey),
+    [pomodoroActivityRecords, todayDateKey],
   )
-  const averageFocusScore = useMemo(() => {
-    const scoredReports = recentPomodoroReports.filter((report) => report.focusScore > 0)
-    if (scoredReports.length === 0) return 0
-    return Math.round((scoredReports.reduce((sum, report) => sum + report.focusScore, 0) / scoredReports.length) * 10) / 10
-  }, [recentPomodoroReports])
+  const todayScheduledPomodoroCount = useMemo(
+    () => getTodayScheduledPomodoroCount(draftSchedule, now),
+    [draftSchedule, now],
+  )
+  const todayPomodoroStats = useMemo(
+    () => getTodayPomodoroStats(todayPomodoroRecords, todayScheduledPomodoroCount),
+    [todayPomodoroRecords, todayScheduledPomodoroCount],
+  )
+  const todayPomodoroDurationMs = useMemo(
+    () => todayPomodoroRecords.reduce((sum, record) => sum + record.durationMs, 0),
+    [todayPomodoroRecords],
+  )
+  const recentPomodoroRecords = useMemo(() => pomodoroActivityRecords.slice(0, 7), [pomodoroActivityRecords])
 
   const headlineCountdown =
     snapshot.status === "running"
@@ -724,16 +738,16 @@ export function PomodoroPage() {
       showErrorFeedback("计划时间冲突", planConflictMessages.join("；"))
       return
     }
+    if (projectBindingMessages.length > 0) {
+      showErrorFeedback("番茄项目未选择完整", projectBindingMessages.join("；"))
+      return
+    }
     try {
       await persistPomodoroSettings({ weeklySchedule: draftSchedule })
       setSettings({ enabled, weeklySchedule: draftSchedule, transitionSoundEnabled, microBreaks })
       showSuccessFeedback(
         "番茄钟排程已保存",
-        enabledDayCount > 0
-          ? enabledUnassignedPomodoros > 0
-            ? `当前在${activeDaySummary}生效，但还有 ${enabledUnassignedPomodoros} 个番茄未绑定项目。`
-            : `当前在${activeDaySummary}生效。`
-          : "排程已保存，但还没有启用任何日期。",
+        enabledDayCount > 0 ? `当前在${activeDaySummary}生效。` : "排程已保存，但还没有启用任何日期。",
       )
     } catch (err) {
       showErrorFeedback("保存番茄钟排程失败", formatApiError(err))
@@ -743,6 +757,10 @@ export function PomodoroPage() {
   async function handleTogglePomodoro() {
     if (planConflictMessages.length > 0) {
       showErrorFeedback("计划时间冲突", planConflictMessages.join("；"))
+      return
+    }
+    if (projectBindingMessages.length > 0) {
+      showErrorFeedback("番茄项目未选择完整", projectBindingMessages.join("；"))
       return
     }
     const nextEnabled = !enabled
@@ -845,6 +863,11 @@ export function PomodoroPage() {
             {planConflictMessages.length > 0 ? (
               <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                 计划时间冲突：{planConflictMessages.join("；")}
+              </div>
+            ) : null}
+            {projectBindingMessages.length > 0 ? (
+              <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                番茄项目未选择完整：{projectBindingMessages.join("；")}
               </div>
             ) : null}
 
@@ -1041,13 +1064,14 @@ export function PomodoroPage() {
                       </div>
                     </div>
 
-                    {availableProjects.length === 0 && !projectsQ.isLoading ? (
-                      <div className="mt-3 text-sm text-muted-foreground">暂无可绑定项目</div>
+                    {availablePomodoroProjects.length === 0 && !projectsQ.isLoading ? (
+                      <div className="mt-3 text-sm text-muted-foreground">暂无可绑定项目。每个番茄必须绑定具体项目，不能直接选择学科。</div>
                     ) : null}
 
                     <div className="pomodoro-project-prompt-scroll flex flex-nowrap gap-3 overflow-x-auto pb-2">
                       {draftProjectIds.map((projectId, index) => {
                         const promptKey = `${pomodoroDraft.id}:focus:${index}`
+                        const projectSelectionInvalid = !projectId || subjectRootProjectIds.has(projectId) || !validPomodoroProjectIds.has(projectId)
                         return (
                           <div
                             key={`${pomodoroDraft.id}-project-${index}`}
@@ -1057,8 +1081,11 @@ export function PomodoroPage() {
                               <Label htmlFor={`pomodoro-project-${pomodoroDraft.id}-${index}`}>番茄 {index + 1}</Label>
                               <select
                                 id={`pomodoro-project-${pomodoroDraft.id}-${index}`}
-                                className="theme-select h-10 w-full rounded-xl px-3 text-sm"
-                                value={projectId ?? ""}
+                                className={cn(
+                                  "theme-select h-10 w-full rounded-xl px-3 text-sm",
+                                  projectSelectionInvalid ? "border-destructive/60 text-destructive focus-visible:ring-destructive" : "",
+                                )}
+                                value={projectId && validPomodoroProjectIds.has(projectId) ? projectId : ""}
                                 onChange={(event) =>
                                   updatePomodoroDraft(pomodoroDraft.id, (draft) => {
                                     const nextProjectIds = normalizeDraftProjectIds(
@@ -1073,13 +1100,16 @@ export function PomodoroPage() {
                                   })
                                 }
                               >
-                                <option value="">未指定项目</option>
-                                {availableProjects.map((project) => (
+                                <option value="">请选择项目（必选）</option>
+                                {availablePomodoroProjects.map((project) => (
                                   <option key={project.projectId} value={project.projectId}>
                                     {project.title}
                                   </option>
                                 ))}
                               </select>
+                              {projectSelectionInvalid ? (
+                                <div className="text-xs text-destructive">必须选择具体项目，不能直接选择学科。</div>
+                              ) : null}
                             </div>
 
                             <div className="space-y-2">
@@ -1166,7 +1196,7 @@ export function PomodoroPage() {
             {activePomodoroDraft ? (
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-5">
                 <div className="flex flex-wrap gap-3">
-                  <Button onClick={savePomodoroConfig} disabled={updateGlobalSettings.isPending || planConflictMessages.length > 0}>
+                  <Button onClick={savePomodoroConfig} disabled={updateGlobalSettings.isPending || planConflictMessages.length > 0 || projectBindingMessages.length > 0}>
                     <Save className="h-4 w-4" />
                     保存
                   </Button>
@@ -1208,7 +1238,7 @@ export function PomodoroPage() {
               <div className="text-3xl font-semibold tracking-[-0.04em] text-foreground sm:text-4xl">{headlineCountdown}</div>
             </div>
             <div className="flex flex-wrap gap-3">
-              <Button variant={enabled ? "outline" : "default"} onClick={handleTogglePomodoro} disabled={updateGlobalSettings.isPending}>
+              <Button variant={enabled ? "outline" : "default"} onClick={handleTogglePomodoro} disabled={updateGlobalSettings.isPending || planConflictMessages.length > 0 || projectBindingMessages.length > 0}>
                 <TimerReset className="h-4 w-4" />
                 {enabled ? "关闭番茄钟" : "开启番茄钟"}
               </Button>
@@ -1283,40 +1313,40 @@ export function PomodoroPage() {
                   />
                 </div>
                 <div className="mt-3 text-sm text-muted-foreground">
-                  {todayPomodoroStats.total > 0 ? "按今天所有已启用计划统计，完成一个学习段后计入一个番茄。" : "今天还没有启用的番茄计划。"}
+                  {todayPomodoroStats.total > 0 ? "按真实完成的番茄学习记录统计；完成一个学习段后计入一个番茄。" : "今天还没有启用的番茄计划。"}
                 </div>
               </div>
 
               <div className="rounded-[1.1rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] px-4 py-4 shadow-[var(--theme-soft-shadow)]">
-                <div className="text-sm font-medium text-muted-foreground">历史番茄质量</div>
+                <div className="text-sm font-medium text-muted-foreground">番茄记录</div>
                 <div className="mt-2 text-3xl font-semibold tracking-[-0.04em] text-foreground">
-                  {averageFocusScore > 0 ? `${averageFocusScore}/5` : "暂无"}
+                  {todayPomodoroRecords.length > 0 ? formatPomodoroActivityDuration(todayPomodoroDurationMs) : "暂无"}
                 </div>
                 <div className="mt-3 text-sm text-muted-foreground">
-                  {recentPomodoroReports.length > 0
-                    ? `最近 ${recentPomodoroReports.length} 条日报的平均专注评分。`
-                    : "完成番茄日报后，这里会展示专注评分和趋势。"}
+                  {todayPomodoroRecords.length > 0
+                    ? `今天已完成 ${todayPomodoroRecords.length} 个番茄学习记录。`
+                    : "完成番茄后，这里会展示今天的番茄学习时长。"}
                 </div>
               </div>
             </div>
 
             <div className="space-y-2">
-              {recentPomodoroReports.length === 0 ? (
+              {recentPomodoroRecords.length === 0 ? (
                 <div className="rounded-[1.1rem] border border-dashed border-[color:var(--theme-soft-border)] px-4 py-8 text-sm text-muted-foreground">
-                  还没有历史质量记录。
+                  还没有番茄记录。开启番茄钟并完成一个学习段后，这里会按“番茄 1、番茄 2...”记录学习情况。
                 </div>
               ) : (
-                recentPomodoroReports.map((report) => (
+                recentPomodoroRecords.map((record) => (
                   <div
-                    key={report.dateKey}
+                    key={record.recordId}
                     className="grid gap-3 rounded-[1.1rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] px-4 py-3 text-sm shadow-[var(--theme-soft-shadow)] md:grid-cols-[7rem_7rem_minmax(0,1fr)]"
                   >
-                    <div className="font-medium text-foreground">{formatShortDateKey(report.dateKey)}</div>
+                    <div className="font-medium text-foreground">{formatShortDateKey(record.dateKey)}</div>
                     <div className="text-muted-foreground">
-                      {report.focusScore > 0 ? `${report.focusScore}/5` : "未评分"} · {describeReportDirection(report.direction)}
+                      {record.pomodoroLabel} · {formatPomodoroActivityDuration(record.durationMs)}
                     </div>
                     <div className="min-w-0 truncate text-muted-foreground">
-                      {report.summary.trim() || report.adjustment.trim() || "没有文字记录"}
+                      {record.projectId ? projectTitleMap.get(record.projectId) ?? "已绑定项目" : "未绑定项目"} · {formatPomodoroActivityTime(record.startAtMs)}-{formatPomodoroActivityTime(record.endAtMs)}
                     </div>
                   </div>
                 ))
@@ -1341,6 +1371,11 @@ export function PomodoroPage() {
           {planConflictMessages.length > 0 ? (
             <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
               计划时间冲突：{planConflictMessages.join("；")}
+            </div>
+          ) : null}
+          {projectBindingMessages.length > 0 ? (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              番茄项目未选择完整：{projectBindingMessages.join("；")}
             </div>
           ) : null}
 

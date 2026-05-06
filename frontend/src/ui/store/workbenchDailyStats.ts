@@ -299,6 +299,32 @@ export function recordStudyActivity(projectId: string, kind: StudyActivityKind, 
   }
 }
 
+export function recordEffectiveStudyActivity(projectId: string, startAtMs: number, endAtMs: number) {
+  if (!projectId) return
+  if (!Number.isFinite(startAtMs) || !Number.isFinite(endAtMs) || endAtMs <= startAtMs) return
+
+  for (const segment of splitRangeByLocalDate(startAtMs, endAtMs)) {
+    if (segment.endOffsetMs <= segment.startOffsetMs) continue
+
+    const current = loadStoredDailyWorkbenchStats(projectId, segment.dateKey)
+    const effectiveRanges = normalizeRanges([...current.effectiveRanges, [segment.startOffsetMs, segment.endOffsetMs]])
+    const addedEffectiveMs = sumRanges(effectiveRanges) - sumRanges(current.effectiveRanges)
+    saveStoredDailyWorkbenchStats(
+      projectId,
+      {
+        ...current,
+        watchMs: current.watchMs,
+        composeMs: current.composeMs,
+        reviewMs: current.reviewMs,
+        qaMs: current.qaMs,
+        effectiveRanges,
+        effectiveMs: current.effectiveMs + addedEffectiveMs,
+      },
+      segment.dateKey,
+    )
+  }
+}
+
 export function touchDailyStudyActivity(projectId: string, kind: StudyActivityKind, windowMs: number, atMs = Date.now()) {
   if (!projectId || !Number.isFinite(windowMs) || windowMs <= 0) return
   const startAtMs = Number.isFinite(atMs) ? atMs : Date.now()

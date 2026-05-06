@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 
+from backend.models.study_material import StudyMaterial, StudyMaterialType
+from backend.models.types import ProjectId, now_utc_ms
+from backend.system.persistence_json import _decode_study_material, _encode_study_material
 from tools.backup_runtime_bundle import backup_runtime_bundle, verify_runtime_bundle
 from tools.restore_runtime_bundle import restore_runtime_bundle
 
@@ -10,6 +13,39 @@ from tests.fixtures.data_safety_runtime import create_project_media
 
 def test_runtime_backup_restore_task_marker() -> None:
     assert True
+
+
+def test_decode_study_material_accepts_legacy_compatibility_project_id() -> None:
+    for legacy_key in ("compatibilityProjectId", "compatibility_project_id"):
+        material = _decode_study_material(
+            {
+                "subjectId": "subject_legacy",
+                "materialId": "legacy_main",
+                "materialType": "COURSE",
+                "title": "旧网课材料",
+                "createdAtMs": 0,
+                legacy_key: "subject_legacy",
+            }
+        )
+
+        assert material.project_id == ProjectId("subject_legacy")
+        assert not hasattr(material, "compatibility_project_id")
+
+
+def test_encode_study_material_writes_project_id_without_compatibility_project_id() -> None:
+    material = StudyMaterial(
+        subject_id=ProjectId("subject_current"),
+        material_id="book_1",
+        material_type=StudyMaterialType.BOOK,
+        title="当前书本材料",
+        created_at=now_utc_ms(),
+        project_id=ProjectId("project_book_1"),
+    )
+
+    payload = _encode_study_material(material)
+
+    assert payload["projectId"] == "project_book_1"
+    assert "compatibilityProjectId" not in payload
 
 
 def test_backup_manifest_includes_media_checksums(tmp_path) -> None:

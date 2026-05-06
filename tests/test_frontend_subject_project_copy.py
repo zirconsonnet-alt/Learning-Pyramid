@@ -31,3 +31,12 @@ def test_book_project_creation_hint_uses_short_activity_copy() -> None:
 
     assert 'return "适合看书记笔记，做题"' in source
     assert "创建后会直接进入项目设置" not in source
+
+
+def test_subject_project_pages_avoid_compatibility_project_wording() -> None:
+    for source_path in (PROJECTS_PAGE, SUBJECT_DASHBOARD_PAGE, STUDY_MATERIALS):
+        source = source_path.read_text(encoding="utf-8")
+        assert "compatibilityProjectId" not in source
+        assert "兼容项目" not in source
+        assert "兼容工作台" not in source
+        assert "兼容入口" not in source

@@ -57,17 +57,17 @@ export function SubjectDashboardPage() {
   const [draftTitle, setDraftTitle] = useState("")
 
   const subject = useMemo(
-    () => (subjectsQ.data ?? []).find((item) => item.subjectId === subjectId || item.compatibilityProjectId === subjectId) ?? null,
+    () => (subjectsQ.data ?? []).find((item) => item.subjectId === subjectId) ?? null,
     [subjectId, subjectsQ.data],
   )
   const subjectTitle = subject?.title ?? "当前学科"
-  const subjectProjectId = subject?.compatibilityProjectId ?? subjectId
-  const materials = materialsQ.data ?? []
+  const subjectProjectId = subject?.subjectProjectId ?? subjectId
+  const materials = useMemo(() => materialsQ.data ?? [], [materialsQ.data])
   const materialActivityQs = useQueries({
     queries: materials.map((material) => ({
-      queryKey: ["auditLogEvents", material.compatibilityProjectId ?? material.materialId],
-      queryFn: () => listAuditLogEvents(material.compatibilityProjectId ?? ""),
-      enabled: Boolean(material.compatibilityProjectId) && !materialsQ.isLoading && !materialsQ.error,
+      queryKey: ["auditLogEvents", material.projectId ?? material.materialId],
+      queryFn: () => listAuditLogEvents(material.projectId ?? ""),
+      enabled: Boolean(material.projectId) && !materialsQ.isLoading && !materialsQ.error,
       staleTime: 60_000,
       refetchInterval: 60_000,
     })),
@@ -148,7 +148,7 @@ export function SubjectDashboardPage() {
   }
 
   function openMaterial(material: StudyMaterial, target: "workbench" | "settings") {
-    const projectId = material.compatibilityProjectId
+    const projectId = material.projectId
     if (!projectId) return
     setSelectedProjectId(projectId)
     navigate(
@@ -216,7 +216,7 @@ export function SubjectDashboardPage() {
         <div className="grid gap-4 xl:grid-cols-2">
           {sortedMaterials.map((material) => {
             const Icon = materialIconByType[material.materialType]
-            const active = material.compatibilityProjectId === subjectProjectId
+            const active = material.projectId === subjectProjectId
             return (
               <Card
                 key={material.materialId}
@@ -241,7 +241,7 @@ export function SubjectDashboardPage() {
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {material.compatibilityProjectId ? (
+                  {material.projectId ? (
                     <div className="flex flex-wrap gap-2">
                       <Button type="button" onClick={() => openMaterial(material, "workbench")}>
                         <ArrowRight className="h-4 w-4" />
@@ -253,7 +253,7 @@ export function SubjectDashboardPage() {
                       </Button>
                     </div>
                   ) : (
-                    <p className="text-sm text-muted-foreground">这个项目还没有可进入的兼容工作台。</p>
+                    <p className="text-sm text-muted-foreground">这个项目还没有可进入的工作台。</p>
                   )}
                 </CardContent>
               </Card>

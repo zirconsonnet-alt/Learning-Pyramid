@@ -73,7 +73,7 @@ def subject_to_dto(p: Project) -> Dict[str, Any]:
         "state": _jsonable(p.state),
         "createdAt": _jsonable(p.created_at),
         "deletedAt": _jsonable(p.deleted_at),
-        "compatibilityProjectId": str(p.project_id),
+        "subjectProjectId": str(p.project_id),
     }
 
 
@@ -84,7 +84,7 @@ def study_material_to_dto(m: StudyMaterial) -> Dict[str, Any]:
         "materialType": _jsonable(m.material_type),
         "title": m.title,
         "createdAt": _jsonable(m.created_at),
-        "compatibilityProjectId": None if m.compatibility_project_id is None else str(m.compatibility_project_id),
+        "projectId": None if m.project_id is None else str(m.project_id),
     }
 
 

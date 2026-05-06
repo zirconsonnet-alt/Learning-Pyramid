@@ -116,7 +116,7 @@ def create_subject(
     if current_runtime_features().auth_enabled:
         user = require_request_auth_user(request)
         auth_store.add_project_owner(pid, user.user_id)
-    return {"ok": True, "data": {"subjectId": str(pid), "compatibilityProjectId": str(pid)}}
+    return {"ok": True, "data": {"subjectId": str(pid), "subjectProjectId": str(pid)}}
 
 
 @router.patch("/subjects/{subjectId}")
@@ -174,9 +174,9 @@ def create_subject_material(
         material_type=_parse_study_material_type(req.materialType),
         title=req.title,
     )
-    if current_runtime_features().auth_enabled and item.compatibility_project_id is not None:
+    if current_runtime_features().auth_enabled and item.project_id is not None:
         user = require_request_auth_user(request)
-        auth_store.add_project_owner(item.compatibility_project_id, user.user_id)
+        auth_store.add_project_owner(item.project_id, user.user_id)
     return {"ok": True, "data": study_material_to_dto(item)}
 
 
@@ -204,9 +204,9 @@ def delete_subject_material(
 ) -> dict:
     _ensure_auth_subject_access(subjectId, request, auth_store)
     cleanup_ids = [
-        item.compatibility_project_id
+        item.project_id
         for item in api.list_subject_materials(subjectId)  # type: ignore[arg-type]
-        if item.material_id == materialId and item.compatibility_project_id is not None
+        if item.material_id == materialId and item.project_id is not None
     ]
     api.delete_subject_material(subjectId, materialId)  # type: ignore[arg-type]
     if current_runtime_features().auth_enabled:

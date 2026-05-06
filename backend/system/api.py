@@ -1943,7 +1943,7 @@ class SystemAPI:
                 material_type=material_type,
                 title=material_title,
                 created_at=subject.created_at,
-                compatibility_project_id=subject.project_id,
+                project_id=subject.project_id,
             ),
         )
 
@@ -1964,10 +1964,10 @@ class SystemAPI:
                 if item.material_id == material_link.material_id:
                     return item
         for item in materials:
-            if item.compatibility_project_id is not None and id_canonical_text(item.compatibility_project_id) == id_canonical_text(project_id):
+            if item.project_id is not None and id_canonical_text(item.project_id) == id_canonical_text(project_id):
                 return item
         for item in materials:
-            if item.compatibility_project_id is not None and id_canonical_text(item.compatibility_project_id) == id_canonical_text(subject_id):
+            if item.project_id is not None and id_canonical_text(item.project_id) == id_canonical_text(subject_id):
                 return item
         if materials:
             return materials[0]
@@ -1982,7 +1982,7 @@ class SystemAPI:
         return "网课材料"
 
     @staticmethod
-    def _compatibility_project_options_for_material_type(
+    def _project_options_for_material_type(
         material_type: StudyMaterialType,
     ) -> tuple[MaterialSourceKind, ProjectType]:
         if material_type == StudyMaterialType.BOOK:
@@ -3985,7 +3985,7 @@ class SystemAPI:
                     material_type=StudyMaterialType.COURSE,
                     title="默认网课材料",
                     created_at=subject.created_at,
-                    compatibility_project_id=subject.project_id,
+                    project_id=subject.project_id,
                 )
             }
             s._staged.study_materials_replaced = True
@@ -4052,8 +4052,8 @@ class SystemAPI:
         subject = self._get_active_project_metadata(resolved_subject_id)
         normalized_title = str(title or "").strip() or self._default_material_title_for_type(material_type)
         material_id = self._new_study_material_id(material_type)
-        source_kind, project_type = self._compatibility_project_options_for_material_type(material_type)
-        compatibility_project_id = self.create_project(
+        source_kind, project_type = self._project_options_for_material_type(material_type)
+        material_project_id = self.create_project(
             normalized_title if normalized_title else f"{subject.title}·{self._default_material_title_for_type(material_type)}",
             initial_source_kind=source_kind,
             initial_project_type=project_type,
@@ -4064,7 +4064,7 @@ class SystemAPI:
             material_type=material_type,
             title=normalized_title,
             created_at=now_utc_ms(),
-            compatibility_project_id=compatibility_project_id,
+            project_id=material_project_id,
         )
         try:
             subject_session = self.sys.begin_session(resolved_subject_id, SessionMode.READ_WRITE)
@@ -4079,7 +4079,7 @@ class SystemAPI:
                     self.sys.rollback(subject_session)
                 raise
 
-            child_session = self.sys.begin_session(compatibility_project_id, SessionMode.READ_WRITE)
+            child_session = self.sys.begin_session(material_project_id, SessionMode.READ_WRITE)
             try:
                 child_session._staged.subject_material_link = SubjectMaterialLink(
                     subject_id=resolved_subject_id,
@@ -4094,7 +4094,7 @@ class SystemAPI:
                 raise
         except Exception:
             try:
-                self.delete_project(compatibility_project_id)
+                self.delete_project(material_project_id)
             except Exception:
                 pass
             raise
@@ -4103,19 +4103,19 @@ class SystemAPI:
     def edit_subject_material(self, subject_id: ProjectId, material_id: str, *, title: str) -> StudyMaterial:
         resolved_subject_id = self._resolve_subject_project_id(subject_id)
         material = self._find_subject_material(resolved_subject_id, material_id)
-        compatibility_project_id = material.compatibility_project_id
-        if compatibility_project_id is None or id_canonical_text(compatibility_project_id) == id_canonical_text(resolved_subject_id):
+        material_project_id = material.project_id
+        if material_project_id is None or id_canonical_text(material_project_id) == id_canonical_text(resolved_subject_id):
             raise PreconditionFailure("当前默认材料仍与学科根绑定，暂不支持单独重命名")
-        self.edit_project(compatibility_project_id, title)
+        self.edit_project(material_project_id, title)
         return self._find_subject_material(resolved_subject_id, material_id)
 
     def delete_subject_material(self, subject_id: ProjectId, material_id: str) -> None:
         resolved_subject_id = self._resolve_subject_project_id(subject_id)
         material = self._find_subject_material(resolved_subject_id, material_id)
-        compatibility_project_id = material.compatibility_project_id
-        if compatibility_project_id is None or id_canonical_text(compatibility_project_id) == id_canonical_text(resolved_subject_id):
+        material_project_id = material.project_id
+        if material_project_id is None or id_canonical_text(material_project_id) == id_canonical_text(resolved_subject_id):
             raise PreconditionFailure("当前默认材料仍与学科根绑定，暂不支持删除")
-        self.delete_project(compatibility_project_id)
+        self.delete_project(material_project_id)
 
     def list_membership_cleanup_project_ids(self, project_id: ProjectId) -> Tuple[ProjectId, ...]:
         material_link = self._get_subject_material_link(project_id)
@@ -4123,9 +4123,9 @@ class SystemAPI:
             return (project_id,)
         related_project_ids = {id_canonical_text(project_id): project_id}
         for material in self._list_subject_materials_from_store(project_id):
-            if material.compatibility_project_id is None:
+            if material.project_id is None:
                 continue
-            related_project_ids[id_canonical_text(material.compatibility_project_id)] = material.compatibility_project_id
+            related_project_ids[id_canonical_text(material.project_id)] = material.project_id
         return tuple(related_project_ids[key] for key in sorted(related_project_ids.keys()))
 
     def edit_project(self, project_id: ProjectId, title: str) -> None:
@@ -4171,7 +4171,7 @@ class SystemAPI:
                         material_type=current.material_type,
                         title=str(title).strip(),
                         created_at=current.created_at,
-                        compatibility_project_id=current.compatibility_project_id,
+                        project_id=current.project_id,
                     )
                     subject_session._staged.study_materials = next_materials
                     subject_session._staged.study_materials_replaced = True
@@ -4201,10 +4201,10 @@ class SystemAPI:
                 raise
         else:
             for material in self._list_subject_materials_from_store(project_id):
-                compatibility_project_id = material.compatibility_project_id
-                if compatibility_project_id is None or id_canonical_text(compatibility_project_id) == id_canonical_text(project_id):
+                material_project_id = material.project_id
+                if material_project_id is None or id_canonical_text(material_project_id) == id_canonical_text(project_id):
                     continue
-                self.delete_project(compatibility_project_id)
+                self.delete_project(material_project_id)
         sql_store = self._sql_store()
         if sql_store is not None:
             self._delete_project_sql_direct(sql_store, project_id)
@@ -4610,9 +4610,9 @@ class SystemAPI:
             raise PreconditionFailure(
                 "initialize_book_learning_objects_from_subject_material source material type is unsupported"
             )
-        source_project_id = source_material.compatibility_project_id
+        source_project_id = source_material.project_id
         if source_project_id is None:
-            raise PreconditionFailure("source material has no compatibility project")
+            raise PreconditionFailure("source material has no project")
 
         outline_items = self._build_outline_items_from_learning_object_tree(source_project_id)
         return self.initialize_book_learning_objects(

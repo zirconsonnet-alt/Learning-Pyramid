@@ -8,7 +8,7 @@ export const SubjectSchema = z.object({
   state: z.string(),
   createdAt: z.string(),
   deletedAt: z.string().nullable(),
-  compatibilityProjectId: z.string(),
+  subjectProjectId: z.string(),
 })
 export type Subject = z.infer<typeof SubjectSchema>
 
@@ -21,7 +21,7 @@ export const StudyMaterialSchema = z.object({
   materialType: StudyMaterialTypeSchema,
   title: z.string(),
   createdAt: z.string(),
-  compatibilityProjectId: z.string().nullable(),
+  projectId: z.string().nullable(),
 })
 export type StudyMaterial = z.infer<typeof StudyMaterialSchema>
 
@@ -38,7 +38,7 @@ export type SubjectContext = z.infer<typeof SubjectContextSchema>
 const SubjectListSchema = z.array(SubjectSchema)
 const CreateSubjectResultSchema = z.object({
   subjectId: z.string(),
-  compatibilityProjectId: z.string(),
+  subjectProjectId: z.string(),
 })
 const StudyMaterialListSchema = z.array(StudyMaterialSchema)
 

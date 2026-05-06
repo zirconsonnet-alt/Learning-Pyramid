@@ -228,14 +228,14 @@ export function ProjectSettingsPage() {
           : "COURSE")
   const subjectMaterials = subjectContext?.materials ?? []
   const sourceCourseMaterials = subjectMaterials.filter(
-    (material) => material.materialType === "COURSE" && material.compatibilityProjectId && material.compatibilityProjectId !== pid,
+    (material) => material.materialType === "COURSE" && material.projectId && material.projectId !== pid,
   )
   const deleteActionRemovesSubject = isSubjectRoot
   const canDeleteCurrentMaterial =
     !isSubjectSettingsScope &&
     currentMaterial !== null &&
-    currentMaterial.compatibilityProjectId !== null &&
-    currentMaterial.compatibilityProjectId !== subjectProjectId
+    currentMaterial.projectId !== null &&
+    currentMaterial.projectId !== subjectProjectId
   const showDangerZone = deleteActionRemovesSubject || canDeleteCurrentMaterial
 
   const existingLayerIndexes = useMemo(() => (layersQ.data ?? []).map((l) => l.layerIndex).sort((a, b) => a - b), [layersQ.data])
@@ -690,14 +690,14 @@ export function ProjectSettingsPage() {
               deleteError={deleteMutationError}
               description={
                 deleteActionRemovesSubject
-                  ? `删除学科会一起移除当前学科和下面的 ${Math.max(0, subjectMaterials.length - 1)} 个项目兼容入口，本地工作台缓存也会一并清理。`
-                  : `删除项目只会移除“${currentMaterialTitle || "当前项目"}”和它的兼容工作台，学科“${subjectTitle || "当前学科"}”以及其他项目会保留。`
+                  ? `删除学科会一起移除当前学科和下面的 ${Math.max(0, subjectMaterials.length - 1)} 个项目入口，本地工作台缓存也会一并清理。`
+                  : `删除项目只会移除“${currentMaterialTitle || "当前项目"}”和它的工作台，学科“${subjectTitle || "当前学科"}”以及其他项目会保留。`
               }
               isPending={deleteMutationPending}
               onDelete={async () => {
                 try {
                   if (deleteActionRemovesSubject) {
-                    const relatedProjectIds = [subjectProjectId, ...subjectMaterials.map((material) => material.compatibilityProjectId ?? "")]
+                    const relatedProjectIds = [subjectProjectId, ...subjectMaterials.map((material) => material.projectId ?? "")]
                     await deleteSubjectM.mutateAsync(subjectProjectId)
                     clearProjectLocalState(relatedProjectIds)
                     setSelectedProjectId("")

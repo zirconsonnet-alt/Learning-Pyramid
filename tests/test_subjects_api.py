@@ -53,7 +53,7 @@ def _flatten_outline_from_learning_object_nodes(nodes: list[dict]) -> list[tuple
     return outline
 
 
-def test_subject_alias_creates_course_compatible_project(monkeypatch, tmp_path: Path) -> None:
+def test_subject_creates_default_course_material_project(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("PLM_APP_MODE", "local")
     monkeypatch.setenv("PLM_ENABLE_AUTH", "false")
     monkeypatch.setenv("PLM_STORE_PATH", "")
@@ -68,7 +68,8 @@ def test_subject_alias_creates_course_compatible_project(monkeypatch, tmp_path: 
     assert create_resp.status_code == 200
     create_data = create_resp.json()["data"]
     subject_id = create_data["subjectId"]
-    assert create_data["compatibilityProjectId"] == subject_id
+    assert create_data["subjectProjectId"] == subject_id
+    assert "compatibilityProjectId" not in create_data
 
     subject_resp = client.get("/api/subjects")
     assert subject_resp.status_code == 200
@@ -80,9 +81,10 @@ def test_subject_alias_creates_course_compatible_project(monkeypatch, tmp_path: 
             "state": "ACTIVE",
             "createdAt": subjects[0]["createdAt"],
             "deletedAt": None,
-            "compatibilityProjectId": subject_id,
+            "subjectProjectId": subject_id,
         }
     ]
+    assert "compatibilityProjectId" not in subjects[0]
 
     config_resp = client.get(f"/api/projects/{subject_id}/project-config")
     assert config_resp.status_code == 200
@@ -96,7 +98,8 @@ def test_subject_alias_creates_course_compatible_project(monkeypatch, tmp_path: 
     assert materials[0]["materialId"] == "legacy_main"
     assert materials[0]["materialType"] == "COURSE"
     assert materials[0]["title"] == "默认网课材料"
-    assert materials[0]["compatibilityProjectId"] == subject_id
+    assert materials[0]["projectId"] == subject_id
+    assert "compatibilityProjectId" not in materials[0]
 
     create_book_resp = client.post(
         f"/api/subjects/{subject_id}/materials",
@@ -104,12 +107,13 @@ def test_subject_alias_creates_course_compatible_project(monkeypatch, tmp_path: 
     )
     assert create_book_resp.status_code == 200
     book_material = create_book_resp.json()["data"]
-    book_project_id = book_material["compatibilityProjectId"]
+    book_project_id = book_material["projectId"]
     assert book_material["subjectId"] == subject_id
     assert book_material["materialType"] == "BOOK"
     assert book_material["title"] == "高等数学教材"
     assert book_project_id
     assert book_project_id != subject_id
+    assert "compatibilityProjectId" not in book_material
 
     subject_resp_after_material = client.get("/api/subjects")
     assert subject_resp_after_material.status_code == 200
@@ -177,8 +181,9 @@ def test_subject_context_and_material_management_endpoints(monkeypatch, tmp_path
     assert create_book_resp.status_code == 200
     book_material = create_book_resp.json()["data"]
     book_material_id = book_material["materialId"]
-    book_project_id = book_material["compatibilityProjectId"]
+    book_project_id = book_material["projectId"]
     assert book_project_id
+    assert "compatibilityProjectId" not in book_material
 
     root_context_resp = client.get(f"/api/projects/{subject_id}/subject-context")
     assert root_context_resp.status_code == 200
@@ -188,6 +193,8 @@ def test_subject_context_and_material_management_endpoints(monkeypatch, tmp_path
     assert root_context["subjectProjectId"] == subject_id
     assert root_context["currentProjectId"] == subject_id
     assert root_context["currentMaterial"]["materialId"] == "legacy_main"
+    assert root_context["currentMaterial"]["projectId"] == subject_id
+    assert "compatibilityProjectId" not in root_context["currentMaterial"]
     assert {item["materialId"] for item in root_context["materials"]} == {"legacy_main", book_material_id}
 
     child_context_resp = client.get(f"/api/projects/{book_project_id}/subject-context")
@@ -198,6 +205,8 @@ def test_subject_context_and_material_management_endpoints(monkeypatch, tmp_path
     assert child_context["subjectProjectId"] == subject_id
     assert child_context["currentProjectId"] == book_project_id
     assert child_context["currentMaterial"]["materialId"] == book_material_id
+    assert child_context["currentMaterial"]["projectId"] == book_project_id
+    assert "compatibilityProjectId" not in child_context["currentMaterial"]
     assert child_context["currentMaterial"]["title"] == "高等数学教材"
 
     rename_subject_resp = client.patch(f"/api/subjects/{subject_id}", json={"title": "高等数学进阶"})
@@ -280,8 +289,10 @@ def test_initialize_book_from_course_material_tree(monkeypatch, tmp_path: Path) 
         json={"materialType": "BOOK", "title": "高数教材"},
     )
     assert create_book_resp.status_code == 200
-    book_project_id = create_book_resp.json()["data"]["compatibilityProjectId"]
+    create_book_data = create_book_resp.json()["data"]
+    book_project_id = create_book_data["projectId"]
     assert book_project_id
+    assert "compatibilityProjectId" not in create_book_data
 
     initialize_from_course_resp = client.post(
         f"/api/projects/{book_project_id}/initialize-book-learning-objects-from-material",

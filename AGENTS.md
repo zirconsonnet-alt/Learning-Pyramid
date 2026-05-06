@@ -29,9 +29,9 @@
 对于可以在 1～3 个文件内以最小改动完成、且不会影响公共接口或配置的任务，默认直接实施，不要重复征求确认。
 
 <!-- SPECKIT START -->
-Current Spec Kit plan: `specs/009-wechat-payout-automation/plan.md`.
-For unattended invite commission settlement and WeChat payout work, use that plan for
-the active requirements, project structure, validation approach, verified WeChat
-desktop QR receiving identity binding, automatic refund-window settlement, merchant
-transfer confirmation, callback/query reconciliation, and exception handling.
+Current Spec Kit plan: `specs/010-retire-compatibility-project/plan.md`.
+For compatibility-field retirement work in the subject/project model, use that plan for
+the active requirements, project structure, validation approach, subject-root versus
+material-project contract cleanup, backward-readable legacy data handling, Pomodoro
+root-project filtering, and synchronized documentation/testing updates.
 <!-- SPECKIT END -->
