@@ -249,6 +249,27 @@ def test_pomodoro_plan_overview_hides_secondary_summary_lines() -> None:
     assert "activeDaySummary" not in plan_overview
 
 
+def test_pomodoro_overview_can_switch_to_statistics_panel() -> None:
+    page_source = POMODORO_PAGE.read_text(encoding="utf-8")
+    session_controls = page_source[
+        page_source.index("data-pomodoro-session-controls"):page_source.index("<RestMusicPlayer isRestPhase={isRestPhase} />")
+    ]
+    statistics_panel = page_source[
+        page_source.index("data-pomodoro-statistics"):page_source.index("</section>", page_source.index("data-pomodoro-statistics"))
+    ]
+
+    assert "BarChart3" in page_source
+    assert "usePomodoroDailyReportStore" in page_source
+    assert "pomodoroOverviewMode" in page_source
+    assert "setPomodoroOverviewMode" in page_source
+    assert "统计" in session_controls
+    assert "data-pomodoro-statistics" in page_source
+    assert "当日番茄完成度" in statistics_panel
+    assert "历史番茄质量" in statistics_panel
+    assert "todayPomodoroStats" in statistics_panel
+    assert "recentPomodoroReports" in statistics_panel
+
+
 def test_pomodoro_settings_page_edits_random_micro_break_preferences() -> None:
     settings_source = POMODORO_SETTINGS_PAGE.read_text(encoding="utf-8")
 

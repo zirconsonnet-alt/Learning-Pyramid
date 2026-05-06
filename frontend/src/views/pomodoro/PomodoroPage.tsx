@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { FolderOpen, Music2, PanelsTopLeft, Pause, Play, Plus, RefreshCw, RotateCcw, Save, Settings2, SkipForward, TimerReset, Trash2, Volume2 } from "lucide-react"
+import { BarChart3, FolderOpen, Music2, PanelsTopLeft, Pause, Play, Plus, RefreshCw, RotateCcw, Save, Settings2, SkipForward, TimerReset, Trash2, Volume2 } from "lucide-react"
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
@@ -28,6 +28,7 @@ import { useSystemCapabilities } from "@/ui/queries/system"
 import { usePageMeta } from "@/ui/seo/usePageMeta"
 import { useAppStore } from "@/ui/store/appStore"
 import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
+import { usePomodoroDailyReportStore, type DailyReportDirection, type PomodoroDailyReport } from "@/ui/store/pomodoroDailyReportStore"
 import {
   POMODORO_WEEKDAYS,
   POMODORO_WEEKDAY_LABELS,
@@ -284,6 +285,60 @@ function formatDateTime(ms: number | null) {
   }).format(ms)
 }
 
+function formatDateKey(ms = Date.now()) {
+  const date = new Date(ms)
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
+
+function formatShortDateKey(dateKey: string) {
+  const [, month = "", day = ""] = dateKey.split("-")
+  return month && day ? `${Number(month)}/${Number(day)}` : dateKey
+}
+
+function describeReportDirection(direction: DailyReportDirection) {
+  if (direction === "progress") return "进步"
+  if (direction === "regress") return "回落"
+  if (direction === "flat") return "持平"
+  return "未标记"
+}
+
+function isMeaningfulPomodoroReport(report: PomodoroDailyReport) {
+  return report.focusScore > 0 || Boolean(report.direction) || Boolean(report.summary.trim()) || Boolean(report.adjustment.trim())
+}
+
+function getTodayPlanStartAtMs(date: Date, startTime: string) {
+  const [hours = "0", minutes = "0"] = normalizePomodoroStartTime(startTime).split(":")
+  const next = new Date(date)
+  next.setHours(Number(hours), Number(minutes), 0, 0)
+  return next.getTime()
+}
+
+function getTodayPomodoroStats(schedule: PomodoroWeekSchedule, now: number) {
+  const date = new Date(now)
+  const weekday = POMODORO_WEEKDAYS[date.getDay() === 0 ? 6 : date.getDay() - 1]
+  const plans = schedule[weekday]?.plans.filter((plan) => plan.enabled) ?? []
+  const total = plans.reduce((sum, plan) => sum + normalizeCountInput(String(plan.pomodoroCount), 4), 0)
+  const completed = plans.reduce((sum, plan) => {
+    const startAtMs = getTodayPlanStartAtMs(date, plan.startTime)
+    const focusMs = normalizeFocusInput(String(plan.focusMinutes), 25) * 60_000
+    const breakMs = normalizeBreakInput(String(plan.breakMinutes), 5) * 60_000
+    const count = normalizeCountInput(String(plan.pomodoroCount), 4)
+    const completedInPlan = Array.from({ length: count }, (_, index) => startAtMs + index * (focusMs + breakMs) + focusMs)
+      .filter((focusEndAtMs) => now >= focusEndAtMs).length
+    return sum + completedInPlan
+  }, 0)
+  const completionPercent = total > 0 ? Math.round((completed / total) * 100) : 0
+  return {
+    completed,
+    total,
+    remaining: Math.max(0, total - completed),
+    completionPercent,
+  }
+}
+
 function RestMusicPlayer(props: { isRestPhase: boolean }) {
   const { isRestPhase } = props
   const musicDirectory = usePomodoroRestMusicDirectoryBinding()
@@ -489,9 +544,11 @@ export function PomodoroPage() {
   const now = usePomodoroNow(enabled || quickPomodoroClockActive)
   const { fromPath } = useMemo(() => readLocationState(location.state), [location.state])
   const [pomodoroDrafts, setPomodoroDrafts] = useState<PomodoroPlanDraft[]>(() => toPomodoroPlanDrafts(weeklySchedule))
+  const [pomodoroOverviewMode, setPomodoroOverviewMode] = useState<"plans" | "stats">("plans")
   const [testingPromptKey, setTestingPromptKey] = useState("")
   const [wallpaperUrl, setWallpaperUrl] = useState("")
   const wallpaperObjectUrlRef = useRef("")
+  const reportsByDate = usePomodoroDailyReportStore((state) => state.reportsByDate)
 
   usePageMeta({
     title: activePlanId ? "番茄计划详情 | LearningPyramid" : "番茄钟 | LearningPyramid",
@@ -598,6 +655,20 @@ export function PomodoroPage() {
   )
   const activePomodoroDraft = activePlanId ? pomodoroDrafts.find((draft) => draft.id === activePlanId) ?? null : null
   const activePomodoroDraftIndex = activePomodoroDraft ? pomodoroDrafts.findIndex((draft) => draft.id === activePomodoroDraft.id) : -1
+  const todayPomodoroStats = useMemo(() => getTodayPomodoroStats(draftSchedule, now), [draftSchedule, now])
+  const recentPomodoroReports = useMemo(
+    () =>
+      Object.values(reportsByDate)
+        .filter(isMeaningfulPomodoroReport)
+        .sort((left, right) => right.dateKey.localeCompare(left.dateKey))
+        .slice(0, 7),
+    [reportsByDate],
+  )
+  const averageFocusScore = useMemo(() => {
+    const scoredReports = recentPomodoroReports.filter((report) => report.focusScore > 0)
+    if (scoredReports.length === 0) return 0
+    return Math.round((scoredReports.reduce((sum, report) => sum + report.focusScore, 0) / scoredReports.length) * 10) / 10
+  }, [recentPomodoroReports])
 
   const headlineCountdown =
     snapshot.status === "running"
@@ -1161,6 +1232,14 @@ export function PomodoroPage() {
               ) : null}
             </div>
           </div>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setPomodoroOverviewMode((current) => (current === "stats" ? "plans" : "stats"))}
+          >
+            <BarChart3 className="h-4 w-4" />
+            {pomodoroOverviewMode === "stats" ? "计划" : "统计"}
+          </Button>
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -1174,6 +1253,77 @@ export function PomodoroPage() {
       <RestMusicPlayer isRestPhase={isRestPhase} />
 
       <section className="space-y-4 border-t border-border/60 pt-6">
+        {pomodoroOverviewMode === "stats" ? (
+          <div data-pomodoro-statistics className="space-y-5">
+            <div>
+              <div className="text-sm font-medium text-muted-foreground">统计</div>
+              <div className="mt-2 text-3xl font-semibold tracking-[-0.04em] text-foreground">
+                当日番茄完成度
+              </div>
+            </div>
+
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,0.8fr)]">
+              <div className="rounded-[1.1rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] px-4 py-4 shadow-[var(--theme-soft-shadow)]">
+                <div className="flex flex-wrap items-end justify-between gap-3">
+                  <div>
+                    <div className="text-sm text-muted-foreground">{formatDateKey(now)}</div>
+                    <div className="mt-2 text-4xl font-semibold tracking-[-0.04em] text-foreground">
+                      {todayPomodoroStats.completionPercent}%
+                    </div>
+                  </div>
+                  <div className="text-right text-sm text-muted-foreground">
+                    <div>已完成 {todayPomodoroStats.completed}/{todayPomodoroStats.total}</div>
+                    <div className="mt-1">剩余 {todayPomodoroStats.remaining} 个</div>
+                  </div>
+                </div>
+                <div className="mt-4 h-3 overflow-hidden rounded-full bg-[color:var(--theme-soft-bg)]">
+                  <div
+                    className="h-full rounded-full bg-primary transition-all"
+                    style={{ width: `${todayPomodoroStats.completionPercent}%` }}
+                  />
+                </div>
+                <div className="mt-3 text-sm text-muted-foreground">
+                  {todayPomodoroStats.total > 0 ? "按今天所有已启用计划统计，完成一个学习段后计入一个番茄。" : "今天还没有启用的番茄计划。"}
+                </div>
+              </div>
+
+              <div className="rounded-[1.1rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] px-4 py-4 shadow-[var(--theme-soft-shadow)]">
+                <div className="text-sm font-medium text-muted-foreground">历史番茄质量</div>
+                <div className="mt-2 text-3xl font-semibold tracking-[-0.04em] text-foreground">
+                  {averageFocusScore > 0 ? `${averageFocusScore}/5` : "暂无"}
+                </div>
+                <div className="mt-3 text-sm text-muted-foreground">
+                  {recentPomodoroReports.length > 0
+                    ? `最近 ${recentPomodoroReports.length} 条日报的平均专注评分。`
+                    : "完成番茄日报后，这里会展示专注评分和趋势。"}
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              {recentPomodoroReports.length === 0 ? (
+                <div className="rounded-[1.1rem] border border-dashed border-[color:var(--theme-soft-border)] px-4 py-8 text-sm text-muted-foreground">
+                  还没有历史质量记录。
+                </div>
+              ) : (
+                recentPomodoroReports.map((report) => (
+                  <div
+                    key={report.dateKey}
+                    className="grid gap-3 rounded-[1.1rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] px-4 py-3 text-sm shadow-[var(--theme-soft-shadow)] md:grid-cols-[7rem_7rem_minmax(0,1fr)]"
+                  >
+                    <div className="font-medium text-foreground">{formatShortDateKey(report.dateKey)}</div>
+                    <div className="text-muted-foreground">
+                      {report.focusScore > 0 ? `${report.focusScore}/5` : "未评分"} · {describeReportDirection(report.direction)}
+                    </div>
+                    <div className="min-w-0 truncate text-muted-foreground">
+                      {report.summary.trim() || report.adjustment.trim() || "没有文字记录"}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        ) : (
         <div data-pomodoro-plan-overview className="space-y-5">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
@@ -1229,6 +1379,7 @@ export function PomodoroPage() {
             })}
           </div>
         </div>
+        )}
       </section>
       </div>
     </>
