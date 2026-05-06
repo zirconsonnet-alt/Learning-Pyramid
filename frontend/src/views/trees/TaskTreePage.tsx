@@ -9,6 +9,7 @@ import { listLearningTaskNodes, type LearningTaskNode } from "@/ui/api/learningT
 import { ContentEmptyState, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { formatLearningTaskNodeDisplayTitle, isDefaultAggregationTitle } from "@/views/learningTasks/displayTitle"
 import { type LearningTaskTreeNode, LearningTaskTreeCanvas } from "@/views/trees/components/LearningTaskTreeCanvas"
+import { TreeCanvasZoomControl } from "@/views/trees/components/TreeCanvasViewport"
 
 type TaskTreeVisualType = "aggregation" | "chapter" | "task"
 
@@ -96,6 +97,7 @@ export function TaskTreePage() {
   const pid = projectId ?? ""
   const nav = useNavigate()
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null)
+  const [zoomPercent, setZoomPercent] = useState(100)
 
   const q = useQuery({
     queryKey: ["learningTaskNodes", pid],
@@ -118,9 +120,14 @@ export function TaskTreePage() {
     const events = eventsQ.data ?? []
     const rawNodeById: Record<string, LearningTaskNode> = {}
     const eventByParentId: Record<string, AggregationEvent> = {}
+    const childIdsByParentId: Record<string, string[]> = {}
 
     for (const node of rawNodes) {
       rawNodeById[node.nodeId] = node
+      if (node.parentId) {
+        childIdsByParentId[node.parentId] ??= []
+        childIdsByParentId[node.parentId].push(node.nodeId)
+      }
     }
     for (const event of events) {
       eventByParentId[event.parentNodeId] = event
@@ -153,7 +160,10 @@ export function TaskTreePage() {
       const layerIndex = layerById[node.nodeId] ?? 0
       const uiType = classifyTaskNode(node, eventByParentId[node.nodeId])
       const taskSpan = descendantCountById[node.nodeId] ?? 0
-      const childIds = getTaskTreeChildIds(node)
+      const childIds =
+        node.kind === "container"
+          ? Array.from(new Set([...getTaskTreeChildIds(node), ...(childIdsByParentId[node.nodeId] ?? [])]))
+          : []
       const childCount = node.kind === "container" ? childIds.length : 0
 
       map[node.nodeId] = {
@@ -191,8 +201,11 @@ export function TaskTreePage() {
 
   return (
     <section className="theme-card-main overflow-hidden">
-      <div className="border-b border-border/60 px-6 py-5">
+      <div className="flex items-center justify-between gap-4 border-b border-border/60 px-6 py-5">
         <h2 className="text-base font-semibold text-foreground">结构视图</h2>
+        <div className="rounded-full border border-white/70 bg-white/90 px-3 py-2 shadow-[0_18px_40px_-28px_rgba(15,23,42,0.45)] backdrop-blur">
+          <TreeCanvasZoomControl zoomPercent={zoomPercent} onZoomPercentChange={setZoomPercent} />
+        </div>
       </div>
 
       <div className="theme-canvas min-h-[36rem] p-4 md:p-5">
@@ -211,6 +224,7 @@ export function TaskTreePage() {
             rootIds={rootIds}
             nodeById={nodeById}
             nodeLayerById={nodeLayerById}
+            zoomPercent={zoomPercent}
             focusNodeId={hoveredNodeId}
             onNodeHover={setHoveredNodeId}
             onNodeSelect={(node) => nav(`/p/${pid}/learning-task-nodes/${node.nodeId}`)}

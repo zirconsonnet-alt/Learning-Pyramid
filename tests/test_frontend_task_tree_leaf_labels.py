@@ -5,6 +5,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 TASK_TREE_PAGE = REPO_ROOT / "frontend" / "src" / "views" / "trees" / "TaskTreePage.tsx"
 TASK_TREE_CANVAS = REPO_ROOT / "frontend" / "src" / "views" / "trees" / "components" / "LearningTaskTreeCanvas.tsx"
 OBJECT_TREE_CANVAS = REPO_ROOT / "frontend" / "src" / "views" / "trees" / "components" / "LearningObjectTreeCanvas.tsx"
+OBJECT_TREE_PAGE = REPO_ROOT / "frontend" / "src" / "views" / "trees" / "ObjectTreePage.tsx"
 TREE_VIEWPORT = REPO_ROOT / "frontend" / "src" / "views" / "trees" / "components" / "TreeCanvasViewport.tsx"
 AI_CHAT_PAGE = REPO_ROOT / "frontend" / "src" / "views" / "ai" / "AiChatPage.tsx"
 LEARNING_TASK_NODE_PAGE = REPO_ROOT / "frontend" / "src" / "views" / "learningTasks" / "LearningTaskNodePage.tsx"
@@ -37,6 +38,8 @@ def test_task_tree_uses_only_real_children_for_edges() -> None:
     api_source = (REPO_ROOT / "frontend" / "src" / "ui" / "api" / "learningTaskNodes.ts").read_text(encoding="utf-8")
 
     assert "getTaskTreeChildIds(node)" in page_source
+    assert "childIdsByParentId" in page_source
+    assert "Array.from(new Set([...getTaskTreeChildIds(node), ...(childIdsByParentId[node.nodeId] ?? [])]))" in page_source
     assert "displayChildNodeIds" not in api_source
     assert "displayChildNodeIds" not in page_source
     assert "return node.children" in page_source
@@ -63,12 +66,17 @@ def test_learning_task_node_detail_uses_real_children_count_and_no_helper_copy()
 
 
 def test_tree_canvases_offer_zoom_and_wider_layout_spacing() -> None:
+    task_page_source = TASK_TREE_PAGE.read_text(encoding="utf-8")
+    object_page_source = OBJECT_TREE_PAGE.read_text(encoding="utf-8")
     task_canvas_source = TASK_TREE_CANVAS.read_text(encoding="utf-8")
     object_canvas_source = OBJECT_TREE_CANVAS.read_text(encoding="utf-8")
     viewport_source = TREE_VIEWPORT.read_text(encoding="utf-8")
 
     assert 'aria-label="缩放树图"' in viewport_source
     assert "zoomPercent" in viewport_source
+    assert "TreeCanvasZoomControl" in task_page_source
+    assert "TreeCanvasZoomControl" in object_page_source
+    assert "absolute right-3 top-3" not in viewport_source
     assert "transform: `scale(${zoom})`" in viewport_source
     assert "const COLUMN_WIDTH = 240" in task_canvas_source
     assert "const COLUMN_WIDTH = 240" in object_canvas_source
@@ -76,3 +84,7 @@ def test_tree_canvases_offer_zoom_and_wider_layout_spacing() -> None:
     assert "const SIBLING_GAP = 28" in object_canvas_source
     assert "const branchY = startY + 26" in task_canvas_source
     assert "const branchY = startY + 26" in object_canvas_source
+    assert "rounded-[30px]" not in task_canvas_source
+    assert "rounded-[30px]" not in object_canvas_source
+    assert "strokeWidth={isActive ? 3.4 : 2.3}" in task_canvas_source
+    assert "strokeWidth={isActive ? 3.4 : 2.3}" in object_canvas_source

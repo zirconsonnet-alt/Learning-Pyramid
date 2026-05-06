@@ -30,7 +30,7 @@ type TreeEdge = {
   parentId: string
 }
 
-const RAIL_WIDTH = 116
+const RAIL_WIDTH = 32
 const CANVAS_PADDING_X = 28
 const TOP_PADDING = 24
 const BOTTOM_PADDING = 28
@@ -100,26 +100,6 @@ function collectDescendantIds(nodeId: string, nodeById: Record<string, LearningT
   for (const childId of node.children ?? []) {
     collectDescendantIds(childId, nodeById, target)
   }
-}
-
-function getRowCaption(rowNodeIds: string[], nodeById: Record<string, LearningTaskTreeNode>) {
-  const types = new Set(
-    rowNodeIds
-      .map((nodeId) => nodeById[nodeId]?.uiType)
-      .filter((value): value is TaskTreeVisualType => value === "aggregation" || value === "chapter" || value === "task"),
-  )
-
-  if (types.size === 1) {
-    const only = Array.from(types)[0]
-    if (only === "task") return "任务层"
-    if (only === "chapter") return "章节层"
-    return "聚合层"
-  }
-
-  if (types.has("chapter") && types.has("aggregation")) return "章节 / 聚合"
-  if (types.has("task") && types.has("chapter")) return "任务 / 章节"
-  if (types.has("task") && types.has("aggregation")) return "任务 / 聚合"
-  return "结构层"
 }
 
 function buildLayout(rootIds: string[], nodeById: Record<string, LearningTaskTreeNode>, nodeLayerById: Record<string, number>) {
@@ -249,6 +229,7 @@ export function LearningTaskTreeCanvas({
   onNodeSelect,
   rootIds,
   selectedNodeId,
+  zoomPercent,
 }: {
   focusNodeId?: string | null
   nodeById: Record<string, LearningTaskTreeNode>
@@ -257,6 +238,7 @@ export function LearningTaskTreeCanvas({
   onNodeSelect: (node: LearningTaskTreeNode) => void
   rootIds: string[]
   selectedNodeId?: string | null
+  zoomPercent: number
 }) {
   const { canvasHeight, canvasWidth, edges, parentById, rectById, rows } = useMemo(
     () => buildLayout(rootIds, nodeById, nodeLayerById),
@@ -288,27 +270,20 @@ export function LearningTaskTreeCanvas({
   }
 
   return (
-    <TreeCanvasViewport canvasWidth={canvasWidth} canvasHeight={canvasHeight}>
+    <TreeCanvasViewport canvasWidth={canvasWidth} canvasHeight={canvasHeight} zoomPercent={zoomPercent}>
       <div className="relative" style={{ width: canvasWidth, height: canvasHeight }}>
         <div className="pointer-events-none absolute inset-0">
           {rows.map((row) => {
             const rowIndex = rows.findIndex((item) => item.layerIndex === row.layerIndex)
             const rowTop = TOP_PADDING + rowIndex * ROW_HEIGHT
-            const caption = getRowCaption(row.nodeIds, nodeById)
 
             return (
-              <div key={row.layerIndex} className="absolute inset-x-0" style={{ top: rowTop, height: ROW_HEIGHT - 14 }}>
-                <div className="absolute inset-x-2 bottom-2 top-0 rounded-[30px] border border-white/65 bg-white/[0.34]" />
-                <div className="absolute left-5 top-5 w-20">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[#59718b]">L{row.layerIndex}</div>
-                  <div className="mt-1 text-xs font-medium text-[#7a91a9]">{caption}</div>
-                </div>
-              </div>
+              <div key={row.layerIndex} className="absolute inset-x-0 border-t border-[#dbe7f2]/70" style={{ top: rowTop }} />
             )
           })}
         </div>
 
-        <svg className="pointer-events-none absolute inset-0" width={canvasWidth} height={canvasHeight} viewBox={`0 0 ${canvasWidth} ${canvasHeight}`}>
+        <svg className="pointer-events-none absolute inset-0 z-10" width={canvasWidth} height={canvasHeight} viewBox={`0 0 ${canvasWidth} ${canvasHeight}`}>
           {edges.map((edge) => {
             const parentRect = rectById[edge.parentId]
             const childRect = rectById[edge.childId]
@@ -326,10 +301,10 @@ export function LearningTaskTreeCanvas({
                 key={`${edge.parentId}-${edge.childId}`}
                 d={`M ${startX} ${startY} V ${branchY} H ${endX} V ${endY}`}
                 fill="none"
-                stroke={isActive ? "rgba(44, 83, 122, 0.92)" : "rgba(97, 122, 150, 0.58)"}
+                stroke={isActive ? "rgba(27, 68, 112, 0.96)" : "rgba(64, 96, 130, 0.78)"}
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                strokeWidth={isActive ? 2.8 : 1.7}
+                strokeWidth={isActive ? 3.4 : 2.3}
               />
             )
           })}
@@ -353,7 +328,7 @@ export function LearningTaskTreeCanvas({
               type="button"
               data-tree-node="true"
               className={cn(
-                "absolute flex cursor-pointer flex-col rounded-[24px] border px-4 py-3 text-left transition duration-200",
+                "absolute z-20 flex cursor-pointer flex-col rounded-[24px] border px-4 py-3 text-left transition duration-200",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#31567d]/30 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent",
                 visual.cardClass,
                 isSelected && "border-[#31567d] shadow-[0_32px_64px_-36px_rgba(34,66,102,0.52)]",

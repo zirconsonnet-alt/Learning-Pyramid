@@ -3,14 +3,42 @@ import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type R
 
 import { cn } from "@/ui/utils"
 
+export function TreeCanvasZoomControl({
+  onZoomPercentChange,
+  zoomPercent,
+}: {
+  onZoomPercentChange: (zoomPercent: number) => void
+  zoomPercent: number
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <ZoomOut className="size-4 text-[#6f879f]" aria-hidden="true" />
+      <input
+        type="range"
+        aria-label="缩放树图"
+        min={60}
+        max={140}
+        step={5}
+        value={zoomPercent}
+        className="h-2 w-36 accent-[#2f66c5]"
+        onChange={(event) => onZoomPercentChange(Number(event.target.value))}
+      />
+      <ZoomIn className="size-4 text-[#6f879f]" aria-hidden="true" />
+      <span className="min-w-10 text-right text-xs font-semibold text-[#5f7891]">{zoomPercent}%</span>
+    </div>
+  )
+}
+
 export function TreeCanvasViewport({
   canvasHeight,
   canvasWidth,
   children,
+  zoomPercent,
 }: {
   canvasHeight: number
   canvasWidth: number
   children: ReactNode
+  zoomPercent: number
 }) {
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const dragStateRef = useRef<{
@@ -20,7 +48,6 @@ export function TreeCanvasViewport({
     startScrollTop: number
   } | null>(null)
   const [isDragging, setIsDragging] = useState(false)
-  const [zoomPercent, setZoomPercent] = useState(100)
   const zoom = zoomPercent / 100
 
   useEffect(() => {
@@ -74,22 +101,6 @@ export function TreeCanvasViewport({
 
   return (
     <div className="relative">
-      <div className="absolute right-3 top-3 z-20 flex items-center gap-2 rounded-full border border-white/70 bg-white/90 px-3 py-2 shadow-[0_18px_40px_-28px_rgba(15,23,42,0.45)] backdrop-blur">
-        <ZoomOut className="size-4 text-[#6f879f]" aria-hidden="true" />
-        <input
-          type="range"
-          aria-label="缩放树图"
-          min={60}
-          max={140}
-          step={5}
-          value={zoomPercent}
-          className="h-2 w-36 accent-[#2f66c5]"
-          onChange={(event) => setZoomPercent(Number(event.target.value))}
-          onMouseDown={(event) => event.stopPropagation()}
-        />
-        <ZoomIn className="size-4 text-[#6f879f]" aria-hidden="true" />
-        <span className="min-w-10 text-right text-xs font-semibold text-[#5f7891]">{zoomPercent}%</span>
-      </div>
       <div
         ref={viewportRef}
         className={cn(

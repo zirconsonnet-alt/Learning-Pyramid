@@ -18,6 +18,7 @@ import {
   type LearningObjectTreeCanvasNode,
   type ObjectTreeVisualType,
 } from "@/views/trees/components/LearningObjectTreeCanvas"
+import { TreeCanvasZoomControl } from "@/views/trees/components/TreeCanvasViewport"
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -44,6 +45,7 @@ export function ObjectTreePage() {
   const pid = projectId ?? ""
   const nav = useNavigate()
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null)
+  const [zoomPercent, setZoomPercent] = useState(100)
   const projectConfigQ = useProjectConfig(pid)
   const projectType = projectConfigQ.data?.projectType ?? "COURSE"
   const usesLearningObjectTree = projectTypeRequiresLearningObjectTree(projectType)
@@ -99,16 +101,24 @@ export function ObjectTreePage() {
       })
 
     const rawNodeById: Record<string, LearningObjectNode> = {}
+    const childIdsByParentId: Record<string, string[]> = {}
 
     for (const node of normalizedNodes) {
       rawNodeById[node.nodeId] = node
+      if (node.parentId) {
+        childIdsByParentId[node.parentId] ??= []
+        childIdsByParentId[node.parentId].push(node.nodeId)
+      }
     }
 
     for (const node of normalizedNodes) {
       if (node.kind !== "container") continue
       rawNodeById[node.nodeId] = {
         ...node,
-        children: sortLearningObjectNodeIdsForDisplay(node.children, rawNodeById),
+        children: sortLearningObjectNodeIdsForDisplay(
+          Array.from(new Set([...(node.children ?? []), ...(childIdsByParentId[node.nodeId] ?? [])])),
+          rawNodeById,
+        ),
       }
     }
 
@@ -194,8 +204,11 @@ export function ObjectTreePage() {
 
   return (
     <section className="theme-card-main overflow-hidden">
-      <div className="border-b border-border/60 px-6 py-5">
+      <div className="flex items-center justify-between gap-4 border-b border-border/60 px-6 py-5">
         <h2 className="text-base font-semibold text-foreground">结构视图</h2>
+        <div className="rounded-full border border-white/70 bg-white/90 px-3 py-2 shadow-[0_18px_40px_-28px_rgba(15,23,42,0.45)] backdrop-blur">
+          <TreeCanvasZoomControl zoomPercent={zoomPercent} onZoomPercentChange={setZoomPercent} />
+        </div>
       </div>
 
       <div className="theme-canvas min-h-[36rem] p-4 md:p-5">
@@ -222,6 +235,7 @@ export function ObjectTreePage() {
             rootIds={rootIds}
             nodeById={nodeById}
             nodeDepthById={depthById}
+            zoomPercent={zoomPercent}
             focusNodeId={hoveredNodeId}
             onNodeHover={setHoveredNodeId}
             onNodeSelect={(node) => nav(`/p/${pid}/learning-object-nodes/${node.nodeId}`)}
