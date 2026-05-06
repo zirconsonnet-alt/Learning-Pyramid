@@ -341,6 +341,20 @@ def test_pomodoro_focus_completion_records_activity_and_feeds_workbench_stats() 
     assert "番茄记录" in page_source
 
 
+def test_pomodoro_focus_locks_other_project_workbenches_without_auto_redirect() -> None:
+    app_shell_source = APP_SHELL.read_text(encoding="utf-8")
+
+    assert "isPomodoroBlockingOtherProjectWorkbench" in app_shell_source
+    assert 'location.pathname.includes("/workbench")' in app_shell_source
+    assert "pid !== pomodoroFocusProjectId" in app_shell_source
+    assert "番茄钟正在学习另一个项目" in app_shell_source
+    assert "不能进入这个项目工作台" in app_shell_source
+    assert "进入当前番茄工作台" in app_shell_source
+    assert "pomodoroAutoJumpKey" not in app_shell_source
+    assert "pomodoroAutoJump" not in app_shell_source
+    assert "nav(targetPath" not in app_shell_source
+
+
 def test_pomodoro_settings_page_edits_random_micro_break_preferences() -> None:
     settings_source = POMODORO_SETTINGS_PAGE.read_text(encoding="utf-8")
 

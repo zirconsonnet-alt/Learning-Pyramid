@@ -19,11 +19,15 @@ def test_review_recommendations_page_uses_workbench_style_review_and_stats() -> 
     source = RECOMMENDATIONS_PAGE.read_text(encoding="utf-8")
 
     assert "reviewWorkspaceEntries" in source
-    assert "chooseSessionAnswer" in source
-    assert "本次复习" in source
-    assert "已完成" in source
-    assert "推荐指数" in source
-    assert "记忆强度" in source
+    assert "ClipboardCheck" in source
+    assert "theme-progress-track" in source
+    assert "第 {activeReviewEntryIndex + 1} 题" in source
+    assert "你的答案" in source
+    assert "提交答案" in source
+    assert "跳过" in source
+    assert "记得" in source
+    assert "不记得" in source
+    assert "回答后自动切到下一题" in source
 
 
 def test_review_recommendations_page_drops_read_only_list_copy() -> None:

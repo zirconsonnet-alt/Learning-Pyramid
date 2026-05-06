@@ -371,7 +371,6 @@ export function AppShell() {
   const projectMenuButtonRef = useRef<HTMLButtonElement | null>(null)
   const accountMenuRef = useRef<HTMLDivElement | null>(null)
   const accountMenuButtonRef = useRef<HTMLButtonElement | null>(null)
-  const pomodoroAutoJumpKeyRef = useRef("")
   const completedPomodoroSegmentKeyRef = useRef("")
   const previousPomodoroSnapshotRef = useRef<typeof pomodoroSnapshot | null>(null)
   const previousLocationRef = useRef(locationToken)
@@ -448,12 +447,13 @@ export function AppShell() {
     pomodoroUpcomingSegment?.phase === "break" &&
     (pomodoroUpcomingSegment?.startsInMs ?? 0) > 0 &&
     (pomodoroUpcomingSegment?.startsInMs ?? 0) <= 10_000
-  const pomodoroAutoJumpKey =
+  const isPomodoroBlockingOtherProjectWorkbench =
     pomodoroSnapshot.status === "running" &&
     pomodoroSnapshot.phase === "focus" &&
-    pomodoroFocusProjectId
-      ? `${pomodoroSnapshot.weekday}:${pomodoroSnapshot.segmentIndex}:${pomodoroFocusProjectId}:${pomodoroSnapshot.startAtMs ?? 0}`
-      : ""
+    Boolean(pomodoroFocusProjectId) &&
+    Boolean(pid) &&
+    location.pathname.includes("/workbench") &&
+    pid !== pomodoroFocusProjectId
   usePomodoroTransitionSound(pomodoroSnapshot, pomodoroTransitionSoundEnabled)
   useEffect(() => {
     setPomodoroRestMusicPhaseActive(
@@ -533,38 +533,6 @@ export function AppShell() {
     })
     return () => window.cancelAnimationFrame(frame)
   }, [locationToken])
-
-  useEffect(() => {
-    if (!pomodoroAutoJumpKey || !pomodoroFocusProjectId) return
-    if (pomodoroAutoJumpKeyRef.current === pomodoroAutoJumpKey) return
-    pomodoroAutoJumpKeyRef.current = pomodoroAutoJumpKey
-    const targetPath = `/p/${pomodoroFocusProjectId}/workbench`
-    if (location.pathname === targetPath) return
-    let cancelled = false
-
-    async function jumpToFocusWorkbench() {
-      if (typeof document !== "undefined" && document.fullscreenElement) {
-        try {
-          await document.exitFullscreen()
-        } catch {
-          // Ignore exit failure and continue with navigation.
-        }
-      }
-      if (cancelled) return
-      nav(targetPath, {
-        replace: true,
-        state: {
-          pomodoroAutoJump: true,
-          targetProjectId: pomodoroFocusProjectId,
-        },
-      })
-    }
-
-    void jumpToFocusWorkbench()
-    return () => {
-      cancelled = true
-    }
-  }, [location.pathname, nav, pomodoroAutoJumpKey, pomodoroFocusProjectId])
 
   useEffect(() => {
     if (!globalMenuOpen && !subjectMenuOpen && !projectMenuOpen && !accountMenuOpen) return
@@ -693,6 +661,22 @@ export function AppShell() {
     const from = `${location.pathname}${location.search}${location.hash}`
     return <Navigate to="/login" replace state={{ from }} />
   }
+
+  const outletContent = isPomodoroBlockingOtherProjectWorkbench ? (
+    <div className="mx-auto max-w-2xl">
+      <ErrorNotice
+        title="番茄钟正在学习另一个项目"
+        message={`当前番茄钟已锁定“${focusProjectTitle || "当前番茄项目"}”，不能进入这个项目工作台。请先完成或停止当前番茄，再切换到其他项目。`}
+        action={
+          <Button asChild>
+            <Link to={`/p/${pomodoroFocusProjectId}/workbench`}>进入当前番茄工作台</Link>
+          </Button>
+        }
+      />
+    </div>
+  ) : (
+    <Outlet />
+  )
 
   return (
     <div className="min-h-dvh">
@@ -893,7 +877,7 @@ export function AppShell() {
       </header>
 
       <main className="container relative z-10 py-5 lg:py-6">
-        <Outlet />
+        {outletContent}
       </main>
     </div>
   )

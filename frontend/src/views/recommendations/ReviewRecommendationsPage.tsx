@@ -1,12 +1,26 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { ArrowRight, Check, CheckCircle2, ChevronLeft, Plus, Search, XCircle } from "lucide-react"
+import {
+  ArrowRight,
+  ArrowUpRight,
+  Check,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  ClipboardCheck,
+  Lightbulb,
+  PlayCircle,
+  Plus,
+  Search,
+  Undo2,
+} from "lucide-react"
 import { Link, useParams, useSearchParams } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
 import { searchRecallPoints, type RecallPoint, type ReviewRecommendationItem } from "@/ui/api/review"
-import { richContentToPlainText } from "@/ui/api/richContent"
+import { normalizeRichContent, richContentHasMeaning, richContentToPlainText, setRichContentText, type RichContent } from "@/ui/api/richContent"
 import { RichContentRenderer } from "@/ui/components/RichContentRenderer"
+import { RichContentEditor } from "@/ui/components/RichContentEditor"
 import { ContentEmptyState, ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
@@ -92,6 +106,10 @@ export function ReviewRecommendationsPage() {
   const [activeRecallPointId, setActiveRecallPointId] = useState<string | null>(null)
   const [revealedAnswerIds, setRevealedAnswerIds] = useState<Record<string, boolean>>({})
   const [sessionAnswers, setSessionAnswers] = useState<Record<string, SessionAnswer>>({})
+  const [writtenAnswerDrafts, setWrittenAnswerDrafts] = useState<Record<string, RichContent>>({})
+  const [submittedWrittenAnswers, setSubmittedWrittenAnswers] = useState<Record<string, boolean>>({})
+  const [insightDrafts, setInsightDrafts] = useState<Record<string, string>>({})
+  const [showInsightEditor, setShowInsightEditor] = useState<Record<string, boolean>>({})
   const reviewRecommendationsQ = useReviewRecommendations(pid, { offset })
   const recallPointSearchQ = useQuery({
     queryKey: ["recommendedReviewRecallPointSearch", pid, deferredRecallPointSearchQuery],
@@ -114,6 +132,10 @@ export function ReviewRecommendationsPage() {
     setActiveRecallPointId(null)
     setRevealedAnswerIds({})
     setSessionAnswers({})
+    setWrittenAnswerDrafts({})
+    setSubmittedWrittenAnswers({})
+    setInsightDrafts({})
+    setShowInsightEditor({})
   }, [pid])
 
   const page = reviewRecommendationsQ.data
@@ -159,18 +181,7 @@ export function ReviewRecommendationsPage() {
     ? reviewWorkspaceEntries.findIndex((entry) => entry.recallPoint.recallPointId === activeEntry.recallPoint.recallPointId)
     : -1
   const answeredCount = reviewWorkspaceEntries.filter((entry) => sessionAnswers[entry.recallPoint.recallPointId] !== undefined).length
-  const rememberedCount = reviewWorkspaceEntries.filter((entry) => sessionAnswers[entry.recallPoint.recallPointId] === "remembered").length
-  const forgottenCount = reviewWorkspaceEntries.filter((entry) => sessionAnswers[entry.recallPoint.recallPointId] === "forgotten").length
   const completionPercent = reviewWorkspaceEntries.length > 0 ? Math.round((answeredCount / reviewWorkspaceEntries.length) * 100) : 0
-  const recommendationStats = reviewWorkspaceEntries.map((entry) => entry.recommendation).filter((item): item is ReviewRecommendationItem => item !== null)
-  const averageRecommendationIndex =
-    recommendationStats.length > 0
-      ? recommendationStats.reduce((sum, item) => sum + item.reviewRecommendationIndex, 0) / recommendationStats.length
-      : null
-  const averageMemoryStrength =
-    recommendationStats.length > 0
-      ? recommendationStats.reduce((sum, item) => sum + item.estimatedMemoryStrength, 0) / recommendationStats.length
-      : null
 
   useEffect(() => {
     if (reviewWorkspaceEntries.length === 0) {
@@ -233,16 +244,82 @@ export function ReviewRecommendationsPage() {
       delete next[recallPointId]
       return next
     })
+    setWrittenAnswerDrafts((current) => {
+      const next = { ...current }
+      delete next[recallPointId]
+      return next
+    })
+    setSubmittedWrittenAnswers((current) => {
+      const next = { ...current }
+      delete next[recallPointId]
+      return next
+    })
+    setInsightDrafts((current) => {
+      const next = { ...current }
+      delete next[recallPointId]
+      return next
+    })
+    setShowInsightEditor((current) => {
+      const next = { ...current }
+      delete next[recallPointId]
+      return next
+    })
     if (activeRecallPointId === recallPointId) setActiveRecallPointId(null)
   }
 
-  function revealAnswer(recallPointId: string) {
+  function chooseSessionAnswer(recallPointId: string, answer: SessionAnswer) {
+    if (!submittedWrittenAnswers[recallPointId]) return
+    setRevealedAnswerIds((current) => ({ ...current, [recallPointId]: true }))
+    setSessionAnswers((current) => ({ ...current, [recallPointId]: answer }))
+    if (activeReviewEntryIndex >= 0 && activeReviewEntryIndex < reviewWorkspaceEntries.length - 1) {
+      goToReviewEntry(activeReviewEntryIndex + 1)
+    }
+  }
+
+  function updateWrittenAnswerText(recallPointId: string, text: string) {
+    setWrittenAnswerDrafts((current) => ({
+      ...current,
+      [recallPointId]: setRichContentText(current[recallPointId] ?? [], text),
+    }))
+  }
+
+  function appendWrittenAnswerImage(recallPointId: string) {
+    setWrittenAnswerDrafts((current) => current)
+    void recallPointId
+  }
+
+  function removeWrittenAnswerImage(recallPointId: string) {
+    setWrittenAnswerDrafts((current) => current)
+    void recallPointId
+  }
+
+  function submitWrittenAnswer(recallPointId: string) {
+    const submittedContent = normalizeRichContent(writtenAnswerDrafts[recallPointId] ?? [])
+    if (!richContentHasMeaning(submittedContent)) return
+    setWrittenAnswerDrafts((current) => ({ ...current, [recallPointId]: submittedContent }))
+    setSubmittedWrittenAnswers((current) => ({ ...current, [recallPointId]: true }))
     setRevealedAnswerIds((current) => ({ ...current, [recallPointId]: true }))
   }
 
-  function chooseSessionAnswer(recallPointId: string, answer: SessionAnswer) {
+  function skipWrittenAnswer(recallPointId: string) {
+    setSubmittedWrittenAnswers((current) => ({ ...current, [recallPointId]: true }))
     setRevealedAnswerIds((current) => ({ ...current, [recallPointId]: true }))
-    setSessionAnswers((current) => ({ ...current, [recallPointId]: answer }))
+  }
+
+  function toggleInsightEditor(recallPointId: string) {
+    setShowInsightEditor((current) => ({ ...current, [recallPointId]: !current[recallPointId] }))
+  }
+
+  function updateInsightDraft(recallPointId: string, value: string) {
+    setInsightDrafts((current) => ({ ...current, [recallPointId]: value }))
+  }
+
+  function clearSessionAnswer(recallPointId: string) {
+    setSessionAnswers((current) => {
+      const next = { ...current }
+      delete next[recallPointId]
+      return next
+    })
   }
 
   function goToReviewEntry(index: number) {
@@ -425,132 +502,272 @@ export function ReviewRecommendationsPage() {
           </Card>
         </aside>
 
-        <div className="space-y-4">
-          <Card className="theme-card-main">
-            <CardHeader className="theme-card-header">
-              <CardTitle>复习统计</CardTitle>
-              <CardDescription>右侧统计会随本次加入的复述点和本地判断同步变化。</CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <StatBlock label="本次复习" value={String(reviewWorkspaceEntries.length)} detail={`推荐 ${items.length} · 手动 ${manualReviewRecallPoints.length}`} />
-              <StatBlock label="已完成" value={`${answeredCount}/${reviewWorkspaceEntries.length}`} detail={`记得 ${rememberedCount} · 不记得 ${forgottenCount}`} />
-              <StatBlock label="推荐指数" value={formatStatValue(averageRecommendationIndex)} detail="已加入推荐项均值" />
-              <StatBlock label="记忆强度" value={averageMemoryStrength === null ? "-" : formatPercent(averageMemoryStrength)} detail="已加入推荐项均值" />
-            </CardContent>
-          </Card>
-
+        <div>
           <Card className="theme-card-main">
             <CardHeader className="theme-card-header flex-col gap-4 space-y-0 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <CardTitle>复习工作区</CardTitle>
-                <CardDescription>
-                  {activeEntry
-                    ? `当前 ${activeReviewEntryIndex + 1}/${reviewWorkspaceEntries.length} · ${formatRecallPointReference(activeEntry.recallPoint.recallPointId)}`
-                    : "先从左侧选择或加入一个复述点。"}
-                </CardDescription>
+              <div className="flex items-center gap-3">
+                <div className="theme-icon-surface h-10 w-10">
+                  <ClipboardCheck className="h-5 w-5" />
+                </div>
+                <div>
+                  <CardTitle>复习任务</CardTitle>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={() => goToReviewEntry(activeReviewEntryIndex - 1)} disabled={activeReviewEntryIndex <= 0}>
-                  <ChevronLeft className="h-4 w-4" />
-                  上一个
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => goToReviewEntry(activeReviewEntryIndex + 1)}
-                  disabled={activeReviewEntryIndex < 0 || activeReviewEntryIndex >= reviewWorkspaceEntries.length - 1}
-                >
-                  下一个
-                  <ArrowRight className="h-4 w-4" />
-                </Button>
+
+              <div className="min-w-[180px] space-y-2">
+                <div className="flex items-center justify-between gap-3 text-sm">
+                  <span className="theme-meta">{reviewWorkspaceEntries.length} 题</span>
+                  <span className="font-medium text-[color:var(--theme-subtle-text)]">
+                    已完成 {answeredCount} / {reviewWorkspaceEntries.length}
+                  </span>
+                </div>
+                <div className="theme-progress-track h-2 overflow-hidden rounded-full">
+                  <div className="theme-progress-fill h-full rounded-full transition-[width] duration-300" style={{ width: `${completionPercent}%` }} />
+                </div>
               </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4 pt-5">
               {!activeEntry ? (
                 <div className="py-16 text-center text-sm text-muted-foreground">从左侧推荐列表或搜索结果中选择一个复述点开始。</div>
               ) : (
-                <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(16rem,0.72fr)]">
-                  <section className="space-y-4">
-                    <div className="space-y-2 border-t border-border/60 pt-4 first:border-t-0">
-                      <div className="text-xs font-medium text-muted-foreground">问题</div>
-                      <RichContentRenderer projectId={pid} value={activeEntry.recallPoint.question} />
-                    </div>
+                <div className="space-y-4">
+                  <div className="sr-only">
+                    作答进度：已作答 {answeredCount} / {reviewWorkspaceEntries.length}，当前是第 {activeReviewEntryIndex + 1} 题。
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {reviewWorkspaceEntries.map((entry, index) => {
+                      const rpId = entry.recallPoint.recallPointId
+                      const answer = sessionAnswers[rpId]
+                      const isActive = rpId === activeEntry.recallPoint.recallPointId
+                      return (
+                        <button
+                          key={`recommended-review-progress-${rpId}`}
+                          type="button"
+                          onClick={() => setActiveRecallPointId(rpId)}
+                          aria-current={isActive ? "true" : undefined}
+                          className={cn(
+                            "flex size-10 items-center justify-center rounded-xl border text-sm font-semibold transition-all",
+                            answer === "remembered" && "border-emerald-200 bg-emerald-600 text-white shadow-[0_12px_24px_-20px_rgba(5,150,105,0.5)]",
+                            answer === "forgotten" && "border-amber-200 bg-amber-50 text-amber-700",
+                            answer === undefined && "[border-color:var(--theme-soft-border)] [background:var(--theme-soft-bg)] text-[color:var(--theme-subtle-text)] hover:border-primary/25 hover:text-primary",
+                            isActive && "ring-2 ring-primary/25 ring-offset-2 ring-offset-background",
+                          )}
+                          title={`第 ${index + 1} 题`}
+                        >
+                          {index + 1}
+                        </button>
+                      )
+                    })}
+                  </div>
 
-                    <div className="space-y-3 border-t border-border/60 pt-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="text-xs font-medium text-muted-foreground">答案</div>
-                        {!revealedAnswerIds[activeEntry.recallPoint.recallPointId] ? (
-                          <Button type="button" size="sm" variant="outline" onClick={() => revealAnswer(activeEntry.recallPoint.recallPointId)}>
-                            显示答案
-                          </Button>
-                        ) : null}
-                      </div>
-                      {revealedAnswerIds[activeEntry.recallPoint.recallPointId] ? (
-                        <RichContentRenderer projectId={pid} value={activeEntry.recallPoint.answer} />
-                      ) : (
-                        <div className="text-sm text-muted-foreground">先在脑中复述，再点开答案核对。</div>
-                      )}
-                    </div>
-                  </section>
+                  {(() => {
+                    const rpId = activeEntry.recallPoint.recallPointId
+                    const answer = sessionAnswers[rpId]
+                    const isRemembered = answer === "remembered"
+                    const isForgotten = answer === "forgotten"
+                    const writtenAnswerDraft = writtenAnswerDrafts[rpId] ?? []
+                    const hasSubmittedWrittenAnswer = submittedWrittenAnswers[rpId] === true
+                    const canSubmitWrittenAnswer = richContentHasMeaning(writtenAnswerDraft)
+                    const answerVisible = hasSubmittedWrittenAnswer && (revealedAnswerIds[rpId] ?? false)
+                    const insightEditorVisible = showInsightEditor[rpId] || Boolean(insightDrafts[rpId]?.trim())
+                    const hasNextRecallPoint = activeReviewEntryIndex >= 0 && activeReviewEntryIndex < reviewWorkspaceEntries.length - 1
 
-                  <section className="space-y-5 border-t border-border/60 pt-4 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
-                    <div className="space-y-3">
-                      <div className="text-sm font-medium">复习判断</div>
-                      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
+                    return (
+                      <div className="relative overflow-visible">
                         <Button
                           type="button"
-                          variant={sessionAnswers[activeEntry.recallPoint.recallPointId] === "remembered" ? "default" : "outline"}
-                          onClick={() => chooseSessionAnswer(activeEntry.recallPoint.recallPointId, "remembered")}
+                          variant="ghost"
+                          size="icon"
+                          className="absolute inset-y-0 -left-4 z-10 h-auto w-4 rounded-none border-0 bg-transparent p-0 text-[color:var(--theme-subtle-text)] shadow-none outline-none hover:bg-transparent hover:text-foreground focus-visible:ring-0 focus-visible:ring-offset-0 sm:-left-5 sm:w-5"
+                          onClick={() => goToReviewEntry(activeReviewEntryIndex - 1)}
+                          disabled={activeReviewEntryIndex <= 0}
+                          aria-label="上一题"
+                          title="上一题"
                         >
-                          <CheckCircle2 className="h-4 w-4" />
-                          记得
+                          <ChevronLeft className="h-4 w-4" />
                         </Button>
                         <Button
                           type="button"
-                          variant={sessionAnswers[activeEntry.recallPoint.recallPointId] === "forgotten" ? "destructive" : "outline"}
-                          onClick={() => chooseSessionAnswer(activeEntry.recallPoint.recallPointId, "forgotten")}
+                          variant="ghost"
+                          size="icon"
+                          className="absolute inset-y-0 -right-4 z-10 h-auto w-4 rounded-none border-0 bg-transparent p-0 text-[color:var(--theme-subtle-text)] shadow-none outline-none hover:bg-transparent hover:text-foreground focus-visible:ring-0 focus-visible:ring-offset-0 sm:-right-5 sm:w-5"
+                          onClick={() => goToReviewEntry(activeReviewEntryIndex + 1)}
+                          disabled={activeReviewEntryIndex < 0 || activeReviewEntryIndex >= reviewWorkspaceEntries.length - 1}
+                          aria-label="下一题"
+                          title="下一题"
                         >
-                          <XCircle className="h-4 w-4" />
-                          不记得
+                          <ChevronRight className="h-4 w-4" />
                         </Button>
-                      </div>
-                    </div>
 
-                    <div className="space-y-3 text-sm">
-                      <div className="flex items-center justify-between gap-3 border-t border-border/60 pt-3">
-                        <span className="text-muted-foreground">来源</span>
-                        <span className="font-medium text-foreground">{activeEntry.source === "recommended" ? `系统推荐 ${activeEntry.rankLabel}` : "手动加入"}</span>
-                      </div>
-                      <div className="flex items-center justify-between gap-3 border-t border-border/60 pt-3">
-                        <span className="text-muted-foreground">推荐指数</span>
-                        <span className="font-medium text-foreground">
-                          {activeEntry.recommendation ? activeEntry.recommendation.reviewRecommendationIndex.toFixed(1) : "-"}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between gap-3 border-t border-border/60 pt-3">
-                        <span className="text-muted-foreground">记忆强度</span>
-                        <span className="font-medium text-foreground">
-                          {activeEntry.recommendation ? formatPercent(activeEntry.recommendation.estimatedMemoryStrength) : "-"}
-                        </span>
-                      </div>
-                      <div className="border-t border-border/60 pt-3">
-                        <div className="text-muted-foreground">最近复习</div>
-                        <div className="mt-1 font-medium text-foreground">
-                          {activeEntry.recommendation
-                            ? `${formatReviewResult(activeEntry.recommendation.lastReviewResult)} · ${formatDateTime(activeEntry.recommendation.lastReviewedAt)}`
-                            : "暂无推荐统计"}
+                        <div className="theme-status-surface rounded-[1.15rem] border border-[color:var(--theme-status-border)] px-4 py-4 sm:px-5">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                                <span>第 {activeReviewEntryIndex + 1} 题</span>
+                                {isRemembered ? <span className="rounded-full bg-emerald-50 px-2 py-0.5 tracking-[0.08em] text-emerald-700">已标记为记得</span> : null}
+                                {isForgotten ? <span className="rounded-full bg-amber-50 px-2 py-0.5 tracking-[0.08em] text-amber-700">已标记为不记得</span> : null}
+                              </div>
+
+                              <Link
+                                to={`/p/${pid}/recall-points/${rpId}`}
+                                className="group mt-2 block rounded-2xl px-2 py-1 -mx-2 -my-1 transition hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                                title="打开复述点详情"
+                              >
+                                <div className="text-[15px] font-semibold leading-6 text-foreground transition group-hover:text-primary">
+                                  <RichContentRenderer projectId={pid} value={activeEntry.recallPoint.question} />
+                                </div>
+                                <div className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary/85">
+                                  查看复述点详情
+                                  <ArrowUpRight className="h-3.5 w-3.5" />
+                                </div>
+                              </Link>
+
+                              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                <span className="theme-pill-default rounded-full px-2.5 py-1 font-medium">{formatAnchorLabel(activeEntry.recallPoint)}</span>
+                                {activeEntry.recallPoint.insights.length > 0 ? (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 font-medium text-amber-700">
+                                    <Lightbulb className="h-3.5 w-3.5" />
+                                    已有 {activeEntry.recallPoint.insights.length} 条理解
+                                  </span>
+                                ) : null}
+                                {activeEntry.recommendation ? (
+                                  <span className="theme-pill-default rounded-full px-2.5 py-1 font-medium">
+                                    系统推荐 {activeEntry.rankLabel} · {formatStatValue(activeEntry.recommendation.reviewRecommendationIndex)}
+                                  </span>
+                                ) : null}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {activeEntry.recallPoint.anchor ? (
+                              <Button variant="outline" size="sm" className="rounded-full" asChild>
+                                <Link to={`/p/${pid}/instances/${activeEntry.recallPoint.anchor.instanceId}`}>
+                                  <PlayCircle className="h-4 w-4" />
+                                  回到锚点
+                                </Link>
+                              </Button>
+                            ) : null}
+                            <Button variant="ghost" size="sm" className="rounded-full" onClick={() => toggleInsightEditor(rpId)}>
+                              <Lightbulb className="h-4 w-4" />
+                              {insightEditorVisible ? "收起理解" : "追加理解"}
+                            </Button>
+                          </div>
+
+                          <div className="mt-4">
+                            <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">你的答案</div>
+                            <RichContentEditor
+                              projectId={pid}
+                              field="answer"
+                              value={writtenAnswerDraft}
+                              disabled={hasSubmittedWrittenAnswer}
+                              placeholder="先写下自己的答案，提交后会自动展开标准答案。"
+                              onTextChange={(text) => updateWrittenAnswerText(rpId, text)}
+                              onAppendImage={() => appendWrittenAnswerImage(rpId)}
+                              onRemoveImage={() => removeWrittenAnswerImage(rpId)}
+                              onUserActivity={() => undefined}
+                              textareaClassName="min-h-[140px] resize-y rounded-xl [border-color:var(--theme-subtle-border)] [background:var(--theme-subtle-bg)] text-foreground outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:cursor-not-allowed disabled:opacity-75"
+                              imageClassName="h-28 w-full max-w-[220px] rounded-xl border [border-color:var(--theme-subtle-border)] [background:var(--theme-subtle-bg)] object-cover"
+                            />
+                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                              {hasSubmittedWrittenAnswer ? (
+                                <span className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                                  <CheckCircle2 className="h-4 w-4" />
+                                  已提交答案
+                                </span>
+                              ) : (
+                                <>
+                                  <Button type="button" variant="default" size="sm" className="rounded-xl" onClick={() => submitWrittenAnswer(rpId)} disabled={!canSubmitWrittenAnswer}>
+                                    提交答案
+                                  </Button>
+                                  <Button type="button" variant="outline" size="sm" className="rounded-xl" onClick={() => skipWrittenAnswer(rpId)}>
+                                    跳过
+                                  </Button>
+                                </>
+                              )}
+                              <span className="text-xs text-muted-foreground">
+                                {hasSubmittedWrittenAnswer ? "已展开答案，可判断记忆状态。" : "先提交自己的答案或跳过，再判断记忆状态。"}
+                              </span>
+                            </div>
+                          </div>
+
+                          {answerVisible ? (
+                            <div className="theme-canvas mt-3 rounded-2xl border border-[color:var(--theme-soft-border)] p-3 text-sm">
+                              <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">答案</div>
+                              <RichContentRenderer projectId={pid} value={activeEntry.recallPoint.answer} />
+                            </div>
+                          ) : null}
+
+                          {insightEditorVisible ? (
+                            <div className="theme-soft-surface mt-3 p-3">
+                              <textarea
+                                value={insightDrafts[rpId] ?? ""}
+                                onChange={(event) => updateInsightDraft(rpId, event.target.value)}
+                                rows={3}
+                                placeholder="补充这道复习点的新理解、易错点、联想线索或自己的话解释。"
+                                className="min-h-[96px] w-full resize-y border-0 bg-transparent p-0 text-sm text-foreground outline-none transition placeholder:text-muted-foreground focus:ring-0"
+                              />
+                            </div>
+                          ) : null}
+
+                          <div className="mt-4 flex flex-wrap items-center gap-2">
+                            <Button
+                              variant={isRemembered ? "default" : "outline"}
+                              size="sm"
+                              className={cn("min-w-[96px] rounded-full", isRemembered ? "bg-emerald-600 hover:bg-emerald-700" : "")}
+                              onClick={() => chooseSessionAnswer(rpId, "remembered")}
+                              disabled={!hasSubmittedWrittenAnswer}
+                            >
+                              记得
+                            </Button>
+                            <Button
+                              variant={isForgotten ? "secondary" : "outline"}
+                              size="sm"
+                              className={cn("min-w-[96px] rounded-full", isForgotten ? "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100" : "")}
+                              onClick={() => chooseSessionAnswer(rpId, "forgotten")}
+                              disabled={!hasSubmittedWrittenAnswer}
+                            >
+                              不记得
+                            </Button>
+                            {answer !== undefined ? (
+                              <Button variant="ghost" size="sm" className="rounded-full text-muted-foreground" onClick={() => clearSessionAnswer(rpId)}>
+                                <Undo2 className="h-4 w-4" />
+                                撤销选择
+                              </Button>
+                            ) : null}
+                          </div>
+
+                          {answer !== undefined ? (
+                            <div
+                              className={cn(
+                                "mt-3 flex items-center gap-2 rounded-2xl px-3 py-2 text-xs font-medium",
+                                isRemembered ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700",
+                              )}
+                            >
+                              <CheckCircle2 className="h-4 w-4" />
+                              {isRemembered
+                                ? hasNextRecallPoint
+                                  ? "这题已标记为“记得”，回答后自动切到下一题。"
+                                  : "这题已标记为“记得”，已经是最后一题。"
+                                : hasNextRecallPoint
+                                  ? "这题已标记为“不记得”，回答后自动切到下一题。"
+                                  : "这题已标记为“不记得”，已经是最后一题。"}
+                            </div>
+                          ) : null}
+
+                          <div className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
+                            <StatBlock label="推荐指数" value={activeEntry.recommendation ? activeEntry.recommendation.reviewRecommendationIndex.toFixed(1) : "-"} detail="当前复述点" />
+                            <StatBlock label="记忆强度" value={activeEntry.recommendation ? formatPercent(activeEntry.recommendation.estimatedMemoryStrength) : "-"} detail="当前复述点" />
+                            <StatBlock
+                              label="最近复习"
+                              value={activeEntry.recommendation ? formatReviewResult(activeEntry.recommendation.lastReviewResult).replace("最近一次：", "") : "-"}
+                              detail={activeEntry.recommendation ? formatDateTime(activeEntry.recommendation.lastReviewedAt) : "暂无推荐统计"}
+                            />
+                          </div>
                         </div>
                       </div>
-                      <div className="border-t border-border/60 pt-3">
-                        <div className="text-muted-foreground">锚点</div>
-                        <div className="mt-1 font-medium text-foreground">{formatAnchorLabel(activeEntry.recallPoint)}</div>
-                      </div>
-                    </div>
-
-                    <Button variant="outline" size="sm" asChild>
-                      <Link to={`/p/${pid}/recall-points/${activeEntry.recallPoint.recallPointId}`}>打开复述点详情</Link>
-                    </Button>
-                  </section>
+                    )
+                  })()}
                 </div>
               )}
             </CardContent>
