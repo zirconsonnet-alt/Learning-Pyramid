@@ -170,15 +170,20 @@ def test_pomodoro_plan_selects_projects_inside_selected_subject() -> None:
     assert 'import { useQueries } from "@tanstack/react-query"' in page_source
     assert 'listSubjectMaterials' in page_source
     assert "subjectProjectOptions" in page_source
-    assert "selectedSubjectIdByProjectId" in page_source
+    assert "selectedSubjectIdByPlanId" in page_source
+    assert "normalizeDraftSubjectId" in page_source
     assert "请选择学科（必选）" in page_source
+    assert "先为这个计划选择学科" in page_source
     assert "validPomodoroProjectIds" in page_source
     assert "validPomodoroProjectIds.has(snapshot.currentProjectId)" in page_source
     assert "projectBindingMessages" in page_source
     assert "请选择项目（必选）" in page_source
-    assert "先选择学科，再选择这个学科下面的项目。" in page_source
+    assert "先选择这个计划的学科，再选择该学科下的项目。" in page_source
     assert "番茄项目未选择完整" in page_source
     assert "updateGlobalSettings.isPending || planConflictMessages.length > 0 || projectBindingMessages.length > 0" in page_source
+    assert "draftSubjectId" in page_source
+    assert 'id={`pomodoro-subject-${pomodoroDraft.id}`}' in page_source
+    assert 'id={`pomodoro-project-${pomodoroDraft.id}-${index}`}' in page_source
 
     assert "pomodoroAccessibleProjects" in app_shell_source
     assert "subjectRootProjectIds" in app_shell_source
@@ -188,7 +193,7 @@ def test_pomodoro_plan_selects_projects_inside_selected_subject() -> None:
     assert 'import { useSubjects } from "@/ui/queries/subjects"' in gate_source
     assert "subjectRootProjectIds" in gate_source
     assert "filter((project) => !subjectRootProjectIds.has(project.projectId))" in gate_source
-    assert "每个番茄先选择学科，再绑定该学科下的具体项目。" in manual_source
+    assert "每个番茄计划先选择一个学科，再给计划里的每个番茄绑定该学科下的具体项目。" in manual_source
 
 
 def test_pomodoro_settings_use_dedicated_route_and_default_prompts() -> None:
