@@ -755,8 +755,8 @@ export function MembershipPage() {
                   )}
                 >
                   <div className="text-[11px] uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">考研套餐</div>
-                  <div className="mt-2 text-2xl font-semibold tracking-tight text-foreground">每日 ¥0.5</div>
-                  <div className="mt-2 text-sm leading-6 text-muted-foreground">购买当天到 12 月 21 日自动按天数结算</div>
+                  <div className="mt-2 text-2xl font-semibold tracking-tight text-foreground">¥15 / 月</div>
+                  <div className="mt-2 text-sm leading-6 text-muted-foreground">单最低15元 有效期至12月21日</div>
                   {effectiveSelectedPlanId === "graduate_exam" ? (
                     <div className="mt-1 text-xs text-[color:var(--theme-warm-text)]">
                       {preview?.planId === "graduate_exam"

@@ -53,5 +53,9 @@ def test_project_nav_places_ai_chat_above_recommended_review() -> None:
 
     assert project_nav_source.index('label: "工作台"') < project_nav_source.index('label: "AI问答"')
     assert project_nav_source.index('label: "AI问答"') < project_nav_source.index('label: "推荐复习"')
-    assert project_nav_source.index('label: "推荐复习"') < project_nav_source.index('label: "学习任务树"')
-    assert "items.splice(4, 0, { to: `/p/${pid}/object-tree`, label: \"学习对象树\", icon: Workflow })" in project_nav_source
+    assert project_nav_source.index('label: "推荐复习"') < project_nav_source.index('label: "结构视图"')
+    assert '{ to: `/p/${pid}/structure-view`, label: "结构视图", icon: Workflow }' in project_nav_source
+    assert 'label: "学习任务树"' not in project_nav_source
+    assert 'label: "学习对象树"' not in project_nav_source
+    assert "/task-tree" not in project_nav_source
+    assert "/object-tree" not in project_nav_source

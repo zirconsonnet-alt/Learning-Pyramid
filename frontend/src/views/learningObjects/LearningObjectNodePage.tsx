@@ -107,7 +107,7 @@ export function LearningObjectNodePage() {
       className="-ml-2 h-8 rounded-full px-2 text-[#60748c] hover:bg-[#f3f7fb] hover:text-foreground"
       asChild
     >
-      <Link to={`/p/${pid}/object-tree`}>
+      <Link to={`/p/${pid}/structure-view?view=object`}>
         <ChevronLeft className="h-4 w-4" />
         返回学习对象树
       </Link>
@@ -165,7 +165,7 @@ export function LearningObjectNodePage() {
           message="这个对象节点可能已经被重建或移除。你可以返回学习对象树重新选择。"
           action={
             <Button variant="outline" asChild>
-              <Link to={`/p/${pid}/object-tree`}>返回学习对象树</Link>
+              <Link to={`/p/${pid}/structure-view?view=object`}>返回学习对象树</Link>
             </Button>
           }
         />

@@ -32,8 +32,8 @@ const MEMBERSHIP_PLAN_OPTIONS = [
   {
     planId: "graduate_exam",
     title: "考研套餐",
-    subtitle: "每天 0.5 元",
-    hint: "购买当天算到同年 12 月 21 日",
+    subtitle: "¥15 / 月",
+    hint: "单最低15元 有效期至12月21日",
   },
 ] as const
 

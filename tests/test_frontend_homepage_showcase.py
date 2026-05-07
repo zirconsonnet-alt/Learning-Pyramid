@@ -196,6 +196,22 @@ def test_homepage_onboarding_uses_pill_action_labels() -> None:
     assert '<strong>查看指引</strong>' not in render_section
     assert ".lp-showcase-step-action" in css
     assert "border-radius: 999px;" in css
+    step_action_start = css.index(".lp-showcase-step-action {")
+    step_action_end = css.index("}", step_action_start)
+    step_action_css = css[step_action_start:step_action_end]
+    carousel_action_start = css.index(".lp-showcase-carousel-slide-action {")
+    carousel_action_end = css.index("}", carousel_action_start)
+    carousel_action_css = css[carousel_action_start:carousel_action_end]
+
+    assert "align-self: center;" in step_action_css
+    for shared_rule in (
+        "padding: 0 22px;",
+        "border: 1px solid var(--lp-secondary-border);",
+        "background: var(--lp-secondary-bg);",
+        "color: var(--lp-text);",
+    ):
+        assert shared_rule in step_action_css
+        assert shared_rule in carousel_action_css
 
 
 def test_homepage_pill_actions_vertically_center_text() -> None:
@@ -478,8 +494,8 @@ def test_homepage_featured_fourth_slide_uses_requested_copy_and_single_guide_but
         last_position = position
         assert intro in section
 
-    assert 'ctaLabel: "立即体验"' not in section
-    assert 'ctaHref: "#onboarding"' not in section
+    assert 'ctaLabel: "立即体验"' in section
+    assert 'ctaHref: "#onboarding"' in section
     assert "guideDocSlug" not in section
     assert "memberFeature: true" not in section
 
@@ -492,9 +508,9 @@ def test_homepage_featured_fourth_slide_uses_requested_copy_and_single_guide_but
     assert 'import { startGuideWalkthrough } from "@/ui/guideWalkthrough/guideWalkthroughController"' not in source
     assert 'startGuideWalkthrough(point.guideDocSlug)' not in source
     assert 'startGuideWalkthrough(item.guideDocSlug)' not in source
-    assert '<Link to={item.ctaHref}' not in source
-    assert "lp-showcase-carousel-slide-actions" not in source
-    assert "lp-showcase-carousel-slide-action" not in source
+    assert '<Link to={item.ctaHref}' in source
+    assert "lp-showcase-carousel-slide-actions" in source
+    assert "lp-showcase-carousel-slide-action" in source
     assert "color: #4d3508;" in css
 
 
@@ -574,8 +590,9 @@ def test_homepage_membership_card_highlights_member_benefits() -> None:
     assert 'className="lp-showcase-membership-benefits"' in section
     assert "<h3>月会员</h3>" in section
     assert "<h3>考研套餐</h3>" in section
-    assert "<strong>¥0.5</strong>" in section
-    assert "按购买当天到 12 月 21 日计费" in section
+    assert "<strong>¥15</strong>" in section
+    assert "<span>/ 月</span>" in section
+    assert "单最低15元 有效期至12月21日" in section
     assert "<h4>会员权益</h4>" in section
     assert "<li>番茄钟：学习规划与督促</li>" in section
     assert "<li>AI交互：你的助理及良师</li>" in section

@@ -58,7 +58,8 @@ def test_membership_purchase_dialog_supports_graduate_exam_plan() -> None:
 
     assert 'planId: "graduate_exam"' in dialog_source
     assert 'title: "考研套餐"' in dialog_source
-    assert "购买当天算到同年 12 月 21 日" in dialog_source
+    assert 'subtitle: "¥15 / 月"' in dialog_source
+    assert "单最低15元 有效期至12月21日" in dialog_source
     assert "会员时长：{preview?.periodDays ?? pendingOrder?.periodDays ?? 30} 天" in dialog_source
     assert "套餐类型：{preview?.planName ?? pendingOrder?.planName ?? \"月会员\"}" in dialog_source
     assert "const [selectedPlanId, setSelectedPlanId] = useState(DEFAULT_MEMBERSHIP_PLAN_ID)" in page_source
@@ -76,8 +77,8 @@ def test_membership_page_header_shows_monthly_and_graduate_exam_plans() -> None:
     assert "月会员" in hero_source
     assert "考研套餐" in hero_source
     assert "¥20 / 30 天" in hero_source
-    assert "每日 ¥0.5" in hero_source
-    assert "到 12 月 21 日" in hero_source
+    assert "¥15 / 月" in hero_source
+    assert "单最低15元 有效期至12月21日" in hero_source
     assert 'preview?.planId === "graduate_exam"' in hero_source
     assert "正在计算当前价格" in hero_source
     assert "支付前自动计算实际价格" in hero_source

@@ -227,6 +227,8 @@ const graduateReasons = [
     tag: "功能",
     title: "用它看视频有什么不同？",
     intro: "不要等到完全理解系统再开始。先用一门最焦虑、最容易遗忘的科目跑通一轮，你就会知道它到底适不适合你。",
+    ctaLabel: "立即体验",
+    ctaHref: "#onboarding",
     points: [
       {
         title: "微休息神经重放",
@@ -358,6 +360,13 @@ export function HomePage() {
                           )
                         })}
                       </div>
+                      {"ctaLabel" in item ? (
+                        <div className="lp-showcase-carousel-slide-actions">
+                          <Link to={item.ctaHref} className="lp-showcase-carousel-slide-action">
+                            {item.ctaLabel}
+                          </Link>
+                        </div>
+                      ) : null}
                     </article>
                   ))}
                 </div>
@@ -439,10 +448,10 @@ export function HomePage() {
                     <div className="lp-showcase-membership-price-block lp-showcase-membership-price-block-accent">
                       <h3>考研套餐</h3>
                       <div className="lp-showcase-price">
-                        <strong>¥0.5</strong>
-                        <span>/ 天</span>
+                        <strong>¥15</strong>
+                        <span>/ 月</span>
                       </div>
-                      <p className="lp-showcase-membership-plan-note">按购买当天到 12 月 21 日计费</p>
+                      <p className="lp-showcase-membership-plan-note">单最低15元 有效期至12月21日</p>
                     </div>
                   </div>
                   <div className="lp-showcase-membership-benefits">

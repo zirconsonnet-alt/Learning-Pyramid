@@ -81,7 +81,7 @@ export function LearningTaskNodePage() {
       className="-ml-2 h-8 rounded-full px-2 text-[#60748c] hover:bg-[#f3f7fb] hover:text-foreground"
       asChild
     >
-      <Link to={`/p/${pid}/task-tree`}>
+      <Link to={`/p/${pid}/structure-view?view=task`}>
         <ChevronLeft className="h-4 w-4" />
         返回学习任务树
       </Link>
@@ -149,7 +149,7 @@ export function LearningTaskNodePage() {
           message="这个任务节点可能已经被重建或移除。你可以返回学习任务树重新选择。"
           action={
             <Button variant="outline" asChild>
-              <Link to={`/p/${pid}/task-tree`}>返回学习任务树</Link>
+              <Link to={`/p/${pid}/structure-view?view=task`}>返回学习任务树</Link>
             </Button>
           }
         />

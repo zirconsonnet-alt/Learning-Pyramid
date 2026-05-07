@@ -74,8 +74,7 @@ const ProjectSettingsPage = lazyRoute(() => import("@/views/settings/ProjectSett
 const GlobalSettingsPage = lazyRoute(() => import("@/views/settings/GlobalSettingsPage"), (mod) => mod.GlobalSettingsPage)
 const SubtitleToolPage = lazyRoute(() => import("@/views/subtitleTool/SubtitleToolPage"), (mod) => mod.SubtitleToolPage)
 const SubjectDashboardPage = lazyRoute(() => import("@/views/subjects/SubjectDashboardPage"), (mod) => mod.SubjectDashboardPage)
-const ObjectTreePage = lazyRoute(() => import("@/views/trees/ObjectTreePage"), (mod) => mod.ObjectTreePage)
-const TaskTreePage = lazyRoute(() => import("@/views/trees/TaskTreePage"), (mod) => mod.TaskTreePage)
+const StructureViewPage = lazyRoute(() => import("@/views/trees/StructureViewPage"), (mod) => mod.StructureViewPage)
 const WorkbenchPage = lazyRoute(() => import("@/views/workbench/WorkbenchPage"), (mod) => mod.WorkbenchPage)
 const PomodoroPage = lazyRoute(() => import("@/views/pomodoro/PomodoroPage"), (mod) => mod.PomodoroPage)
 const PomodoroSettingsPage = lazyRoute(() => import("@/views/pomodoro/PomodoroSettingsPage"), (mod) => mod.PomodoroSettingsPage)
@@ -149,11 +148,10 @@ export const router = createBrowserRouter([
       { path: "/p/:projectId/settings", element: lazyElement(<ProjectSettingsPage />) },
       { path: "/p/:projectId/project-settings", element: lazyElement(<ProjectSettingsPage />) },
       { path: "/p/:projectId/ai-chat", element: lazyElement(<AiChatPage />) },
-      { path: "/p/:projectId/task-tree", element: lazyElement(<TaskTreePage />) },
+      { path: "/p/:projectId/structure-view", element: lazyElement(<StructureViewPage />) },
       { path: "/p/:projectId/learning-task-nodes/:nodeId", element: lazyElement(<LearningTaskNodePage />) },
       { path: "/p/:projectId/learning-object-nodes/:nodeId", element: lazyElement(<LearningObjectNodePage />) },
       { path: "/p/:projectId/instances/:instanceId", element: lazyElement(<InstancePage />) },
-      { path: "/p/:projectId/object-tree", element: lazyElement(<ObjectTreePage />) },
       { path: "/p/:projectId/review-chains/:reviewChainId", element: lazyElement(<ReviewChainPage />) },
       { path: "/p/:projectId/convergences/:convergenceId", element: lazyElement(<ConvergencePage />) },
       { path: "/p/:projectId/review-tasks/:reviewTaskId", element: lazyElement(<ReviewTaskPage />) },

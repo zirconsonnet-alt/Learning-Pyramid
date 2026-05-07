@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react"
-import { BookOpenText, Bot, Clock3, FolderKanban, LayoutDashboard, PanelsTopLeft, Settings2, Shield, Waypoints, Workflow } from "lucide-react"
+import { BookOpenText, Bot, Clock3, FolderKanban, LayoutDashboard, PanelsTopLeft, Settings2, Shield, Workflow } from "lucide-react"
 
 import { buildGlobalSettingsPath } from "@/views/settings/globalSettingsRouting"
 
@@ -32,17 +32,13 @@ export function getSubjectNavItems(subjectId: string, subjectProjectId: string) 
   ] satisfies NavItem[]
 }
 
-export function getProjectNavItems(pid: string, options?: { includeObjectTree?: boolean; settingsLabel?: string; settingsTo?: string }): NavItem[] {
+export function getProjectNavItems(pid: string, options?: { settingsLabel?: string; settingsTo?: string }): NavItem[] {
   if (!pid) return []
-  const items: NavItem[] = [
+  return [
     { to: `/p/${pid}/workbench`, label: "工作台", icon: PanelsTopLeft, guideTourAnchor: "workbench-nav" },
     { to: `/p/${pid}/ai-chat`, label: "AI问答", icon: Bot },
     { to: `/p/${pid}/recommended-reviews`, label: "推荐复习", icon: Clock3 },
-    { to: `/p/${pid}/task-tree`, label: "学习任务树", icon: Waypoints },
+    { to: `/p/${pid}/structure-view`, label: "结构视图", icon: Workflow },
     { to: options?.settingsTo ?? `/p/${pid}/settings`, label: options?.settingsLabel ?? "项目设置", icon: Settings2, guideTourAnchor: "project-settings-nav" },
   ]
-  if (options?.includeObjectTree ?? true) {
-    items.splice(4, 0, { to: `/p/${pid}/object-tree`, label: "学习对象树", icon: Workflow })
-  }
-  return items
 }

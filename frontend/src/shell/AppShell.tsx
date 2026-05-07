@@ -12,11 +12,9 @@ import { useLearningPlanRemoteSync } from "@/ui/learningPlans/learningPlanRemote
 import { useSubjectContext, useSubjects } from "@/ui/queries/subjects"
 import { ErrorNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
-import { projectTypeRequiresLearningObjectTree } from "@/ui/projectTypes"
 import { useCurrentUser, useLogout } from "@/ui/queries/auth"
 import { useProject, useProjects } from "@/ui/queries/projects"
 import { useSystemCapabilities } from "@/ui/queries/system"
-import { useProjectConfig } from "@/ui/queries/workbench"
 import { usePomodoroPreTransitionSpeech, usePomodoroTransitionSound } from "@/ui/pomodoroAudio"
 import { setPomodoroRestMusicPhaseActive } from "@/ui/pomodoroRestMusicPlayer"
 import { useGuideWalkthroughController } from "@/ui/guideWalkthrough/guideWalkthroughController"
@@ -130,16 +128,9 @@ function describeArea(
       }
     }
 
-    if (pathname.includes("/task-tree")) {
+    if (pathname.includes("/structure-view")) {
       return {
-        title: "学习任务树",
-        context: materialTitle,
-      }
-    }
-
-    if (pathname.includes("/object-tree")) {
-      return {
-        title: "学习对象树",
+        title: "结构视图",
         context: materialTitle,
       }
     }
@@ -332,7 +323,6 @@ export function AppShell() {
   const subjectContextQ = useSubjectContext(effectiveProjectId, canAccessApp && Boolean(effectiveProjectId) && !isSubjectDashboardScope)
   const { projectTitle } = useProject(effectiveProjectId, { enabled: canAccessApp && Boolean(effectiveProjectId) })
   const projectsQ = useProjects(canAccessApp)
-  const projectConfigQ = useProjectConfig(canAccessApp && effectiveProjectId ? effectiveProjectId : "")
   const logout = useLogout()
   const pomodoroEnabled = usePomodoroStore((state) => state.enabled)
   const pomodoroWeeklySchedule = usePomodoroStore((state) => state.weeklySchedule)
@@ -374,9 +364,6 @@ export function AppShell() {
   const completedPomodoroSegmentKeyRef = useRef("")
   const previousPomodoroSnapshotRef = useRef<typeof pomodoroSnapshot | null>(null)
   const previousLocationRef = useRef(locationToken)
-  const includeObjectTree = projectTypeRequiresLearningObjectTree(
-    subjectContextQ.data?.currentMaterial.materialType ?? projectConfigQ.data?.projectType ?? "COURSE",
-  )
   const subjectNavItems = useMemo(
     () => getSubjectNavItems(resolvedSubjectId, resolvedSubjectProjectId),
     [resolvedSubjectId, resolvedSubjectProjectId],
@@ -389,12 +376,11 @@ export function AppShell() {
     () =>
       hasProjectContext
         ? getProjectNavItems(currentMaterialProjectId, {
-            includeObjectTree,
             settingsLabel: "项目设置",
             settingsTo: currentProjectSettingsPath,
           })
         : [],
-    [currentMaterialProjectId, currentProjectSettingsPath, hasProjectContext, includeObjectTree],
+    [currentMaterialProjectId, currentProjectSettingsPath, hasProjectContext],
   )
   const isAdmin = Boolean(currentUserQ.data?.roles.some((role) => role === "super_admin" || role === "admin"))
   const globalNavItems = useMemo(() => getGlobalNavItems({ includeAdmin: isAdmin, includeMembership: authEnabled }), [authEnabled, isAdmin])
