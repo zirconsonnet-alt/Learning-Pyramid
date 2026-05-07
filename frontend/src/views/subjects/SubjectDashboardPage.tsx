@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { useQueries } from "@tanstack/react-query"
 import { ArrowLeft, ArrowRight, ArrowUpDown, BookOpenText, ChevronDown, Lightbulb, Plus, Settings2, Trash2, Video } from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router-dom"
@@ -154,11 +154,6 @@ export function SubjectDashboardPage() {
     })
   }, [lastStudyByMaterialId, materials, sortMode])
 
-  useEffect(() => {
-    if (!subjectProjectId) return
-    setSelectedProjectId(subjectProjectId)
-  }, [setSelectedProjectId, subjectProjectId])
-
   function getDefaultDraftTitle(materialType: StudyMaterialType) {
     return `${subjectTitle}·${formatStudyMaterialTypeLabel(materialType)}`
   }
@@ -233,7 +228,8 @@ export function SubjectDashboardPage() {
       if (projectId) {
         removeRecentProjectId(projectId)
       }
-      setSelectedProjectId(subjectProjectId)
+      const nextProjectId = materials.find((item) => item.materialId !== deleteMaterialTarget.materialId && item.projectId)?.projectId ?? null
+      setSelectedProjectId(nextProjectId)
       showSuccessFeedback("项目已删除", `“${deleteMaterialTarget.title}” 已从“${subjectTitle}”下移除。`)
       closeDeleteMaterialDialog()
     } catch (err) {
@@ -300,8 +296,6 @@ export function SubjectDashboardPage() {
           {sortedMaterials.map((material) => {
             const Icon = materialIconByType[material.materialType]
             const active = material.projectId === subjectProjectId
-            const canDeleteMaterial = Boolean(material.projectId && material.projectId !== subjectProjectId)
-            const deleteMaterialBlockedReason = canDeleteMaterial ? undefined : "默认项目与学科根绑定，不能单独删除；请在学科中心删除整个学科。"
             const materialActivityIndex = materials.findIndex((item) => item.materialId === material.materialId)
             const materialActivityLoading = material.projectId ? Boolean(materialActivityQs[materialActivityIndex]?.isLoading) : false
             const lastStudyDisplay = formatLastStudyText(lastStudyByMaterialId[material.materialId] ?? null)
@@ -342,20 +336,10 @@ export function SubjectDashboardPage() {
                         <Settings2 className="h-4 w-4" />
                         项目设置
                       </Button>
-                      <span className="inline-flex" title={deleteMaterialBlockedReason}>
-                        <Button
-                          type="button"
-                          variant="destructive"
-                          disabled={deleteMaterialM.isPending || !canDeleteMaterial}
-                          onClick={() => {
-                            if (!canDeleteMaterial) return
-                            openDeleteMaterialDialog(material)
-                          }}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                          删除
-                        </Button>
-                      </span>
+                      <Button type="button" variant="destructive" disabled={deleteMaterialM.isPending} onClick={() => openDeleteMaterialDialog(material)}>
+                        <Trash2 className="h-4 w-4" />
+                        删除
+                      </Button>
                     </div>
                   ) : (
                     <p className="text-sm text-muted-foreground">这个项目还没有可进入的工作台。</p>

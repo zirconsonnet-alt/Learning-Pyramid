@@ -57,7 +57,7 @@ export const CREATE_SUBJECT_PROJECT_GUIDE_STEPS: GuideWalkthroughStep[] = [
   },
   {
     id: "choose-project",
-    popoverTitle: "第 3 步：打开默认项目设置",
+    popoverTitle: "第 3 步：打开项目设置",
     sourceRef: {
       heading: "第 1 步：创建学科和项目",
       itemIndex: 6,

@@ -9,9 +9,9 @@
 3. 只填写学科标题，例如“机器学习”“英语听力”“操作系统”。
 4. 填写学科标题后，点击“创建学科”。
 5. 创建完成后，先进入“学科总面板”。
-6. 在学科总面板里选择默认项目，或新建书本、零散知识点项目。
+6. 在学科总面板里选择已有项目，或新建网课、书本、零散知识点项目。
 
-:::guide-demo scene="subject-project" state="create-subject" highlight="new-subject-button" title="创建学科和默认项目"
+:::guide-demo scene="subject-project" state="create-subject" highlight="new-subject-button" title="创建学科和项目"
 这个场景对应首次上手时从“学科中心”创建学科，并在创建后继续进入项目的入口。
 :::
 

@@ -364,12 +364,12 @@ export function ProjectSettingsPage() {
     try {
       const permission = await directoryBinding.authorizeDirectory()
       if (permission === "granted") {
-        showSuccessFeedback("本地目录已绑定", `浏览器已经记录并授权${isSubjectSettingsScope ? "当前默认项目" : "当前项目"}的本地素材目录。`)
+        showSuccessFeedback("本地目录已绑定", "浏览器已经记录并授权当前项目的本地素材目录。")
         await importAuthorizedDirectory(true)
         completeGuideWalkthroughStep("authorize-directory")
         return
       } else {
-        showInfoFeedback("目录已记录", `目录已经保存到${isSubjectSettingsScope ? "当前默认项目" : "当前项目"}，但浏览器还需要你继续授予读取权限。`)
+        showInfoFeedback("目录已记录", "目录已经保存到当前项目，但浏览器还需要你继续授予读取权限。")
       }
     } catch (err) {
       if (!isDirectoryPickerAbort(err)) {
@@ -386,7 +386,7 @@ export function ProjectSettingsPage() {
     try {
       const permission = await directoryBinding.requestPermission()
       if (permission === "granted") {
-        showSuccessFeedback("目录权限已恢复", `现在可以扫描并导入${isSubjectSettingsScope ? "默认项目" : "当前项目"}的本地素材目录。`)
+        showSuccessFeedback("目录权限已恢复", `现在可以扫描并导入当前项目的本地素材目录。`)
         await importAuthorizedDirectory(true)
         completeGuideWalkthroughStep("authorize-directory")
         return
@@ -435,7 +435,7 @@ export function ProjectSettingsPage() {
     setDirectoryAction("clear")
     try {
       await directoryBinding.clearDirectory()
-      showSuccessFeedback("本地目录绑定已清除", `${isSubjectSettingsScope ? "当前默认项目" : "当前项目"}不再保留这个浏览器里的目录授权记录。`)
+      showSuccessFeedback("本地目录绑定已清除", `当前项目不再保留这个浏览器里的目录授权记录。`)
     } catch (err) {
       showErrorFeedback("清除本地目录绑定失败", formatApiError(err))
     } finally {
@@ -1097,12 +1097,12 @@ function BasicInfoCard({
 
           <div className="space-y-3">
             <div className="space-y-1">
-              <div className="text-sm font-semibold text-foreground">{isSubjectRoot ? "默认项目" : "所属学科"}</div>
+              <div className="text-sm font-semibold text-foreground">{isSubjectRoot ? "当前项目" : "所属学科"}</div>
             </div>
             <div className="rounded-[1.2rem] border border-border/70 bg-muted/15 px-4 py-3">
               {isSubjectRoot ? (
                 <>
-                  <div className="text-sm font-semibold text-foreground">{materialTitle || "默认项目"}</div>
+                  <div className="text-sm font-semibold text-foreground">{materialTitle || "当前项目"}</div>
                   <div className="mt-1 text-xs text-muted-foreground">{formatStudyMaterialTypeLabel(materialType)} · {formatProjectTypeLabel(projectType)}</div>
                 </>
               ) : (
@@ -1128,7 +1128,7 @@ function BasicInfoCard({
 
         <section className="space-y-3">
           <div className="flex flex-wrap items-center gap-3">
-            <div className="text-sm font-semibold text-foreground">{isSubjectRoot ? "默认项目" : `当前${formatStudyMaterialTypeLabel(materialType)}项目`}</div>
+            <div className="text-sm font-semibold text-foreground">{isSubjectRoot ? "当前项目" : `当前${formatStudyMaterialTypeLabel(materialType)}项目`}</div>
             {projectType === "COURSE" && browserLocalMediaEnabled ? (
               <span
                 className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${describeDirectoryPermissionTone(directoryPermission)}`}
@@ -1145,7 +1145,7 @@ function BasicInfoCard({
                   <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                     <div className="space-y-2">
                       <div className="text-sm text-foreground">
-                        {directoryBinding.handleName ? directoryBinding.handleName : `当前${isSubjectRoot ? "默认项目" : "项目"}还没有绑定浏览器目录。`}
+                        {directoryBinding.handleName ? directoryBinding.handleName : "当前项目还没有绑定浏览器目录。"}
                       </div>
                     </div>
 
@@ -1227,7 +1227,7 @@ function BasicInfoCard({
                         </span>
                       </div>
                       <div className="text-sm text-muted-foreground">
-                        支持在当前{isSubjectRoot ? "默认项目" : "项目"}里浏览百度网盘目录、导入视频并按实例播放；字幕会按同目录同名规则自动识别。
+                        支持在当前项目里浏览百度网盘目录、导入视频并按实例播放；字幕会按同目录同名规则自动识别。
                       </div>
                     </div>
 

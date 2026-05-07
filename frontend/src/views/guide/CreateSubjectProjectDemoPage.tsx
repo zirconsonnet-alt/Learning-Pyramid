@@ -56,7 +56,7 @@ export function CreateSubjectProjectDemoPage() {
           <div>
             <div className="text-sm font-semibold text-foreground">创建学科项目引导演示</div>
             <p className="mt-1 text-sm leading-6 text-muted-foreground">
-              这里是一次性的虚拟演示环境，只模拟创建学科、打开默认项目设置、授权目录和同步内容，不会创建真实学科或项目。
+              这里是一次性的虚拟演示环境，只模拟创建学科、打开项目设置、授权目录和同步内容，不会创建真实学科或项目。
             </p>
           </div>
           <Button type="button" variant="outline" onClick={resetDemo}>
@@ -75,7 +75,7 @@ export function CreateSubjectProjectDemoPage() {
             <CardContent className="space-y-3 pt-4 text-sm">
               {[
                 ["创建学科", subjectCreated],
-                ["打开默认项目设置", stage === "project-settings" || directoryStatus !== "missing"],
+                ["打开项目设置", stage === "project-settings" || directoryStatus !== "missing"],
                 ["授权目录", directoryStatus === "authorized" || directoryStatus === "imported"],
                 ["同步内容", directoryStatus === "imported"],
               ].map(([label, done]) => (

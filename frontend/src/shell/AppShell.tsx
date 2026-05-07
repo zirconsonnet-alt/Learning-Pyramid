@@ -328,7 +328,8 @@ export function AppShell() {
   )
   const routeScopedProjectId = routeSubjectId ? routeSubject?.subjectProjectId ?? "" : ""
   const effectiveProjectId = pid || (routeSubjectId ? routeScopedProjectId : isProjectsScope ? "" : selectedProjectId || "")
-  const subjectContextQ = useSubjectContext(effectiveProjectId, canAccessApp && Boolean(effectiveProjectId))
+  const isSubjectDashboardScope = Boolean(routeSubjectId) && !pid
+  const subjectContextQ = useSubjectContext(effectiveProjectId, canAccessApp && Boolean(effectiveProjectId) && !isSubjectDashboardScope)
   const { projectTitle } = useProject(effectiveProjectId, { enabled: canAccessApp && Boolean(effectiveProjectId) })
   const projectsQ = useProjects(canAccessApp)
   const projectConfigQ = useProjectConfig(canAccessApp && effectiveProjectId ? effectiveProjectId : "")
@@ -350,7 +351,6 @@ export function AppShell() {
   const isSubjectSettingsScope = isSubjectRoot && !location.pathname.includes("/project-settings")
   const currentMaterialProjectId =
     subjectContextQ.data?.currentMaterial.projectId ?? (!isSubjectRoot ? currentProjectContextId : "")
-  const isSubjectDashboardScope = Boolean(routeSubjectId) && !pid
   const hasSubjectContext = Boolean(resolvedSubjectId && resolvedSubjectProjectId)
   const hasProjectContext = Boolean(hasSubjectContext && currentMaterialProjectId && !isSubjectDashboardScope)
   const area = describeArea(location.pathname, {
@@ -516,10 +516,10 @@ export function AppShell() {
               : "已关闭"
 
   useEffect(() => {
-    const nextSelectedProjectId = pid || routeScopedProjectId
+    const nextSelectedProjectId = pid || (isSubjectDashboardScope ? "" : routeScopedProjectId)
     if (!nextSelectedProjectId || selectedProjectId === nextSelectedProjectId) return
     setSelectedProjectId(nextSelectedProjectId)
-  }, [pid, routeScopedProjectId, selectedProjectId, setSelectedProjectId])
+  }, [isSubjectDashboardScope, pid, routeScopedProjectId, selectedProjectId, setSelectedProjectId])
 
   useEffect(() => {
     if (previousLocationRef.current === locationToken) return

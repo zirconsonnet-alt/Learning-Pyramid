@@ -62,7 +62,7 @@ export const guideSceneRegistry: GuideSceneDefinition[] = [
   {
     scene: "subject-project",
     label: "创建学科和项目",
-    description: "展示首次进入系统后创建学科、进入学科总面板并选择默认项目的路径。",
+    description: "展示首次进入系统后创建学科、进入学科总面板并选择项目的路径。",
     states: [
       {
         state: "create-subject",
@@ -72,7 +72,7 @@ export const guideSceneRegistry: GuideSceneDefinition[] = [
       {
         state: "project-choice",
         label: "选择项目",
-        stateDescription: "展示学科总面板中的默认项目卡片，帮助读者找到下一步入口。",
+        stateDescription: "展示学科总面板中的项目卡片，帮助读者找到下一步入口。",
       },
     ],
     highlights: ["new-subject-button", "default-project-card"],

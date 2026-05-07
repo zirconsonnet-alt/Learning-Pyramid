@@ -1015,6 +1015,9 @@ def encode_project_payload(project_store: Any) -> dict[str, Any]:
         "studyMaterials": {
             k: _encode_study_material(v) for k, v in getattr(project_store, "study_materials", {}).items()
         },
+        "studyMaterialsInitialized": bool(
+            getattr(project_store, "study_materials_initialized", bool(getattr(project_store, "study_materials", {})))
+        ),
         "subjectMaterialLink": None
         if getattr(project_store, "subject_material_link", None) is None
         else _encode_subject_material_link(project_store.subject_material_link),
@@ -1068,6 +1071,11 @@ def decode_project_payload(project_id: str, raw: dict[str, Any]) -> dict[str, An
     if raw_storage_cfg is None:
         raw_storage_cfg = d.get("projectScanConfig")
     raw_material_source_binding = d.get("projectMaterialSourceBinding")
+    raw_study_materials = d.get("studyMaterials")
+    study_materials = {k: _decode_study_material(v) for k, v in dict(raw_study_materials or {}).items()}
+    study_materials_initialized = bool(
+        d.get("studyMaterialsInitialized", raw_study_materials is not None and bool(study_materials))
+    )
     return {
         "project": project,
         "project_storage_config": None if raw_storage_cfg is None else _decode_project_storage_config(dict(raw_storage_cfg)),
@@ -1078,9 +1086,8 @@ def decode_project_payload(project_id: str, raw: dict[str, Any]) -> dict[str, An
         "material_allowlist": None
         if d.get("materialAllowlist") is None
         else _decode_material_allowlist(dict(d["materialAllowlist"])),
-        "study_materials": {
-            k: _decode_study_material(v) for k, v in dict(d.get("studyMaterials", {})).items()
-        },
+        "study_materials": study_materials,
+        "study_materials_initialized": study_materials_initialized,
         "subject_material_link": None
         if d.get("subjectMaterialLink") is None
         else _decode_subject_material_link(dict(d["subjectMaterialLink"])),

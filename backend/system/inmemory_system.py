@@ -106,6 +106,7 @@ class ProjectStore:
     project_config: Optional[ProjectConfig] = None
     material_allowlist: Optional[MaterialAllowlist] = None
     study_materials: Dict[str, StudyMaterial] = field(default_factory=dict)
+    study_materials_initialized: bool = False
     subject_material_link: Optional[SubjectMaterialLink] = None
     media_assets: Dict[str, MediaAsset] = field(default_factory=dict)
     audit_log_events: Dict[str, AuditLogEvent] = field(default_factory=dict)
@@ -2379,6 +2380,9 @@ class InMemorySystem:
                 ps.project_config = d.get("project_config")
                 ps.material_allowlist = d.get("material_allowlist")
                 ps.study_materials = d.get("study_materials", {})
+                ps.study_materials_initialized = bool(
+                    d.get("study_materials_initialized", bool(ps.study_materials))
+                )
                 ps.subject_material_link = d.get("subject_material_link")
                 ps.audit_log_events = d.get("audit_log_events", {})
                 ps.instances = d["instances"]
@@ -2468,6 +2472,7 @@ class InMemorySystem:
             ps.project_config = d.get("project_config")
             ps.material_allowlist = d.get("material_allowlist")
             ps.study_materials = d.get("study_materials", {})
+            ps.study_materials_initialized = bool(d.get("study_materials_initialized", bool(ps.study_materials)))
             ps.subject_material_link = d.get("subject_material_link")
             ps.audit_log_events = d.get("audit_log_events", {})
             ps.instances = d["instances"]
@@ -2785,6 +2790,9 @@ class InMemorySystem:
             next_ps.project_config = st.project_config if st.project_config is not None else ps.project_config
             next_ps.material_allowlist = st.material_allowlist if st.material_allowlist is not None else ps.material_allowlist
             next_ps.study_materials = dict(_overlay_study_materials(ps, st))
+            next_ps.study_materials_initialized = (
+                True if st.study_materials_replaced else getattr(ps, "study_materials_initialized", bool(ps.study_materials))
+            )
             next_ps.subject_material_link = (
                 st.subject_material_link if st.subject_material_link_replaced else ps.subject_material_link
             )

@@ -242,12 +242,14 @@ Replace reads of `material.compatibility_project_id` with `material.project_id` 
 - `delete_project`
 - `initialize_book_learning_objects_from_subject_material`
 
-Keep behavior the same:
+Historical note from the original plan:
 
 ```python
 if material_project_id is None or id_canonical_text(material_project_id) == id_canonical_text(resolved_subject_id):
-    raise PreconditionFailure("当前默认材料仍与学科根绑定，暂不支持删除")
+    raise PreconditionFailure("retired guard")
 ```
+
+This guard has since been retired. Subject project cards are product-equal and can all be deleted while the subject remains.
 
 - [ ] **Step 5: Rename helper**
 

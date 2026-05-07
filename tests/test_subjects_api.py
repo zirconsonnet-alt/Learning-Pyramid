@@ -97,7 +97,7 @@ def test_subject_creates_default_course_material_project(monkeypatch, tmp_path: 
     assert materials[0]["subjectId"] == subject_id
     assert materials[0]["materialId"] == "legacy_main"
     assert materials[0]["materialType"] == "COURSE"
-    assert materials[0]["title"] == "默认网课材料"
+    assert materials[0]["title"] == "网课材料"
     assert materials[0]["projectId"] == subject_id
     assert "compatibilityProjectId" not in materials[0]
 
@@ -252,6 +252,65 @@ def test_subject_context_and_material_management_endpoints(monkeypatch, tmp_path
     final_subjects_resp = client.get("/api/subjects")
     assert final_subjects_resp.status_code == 200
     assert final_subjects_resp.json()["data"] == []
+
+    _reset_caches()
+
+
+def test_subject_material_projects_can_all_be_deleted(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PLM_APP_MODE", "local")
+    monkeypatch.setenv("PLM_ENABLE_AUTH", "false")
+    monkeypatch.setenv("PLM_STORE_PATH", "")
+    monkeypatch.setenv("PLM_LEGACY_STORE_PATH", "")
+    monkeypatch.setenv("PLM_STORE_DB_PATH", str(tmp_path / "plm_store.sqlite3"))
+    monkeypatch.setenv("PLM_AUTH_DB_PATH", str(tmp_path / "plm_auth.sqlite3"))
+    _reset_caches()
+
+    client = TestClient(create_app())
+
+    create_subject_resp = client.post("/api/subjects", json={"title": "概率论与数理统计"})
+    assert create_subject_resp.status_code == 200
+    subject_id = create_subject_resp.json()["data"]["subjectId"]
+
+    materials_resp = client.get(f"/api/subjects/{subject_id}/materials")
+    assert materials_resp.status_code == 200
+    materials = materials_resp.json()["data"]
+    assert [item["materialId"] for item in materials] == ["legacy_main"]
+
+    delete_material_resp = client.delete(f"/api/subjects/{subject_id}/materials/legacy_main")
+    assert delete_material_resp.status_code == 200
+
+    subjects_after_delete_resp = client.get("/api/subjects")
+    assert subjects_after_delete_resp.status_code == 200
+    assert [item["subjectId"] for item in subjects_after_delete_resp.json()["data"]] == [subject_id]
+
+    materials_after_delete_resp = client.get(f"/api/subjects/{subject_id}/materials")
+    assert materials_after_delete_resp.status_code == 200
+    assert materials_after_delete_resp.json()["data"] == []
+
+    create_book_resp = client.post(
+        f"/api/subjects/{subject_id}/materials",
+        json={"materialType": "BOOK", "title": "习题集"},
+    )
+    assert create_book_resp.status_code == 200
+    book_material = create_book_resp.json()["data"]
+    assert book_material["materialId"] != "legacy_main"
+    assert book_material["projectId"] != subject_id
+
+    materials_after_recreate_resp = client.get(f"/api/subjects/{subject_id}/materials")
+    assert materials_after_recreate_resp.status_code == 200
+    materials_after_recreate = materials_after_recreate_resp.json()["data"]
+    assert [item["materialId"] for item in materials_after_recreate] == [book_material["materialId"]]
+
+    delete_book_resp = client.delete(f"/api/subjects/{subject_id}/materials/{book_material['materialId']}")
+    assert delete_book_resp.status_code == 200
+
+    final_materials_resp = client.get(f"/api/subjects/{subject_id}/materials")
+    assert final_materials_resp.status_code == 200
+    assert final_materials_resp.json()["data"] == []
+
+    final_subjects_resp = client.get("/api/subjects")
+    assert final_subjects_resp.status_code == 200
+    assert [item["subjectId"] for item in final_subjects_resp.json()["data"]] == [subject_id]
 
     _reset_caches()
 

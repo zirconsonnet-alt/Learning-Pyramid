@@ -1921,7 +1921,7 @@ class SystemAPI:
     def _list_subject_materials_from_store(self, subject_id: ProjectId) -> Tuple[StudyMaterial, ...]:
         project_store = self._get_project_store(subject_id)
         study_materials = tuple(getattr(project_store, "study_materials", {}).values())
-        if study_materials:
+        if study_materials or getattr(project_store, "study_materials_initialized", False):
             return tuple(
                 sorted(
                     study_materials,
@@ -1944,7 +1944,7 @@ class SystemAPI:
             material_title = "零散知识入口"
         else:
             material_type = StudyMaterialType.COURSE
-            material_title = "默认网课材料"
+            material_title = "网课材料"
 
         return (
             StudyMaterial(
@@ -3859,7 +3859,7 @@ class SystemAPI:
                     subject_id=subject.project_id,
                     material_id="legacy_main",
                     material_type=StudyMaterialType.COURSE,
-                    title="默认网课材料",
+                    title="网课材料",
                     created_at=subject.created_at,
                     project_id=subject.project_id,
                 )
@@ -3980,8 +3980,22 @@ class SystemAPI:
         resolved_subject_id = self._resolve_subject_project_id(subject_id)
         material = self._find_subject_material(resolved_subject_id, material_id)
         material_project_id = material.project_id
-        if material_project_id is None or id_canonical_text(material_project_id) == id_canonical_text(resolved_subject_id):
-            raise PreconditionFailure("当前默认材料仍与学科根绑定，暂不支持单独重命名")
+        if material_project_id is None:
+            raise PreconditionFailure("当前项目缺少可重命名的项目标识")
+        if id_canonical_text(material_project_id) == id_canonical_text(resolved_subject_id):
+            updated = replace(material, title=title)
+            s = self.sys.begin_session(resolved_subject_id, SessionMode.READ_WRITE)
+            try:
+                materials = dict((item.material_id, item) for item in self._list_subject_materials_from_store(resolved_subject_id))
+                materials[material.material_id] = updated
+                s._staged.study_materials = materials
+                s._staged.study_materials_replaced = True
+                self.sys.commit(s)
+            except Exception:
+                if s.state == SessionState.OPEN:
+                    self.sys.rollback(s)
+                raise
+            return updated
         self.edit_project(material_project_id, title)
         return self._find_subject_material(resolved_subject_id, material_id)
 
@@ -3989,8 +4003,21 @@ class SystemAPI:
         resolved_subject_id = self._resolve_subject_project_id(subject_id)
         material = self._find_subject_material(resolved_subject_id, material_id)
         material_project_id = material.project_id
-        if material_project_id is None or id_canonical_text(material_project_id) == id_canonical_text(resolved_subject_id):
-            raise PreconditionFailure("当前默认材料仍与学科根绑定，暂不支持删除")
+        if material_project_id is None:
+            raise PreconditionFailure("当前项目缺少可删除的项目标识")
+        if id_canonical_text(material_project_id) == id_canonical_text(resolved_subject_id):
+            s = self.sys.begin_session(resolved_subject_id, SessionMode.READ_WRITE)
+            try:
+                materials = dict((item.material_id, item) for item in self._list_subject_materials_from_store(resolved_subject_id))
+                materials.pop(material.material_id, None)
+                s._staged.study_materials = materials
+                s._staged.study_materials_replaced = True
+                self.sys.commit(s)
+            except Exception:
+                if s.state == SessionState.OPEN:
+                    self.sys.rollback(s)
+                raise
+            return
         self.delete_project(material_project_id)
 
     def list_membership_cleanup_project_ids(self, project_id: ProjectId) -> Tuple[ProjectId, ...]:
