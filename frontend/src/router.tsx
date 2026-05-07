@@ -48,6 +48,8 @@ const StudyReviewDemoWorkbenchPage = lazyRoute(
   () => import("@/views/guide/StudyReviewDemoWorkbenchPage"),
   (mod) => mod.StudyReviewDemoWorkbenchPage,
 )
+const AiChatGuideDemoPage = lazyRoute(() => import("@/views/guide/AiChatGuideDemoPage"), (mod) => mod.AiChatGuideDemoPage)
+const PomodoroGuideDemoPage = lazyRoute(() => import("@/views/guide/PomodoroGuideDemoPage"), (mod) => mod.PomodoroGuideDemoPage)
 const InstancePage = lazyRoute(() => import("@/views/instances/InstancePage"), (mod) => mod.InstancePage)
 const ConvergencePage = lazyRoute(() => import("@/views/convergences/ConvergencePage"), (mod) => mod.ConvergencePage)
 const AdminPage = lazyRoute(() => import("@/views/admin/AdminPage"), (mod) => mod.AdminPage)
@@ -117,6 +119,8 @@ export const router = createBrowserRouter([
       { path: "/guide", element: lazyElement(<GuidePage />) },
       { path: "/guide/demo/create-subject-project", element: lazyElement(<CreateSubjectProjectDemoPage />) },
       { path: "/guide/demo/study-review", element: lazyElement(<StudyReviewDemoWorkbenchPage />) },
+      { path: "/guide/demo/ai-chat", element: lazyElement(<AiChatGuideDemoPage />) },
+      { path: "/guide/demo/pomodoro", element: lazyElement(<PomodoroGuideDemoPage />) },
       { path: "/projects", element: lazyElement(<ProjectsPage />) },
       { path: "/subjects/:subjectId", element: lazyElement(<SubjectDashboardPage />) },
       { path: "/friends", element: lazyElement(<FriendsPage />) },

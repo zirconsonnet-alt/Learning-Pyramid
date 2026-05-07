@@ -51,7 +51,7 @@ const onboardingSteps = [
     title: "创建学科项目",
     body: "从新建学科、进入项目，到绑定并导入本地学习材料。",
     label: "去管理专业课的学习",
-    to: "/guide",
+    to: "/guide/demo/create-subject-project?walkthrough=create-subject-project",
     access: "free",
   },
   {
@@ -59,7 +59,7 @@ const onboardingSteps = [
     title: "学习复习",
     body: "进入工作台后，录入复述点、提交学习并完成复习闭环。",
     label: "去体验自动复习推送",
-    to: "/guide?doc=study-review",
+    to: "/guide/demo/study-review?walkthrough=study-review",
     access: "free",
   },
   {
@@ -67,7 +67,7 @@ const onboardingSteps = [
     title: "使用 AI 问答",
     body: "确认目录、学习对象树和第三方 LLM API 后，进入项目 AI 问答开始对话。",
     label: "去感受AI学习赋能",
-    to: "/guide?doc=use-ai-chat",
+    to: "/guide/demo/ai-chat?walkthrough=use-ai-chat",
     access: "member",
   },
   {
@@ -75,7 +75,7 @@ const onboardingSteps = [
     title: "使用番茄钟",
     body: "开启番茄钟、设定番茄计划，并在番茄开始后登录网页进入工作台。",
     label: "去定明早9点的番茄钟",
-    to: "/guide?doc=use-pomodoro",
+    to: "/guide/demo/pomodoro?walkthrough=use-pomodoro",
     access: "member",
   },
 ] as const

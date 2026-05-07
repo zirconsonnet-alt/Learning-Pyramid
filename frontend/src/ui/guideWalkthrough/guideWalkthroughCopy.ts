@@ -1,10 +1,14 @@
 import createSubjectProjectMarkdownSource from "../../../../docs/how-to-create-subject-project.md?raw"
+import useAiChatMarkdownSource from "../../../../docs/how-to-use-ai-chat.md?raw"
+import usePomodoroMarkdownSource from "../../../../docs/how-to-use-pomodoro.md?raw"
 import studyReviewMarkdownSource from "../../../../docs/how-to-study-review.md?raw"
 
 import { DEFAULT_GUIDE_WALKTHROUGH_DOC_SLUG, type GuideWalkthroughDocSlug, type GuideWalkthroughSourceRef } from "./guideWalkthroughSteps"
 
 export const CREATE_SUBJECT_PROJECT_SOURCE_PATH = "docs/how-to-create-subject-project.md"
 export const STUDY_REVIEW_SOURCE_PATH = "docs/how-to-study-review.md"
+export const USE_AI_CHAT_SOURCE_PATH = "docs/how-to-use-ai-chat.md"
+export const USE_POMODORO_SOURCE_PATH = "docs/how-to-use-pomodoro.md"
 
 export const guideWalkthroughCopySources: Record<GuideWalkthroughDocSlug, { markdown: string; sourcePath: string }> = {
   "create-subject-project": {
@@ -14,6 +18,14 @@ export const guideWalkthroughCopySources: Record<GuideWalkthroughDocSlug, { mark
   "study-review": {
     markdown: studyReviewMarkdownSource,
     sourcePath: STUDY_REVIEW_SOURCE_PATH,
+  },
+  "use-ai-chat": {
+    markdown: useAiChatMarkdownSource,
+    sourcePath: USE_AI_CHAT_SOURCE_PATH,
+  },
+  "use-pomodoro": {
+    markdown: usePomodoroMarkdownSource,
+    sourcePath: USE_POMODORO_SOURCE_PATH,
   },
 }
 

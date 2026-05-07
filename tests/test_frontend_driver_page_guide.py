@@ -15,6 +15,8 @@ COMPOSE_PANE = SRC / "views" / "workbench" / "components" / "ComposePane.tsx"
 REVIEW_PANE = SRC / "views" / "workbench" / "components" / "ReviewPane.tsx"
 GUIDE_DEMO_WORKBENCH_PAGE = SRC / "views" / "guide" / "StudyReviewDemoWorkbenchPage.tsx"
 GUIDE_DEMO_CREATE_SUBJECT_PROJECT_PAGE = SRC / "views" / "guide" / "CreateSubjectProjectDemoPage.tsx"
+GUIDE_DEMO_AI_CHAT_PAGE = SRC / "views" / "guide" / "AiChatGuideDemoPage.tsx"
+GUIDE_DEMO_POMODORO_PAGE = SRC / "views" / "guide" / "PomodoroGuideDemoPage.tsx"
 APP_SHELL = SRC / "shell" / "AppShell.tsx"
 NAV_ITEMS = SRC / "shell" / "navItems.ts"
 MAIN_NAV = SRC / "shell" / "MainNav.tsx"
@@ -30,6 +32,8 @@ FAQ_GUIDE_DOC = ROOT / "docs" / "guide-faq.md"
 GUIDE_DOCUMENTS = {
     "create-subject-project": CREATE_SUBJECT_PROJECT_DOC,
     "study-review": STUDY_REVIEW_DOC,
+    "use-ai-chat": AI_CHAT_GUIDE_DOC,
+    "use-pomodoro": POMODORO_GUIDE_DOC,
 }
 CONTRACT_STEP_MAP = ROOT / "specs" / "003-driver-page-guide" / "contracts" / "walkthrough-step-map.md"
 
@@ -48,6 +52,16 @@ FIRST_RELEASE_STEP_IDS = [
     "submit-review-answer",
     "mark-review-result",
     "submit-review",
+    "ai-confirm-context",
+    "ai-confirm-llm",
+    "ai-open-chat",
+    "ai-select-node",
+    "ai-send-message",
+    "pomodoro-open-settings",
+    "pomodoro-enable-clock",
+    "pomodoro-create-plan",
+    "pomodoro-bind-project",
+    "pomodoro-enter-web",
 ]
 
 FIRST_RELEASE_ANCHORS = [
@@ -64,6 +78,16 @@ FIRST_RELEASE_ANCHORS = [
     "submit-review-answer-button",
     "review-memory-choice-buttons",
     "submit-review-button",
+    "ai-context-check",
+    "ai-llm-check",
+    "ai-chat-entry",
+    "ai-learning-object-node",
+    "ai-message-composer",
+    "pomodoro-settings-entry",
+    "pomodoro-enable-toggle",
+    "pomodoro-plan-editor",
+    "pomodoro-project-binding",
+    "pomodoro-web-entry-reminder",
 ]
 
 
@@ -183,10 +207,12 @@ def test_guide_page_replaces_manual_with_two_task_documents():
     assert "studyReviewMarkdown" in guide_page
 
 
-def test_guide_page_registers_pomodoro_guide_without_walkthrough_action():
+def test_guide_page_registers_pomodoro_guide_with_walkthrough_steps():
     guide_page = read(GUIDE_PAGE)
     pomodoro_doc = read(POMODORO_GUIDE_DOC)
     steps = read(STEPS_MODULE)
+    router = read(SRC / "router.tsx")
+    demo_page = read(GUIDE_DEMO_POMODORO_PAGE)
 
     assert 'slug: "use-pomodoro"' in guide_page
     assert 'label: "如何使用番茄钟"' in guide_page
@@ -200,14 +226,34 @@ def test_guide_page_registers_pomodoro_guide_without_walkthrough_action():
     assert "番茄开始后登录网页" in pomodoro_doc
     assert "进入工作台" in pomodoro_doc
 
-    assert 'export type GuideWalkthroughDocSlug = "create-subject-project" | "study-review"' in steps
-    assert "use-pomodoro" not in steps
+    assert 'export type GuideWalkthroughDocSlug = "create-subject-project" | "study-review" | "use-ai-chat" | "use-pomodoro"' in steps
+    assert '"use-pomodoro"' in steps
+    assert 'path: "/guide/demo/pomodoro"' in router
+    assert GUIDE_DEMO_POMODORO_PAGE.exists()
+    for anchor in [
+        "pomodoro-settings-entry",
+        "pomodoro-enable-toggle",
+        "pomodoro-plan-editor",
+        "pomodoro-project-binding",
+        "pomodoro-web-entry-reminder",
+    ]:
+        assert f'data-guide-tour="{anchor}"' in demo_page
+    for step_id in [
+        "pomodoro-open-settings",
+        "pomodoro-enable-clock",
+        "pomodoro-create-plan",
+        "pomodoro-bind-project",
+        "pomodoro-enter-web",
+    ]:
+        assert f'completeGuideWalkthroughStep("{step_id}")' in demo_page
 
 
-def test_guide_page_registers_ai_chat_guide_without_walkthrough_action():
+def test_guide_page_registers_ai_chat_guide_with_walkthrough_steps():
     guide_page = read(GUIDE_PAGE)
     ai_chat_doc = read(AI_CHAT_GUIDE_DOC)
     steps = read(STEPS_MODULE)
+    router = read(SRC / "router.tsx")
+    demo_page = read(GUIDE_DEMO_AI_CHAT_PAGE)
 
     assert 'slug: "use-ai-chat"' in guide_page
     assert 'label: "如何使用 AI 问答"' in guide_page
@@ -223,8 +269,26 @@ def test_guide_page_registers_ai_chat_guide_without_walkthrough_action():
     assert "/p/:projectId/ai-chat" in ai_chat_doc
     assert "对话" in ai_chat_doc
 
-    assert 'export type GuideWalkthroughDocSlug = "create-subject-project" | "study-review"' in steps
-    assert "use-ai-chat" not in steps
+    assert 'export type GuideWalkthroughDocSlug = "create-subject-project" | "study-review" | "use-ai-chat" | "use-pomodoro"' in steps
+    assert '"use-ai-chat"' in steps
+    assert 'path: "/guide/demo/ai-chat"' in router
+    assert GUIDE_DEMO_AI_CHAT_PAGE.exists()
+    for anchor in [
+        "ai-context-check",
+        "ai-llm-check",
+        "ai-chat-entry",
+        "ai-learning-object-node",
+        "ai-message-composer",
+    ]:
+        assert f'data-guide-tour="{anchor}"' in demo_page
+    for step_id in [
+        "ai-confirm-context",
+        "ai-confirm-llm",
+        "ai-open-chat",
+        "ai-select-node",
+        "ai-send-message",
+    ]:
+        assert f'completeGuideWalkthroughStep("{step_id}")' in demo_page
 
 
 def test_guide_page_removes_left_column_walkthrough_start_action():
@@ -364,7 +428,7 @@ def test_study_review_guide_uses_transient_virtual_project_route_and_actions():
     demo_workbench = read(GUIDE_DEMO_WORKBENCH_PAGE)
 
     study_doc_steps = re.search(
-        r"STUDY_REVIEW_GUIDE_STEPS: GuideWalkthroughStep\[\] = \[(.*?)\]\s*\n\nexport const GUIDE_WALKTHROUGH_STEPS_BY_DOC",
+        r"STUDY_REVIEW_GUIDE_STEPS: GuideWalkthroughStep\[\] = \[(.*?)\]\s*\n\nexport const USE_AI_CHAT_GUIDE_STEPS",
         steps,
         flags=re.DOTALL,
     )
@@ -433,9 +497,9 @@ def test_all_source_references_resolve_in_manual():
 
     for step in steps:
         heading = str(step["heading"])
-        doc_slug = "study-review" if heading in document_sections["study-review"] else "create-subject-project"
-        sections = document_sections[doc_slug]
-        assert heading in sections, f"{step['id']} references missing manual heading {heading!r}"
+        matching_slug = next((slug for slug, sections in document_sections.items() if heading in sections), None)
+        assert matching_slug, f"{step['id']} references missing manual heading {heading!r}"
+        sections = document_sections[matching_slug]
         item_numbers = [step["itemIndex"]] if step["itemIndex"] else step["itemIndexes"]
         if item_numbers:
             items = ordered_items(sections[heading])

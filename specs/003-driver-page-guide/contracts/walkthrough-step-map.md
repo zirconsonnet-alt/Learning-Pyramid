@@ -46,6 +46,16 @@ type GuideWalkthroughStep = {
 | `submit-review-answer` | `第 6 步：做复习`, item 3 | `submit-review-answer-button` | Explain that a written answer or skip is needed before judging memory |
 | `mark-review-result` | `第 6 步：做复习`, item 5 | `review-memory-choice-buttons` | Explain that the learner should choose the true remembered/forgotten result |
 | `submit-review` | `第 6 步：做复习`, item 6 | `submit-review-button` | Explain that every review item must be judged before submission |
+| `ai-confirm-context` | `使用前先确认 3 个条件`, items 1-2 | `ai-context-check` | Explain that AI Q&A needs an authorized directory and a populated learning object tree |
+| `ai-confirm-llm` | `使用前先确认 3 个条件`, item 3 | `ai-llm-check` | Explain that third-party LLM API settings must be saved before chatting |
+| `ai-open-chat` | `第 3 步：进入项目 AI 问答界面`, item 2 | `ai-chat-entry` | Explain where the project AI Q&A entry lives |
+| `ai-select-node` | `第 3 步：进入项目 AI 问答界面`, item 4 | `ai-learning-object-node` | Explain that a concrete learning object should be selected as context |
+| `ai-send-message` | `第 3 步：进入项目 AI 问答界面`, item 5 | `ai-message-composer` | Explain that the user asks inside the composer after context is selected |
+| `pomodoro-open-settings` | `第 1 步：先开启番茄钟`, item 2 | `pomodoro-settings-entry` | Explain that disabled Pomodoro requires opening Pomodoro settings first |
+| `pomodoro-enable-clock` | `第 1 步：先开启番茄钟`, item 3 | `pomodoro-enable-toggle` | Explain that the global Pomodoro switch must be enabled |
+| `pomodoro-create-plan` | `第 2 步：设定番茄计划`, items 1-4 | `pomodoro-plan-editor` | Explain weekday, start time, focus/rest duration, and Pomodoro count setup |
+| `pomodoro-bind-project` | `第 2 步：设定番茄计划`, item 5 | `pomodoro-project-binding` | Explain that binding projects lets the workbench open for the correct learning target |
+| `pomodoro-enter-web` | `第 3 步：番茄开始后登录网页`, items 1-5 | `pomodoro-web-entry-reminder` | Explain that the web page must be open and logged in when the Pomodoro starts |
 
 ## Validation Rules
 

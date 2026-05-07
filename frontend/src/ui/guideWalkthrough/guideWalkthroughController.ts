@@ -28,6 +28,8 @@ const GUIDE_WALKTHROUGH_POMODORO_NON_FOCUS_MESSAGE = "当前处于{phaseLabel}�
 
 type GuideNavigate = (to: string, options?: { replace?: boolean }) => void
 
+const WALKTHROUGH_QUERY_PARAM = "walkthrough"
+
 type BuildDriverStepsOptions = {
   getPathname: () => string
   navigate: GuideNavigate
@@ -48,6 +50,16 @@ function dispatchGuideWalkthroughCustomEvent(name: string, detail: Record<string
 export function startGuideWalkthrough(docSlug: GuideWalkthroughDocSlug = DEFAULT_GUIDE_WALKTHROUGH_DOC_SLUG) {
   dispatchGuideWalkthroughCustomEvent(START_GUIDE_WALKTHROUGH_EVENT, { docSlug })
   return true
+}
+
+function consumeGuideWalkthroughQueryParam() {
+  if (typeof window === "undefined") return null
+  const url = new URL(window.location.href)
+  const requestedDocSlug = url.searchParams.get(WALKTHROUGH_QUERY_PARAM)
+  if (!isGuideWalkthroughDocSlug(requestedDocSlug)) return null
+  url.searchParams.delete(WALKTHROUGH_QUERY_PARAM)
+  window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`)
+  return requestedDocSlug
 }
 
 export function destroyGuideWalkthrough() {
@@ -283,11 +295,10 @@ export function useGuideWalkthroughController({ navigate, pathname }: { navigate
       getSteps: () => getGuideWalkthroughSteps(activeDocSlugRef.current),
     }
 
-    function runWalkthrough(event: Event) {
+    function runWalkthroughForDoc(requestedDocSlug: GuideWalkthroughDocSlug) {
       cleanupGuideWalkthrough(driverRef, statusRef)
       statusRef.current = "running"
 
-      const requestedDocSlug = event instanceof CustomEvent && isGuideWalkthroughDocSlug(event.detail?.docSlug) ? event.detail.docSlug : DEFAULT_GUIDE_WALKTHROUGH_DOC_SLUG
       activeDocSlugRef.current = requestedDocSlug
 
       const firstStep = options.getSteps()[0]
@@ -333,6 +344,11 @@ export function useGuideWalkthroughController({ navigate, pathname }: { navigate
       )
     }
 
+    function runWalkthrough(event: Event) {
+      const requestedDocSlug = event instanceof CustomEvent && isGuideWalkthroughDocSlug(event.detail?.docSlug) ? event.detail.docSlug : DEFAULT_GUIDE_WALKTHROUGH_DOC_SLUG
+      runWalkthroughForDoc(requestedDocSlug)
+    }
+
     function destroyActiveWalkthrough() {
       cleanupGuideWalkthrough(driverRef, statusRef)
     }
@@ -354,6 +370,11 @@ export function useGuideWalkthroughController({ navigate, pathname }: { navigate
     window.addEventListener(DESTROY_GUIDE_WALKTHROUGH_EVENT, destroyActiveWalkthrough)
     window.addEventListener(REFRESH_GUIDE_WALKTHROUGH_EVENT, refreshActiveWalkthrough)
     window.addEventListener(GUIDE_WALKTHROUGH_STEP_COMPLETED_EVENT, completeActiveWalkthroughStep)
+
+    const requestedDocSlug = consumeGuideWalkthroughQueryParam()
+    if (requestedDocSlug) {
+      window.setTimeout(() => runWalkthroughForDoc(requestedDocSlug), 0)
+    }
 
     return () => {
       window.removeEventListener(START_GUIDE_WALKTHROUGH_EVENT, runWalkthrough)

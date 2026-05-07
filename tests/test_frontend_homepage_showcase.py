@@ -139,7 +139,7 @@ def test_homepage_method_cards_use_requested_short_body_copy() -> None:
     assert "align-self: center;" in css
 
 
-def test_homepage_onboarding_path_links_to_four_guide_documents() -> None:
+def test_homepage_onboarding_path_links_to_four_interactive_guides() -> None:
     source = HOME_PAGE.read_text(encoding="utf-8")
     chrome_source = SHOWCASE_CHROME.read_text(encoding="utf-8")
     section_start = source.index("const onboardingSteps = [")
@@ -150,10 +150,10 @@ def test_homepage_onboarding_path_links_to_four_guide_documents() -> None:
     render_section = source[render_start:render_end]
 
     expected_guides = [
-        ('title: "创建学科项目"', 'to: "/guide"', 'label: "去管理专业课的学习"', 'access: "free"'),
-        ('title: "学习复习"', 'to: "/guide?doc=study-review"', 'label: "去体验自动复习推送"', 'access: "free"'),
-        ('title: "使用 AI 问答"', 'to: "/guide?doc=use-ai-chat"', 'label: "去感受AI学习赋能"', 'access: "member"'),
-        ('title: "使用番茄钟"', 'to: "/guide?doc=use-pomodoro"', 'label: "去定明早9点的番茄钟"', 'access: "member"'),
+        ('title: "创建学科项目"', 'to: "/guide/demo/create-subject-project?walkthrough=create-subject-project"', 'label: "去管理专业课的学习"', 'access: "free"'),
+        ('title: "学习复习"', 'to: "/guide/demo/study-review?walkthrough=study-review"', 'label: "去体验自动复习推送"', 'access: "free"'),
+        ('title: "使用 AI 问答"', 'to: "/guide/demo/ai-chat?walkthrough=use-ai-chat"', 'label: "去感受AI学习赋能"', 'access: "member"'),
+        ('title: "使用番茄钟"', 'to: "/guide/demo/pomodoro?walkthrough=use-pomodoro"', 'label: "去定明早9点的番茄钟"', 'access: "member"'),
     ]
 
     last_position = -1
@@ -182,6 +182,7 @@ def test_homepage_onboarding_path_links_to_four_guide_documents() -> None:
     assert "第一次使用先照着这 4 步走" not in render_section
     assert "<Link" in render_section
     assert "to={item.to}" in render_section
+    assert "/guide?doc=" not in data_section
     assert 'data-access={item.access}' in render_section
     assert 'className="lp-showcase-step-ribbon"' in render_section
     assert 'item.access === "free" ? "免费功能" : "会员功能"' in render_section
