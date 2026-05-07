@@ -23,7 +23,7 @@ def test_friends_page_trims_redundant_intro_copy_and_jump_button() -> None:
 def test_global_nav_uses_friend_center_label() -> None:
     source = NAV_ITEMS.read_text(encoding="utf-8")
 
-    assert '{ to: "/friends", label: "好友中心", icon: UsersRound }' in source
+    assert '{ to: "/friends", label: "好友中心", icon: UsersRound }' not in source
     assert '{ to: "/friends", label: "好友", icon: UsersRound }' not in source
 
 

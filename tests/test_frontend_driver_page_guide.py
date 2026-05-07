@@ -26,6 +26,7 @@ CREATE_SUBJECT_PROJECT_DOC = ROOT / "docs" / "how-to-create-subject-project.md"
 STUDY_REVIEW_DOC = ROOT / "docs" / "how-to-study-review.md"
 POMODORO_GUIDE_DOC = ROOT / "docs" / "how-to-use-pomodoro.md"
 AI_CHAT_GUIDE_DOC = ROOT / "docs" / "how-to-use-ai-chat.md"
+FAQ_GUIDE_DOC = ROOT / "docs" / "guide-faq.md"
 GUIDE_DOCUMENTS = {
     "create-subject-project": CREATE_SUBJECT_PROJECT_DOC,
     "study-review": STUDY_REVIEW_DOC,
@@ -169,6 +170,9 @@ def test_guide_page_replaces_manual_with_two_task_documents():
     guide_page = read(GUIDE_PAGE)
     assert "plm-method-guide.md?raw" not in guide_page
     assert "learningpyramid-user-manual.md?raw" not in guide_page
+    assert "guide-faq.md?raw" in guide_page
+    assert 'slug: "faq"' in guide_page
+    assert 'label: "常见问题"' in guide_page
     assert 'label: "系统使用说明"' not in guide_page
     assert 'slug: "manual"' not in guide_page
     assert 'slug: "create-subject-project"' in guide_page
@@ -187,8 +191,8 @@ def test_guide_page_registers_pomodoro_guide_without_walkthrough_action():
     assert 'slug: "use-pomodoro"' in guide_page
     assert 'label: "如何使用番茄钟"' in guide_page
     assert "usePomodoroMarkdown" in guide_page
-    assert "hasWalkthroughSteps" in guide_page
-    assert "isWalkthroughDoc(activeDoc)" in guide_page
+    assert "hasWalkthroughSteps" not in guide_page
+    assert "isWalkthroughDoc(activeDoc)" not in guide_page
 
     assert "# 如何使用番茄钟" in pomodoro_doc
     assert "先开启番茄钟" in pomodoro_doc
@@ -208,7 +212,7 @@ def test_guide_page_registers_ai_chat_guide_without_walkthrough_action():
     assert 'slug: "use-ai-chat"' in guide_page
     assert 'label: "如何使用 AI 问答"' in guide_page
     assert "useAiChatMarkdown" in guide_page
-    assert "isWalkthroughDoc(activeDoc)" in guide_page
+    assert "isWalkthroughDoc(activeDoc)" not in guide_page
 
     assert "# 如何使用 AI 问答" in ai_chat_doc
     assert "绑定本地素材目录" in ai_chat_doc
@@ -223,11 +227,11 @@ def test_guide_page_registers_ai_chat_guide_without_walkthrough_action():
     assert "use-ai-chat" not in steps
 
 
-def test_guide_page_renders_start_action_wired_to_walkthrough_api():
+def test_guide_page_removes_left_column_walkthrough_start_action():
     guide_page = read(GUIDE_PAGE)
-    assert "startGuideWalkthrough" in guide_page
-    assert "开始引导" in guide_page
-    assert re.search(r"onClick=\{\(\)\s*=>\s*startGuideWalkthrough\(activeDoc\.slug\)\}", guide_page)
+    assert "startGuideWalkthrough" not in guide_page
+    assert "开始引导" not in guide_page
+    assert re.search(r"onClick=\{\(\)\s*=>\s*startGuideWalkthrough\(activeDoc\.slug\)\}", guide_page) is None
 
 
 def test_guide_page_resolves_legacy_queries_to_first_task_document():
@@ -236,6 +240,22 @@ def test_guide_page_resolves_legacy_queries_to_first_task_document():
     assert "method" in guide_page
     assert "manual" in guide_page
     assert "resolvedRequestedSlug" in guide_page
+
+
+def test_guide_page_uses_faq_as_default_doc_and_left_column_only_for_community_card():
+    guide_page = read(GUIDE_PAGE)
+    faq_doc = read(FAQ_GUIDE_DOC)
+
+    assert 'const activeDoc = docs.find((item) => item.slug === resolvedRequestedSlug) ?? docs[0]' in guide_page
+    assert 'slug: "faq"' in guide_page
+    assert "# LearningPyramid 常见问题" in faq_doc
+    assert 'aria-label="文档目录"' not in guide_page
+    assert "selectDoc(slug: string)" not in guide_page
+    assert "官方群与反馈" in guide_page
+    assert "/official-community-qq-group.png" in guide_page
+    assert "我应该先从哪里开始？" in faq_doc
+    assert "为什么我已经绑定目录了，学习对象树还是空的？" in faq_doc
+    assert "番茄钟开始后为什么还要登录网页？" in faq_doc
 
 
 def test_guide_page_renders_current_document_outline_card():

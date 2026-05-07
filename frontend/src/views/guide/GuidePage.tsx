@@ -1,17 +1,16 @@
-import { startTransition, useEffect, type ReactNode } from "react"
-import { Copy, PlayCircle } from "lucide-react"
+import { useEffect, type ReactNode } from "react"
+import { Copy } from "lucide-react"
 import katex from "katex"
 import "katex/dist/katex.min.css"
 import { useSearchParams } from "react-router-dom"
 
+import faqMarkdown from "../../../../docs/guide-faq.md?raw"
 import createSubjectProjectMarkdown from "../../../../docs/how-to-create-subject-project.md?raw"
 import studyReviewMarkdown from "../../../../docs/how-to-study-review.md?raw"
 import useAiChatMarkdown from "../../../../docs/how-to-use-ai-chat.md?raw"
 import usePomodoroMarkdown from "../../../../docs/how-to-use-pomodoro.md?raw"
 
 import { Button } from "@/ui/components/ui/button"
-import { startGuideWalkthrough } from "@/ui/guideWalkthrough/guideWalkthroughController"
-import type { GuideWalkthroughDocSlug } from "@/ui/guideWalkthrough/guideWalkthroughSteps"
 import {
   getOfficialCommunityCopyLabel,
   getOfficialCommunityCopySuccessMessage,
@@ -75,31 +74,15 @@ type ParsedMarkdown = {
   headings: MarkdownHeading[]
 }
 
-type GuideDocSlug = GuideWalkthroughDocSlug | "use-ai-chat" | "use-pomodoro"
+type GuideDocSlug = "faq" | "create-subject-project" | "study-review" | "use-ai-chat" | "use-pomodoro"
 
-type BaseDocDefinition = {
+type DocDefinition = {
   slug: GuideDocSlug
   label: string
   audience: string
   summary: string
   sourcePath: string
   parsed: ParsedMarkdown
-}
-
-type DocDefinition = BaseDocDefinition &
-  (
-    | {
-        slug: GuideWalkthroughDocSlug
-        hasWalkthroughSteps: true
-      }
-    | {
-        slug: "use-ai-chat" | "use-pomodoro"
-        hasWalkthroughSteps: false
-      }
-  )
-
-function isWalkthroughDoc(doc: DocDefinition): doc is DocDefinition & { slug: GuideWalkthroughDocSlug; hasWalkthroughSteps: true } {
-  return doc.hasWalkthroughSteps
 }
 
 const LEGACY_GUIDE_DOC_SLUGS = new Set(["manual", "method"])
@@ -312,13 +295,20 @@ function parseMarkdown(source: string): ParsedMarkdown {
 
 const docs: DocDefinition[] = [
   {
+    slug: "faq",
+    label: "常见问题",
+    audience: "面向使用者",
+    summary: "把第一次使用、目录同步、复习链、AI 问答、番茄钟和会员套餐的常见问题集中放在一页。",
+    sourcePath: "仓库文档 / 用户指南常见问题",
+    parsed: parseMarkdown(faqMarkdown),
+  },
+  {
     slug: "create-subject-project",
     label: "如何创建学科项目",
     audience: "面向使用者",
     summary: "从新建学科、进入项目，到绑定并导入本地学习材料。",
     sourcePath: "仓库文档 / 如何创建学科项目",
     parsed: parseMarkdown(createSubjectProjectMarkdown),
-    hasWalkthroughSteps: true,
   },
   {
     slug: "study-review",
@@ -327,7 +317,6 @@ const docs: DocDefinition[] = [
     summary: "进入工作台后，录入复述点、提交学习并完成复习闭环。",
     sourcePath: "仓库文档 / 如何学习复习",
     parsed: parseMarkdown(studyReviewMarkdown),
-    hasWalkthroughSteps: true,
   },
   {
     slug: "use-ai-chat",
@@ -336,7 +325,6 @@ const docs: DocDefinition[] = [
     summary: "确认目录、学习对象树和第三方 LLM API 后，进入项目 AI 问答开始对话。",
     sourcePath: "仓库文档 / 如何使用 AI 问答",
     parsed: parseMarkdown(useAiChatMarkdown),
-    hasWalkthroughSteps: false,
   },
   {
     slug: "use-pomodoro",
@@ -345,7 +333,6 @@ const docs: DocDefinition[] = [
     summary: "开启番茄钟、设定番茄计划，并在番茄开始后登录网页进入工作台。",
     sourcePath: "仓库文档 / 如何使用番茄钟",
     parsed: parseMarkdown(usePomodoroMarkdown),
-    hasWalkthroughSteps: false,
   },
 ]
 
@@ -529,53 +516,11 @@ export function GuidePage() {
     }
   }
 
-  function selectDoc(slug: string) {
-    const nextSearchParams = new URLSearchParams(searchParams)
-    if (slug === docs[0].slug) nextSearchParams.delete("doc")
-    else nextSearchParams.set("doc", slug)
-
-    startTransition(() => {
-      setSearchParams(nextSearchParams, { replace: true })
-    })
-
-    window.scrollTo({ top: 0, behavior: "smooth" })
-  }
-
   return (
     <div className="space-y-6">
       <div className="grid gap-6 xl:grid-cols-[18rem_minmax(0,1fr)_18rem]">
         <aside className="xl:sticky xl:top-28 xl:self-start">
           <section className="theme-card p-4">
-            <div className="mb-3 text-sm font-semibold text-foreground">文档目录</div>
-            <div className="space-y-2">
-              {docs.map((doc) => {
-                const isActive = doc.slug === activeDoc.slug
-                return (
-                  <button
-                    key={doc.slug}
-                    type="button"
-                    onClick={() => selectDoc(doc.slug)}
-                    className={cn(
-                      "w-full rounded-2xl border p-4 text-left transition-colors",
-                      isActive
-                        ? "border-primary/15 bg-primary/10 shadow-[0_14px_30px_-26px_rgba(30,58,95,0.38)]"
-                        : "border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] hover:border-primary/15 hover:bg-accent/60",
-                    )}
-                  >
-                    <div className="font-medium text-foreground">{doc.label}</div>
-                  </button>
-                )
-              })}
-              {isWalkthroughDoc(activeDoc) ? (
-                <Button type="button" className="mt-3 w-full justify-center" onClick={() => startGuideWalkthrough(activeDoc.slug)}>
-                  <PlayCircle className="h-4 w-4" />
-                  开始引导
-                </Button>
-              ) : null}
-            </div>
-          </section>
-
-          <section className="theme-card mt-4 p-4">
             <div className="text-sm font-semibold text-foreground">官方群与反馈</div>
             <img
               src="/official-community-qq-group.png"

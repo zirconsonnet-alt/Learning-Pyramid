@@ -65,3 +65,21 @@ def test_membership_purchase_dialog_supports_graduate_exam_plan() -> None:
     assert "const effectiveSelectedPlanId = pendingOrder?.planId || selectedPlanId" in page_source
     assert "planId: effectiveSelectedPlanId" in page_source
     assert "planId: z.string()" in api_source
+
+
+def test_membership_page_header_shows_monthly_and_graduate_exam_plans() -> None:
+    source = MEMBERSHIP_PAGE.read_text(encoding="utf-8")
+    hero_start = source.index('<section className="mx-auto max-w-4xl">')
+    hero_end = source.index('<div className="mt-6 grid', hero_start)
+    hero_source = source[hero_start:hero_end]
+
+    assert "月会员" in hero_source
+    assert "考研套餐" in hero_source
+    assert "¥20 / 30 天" in hero_source
+    assert "每日 ¥0.5" in hero_source
+    assert "到 12 月 21 日" in hero_source
+    assert 'preview?.planId === "graduate_exam"' in hero_source
+    assert "正在计算当前价格" in hero_source
+    assert "支付前自动计算实际价格" in hero_source
+    assert 'onClick={() => setSelectedPlanId("monthly")}' in hero_source
+    assert 'onClick={() => setSelectedPlanId("graduate_exam")}' in hero_source

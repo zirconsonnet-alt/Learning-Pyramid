@@ -1433,6 +1433,10 @@
     align-items: stretch;
   }
 
+  .lp-showcase-membership-grid {
+    grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.65fr);
+  }
+
   .lp-showcase-faq-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1700,12 +1704,20 @@
     right: 14px;
   }
 
-  .lp-showcase-carousel-meta {
+  .lp-showcase-carousel-title-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
     margin-bottom: 18px;
+  }
+
+  .lp-showcase-carousel-title-main {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
   }
 
   .lp-showcase-carousel-tag {
@@ -1901,12 +1913,41 @@
     margin-bottom: 10px;
   }
 
-  .lp-showcase-membership-price-block {
+  .lp-showcase-membership-plan-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
     min-width: 0;
   }
 
+  .lp-showcase-membership-price-block {
+    min-width: 0;
+    height: 100%;
+    padding: 16px;
+    border-radius: 18px;
+    border: 1px solid color-mix(in srgb, var(--lp-primary) 18%, transparent);
+    background: color-mix(in srgb, var(--lp-surface) 86%, rgba(255, 255, 255, 0.72));
+  }
+
+  .lp-showcase-membership-price-block-accent {
+    border-color: color-mix(in srgb, var(--lp-warning-border) 80%, transparent);
+    background: color-mix(in srgb, var(--lp-warning-bg) 72%, rgba(255, 255, 255, 0.8));
+  }
+
   .lp-showcase-membership-price-block h3 {
-    margin-bottom: 18px;
+    margin-bottom: 12px;
+  }
+
+  .lp-showcase-membership-price-block .lp-showcase-price strong {
+    font-size: 38px;
+  }
+
+  .lp-showcase-membership-plan-note {
+    color: var(--lp-muted);
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 1.5;
+    margin: 0;
   }
 
   .lp-showcase-membership-benefits {
@@ -1965,7 +2006,7 @@
 
   .lp-showcase-pricing-card-primary {
     width: 100%;
-    max-width: 560px;
+    max-width: none;
     justify-self: start;
     align-self: stretch;
   }
@@ -2352,6 +2393,10 @@
       gap: 16px;
     }
 
+    .lp-showcase-membership-plan-grid {
+      grid-template-columns: 1fr;
+    }
+
     .lp-showcase-membership-benefits {
       width: 100%;
       justify-self: stretch;
@@ -2461,9 +2506,13 @@
       right: 8px;
     }
 
-    .lp-showcase-carousel-meta {
+    .lp-showcase-carousel-title-row {
       align-items: flex-start;
-      flex-direction: column;
+      flex-wrap: wrap;
+    }
+
+    .lp-showcase-carousel-title-main {
+      gap: 10px;
     }
   }
 }

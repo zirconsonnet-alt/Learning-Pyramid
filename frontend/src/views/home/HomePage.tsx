@@ -323,13 +323,15 @@ export function HomePage() {
                 <div className="lp-showcase-carousel-track" style={{ transform: `translateX(-${activeReasonIndex * 100}%)` }}>
                   {graduateReasons.map((item) => (
                     <article key={item.index} className="lp-showcase-carousel-slide">
-                      <div className="lp-showcase-carousel-meta">
-                        <span className="lp-showcase-carousel-tag">{item.tag}</span>
+                      <div className="lp-showcase-carousel-title-row">
+                        <div className="lp-showcase-carousel-title-main">
+                          <h3>{item.title}</h3>
+                          <span className="lp-showcase-carousel-tag">{item.tag}</span>
+                        </div>
                         <span className="lp-showcase-carousel-count">
                           {item.index} / {graduateReasons.length.toString().padStart(2, "0")}
                         </span>
                       </div>
-                      <h3>{item.title}</h3>
                       <div className="lp-showcase-carousel-points">
                         {item.points.map((point) => {
                           const pointImageSrc = "imageSrc" in point ? point.imageSrc : undefined
@@ -422,14 +424,25 @@ export function HomePage() {
             <div className="lp-showcase-section-head">
               <h2>会员</h2>
             </div>
-            <div className="lp-showcase-pricing-grid">
+            <div className="lp-showcase-pricing-grid lp-showcase-membership-grid">
               <article className="lp-showcase-pricing-card lp-showcase-pricing-card-primary">
                 <div className="lp-showcase-membership-card-top">
-                  <div className="lp-showcase-membership-price-block">
-                    <h3>月会员</h3>
-                    <div className="lp-showcase-price">
-                      <strong>¥20</strong>
-                      <span>/ 月</span>
+                  <div className="lp-showcase-membership-plan-grid">
+                    <div className="lp-showcase-membership-price-block">
+                      <h3>月会员</h3>
+                      <div className="lp-showcase-price">
+                        <strong>¥20</strong>
+                        <span>/ 月</span>
+                      </div>
+                      <p className="lp-showcase-membership-plan-note">邀请码 7.5 折券可让首单实付 ¥15</p>
+                    </div>
+                    <div className="lp-showcase-membership-price-block lp-showcase-membership-price-block-accent">
+                      <h3>考研套餐</h3>
+                      <div className="lp-showcase-price">
+                        <strong>¥0.5</strong>
+                        <span>/ 天</span>
+                      </div>
+                      <p className="lp-showcase-membership-plan-note">按购买当天到 12 月 21 日计费</p>
                     </div>
                   </div>
                   <div className="lp-showcase-membership-benefits">
@@ -440,7 +453,6 @@ export function HomePage() {
                     </ul>
                   </div>
                 </div>
-                <div className="lp-showcase-price-note">邀请码 7.5 折券可让首单实付 ¥15</div>
                 <div className="lp-showcase-hero-actions lp-showcase-membership-actions">
                   <Link className="lp-showcase-btn lp-showcase-btn-primary" to={membershipEntryHref}>
                     {membershipEntryLabel}

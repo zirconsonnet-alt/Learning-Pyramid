@@ -322,8 +322,10 @@ def test_pomodoro_overview_can_switch_to_statistics_panel() -> None:
     assert "统计" in session_controls
     assert "data-pomodoro-statistics" in page_source
     assert '<div className="text-sm font-medium text-muted-foreground">统计</div>' not in statistics_panel
-    assert "当日番茄完成度" in statistics_panel
-    assert "todayPomodoroStats" in statistics_panel
+    assert "当日番茄完成度" not in statistics_panel
+    assert "todayPomodoroStats" not in statistics_panel
+    assert "今日完成" not in statistics_panel
+    assert "completionPercent" not in page_source
     assert "recentPomodoroRecords.map" not in statistics_panel
     assert "还没有番茄记录" not in statistics_panel
     assert "这里会按“番茄 1、番茄 2...”记录学习情况" not in statistics_panel
@@ -558,6 +560,9 @@ def test_pomodoro_wallpaper_is_displayed_on_page_and_managed_in_settings() -> No
     assert "URL.revokeObjectURL" in pomodoro_page_source
     assert "data-pomodoro-wallpaper-backdrop" in pomodoro_page_source
     assert 'data-pomodoro-wallpaper-scope="page"' in pomodoro_page_source
+    assert "fixed inset-x-0 bottom-0 top-[4.5rem]" not in pomodoro_page_source
+    assert "pointer-events-none absolute inset-0 -z-10" in pomodoro_page_source
+    assert "relative isolate z-10 mx-auto" in pomodoro_page_source
     assert "wallpaperInputRef" not in pomodoro_page_source
     assert "savePomodoroWallpaperBlob" not in pomodoro_page_source
     assert "removePomodoroWallpaperBlob" not in pomodoro_page_source

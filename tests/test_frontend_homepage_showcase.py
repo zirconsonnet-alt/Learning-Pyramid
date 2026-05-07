@@ -48,6 +48,22 @@ def test_homepage_carousel_uses_requested_main_titles() -> None:
         assert title not in section
 
 
+def test_homepage_carousel_tag_sits_after_each_slide_title() -> None:
+    source = HOME_PAGE.read_text(encoding="utf-8")
+    css = INDEX_CSS.read_text(encoding="utf-8")
+    render_start = source.index("{graduateReasons.map((item) => (")
+    render_end = source.index('<div className="lp-showcase-carousel-points">', render_start)
+    render_source = source[render_start:render_end]
+
+    assert 'className="lp-showcase-carousel-meta"' not in render_source
+    assert 'className="lp-showcase-carousel-title-row"' in render_source
+    assert "<h3>{item.title}</h3>" in render_source
+    assert "<span className=\"lp-showcase-carousel-tag\">{item.tag}</span>" in render_source
+    assert render_source.index("<h3>{item.title}</h3>") < render_source.index("<span className=\"lp-showcase-carousel-tag\">{item.tag}</span>")
+    assert 'className="lp-showcase-carousel-count"' in render_source
+    assert ".lp-showcase-carousel-title-row" in css
+
+
 def test_homepage_removes_standalone_feature_section() -> None:
     source = HOME_PAGE.read_text(encoding="utf-8")
     chrome_source = SHOWCASE_CHROME.read_text(encoding="utf-8")
@@ -551,14 +567,23 @@ def test_homepage_membership_card_highlights_member_benefits() -> None:
     section_end = source.index('id="faq"', section_start)
     section = source[section_start:section_end]
 
+    assert 'className="lp-showcase-pricing-grid lp-showcase-membership-grid"' in section
     assert 'className="lp-showcase-membership-card-top"' in section
+    assert 'className="lp-showcase-membership-plan-grid"' in section
     assert 'className="lp-showcase-membership-price-block"' in section
     assert 'className="lp-showcase-membership-benefits"' in section
+    assert "<h3>月会员</h3>" in section
+    assert "<h3>考研套餐</h3>" in section
+    assert "<strong>¥0.5</strong>" in section
+    assert "按购买当天到 12 月 21 日计费" in section
     assert "<h4>会员权益</h4>" in section
     assert "<li>番茄钟：学习规划与督促</li>" in section
     assert "<li>AI交互：你的助理及良师</li>" in section
 
     assert ".lp-showcase-membership-card-top" in css
+    assert ".lp-showcase-membership-grid" in css
+    assert "grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.65fr);" in css
+    assert ".lp-showcase-membership-plan-grid" in css
     assert ".lp-showcase-membership-price-block" in css
     assert ".lp-showcase-membership-benefits" in css
     assert "grid-template-columns: minmax(0, 1fr) minmax(170px, 220px);" in css

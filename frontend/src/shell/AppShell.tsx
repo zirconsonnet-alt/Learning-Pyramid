@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react"
-import { ChevronDown, CreditCard, LogOut, Sparkles, TimerReset, User, type LucideIcon } from "lucide-react"
+import { ChevronDown, CreditCard, LogOut, Sparkles, TimerReset, User, UsersRound, type LucideIcon } from "lucide-react"
 import { Link, Navigate, NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router-dom"
 import "driver.js/dist/driver.css"
 
@@ -849,6 +849,7 @@ export function AppShell() {
                           <div className="mt-4 border-t border-border/60 pt-3">
                             <div className="grid gap-1">
                               <AccountMenuLink to="/profile" label="个人中心" icon={User} onNavigate={() => setAccountMenuOpen(false)} />
+                              <AccountMenuLink to="/friends" label="好友中心" icon={UsersRound} onNavigate={() => setAccountMenuOpen(false)} />
                               <AccountMenuLink to="/membership" label="会员中心" icon={CreditCard} onNavigate={() => setAccountMenuOpen(false)} />
                               <AccountMenuActionButton
                                 label={logout.isPending ? "退出中..." : "退出登录"}

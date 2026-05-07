@@ -467,24 +467,6 @@ function formatPercent(value: number) {
   return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`
 }
 
-function getTodayScheduledPomodoroCount(schedule: PomodoroWeekSchedule, now: number) {
-  const date = new Date(now)
-  const weekday = POMODORO_WEEKDAYS[date.getDay() === 0 ? 6 : date.getDay() - 1]
-  const plans = schedule[weekday]?.plans.filter((plan) => plan.enabled) ?? []
-  return plans.reduce((sum, plan) => sum + normalizeCountInput(String(plan.pomodoroCount), 4), 0)
-}
-
-function getTodayPomodoroStats(records: PomodoroActivityRecord[], total: number) {
-  const completed = records.length
-  const completionPercent = total > 0 ? Math.min(100, Math.round((completed / total) * 100)) : completed > 0 ? 100 : 0
-  return {
-    completed,
-    total,
-    remaining: Math.max(0, total - completed),
-    completionPercent,
-  }
-}
-
 function getScheduledStartAtMsForDate(date: Date, startTime: string) {
   const [hoursText = "0", minutesText = "0"] = normalizePomodoroStartTime(startTime).split(":")
   return new Date(date.getFullYear(), date.getMonth(), date.getDate(), Number(hoursText), Number(minutesText), 0, 0).getTime()
@@ -978,14 +960,6 @@ export function PomodoroPage() {
     () => pomodoroActivityRecords.filter((record) => record.dateKey === todayDateKey),
     [pomodoroActivityRecords, todayDateKey],
   )
-  const todayScheduledPomodoroCount = useMemo(
-    () => getTodayScheduledPomodoroCount(draftSchedule, now),
-    [draftSchedule, now],
-  )
-  const todayPomodoroStats = useMemo(
-    () => getTodayPomodoroStats(todayPomodoroRecords, todayScheduledPomodoroCount),
-    [todayPomodoroRecords, todayScheduledPomodoroCount],
-  )
   const pomodoroPlanMetricSummaries = useMemo(
     () => buildPomodoroPlanMetricSummaries(draftSchedule, now),
     [draftSchedule, now],
@@ -1177,7 +1151,7 @@ export function PomodoroPage() {
   const wallpaperBackdrop = wallpaperUrl ? (
     <div
       data-pomodoro-wallpaper-backdrop
-      className="pointer-events-none fixed inset-x-0 bottom-0 top-[4.5rem] z-0 bg-cover bg-center"
+      className="pointer-events-none absolute inset-0 -z-10 overflow-hidden rounded-[2rem] bg-cover bg-center"
       style={{ backgroundImage: `url(${wallpaperUrl})` }}
     >
       <div
@@ -1192,7 +1166,8 @@ export function PomodoroPage() {
 
   if (pomodoroMemberBlocked) {
     return (
-      <div data-pomodoro-wallpaper-scope="page" className="relative z-10 mx-auto flex w-full max-w-3xl flex-col gap-6">
+      <div data-pomodoro-wallpaper-scope="page" className="relative isolate z-10 mx-auto flex w-full max-w-3xl flex-col gap-6">
+        {wallpaperBackdrop}
         <MemberOnlyFeatureNotice
           title="番茄钟是会员专属功能"
           message="当前账号还没有有效会员，所以这里先不开放番茄钟。开通会员后，就可以继续使用排程、小番茄和相关设置。"
@@ -1203,9 +1178,8 @@ export function PomodoroPage() {
 
   if (activePlanId) {
     return (
-      <>
+      <div data-pomodoro-wallpaper-scope="page" className="relative isolate z-10 mx-auto flex w-full max-w-5xl flex-col gap-8">
         {wallpaperBackdrop}
-        <div data-pomodoro-wallpaper-scope="page" className="relative z-10 mx-auto flex w-full max-w-5xl flex-col gap-8">
           <section data-pomodoro-plan-detail className="space-y-6">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="text-2xl font-semibold text-foreground">
@@ -1596,15 +1570,13 @@ export function PomodoroPage() {
               </div>
             ) : null}
           </section>
-        </div>
-      </>
+      </div>
     )
   }
 
   return (
-    <>
+    <div data-pomodoro-wallpaper-scope="page" className="relative isolate z-10 mx-auto flex w-full max-w-5xl flex-col gap-8">
       {wallpaperBackdrop}
-      <div data-pomodoro-wallpaper-scope="page" className="relative z-10 mx-auto flex w-full max-w-5xl flex-col gap-8">
       <section data-pomodoro-session-controls className="space-y-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0 flex-1 space-y-5">
@@ -1660,50 +1632,6 @@ export function PomodoroPage() {
       <section className="space-y-4 border-t border-border/60 pt-6">
         {pomodoroOverviewMode === "stats" ? (
           <div data-pomodoro-statistics className="space-y-5">
-            <div>
-              <div className="text-3xl font-semibold tracking-[-0.04em] text-foreground">
-                当日番茄完成度
-              </div>
-            </div>
-
-            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,0.8fr)]">
-              <div className="rounded-[1.1rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] px-4 py-4 shadow-[var(--theme-soft-shadow)]">
-                <div className="flex flex-wrap items-end justify-between gap-3">
-                  <div>
-                    <div className="text-sm text-muted-foreground">{formatDateKey(now)}</div>
-                    <div className="mt-2 text-4xl font-semibold tracking-[-0.04em] text-foreground">
-                      {todayPomodoroStats.completionPercent}%
-                    </div>
-                  </div>
-                  <div className="text-right text-sm text-muted-foreground">
-                    <div>已完成 {todayPomodoroStats.completed}/{todayPomodoroStats.total}</div>
-                    <div className="mt-1">剩余 {todayPomodoroStats.remaining} 个</div>
-                  </div>
-                </div>
-                <div className="mt-4 h-3 overflow-hidden rounded-full bg-[color:var(--theme-soft-bg)]">
-                  <div
-                    className="h-full rounded-full bg-primary transition-all"
-                    style={{ width: `${todayPomodoroStats.completionPercent}%` }}
-                  />
-                </div>
-                <div className="mt-3 text-sm text-muted-foreground">
-                  {todayPomodoroStats.total > 0 ? "按真实完成的番茄学习记录统计；完成一个学习段后计入一个番茄。" : "今天还没有启用的番茄计划。"}
-                </div>
-              </div>
-
-              <div className="rounded-[1.1rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] px-4 py-4 shadow-[var(--theme-soft-shadow)]">
-                <div className="text-sm font-medium text-muted-foreground">今日完成</div>
-                <div className="mt-2 text-3xl font-semibold tracking-[-0.04em] text-foreground">
-                  {todayPomodoroRecords.length > 0 ? `${todayPomodoroRecords.length} 个` : "暂无"}
-                </div>
-                <div className="mt-3 text-sm text-muted-foreground">
-                  {todayPomodoroRecords.length > 0
-                    ? "下面会按计划和番茄段展示具体统计。"
-                    : "完成番茄后，下面会展示具体统计。"}
-                </div>
-              </div>
-            </div>
-
             <div className="space-y-3">
               {dailyMetricSummaries.length === 0 ? (
                 <div className="rounded-[1.1rem] border border-dashed border-[color:var(--theme-soft-border)] px-4 py-8 text-sm text-muted-foreground">

@@ -26,6 +26,7 @@ import {
   useInviteSummary,
 } from "@/ui/queries/membership"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
+import { cn } from "@/ui/utils"
 import { MembershipPurchaseDialog } from "@/views/membership/components/MembershipPurchaseDialog"
 import {
   copyTextToClipboard,
@@ -630,7 +631,6 @@ export function MembershipPage() {
   const purchaseDisabled =
     createOrder.isPending || confirmPayment.isPending || syncPayment.isPending || closeOrder.isPending || (supportedProviders.length === 0 && !pendingOrder)
   const purchaseButtonLabel = pendingOrder ? "继续支付" : summary?.isActive ? "立即续费" : "立即开通"
-  const currentPriceCent = preview?.payableAmountCent ?? summary?.currentPriceCent ?? 0
 
   return (
     <>
@@ -722,13 +722,51 @@ export function MembershipPage() {
                 </div>
               </div>
 
-              <div className="rounded-[1.35rem] border border-[color:var(--theme-soft-border)] bg-[hsl(var(--background)/0.75)] px-5 py-4 text-right shadow-[var(--theme-soft-shadow)] backdrop-blur">
-                <div className="text-[11px] uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">当前价格</div>
-                <div className="mt-2 text-4xl font-semibold tracking-tight text-foreground">{formatMembershipPrice(currentPriceCent)}</div>
-                <div className="mt-2 text-sm text-muted-foreground">
-                  首单 {formatMembershipPrice(summary?.firstOrderPriceCent ?? 0)} · 续费 {formatMembershipPrice(summary?.renewalPriceCent ?? 0)}
-                </div>
-                {selectedCoupon ? <div className="mt-1 text-xs text-[color:var(--theme-warm-text)]">已选 {formatMembershipCouponValue(selectedCoupon)}</div> : null}
+              <div className="grid w-full gap-3 sm:grid-cols-2 lg:w-[34rem]">
+                <button
+                  type="button"
+                  onClick={() => setSelectedPlanId("monthly")}
+                  aria-pressed={effectiveSelectedPlanId === "monthly"}
+                  className={cn(
+                    "rounded-[1.35rem] border px-5 py-4 text-left shadow-[var(--theme-soft-shadow)] backdrop-blur transition",
+                    effectiveSelectedPlanId === "monthly"
+                      ? "border-primary/30 bg-[hsl(var(--primary)/0.1)]"
+                      : "border-[color:var(--theme-soft-border)] bg-[hsl(var(--background)/0.75)] hover:border-primary/20",
+                  )}
+                >
+                  <div className="text-[11px] uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">月会员</div>
+                  <div className="mt-2 text-2xl font-semibold tracking-tight text-foreground">¥20 / 30 天</div>
+                  <div className="mt-2 text-sm leading-6 text-muted-foreground">
+                    首单 {formatMembershipPrice(summary?.firstOrderPriceCent ?? 0)} · 续费 {formatMembershipPrice(summary?.renewalPriceCent ?? 0)}
+                  </div>
+                  {effectiveSelectedPlanId === "monthly" && selectedCoupon ? (
+                    <div className="mt-1 text-xs text-[color:var(--theme-warm-text)]">已选 {formatMembershipCouponValue(selectedCoupon)}</div>
+                  ) : null}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedPlanId("graduate_exam")}
+                  aria-pressed={effectiveSelectedPlanId === "graduate_exam"}
+                  className={cn(
+                    "rounded-[1.35rem] border px-5 py-4 text-left shadow-[var(--theme-soft-shadow)] backdrop-blur transition",
+                    effectiveSelectedPlanId === "graduate_exam"
+                      ? "border-primary/30 bg-[hsl(var(--primary)/0.1)]"
+                      : "border-[color:var(--theme-soft-border)] bg-[hsl(var(--background)/0.75)] hover:border-primary/20",
+                  )}
+                >
+                  <div className="text-[11px] uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">考研套餐</div>
+                  <div className="mt-2 text-2xl font-semibold tracking-tight text-foreground">每日 ¥0.5</div>
+                  <div className="mt-2 text-sm leading-6 text-muted-foreground">购买当天到 12 月 21 日自动按天数结算</div>
+                  {effectiveSelectedPlanId === "graduate_exam" ? (
+                    <div className="mt-1 text-xs text-[color:var(--theme-warm-text)]">
+                      {preview?.planId === "graduate_exam"
+                        ? `当前预估 ${formatMembershipPrice(preview.payableAmountCent)}`
+                        : previewQ.isLoading
+                          ? "正在计算当前价格"
+                          : "支付前自动计算实际价格"}
+                    </div>
+                  ) : null}
+                </button>
               </div>
             </div>
           </div>
