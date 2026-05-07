@@ -48,28 +48,28 @@ const mechanismCards = [
 const onboardingSteps = [
   {
     index: "1",
-    title: "如何创建学科项目",
+    title: "创建学科项目",
     body: "从新建学科、进入项目，到绑定并导入本地学习材料。",
     label: "创建学科、绑定目录并同步内容",
     to: "/guide",
   },
   {
     index: "2",
-    title: "如何学习复习",
+    title: "学习复习",
     body: "进入工作台后，录入复述点、提交学习并完成复习闭环。",
     label: "进入工作台录入复述点并完成复习",
     to: "/guide?doc=study-review",
   },
   {
     index: "3",
-    title: "如何使用 AI 问答",
+    title: "使用 AI 问答",
     body: "确认目录、学习对象树和第三方 LLM API 后，进入项目 AI 问答开始对话。",
     label: "配置 LLM 后围绕学习对象对话",
     to: "/guide?doc=use-ai-chat",
   },
   {
     index: "4",
-    title: "如何使用番茄钟",
+    title: "使用番茄钟",
     body: "开启番茄钟、设定番茄计划，并在番茄开始后登录网页进入工作台。",
     label: "设定计划并在学习时间进入网页",
     to: "/guide?doc=use-pomodoro",
@@ -227,8 +227,6 @@ const graduateReasons = [
     tag: "功能",
     title: "用它看视频有什么不同？",
     intro: "不要等到完全理解系统再开始。先用一门最焦虑、最容易遗忘的科目跑通一轮，你就会知道它到底适不适合你。",
-    ctaLabel: "立即体验",
-    ctaHref: "#onboarding",
     points: [
       {
         title: "微休息神经重放",
@@ -358,13 +356,6 @@ export function HomePage() {
                           )
                         })}
                       </div>
-                      {"ctaLabel" in item ? (
-                        <div className="lp-showcase-carousel-slide-actions">
-                          <Link to={item.ctaHref} className="lp-showcase-carousel-slide-action lp-showcase-carousel-slide-action-member">
-                            {item.ctaLabel}
-                          </Link>
-                        </div>
-                      ) : null}
                     </article>
                   ))}
                 </div>
@@ -413,13 +404,14 @@ export function HomePage() {
             </div>
             <div className="lp-showcase-steps-grid">
               {onboardingSteps.map((item) => (
-                <Link key={item.index} to={item.to} className="lp-showcase-step">
+                <article key={item.index} className="lp-showcase-step">
                   <div className="lp-showcase-step-no">{item.index}</div>
                   <h3>{item.title}</h3>
                   <p>{item.body}</p>
-                  <span>{item.label}</span>
-                  <strong>查看指引</strong>
-                </Link>
+                  <Link to={item.to} className="lp-showcase-step-action">
+                    {item.label}
+                  </Link>
+                </article>
               ))}
             </div>
           </div>

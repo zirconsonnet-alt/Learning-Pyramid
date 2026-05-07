@@ -134,10 +134,10 @@ def test_homepage_onboarding_path_links_to_four_guide_documents() -> None:
     render_section = source[render_start:render_end]
 
     expected_guides = [
-        ('title: "如何创建学科项目"', 'to: "/guide"', 'label: "创建学科、绑定目录并同步内容"'),
-        ('title: "如何学习复习"', 'to: "/guide?doc=study-review"', 'label: "进入工作台录入复述点并完成复习"'),
-        ('title: "如何使用 AI 问答"', 'to: "/guide?doc=use-ai-chat"', 'label: "配置 LLM 后围绕学习对象对话"'),
-        ('title: "如何使用番茄钟"', 'to: "/guide?doc=use-pomodoro"', 'label: "设定计划并在学习时间进入网页"'),
+        ('title: "创建学科项目"', 'to: "/guide"', 'label: "创建学科、绑定目录并同步内容"'),
+        ('title: "学习复习"', 'to: "/guide?doc=study-review"', 'label: "进入工作台录入复述点并完成复习"'),
+        ('title: "使用 AI 问答"', 'to: "/guide?doc=use-ai-chat"', 'label: "配置 LLM 后围绕学习对象对话"'),
+        ('title: "使用番茄钟"', 'to: "/guide?doc=use-pomodoro"', 'label: "设定计划并在学习时间进入网页"'),
     ]
 
     last_position = -1
@@ -149,6 +149,7 @@ def test_homepage_onboarding_path_links_to_four_guide_documents() -> None:
         assert label in data_section
 
     assert data_section.count("to: ") == 4
+    assert 'title: "如何' not in data_section
     assert 'title: "创建学科"' not in data_section
     assert 'title: "绑定并授权目录"' not in data_section
     assert 'title: "导入内容目录"' not in data_section
@@ -161,7 +162,40 @@ def test_homepage_onboarding_path_links_to_four_guide_documents() -> None:
     assert "第一次使用先照着这 4 步走" not in render_section
     assert "<Link" in render_section
     assert "to={item.to}" in render_section
-    assert "查看指引" in render_section
+    assert 'className="lp-showcase-step-action"' in render_section
+    assert "查看指引" not in render_section
+
+
+def test_homepage_onboarding_uses_pill_action_labels() -> None:
+    source = HOME_PAGE.read_text(encoding="utf-8")
+    css = INDEX_CSS.read_text(encoding="utf-8")
+    render_start = source.index('id="onboarding"')
+    render_end = source.index('id="membership"', render_start)
+    render_section = source[render_start:render_end]
+
+    assert '<article key={item.index} className="lp-showcase-step">' in render_section
+    assert '<Link to={item.to} className="lp-showcase-step-action">' in render_section
+    assert "{item.label}" in render_section
+    assert '<strong>查看指引</strong>' not in render_section
+    assert ".lp-showcase-step-action" in css
+    assert "border-radius: 999px;" in css
+
+
+def test_homepage_pill_actions_vertically_center_text() -> None:
+    css = INDEX_CSS.read_text(encoding="utf-8")
+    step_action_start = css.index(".lp-showcase-step-action {")
+    step_action_end = css.index("}", step_action_start)
+    step_action_css = css[step_action_start:step_action_end]
+    carousel_action_start = css.index(".lp-showcase-carousel-slide-action {")
+    carousel_action_end = css.index("}", carousel_action_start)
+    carousel_action_css = css[carousel_action_start:carousel_action_end]
+
+    for action_css in (step_action_css, carousel_action_css):
+        assert "display: inline-flex;" in action_css
+        assert "align-items: center;" in action_css
+        assert "justify-content: center;" in action_css
+        assert "min-height: 44px;" in action_css
+        assert "line-height: 1;" in action_css
 
 
 def test_homepage_problem_cards_use_short_titles_and_previous_titles_as_symptoms() -> None:
@@ -427,8 +461,8 @@ def test_homepage_featured_fourth_slide_uses_requested_copy_and_single_guide_but
         last_position = position
         assert intro in section
 
-    assert section.count('ctaLabel: "立即体验"') == 1
-    assert section.count('ctaHref: "#onboarding"') == 1
+    assert 'ctaLabel: "立即体验"' not in section
+    assert 'ctaHref: "#onboarding"' not in section
     assert "guideDocSlug" not in section
     assert "memberFeature: true" not in section
 
@@ -441,13 +475,9 @@ def test_homepage_featured_fourth_slide_uses_requested_copy_and_single_guide_but
     assert 'import { startGuideWalkthrough } from "@/ui/guideWalkthrough/guideWalkthroughController"' not in source
     assert 'startGuideWalkthrough(point.guideDocSlug)' not in source
     assert 'startGuideWalkthrough(item.guideDocSlug)' not in source
-    assert '<Link to={item.ctaHref}' in source
-    assert "lp-showcase-carousel-slide-actions" in source
-    assert "lp-showcase-carousel-slide-action" in source
-    assert ".lp-showcase-carousel-slide-actions" in css
-    assert ".lp-showcase-carousel-slide-action-member" in css
-    assert "justify-content: center;" in css
-    assert "background: linear-gradient(135deg, #e6c36a, #c8921f);" in css
+    assert '<Link to={item.ctaHref}' not in source
+    assert "lp-showcase-carousel-slide-actions" not in source
+    assert "lp-showcase-carousel-slide-action" not in source
     assert "color: #4d3508;" in css
 
 

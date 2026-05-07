@@ -1460,7 +1460,6 @@
     display: flex;
     min-height: 100%;
     flex-direction: column;
-    text-decoration: none;
     color: inherit;
     transition:
       transform 0.2s ease,
@@ -1506,23 +1505,34 @@
     font-size: 15px;
   }
 
-  .lp-showcase-step span {
-    display: block;
-    margin-top: 18px;
+  .lp-showcase-step-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: fit-content;
+    max-width: 100%;
+    min-height: 44px;
+    margin-top: auto;
+    padding: 0 16px;
+    border: 1px solid color-mix(in srgb, var(--lp-primary) 28%, var(--lp-line));
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--lp-primary) 9%, white);
     color: var(--lp-ink);
-    font-size: 15px;
-    font-weight: 650;
-    line-height: 1.55;
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 1;
+    text-align: center;
+    text-decoration: none;
+    transition:
+      background 0.2s ease,
+      border-color 0.2s ease,
+      color 0.2s ease;
   }
 
-  .lp-showcase-step strong {
-    display: inline-flex;
-    width: fit-content;
-    margin-top: auto;
-    padding-top: 18px;
+  .lp-showcase-step-action:hover {
+    border-color: color-mix(in srgb, var(--lp-primary) 52%, var(--lp-line));
+    background: color-mix(in srgb, var(--lp-primary) 16%, white);
     color: var(--lp-primary);
-    font-size: 14px;
-    font-weight: 750;
   }
 
   .lp-showcase-method-card-head {
@@ -1808,7 +1818,10 @@
   }
 
   .lp-showcase-carousel-slide-action {
-    min-height: 40px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
     padding: 0 22px;
     border-radius: 999px;
     border: 1px solid var(--lp-secondary-border);
