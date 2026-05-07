@@ -1749,7 +1749,6 @@ export function PomodoroPage() {
         </div>
         )}
       </section>
-      </div>
-    </>
+    </div>
   )
 }
