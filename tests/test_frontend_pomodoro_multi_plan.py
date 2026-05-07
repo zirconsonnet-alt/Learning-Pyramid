@@ -321,6 +321,7 @@ def test_pomodoro_overview_can_switch_to_statistics_panel() -> None:
     assert "setPomodoroOverviewMode" in page_source
     assert "统计" in session_controls
     assert "data-pomodoro-statistics" in page_source
+    assert '<div className="text-sm font-medium text-muted-foreground">统计</div>' not in statistics_panel
     assert "当日番茄完成度" in statistics_panel
     assert "todayPomodoroStats" in statistics_panel
     assert "recentPomodoroRecords.map" not in statistics_panel
@@ -360,9 +361,13 @@ def test_pomodoro_statistics_slice_workbench_metrics_by_plan_and_pomodoro() -> N
     assert "loadPomodoroSegmentMetricSummary" in workbench_stats_source
     assert "buildPomodoroPlanMetricSummaries" in page_source
     assert "pomodoroPlanMetricSummaries" in page_source
+    assert "quickPomodoroMetricSummaries" in page_source
     assert "segments: PomodoroSegmentMetricSummary[]" in page_source
     assert "segment.pomodoroIndex" in page_source
     assert "planId: plan.id" in page_source
+    assert "label: \"小番茄\"" in page_source
+    assert "const dailyMetricSummaries = [...pomodoroPlanMetricSummaries, ...quickPomodoroMetricSummaries]" in page_source
+    assert "dailyMetricSummaries.map((planSummary)" in statistics_panel
     assert "pomodoro-project-prompt-scroll flex flex-nowrap gap-3 overflow-x-auto pb-2" in statistics_panel
     assert "min-w-[20rem] flex-1 basis-[20rem] shrink-0" in statistics_panel
     assert "grid gap-2 md:grid-cols-2" not in statistics_panel

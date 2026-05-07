@@ -100,6 +100,8 @@ type PomodoroPlanMetricSummary = {
   status: "not-started" | "in-progress" | "completed"
 }
 
+const QUICK_POMODORO_PLAN_ID = "quick-pomodoro"
+
 function createPomodoroDraftId() {
   return `plan-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 }
@@ -556,6 +558,51 @@ function buildPomodoroPlanMetricSummaries(schedule: PomodoroWeekSchedule, now: n
   })
 }
 
+function buildPomodoroMetricSummary(input: {
+  planId: string
+  planIndex: number
+  dateKey: string
+  label: string
+  segments: PomodoroSegmentMetricSummary[]
+}): PomodoroPlanMetricSummary {
+  const scheduledFocusMs = input.segments.reduce((sum, segment) => sum + segment.scheduledFocusMs, 0)
+  const webPresenceMs = input.segments.reduce((sum, segment) => sum + segment.webPresenceMs, 0)
+  const videoMs = input.segments.reduce((sum, segment) => sum + segment.videoMs, 0)
+  const recallEntryMs = input.segments.reduce((sum, segment) => sum + segment.recallEntryMs, 0)
+  const reviewMs = input.segments.reduce((sum, segment) => sum + segment.reviewMs, 0)
+  const aiQaMs = input.segments.reduce((sum, segment) => sum + segment.aiQaMs, 0)
+  const distractionMs = input.segments.reduce((sum, segment) => sum + segment.distractionMs, 0)
+  const absenceMs = Math.max(0, scheduledFocusMs - webPresenceMs)
+  const activeLearningMs = videoMs + recallEntryMs + reviewMs + aiQaMs
+  const attendanceRate = scheduledFocusMs > 0 ? webPresenceMs / scheduledFocusMs : 0
+  const effectiveLearningRate = scheduledFocusMs > 0 ? activeLearningMs / scheduledFocusMs : 0
+  const status = input.segments.some((segment) => segment.status === "in-progress")
+    ? "in-progress"
+    : input.segments.every((segment) => segment.status === "completed")
+      ? "completed"
+      : "not-started"
+
+  return {
+    planId: input.planId,
+    planIndex: input.planIndex,
+    dateKey: input.dateKey,
+    label: input.label,
+    segments: input.segments,
+    scheduledFocusMs,
+    webPresenceMs,
+    videoMs,
+    recallEntryMs,
+    reviewMs,
+    aiQaMs,
+    distractionMs,
+    absenceMs,
+    activeLearningMs,
+    attendanceRate,
+    effectiveLearningRate,
+    status,
+  }
+}
+
 function RestMusicPlayer(props: { isRestPhase: boolean }) {
   const { isRestPhase } = props
   const musicDirectory = usePomodoroRestMusicDirectoryBinding()
@@ -943,6 +990,59 @@ export function PomodoroPage() {
     () => buildPomodoroPlanMetricSummaries(draftSchedule, now),
     [draftSchedule, now],
   )
+  const quickPomodoroMetricSummaries = useMemo(() => {
+    const quickSegments: PomodoroSegmentMetricSummary[] = []
+    const quickRecords = todayPomodoroRecords.filter((record) => record.planId === QUICK_POMODORO_PLAN_ID)
+
+    quickRecords.forEach((record) => {
+      quickSegments.push(
+        loadPomodoroSegmentMetricSummary({
+          projectId: record.projectId,
+          dateKey: record.dateKey,
+          planId: record.planId,
+          planIndex: record.planIndex,
+          pomodoroIndex: record.pomodoroIndex,
+          scheduledStartAtMs: record.startAtMs,
+          scheduledEndAtMs: record.endAtMs,
+          now,
+        }),
+      )
+    })
+
+    if (quickPomodoro && formatDateKey(quickPomodoro.endAtMs) === todayDateKey) {
+      const alreadyTracked = quickSegments.some(
+        (segment) => segment.scheduledStartAtMs === quickPomodoro.startAtMs && segment.scheduledEndAtMs === quickPomodoro.endAtMs,
+      )
+      if (!alreadyTracked) {
+        quickSegments.push(
+          loadPomodoroSegmentMetricSummary({
+            projectId: quickPomodoro.projectId,
+            dateKey: formatDateKey(quickPomodoro.endAtMs),
+            planId: QUICK_POMODORO_PLAN_ID,
+            planIndex: -1,
+            pomodoroIndex: 1,
+            scheduledStartAtMs: quickPomodoro.startAtMs,
+            scheduledEndAtMs: quickPomodoro.endAtMs,
+            now,
+          }),
+        )
+      }
+    }
+
+    if (quickSegments.length === 0) return []
+
+    const sortedSegments = [...quickSegments].sort((left, right) => left.scheduledStartAtMs - right.scheduledStartAtMs)
+    return [
+      buildPomodoroMetricSummary({
+        planId: QUICK_POMODORO_PLAN_ID,
+        planIndex: -1,
+        dateKey: todayDateKey,
+        label: "小番茄",
+        segments: sortedSegments,
+      }),
+    ]
+  }, [now, quickPomodoro, todayDateKey, todayPomodoroRecords])
+  const dailyMetricSummaries = [...pomodoroPlanMetricSummaries, ...quickPomodoroMetricSummaries]
 
   const headlineCountdown =
     snapshot.status === "running"
@@ -1561,8 +1661,7 @@ export function PomodoroPage() {
         {pomodoroOverviewMode === "stats" ? (
           <div data-pomodoro-statistics className="space-y-5">
             <div>
-              <div className="text-sm font-medium text-muted-foreground">统计</div>
-              <div className="mt-2 text-3xl font-semibold tracking-[-0.04em] text-foreground">
+              <div className="text-3xl font-semibold tracking-[-0.04em] text-foreground">
                 当日番茄完成度
               </div>
             </div>
@@ -1606,12 +1705,12 @@ export function PomodoroPage() {
             </div>
 
             <div className="space-y-3">
-              {pomodoroPlanMetricSummaries.length === 0 ? (
+              {dailyMetricSummaries.length === 0 ? (
                 <div className="rounded-[1.1rem] border border-dashed border-[color:var(--theme-soft-border)] px-4 py-8 text-sm text-muted-foreground">
-                  今天还没有可统计的番茄计划。
+                  今天还没有可统计的番茄记录。
                 </div>
               ) : (
-                pomodoroPlanMetricSummaries.map((planSummary) => (
+                dailyMetricSummaries.map((planSummary) => (
                   <div
                     key={`${planSummary.dateKey}:${planSummary.planId}:${planSummary.planIndex}`}
                     className="space-y-4 rounded-[1.1rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] px-4 py-4 shadow-[var(--theme-soft-shadow)]"
