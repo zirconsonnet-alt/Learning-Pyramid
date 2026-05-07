@@ -1516,18 +1516,21 @@
     align-self: center;
     width: fit-content;
     max-width: 100%;
-    min-height: 44px;
+    min-height: 48px;
     margin-top: auto;
-    padding: 0 22px;
+    padding: 0 26px;
     border-radius: 999px;
-    border: 1px solid var(--lp-secondary-border);
-    background: var(--lp-secondary-bg);
-    color: var(--lp-text);
-    font-size: 14px;
+    border: 1px solid rgba(146, 92, 15, 0.26);
+    background: linear-gradient(135deg, #f3d36d 0%, #d59a24 58%, #b87710 100%);
+    color: #4d3508;
+    font-size: 15px;
     font-weight: 700;
     line-height: 1;
     text-align: center;
     text-decoration: none;
+    box-shadow:
+      0 16px 34px -20px rgba(176, 125, 18, 0.78),
+      inset 0 1px 0 rgba(255, 255, 255, 0.55);
     transition:
       transform 0.18s ease,
       border-color 0.18s ease,
@@ -1536,10 +1539,25 @@
   }
 
   .lp-showcase-step-action:hover {
-    transform: translateY(-1px);
-    background: var(--lp-secondary-hover-bg);
-    border-color: color-mix(in srgb, var(--lp-primary) 28%, var(--lp-secondary-border));
-    box-shadow: 0 12px 24px -18px color-mix(in srgb, var(--lp-text) 36%, transparent);
+    transform: translateY(-2px);
+    background: linear-gradient(135deg, #f7dd86 0%, #deaa32 58%, #c27a0f 100%);
+    border-color: rgba(146, 92, 15, 0.3);
+    box-shadow:
+      0 18px 36px -18px rgba(176, 125, 18, 0.82),
+      inset 0 1px 0 rgba(255, 255, 255, 0.62);
+  }
+
+  .lp-showcase-step-action:active {
+    transform: translateY(0);
+    background: linear-gradient(135deg, #e7c256 0%, #cc8f18 58%, #ae6b0d 100%);
+    box-shadow:
+      0 10px 20px -16px rgba(176, 125, 18, 0.72),
+      inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  }
+
+  .lp-showcase-step-action:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--lp-primary) 72%, transparent);
+    outline-offset: 3px;
   }
 
   .lp-showcase-method-card-head {
@@ -1836,16 +1854,19 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-height: 44px;
-    padding: 0 22px;
+    min-height: 48px;
+    padding: 0 26px;
     border-radius: 999px;
-    border: 1px solid var(--lp-secondary-border);
-    background: var(--lp-secondary-bg);
-    color: var(--lp-text);
-    font-size: 14px;
+    border: 1px solid rgba(146, 92, 15, 0.26);
+    background: linear-gradient(135deg, #f3d36d 0%, #d59a24 58%, #b87710 100%);
+    color: #4d3508;
+    font-size: 15px;
     font-weight: 700;
     line-height: 1;
     cursor: pointer;
+    box-shadow:
+      0 16px 34px -20px rgba(176, 125, 18, 0.78),
+      inset 0 1px 0 rgba(255, 255, 255, 0.55);
     transition:
       transform 0.18s ease,
       border-color 0.18s ease,
@@ -1854,10 +1875,20 @@
   }
 
   .lp-showcase-carousel-slide-action:hover {
-    transform: translateY(-1px);
-    background: var(--lp-secondary-hover-bg);
-    border-color: color-mix(in srgb, var(--lp-primary) 28%, var(--lp-secondary-border));
-    box-shadow: 0 12px 24px -18px color-mix(in srgb, var(--lp-text) 36%, transparent);
+    transform: translateY(-2px);
+    background: linear-gradient(135deg, #f7dd86 0%, #deaa32 58%, #c27a0f 100%);
+    border-color: rgba(146, 92, 15, 0.3);
+    box-shadow:
+      0 18px 36px -18px rgba(176, 125, 18, 0.82),
+      inset 0 1px 0 rgba(255, 255, 255, 0.62);
+  }
+
+  .lp-showcase-carousel-slide-action:active {
+    transform: translateY(0);
+    background: linear-gradient(135deg, #e7c256 0%, #cc8f18 58%, #ae6b0d 100%);
+    box-shadow:
+      0 10px 20px -16px rgba(176, 125, 18, 0.72),
+      inset 0 1px 0 rgba(255, 255, 255, 0.45);
   }
 
   .lp-showcase-carousel-slide-action:focus-visible {
@@ -1954,6 +1985,9 @@
   }
 
   .lp-showcase-membership-benefits {
+    display: grid;
+    align-content: start;
+    gap: 12px;
     justify-self: end;
     width: 100%;
     padding: 14px 16px;
@@ -1964,7 +1998,7 @@
   }
 
   .lp-showcase-membership-benefits h4 {
-    margin: 0 0 8px;
+    margin: 0;
     font-size: 14px;
     line-height: 1.35;
     color: var(--lp-text);
@@ -1984,6 +2018,17 @@
     font-weight: 700;
   }
 
+  .lp-showcase-membership-benefits-action {
+    width: fit-content;
+    max-width: 100%;
+    min-height: 40px;
+    margin-top: 4px;
+    padding: 0 16px;
+    border-radius: 999px;
+    font-size: 14px;
+    white-space: nowrap;
+  }
+
   .lp-showcase-price strong {
     font-size: clamp(34px, 5vw, 54px);
     line-height: 1;
@@ -2000,11 +2045,6 @@
     font-size: 14px;
     line-height: 1.6;
     margin-top: 10px;
-  }
-
-  .lp-showcase-membership-actions {
-    margin-top: auto;
-    padding-top: 20px;
   }
 
   .lp-showcase-pricing-card-primary {

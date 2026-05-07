@@ -1151,7 +1151,7 @@ export function PomodoroPage() {
   const wallpaperBackdrop = wallpaperUrl ? (
     <div
       data-pomodoro-wallpaper-backdrop
-      className="pointer-events-none absolute inset-0 -z-10 overflow-hidden rounded-[2rem] bg-cover bg-center"
+      className="pointer-events-none fixed inset-x-0 bottom-0 top-[3.75rem] z-0 bg-cover bg-center"
       style={{ backgroundImage: `url(${wallpaperUrl})` }}
     >
       <div
@@ -1166,20 +1166,23 @@ export function PomodoroPage() {
 
   if (pomodoroMemberBlocked) {
     return (
-      <div data-pomodoro-wallpaper-scope="page" className="relative isolate z-10 mx-auto flex w-full max-w-3xl flex-col gap-6">
+      <>
         {wallpaperBackdrop}
-        <MemberOnlyFeatureNotice
-          title="番茄钟是会员专属功能"
-          message="当前账号还没有有效会员，所以这里先不开放番茄钟。开通会员后，就可以继续使用排程、小番茄和相关设置。"
-        />
-      </div>
+        <div data-pomodoro-wallpaper-scope="page" className="relative z-10 mx-auto flex w-full max-w-3xl flex-col gap-6">
+          <MemberOnlyFeatureNotice
+            title="番茄钟是会员专属功能"
+            message="当前账号还没有有效会员，所以这里先不开放番茄钟。开通会员后，就可以继续使用排程、小番茄和相关设置。"
+          />
+        </div>
+      </>
     )
   }
 
   if (activePlanId) {
     return (
-      <div data-pomodoro-wallpaper-scope="page" className="relative isolate z-10 mx-auto flex w-full max-w-5xl flex-col gap-8">
+      <>
         {wallpaperBackdrop}
+        <div data-pomodoro-wallpaper-scope="page" className="relative z-10 mx-auto flex w-full max-w-5xl flex-col gap-8">
           <section data-pomodoro-plan-detail className="space-y-6">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="text-2xl font-semibold text-foreground">
@@ -1570,14 +1573,16 @@ export function PomodoroPage() {
               </div>
             ) : null}
           </section>
-      </div>
+        </div>
+      </>
     )
   }
 
   return (
-    <div data-pomodoro-wallpaper-scope="page" className="relative isolate z-10 mx-auto flex w-full max-w-5xl flex-col gap-8">
+    <>
       {wallpaperBackdrop}
-      <section data-pomodoro-session-controls className="space-y-5">
+      <div data-pomodoro-wallpaper-scope="page" className="relative z-10 mx-auto flex w-full max-w-5xl flex-col gap-8">
+        <section data-pomodoro-session-controls className="space-y-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0 flex-1 space-y-5">
             <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
@@ -1625,7 +1630,7 @@ export function PomodoroPage() {
           <MetricTile label="下次开始" value={formatDateTime(snapshot.nextStartAtMs)} />
           <MetricTile label="工作台" value={enabled ? "按番茄放行" : "不限制"} />
         </div>
-      </section>
+        </section>
 
       <RestMusicPlayer isRestPhase={isRestPhase} />
 
@@ -1749,6 +1754,7 @@ export function PomodoroPage() {
         </div>
         )}
       </section>
-    </div>
+      </div>
+    </>
   )
 }

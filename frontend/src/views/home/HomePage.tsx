@@ -263,7 +263,7 @@ const graduateReasons = [
 ] as const
 
 export function HomePage() {
-  const { authEnabled, isLoggedIn, registerHref, registerLabel } = useShowcaseEntryPaths()
+  const { authEnabled, isLoggedIn, registerHref } = useShowcaseEntryPaths()
 
   usePageMeta({
     title: "LearningPyramid | 把每一次遍历都变得更值",
@@ -271,8 +271,8 @@ export function HomePage() {
     path: "/",
   })
 
-  const membershipEntryHref = isLoggedIn || !authEnabled ? "/profile" : registerHref
-  const membershipEntryLabel = isLoggedIn || !authEnabled ? "去个人中心查看" : "登录后在个人中心查看"
+  const membershipEntryHref = isLoggedIn || !authEnabled ? "/membership" : registerHref
+  const membershipEntryLabel = isLoggedIn || !authEnabled ? "去会员中心查看" : "登录后在会员中心查看"
   const [activeReasonIndex, setActiveReasonIndex] = useState(0)
   const [isReasonCarouselPaused, setIsReasonCarouselPaused] = useState(false)
 
@@ -443,7 +443,7 @@ export function HomePage() {
                         <strong>¥20</strong>
                         <span>/ 月</span>
                       </div>
-                      <p className="lp-showcase-membership-plan-note">邀请码 7.5 折券可让首单实付 ¥15</p>
+                      <p className="lp-showcase-membership-plan-note">首单最低15元</p>
                     </div>
                     <div className="lp-showcase-membership-price-block lp-showcase-membership-price-block-accent">
                       <h3>考研套餐</h3>
@@ -451,7 +451,7 @@ export function HomePage() {
                         <strong>¥15</strong>
                         <span>/ 月</span>
                       </div>
-                      <p className="lp-showcase-membership-plan-note">单最低15元 有效期至12月21日</p>
+                      <p className="lp-showcase-membership-plan-note">有效期至12月21日</p>
                     </div>
                   </div>
                   <div className="lp-showcase-membership-benefits">
@@ -460,15 +460,10 @@ export function HomePage() {
                       <li>番茄钟：学习规划与督促</li>
                       <li>AI交互：你的助理及良师</li>
                     </ul>
+                    <Link className="lp-showcase-btn lp-showcase-btn-primary lp-showcase-membership-benefits-action" to={membershipEntryHref}>
+                      {membershipEntryLabel}
+                    </Link>
                   </div>
-                </div>
-                <div className="lp-showcase-hero-actions lp-showcase-membership-actions">
-                  <Link className="lp-showcase-btn lp-showcase-btn-primary" to={membershipEntryHref}>
-                    {membershipEntryLabel}
-                  </Link>
-                  <Link className="lp-showcase-btn lp-showcase-btn-secondary" to={registerHref}>
-                    {registerLabel}
-                  </Link>
                 </div>
               </article>
 

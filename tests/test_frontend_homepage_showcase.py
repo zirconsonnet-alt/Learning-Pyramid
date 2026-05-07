@@ -205,10 +205,10 @@ def test_homepage_onboarding_uses_pill_action_labels() -> None:
 
     assert "align-self: center;" in step_action_css
     for shared_rule in (
-        "padding: 0 22px;",
-        "border: 1px solid var(--lp-secondary-border);",
-        "background: var(--lp-secondary-bg);",
-        "color: var(--lp-text);",
+        "padding: 0 26px;",
+        "border: 1px solid rgba(146, 92, 15, 0.26);",
+        "background: linear-gradient(135deg, #f3d36d 0%, #d59a24 58%, #b87710 100%);",
+        "color: #4d3508;",
     ):
         assert shared_rule in step_action_css
         assert shared_rule in carousel_action_css
@@ -227,7 +227,7 @@ def test_homepage_pill_actions_vertically_center_text() -> None:
         assert "display: inline-flex;" in action_css
         assert "align-items: center;" in action_css
         assert "justify-content: center;" in action_css
-        assert "min-height: 44px;" in action_css
+        assert "min-height: 48px;" in action_css
         assert "line-height: 1;" in action_css
 
 
@@ -592,10 +592,19 @@ def test_homepage_membership_card_highlights_member_benefits() -> None:
     assert "<h3>考研套餐</h3>" in section
     assert "<strong>¥15</strong>" in section
     assert "<span>/ 月</span>" in section
-    assert "单最低15元 有效期至12月21日" in section
+    assert "首单最低15元" in section
+    assert "有效期至12月21日" in section
+    assert "邀请码 7.5 折券可让首单实付 ¥15" not in section
+    assert "单最低15元 有效期至12月21日" not in section
     assert "<h4>会员权益</h4>" in section
     assert "<li>番茄钟：学习规划与督促</li>" in section
     assert "<li>AI交互：你的助理及良师</li>" in section
+    assert 'const membershipEntryHref = isLoggedIn || !authEnabled ? "/membership" : registerHref' in source
+    assert 'const membershipEntryLabel = isLoggedIn || !authEnabled ? "去会员中心查看" : "登录后在会员中心查看"' in source
+    assert "去个人中心查看" not in source
+    assert "进入项目" not in section
+    assert 'className="lp-showcase-btn lp-showcase-btn-primary lp-showcase-membership-benefits-action"' in section
+    assert section.index("<li>AI交互：你的助理及良师</li>") < section.index("lp-showcase-membership-benefits-action")
 
     assert ".lp-showcase-membership-card-top" in css
     assert ".lp-showcase-membership-grid" in css
@@ -603,4 +612,6 @@ def test_homepage_membership_card_highlights_member_benefits() -> None:
     assert ".lp-showcase-membership-plan-grid" in css
     assert ".lp-showcase-membership-price-block" in css
     assert ".lp-showcase-membership-benefits" in css
+    assert ".lp-showcase-membership-benefits-action" in css
+    assert ".lp-showcase-membership-actions" not in css
     assert "grid-template-columns: minmax(0, 1fr) minmax(170px, 220px);" in css

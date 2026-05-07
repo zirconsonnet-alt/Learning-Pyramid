@@ -560,9 +560,12 @@ def test_pomodoro_wallpaper_is_displayed_on_page_and_managed_in_settings() -> No
     assert "URL.revokeObjectURL" in pomodoro_page_source
     assert "data-pomodoro-wallpaper-backdrop" in pomodoro_page_source
     assert 'data-pomodoro-wallpaper-scope="page"' in pomodoro_page_source
+    assert "fixed inset-x-0 bottom-0 top-[3.75rem]" in pomodoro_page_source
     assert "fixed inset-x-0 bottom-0 top-[4.5rem]" not in pomodoro_page_source
-    assert "pointer-events-none absolute inset-0 -z-10" in pomodoro_page_source
-    assert "relative isolate z-10 mx-auto" in pomodoro_page_source
+    assert "pointer-events-none absolute inset-0 -z-10" not in pomodoro_page_source
+    assert "overflow-hidden rounded-[2rem] bg-cover bg-center" not in pomodoro_page_source
+    assert "relative z-10 mx-auto" in pomodoro_page_source
+    assert "relative isolate z-10 mx-auto" not in pomodoro_page_source
     assert "wallpaperInputRef" not in pomodoro_page_source
     assert "savePomodoroWallpaperBlob" not in pomodoro_page_source
     assert "removePomodoroWallpaperBlob" not in pomodoro_page_source
