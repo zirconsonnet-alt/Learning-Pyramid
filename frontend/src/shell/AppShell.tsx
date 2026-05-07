@@ -256,18 +256,18 @@ function AccountMenuLink(props: {
       {({ isActive }) => (
         <div
           className={cn(
-            "group flex min-h-11 w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition-all duration-200",
+            "group flex min-h-12 w-full items-center gap-3 rounded-xl px-2 py-2 text-sm transition-all duration-200",
             isActive
-              ? "bg-primary text-primary-foreground shadow-[0_18px_36px_-28px_hsl(var(--primary)/0.42)]"
-              : "text-[color:var(--theme-subtle-text)] hover:[background:var(--theme-soft-bg)] hover:text-foreground",
+              ? "bg-[hsl(var(--primary)/0.08)] text-foreground"
+              : "text-[color:var(--theme-subtle-text)] hover:bg-[color:var(--theme-soft-bg)] hover:text-foreground",
           )}
         >
           <span
             className={cn(
-              "flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border transition-colors",
+              "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors",
               isActive
-                ? "border-white/15 bg-white/12 text-white"
-                : "[border-color:var(--theme-icon-border)] [background:var(--theme-icon-bg)] [color:var(--theme-icon-text)] group-hover:bg-white",
+                ? "bg-white text-primary shadow-[0_10px_22px_-18px_hsl(var(--primary)/0.4)]"
+                : "text-[color:var(--theme-icon-text)] group-hover:bg-white group-hover:text-foreground",
             )}
           >
             <Icon className="h-4 w-4" />
@@ -290,11 +290,11 @@ function AccountMenuActionButton(props: {
   return (
     <button
       type="button"
-      className="group flex min-h-11 w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm text-[color:var(--theme-subtle-text)] transition-all duration-200 hover:bg-destructive/8 hover:text-destructive disabled:pointer-events-none disabled:opacity-60"
+      className="group flex min-h-12 w-full items-center gap-3 rounded-xl px-2 py-2 text-left text-sm text-[color:var(--theme-subtle-text)] transition-all duration-200 hover:bg-destructive/8 hover:text-destructive disabled:pointer-events-none disabled:opacity-60"
       onClick={onClick}
       disabled={disabled}
     >
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border [border-color:var(--theme-icon-border)] [background:var(--theme-icon-bg)] [color:var(--theme-icon-text)] transition-colors group-hover:border-destructive/20 group-hover:bg-white group-hover:text-destructive">
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg [color:var(--theme-icon-text)] transition-colors group-hover:bg-white group-hover:text-destructive">
         <Icon className="h-4 w-4" />
       </span>
       <span className="min-w-0 truncate">{label}</span>
@@ -831,23 +831,23 @@ export function AppShell() {
                       className="absolute right-0 top-full z-30 w-[min(18rem,calc(100vw-1rem))] pt-2.5"
                     >
                       <div className="overflow-hidden rounded-[1.6rem] border [border-color:var(--theme-soft-border)] [background:radial-gradient(circle_at_top_left,hsl(var(--primary)/0.08),transparent_34%),var(--theme-card-main-bg)] shadow-[0_24px_60px_-30px_rgba(15,23,42,0.24)] backdrop-blur-2xl">
-                        <div className="p-3">
-                          <div className="theme-soft-surface p-3">
-                            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">账号</div>
-                            <div className="mt-3 flex items-center gap-3">
-                              <div className="inline-flex h-12 w-12 items-center justify-center overflow-hidden rounded-2xl border [border-color:var(--theme-icon-border)] [background:var(--theme-icon-bg)] text-base font-semibold [color:var(--theme-icon-text)]">
-                                {currentUserQ.data.avatarUrl ? (
-                                  <img src={currentUserQ.data.avatarUrl} alt={currentUserQ.data.nickname} className="h-full w-full object-cover" />
-                                ) : (
-                                  (currentUserQ.data.nickname || currentUserQ.data.email).slice(0, 1).toUpperCase()
-                                )}
-                              </div>
-                              <div className="min-w-0">
-                                <div className="truncate text-sm font-medium text-foreground">{currentUserQ.data.nickname}</div>
-                                <div className="mt-1 truncate text-xs text-muted-foreground">{currentUserQ.data.email}</div>
-                              </div>
+                        <div className="p-4">
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">账号</div>
+                          <div className="mt-3 flex items-center gap-3 px-1">
+                            <div className="inline-flex h-12 w-12 items-center justify-center overflow-hidden rounded-2xl border [border-color:var(--theme-icon-border)] [background:var(--theme-icon-bg)] text-base font-semibold [color:var(--theme-icon-text)]">
+                              {currentUserQ.data.avatarUrl ? (
+                                <img src={currentUserQ.data.avatarUrl} alt={currentUserQ.data.nickname} className="h-full w-full object-cover" />
+                              ) : (
+                                (currentUserQ.data.nickname || currentUserQ.data.email).slice(0, 1).toUpperCase()
+                              )}
                             </div>
-                            <div className="mt-3 grid gap-2">
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-medium text-foreground">{currentUserQ.data.nickname}</div>
+                              <div className="mt-1 truncate text-xs text-muted-foreground">{currentUserQ.data.email}</div>
+                            </div>
+                          </div>
+                          <div className="mt-4 border-t border-border/60 pt-3">
+                            <div className="grid gap-1">
                               <AccountMenuLink to="/profile" label="个人中心" icon={User} onNavigate={() => setAccountMenuOpen(false)} />
                               <AccountMenuLink to="/membership" label="会员中心" icon={CreditCard} onNavigate={() => setAccountMenuOpen(false)} />
                               <AccountMenuActionButton

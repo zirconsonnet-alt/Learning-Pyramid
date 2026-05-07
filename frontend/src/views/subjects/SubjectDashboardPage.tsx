@@ -328,19 +328,6 @@ export function SubjectDashboardPage() {
                         </CardDescription>
                       </div>
                     </div>
-                    {canDeleteMaterial ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-9 w-9 shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                        aria-label={`删除项目 ${material.title}`}
-                        disabled={deleteMaterialM.isPending}
-                        onClick={() => openDeleteMaterialDialog(material)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    ) : null}
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -354,6 +341,17 @@ export function SubjectDashboardPage() {
                         <Settings2 className="h-4 w-4" />
                         项目设置
                       </Button>
+                      {canDeleteMaterial ? (
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          disabled={deleteMaterialM.isPending}
+                          onClick={() => openDeleteMaterialDialog(material)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          删除
+                        </Button>
+                      ) : null}
                     </div>
                   ) : (
                     <p className="text-sm text-muted-foreground">这个项目还没有可进入的工作台。</p>

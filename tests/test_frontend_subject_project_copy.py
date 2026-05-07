@@ -54,12 +54,20 @@ def test_delete_subject_dialog_uses_warning_as_confirmation_placeholder() -> Non
 
 def test_subject_dashboard_project_cards_offer_project_delete_action() -> None:
     source = SUBJECT_DASHBOARD_PAGE.read_text(encoding="utf-8")
+    action_row_source = source[
+        source.index('<div className="flex flex-wrap gap-2">', source.index("{material.projectId ? (")) :
+        source.index("</div>", source.index("项目设置"))
+    ]
 
     assert "useDeleteSubjectMaterial" in source
     assert "openDeleteMaterialDialog(material)" in source
     assert '<Trash2 className="h-4 w-4" />' in source
     assert "<DialogTitle>删除项目</DialogTitle>" in source
     assert "deleteMaterialExpectedText" in source
+    assert "aria-label={`删除项目 ${material.title}`}" not in source
+    assert "variant=\"destructive\"" in action_row_source
+    assert "canDeleteMaterial ? (" in action_row_source
+    assert action_row_source.index("进入工作台") < action_row_source.index("项目设置") < action_row_source.index("删除")
 
 
 def test_subject_dashboard_project_cards_show_last_study_status() -> None:
