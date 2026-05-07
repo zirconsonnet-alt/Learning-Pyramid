@@ -440,36 +440,35 @@ export function HomePage() {
             </div>
             <div className="lp-showcase-pricing-grid lp-showcase-membership-grid">
               <article className="lp-showcase-pricing-card lp-showcase-pricing-card-primary">
-                <div className="lp-showcase-membership-card-top">
-                  <div className="lp-showcase-membership-plan-grid">
-                    <div className="lp-showcase-membership-price-block">
-                      <h3>月会员</h3>
-                      <div className="lp-showcase-price">
-                        <strong>¥20</strong>
-                        <span>/ 月</span>
-                      </div>
-                      <p className="lp-showcase-membership-plan-note">首单最低15元</p>
+                <div className="lp-showcase-membership-plan-grid">
+                  <div className="lp-showcase-membership-price-block">
+                    <h3>月会员</h3>
+                    <div className="lp-showcase-price">
+                      <strong>¥20</strong>
+                      <span>/ 月</span>
                     </div>
-                    <div className="lp-showcase-membership-price-block lp-showcase-membership-price-block-accent">
-                      <h3>考研套餐</h3>
-                      <div className="lp-showcase-price">
-                        <strong>¥15</strong>
-                        <span>/ 月</span>
-                      </div>
-                      <p className="lp-showcase-membership-plan-note">有效期至12月21日</p>
-                    </div>
+                    <p className="lp-showcase-membership-plan-note">首单最低15元</p>
                   </div>
-                  <div className="lp-showcase-membership-benefits">
-                    <h4>会员权益</h4>
-                    <ul>
-                      <li>番茄钟：学习规划与督促</li>
-                      <li>AI交互：你的助理及良师</li>
-                    </ul>
-                    <Link className="lp-showcase-membership-benefits-action" to={membershipEntryHref}>
-                      {membershipEntryLabel}
-                    </Link>
+                  <div className="lp-showcase-membership-price-block lp-showcase-membership-price-block-accent">
+                    <h3>考研套餐</h3>
+                    <div className="lp-showcase-price">
+                      <strong>¥15</strong>
+                      <span>/ 月</span>
+                    </div>
+                    <p className="lp-showcase-membership-plan-note">有效期至12月21日</p>
                   </div>
                 </div>
+              </article>
+
+              <article className="lp-showcase-pricing-card lp-showcase-membership-benefits">
+                <h3>会员权益</h3>
+                <ul className="lp-showcase-pricing-list">
+                  <li>番茄钟：学习规划与督促</li>
+                  <li>AI交互：你的助理及良师</li>
+                </ul>
+                <Link className="lp-showcase-btn lp-showcase-btn-primary lp-showcase-membership-benefits-action" to={membershipEntryHref}>
+                  {membershipEntryLabel}
+                </Link>
               </article>
 
               <article className="lp-showcase-pricing-card">

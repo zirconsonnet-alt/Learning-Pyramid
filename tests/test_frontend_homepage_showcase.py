@@ -596,10 +596,9 @@ def test_homepage_membership_card_highlights_member_benefits() -> None:
     section = source[section_start:section_end]
 
     assert 'className="lp-showcase-pricing-grid lp-showcase-membership-grid"' in section
-    assert 'className="lp-showcase-membership-card-top"' in section
     assert 'className="lp-showcase-membership-plan-grid"' in section
     assert 'className="lp-showcase-membership-price-block"' in section
-    assert 'className="lp-showcase-membership-benefits"' in section
+    assert 'className="lp-showcase-pricing-card lp-showcase-membership-benefits"' in section
     assert "<h3>月会员</h3>" in section
     assert "<h3>考研套餐</h3>" in section
     assert "<strong>¥15</strong>" in section
@@ -608,27 +607,27 @@ def test_homepage_membership_card_highlights_member_benefits() -> None:
     assert "有效期至12月21日" in section
     assert "邀请码 7.5 折券可让首单实付 ¥15" not in section
     assert "单最低15元 有效期至12月21日" not in section
-    assert "<h4>会员权益</h4>" in section
+    assert "<h3>会员权益</h3>" in section
     assert "<li>番茄钟：学习规划与督促</li>" in section
     assert "<li>AI交互：你的助理及良师</li>" in section
     assert 'const membershipEntryHref = isLoggedIn || !authEnabled ? "/membership" : registerHref' in source
     assert 'const membershipEntryLabel = isLoggedIn || !authEnabled ? "去会员中心查看" : "登录后在会员中心查看"' in source
     assert "去个人中心查看" not in source
     assert "进入项目" not in section
-    assert 'className="lp-showcase-membership-benefits-action"' in section
-    assert 'lp-showcase-btn lp-showcase-btn-primary lp-showcase-membership-benefits-action' not in section
+    assert 'className="lp-showcase-btn lp-showcase-btn-primary lp-showcase-membership-benefits-action"' in section
+    assert 'className="lp-showcase-membership-benefits-action"' not in section
+    assert section.index('className="lp-showcase-membership-plan-grid"') < section.index('className="lp-showcase-pricing-card lp-showcase-membership-benefits"')
+    assert section.index("<h3>会员权益</h3>") < section.index("<h3>邀请机制</h3>")
     assert section.index("<li>AI交互：你的助理及良师</li>") < section.index("lp-showcase-membership-benefits-action")
 
-    assert ".lp-showcase-membership-card-top" in css
+    assert ".lp-showcase-membership-card-top" not in css
     assert ".lp-showcase-membership-grid" in css
-    assert "grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.65fr);" in css
+    assert "grid-template-columns: minmax(0, 1.35fr) minmax(240px, 0.65fr) minmax(260px, 0.72fr);" in css
     assert "align-items: start;" in css
     assert ".lp-showcase-membership-plan-grid" in css
     assert ".lp-showcase-membership-price-block" in css
     assert ".lp-showcase-membership-benefits" in css
     assert ".lp-showcase-membership-benefits-action" in css
-    assert ".lp-showcase-membership-benefits-action:hover" in css
-    assert "background: transparent;" in css
-    assert "box-shadow: none;" in css
+    assert ".lp-showcase-membership-benefits-action:hover" not in css
+    assert "color: var(--lp-link);" not in css
     assert ".lp-showcase-membership-actions" not in css
-    assert "grid-template-columns: minmax(0, 1fr) minmax(170px, 220px);" in css
