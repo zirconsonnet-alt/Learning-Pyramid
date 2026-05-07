@@ -40,6 +40,8 @@ import {
   StatusPill,
 } from "@/views/membership/membershipUi"
 
+const DEFAULT_MEMBERSHIP_PLAN_ID = "monthly"
+
 function getMembershipState(summary: ReturnType<typeof useMembershipSummary>["data"]) {
   if (summary?.isActive) return "会员有效"
   if (summary?.currentStatus === "expired") return "会员已过期"
@@ -279,6 +281,7 @@ function WithdrawalRecordsDialog(props: {
 }
 
 export function MembershipPage() {
+  const [selectedPlanId, setSelectedPlanId] = useState(DEFAULT_MEMBERSHIP_PLAN_ID)
   const [selectedCouponId, setSelectedCouponId] = useState("")
   const [selectedProvider, setSelectedProvider] = useState("")
   const [purchaseOpen, setPurchaseOpen] = useState(false)
@@ -300,8 +303,10 @@ export function MembershipPage() {
   const commissionQ = useCommissionSummary()
   const bindingAttemptQ = usePayoutBindingAttempt(activeBindingAttemptId, Boolean(activeBindingAttemptId), activeBindingAttemptId ? 2_000 : false)
   const withdrawalsQ = useCommissionWithdrawals()
-  const previewQ = useMembershipOrderPreview(selectedCouponId || undefined)
   const ordersQ = useMembershipOrders(20, true, shouldAutoRefresh ? 5_000 : false)
+  const pendingOrder = (ordersQ.data ?? []).find((item) => item.status === "pending")
+  const effectiveSelectedPlanId = pendingOrder?.planId || selectedPlanId
+  const previewQ = useMembershipOrderPreview(selectedCouponId || undefined, effectiveSelectedPlanId)
   const createOrder = useCreateMembershipOrder()
   const confirmPayment = useConfirmMembershipPayment()
   const syncPayment = useSyncMembershipPayment()
@@ -311,7 +316,6 @@ export function MembershipPage() {
 
   const coupons = couponsQ.data ?? []
   const availableCoupons = coupons.filter((item) => item.status === "available")
-  const pendingOrder = (ordersQ.data ?? []).find((item) => item.status === "pending")
   const supportedProviders = summaryQ.data?.supportedPaymentProviders ?? []
   const effectiveSelectedProvider = supportedProviders.includes(selectedProvider)
     ? selectedProvider
@@ -431,6 +435,7 @@ export function MembershipPage() {
     try {
       const result = await createOrder.mutateAsync({
         provider: effectiveSelectedProvider,
+        planId: effectiveSelectedPlanId,
         couponId: selectedCouponId || undefined,
       })
       setLatestCheckout(result)
@@ -671,6 +676,7 @@ export function MembershipPage() {
         previewError={previewQ.error}
         previewLoading={previewQ.isLoading}
         selectedCouponId={selectedCouponId}
+        selectedPlanId={effectiveSelectedPlanId}
         selectedProvider={effectiveSelectedProvider}
         supportedProviders={supportedProviders}
         availableCoupons={availableCoupons}
@@ -681,6 +687,7 @@ export function MembershipPage() {
         syncPending={syncPayment.isPending}
         closePending={closeOrder.isPending}
         onSelectCoupon={setSelectedCouponId}
+        onSelectPlan={setSelectedPlanId}
         onSelectProvider={setSelectedProvider}
         onConfirmPayment={(order) => void onConfirmPayment(order)}
         onSyncPayment={(order) => void onSyncPayment(order)}

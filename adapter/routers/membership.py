@@ -94,6 +94,8 @@ def _membership_summary_to_dto(item: MembershipSummary) -> dict[str, object]:
 def _membership_preview_to_dto(item: MembershipOrderPreview) -> dict[str, object]:
     return {
         "userId": item.user_id,
+        "planId": item.plan_id,
+        "planName": item.plan_name,
         "orderType": item.order_type,
         "periodDays": item.period_days,
         "listAmountCent": item.list_amount_cent,
@@ -108,6 +110,8 @@ def _membership_order_to_dto(item: MembershipOrder) -> dict[str, object]:
     return {
         "orderId": item.order_id,
         "userId": item.user_id,
+        "planId": item.plan_id,
+        "planName": item.plan_name,
         "orderType": item.order_type,
         "pricingVersion": item.pricing_version,
         "periodDays": item.period_days,
@@ -573,11 +577,12 @@ def _mobile_binding_confirmation_url(return_url: str, *, binding_attempt_id: str
 def _resolve_coupon_aware_preview(
     *,
     user_id: str,
+    plan_id: str | None,
     coupon_id: str | None,
     membership_store: MembershipStore,
     membership_marketing_store: MembershipMarketingStore,
 ) -> MembershipOrderPreview:
-    base_preview = membership_store.preview_order(user_id)
+    base_preview = membership_store.preview_order(user_id, plan_id=plan_id)
     resolved_coupon_id, coupon_discount_cent = membership_marketing_store.resolve_coupon_discount(
         user_id,
         coupon_id=coupon_id,
@@ -585,6 +590,7 @@ def _resolve_coupon_aware_preview(
     )
     return membership_store.preview_order(
         user_id,
+        plan_id=plan_id,
         coupon_discount_cent=coupon_discount_cent,
         coupon_id=resolved_coupon_id,
     )
@@ -617,6 +623,7 @@ def preview_membership_order(
     user = require_request_auth_user(request)
     preview = _resolve_coupon_aware_preview(
         user_id=user.user_id,
+        plan_id=None if req is None else req.planId,
         coupon_id=None if req is None else req.couponId,
         membership_store=membership_store,
         membership_marketing_store=membership_marketing_store,
@@ -637,6 +644,7 @@ def create_membership_order(
     client_version = str(request.headers.get("User-Agent", "")).strip()
     preview = _resolve_coupon_aware_preview(
         user_id=user.user_id,
+        plan_id=req.planId,
         coupon_id=req.couponId,
         membership_store=membership_store,
         membership_marketing_store=membership_marketing_store,
@@ -646,6 +654,7 @@ def create_membership_order(
         provider=req.provider,
         client_ip=client_ip,
         client_version=client_version,
+        plan_id=preview.plan_id,
         coupon_id=preview.coupon_id,
         coupon_discount_cent=preview.coupon_discount_cent,
     )

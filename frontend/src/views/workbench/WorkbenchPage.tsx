@@ -156,8 +156,8 @@ function StatusMetricRow(props: { label: string; value: string; emphasize?: bool
   const { label, value } = props
   return (
     <div className="flex items-center justify-between gap-4 py-2.5">
-      <div className="text-[13px] font-medium text-muted-foreground">{label}</div>
-      <div className={cn("text-[15px] font-semibold tracking-[-0.02em]", props.emphasize ? "text-foreground" : "text-[color:var(--theme-soft-text-strong)]")}>
+      <div className={cn("text-[13px] text-muted-foreground", props.emphasize ? "font-semibold" : "font-medium")}>{label}</div>
+      <div className={cn("text-[13px]", props.emphasize ? "font-semibold text-foreground" : "font-medium text-[color:var(--theme-soft-text-strong)]")}>
         {value}
       </div>
     </div>
@@ -1008,9 +1008,6 @@ export function WorkbenchPage() {
                 >
                   <div>
                     <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">今日回看</div>
-                    <div className="mt-1 text-[15px] font-semibold text-[color:var(--theme-soft-text-strong)]">
-                      网页驻留 {formatDurationCompact(todayStats.webPresenceMs)}
-                    </div>
                   </div>
                   <span className="text-xs font-medium text-primary">{sidebarStatsExpanded ? "收起" : "展开"}</span>
                 </button>

@@ -1213,6 +1213,7 @@ export function AdminMembershipPage() {
                         <div className="flex flex-wrap items-center gap-2">
                           <div className="text-sm font-semibold text-foreground">{owner.title}</div>
                           <StatusPill tone={orderStatusTone(order.status)}>{describeMembershipOrderStatus(order.status)}</StatusPill>
+                          <StatusPill>{order.planName}</StatusPill>
                           <StatusPill>{describeMembershipOrderType(order.orderType)}</StatusPill>
                           <StatusPill>{describeMembershipPaymentProvider(order.provider)}</StatusPill>
                           {isSelected ? <StatusPill tone="accent">当前查看中</StatusPill> : null}
@@ -1308,6 +1309,7 @@ export function AdminMembershipPage() {
                         <StatusPill tone={orderStatusTone(selectedOrderDetail.order.status)}>
                           {describeMembershipOrderStatus(selectedOrderDetail.order.status)}
                         </StatusPill>
+                        <StatusPill>{selectedOrderDetail.order.planName}</StatusPill>
                         <StatusPill>{describeMembershipOrderType(selectedOrderDetail.order.orderType)}</StatusPill>
                         <StatusPill>{describeMembershipPaymentProvider(selectedOrderDetail.order.provider)}</StatusPill>
                       </div>
@@ -1376,6 +1378,8 @@ export function AdminMembershipPage() {
                       <DetailMetric label="订单号" value={selectedOrderDetail.order.orderId} />
                       <DetailMetric label="当前会员状态" value={describeMembershipAccountStatus(selectedOrderDetail.membership.currentStatus)} />
                       <DetailMetric label="订单实付" value={formatMembershipPrice(selectedOrderDetail.order.payableAmountCent)} tone="accent" />
+                      <DetailMetric label="套餐类型" value={selectedOrderDetail.order.planName} />
+                      <DetailMetric label="套餐天数" value={`${selectedOrderDetail.order.periodDays} 天`} />
                       <DetailMetric label="会员当前价" value={formatMembershipPrice(selectedOrderDetail.membership.currentPriceCent)} />
                       <DetailMetric label="创建时间" value={formatMembershipDateTime(selectedOrderDetail.order.createdAt)} />
                       <DetailMetric label="支付时间" value={formatMembershipDateTime(selectedOrderDetail.order.paidAt)} />

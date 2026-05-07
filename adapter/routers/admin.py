@@ -129,6 +129,8 @@ def _admin_membership_order_to_dto(order: MembershipOrder, auth_store: AuthStore
     return {
         "orderId": order.order_id,
         "user": _admin_user_ref_to_dto(order.user_id, auth_store),
+        "planId": order.plan_id,
+        "planName": order.plan_name,
         "orderType": order.order_type,
         "pricingVersion": order.pricing_version,
         "periodDays": order.period_days,

@@ -443,21 +443,11 @@ function formatDateKey(ms = Date.now()) {
   return `${year}-${month}-${day}`
 }
 
-function formatShortDateKey(dateKey: string) {
-  const [, month = "", day = ""] = dateKey.split("-")
-  return month && day ? `${Number(month)}/${Number(day)}` : dateKey
-}
-
 function formatPomodoroActivityTime(ms: number) {
   return new Intl.DateTimeFormat("zh-CN", {
     hour: "2-digit",
     minute: "2-digit",
   }).format(ms)
-}
-
-function formatPomodoroActivityDuration(durationMs: number) {
-  const totalMinutes = Math.max(1, Math.round(durationMs / 60_000))
-  return `${totalMinutes} 分钟`
 }
 
 function formatDurationCompact(ms: number) {
@@ -949,11 +939,6 @@ export function PomodoroPage() {
     () => getTodayPomodoroStats(todayPomodoroRecords, todayScheduledPomodoroCount),
     [todayPomodoroRecords, todayScheduledPomodoroCount],
   )
-  const todayPomodoroDurationMs = useMemo(
-    () => todayPomodoroRecords.reduce((sum, record) => sum + record.durationMs, 0),
-    [todayPomodoroRecords],
-  )
-  const recentPomodoroRecords = useMemo(() => pomodoroActivityRecords.slice(0, 7), [pomodoroActivityRecords])
   const pomodoroPlanMetricSummaries = useMemo(
     () => buildPomodoroPlanMetricSummaries(draftSchedule, now),
     [draftSchedule, now],
@@ -1608,39 +1593,16 @@ export function PomodoroPage() {
               </div>
 
               <div className="rounded-[1.1rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] px-4 py-4 shadow-[var(--theme-soft-shadow)]">
-                <div className="text-sm font-medium text-muted-foreground">番茄记录</div>
+                <div className="text-sm font-medium text-muted-foreground">今日完成</div>
                 <div className="mt-2 text-3xl font-semibold tracking-[-0.04em] text-foreground">
-                  {todayPomodoroRecords.length > 0 ? formatPomodoroActivityDuration(todayPomodoroDurationMs) : "暂无"}
+                  {todayPomodoroRecords.length > 0 ? `${todayPomodoroRecords.length} 个` : "暂无"}
                 </div>
                 <div className="mt-3 text-sm text-muted-foreground">
                   {todayPomodoroRecords.length > 0
-                    ? `今天已完成 ${todayPomodoroRecords.length} 个番茄学习记录。`
-                    : "完成番茄后，这里会展示今天的番茄学习时长。"}
+                    ? "下面会按计划和番茄段展示具体统计。"
+                    : "完成番茄后，下面会展示具体统计。"}
                 </div>
               </div>
-            </div>
-
-            <div className="space-y-2">
-              {recentPomodoroRecords.length === 0 ? (
-                <div className="rounded-[1.1rem] border border-dashed border-[color:var(--theme-soft-border)] px-4 py-8 text-sm text-muted-foreground">
-                  还没有番茄记录。开启番茄钟并完成一个学习段后，这里会按“番茄 1、番茄 2...”记录学习情况。
-                </div>
-              ) : (
-                recentPomodoroRecords.map((record) => (
-                  <div
-                    key={record.recordId}
-                    className="grid gap-3 rounded-[1.1rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] px-4 py-3 text-sm shadow-[var(--theme-soft-shadow)] md:grid-cols-[7rem_7rem_minmax(0,1fr)]"
-                  >
-                    <div className="font-medium text-foreground">{formatShortDateKey(record.dateKey)}</div>
-                    <div className="text-muted-foreground">
-                      {record.pomodoroLabel} · {formatPomodoroActivityDuration(record.durationMs)}
-                    </div>
-                    <div className="min-w-0 truncate text-muted-foreground">
-                      {record.projectId ? projectTitleMap.get(record.projectId) ?? "已绑定项目" : "未绑定项目"} · {formatPomodoroActivityTime(record.startAtMs)}-{formatPomodoroActivityTime(record.endAtMs)}
-                    </div>
-                  </div>
-                ))
-              )}
             </div>
 
             <div className="space-y-3">
@@ -1671,11 +1633,11 @@ export function PomodoroPage() {
 
                     <MetricDonut summary={planSummary} />
 
-                    <div className="grid gap-2 md:grid-cols-2">
+                    <div className="pomodoro-project-prompt-scroll flex flex-nowrap gap-3 overflow-x-auto pb-2">
                       {planSummary.segments.map((segment) => (
                         <div
                           key={`${segment.planId}:${segment.pomodoroIndex}:${segment.scheduledStartAtMs}`}
-                          className="space-y-3 border-t border-border/60 pt-3 text-sm"
+                          className="min-w-[20rem] flex-1 basis-[20rem] shrink-0 space-y-3 border-t border-border/60 pt-3 text-sm sm:min-w-[22rem] sm:basis-[22rem] lg:min-w-[24rem] lg:basis-[24rem]"
                         >
                           <div className="flex items-start justify-between gap-3">
                             <div className="font-medium text-foreground">
@@ -1708,9 +1670,8 @@ export function PomodoroPage() {
         <div data-pomodoro-plan-overview className="space-y-5">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <div className="text-sm font-medium text-muted-foreground">番茄计划</div>
-              <div className="mt-2 text-3xl font-semibold tracking-[-0.04em] text-foreground">
-                {enabledDraftCount > 0 ? `${enabledDraftCount} 组` : "未启用"}
+              <div className="text-lg font-semibold text-foreground">
+                番茄计划：{enabledDraftCount > 0 ? `${enabledDraftCount}组` : "未启用"}
               </div>
             </div>
             <Button type="button" variant="outline" onClick={addPomodoroDraftPlan}>

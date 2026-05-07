@@ -51,6 +51,8 @@ def test_workbench_status_card_uses_objective_metric_rows_only() -> None:
     source = WORKBENCH_PAGE.read_text(encoding="utf-8")
 
     assert "网页驻留" in source
+    assert "网页驻留 {formatDurationCompact(todayStats.webPresenceMs)}" not in source
+    assert '<StatusMetricRow label="网页驻留" value={formatDurationCompact(todayStats.webPresenceMs)} emphasize />' in source
     assert "视频观看" in source
     assert "复述点录入" in source
     assert "复习用时" in source

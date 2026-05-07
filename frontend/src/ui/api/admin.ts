@@ -85,6 +85,8 @@ export type AdminMembershipUserRef = z.infer<typeof AdminMembershipUserRefSchema
 export const AdminMembershipOrderSchema = z.object({
   orderId: z.string(),
   user: AdminMembershipUserRefSchema,
+  planId: z.string(),
+  planName: z.string(),
   orderType: z.string(),
   pricingVersion: z.string(),
   periodDays: z.number(),

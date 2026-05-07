@@ -69,11 +69,13 @@ class EmailVerificationConfirmRequest(BaseModel):
 
 class PreviewMembershipOrderRequest(BaseModel):
     couponId: Optional[str] = Field(default=None, min_length=1)
+    planId: Optional[str] = Field(default=None, min_length=1, max_length=64)
 
 
 class CreateMembershipOrderRequest(BaseModel):
     provider: str = Field(min_length=1)
     couponId: Optional[str] = Field(default=None, min_length=1)
+    planId: Optional[str] = Field(default=None, min_length=1, max_length=64)
 
 
 class ConfirmMembershipPaymentRequest(BaseModel):

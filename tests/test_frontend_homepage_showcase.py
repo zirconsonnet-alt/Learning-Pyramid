@@ -134,10 +134,10 @@ def test_homepage_onboarding_path_links_to_four_guide_documents() -> None:
     render_section = source[render_start:render_end]
 
     expected_guides = [
-        ('title: "创建学科项目"', 'to: "/guide"', 'label: "创建学科、绑定目录并同步内容"'),
-        ('title: "学习复习"', 'to: "/guide?doc=study-review"', 'label: "进入工作台录入复述点并完成复习"'),
-        ('title: "使用 AI 问答"', 'to: "/guide?doc=use-ai-chat"', 'label: "配置 LLM 后围绕学习对象对话"'),
-        ('title: "使用番茄钟"', 'to: "/guide?doc=use-pomodoro"', 'label: "设定计划并在学习时间进入网页"'),
+        ('title: "创建学科项目"', 'to: "/guide"', 'label: "去管理专业课的学习"'),
+        ('title: "学习复习"', 'to: "/guide?doc=study-review"', 'label: "去体验自动复习推送"'),
+        ('title: "使用 AI 问答"', 'to: "/guide?doc=use-ai-chat"', 'label: "去感受AI学习赋能"'),
+        ('title: "使用番茄钟"', 'to: "/guide?doc=use-pomodoro"', 'label: "去定明早9点的番茄钟"'),
     ]
 
     last_position = -1
@@ -155,7 +155,8 @@ def test_homepage_onboarding_path_links_to_four_guide_documents() -> None:
     assert 'title: "导入内容目录"' not in data_section
     assert 'title: "回工作台选内容开始学习"' not in data_section
 
-    assert "<h2>快速上手</h2>" in render_section
+    assert "<h2>改变，从现在开始</h2>" in render_section
+    assert "<h2>快速上手</h2>" not in render_section
     assert "<h2>上手路径</h2>" not in render_section
     assert 'buildHomeSectionHref("onboarding", homeSectionPrefix), label: "快速上手"' in chrome_source
     assert 'label: "上手路径"' not in chrome_source

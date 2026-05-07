@@ -50,28 +50,28 @@ const onboardingSteps = [
     index: "1",
     title: "创建学科项目",
     body: "从新建学科、进入项目，到绑定并导入本地学习材料。",
-    label: "创建学科、绑定目录并同步内容",
+    label: "去管理专业课的学习",
     to: "/guide",
   },
   {
     index: "2",
     title: "学习复习",
     body: "进入工作台后，录入复述点、提交学习并完成复习闭环。",
-    label: "进入工作台录入复述点并完成复习",
+    label: "去体验自动复习推送",
     to: "/guide?doc=study-review",
   },
   {
     index: "3",
     title: "使用 AI 问答",
     body: "确认目录、学习对象树和第三方 LLM API 后，进入项目 AI 问答开始对话。",
-    label: "配置 LLM 后围绕学习对象对话",
+    label: "去感受AI学习赋能",
     to: "/guide?doc=use-ai-chat",
   },
   {
     index: "4",
     title: "使用番茄钟",
     body: "开启番茄钟、设定番茄计划，并在番茄开始后登录网页进入工作台。",
-    label: "设定计划并在学习时间进入网页",
+    label: "去定明早9点的番茄钟",
     to: "/guide?doc=use-pomodoro",
   },
 ] as const
@@ -400,7 +400,7 @@ export function HomePage() {
         <section id="onboarding" className="lp-showcase-section">
           <div className="lp-showcase-container">
             <div className="lp-showcase-section-head">
-              <h2>快速上手</h2>
+              <h2>改变，从现在开始</h2>
             </div>
             <div className="lp-showcase-steps-grid">
               {onboardingSteps.map((item) => (

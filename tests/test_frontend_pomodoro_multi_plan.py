@@ -297,6 +297,8 @@ def test_pomodoro_plan_overview_hides_secondary_summary_lines() -> None:
     plan_overview_conflict_start = page_source.index("planConflictMessages.length > 0", plan_overview_start)
     plan_overview = page_source[plan_overview_start:plan_overview_conflict_start]
 
+    assert "番茄计划：{enabledDraftCount > 0 ? `${enabledDraftCount}组` : \"未启用\"}" in plan_overview
+    assert "mt-2 text-3xl" not in plan_overview
     assert "draftStartTimes" not in plan_overview
     assert "还没有开始时间" not in plan_overview
     assert "enabledUnassignedPomodoros" not in plan_overview
@@ -320,9 +322,10 @@ def test_pomodoro_overview_can_switch_to_statistics_panel() -> None:
     assert "统计" in session_controls
     assert "data-pomodoro-statistics" in page_source
     assert "当日番茄完成度" in statistics_panel
-    assert "番茄记录" in statistics_panel
     assert "todayPomodoroStats" in statistics_panel
-    assert "recentPomodoroRecords" in statistics_panel
+    assert "recentPomodoroRecords.map" not in statistics_panel
+    assert "还没有番茄记录" not in statistics_panel
+    assert "这里会按“番茄 1、番茄 2...”记录学习情况" not in statistics_panel
 
 
 def test_pomodoro_focus_completion_records_schedule_marker_only() -> None:
@@ -344,12 +347,14 @@ def test_pomodoro_focus_completion_records_schedule_marker_only() -> None:
     assert "pomodoroSnapshot.segment" in app_shell_source
 
     assert "listPomodoroActivityRecords()" in page_source
-    assert "番茄记录" in page_source
 
 
 def test_pomodoro_statistics_slice_workbench_metrics_by_plan_and_pomodoro() -> None:
     workbench_stats_source = WORKBENCH_DAILY_STATS.read_text(encoding="utf-8")
     page_source = POMODORO_PAGE.read_text(encoding="utf-8")
+    statistics_panel = page_source[
+        page_source.index("data-pomodoro-statistics"):page_source.index("</section>", page_source.index("data-pomodoro-statistics"))
+    ]
 
     assert "sliceDailyWebPresenceMetrics" in workbench_stats_source
     assert "loadPomodoroSegmentMetricSummary" in workbench_stats_source
@@ -358,6 +363,9 @@ def test_pomodoro_statistics_slice_workbench_metrics_by_plan_and_pomodoro() -> N
     assert "segments: PomodoroSegmentMetricSummary[]" in page_source
     assert "segment.pomodoroIndex" in page_source
     assert "planId: plan.id" in page_source
+    assert "pomodoro-project-prompt-scroll flex flex-nowrap gap-3 overflow-x-auto pb-2" in statistics_panel
+    assert "min-w-[20rem] flex-1 basis-[20rem] shrink-0" in statistics_panel
+    assert "grid gap-2 md:grid-cols-2" not in statistics_panel
 
 
 def test_pomodoro_statistics_show_absence_rates_and_visual_breakdown() -> None:

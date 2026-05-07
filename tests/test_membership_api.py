@@ -487,6 +487,8 @@ def test_membership_round_one_flow(auth_env: None) -> None:
     assert preview.status_code == 200
     assert preview.json()["data"] == {
         "userId": user_id,
+        "planId": "monthly",
+        "planName": "月会员",
         "orderType": "first_purchase",
         "periodDays": 30,
         "listAmountCent": 2000,
@@ -501,6 +503,8 @@ def test_membership_round_one_flow(auth_env: None) -> None:
     created_data = created.json()["data"]
     order_id = created_data["order"]["orderId"]
     assert created_data["order"]["status"] == "pending"
+    assert created_data["order"]["planId"] == "monthly"
+    assert created_data["order"]["planName"] == "月会员"
     assert created_data["order"]["orderType"] == "first_purchase"
     assert created_data["order"]["payableAmountCent"] == 2000
     assert created_data["paymentPayload"]["mode"] == "manual_test"
@@ -542,9 +546,49 @@ def test_membership_round_one_flow(auth_env: None) -> None:
     renewal_preview = client.post("/api/membership/orders/preview")
     assert renewal_preview.status_code == 200
     assert renewal_preview.json()["data"]["orderType"] == "renewal"
+    assert renewal_preview.json()["data"]["planId"] == "monthly"
+    assert renewal_preview.json()["data"]["planName"] == "月会员"
     assert renewal_preview.json()["data"]["firstOrderDiscountCent"] == 0
     assert renewal_preview.json()["data"]["couponDiscountCent"] == 0
     assert renewal_preview.json()["data"]["payableAmountCent"] == 2000
+
+
+def test_graduate_exam_membership_plan_prices_by_purchase_day_before_nov_21(auth_env: None) -> None:
+    client = TestClient(create_app())
+    register = client.post("/api/auth/register", json={"email": "member@example.com", "password": "password123"})
+    assert register.status_code == 200
+
+    with patch("backend.system.membership_store._utc_now", return_value=datetime.fromisoformat("2026-11-01T00:00:00+08:00")):
+        november_first_preview = client.post("/api/membership/orders/preview", json={"planId": "graduate_exam"})
+
+    assert november_first_preview.status_code == 200
+    november_first_data = november_first_preview.json()["data"]
+    assert november_first_data["planId"] == "graduate_exam"
+    assert november_first_data["planName"] == "考研套餐"
+    assert november_first_data["periodDays"] == 51
+    assert november_first_data["listAmountCent"] == 2550
+    assert november_first_data["payableAmountCent"] == 2550
+
+    with patch("backend.system.membership_store._utc_now", return_value=datetime.fromisoformat("2026-11-20T09:00:00+08:00")):
+        last_day_preview = client.post("/api/membership/orders/preview", json={"planId": "graduate_exam"})
+        created = client.post("/api/membership/orders", json={"provider": "manual_test", "planId": "graduate_exam"})
+
+    assert last_day_preview.status_code == 200
+    assert last_day_preview.json()["data"]["periodDays"] == 32
+    assert last_day_preview.json()["data"]["payableAmountCent"] == 1600
+    assert created.status_code == 200
+    order = created.json()["data"]["order"]
+    assert order["planId"] == "graduate_exam"
+    assert order["planName"] == "考研套餐"
+    assert order["periodDays"] == 32
+    assert order["payableAmountCent"] == 1600
+
+    with patch("backend.system.membership_store._utc_now", return_value=datetime.fromisoformat("2026-11-21T00:00:00+08:00")):
+        after_cutoff_preview = client.post("/api/membership/orders/preview", json={"planId": "graduate_exam"})
+
+    assert after_cutoff_preview.status_code == 400
+    assert after_cutoff_preview.json()["error"]["code"] == "PRECONDITION"
+    assert "11月21日前" in after_cutoff_preview.json()["error"]["message"]
 
 
 def test_hosted_mode_disables_manual_test_payment_by_default(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

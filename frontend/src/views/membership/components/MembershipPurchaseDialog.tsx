@@ -22,6 +22,21 @@ import {
 } from "@/views/membership/membershipUi"
 import { cn } from "@/ui/utils"
 
+const MEMBERSHIP_PLAN_OPTIONS = [
+  {
+    planId: "monthly",
+    title: "月会员",
+    subtitle: "30 天固定权益",
+    hint: "按 20 元月会员结算",
+  },
+  {
+    planId: "graduate_exam",
+    title: "考研套餐",
+    subtitle: "每天 0.5 元",
+    hint: "购买当天算到同年 12 月 21 日",
+  },
+] as const
+
 function CouponOptionCard(props: {
   coupon: CouponRecord
   selected: boolean
@@ -65,6 +80,7 @@ export function MembershipPurchaseDialog(props: {
   previewError: unknown
   previewLoading: boolean
   selectedCouponId: string
+  selectedPlanId: string
   selectedProvider: string
   supportedProviders: string[]
   availableCoupons: CouponRecord[]
@@ -75,6 +91,7 @@ export function MembershipPurchaseDialog(props: {
   syncPending: boolean
   closePending: boolean
   onSelectCoupon: (couponId: string) => void
+  onSelectPlan: (planId: string) => void
   onSelectProvider: (provider: string) => void
   onConfirmPayment: (order: MembershipOrder) => void
   onSyncPayment: (order: MembershipOrder) => void
@@ -90,6 +107,7 @@ export function MembershipPurchaseDialog(props: {
     previewError,
     previewLoading,
     selectedCouponId,
+    selectedPlanId,
     selectedProvider,
     supportedProviders,
     availableCoupons,
@@ -100,6 +118,7 @@ export function MembershipPurchaseDialog(props: {
     syncPending,
     closePending,
     onSelectCoupon,
+    onSelectPlan,
     onSelectProvider,
     onConfirmPayment,
     onSyncPayment,
@@ -118,16 +137,43 @@ export function MembershipPurchaseDialog(props: {
                 <StatusPill tone="accent">{summary?.isActive ? "立即续费" : "立即开通"}</StatusPill>
                 <StatusPill tone="warm">确认购买</StatusPill>
               </div>
-              <DialogTitle className="text-2xl tracking-tight text-foreground">开通月会员</DialogTitle>
+              <DialogTitle className="text-2xl tracking-tight text-foreground">开通会员套餐</DialogTitle>
               <DialogDescription className="max-w-xl leading-7 text-muted-foreground">
                 确认当前价格、支付方式和优惠券后，再继续支付。
               </DialogDescription>
             </DialogHeader>
 
+            <div className="mt-6 grid gap-3 sm:grid-cols-2">
+              {MEMBERSHIP_PLAN_OPTIONS.map((plan) => (
+                <button
+                  key={plan.planId}
+                  type="button"
+                  onClick={() => onSelectPlan(plan.planId)}
+                  disabled={Boolean(pendingOrder)}
+                  className={cn(
+                    "w-full rounded-[1.25rem] border p-4 text-left transition disabled:cursor-not-allowed disabled:opacity-70",
+                    selectedPlanId === plan.planId
+                      ? "border-primary/20 bg-[hsl(var(--primary)/0.08)] shadow-[0_18px_36px_-30px_hsl(var(--primary)/0.35)]"
+                      : "theme-soft-surface hover:border-primary/20",
+                  )}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-foreground">{plan.title}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">{plan.subtitle}</div>
+                    </div>
+                    {selectedPlanId === plan.planId ? <StatusPill tone="accent">当前套餐</StatusPill> : null}
+                  </div>
+                  <div className="mt-3 text-xs leading-5 text-muted-foreground">{plan.hint}</div>
+                </button>
+              ))}
+            </div>
+
             {pendingOrder ? (
               <div className="theme-soft-surface mt-6 p-4">
                 <div className="flex flex-wrap items-center gap-2">
                   <StatusPill tone="warm">待支付订单</StatusPill>
+                  <StatusPill>{pendingOrder.planName}</StatusPill>
                   <StatusPill>{describeMembershipPaymentProvider(pendingOrder.provider)}</StatusPill>
                 </div>
                 <div className="mt-3 space-y-1 text-sm leading-6 text-muted-foreground">
@@ -200,7 +246,7 @@ export function MembershipPurchaseDialog(props: {
                 {preview ? (
                   <div className="mt-3 space-y-2 text-sm leading-6 text-muted-foreground">
                     <div className="flex items-center justify-between gap-4">
-                      <span>月会员原价</span>
+                      <span>{preview.planName}原价</span>
                       <span>{formatMembershipPrice(preview.listAmountCent)}</span>
                     </div>
                     <div className="flex items-center justify-between gap-4">
@@ -222,9 +268,10 @@ export function MembershipPurchaseDialog(props: {
               <div className="theme-subtle-surface p-4">
                 <div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">订单说明</div>
                 <div className="mt-3 space-y-2 text-sm leading-6">
-                  <div>会员时长：30 天</div>
+                  <div>会员时长：{preview?.periodDays ?? pendingOrder?.periodDays ?? 30} 天</div>
+                  <div>套餐类型：{preview?.planName ?? pendingOrder?.planName ?? "月会员"}</div>
                   <div>支付方式：{selectedProvider ? describeMembershipPaymentProvider(selectedProvider) : "暂未开放"}</div>
-                  <div>当前价格：{formatMembershipPrice(summary?.currentPriceCent ?? 0)}</div>
+                  <div>当前价格：{formatMembershipPrice(preview?.payableAmountCent ?? summary?.currentPriceCent ?? 0)}</div>
                   {pendingOrder ? <div>当前已有一笔待支付订单，确认后可继续支付。</div> : <div>确认后会创建一笔新的待支付订单。</div>}
                 </div>
                 {pendingOrder ? (

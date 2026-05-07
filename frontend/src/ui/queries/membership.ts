@@ -42,10 +42,10 @@ export function useMembershipOrders(limit = 20, enabled = true, refetchInterval:
   })
 }
 
-export function useMembershipOrderPreview(couponId?: string | null, enabled = true) {
+export function useMembershipOrderPreview(couponId?: string | null, planId?: string | null, enabled = true) {
   return useQuery({
-    queryKey: ["membership", "preview", couponId ?? null],
-    queryFn: () => previewMembershipOrder({ couponId }),
+    queryKey: ["membership", "preview", couponId ?? null, planId ?? null],
+    queryFn: () => previewMembershipOrder({ couponId, planId }),
     enabled,
     staleTime: 10_000,
   })

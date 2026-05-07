@@ -48,3 +48,20 @@ def test_membership_api_exposes_one_scan_withdrawal_attempt_payload() -> None:
     assert "amountCent: z.number().default(0)" in source
     assert "withdrawal: CommissionWithdrawalSchema.optional()" in source
     assert "PayoutIdentityDetailSchema" in source
+
+
+def test_membership_purchase_dialog_supports_graduate_exam_plan() -> None:
+    dialog = REPO_ROOT / "frontend" / "src" / "views" / "membership" / "components" / "MembershipPurchaseDialog.tsx"
+    dialog_source = dialog.read_text(encoding="utf-8")
+    page_source = MEMBERSHIP_PAGE.read_text(encoding="utf-8")
+    api_source = MEMBERSHIP_API.read_text(encoding="utf-8")
+
+    assert 'planId: "graduate_exam"' in dialog_source
+    assert 'title: "考研套餐"' in dialog_source
+    assert "购买当天算到同年 12 月 21 日" in dialog_source
+    assert "会员时长：{preview?.periodDays ?? pendingOrder?.periodDays ?? 30} 天" in dialog_source
+    assert "套餐类型：{preview?.planName ?? pendingOrder?.planName ?? \"月会员\"}" in dialog_source
+    assert "const [selectedPlanId, setSelectedPlanId] = useState(DEFAULT_MEMBERSHIP_PLAN_ID)" in page_source
+    assert "const effectiveSelectedPlanId = pendingOrder?.planId || selectedPlanId" in page_source
+    assert "planId: effectiveSelectedPlanId" in page_source
+    assert "planId: z.string()" in api_source

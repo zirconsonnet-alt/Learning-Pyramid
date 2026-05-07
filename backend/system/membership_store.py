@@ -5,7 +5,7 @@ import sqlite3
 import threading
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from backend.models.errors import NotFound, PreconditionFailure
@@ -37,8 +37,20 @@ BASE_MONTHLY_PRICE_CENT = 2000
 FIRST_ORDER_DISCOUNT_CENT = 0
 FIRST_ORDER_PRICE_CENT = BASE_MONTHLY_PRICE_CENT - FIRST_ORDER_DISCOUNT_CENT
 RENEWAL_PRICE_CENT = BASE_MONTHLY_PRICE_CENT
-MEMBERSHIP_PRICING_VERSION = "invite_commission_v1"
+MEMBERSHIP_PRICING_VERSION = "membership_plans_v2"
 MEMBERSHIP_PERIOD_DAYS = 30
+MEMBERSHIP_PLAN_MONTHLY = "monthly"
+MEMBERSHIP_PLAN_GRADUATE_EXAM = "graduate_exam"
+MEMBERSHIP_PLAN_NAMES = {
+    MEMBERSHIP_PLAN_MONTHLY: "月会员",
+    MEMBERSHIP_PLAN_GRADUATE_EXAM: "考研套餐",
+}
+GRADUATE_EXAM_DAILY_PRICE_CENT = 50
+GRADUATE_EXAM_CUTOFF_MONTH = 11
+GRADUATE_EXAM_CUTOFF_DAY = 21
+GRADUATE_EXAM_END_MONTH = 12
+GRADUATE_EXAM_END_DAY = 21
+CHINA_TIMEZONE = timezone(timedelta(hours=8), "Asia/Shanghai")
 ORDER_TTL_MINUTES = 30
 REFUND_WINDOW_HOURS = 24
 REFUND_WINDOW_EXPIRED_MESSAGE = "Membership refund period has expired."
@@ -74,6 +86,33 @@ def _parse_dt(value: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
+def _normalize_membership_plan_id(plan_id: str | None) -> str:
+    value = str(plan_id or "").strip().lower()
+    if not value:
+        return MEMBERSHIP_PLAN_MONTHLY
+    if value not in MEMBERSHIP_PLAN_NAMES:
+        supported_text = ", ".join(MEMBERSHIP_PLAN_NAMES)
+        raise PreconditionFailure(f"membership planId must be one of: {supported_text}")
+    return value
+
+
+def _membership_plan_name(plan_id: str | None) -> str:
+    normalized_plan_id = _normalize_membership_plan_id(plan_id)
+    return MEMBERSHIP_PLAN_NAMES[normalized_plan_id]
+
+
+def _graduate_exam_plan_days_and_amount(now: datetime) -> tuple[int, int]:
+    purchase_date = now.astimezone(CHINA_TIMEZONE).date()
+    cutoff_date = date(purchase_date.year, GRADUATE_EXAM_CUTOFF_MONTH, GRADUATE_EXAM_CUTOFF_DAY)
+    if purchase_date >= cutoff_date:
+        raise PreconditionFailure("考研套餐仅支持在11月21日前购买")
+    end_date = date(purchase_date.year, GRADUATE_EXAM_END_MONTH, GRADUATE_EXAM_END_DAY)
+    period_days = (end_date - purchase_date).days + 1
+    if period_days <= 0:
+        raise PreconditionFailure("考研套餐当前不可购买")
+    return period_days, period_days * GRADUATE_EXAM_DAILY_PRICE_CENT
+
+
 @dataclass(frozen=True, slots=True)
 class MembershipSummary:
     user_id: str
@@ -92,6 +131,8 @@ class MembershipSummary:
 @dataclass(frozen=True, slots=True)
 class MembershipOrderPreview:
     user_id: str
+    plan_id: str
+    plan_name: str
     order_type: str
     period_days: int
     list_amount_cent: int
@@ -105,6 +146,8 @@ class MembershipOrderPreview:
 class MembershipOrder:
     order_id: str
     user_id: str
+    plan_id: str
+    plan_name: str
     order_type: str
     pricing_version: str
     period_days: int
@@ -304,6 +347,7 @@ class MembershipStore:
                     CREATE TABLE IF NOT EXISTS membership_orders (
                         order_id TEXT PRIMARY KEY,
                         user_id TEXT NOT NULL,
+                        plan_id TEXT NOT NULL DEFAULT 'monthly',
                         order_type TEXT NOT NULL,
                         pricing_version TEXT NOT NULL,
                         period_days INTEGER NOT NULL,
@@ -394,6 +438,12 @@ class MembershipStore:
                     CREATE INDEX IF NOT EXISTS idx_membership_entitlements_user_end
                     ON membership_entitlements (user_id, end_at DESC);
                     """
+                )
+                self._ensure_column(
+                    conn,
+                    "membership_orders",
+                    "plan_id",
+                    "plan_id TEXT NOT NULL DEFAULT 'monthly'",
                 )
                 self._ensure_column(
                     conn,
@@ -594,18 +644,28 @@ class MembershipStore:
         conn: sqlite3.Connection,
         user_id: str,
         *,
+        plan_id: str | None = None,
         coupon_discount_cent: int = 0,
         coupon_id: str | None = None,
+        now: datetime | None = None,
     ) -> MembershipOrderPreview:
         is_first = self._is_first_order_eligible(conn, user_id)
+        normalized_plan_id = _normalize_membership_plan_id(plan_id)
+        if normalized_plan_id == MEMBERSHIP_PLAN_GRADUATE_EXAM:
+            period_days, list_amount_cent = _graduate_exam_plan_days_and_amount(now or _utc_now())
+        else:
+            period_days = MEMBERSHIP_PERIOD_DAYS
+            list_amount_cent = BASE_MONTHLY_PRICE_CENT
         first_order_discount_cent = 0
         normalized_coupon_discount_cent = max(0, int(coupon_discount_cent))
-        payable_amount_cent = max(0, BASE_MONTHLY_PRICE_CENT - first_order_discount_cent - normalized_coupon_discount_cent)
+        payable_amount_cent = max(0, list_amount_cent - first_order_discount_cent - normalized_coupon_discount_cent)
         return MembershipOrderPreview(
             user_id=str(user_id),
+            plan_id=normalized_plan_id,
+            plan_name=_membership_plan_name(normalized_plan_id),
             order_type="first_purchase" if is_first else "renewal",
-            period_days=MEMBERSHIP_PERIOD_DAYS,
-            list_amount_cent=BASE_MONTHLY_PRICE_CENT,
+            period_days=period_days,
+            list_amount_cent=list_amount_cent,
             first_order_discount_cent=first_order_discount_cent,
             coupon_discount_cent=normalized_coupon_discount_cent,
             payable_amount_cent=payable_amount_cent,
@@ -616,6 +676,8 @@ class MembershipStore:
         return MembershipOrder(
             order_id=str(row["order_id"]),
             user_id=str(row["user_id"]),
+            plan_id=_normalize_membership_plan_id(row["plan_id"] if "plan_id" in row.keys() else MEMBERSHIP_PLAN_MONTHLY),
+            plan_name=_membership_plan_name(row["plan_id"] if "plan_id" in row.keys() else MEMBERSHIP_PLAN_MONTHLY),
             order_type=str(row["order_type"]),
             pricing_version=str(row["pricing_version"]),
             period_days=int(row["period_days"]),
@@ -710,6 +772,7 @@ class MembershipStore:
         self,
         user_id: str,
         *,
+        plan_id: str | None = None,
         coupon_discount_cent: int = 0,
         coupon_id: str | None = None,
     ) -> MembershipOrderPreview:
@@ -719,6 +782,7 @@ class MembershipStore:
             return self._preview_for_user(
                 conn,
                 str(user_id),
+                plan_id=plan_id,
                 coupon_discount_cent=coupon_discount_cent,
                 coupon_id=coupon_id,
             )
@@ -1248,10 +1312,12 @@ class MembershipStore:
         provider: str,
         client_ip: str = "",
         client_version: str = "",
+        plan_id: str | None = None,
         coupon_id: str | None = None,
         coupon_discount_cent: int = 0,
     ) -> MembershipCreateOrderResult:
         normalized_provider = _normalize_provider(provider)
+        normalized_plan_id = _normalize_membership_plan_id(plan_id)
         normalized_coupon_discount_cent = max(0, int(coupon_discount_cent))
         normalized_coupon_id = str(coupon_id or "").strip() or None
         now = _utc_now()
@@ -1262,8 +1328,10 @@ class MembershipStore:
                 preview = self._preview_for_user(
                     conn,
                     str(user_id),
+                    plan_id=normalized_plan_id,
                     coupon_discount_cent=normalized_coupon_discount_cent,
                     coupon_id=normalized_coupon_id,
+                    now=now,
                 )
                 existing = conn.execute(
                     """
@@ -1282,7 +1350,8 @@ class MembershipStore:
                     conn.execute(
                         """
                         UPDATE membership_orders
-                        SET order_type = ?,
+                        SET plan_id = ?,
+                            order_type = ?,
                             pricing_version = ?,
                             period_days = ?,
                             list_amount_cent = ?,
@@ -1296,6 +1365,7 @@ class MembershipStore:
                         WHERE order_id = ?
                         """,
                         (
+                            preview.plan_id,
                             preview.order_type,
                             MEMBERSHIP_PRICING_VERSION,
                             preview.period_days,
@@ -1331,6 +1401,7 @@ class MembershipStore:
                     INSERT INTO membership_orders (
                         order_id,
                         user_id,
+                        plan_id,
                         order_type,
                         pricing_version,
                         period_days,
@@ -1346,11 +1417,12 @@ class MembershipStore:
                         created_at,
                         expired_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
                     """,
                     (
                         order_id,
                         str(user_id),
+                        preview.plan_id,
                         preview.order_type,
                         MEMBERSHIP_PRICING_VERSION,
                         preview.period_days,

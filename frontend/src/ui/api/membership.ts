@@ -20,6 +20,8 @@ export type MembershipSummary = z.infer<typeof MembershipSummarySchema>
 
 export const MembershipOrderPreviewSchema = z.object({
   userId: z.string(),
+  planId: z.string(),
+  planName: z.string(),
   orderType: z.enum(["first_purchase", "renewal"]),
   periodDays: z.number(),
   listAmountCent: z.number(),
@@ -34,6 +36,8 @@ export type MembershipOrderPreview = z.infer<typeof MembershipOrderPreviewSchema
 export const MembershipOrderSchema = z.object({
   orderId: z.string(),
   userId: z.string(),
+  planId: z.string(),
+  planName: z.string(),
   orderType: z.enum(["first_purchase", "renewal"]),
   pricingVersion: z.string(),
   periodDays: z.number(),
@@ -329,22 +333,26 @@ export function listMembershipOrders(limit = 20) {
   })
 }
 
-export function previewMembershipOrder(params?: { couponId?: string | null }) {
+export function previewMembershipOrder(params?: { couponId?: string | null; planId?: string | null }) {
   return apiRequest({
     path: "/membership/orders/preview",
     method: "POST",
-    body: params?.couponId ? { couponId: params.couponId } : {},
+    body: {
+      couponId: params?.couponId?.trim() ? params.couponId.trim() : undefined,
+      planId: params?.planId?.trim() ? params.planId.trim() : undefined,
+    },
     responseSchema: MembershipOrderPreviewSchema,
   })
 }
 
-export function createMembershipOrder(params: { provider: string; couponId?: string | null }) {
+export function createMembershipOrder(params: { provider: string; couponId?: string | null; planId?: string | null }) {
   return apiRequest({
     path: "/membership/orders",
     method: "POST",
     body: {
       provider: params.provider,
       couponId: params.couponId?.trim() ? params.couponId.trim() : undefined,
+      planId: params.planId?.trim() ? params.planId.trim() : undefined,
     },
     responseSchema: MembershipCreateOrderResultSchema,
   })
