@@ -150,21 +150,24 @@ def test_homepage_onboarding_path_links_to_four_guide_documents() -> None:
     render_section = source[render_start:render_end]
 
     expected_guides = [
-        ('title: "创建学科项目"', 'to: "/guide"', 'label: "去管理专业课的学习"'),
-        ('title: "学习复习"', 'to: "/guide?doc=study-review"', 'label: "去体验自动复习推送"'),
-        ('title: "使用 AI 问答"', 'to: "/guide?doc=use-ai-chat"', 'label: "去感受AI学习赋能"'),
-        ('title: "使用番茄钟"', 'to: "/guide?doc=use-pomodoro"', 'label: "去定明早9点的番茄钟"'),
+        ('title: "创建学科项目"', 'to: "/guide"', 'label: "去管理专业课的学习"', 'access: "free"'),
+        ('title: "学习复习"', 'to: "/guide?doc=study-review"', 'label: "去体验自动复习推送"', 'access: "free"'),
+        ('title: "使用 AI 问答"', 'to: "/guide?doc=use-ai-chat"', 'label: "去感受AI学习赋能"', 'access: "member"'),
+        ('title: "使用番茄钟"', 'to: "/guide?doc=use-pomodoro"', 'label: "去定明早9点的番茄钟"', 'access: "member"'),
     ]
 
     last_position = -1
-    for title, to, label in expected_guides:
+    for title, to, label, access in expected_guides:
         position = data_section.index(title)
         assert position > last_position
         last_position = position
         assert to in data_section
         assert label in data_section
+        assert access in data_section
 
     assert data_section.count("to: ") == 4
+    assert data_section.count('access: "free"') == 2
+    assert data_section.count('access: "member"') == 2
     assert 'title: "如何' not in data_section
     assert 'title: "创建学科"' not in data_section
     assert 'title: "绑定并授权目录"' not in data_section
@@ -179,7 +182,10 @@ def test_homepage_onboarding_path_links_to_four_guide_documents() -> None:
     assert "第一次使用先照着这 4 步走" not in render_section
     assert "<Link" in render_section
     assert "to={item.to}" in render_section
-    assert 'className="lp-showcase-step-action"' in render_section
+    assert 'data-access={item.access}' in render_section
+    assert 'className="lp-showcase-step-ribbon"' in render_section
+    assert 'item.access === "free" ? "免费功能" : "会员功能"' in render_section
+    assert 'className={`lp-showcase-step-action ${item.access === "free" ? "lp-showcase-step-action-free" : ""}`}' in render_section
     assert "查看指引" not in render_section
 
 
@@ -190,11 +196,17 @@ def test_homepage_onboarding_uses_pill_action_labels() -> None:
     render_end = source.index('id="membership"', render_start)
     render_section = source[render_start:render_end]
 
-    assert '<article key={item.index} className="lp-showcase-step">' in render_section
-    assert '<Link to={item.to} className="lp-showcase-step-action">' in render_section
+    assert '<article key={item.index} className="lp-showcase-step" data-access={item.access}>' in render_section
+    assert '<div className="lp-showcase-step-ribbon">' in render_section
+    assert '<Link to={item.to} className={`lp-showcase-step-action ${item.access === "free" ? "lp-showcase-step-action-free" : ""}`}>' in render_section
     assert "{item.label}" in render_section
     assert '<strong>查看指引</strong>' not in render_section
+    assert ".lp-showcase-step-ribbon" in css
+    assert 'transform: rotate(35deg);' in css
+    assert '.lp-showcase-step[data-access="member"] .lp-showcase-step-ribbon' in css
     assert ".lp-showcase-step-action" in css
+    assert ".lp-showcase-step-action-free" in css
+    assert "background: linear-gradient(135deg, #5aa9f2 0%, #2f7ed1 56%, #1f64b6 100%);" in css
     assert "border-radius: 999px;" in css
     step_action_start = css.index(".lp-showcase-step-action {")
     step_action_end = css.index("}", step_action_start)

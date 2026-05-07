@@ -52,6 +52,7 @@ const onboardingSteps = [
     body: "从新建学科、进入项目，到绑定并导入本地学习材料。",
     label: "去管理专业课的学习",
     to: "/guide",
+    access: "free",
   },
   {
     index: "2",
@@ -59,6 +60,7 @@ const onboardingSteps = [
     body: "进入工作台后，录入复述点、提交学习并完成复习闭环。",
     label: "去体验自动复习推送",
     to: "/guide?doc=study-review",
+    access: "free",
   },
   {
     index: "3",
@@ -66,6 +68,7 @@ const onboardingSteps = [
     body: "确认目录、学习对象树和第三方 LLM API 后，进入项目 AI 问答开始对话。",
     label: "去感受AI学习赋能",
     to: "/guide?doc=use-ai-chat",
+    access: "member",
   },
   {
     index: "4",
@@ -73,6 +76,7 @@ const onboardingSteps = [
     body: "开启番茄钟、设定番茄计划，并在番茄开始后登录网页进入工作台。",
     label: "去定明早9点的番茄钟",
     to: "/guide?doc=use-pomodoro",
+    access: "member",
   },
 ] as const
 
@@ -415,11 +419,12 @@ export function HomePage() {
             </div>
             <div className="lp-showcase-steps-grid">
               {onboardingSteps.map((item) => (
-                <article key={item.index} className="lp-showcase-step">
+                <article key={item.index} className="lp-showcase-step" data-access={item.access}>
+                  <div className="lp-showcase-step-ribbon">{item.access === "free" ? "免费功能" : "会员功能"}</div>
                   <div className="lp-showcase-step-no">{item.index}</div>
                   <h3>{item.title}</h3>
                   <p>{item.body}</p>
-                  <Link to={item.to} className="lp-showcase-step-action">
+                  <Link to={item.to} className={`lp-showcase-step-action ${item.access === "free" ? "lp-showcase-step-action-free" : ""}`}>
                     {item.label}
                   </Link>
                 </article>

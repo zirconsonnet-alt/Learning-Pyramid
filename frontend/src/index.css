@@ -1463,6 +1463,8 @@
 
   .lp-showcase-step {
     display: flex;
+    position: relative;
+    overflow: hidden;
     min-height: 100%;
     flex-direction: column;
     color: inherit;
@@ -1476,6 +1478,32 @@
     transform: translateY(-2px);
     border-color: color-mix(in srgb, var(--lp-primary) 28%, var(--lp-line));
     box-shadow: 0 24px 58px rgb(73 53 31 / 14%);
+  }
+
+  .lp-showcase-step-ribbon {
+    position: absolute;
+    top: 16px;
+    right: -36px;
+    width: 132px;
+    transform: rotate(35deg);
+    transform-origin: center;
+    border: 1px solid color-mix(in srgb, var(--lp-primary) 24%, transparent);
+    background: linear-gradient(135deg, rgba(80, 145, 218, 0.94), rgba(33, 92, 169, 0.94));
+    color: #f8fbff;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0;
+    line-height: 1;
+    padding: 7px 0;
+    text-align: center;
+    box-shadow: 0 10px 24px -18px rgba(27, 70, 130, 0.75);
+  }
+
+  .lp-showcase-step[data-access="member"] .lp-showcase-step-ribbon {
+    border-color: rgba(146, 92, 15, 0.24);
+    background: linear-gradient(135deg, #f0c758 0%, #d1971e 62%, #b6780f 100%);
+    color: #4d3508;
+    box-shadow: 0 10px 24px -18px rgba(176, 125, 18, 0.78);
   }
 
   .lp-showcase-feature-icon,
@@ -1548,12 +1576,33 @@
       inset 0 1px 0 rgba(255, 255, 255, 0.62);
   }
 
+  .lp-showcase-step-action-free {
+    border-color: rgba(36, 95, 170, 0.28);
+    background: linear-gradient(135deg, #5aa9f2 0%, #2f7ed1 56%, #1f64b6 100%);
+    color: #f8fbff;
+    box-shadow:
+      0 16px 34px -20px rgba(31, 100, 182, 0.86),
+      inset 0 1px 0 rgba(255, 255, 255, 0.42);
+  }
+
+  .lp-showcase-step-action-free:hover {
+    background: linear-gradient(135deg, #70b8f7 0%, #3d8ee0 56%, #245fb2 100%);
+    border-color: rgba(36, 95, 170, 0.34);
+    box-shadow:
+      0 18px 36px -18px rgba(31, 100, 182, 0.9),
+      inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  }
+
   .lp-showcase-step-action:active {
     transform: translateY(0);
     background: linear-gradient(135deg, #e7c256 0%, #cc8f18 58%, #ae6b0d 100%);
     box-shadow:
       0 10px 20px -16px rgba(176, 125, 18, 0.72),
       inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  }
+
+  .lp-showcase-step-action-free:active {
+    background: linear-gradient(135deg, #428bd3 0%, #276fbd 56%, #1a559d 100%);
   }
 
   .lp-showcase-step-action:focus-visible {
