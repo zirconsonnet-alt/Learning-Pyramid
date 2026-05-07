@@ -301,6 +301,7 @@ export function SubjectDashboardPage() {
             const Icon = materialIconByType[material.materialType]
             const active = material.projectId === subjectProjectId
             const canDeleteMaterial = Boolean(material.projectId && material.projectId !== subjectProjectId)
+            const deleteMaterialBlockedReason = canDeleteMaterial ? undefined : "默认项目与学科根绑定，不能单独删除；请在学科中心删除整个学科。"
             const materialActivityIndex = materials.findIndex((item) => item.materialId === material.materialId)
             const materialActivityLoading = material.projectId ? Boolean(materialActivityQs[materialActivityIndex]?.isLoading) : false
             const lastStudyDisplay = formatLastStudyText(lastStudyByMaterialId[material.materialId] ?? null)
@@ -341,17 +342,20 @@ export function SubjectDashboardPage() {
                         <Settings2 className="h-4 w-4" />
                         项目设置
                       </Button>
-                      {canDeleteMaterial ? (
+                      <span className="inline-flex" title={deleteMaterialBlockedReason}>
                         <Button
                           type="button"
                           variant="destructive"
-                          disabled={deleteMaterialM.isPending}
-                          onClick={() => openDeleteMaterialDialog(material)}
+                          disabled={deleteMaterialM.isPending || !canDeleteMaterial}
+                          onClick={() => {
+                            if (!canDeleteMaterial) return
+                            openDeleteMaterialDialog(material)
+                          }}
                         >
                           <Trash2 className="h-4 w-4" />
                           删除
                         </Button>
-                      ) : null}
+                      </span>
                     </div>
                   ) : (
                     <p className="text-sm text-muted-foreground">这个项目还没有可进入的工作台。</p>

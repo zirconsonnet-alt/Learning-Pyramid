@@ -66,7 +66,9 @@ def test_subject_dashboard_project_cards_offer_project_delete_action() -> None:
     assert "deleteMaterialExpectedText" in source
     assert "aria-label={`删除项目 ${material.title}`}" not in source
     assert "variant=\"destructive\"" in action_row_source
-    assert "canDeleteMaterial ? (" in action_row_source
+    assert "默认项目与学科根绑定，不能单独删除" in source
+    assert "title={deleteMaterialBlockedReason}" in action_row_source
+    assert "disabled={deleteMaterialM.isPending || !canDeleteMaterial}" in action_row_source
     assert action_row_source.index("进入工作台") < action_row_source.index("项目设置") < action_row_source.index("删除")
 
 
