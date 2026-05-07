@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-03-30T06:16:23Z",
+  "generatedAt": "2026-05-07T09:23:15Z",
   "items": [
     {
       "id": "subtitle-generator-windows-x64",
@@ -8,9 +8,9 @@
       "platform": "windows-x64",
       "summary": "离线扫描视频目录，用内置 ffmpeg + whisper.cpp 生成同目录同名 .srt 字幕，支持可选 NVIDIA CUDA GPU 加速。",
       "assetPath": "LearningPyramid-subtitle-tool-0.1.0-beta.3-windows-x64.zip",
-      "publishedAt": "2026-03-30T06:16:23Z",
-      "sha256": "152b152be61ae8b6d312af5f803a9a9336617f41b984a57767c0b8ee396c25f9",
-      "sizeBytes": 276504737,
+      "publishedAt": "2026-05-07T09:23:15Z",
+      "sha256": "963976389f2be855ccff76e3fa424ea02f8fc469db5b138819727b1eb79ac3ee",
+      "sizeBytes": 276504596,
       "recommended": true,
       "includedComponents": [
         "ffmpeg release essentials for Windows",

@@ -14,4 +14,9 @@ def test_subtitle_tool_page_removes_status_pill_and_summary_copy() -> None:
     assert "可以直接下载" not in source
     assert "lp-subtitle-tool-status" not in source
     assert "lp-subtitle-tool-summary" not in source
+    assert "自托管部署" not in source
+    assert "public-downloads/" not in source
+    assert "-IncludePublicDownloads" not in source
+    assert "PLM_PUBLIC_DOWNLOADS_DIR" not in source
+    assert "构建目录" not in source
     assert "离线扫描视频目录，用内置 ffmpeg + whisper.cpp 生成同目录同名 `.srt` 字幕，支持可选 NVIDIA CUDA GPU 加速。" not in source

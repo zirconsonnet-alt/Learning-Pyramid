@@ -170,3 +170,12 @@ def test_configure_qt_display_scaling_skips_when_rounding_policy_is_missing(monk
     configure_qt_display_scaling()
 
     assert calls == []
+
+
+def test_subtitle_tool_main_ui_removes_redundant_hint_labels() -> None:
+    source = (Path(__file__).resolve().parents[1] / "tools" / "subtitle_tool.py").read_text(encoding="utf-8")
+
+    assert "选好目录后，工具会按当前设置批量生成字幕。" not in source
+    assert "常用设置已经放在上面；日志按需展开，不再抢主界面空间。" not in source
+    assert "status_label.hide()" in source
+    assert "status_label.show()" in source

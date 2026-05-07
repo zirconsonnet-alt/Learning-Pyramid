@@ -213,6 +213,96 @@ def test_profile_study_metrics_sync_merges_ranges(auth_env: None) -> None:
     assert fetched.json()["data"][0]["effectiveMs"] == 45000
 
 
+def test_profile_study_metrics_sync_supports_web_presence_partition(auth_env: None) -> None:
+    client = TestClient(create_app())
+    client.post("/api/auth/register", json={"email": "owner@example.com", "password": "password123"})
+
+    created = client.post("/api/projects", json={"title": "Web Metrics Project"})
+    assert created.status_code == 200
+    project_id = created.json()["data"]["projectId"]
+
+    synced = client.post(
+        "/api/profile/me/study-metrics/sync",
+        json={
+            "projectIds": [project_id],
+            "dateFrom": "2026-04-09",
+            "dateTo": "2026-04-09",
+            "entries": [
+                {
+                    "projectId": project_id,
+                    "dateKey": "2026-04-09",
+                    "schemaVersion": 2,
+                    "webPresenceMs": 60_000,
+                    "videoMs": 20_000,
+                    "recallEntryMs": 15_000,
+                    "reviewMs": 10_000,
+                    "aiQaMs": 5_000,
+                    "distractionMs": 10_000,
+                    "presenceRanges": [{"startMs": 0, "endMs": 60_000}],
+                    "videoRanges": [{"startMs": 0, "endMs": 20_000}],
+                    "recallEntryRanges": [{"startMs": 20_000, "endMs": 35_000}],
+                    "reviewRanges": [{"startMs": 35_000, "endMs": 45_000}],
+                    "aiQaRanges": [{"startMs": 45_000, "endMs": 50_000}],
+                    "isPartitionComplete": True,
+                }
+            ],
+        },
+    )
+
+    assert synced.status_code == 200
+    entry = synced.json()["data"][0]
+    assert entry["schemaVersion"] == 2
+    assert entry["webPresenceMs"] == 60_000
+    assert entry["videoMs"] == 20_000
+    assert entry["recallEntryMs"] == 15_000
+    assert entry["reviewMs"] == 10_000
+    assert entry["aiQaMs"] == 5_000
+    assert entry["distractionMs"] == 10_000
+    assert entry["presenceRanges"] == [{"startMs": 0, "endMs": 60_000}]
+    assert entry["isPartitionComplete"] is True
+
+
+def test_profile_study_metrics_legacy_records_are_partition_incomplete(auth_env: None) -> None:
+    client = TestClient(create_app())
+    client.post("/api/auth/register", json={"email": "owner@example.com", "password": "password123"})
+
+    created = client.post("/api/projects", json={"title": "Legacy Metrics Project"})
+    assert created.status_code == 200
+    project_id = created.json()["data"]["projectId"]
+
+    synced = client.post(
+        "/api/profile/me/study-metrics/sync",
+        json={
+            "projectIds": [project_id],
+            "dateFrom": "2026-04-10",
+            "dateTo": "2026-04-10",
+            "entries": [
+                {
+                    "projectId": project_id,
+                    "dateKey": "2026-04-10",
+                    "effectiveMs": 30_000,
+                    "watchMs": 30_000,
+                    "composeMs": 0,
+                    "reviewMs": 0,
+                    "qaMs": 0,
+                    "effectiveRanges": [{"startMs": 0, "endMs": 30_000}],
+                    "watchRanges": [{"startMs": 0, "endMs": 30_000}],
+                    "composeRanges": [],
+                    "reviewRanges": [],
+                    "qaRanges": [],
+                }
+            ],
+        },
+    )
+
+    assert synced.status_code == 200
+    entry = synced.json()["data"][0]
+    assert entry["effectiveMs"] == 30_000
+    assert entry["webPresenceMs"] == 0
+    assert entry["presenceRanges"] == []
+    assert entry["isPartitionComplete"] is False
+
+
 def test_profile_study_metrics_sync_rejects_unowned_project(auth_env: None) -> None:
     owner_client = TestClient(create_app())
     owner_client.post("/api/auth/register", json={"email": "owner@example.com", "password": "password123"})

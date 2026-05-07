@@ -17,6 +17,9 @@ build/
 release/
 config/caddy/
 
+public-downloads/*.zip
+public-downloads/*/
+
 frontend/node_modules/
 frontend/dist/
 frontend/*.tsbuildinfo

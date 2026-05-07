@@ -25,6 +25,21 @@ const AddInstanceResultSchema = z.object({ instanceId: z.string() })
 const MissingInstancesSchema = z.object({ instanceIds: z.array(z.string()) })
 const RecallPointIdsByInstanceSchema = z.object({ recallPointIds: z.array(z.string()) })
 const BulkRemapRecallPointsResultSchema = z.object({ movedCount: z.number().int() })
+const VideoWatchProgressRangeSchema = z.object({
+  startMs: z.number().int().nonnegative(),
+  endMs: z.number().int().positive(),
+})
+const VideoWatchProgressSchema = z.object({
+  projectId: z.string(),
+  instanceId: z.string(),
+  durationMs: z.number().int().positive().nullable().default(null),
+  watchedMs: z.number().int().nonnegative(),
+  ranges: z.array(VideoWatchProgressRangeSchema).default([]),
+  completedAt: z.string().nullable().default(null),
+  updatedAt: z.string(),
+})
+const VideoWatchProgressMapSchema = z.record(z.string(), VideoWatchProgressSchema)
+export type VideoWatchProgress = z.infer<typeof VideoWatchProgressSchema>
 
 export function listInstances(projectId: string, options?: ApiRequestExecutionOptions) {
   return apiRequest({
@@ -50,6 +65,48 @@ export function listRecallPointsByInstance(projectId: string, instanceId: string
     responseSchema: RecallPointIdsByInstanceSchema,
     signal: options?.signal,
     timeoutMs: options?.timeoutMs,
+  })
+}
+
+export function fetchVideoWatchProgressMap(
+  projectId: string,
+  instanceIds: string[],
+  options?: ApiRequestExecutionOptions,
+) {
+  const params = new URLSearchParams()
+  for (const instanceId of instanceIds) params.append("instanceIds", instanceId)
+  const query = params.toString()
+  return apiRequest({
+    path: `/projects/${projectId}/video-watch-progress${query ? `?${query}` : ""}`,
+    responseSchema: VideoWatchProgressMapSchema,
+    signal: options?.signal,
+    timeoutMs: options?.timeoutMs,
+  })
+}
+
+export function syncVideoWatchProgressRange(
+  projectId: string,
+  instanceId: string,
+  params: { startMs: number; endMs: number; durationMs?: number | null },
+) {
+  return apiRequest({
+    path: `/projects/${projectId}/instances/${instanceId}/video-watch-progress/ranges`,
+    method: "POST",
+    body: params,
+    responseSchema: VideoWatchProgressSchema,
+  })
+}
+
+export function markVideoWatchProgressCompleted(
+  projectId: string,
+  instanceId: string,
+  params: { durationMs: number },
+) {
+  return apiRequest({
+    path: `/projects/${projectId}/instances/${instanceId}/video-watch-progress/completed`,
+    method: "POST",
+    body: params,
+    responseSchema: VideoWatchProgressSchema,
   })
 }
 

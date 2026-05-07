@@ -1,4 +1,4 @@
-import { getLocalDateKey, recordEffectiveStudyActivity } from "@/ui/store/workbenchDailyStats"
+import { getLocalDateKey } from "@/ui/store/workbenchDailyStats"
 
 export type PomodoroActivityRecord = {
   recordId: string
@@ -100,10 +100,6 @@ export function recordPomodoroActivity(input: RecordPomodoroActivityInput) {
   if (records.some((record) => record.recordId === normalized.recordId)) return normalized
   const nextRecords = [normalized, ...records].sort((left, right) => right.endAtMs - left.endAtMs).slice(0, 500)
   saveRecords(nextRecords)
-  const projectId = normalized.projectId
-  if (projectId) {
-    recordEffectiveStudyActivity(projectId, normalized.startAtMs, normalized.endAtMs)
-  }
   return normalized
 }
 

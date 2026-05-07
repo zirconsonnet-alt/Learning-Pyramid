@@ -720,6 +720,17 @@ def _auth_user_project_daily_study_stats_sql() -> str:
             "    user_id TEXT NOT NULL,",
             "    project_id TEXT NOT NULL,",
             "    date_key TEXT NOT NULL,",
+            "    schema_version BIGINT NOT NULL DEFAULT 1,",
+            "    web_presence_ms BIGINT NOT NULL DEFAULT 0,",
+            "    video_ms BIGINT NOT NULL DEFAULT 0,",
+            "    recall_entry_ms BIGINT NOT NULL DEFAULT 0,",
+            "    ai_qa_ms BIGINT NOT NULL DEFAULT 0,",
+            "    distraction_ms BIGINT NOT NULL DEFAULT 0,",
+            "    presence_ranges_json TEXT NOT NULL DEFAULT '[]',",
+            "    video_ranges_json TEXT NOT NULL DEFAULT '[]',",
+            "    recall_entry_ranges_json TEXT NOT NULL DEFAULT '[]',",
+            "    ai_qa_ranges_json TEXT NOT NULL DEFAULT '[]',",
+            "    is_partition_complete BOOLEAN NOT NULL DEFAULT FALSE,",
             "    effective_ms BIGINT NOT NULL DEFAULT 0,",
             "    watch_ms BIGINT NOT NULL DEFAULT 0,",
             "    compose_ms BIGINT NOT NULL DEFAULT 0,",
@@ -738,6 +749,25 @@ def _auth_user_project_daily_study_stats_sql() -> str:
             "ON user_project_daily_study_stats (user_id, project_id, date_key DESC);",
             "CREATE INDEX IF NOT EXISTS idx_user_project_daily_study_stats_user_date",
             "ON user_project_daily_study_stats (user_id, date_key DESC);",
+        )
+    )
+
+
+def _auth_user_project_daily_study_stats_web_presence_sql() -> str:
+    return "\n".join(
+        (
+            "-- Add objective web-presence metric partition fields to hosted study stats",
+            "ALTER TABLE user_project_daily_study_stats ADD COLUMN IF NOT EXISTS schema_version BIGINT NOT NULL DEFAULT 1;",
+            "ALTER TABLE user_project_daily_study_stats ADD COLUMN IF NOT EXISTS web_presence_ms BIGINT NOT NULL DEFAULT 0;",
+            "ALTER TABLE user_project_daily_study_stats ADD COLUMN IF NOT EXISTS video_ms BIGINT NOT NULL DEFAULT 0;",
+            "ALTER TABLE user_project_daily_study_stats ADD COLUMN IF NOT EXISTS recall_entry_ms BIGINT NOT NULL DEFAULT 0;",
+            "ALTER TABLE user_project_daily_study_stats ADD COLUMN IF NOT EXISTS ai_qa_ms BIGINT NOT NULL DEFAULT 0;",
+            "ALTER TABLE user_project_daily_study_stats ADD COLUMN IF NOT EXISTS distraction_ms BIGINT NOT NULL DEFAULT 0;",
+            "ALTER TABLE user_project_daily_study_stats ADD COLUMN IF NOT EXISTS presence_ranges_json TEXT NOT NULL DEFAULT '[]';",
+            "ALTER TABLE user_project_daily_study_stats ADD COLUMN IF NOT EXISTS video_ranges_json TEXT NOT NULL DEFAULT '[]';",
+            "ALTER TABLE user_project_daily_study_stats ADD COLUMN IF NOT EXISTS recall_entry_ranges_json TEXT NOT NULL DEFAULT '[]';",
+            "ALTER TABLE user_project_daily_study_stats ADD COLUMN IF NOT EXISTS ai_qa_ranges_json TEXT NOT NULL DEFAULT '[]';",
+            "ALTER TABLE user_project_daily_study_stats ADD COLUMN IF NOT EXISTS is_partition_complete BOOLEAN NOT NULL DEFAULT FALSE;",
         )
     )
 
@@ -775,6 +805,12 @@ POSTGRES_MIGRATIONS: tuple[PostgresMigration, ...] = (
     PostgresMigration(scope="auth", version=14, name="auth_user_global_settings", sql_factory=_auth_user_global_settings_sql),
     PostgresMigration(scope="auth", version=15, name="auth_password_reset_tokens", sql_factory=_auth_password_reset_tokens_sql),
     PostgresMigration(scope="auth", version=16, name="auth_email_verification", sql_factory=_auth_email_verification_sql),
+    PostgresMigration(
+        scope="auth",
+        version=17,
+        name="auth_user_project_daily_study_stats_web_presence",
+        sql_factory=_auth_user_project_daily_study_stats_web_presence_sql,
+    ),
 )
 
 

@@ -1235,7 +1235,8 @@ class QtSubtitleToolApp:
         self.current_detail = "请选择一个视频目录。"
         self.progress_bar.setValue(0)
         self.progress_label.setText("尚未开始")
-        self.status_label.setText("选好目录后，工具会按当前设置批量生成字幕。")
+        self.status_label.setText("")
+        self.status_label.hide()
         self.current_file_value_label.setText("还没有开始处理")
         self.current_file_value_label.setToolTip("")
         self.current_step_value_label.setText("等待你点击开始生成")
@@ -1523,19 +1524,7 @@ class QtSubtitleToolApp:
         footer_row = QHBoxLayout()
         footer_row.setContentsMargins(0, 0, 0, 0)
         footer_row.setSpacing(12)
-        footer_copy = QWidget()
-        footer_copy_layout = QVBoxLayout(footer_copy)
-        footer_copy_layout.setContentsMargins(0, 0, 0, 0)
-        footer_copy_layout.setSpacing(4)
-        footer_copy_layout.addWidget(self._make_label("操作区", role="eyebrow"))
-        footer_copy_layout.addWidget(
-            self._make_label(
-                "常用设置已经放在上面；日志按需展开，不再抢主界面空间。",
-                role="cardMuted",
-                word_wrap=True,
-            )
-        )
-        footer_row.addWidget(footer_copy, 1)
+        footer_row.addStretch(1)
         self.log_toggle_button = self._make_button("查看日志", variant="secondary", handler=self._toggle_log_visibility)
         self.cancel_button = self._make_button("取消", variant="secondary", handler=self._cancel)
         self.cancel_button.setEnabled(False)
@@ -1802,6 +1791,7 @@ class QtSubtitleToolApp:
         self.status_label.setText(
             f"正在扫描目录并准备逐个生成字幕（{format_selected_acceleration_text(options.enable_gpu)} / {recognition_language_label(options.language)}）。"
         )
+        self.status_label.show()
         self.current_file_value_label.setText("正在扫描目录...")
         self.current_file_value_label.setToolTip("")
         self.current_step_value_label.setText("准备任务队列")
@@ -1833,6 +1823,7 @@ class QtSubtitleToolApp:
         self.cancel_event.set()
         self.process_controller.terminate()
         self.status_label.setText("正在尝试取消当前任务...")
+        self.status_label.show()
         self.current_step_value_label.setText("正在取消当前任务")
         self._set_status_badge("取消中", "warning")
 
@@ -1862,6 +1853,7 @@ class QtSubtitleToolApp:
                 visible_position = min(total_count, max(1, int(progress_units) + (0 if progress_units >= total_count else 1)))
                 self.progress_label.setText(f"{visible_position}/{total_count} · {Path(str(current)).name}")
                 self.status_label.setText(str(detail))
+                self.status_label.show()
                 self.current_file_value_label.setText(Path(str(current)).name)
                 self.current_file_value_label.setToolTip(str(current))
                 self.current_step_value_label.setText(str(detail))
@@ -1939,6 +1931,7 @@ class QtSubtitleToolApp:
                 self._update_timing_labels()
                 self._finish_work()
                 self.status_label.setText(f"完成：生成 {summary.generated} 个，跳过 {summary.skipped} 个，失败 {summary.failed} 个。")
+                self.status_label.show()
                 self.current_step_value_label.setText("全部视频处理完成")
                 self.progress_label.setText(f"{summary.total}/{summary.total} · 全部完成")
                 self.progress_bar.setValue(100)
@@ -1954,6 +1947,7 @@ class QtSubtitleToolApp:
             if event_name == "cancelled":
                 self._finish_work()
                 self.status_label.setText(str(payload))
+                self.status_label.show()
                 self.current_step_value_label.setText("任务已取消")
                 self._set_status_badge("已取消", "warning")
                 self._set_log_visible(True)
@@ -1963,6 +1957,7 @@ class QtSubtitleToolApp:
             if event_name == "error":
                 self._finish_work()
                 self.status_label.setText(str(payload))
+                self.status_label.show()
                 self.current_step_value_label.setText("任务异常结束")
                 self._set_status_badge("发生错误", "error")
                 self._set_log_visible(True)

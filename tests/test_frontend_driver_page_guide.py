@@ -24,6 +24,8 @@ STEPS_MODULE = WALKTHROUGH_DIR / "guideWalkthroughSteps.ts"
 CONTROLLER_MODULE = WALKTHROUGH_DIR / "guideWalkthroughController.ts"
 CREATE_SUBJECT_PROJECT_DOC = ROOT / "docs" / "how-to-create-subject-project.md"
 STUDY_REVIEW_DOC = ROOT / "docs" / "how-to-study-review.md"
+POMODORO_GUIDE_DOC = ROOT / "docs" / "how-to-use-pomodoro.md"
+AI_CHAT_GUIDE_DOC = ROOT / "docs" / "how-to-use-ai-chat.md"
 GUIDE_DOCUMENTS = {
     "create-subject-project": CREATE_SUBJECT_PROJECT_DOC,
     "study-review": STUDY_REVIEW_DOC,
@@ -175,6 +177,50 @@ def test_guide_page_replaces_manual_with_two_task_documents():
     assert 'label: "如何学习复习"' in guide_page
     assert "createSubjectProjectMarkdown" in guide_page
     assert "studyReviewMarkdown" in guide_page
+
+
+def test_guide_page_registers_pomodoro_guide_without_walkthrough_action():
+    guide_page = read(GUIDE_PAGE)
+    pomodoro_doc = read(POMODORO_GUIDE_DOC)
+    steps = read(STEPS_MODULE)
+
+    assert 'slug: "use-pomodoro"' in guide_page
+    assert 'label: "如何使用番茄钟"' in guide_page
+    assert "usePomodoroMarkdown" in guide_page
+    assert "hasWalkthroughSteps" in guide_page
+    assert "isWalkthroughDoc(activeDoc)" in guide_page
+
+    assert "# 如何使用番茄钟" in pomodoro_doc
+    assert "先开启番茄钟" in pomodoro_doc
+    assert "设定番茄计划" in pomodoro_doc
+    assert "番茄开始后登录网页" in pomodoro_doc
+    assert "进入工作台" in pomodoro_doc
+
+    assert 'export type GuideWalkthroughDocSlug = "create-subject-project" | "study-review"' in steps
+    assert "use-pomodoro" not in steps
+
+
+def test_guide_page_registers_ai_chat_guide_without_walkthrough_action():
+    guide_page = read(GUIDE_PAGE)
+    ai_chat_doc = read(AI_CHAT_GUIDE_DOC)
+    steps = read(STEPS_MODULE)
+
+    assert 'slug: "use-ai-chat"' in guide_page
+    assert 'label: "如何使用 AI 问答"' in guide_page
+    assert "useAiChatMarkdown" in guide_page
+    assert "isWalkthroughDoc(activeDoc)" in guide_page
+
+    assert "# 如何使用 AI 问答" in ai_chat_doc
+    assert "绑定本地素材目录" in ai_chat_doc
+    assert "学习对象树" in ai_chat_doc
+    assert "第三方 LLM API" in ai_chat_doc
+    assert "大模型配置" in ai_chat_doc
+    assert "AI问答" in ai_chat_doc
+    assert "/p/:projectId/ai-chat" in ai_chat_doc
+    assert "对话" in ai_chat_doc
+
+    assert 'export type GuideWalkthroughDocSlug = "create-subject-project" | "study-review"' in steps
+    assert "use-ai-chat" not in steps
 
 
 def test_guide_page_renders_start_action_wired_to_walkthrough_api():

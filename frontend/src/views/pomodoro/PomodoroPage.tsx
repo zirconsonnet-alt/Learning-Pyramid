@@ -37,6 +37,7 @@ import {
   POMODORO_WEEKDAY_LABELS,
   describePomodoroPhase,
   formatPomodoroCountdown,
+  buildPomodoroSegments,
   getPomodoroSnapshot,
   isQuickPomodoroSessionActive,
   normalizePomodoroStartTime,
@@ -51,6 +52,7 @@ import {
   usePomodoroNow,
   usePomodoroStore,
 } from "@/ui/store/pomodoroStore"
+import { loadPomodoroSegmentMetricSummary, type PomodoroSegmentMetricSummary } from "@/ui/store/workbenchDailyStats"
 import { formatStudyMaterialTypeLabel } from "@/ui/subjects/studyMaterials"
 import { useThemeStore } from "@/ui/store/themeStore"
 import { cn } from "@/ui/utils"
@@ -76,6 +78,26 @@ type PomodoroSubjectProjectOption = {
   projectId: string
   title: string
   materialType: StudyMaterial["materialType"]
+}
+
+type PomodoroPlanMetricSummary = {
+  planId: string
+  planIndex: number
+  dateKey: string
+  label: string
+  segments: PomodoroSegmentMetricSummary[]
+  scheduledFocusMs: number
+  webPresenceMs: number
+  videoMs: number
+  recallEntryMs: number
+  reviewMs: number
+  aiQaMs: number
+  distractionMs: number
+  absenceMs: number
+  activeLearningMs: number
+  attendanceRate: number
+  effectiveLearningRate: number
+  status: "not-started" | "in-progress" | "completed"
 }
 
 function createPomodoroDraftId() {
@@ -337,6 +359,59 @@ function MetricTile(props: { label: string; value: string }) {
   )
 }
 
+function MetricDonut(props: { summary: Pick<PomodoroPlanMetricSummary, "scheduledFocusMs" | "videoMs" | "recallEntryMs" | "reviewMs" | "aiQaMs" | "distractionMs" | "absenceMs"> }) {
+  const { summary } = props
+  const slices = [
+    { label: "视频观看", value: summary.videoMs, color: "#2563eb" },
+    { label: "复述点录入", value: summary.recallEntryMs, color: "#16a34a" },
+    { label: "复习用时", value: summary.reviewMs, color: "#d97706" },
+    { label: "AI 问答", value: summary.aiQaMs, color: "#7c3aed" },
+    { label: "走神时间", value: summary.distractionMs, color: "#64748b" },
+    { label: "缺席时间", value: summary.absenceMs, color: "#dc2626" },
+  ].filter((slice) => slice.value > 0)
+  const total = Math.max(summary.scheduledFocusMs, slices.reduce((sum, slice) => sum + slice.value, 0))
+  let cursor = 0
+  const gradient =
+    slices.length === 0 || total <= 0
+      ? "conic-gradient(#e5e7eb 0deg 360deg)"
+      : `conic-gradient(${slices
+          .map((slice) => {
+            const start = (cursor / total) * 360
+            cursor += slice.value
+            const end = (cursor / total) * 360
+            return `${slice.color} ${start}deg ${end}deg`
+          })
+          .join(", ")})`
+
+  return (
+    <div className="grid gap-3 sm:grid-cols-[7.5rem_minmax(0,1fr)]">
+      <div
+        data-pomodoro-metric-donut
+        className="relative aspect-square w-28 rounded-full"
+        style={{ background: gradient }}
+        aria-label="番茄学习时间分解"
+      >
+        <div className="absolute inset-5 rounded-full bg-[color:var(--theme-card-main-bg)]" />
+      </div>
+      <div className="grid content-center gap-2 text-xs text-muted-foreground">
+        {slices.length === 0 ? (
+          <div>暂无学习分解</div>
+        ) : (
+          slices.map((slice) => (
+            <div key={slice.label} className="flex items-center justify-between gap-3">
+              <span className="flex items-center gap-2">
+                <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: slice.color }} />
+                {slice.label}
+              </span>
+              <span>{formatDurationCompact(slice.value)}</span>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  )
+}
+
 function readLocationState(locationState: unknown) {
   if (!locationState || typeof locationState !== "object") {
     return {
@@ -385,6 +460,21 @@ function formatPomodoroActivityDuration(durationMs: number) {
   return `${totalMinutes} 分钟`
 }
 
+function formatDurationCompact(ms: number) {
+  if (!Number.isFinite(ms) || ms <= 0) return "0m"
+  const totalMinutes = Math.floor(ms / 60_000)
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+  if (hours <= 0) return `${Math.max(1, minutes)}m`
+  if (minutes === 0) return `${hours}h`
+  return `${hours}h ${minutes}m`
+}
+
+function formatPercent(value: number) {
+  if (!Number.isFinite(value)) return "0%"
+  return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`
+}
+
 function getTodayScheduledPomodoroCount(schedule: PomodoroWeekSchedule, now: number) {
   const date = new Date(now)
   const weekday = POMODORO_WEEKDAYS[date.getDay() === 0 ? 6 : date.getDay() - 1]
@@ -401,6 +491,79 @@ function getTodayPomodoroStats(records: PomodoroActivityRecord[], total: number)
     remaining: Math.max(0, total - completed),
     completionPercent,
   }
+}
+
+function getScheduledStartAtMsForDate(date: Date, startTime: string) {
+  const [hoursText = "0", minutesText = "0"] = normalizePomodoroStartTime(startTime).split(":")
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), Number(hoursText), Number(minutesText), 0, 0).getTime()
+}
+
+function buildPomodoroPlanMetricSummaries(schedule: PomodoroWeekSchedule, now: number): PomodoroPlanMetricSummary[] {
+  const date = new Date(now)
+  const weekday = POMODORO_WEEKDAYS[date.getDay() === 0 ? 6 : date.getDay() - 1]
+  const dateKey = formatDateKey(now)
+  const plans = (schedule[weekday]?.plans ?? []).filter((plan) => plan.enabled)
+
+  return plans.map((plan, planIndex) => {
+    const planStartAtMs = getScheduledStartAtMsForDate(date, plan.startTime)
+    const focusSegments = buildPomodoroSegments(
+      plan.focusMinutes,
+      plan.breakMinutes,
+      plan.pomodoroCount,
+      plan.projectIds,
+      plan.focusPrompts,
+      plan.breakPrompt,
+      { planId: plan.id, planIndex },
+    ).filter((segment) => segment.phase === "focus")
+    const segments: PomodoroSegmentMetricSummary[] = focusSegments.map((segment) =>
+      loadPomodoroSegmentMetricSummary({
+        projectId: segment.projectId,
+        dateKey,
+        planId: plan.id,
+        planIndex,
+        pomodoroIndex: segment.pomodoroIndex,
+        scheduledStartAtMs: planStartAtMs + segment.startOffsetMs,
+        scheduledEndAtMs: planStartAtMs + segment.endOffsetMs,
+        now,
+      }),
+    )
+    const scheduledFocusMs = segments.reduce((sum, segment) => sum + segment.scheduledFocusMs, 0)
+    const webPresenceMs = segments.reduce((sum, segment) => sum + segment.webPresenceMs, 0)
+    const videoMs = segments.reduce((sum, segment) => sum + segment.videoMs, 0)
+    const recallEntryMs = segments.reduce((sum, segment) => sum + segment.recallEntryMs, 0)
+    const reviewMs = segments.reduce((sum, segment) => sum + segment.reviewMs, 0)
+    const aiQaMs = segments.reduce((sum, segment) => sum + segment.aiQaMs, 0)
+    const distractionMs = segments.reduce((sum, segment) => sum + segment.distractionMs, 0)
+    const absenceMs = Math.max(0, scheduledFocusMs - webPresenceMs)
+    const activeLearningMs = videoMs + recallEntryMs + reviewMs + aiQaMs
+    const attendanceRate = scheduledFocusMs > 0 ? webPresenceMs / scheduledFocusMs : 0
+    const effectiveLearningRate = scheduledFocusMs > 0 ? activeLearningMs / scheduledFocusMs : 0
+    const status = segments.some((segment) => segment.status === "in-progress")
+      ? "in-progress"
+      : segments.every((segment) => segment.status === "completed")
+        ? "completed"
+        : "not-started"
+
+    return {
+      planId: plan.id,
+      planIndex,
+      dateKey,
+      label: `计划 ${planIndex + 1}`,
+      segments,
+      scheduledFocusMs,
+      webPresenceMs,
+      videoMs,
+      recallEntryMs,
+      reviewMs,
+      aiQaMs,
+      distractionMs,
+      absenceMs,
+      activeLearningMs,
+      attendanceRate,
+      effectiveLearningRate,
+      status,
+    }
+  })
 }
 
 function RestMusicPlayer(props: { isRestPhase: boolean }) {
@@ -791,6 +954,10 @@ export function PomodoroPage() {
     [todayPomodoroRecords],
   )
   const recentPomodoroRecords = useMemo(() => pomodoroActivityRecords.slice(0, 7), [pomodoroActivityRecords])
+  const pomodoroPlanMetricSummaries = useMemo(
+    () => buildPomodoroPlanMetricSummaries(draftSchedule, now),
+    [draftSchedule, now],
+  )
 
   const headlineCountdown =
     snapshot.status === "running"
@@ -1470,6 +1637,67 @@ export function PomodoroPage() {
                     </div>
                     <div className="min-w-0 truncate text-muted-foreground">
                       {record.projectId ? projectTitleMap.get(record.projectId) ?? "已绑定项目" : "未绑定项目"} · {formatPomodoroActivityTime(record.startAtMs)}-{formatPomodoroActivityTime(record.endAtMs)}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="space-y-3">
+              {pomodoroPlanMetricSummaries.length === 0 ? (
+                <div className="rounded-[1.1rem] border border-dashed border-[color:var(--theme-soft-border)] px-4 py-8 text-sm text-muted-foreground">
+                  今天还没有可统计的番茄计划。
+                </div>
+              ) : (
+                pomodoroPlanMetricSummaries.map((planSummary) => (
+                  <div
+                    key={`${planSummary.dateKey}:${planSummary.planId}:${planSummary.planIndex}`}
+                    className="space-y-4 rounded-[1.1rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] px-4 py-4 shadow-[var(--theme-soft-shadow)]"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-medium text-muted-foreground">{planSummary.label}</div>
+                        <div className="mt-1 text-xl font-semibold text-foreground">
+                          网页驻留 {formatDurationCompact(planSummary.webPresenceMs)}
+                        </div>
+                      </div>
+                      <div className="text-right text-sm text-muted-foreground">
+                        <div>缺席时间 {formatDurationCompact(planSummary.absenceMs)}</div>
+                        <div className="mt-1">
+                          出勤率 {formatPercent(planSummary.attendanceRate)} · 有效学习率 {formatPercent(planSummary.effectiveLearningRate)}
+                        </div>
+                      </div>
+                    </div>
+
+                    <MetricDonut summary={planSummary} />
+
+                    <div className="grid gap-2 md:grid-cols-2">
+                      {planSummary.segments.map((segment) => (
+                        <div
+                          key={`${segment.planId}:${segment.pomodoroIndex}:${segment.scheduledStartAtMs}`}
+                          className="space-y-3 border-t border-border/60 pt-3 text-sm"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="font-medium text-foreground">
+                              番茄 {segment.pomodoroIndex}
+                              {segment.status === "in-progress" ? "（进行中）" : segment.status === "not-started" ? "（未开始）" : ""}
+                            </div>
+                            <div className="text-muted-foreground">
+                              {formatPomodoroActivityTime(segment.scheduledStartAtMs)}-{formatPomodoroActivityTime(segment.scheduledEndAtMs)}
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-muted-foreground">
+                            <span>网页驻留 {formatDurationCompact(segment.webPresenceMs)}</span>
+                            <span>缺席时间 {formatDurationCompact(segment.absenceMs)}</span>
+                            <span>视频观看 {formatDurationCompact(segment.videoMs)}</span>
+                            <span>复述点录入 {formatDurationCompact(segment.recallEntryMs)}</span>
+                            <span>复习用时 {formatDurationCompact(segment.reviewMs)}</span>
+                            <span>AI 问答 {formatDurationCompact(segment.aiQaMs)}</span>
+                            <span>走神时间 {formatDurationCompact(segment.distractionMs)}</span>
+                            <span>有效学习率 {formatPercent(segment.effectiveLearningRate)}</span>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 ))

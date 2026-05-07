@@ -1032,6 +1032,17 @@ class Friendship:
 class UserProjectDailyStudyStatInput:
     project_id: str
     date_key: str
+    schema_version: int
+    web_presence_ms: int
+    video_ms: int
+    recall_entry_ms: int
+    ai_qa_ms: int
+    distraction_ms: int
+    presence_ranges: tuple[tuple[int, int], ...]
+    video_ranges: tuple[tuple[int, int], ...]
+    recall_entry_ranges: tuple[tuple[int, int], ...]
+    ai_qa_ranges: tuple[tuple[int, int], ...]
+    is_partition_complete: bool
     effective_ms: int
     watch_ms: int
     compose_ms: int
@@ -1049,6 +1060,17 @@ class UserProjectDailyStudyStatInput:
         *,
         project_id: str,
         date_key: str,
+        schema_version: int | float | str | None = 1,
+        web_presence_ms: int | float | str | None = 0,
+        video_ms: int | float | str | None = 0,
+        recall_entry_ms: int | float | str | None = 0,
+        ai_qa_ms: int | float | str | None = 0,
+        distraction_ms: int | float | str | None = 0,
+        presence_ranges: Iterable[tuple[int, int] | list[int]] = (),
+        video_ranges: Iterable[tuple[int, int] | list[int]] = (),
+        recall_entry_ranges: Iterable[tuple[int, int] | list[int]] = (),
+        ai_qa_ranges: Iterable[tuple[int, int] | list[int]] = (),
+        is_partition_complete: bool = False,
         effective_ms: int | float | str | None = 0,
         watch_ms: int | float | str | None = 0,
         compose_ms: int | float | str | None = 0,
@@ -1060,24 +1082,57 @@ class UserProjectDailyStudyStatInput:
         review_ranges: Iterable[tuple[int, int] | list[int]] = (),
         qa_ranges: Iterable[tuple[int, int] | list[int]] = (),
     ) -> "UserProjectDailyStudyStatInput":
+        normalized_presence_ranges = _normalize_study_ranges(presence_ranges)
+        normalized_video_ranges = _normalize_study_ranges(video_ranges)
+        normalized_recall_entry_ranges = _normalize_study_ranges(recall_entry_ranges)
+        normalized_ai_qa_ranges = _normalize_study_ranges(ai_qa_ranges)
         normalized_effective_ranges = _normalize_study_ranges(effective_ranges)
         normalized_watch_ranges = _normalize_study_ranges(watch_ranges)
         normalized_compose_ranges = _normalize_study_ranges(compose_ranges)
         normalized_review_ranges = _normalize_study_ranges(review_ranges)
         normalized_qa_ranges = _normalize_study_ranges(qa_ranges)
+        normalized_schema_version = max(1, _normalize_study_duration_ms(schema_version, field_name="schema_version"))
+        normalized_video_ms = max(
+            _normalize_study_duration_ms(video_ms, field_name="video_ms"),
+            _sum_study_ranges(normalized_video_ranges),
+        )
+        normalized_recall_entry_ms = max(
+            _normalize_study_duration_ms(recall_entry_ms, field_name="recall_entry_ms"),
+            _sum_study_ranges(normalized_recall_entry_ranges),
+        )
+        normalized_ai_qa_ms = max(
+            _normalize_study_duration_ms(ai_qa_ms, field_name="ai_qa_ms"),
+            _sum_study_ranges(normalized_ai_qa_ranges),
+        )
         return cls(
             project_id=_normalize_project_id(project_id),
             date_key=_normalize_study_date_key(date_key),
+            schema_version=normalized_schema_version,
+            web_presence_ms=max(
+                _normalize_study_duration_ms(web_presence_ms, field_name="web_presence_ms"),
+                _sum_study_ranges(normalized_presence_ranges),
+            ),
+            video_ms=normalized_video_ms,
+            recall_entry_ms=normalized_recall_entry_ms,
+            ai_qa_ms=normalized_ai_qa_ms,
+            distraction_ms=_normalize_study_duration_ms(distraction_ms, field_name="distraction_ms"),
+            presence_ranges=normalized_presence_ranges,
+            video_ranges=normalized_video_ranges,
+            recall_entry_ranges=normalized_recall_entry_ranges,
+            ai_qa_ranges=normalized_ai_qa_ranges,
+            is_partition_complete=bool(is_partition_complete),
             effective_ms=max(
                 _normalize_study_duration_ms(effective_ms, field_name="effective_ms"),
                 _sum_study_ranges(normalized_effective_ranges),
             ),
             watch_ms=max(
                 _normalize_study_duration_ms(watch_ms, field_name="watch_ms"),
+                normalized_video_ms,
                 _sum_study_ranges(normalized_watch_ranges),
             ),
             compose_ms=max(
                 _normalize_study_duration_ms(compose_ms, field_name="compose_ms"),
+                normalized_recall_entry_ms,
                 _sum_study_ranges(normalized_compose_ranges),
             ),
             review_ms=max(
@@ -1086,6 +1141,7 @@ class UserProjectDailyStudyStatInput:
             ),
             qa_ms=max(
                 _normalize_study_duration_ms(qa_ms, field_name="qa_ms"),
+                normalized_ai_qa_ms,
                 _sum_study_ranges(normalized_qa_ranges),
             ),
             effective_ranges=normalized_effective_ranges,
@@ -1101,6 +1157,17 @@ class UserProjectDailyStudyStat:
     user_id: str
     project_id: str
     date_key: str
+    schema_version: int
+    web_presence_ms: int
+    video_ms: int
+    recall_entry_ms: int
+    ai_qa_ms: int
+    distraction_ms: int
+    presence_ranges: tuple[tuple[int, int], ...]
+    video_ranges: tuple[tuple[int, int], ...]
+    recall_entry_ranges: tuple[tuple[int, int], ...]
+    ai_qa_ranges: tuple[tuple[int, int], ...]
+    is_partition_complete: bool
     effective_ms: int
     watch_ms: int
     compose_ms: int
@@ -1327,7 +1394,10 @@ class _AuthStoreImpl:
     @staticmethod
     def _row_to_user_project_daily_study_stat(row: Any) -> UserProjectDailyStudyStat:
         def parse_ranges(key: str) -> tuple[tuple[int, int], ...]:
-            raw = row[key]
+            try:
+                raw = row[key]
+            except Exception:
+                raw = None
             payload = json.loads(str(raw)) if raw not in (None, "") else []
             if not isinstance(payload, list):
                 payload = []
@@ -1337,10 +1407,28 @@ class _AuthStoreImpl:
                     parsed.append((item[0], item[1]))
             return _normalize_study_ranges(parsed)
 
+        def read_optional(key: str, default: Any = 0) -> Any:
+            try:
+                value = row[key]
+            except Exception:
+                return default
+            return default if value is None else value
+
         return UserProjectDailyStudyStat(
             user_id=str(row["user_id"]),
             project_id=_normalize_project_id(row["project_id"]),
             date_key=_normalize_study_date_key(row["date_key"]),
+            schema_version=max(1, _normalize_study_duration_ms(read_optional("schema_version", 1), field_name="schema_version")),
+            web_presence_ms=_normalize_study_duration_ms(read_optional("web_presence_ms", 0), field_name="web_presence_ms"),
+            video_ms=_normalize_study_duration_ms(read_optional("video_ms", 0), field_name="video_ms"),
+            recall_entry_ms=_normalize_study_duration_ms(read_optional("recall_entry_ms", 0), field_name="recall_entry_ms"),
+            ai_qa_ms=_normalize_study_duration_ms(read_optional("ai_qa_ms", 0), field_name="ai_qa_ms"),
+            distraction_ms=_normalize_study_duration_ms(read_optional("distraction_ms", 0), field_name="distraction_ms"),
+            presence_ranges=parse_ranges("presence_ranges_json"),
+            video_ranges=parse_ranges("video_ranges_json"),
+            recall_entry_ranges=parse_ranges("recall_entry_ranges_json"),
+            ai_qa_ranges=parse_ranges("ai_qa_ranges_json"),
+            is_partition_complete=bool(read_optional("is_partition_complete", 0)),
             effective_ms=_normalize_study_duration_ms(row["effective_ms"], field_name="effective_ms"),
             watch_ms=_normalize_study_duration_ms(row["watch_ms"], field_name="watch_ms"),
             compose_ms=_normalize_study_duration_ms(row["compose_ms"], field_name="compose_ms"),
@@ -1501,6 +1589,30 @@ class SQLiteAuthStore(_AuthStoreImpl):
             """
         )
         return True
+
+    @staticmethod
+    def _ensure_user_project_daily_study_stats_metric_columns(conn: sqlite3.Connection) -> None:
+        columns = {
+            str(row["name"])
+            for row in conn.execute("PRAGMA table_info(user_project_daily_study_stats)").fetchall()
+        }
+        definitions = {
+            "schema_version": "INTEGER NOT NULL DEFAULT 1",
+            "web_presence_ms": "INTEGER NOT NULL DEFAULT 0",
+            "video_ms": "INTEGER NOT NULL DEFAULT 0",
+            "recall_entry_ms": "INTEGER NOT NULL DEFAULT 0",
+            "ai_qa_ms": "INTEGER NOT NULL DEFAULT 0",
+            "distraction_ms": "INTEGER NOT NULL DEFAULT 0",
+            "presence_ranges_json": "TEXT NOT NULL DEFAULT '[]'",
+            "video_ranges_json": "TEXT NOT NULL DEFAULT '[]'",
+            "recall_entry_ranges_json": "TEXT NOT NULL DEFAULT '[]'",
+            "ai_qa_ranges_json": "TEXT NOT NULL DEFAULT '[]'",
+            "is_partition_complete": "INTEGER NOT NULL DEFAULT 0",
+        }
+        for column_name, definition in definitions.items():
+            if column_name in columns:
+                continue
+            conn.execute(f"ALTER TABLE user_project_daily_study_stats ADD COLUMN {column_name} {definition}")
 
     @staticmethod
     def _ensure_email_verification_tokens_table(conn: sqlite3.Connection) -> None:
@@ -1697,6 +1809,17 @@ class SQLiteAuthStore(_AuthStoreImpl):
                         user_id TEXT NOT NULL,
                         project_id TEXT NOT NULL,
                         date_key TEXT NOT NULL,
+                        schema_version INTEGER NOT NULL DEFAULT 1,
+                        web_presence_ms INTEGER NOT NULL DEFAULT 0,
+                        video_ms INTEGER NOT NULL DEFAULT 0,
+                        recall_entry_ms INTEGER NOT NULL DEFAULT 0,
+                        ai_qa_ms INTEGER NOT NULL DEFAULT 0,
+                        distraction_ms INTEGER NOT NULL DEFAULT 0,
+                        presence_ranges_json TEXT NOT NULL DEFAULT '[]',
+                        video_ranges_json TEXT NOT NULL DEFAULT '[]',
+                        recall_entry_ranges_json TEXT NOT NULL DEFAULT '[]',
+                        ai_qa_ranges_json TEXT NOT NULL DEFAULT '[]',
+                        is_partition_complete INTEGER NOT NULL DEFAULT 0,
                         effective_ms INTEGER NOT NULL DEFAULT 0,
                         watch_ms INTEGER NOT NULL DEFAULT 0,
                         compose_ms INTEGER NOT NULL DEFAULT 0,
@@ -1751,6 +1874,7 @@ class SQLiteAuthStore(_AuthStoreImpl):
                 # Older hosted auth databases may still carry the deprecated study-group tables.
                 # Drop them eagerly so upgraded installs converge on the friend-only schema.
                 self._ensure_user_service_prompt_assembly_mode_column(conn)
+                self._ensure_user_project_daily_study_stats_metric_columns(conn)
                 added_email_verified_column = self._ensure_users_email_verified_column(conn)
                 self._ensure_email_verification_tokens_table(conn)
                 if added_email_verified_column:
@@ -2960,6 +3084,17 @@ class SQLiteAuthStore(_AuthStoreImpl):
                             user_id,
                             project_id,
                             date_key,
+                            schema_version,
+                            web_presence_ms,
+                            video_ms,
+                            recall_entry_ms,
+                            ai_qa_ms,
+                            distraction_ms,
+                            presence_ranges_json,
+                            video_ranges_json,
+                            recall_entry_ranges_json,
+                            ai_qa_ranges_json,
+                            is_partition_complete,
                             effective_ms,
                             watch_ms,
                             compose_ms,
@@ -2977,6 +3112,12 @@ class SQLiteAuthStore(_AuthStoreImpl):
                         (str(user_id), entry.project_id, entry.date_key),
                     ).fetchone()
                     current = None if current_row is None else self._row_to_user_project_daily_study_stat(current_row)
+                    presence_ranges = _normalize_study_ranges([*(current.presence_ranges if current else ()), *entry.presence_ranges])
+                    video_ranges = _normalize_study_ranges([*(current.video_ranges if current else ()), *entry.video_ranges])
+                    recall_entry_ranges = _normalize_study_ranges(
+                        [*(current.recall_entry_ranges if current else ()), *entry.recall_entry_ranges]
+                    )
+                    ai_qa_ranges = _normalize_study_ranges([*(current.ai_qa_ranges if current else ()), *entry.ai_qa_ranges])
                     effective_ranges = _normalize_study_ranges(
                         [*(current.effective_ranges if current else ()), *entry.effective_ranges]
                     )
@@ -2988,11 +3129,41 @@ class SQLiteAuthStore(_AuthStoreImpl):
                         user_id=str(user_id),
                         project_id=entry.project_id,
                         date_key=entry.date_key,
+                        schema_version=max(current.schema_version if current else 1, entry.schema_version),
+                        web_presence_ms=_merge_study_metric_value(
+                            current.web_presence_ms if current else 0,
+                            entry.web_presence_ms,
+                            presence_ranges,
+                        ),
+                        video_ms=_merge_study_metric_value(current.video_ms if current else 0, entry.video_ms, video_ranges),
+                        recall_entry_ms=_merge_study_metric_value(
+                            current.recall_entry_ms if current else 0,
+                            entry.recall_entry_ms,
+                            recall_entry_ranges,
+                        ),
+                        ai_qa_ms=_merge_study_metric_value(current.ai_qa_ms if current else 0, entry.ai_qa_ms, ai_qa_ranges),
+                        distraction_ms=max(current.distraction_ms if current else 0, entry.distraction_ms),
+                        presence_ranges=presence_ranges,
+                        video_ranges=video_ranges,
+                        recall_entry_ranges=recall_entry_ranges,
+                        ai_qa_ranges=ai_qa_ranges,
+                        is_partition_complete=bool(
+                            entry.is_partition_complete or (current.is_partition_complete if current else False)
+                        ),
                         effective_ms=_merge_study_metric_value(current.effective_ms if current else 0, entry.effective_ms, effective_ranges),
-                        watch_ms=_merge_study_metric_value(current.watch_ms if current else 0, entry.watch_ms, watch_ranges),
-                        compose_ms=_merge_study_metric_value(current.compose_ms if current else 0, entry.compose_ms, compose_ranges),
+                        watch_ms=max(
+                            _merge_study_metric_value(current.watch_ms if current else 0, entry.watch_ms, watch_ranges),
+                            _merge_study_metric_value(current.video_ms if current else 0, entry.video_ms, video_ranges),
+                        ),
+                        compose_ms=max(
+                            _merge_study_metric_value(current.compose_ms if current else 0, entry.compose_ms, compose_ranges),
+                            _merge_study_metric_value(current.recall_entry_ms if current else 0, entry.recall_entry_ms, recall_entry_ranges),
+                        ),
                         review_ms=_merge_study_metric_value(current.review_ms if current else 0, entry.review_ms, review_ranges),
-                        qa_ms=_merge_study_metric_value(current.qa_ms if current else 0, entry.qa_ms, qa_ranges),
+                        qa_ms=max(
+                            _merge_study_metric_value(current.qa_ms if current else 0, entry.qa_ms, qa_ranges),
+                            _merge_study_metric_value(current.ai_qa_ms if current else 0, entry.ai_qa_ms, ai_qa_ranges),
+                        ),
                         effective_ranges=effective_ranges,
                         watch_ranges=watch_ranges,
                         compose_ranges=compose_ranges,
@@ -3006,6 +3177,17 @@ class SQLiteAuthStore(_AuthStoreImpl):
                             user_id,
                             project_id,
                             date_key,
+                            schema_version,
+                            web_presence_ms,
+                            video_ms,
+                            recall_entry_ms,
+                            ai_qa_ms,
+                            distraction_ms,
+                            presence_ranges_json,
+                            video_ranges_json,
+                            recall_entry_ranges_json,
+                            ai_qa_ranges_json,
+                            is_partition_complete,
                             effective_ms,
                             watch_ms,
                             compose_ms,
@@ -3018,12 +3200,23 @@ class SQLiteAuthStore(_AuthStoreImpl):
                             qa_ranges_json,
                             updated_at
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             merged.user_id,
                             merged.project_id,
                             merged.date_key,
+                            merged.schema_version,
+                            merged.web_presence_ms,
+                            merged.video_ms,
+                            merged.recall_entry_ms,
+                            merged.ai_qa_ms,
+                            merged.distraction_ms,
+                            json.dumps(merged.presence_ranges, ensure_ascii=False, separators=(",", ":")),
+                            json.dumps(merged.video_ranges, ensure_ascii=False, separators=(",", ":")),
+                            json.dumps(merged.recall_entry_ranges, ensure_ascii=False, separators=(",", ":")),
+                            json.dumps(merged.ai_qa_ranges, ensure_ascii=False, separators=(",", ":")),
+                            1 if merged.is_partition_complete else 0,
                             merged.effective_ms,
                             merged.watch_ms,
                             merged.compose_ms,
@@ -3064,6 +3257,17 @@ class SQLiteAuthStore(_AuthStoreImpl):
                 user_id,
                 project_id,
                 date_key,
+                schema_version,
+                web_presence_ms,
+                video_ms,
+                recall_entry_ms,
+                ai_qa_ms,
+                distraction_ms,
+                presence_ranges_json,
+                video_ranges_json,
+                recall_entry_ranges_json,
+                ai_qa_ranges_json,
+                is_partition_complete,
                 effective_ms,
                 watch_ms,
                 compose_ms,
@@ -5031,6 +5235,17 @@ class PostgresAuthStore(_AuthStoreImpl):
                             user_id,
                             project_id,
                             date_key,
+                            schema_version,
+                            web_presence_ms,
+                            video_ms,
+                            recall_entry_ms,
+                            ai_qa_ms,
+                            distraction_ms,
+                            presence_ranges_json,
+                            video_ranges_json,
+                            recall_entry_ranges_json,
+                            ai_qa_ranges_json,
+                            is_partition_complete,
                             effective_ms,
                             watch_ms,
                             compose_ms,
@@ -5048,6 +5263,12 @@ class PostgresAuthStore(_AuthStoreImpl):
                         (str(user_id), entry.project_id, entry.date_key),
                     ).fetchone()
                     current = None if current_row is None else self._row_to_user_project_daily_study_stat(current_row)
+                    presence_ranges = _normalize_study_ranges([*(current.presence_ranges if current else ()), *entry.presence_ranges])
+                    video_ranges = _normalize_study_ranges([*(current.video_ranges if current else ()), *entry.video_ranges])
+                    recall_entry_ranges = _normalize_study_ranges(
+                        [*(current.recall_entry_ranges if current else ()), *entry.recall_entry_ranges]
+                    )
+                    ai_qa_ranges = _normalize_study_ranges([*(current.ai_qa_ranges if current else ()), *entry.ai_qa_ranges])
                     effective_ranges = _normalize_study_ranges(
                         [*(current.effective_ranges if current else ()), *entry.effective_ranges]
                     )
@@ -5059,11 +5280,41 @@ class PostgresAuthStore(_AuthStoreImpl):
                         user_id=str(user_id),
                         project_id=entry.project_id,
                         date_key=entry.date_key,
+                        schema_version=max(current.schema_version if current else 1, entry.schema_version),
+                        web_presence_ms=_merge_study_metric_value(
+                            current.web_presence_ms if current else 0,
+                            entry.web_presence_ms,
+                            presence_ranges,
+                        ),
+                        video_ms=_merge_study_metric_value(current.video_ms if current else 0, entry.video_ms, video_ranges),
+                        recall_entry_ms=_merge_study_metric_value(
+                            current.recall_entry_ms if current else 0,
+                            entry.recall_entry_ms,
+                            recall_entry_ranges,
+                        ),
+                        ai_qa_ms=_merge_study_metric_value(current.ai_qa_ms if current else 0, entry.ai_qa_ms, ai_qa_ranges),
+                        distraction_ms=max(current.distraction_ms if current else 0, entry.distraction_ms),
+                        presence_ranges=presence_ranges,
+                        video_ranges=video_ranges,
+                        recall_entry_ranges=recall_entry_ranges,
+                        ai_qa_ranges=ai_qa_ranges,
+                        is_partition_complete=bool(
+                            entry.is_partition_complete or (current.is_partition_complete if current else False)
+                        ),
                         effective_ms=_merge_study_metric_value(current.effective_ms if current else 0, entry.effective_ms, effective_ranges),
-                        watch_ms=_merge_study_metric_value(current.watch_ms if current else 0, entry.watch_ms, watch_ranges),
-                        compose_ms=_merge_study_metric_value(current.compose_ms if current else 0, entry.compose_ms, compose_ranges),
+                        watch_ms=max(
+                            _merge_study_metric_value(current.watch_ms if current else 0, entry.watch_ms, watch_ranges),
+                            _merge_study_metric_value(current.video_ms if current else 0, entry.video_ms, video_ranges),
+                        ),
+                        compose_ms=max(
+                            _merge_study_metric_value(current.compose_ms if current else 0, entry.compose_ms, compose_ranges),
+                            _merge_study_metric_value(current.recall_entry_ms if current else 0, entry.recall_entry_ms, recall_entry_ranges),
+                        ),
                         review_ms=_merge_study_metric_value(current.review_ms if current else 0, entry.review_ms, review_ranges),
-                        qa_ms=_merge_study_metric_value(current.qa_ms if current else 0, entry.qa_ms, qa_ranges),
+                        qa_ms=max(
+                            _merge_study_metric_value(current.qa_ms if current else 0, entry.qa_ms, qa_ranges),
+                            _merge_study_metric_value(current.ai_qa_ms if current else 0, entry.ai_qa_ms, ai_qa_ranges),
+                        ),
                         effective_ranges=effective_ranges,
                         watch_ranges=watch_ranges,
                         compose_ranges=compose_ranges,
@@ -5077,6 +5328,17 @@ class PostgresAuthStore(_AuthStoreImpl):
                             user_id,
                             project_id,
                             date_key,
+                            schema_version,
+                            web_presence_ms,
+                            video_ms,
+                            recall_entry_ms,
+                            ai_qa_ms,
+                            distraction_ms,
+                            presence_ranges_json,
+                            video_ranges_json,
+                            recall_entry_ranges_json,
+                            ai_qa_ranges_json,
+                            is_partition_complete,
                             effective_ms,
                             watch_ms,
                             compose_ms,
@@ -5089,8 +5351,19 @@ class PostgresAuthStore(_AuthStoreImpl):
                             qa_ranges_json,
                             updated_at
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT(user_id, project_id, date_key) DO UPDATE SET
+                            schema_version = EXCLUDED.schema_version,
+                            web_presence_ms = EXCLUDED.web_presence_ms,
+                            video_ms = EXCLUDED.video_ms,
+                            recall_entry_ms = EXCLUDED.recall_entry_ms,
+                            ai_qa_ms = EXCLUDED.ai_qa_ms,
+                            distraction_ms = EXCLUDED.distraction_ms,
+                            presence_ranges_json = EXCLUDED.presence_ranges_json,
+                            video_ranges_json = EXCLUDED.video_ranges_json,
+                            recall_entry_ranges_json = EXCLUDED.recall_entry_ranges_json,
+                            ai_qa_ranges_json = EXCLUDED.ai_qa_ranges_json,
+                            is_partition_complete = EXCLUDED.is_partition_complete,
                             effective_ms = EXCLUDED.effective_ms,
                             watch_ms = EXCLUDED.watch_ms,
                             compose_ms = EXCLUDED.compose_ms,
@@ -5107,6 +5380,17 @@ class PostgresAuthStore(_AuthStoreImpl):
                             merged.user_id,
                             merged.project_id,
                             merged.date_key,
+                            merged.schema_version,
+                            merged.web_presence_ms,
+                            merged.video_ms,
+                            merged.recall_entry_ms,
+                            merged.ai_qa_ms,
+                            merged.distraction_ms,
+                            json.dumps(merged.presence_ranges, ensure_ascii=False, separators=(",", ":")),
+                            json.dumps(merged.video_ranges, ensure_ascii=False, separators=(",", ":")),
+                            json.dumps(merged.recall_entry_ranges, ensure_ascii=False, separators=(",", ":")),
+                            json.dumps(merged.ai_qa_ranges, ensure_ascii=False, separators=(",", ":")),
+                            merged.is_partition_complete,
                             merged.effective_ms,
                             merged.watch_ms,
                             merged.compose_ms,
@@ -5144,6 +5428,17 @@ class PostgresAuthStore(_AuthStoreImpl):
                 user_id,
                 project_id,
                 date_key,
+                schema_version,
+                web_presence_ms,
+                video_ms,
+                recall_entry_ms,
+                ai_qa_ms,
+                distraction_ms,
+                presence_ranges_json,
+                video_ranges_json,
+                recall_entry_ranges_json,
+                ai_qa_ranges_json,
+                is_partition_complete,
                 effective_ms,
                 watch_ms,
                 compose_ms,

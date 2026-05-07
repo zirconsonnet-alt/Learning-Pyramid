@@ -148,9 +148,30 @@ class StudyRangeRequest(BaseModel):
     endMs: int = Field(gt=0)
 
 
+class VideoWatchProgressRangeRequest(BaseModel):
+    startMs: int = Field(ge=0)
+    endMs: int = Field(gt=0)
+    durationMs: Optional[int] = Field(default=None, ge=0)
+
+
+class VideoWatchProgressCompletedRequest(BaseModel):
+    durationMs: int = Field(gt=0)
+
+
 class DailyStudyMetricEntryRequest(BaseModel):
     projectId: str = Field(min_length=1, max_length=200)
     dateKey: str = Field(min_length=10, max_length=10)
+    schemaVersion: int = Field(default=1, ge=1)
+    webPresenceMs: int = Field(default=0, ge=0)
+    videoMs: int = Field(default=0, ge=0)
+    recallEntryMs: int = Field(default=0, ge=0)
+    aiQaMs: int = Field(default=0, ge=0)
+    distractionMs: int = Field(default=0, ge=0)
+    presenceRanges: List[StudyRangeRequest] = Field(default_factory=list)
+    videoRanges: List[StudyRangeRequest] = Field(default_factory=list)
+    recallEntryRanges: List[StudyRangeRequest] = Field(default_factory=list)
+    aiQaRanges: List[StudyRangeRequest] = Field(default_factory=list)
+    isPartitionComplete: bool = False
     effectiveMs: int = Field(default=0, ge=0)
     watchMs: int = Field(default=0, ge=0)
     composeMs: int = Field(default=0, ge=0)

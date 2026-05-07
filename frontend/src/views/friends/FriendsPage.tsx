@@ -422,10 +422,10 @@ export function FriendsPage() {
               {friendProfileQ.data ? (
                 <>
                   <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                    <StatCard label="有效学习" value={formatDurationCompact(friendProfileQ.data.stats.effectiveMs)} detail="去重后的学习时长" />
-                    <StatCard label="内容接触" value={formatDurationCompact(friendProfileQ.data.stats.watchMs)} />
-                    <StatCard label="复述点构建" value={formatDurationCompact(friendProfileQ.data.stats.composeMs)} />
-                    <StatCard label="复习时长" value={formatDurationCompact(friendProfileQ.data.stats.reviewMs)} />
+                    <StatCard label="活跃学习" value={formatDurationCompact(friendProfileQ.data.stats.effectiveMs)} detail="兼容历史学习统计" />
+                    <StatCard label="视频观看" value={formatDurationCompact(friendProfileQ.data.stats.watchMs)} />
+                    <StatCard label="复述点录入" value={formatDurationCompact(friendProfileQ.data.stats.composeMs)} />
+                    <StatCard label="复习用时" value={formatDurationCompact(friendProfileQ.data.stats.reviewMs)} />
                   </div>
                   <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                     <StatCard label="AI 问答" value={formatDurationCompact(friendProfileQ.data.stats.qaMs)} />
@@ -567,7 +567,7 @@ function FriendLeaderboard(props: {
                 <tr className="text-left text-xs uppercase tracking-[0.18em] text-[color:var(--theme-subtle-text)]">
                   <th className="pb-3 pr-3">排名</th>
                   <th className="pb-3 pr-3">好友</th>
-                  <th className="pb-3 pr-3">有效学习</th>
+                  <th className="pb-3 pr-3">活跃学习</th>
                   <th className="pb-3 pr-3">学习动作</th>
                   <th className="pb-3 pr-3">活跃天数</th>
                   <th className="pb-3">上次学习</th>

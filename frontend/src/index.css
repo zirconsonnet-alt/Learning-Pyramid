@@ -1456,6 +1456,24 @@
     height: 100%;
   }
 
+  .lp-showcase-step {
+    display: flex;
+    min-height: 100%;
+    flex-direction: column;
+    text-decoration: none;
+    color: inherit;
+    transition:
+      transform 0.2s ease,
+      border-color 0.2s ease,
+      box-shadow 0.2s ease;
+  }
+
+  .lp-showcase-step:hover {
+    transform: translateY(-2px);
+    border-color: color-mix(in srgb, var(--lp-primary) 28%, var(--lp-line));
+    box-shadow: 0 24px 58px rgb(73 53 31 / 14%);
+  }
+
   .lp-showcase-feature-icon,
   .lp-showcase-step-no {
     width: 48px;
@@ -1486,6 +1504,25 @@
     margin: 0;
     color: var(--lp-muted);
     font-size: 15px;
+  }
+
+  .lp-showcase-step span {
+    display: block;
+    margin-top: 18px;
+    color: var(--lp-ink);
+    font-size: 15px;
+    font-weight: 650;
+    line-height: 1.55;
+  }
+
+  .lp-showcase-step strong {
+    display: inline-flex;
+    width: fit-content;
+    margin-top: auto;
+    padding-top: 18px;
+    color: var(--lp-primary);
+    font-size: 14px;
+    font-weight: 750;
   }
 
   .lp-showcase-method-card-head {

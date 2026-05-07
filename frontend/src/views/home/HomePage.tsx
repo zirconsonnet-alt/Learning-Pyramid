@@ -21,7 +21,6 @@ import carouselTakeNotes from "@/assets/carousel-take-notes.webp"
 import methodFocusCompression from "@/assets/method-focus-compression.webp"
 import methodInterleavedReview from "@/assets/method-interleaved-review.webp"
 import methodLayeredReview from "@/assets/method-layered-review.webp"
-import { startGuideWalkthrough } from "@/ui/guideWalkthrough/guideWalkthroughController"
 import { usePageMeta } from "@/ui/seo/usePageMeta"
 import { ShowcaseFooter, ShowcaseSiteHeader, useShowcaseEntryPaths } from "@/views/home/ShowcaseChrome"
 
@@ -49,23 +48,31 @@ const mechanismCards = [
 const onboardingSteps = [
   {
     index: "1",
-    title: "创建学科",
-    body: "先在项目页新建一门学科，例如机器学习、英语听力或操作系统。创建完成后直接进入项目，而不是停在列表页。",
+    title: "如何创建学科项目",
+    body: "从新建学科、进入项目，到绑定并导入本地学习材料。",
+    label: "创建学科、绑定目录并同步内容",
+    to: "/guide",
   },
   {
     index: "2",
-    title: "绑定并授权目录",
-    body: "到项目设置里选择并授权本地素材目录。一个项目可以理解为绑定到一个你自己管理的视频目录。",
+    title: "如何学习复习",
+    body: "进入工作台后，录入复述点、提交学习并完成复习闭环。",
+    label: "进入工作台录入复述点并完成复习",
+    to: "/guide?doc=study-review",
   },
   {
     index: "3",
-    title: "导入内容目录",
-    body: "授权之后再点击“导入内容目录”。系统会识别目录层级、重建学习对象树，并为内容实例建立索引。",
+    title: "如何使用 AI 问答",
+    body: "确认目录、学习对象树和第三方 LLM API 后，进入项目 AI 问答开始对话。",
+    label: "配置 LLM 后围绕学习对象对话",
+    to: "/guide?doc=use-ai-chat",
   },
   {
     index: "4",
-    title: "回工作台选内容开始学习",
-    body: "回到工作台，先从左侧选中当前视频，再添加复述点并提交学习；之后按系统排出的复习链手写答案，必要时跳过，并完成“记得 / 不记得”判断，先跑通最小闭环。",
+    title: "如何使用番茄钟",
+    body: "开启番茄钟、设定番茄计划，并在番茄开始后登录网页进入工作台。",
+    label: "设定计划并在学习时间进入网页",
+    to: "/guide?doc=use-pomodoro",
   },
 ] as const
 
@@ -221,7 +228,7 @@ const graduateReasons = [
     title: "用它看视频有什么不同？",
     intro: "不要等到完全理解系统再开始。先用一门最焦虑、最容易遗忘的科目跑通一轮，你就会知道它到底适不适合你。",
     ctaLabel: "立即体验",
-    guideDocSlug: "study-review",
+    ctaHref: "#onboarding",
     points: [
       {
         title: "微休息神经重放",
@@ -298,7 +305,7 @@ export function HomePage() {
           <div className="lp-showcase-container">
             <div className="lp-showcase-carousel-shell">
               <div className="lp-showcase-carousel-header">
-                <h2>我是考研大学生，给我 4 个选择 LearningPyramid 的理由</h2>
+                <h2>速成？期末？考研？给我 4 个选择 LearningPyramid 的理由</h2>
               </div>
 
               <div
@@ -353,13 +360,9 @@ export function HomePage() {
                       </div>
                       {"ctaLabel" in item ? (
                         <div className="lp-showcase-carousel-slide-actions">
-                          <button
-                            type="button"
-                            className="lp-showcase-carousel-slide-action lp-showcase-carousel-slide-action-member"
-                            onClick={() => startGuideWalkthrough(item.guideDocSlug)}
-                          >
+                          <Link to={item.ctaHref} className="lp-showcase-carousel-slide-action lp-showcase-carousel-slide-action-member">
                             {item.ctaLabel}
-                          </button>
+                          </Link>
                         </div>
                       ) : null}
                     </article>
@@ -406,16 +409,17 @@ export function HomePage() {
         <section id="onboarding" className="lp-showcase-section">
           <div className="lp-showcase-container">
             <div className="lp-showcase-section-head">
-              <h2>上手路径</h2>
-              <p>第一次使用先照着这 4 步走：创建学科，绑定并授权目录，导入内容，再回工作台选内容开始学习。</p>
+              <h2>快速上手</h2>
             </div>
             <div className="lp-showcase-steps-grid">
               {onboardingSteps.map((item) => (
-                <article key={item.index} className="lp-showcase-step">
+                <Link key={item.index} to={item.to} className="lp-showcase-step">
                   <div className="lp-showcase-step-no">{item.index}</div>
                   <h3>{item.title}</h3>
                   <p>{item.body}</p>
-                </article>
+                  <span>{item.label}</span>
+                  <strong>查看指引</strong>
+                </Link>
               ))}
             </div>
           </div>

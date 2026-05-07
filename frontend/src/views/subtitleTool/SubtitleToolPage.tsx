@@ -45,7 +45,7 @@ export function SubtitleToolPage() {
     : !recommendedDownload && !publicDownloadsQ.isLoading
       ? publicDownloadsQ.data?.generatedAt
         ? "如果你已经完成打包，请确认 ZIP 文件已经跟着 catalog.json 一起放到服务端可读目录。"
-        : "如果你是自托管部署，默认同步会跳过 public-downloads/。需要用 -IncludePublicDownloads 重新同步，或把 PLM_PUBLIC_DOWNLOADS_DIR 指到现有构建目录。"
+        : ""
       : ""
   const downloadFacts = [
     recommendedDownload?.version,

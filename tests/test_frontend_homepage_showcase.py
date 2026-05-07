@@ -17,6 +17,9 @@ def test_homepage_carousel_no_longer_renders_intro_subtitle() -> None:
 
 def test_homepage_carousel_uses_requested_main_titles() -> None:
     source = HOME_PAGE.read_text(encoding="utf-8")
+    assert "<h2>速成？期末？考研？给我 4 个选择 LearningPyramid 的理由</h2>" in source
+    assert "<h2>我是考研大学生，给我 4 个选择 LearningPyramid 的理由</h2>" not in source
+
     section_start = source.index("const graduateReasons = [")
     section_end = source.index("] as const", section_start)
     section = source[section_start:section_end]
@@ -118,6 +121,47 @@ def test_homepage_method_cards_use_requested_short_body_copy() -> None:
     assert 'className="lp-showcase-method-card-copy"' in render_section
     assert ".lp-showcase-method-card-copy p" in css
     assert "align-self: center;" in css
+
+
+def test_homepage_onboarding_path_links_to_four_guide_documents() -> None:
+    source = HOME_PAGE.read_text(encoding="utf-8")
+    chrome_source = SHOWCASE_CHROME.read_text(encoding="utf-8")
+    section_start = source.index("const onboardingSteps = [")
+    section_end = source.index("] as const", section_start)
+    data_section = source[section_start:section_end]
+    render_start = source.index('id="onboarding"')
+    render_end = source.index('id="membership"', render_start)
+    render_section = source[render_start:render_end]
+
+    expected_guides = [
+        ('title: "如何创建学科项目"', 'to: "/guide"', 'label: "创建学科、绑定目录并同步内容"'),
+        ('title: "如何学习复习"', 'to: "/guide?doc=study-review"', 'label: "进入工作台录入复述点并完成复习"'),
+        ('title: "如何使用 AI 问答"', 'to: "/guide?doc=use-ai-chat"', 'label: "配置 LLM 后围绕学习对象对话"'),
+        ('title: "如何使用番茄钟"', 'to: "/guide?doc=use-pomodoro"', 'label: "设定计划并在学习时间进入网页"'),
+    ]
+
+    last_position = -1
+    for title, to, label in expected_guides:
+        position = data_section.index(title)
+        assert position > last_position
+        last_position = position
+        assert to in data_section
+        assert label in data_section
+
+    assert data_section.count("to: ") == 4
+    assert 'title: "创建学科"' not in data_section
+    assert 'title: "绑定并授权目录"' not in data_section
+    assert 'title: "导入内容目录"' not in data_section
+    assert 'title: "回工作台选内容开始学习"' not in data_section
+
+    assert "<h2>快速上手</h2>" in render_section
+    assert "<h2>上手路径</h2>" not in render_section
+    assert 'buildHomeSectionHref("onboarding", homeSectionPrefix), label: "快速上手"' in chrome_source
+    assert 'label: "上手路径"' not in chrome_source
+    assert "第一次使用先照着这 4 步走" not in render_section
+    assert "<Link" in render_section
+    assert "to={item.to}" in render_section
+    assert "查看指引" in render_section
 
 
 def test_homepage_problem_cards_use_short_titles_and_previous_titles_as_symptoms() -> None:
@@ -384,7 +428,8 @@ def test_homepage_featured_fourth_slide_uses_requested_copy_and_single_guide_but
         assert intro in section
 
     assert section.count('ctaLabel: "立即体验"') == 1
-    assert section.count('guideDocSlug: "study-review"') == 1
+    assert section.count('ctaHref: "#onboarding"') == 1
+    assert "guideDocSlug" not in section
     assert "memberFeature: true" not in section
 
     assert 'title: "现在开始，最合适的方式是什么"' not in section
@@ -393,9 +438,10 @@ def test_homepage_featured_fourth_slide_uses_requested_copy_and_single_guide_but
     assert 'title: "看课时边学边留复述点"' not in section
     assert 'title: "学完后立刻进入第一次复习"' not in section
 
-    assert 'import { startGuideWalkthrough } from "@/ui/guideWalkthrough/guideWalkthroughController"' in source
+    assert 'import { startGuideWalkthrough } from "@/ui/guideWalkthrough/guideWalkthroughController"' not in source
     assert 'startGuideWalkthrough(point.guideDocSlug)' not in source
-    assert 'startGuideWalkthrough(item.guideDocSlug)' in source
+    assert 'startGuideWalkthrough(item.guideDocSlug)' not in source
+    assert '<Link to={item.ctaHref}' in source
     assert "lp-showcase-carousel-slide-actions" in source
     assert "lp-showcase-carousel-slide-action" in source
     assert ".lp-showcase-carousel-slide-actions" in css

@@ -325,10 +325,9 @@ def test_pomodoro_overview_can_switch_to_statistics_panel() -> None:
     assert "recentPomodoroRecords" in statistics_panel
 
 
-def test_pomodoro_focus_completion_records_activity_and_feeds_workbench_stats() -> None:
+def test_pomodoro_focus_completion_records_schedule_marker_only() -> None:
     activity_store_source = POMODORO_ACTIVITY_STORE.read_text(encoding="utf-8")
     app_shell_source = APP_SHELL.read_text(encoding="utf-8")
-    workbench_stats_source = WORKBENCH_DAILY_STATS.read_text(encoding="utf-8")
     page_source = POMODORO_PAGE.read_text(encoding="utf-8")
 
     assert "export type PomodoroActivityRecord" in activity_store_source
@@ -336,13 +335,8 @@ def test_pomodoro_focus_completion_records_activity_and_feeds_workbench_stats() 
     assert "listPomodoroActivityRecords" in activity_store_source
     assert 'kind: "pomodoro"' in activity_store_source
     assert 'pomodoroLabel: `番茄 ${input.pomodoroIndex}`' in activity_store_source
-    assert "recordEffectiveStudyActivity(projectId, normalized.startAtMs, normalized.endAtMs)" in activity_store_source
-
-    assert "recordEffectiveStudyActivity" in workbench_stats_source
-    assert "watchMs: current.watchMs" in workbench_stats_source
-    assert "composeMs: current.composeMs" in workbench_stats_source
-    assert "reviewMs: current.reviewMs" in workbench_stats_source
-    assert "qaMs: current.qaMs" in workbench_stats_source
+    assert "recordEffectiveStudyActivity" not in activity_store_source
+    assert "recordWebPresenceActivity" not in activity_store_source
 
     assert "recordPomodoroActivity({" in app_shell_source
     assert "completedPomodoroSegmentKeyRef" in app_shell_source
@@ -351,6 +345,40 @@ def test_pomodoro_focus_completion_records_activity_and_feeds_workbench_stats() 
 
     assert "listPomodoroActivityRecords()" in page_source
     assert "番茄记录" in page_source
+
+
+def test_pomodoro_statistics_slice_workbench_metrics_by_plan_and_pomodoro() -> None:
+    workbench_stats_source = WORKBENCH_DAILY_STATS.read_text(encoding="utf-8")
+    page_source = POMODORO_PAGE.read_text(encoding="utf-8")
+
+    assert "sliceDailyWebPresenceMetrics" in workbench_stats_source
+    assert "loadPomodoroSegmentMetricSummary" in workbench_stats_source
+    assert "buildPomodoroPlanMetricSummaries" in page_source
+    assert "pomodoroPlanMetricSummaries" in page_source
+    assert "segments: PomodoroSegmentMetricSummary[]" in page_source
+    assert "segment.pomodoroIndex" in page_source
+    assert "planId: plan.id" in page_source
+
+
+def test_pomodoro_statistics_show_absence_rates_and_visual_breakdown() -> None:
+    page_source = POMODORO_PAGE.read_text(encoding="utf-8")
+    workbench_stats_source = WORKBENCH_DAILY_STATS.read_text(encoding="utf-8")
+
+    assert "absenceMs = Math.max(0, scheduledFocusMs - metrics.webPresenceMs)" in workbench_stats_source
+    assert "activeLearningMs = metrics.videoMs + metrics.recallEntryMs + metrics.reviewMs + metrics.aiQaMs" in workbench_stats_source
+    assert "attendanceRate = scheduledFocusMs > 0 ? metrics.webPresenceMs / scheduledFocusMs : 0" in workbench_stats_source
+    assert "effectiveLearningRate = scheduledFocusMs > 0 ? activeLearningMs / scheduledFocusMs : 0" in workbench_stats_source
+    assert "MetricDonut" in page_source
+    assert "data-pomodoro-metric-donut" in page_source
+    assert "缺席时间" in page_source
+    assert "出勤率" in page_source
+    assert "有效学习率" in page_source
+    assert "网页驻留" in page_source
+    assert "视频观看" in page_source
+    assert "复述点录入" in page_source
+    assert "复习用时" in page_source
+    assert "AI 问答" in page_source
+    assert "走神时间" in page_source
 
 
 def test_pomodoro_focus_locks_other_project_workbenches_without_auto_redirect() -> None:

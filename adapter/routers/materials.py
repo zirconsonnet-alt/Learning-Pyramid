@@ -4,7 +4,13 @@ from fastapi import APIRouter, Depends, Query, Request
 
 from adapter.auth import require_request_auth_user
 from adapter.deps import get_api
-from adapter.mappers import asr_artifact_to_dto, instance_to_dto, learning_object_node_to_dto, recall_point_to_dto
+from adapter.mappers import (
+    asr_artifact_to_dto,
+    instance_to_dto,
+    learning_object_node_to_dto,
+    recall_point_to_dto,
+    video_watch_progress_to_dto,
+)
 from adapter.schemas import (
     AddInstanceRequest,
     AddLearningObjectContainerRequest,
@@ -14,6 +20,8 @@ from adapter.schemas import (
     ImportBrowserDirectoryRequest,
     InitializeBookLearningObjectsRequest,
     InitializeBookLearningObjectsFromMaterialRequest,
+    VideoWatchProgressCompletedRequest,
+    VideoWatchProgressRangeRequest,
 )
 from backend.models.types import InstanceId, LearningObjectNodeId
 from backend.models.types import RecallPointId
@@ -142,6 +150,49 @@ def import_learning_objects_from_baidu_netdisk(
 def list_missing_instances(projectId: str, api: SystemAPI = Depends(get_api)) -> dict:
     ids = api.list_missing_instances(projectId)  # type: ignore[arg-type]
     return {"ok": True, "data": {"instanceIds": [str(x) for x in ids]}}
+
+
+@router.get("/projects/{projectId}/video-watch-progress")
+def list_video_watch_progress(
+    projectId: str,
+    instanceIds: list[str] | None = Query(default=None),
+    api: SystemAPI = Depends(get_api),
+) -> dict:
+    ids = None if instanceIds is None else tuple(InstanceId(item) for item in instanceIds)
+    items = api.list_video_watch_progress(projectId, instance_ids=ids)  # type: ignore[arg-type]
+    return {"ok": True, "data": {str(item.instance_id): video_watch_progress_to_dto(item) for item in items}}
+
+
+@router.post("/projects/{projectId}/instances/{instanceId}/video-watch-progress/ranges")
+def record_video_watch_progress_range(
+    projectId: str,
+    instanceId: str,
+    req: VideoWatchProgressRangeRequest,
+    api: SystemAPI = Depends(get_api),
+) -> dict:
+    item = api.record_video_watch_progress_range(  # type: ignore[arg-type]
+        projectId,
+        InstanceId(instanceId),
+        start_ms=req.startMs,
+        end_ms=req.endMs,
+        duration_ms=req.durationMs,
+    )
+    return {"ok": True, "data": video_watch_progress_to_dto(item)}
+
+
+@router.post("/projects/{projectId}/instances/{instanceId}/video-watch-progress/completed")
+def mark_video_watch_progress_completed(
+    projectId: str,
+    instanceId: str,
+    req: VideoWatchProgressCompletedRequest,
+    api: SystemAPI = Depends(get_api),
+) -> dict:
+    item = api.mark_video_watch_progress_completed(  # type: ignore[arg-type]
+        projectId,
+        InstanceId(instanceId),
+        duration_ms=req.durationMs,
+    )
+    return {"ok": True, "data": video_watch_progress_to_dto(item)}
 
 
 @router.get("/projects/{projectId}/instances/{instanceId}/recall-points")

@@ -15,7 +15,6 @@ import { Input } from "@/ui/components/ui/input"
 import { useEditLearningTask, useEditLearningTaskNode, useLearningTask, useLearningTaskNode, useLearningTaskNodeBinding } from "@/ui/queries/learningTasks"
 import { useInstances } from "@/ui/queries/workbench"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
-import { buildAiChatPath } from "@/views/ai/chatRouting"
 import { formatLearningTaskNodeDisplayTitle } from "@/views/learningTasks/displayTitle"
 import { RecallPointListCard } from "@/views/recallPoints/components/RecallPointListCard"
 import { NodeExportCard } from "@/views/shared/NodeExportCard"
@@ -128,7 +127,7 @@ export function LearningTaskNodePage() {
         />
       ) : null}
       <Button asChild className="w-full">
-        <Link to={buildAiChatPath(pid, { kind: "task", nodeId: nid })}>
+        <Link to={`/p/${pid}/ai-chat`}>
           <Sparkles className="h-4 w-4" />
           AI问答
         </Link>

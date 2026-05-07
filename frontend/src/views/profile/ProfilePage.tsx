@@ -51,7 +51,7 @@ type LearningMetricOption = {
 const learningMetricOptions: LearningMetricOption[] = [
   {
     value: "effective",
-    label: "有效学习",
+    label: "活跃学习",
     stroke: "#2563eb",
     surface: "#eff6ff",
     fillStart: "rgba(37,99,235,0.22)",
@@ -59,7 +59,7 @@ const learningMetricOptions: LearningMetricOption[] = [
   },
   {
     value: "watch",
-    label: "内容接触",
+    label: "视频观看",
     stroke: "#0f766e",
     surface: "#ecfeff",
     fillStart: "rgba(15,118,110,0.18)",
@@ -67,7 +67,7 @@ const learningMetricOptions: LearningMetricOption[] = [
   },
   {
     value: "compose",
-    label: "复述点构建",
+    label: "复述点录入",
     stroke: "#ef4444",
     surface: "#fef2f2",
     fillStart: "rgba(239,68,68,0.2)",
@@ -75,7 +75,7 @@ const learningMetricOptions: LearningMetricOption[] = [
   },
   {
     value: "review",
-    label: "复习时长",
+    label: "复习用时",
     stroke: "#14b8a6",
     surface: "#ecfeff",
     fillStart: "rgba(20,184,166,0.2)",

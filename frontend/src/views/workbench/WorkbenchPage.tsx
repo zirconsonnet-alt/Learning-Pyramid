@@ -5,7 +5,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 
 import { getBaseUrl } from "@/ui/api/http"
 import { ApiError } from "@/ui/api/http"
-import { listRecallPointsByInstance } from "@/ui/api/instances"
+import { fetchVideoWatchProgressMap, listRecallPointsByInstance, type VideoWatchProgress } from "@/ui/api/instances"
 import type { Instance } from "@/ui/api/instances"
 import { getInstancePlaybackDescriptor } from "@/ui/api/media"
 import type { LearningTaskNode } from "@/ui/api/learningTaskNodes"
@@ -16,7 +16,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/car
 import { projectTypeRequiresLearningObjectTree, projectTypeUsesResolvableCourseAnchor } from "@/ui/projectTypes"
 import { buildProjectSettingsPath } from "@/ui/projectPaths"
 import { resolveProjectFile, useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
-import { useAuditLogEvents } from "@/ui/queries/auditLog"
 import { useLearningTaskNodes } from "@/ui/queries/learningTasks"
 import { useSubjectContext } from "@/ui/queries/subjects"
 import { useSystemCapabilities } from "@/ui/queries/system"
@@ -32,9 +31,9 @@ import { useAppStore } from "@/ui/store/appStore"
 import { getLocalDateKey, listDailyStudyMetricEntries, loadDailyWorkbenchStats } from "@/ui/store/workbenchDailyStats"
 import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { syncStudyMetricsSnapshot } from "@/ui/studyMetricsSync"
-import { createStudyPresenceTracker, loadDailyProjectStudyPresence } from "@/ui/store/studyPresenceStore"
+import { createStudyPresenceTracker } from "@/ui/store/studyPresenceStore"
 import { loadVideoDurationMap, saveVideoDurationMs } from "@/ui/store/videoDurations"
-import { loadVideoWatchCoverageMap } from "@/ui/store/videoWatchCoverage"
+import { loadVideoWatchProgressMap } from "@/ui/store/videoWatchProgress"
 import { useWorkbenchStore } from "@/ui/store/workbenchStore"
 import { cn } from "@/ui/utils"
 import { ComposePane } from "@/views/workbench/components/ComposePane"
@@ -67,25 +66,10 @@ function formatDurationCompact(ms: number) {
   return `${hours}h ${minutes}m`
 }
 
-function formatPercent(value: number) {
-  if (!Number.isFinite(value)) return "0%"
-  return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`
-}
-
 function getDateKeyDaysAgo(days: number, from = new Date()) {
   const next = new Date(from)
   next.setDate(next.getDate() - Math.max(0, Math.floor(days)))
   return getLocalDateKey(next)
-}
-
-function parseAuditPayloadCount(payload: string, key: string) {
-  try {
-    const parsed = JSON.parse(payload) as Record<string, unknown>
-    const value = parsed[key]
-    return typeof value === "number" && Number.isFinite(value) ? value : 0
-  } catch {
-    return 0
-  }
 }
 
 function isRelativeMaterialId(materialId: string) {
@@ -249,7 +233,6 @@ export function WorkbenchPage() {
   const learningTaskNodesQ = useLearningTaskNodes(pid)
   const queueQ = useQueue(pid)
   const layersQ = useLayers(pid)
-  const auditLogQ = useAuditLogEvents(pid)
   const rollUpM = useManualRollUp(pid)
   const projectConfigQ = useProjectConfig(pid)
   const subjectContextQ = useSubjectContext(pid, !!pid)
@@ -299,10 +282,10 @@ export function WorkbenchPage() {
     return map
   }, [learningTaskNodesQ.data])
   const [todayStats, setTodayStats] = useState(() => loadDailyWorkbenchStats(pid))
-  const [todayPresenceStats, setTodayPresenceStats] = useState(() => loadDailyProjectStudyPresence(pid))
   const [studyEstimateRevision, setStudyEstimateRevision] = useState(0)
   const [videoDurationByInstanceId, setVideoDurationByInstanceId] = useState<Record<string, number>>({})
   const [videoWatchedMsByInstanceId, setVideoWatchedMsByInstanceId] = useState<Record<string, number>>({})
+  const [remoteVideoWatchProgressByInstanceId, setRemoteVideoWatchProgressByInstanceId] = useState<Record<string, VideoWatchProgress>>({})
   const [durationProbeAttemptedByInstanceId, setDurationProbeAttemptedByInstanceId] = useState<Record<string, true>>({})
   const [durationProbeInFlightByInstanceId, setDurationProbeInFlightByInstanceId] = useState<Record<string, true>>({})
   const [recallPointCountByInstanceId, setRecallPointCountByInstanceId] = useState<Record<string, number>>({})
@@ -314,10 +297,8 @@ export function WorkbenchPage() {
   useEffect(() => {
     if (!pid) return
     setTodayStats(loadDailyWorkbenchStats(pid))
-    setTodayPresenceStats(loadDailyProjectStudyPresence(pid))
     const timer = window.setInterval(() => {
       setTodayStats(loadDailyWorkbenchStats(pid))
-      setTodayPresenceStats(loadDailyProjectStudyPresence(pid))
     }, 1000)
     return () => window.clearInterval(timer)
   }, [pid])
@@ -337,7 +318,7 @@ export function WorkbenchPage() {
       window.removeEventListener("wheel", touch)
       window.removeEventListener("scroll", touch)
       tracker.stop()
-      setTodayPresenceStats(loadDailyProjectStudyPresence(pid))
+      setTodayStats(loadDailyWorkbenchStats(pid))
     }
   }, [pid])
 
@@ -402,22 +383,6 @@ export function WorkbenchPage() {
     }
   }, [capabilitiesQ.data?.authEnabled, estimateDateFrom, pid, todayDateKey])
 
-  const todayAuditStats = useMemo(() => {
-    let submittedRecallPoints = 0
-    let reviewedRecallPoints = 0
-    for (const event of auditLogQ.data ?? []) {
-      const occurredAt = new Date(event.occurredAt)
-      if (Number.isNaN(occurredAt.getTime()) || getLocalDateKey(occurredAt) !== todayDateKey) continue
-      if (event.kind === "SUBMIT_LEARNING_TASK") {
-        submittedRecallPoints += parseAuditPayloadCount(event.payload, "itemsCount")
-      }
-      if (event.kind === "EXECUTOR_COMMIT_REVIEW_TASK") {
-        reviewedRecallPoints += parseAuditPayloadCount(event.payload, "canRecallLen")
-      }
-    }
-    return { submittedRecallPoints, reviewedRecallPoints }
-  }, [auditLogQ.data, todayDateKey])
-
   useEffect(() => {
     if (!pid) return
     if (!instancesQ.data) return
@@ -446,6 +411,7 @@ export function WorkbenchPage() {
     if (!pid) {
       setVideoDurationByInstanceId({})
       setVideoWatchedMsByInstanceId({})
+      setRemoteVideoWatchProgressByInstanceId({})
       return
     }
     const instanceIds = (instancesQ.data ?? []).map((item) => item.instanceId)
@@ -457,20 +423,46 @@ export function WorkbenchPage() {
     )
     const nextDurationByInstanceId = { ...stored, ...fromInstances }
     setVideoDurationByInstanceId(nextDurationByInstanceId)
-    setVideoWatchedMsByInstanceId(loadVideoWatchCoverageMap(pid, instanceIds, nextDurationByInstanceId))
-  }, [instancesQ.data, pid])
+    setVideoWatchedMsByInstanceId(loadVideoWatchProgressMap(pid, instanceIds, nextDurationByInstanceId, remoteVideoWatchProgressByInstanceId))
+  }, [instancesQ.data, pid, remoteVideoWatchProgressByInstanceId])
 
   useEffect(() => {
     if (!pid) return
     const instanceIds = (instancesQ.data ?? []).map((item) => item.instanceId)
 
     const refreshWatchCoverage = () => {
-      setVideoWatchedMsByInstanceId(loadVideoWatchCoverageMap(pid, instanceIds, videoDurationByInstanceId))
+      setVideoWatchedMsByInstanceId(
+        loadVideoWatchProgressMap(pid, instanceIds, videoDurationByInstanceId, remoteVideoWatchProgressByInstanceId),
+      )
     }
 
     refreshWatchCoverage()
     const timer = window.setInterval(refreshWatchCoverage, 1000)
     return () => window.clearInterval(timer)
+  }, [instancesQ.data, pid, remoteVideoWatchProgressByInstanceId, videoDurationByInstanceId])
+
+  useEffect(() => {
+    if (!pid) return
+    const instanceIds = (instancesQ.data ?? []).map((item) => item.instanceId)
+    if (instanceIds.length <= 0) {
+      setRemoteVideoWatchProgressByInstanceId({})
+      return
+    }
+    const controller = new AbortController()
+    void (async () => {
+      try {
+        const remoteProgress = await fetchVideoWatchProgressMap(pid, instanceIds, {
+          signal: controller.signal,
+          timeoutMs: 90_000,
+        })
+        if (controller.signal.aborted) return
+        setRemoteVideoWatchProgressByInstanceId(remoteProgress)
+        setVideoWatchedMsByInstanceId(loadVideoWatchProgressMap(pid, instanceIds, videoDurationByInstanceId, remoteProgress))
+      } catch {
+        // Keep local watch coverage usable when remote progress sync is unavailable.
+      }
+    })()
+    return () => controller.abort()
   }, [instancesQ.data, pid, videoDurationByInstanceId])
 
   useEffect(() => {
@@ -691,10 +683,6 @@ export function WorkbenchPage() {
       value,
     }
   }, [studyEstimate, usesResolvableCourseAnchor])
-  const todayStudyPresenceMs = Math.max(todayPresenceStats.presenceMs, todayStats.effectiveMs)
-  const blankPresenceMs = Math.max(0, todayStudyPresenceMs - todayStats.effectiveMs)
-  const focusRatio = todayStudyPresenceMs > 0 ? todayStats.effectiveMs / todayStudyPresenceMs : 0
-
   async function onManualRollUp(layerIndex: number) {
     if (queueHasGate) {
       showInfoFeedback("当前无法上推", "还有待完成的复习门禁，请先完成复习再继续层级推进。")
@@ -1021,7 +1009,7 @@ export function WorkbenchPage() {
                   <div>
                     <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">今日回看</div>
                     <div className="mt-1 text-[15px] font-semibold text-[color:var(--theme-soft-text-strong)]">
-                      有效学习 {formatDurationCompact(todayStats.effectiveMs)}
+                      网页驻留 {formatDurationCompact(todayStats.webPresenceMs)}
                     </div>
                   </div>
                   <span className="text-xs font-medium text-primary">{sidebarStatsExpanded ? "收起" : "展开"}</span>
@@ -1029,28 +1017,17 @@ export function WorkbenchPage() {
                 {sidebarStatsExpanded ? (
                   <div className="mt-3 border-t border-border/60 pt-2">
                     <div className="divide-y divide-border/60">
-                      <StatusMetricRow label="有效学习时长" value={formatDurationCompact(todayStats.effectiveMs)} emphasize />
-                      <StatusMetricRow label="学习驻留" value={formatDurationCompact(todayStudyPresenceMs)} />
-                      <StatusMetricRow label="走神时长" value={formatDurationCompact(blankPresenceMs)} />
-                      <StatusMetricRow label="客观专注率" value={todayStudyPresenceMs > 0 ? formatPercent(focusRatio) : "继续学习后生成"} emphasize={todayStudyPresenceMs > 0} />
-                      <StatusMetricRow label="内容接触" value={formatDurationCompact(todayStats.watchMs)} />
-                      <StatusMetricRow label="复述点构建" value={formatDurationCompact(todayStats.composeMs)} />
-                      <StatusMetricRow label="复习时长" value={formatDurationCompact(todayStats.reviewMs)} />
-                      <StatusMetricRow label="AI 问答" value={formatDurationCompact(todayStats.qaMs)} />
-                      <StatusMetricRow
-                        label="录入复述点数"
-                        value={auditLogQ.isLoading ? "..." : `${todayAuditStats.submittedRecallPoints}`}
-                      />
-                      <StatusMetricRow
-                        label="复习复述点数"
-                        value={auditLogQ.isLoading ? "..." : `${todayAuditStats.reviewedRecallPoints}`}
-                      />
+                      <StatusMetricRow label="网页驻留" value={formatDurationCompact(todayStats.webPresenceMs)} emphasize />
+                      <StatusMetricRow label="视频观看" value={formatDurationCompact(todayStats.videoMs)} />
+                      <StatusMetricRow label="复述点录入" value={formatDurationCompact(todayStats.recallEntryMs)} />
+                      <StatusMetricRow label="复习用时" value={formatDurationCompact(todayStats.reviewMs)} />
+                      <StatusMetricRow label="AI 问答" value={formatDurationCompact(todayStats.aiQaMs)} />
+                      <StatusMetricRow label="走神时间" value={formatDurationCompact(todayStats.distractionMs)} />
                     </div>
                   </div>
                 ) : null}
               </section>
               {queueQ.error ? <p className="text-sm text-destructive">{formatApiError(queueQ.error)}</p> : null}
-              {auditLogQ.error ? <p className="text-sm text-destructive">{formatApiError(auditLogQ.error)}</p> : null}
             </CardContent>
           </Card>
         </aside>

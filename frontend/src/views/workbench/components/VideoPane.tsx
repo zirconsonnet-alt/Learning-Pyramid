@@ -60,7 +60,7 @@ import {
   VIDEO_PLAYBACK_RATE_OPTIONS,
 } from "@/ui/store/videoPlaybackRate"
 import { saveVideoDurationMs } from "@/ui/store/videoDurations"
-import { recordVideoWatchCoverageRange } from "@/ui/store/videoWatchCoverage"
+import { markVideoWatchProgressCompleted, syncVideoWatchProgressRange } from "@/ui/store/videoWatchProgress"
 import { useWorkbenchStore } from "@/ui/store/workbenchStore"
 import { cn } from "@/ui/utils"
 import { MemberOnlyFeatureNotice } from "@/views/membership/membershipUi"
@@ -531,11 +531,11 @@ export function VideoPane({
   }
 
   const touchComposeActivity = useCallback(() => {
-    touchDailyStudyActivity(projectId, "compose", COMPOSE_ACTIVITY_WINDOW_MS)
+    touchDailyStudyActivity(projectId, "recallEntry", COMPOSE_ACTIVITY_WINDOW_MS)
   }, [projectId])
 
   const touchQaActivity = useCallback(() => {
-    touchDailyStudyActivity(projectId, "qa", QA_ACTIVITY_WINDOW_MS)
+    touchDailyStudyActivity(projectId, "aiQa", QA_ACTIVITY_WINDOW_MS)
   }, [projectId])
 
   const resetPlaybackCoverageAnchor = useCallback((playbackMs?: number | null) => {
@@ -571,7 +571,7 @@ export function VideoPane({
       const maxExpectedAdvanceMs = Math.max(2_500, wallDeltaMs * playbackRate * 2.25 + 1_500)
       if (playbackDeltaMs > maxExpectedAdvanceMs) return
 
-      recordVideoWatchCoverageRange(projectId, instanceId, previousPlaybackMs, nextPlaybackMs, durationMs > 0 ? durationMs : null)
+      syncVideoWatchProgressRange(projectId, instanceId, previousPlaybackMs, nextPlaybackMs, durationMs > 0 ? durationMs : null)
     },
     [durationMs, instanceId, projectId],
   )
@@ -587,7 +587,7 @@ export function VideoPane({
     if (previous === null) return
     const boundedStartAtMs = Math.max(previous, now - WATCH_TRACKING_MAX_CHUNK_MS)
     if (now > boundedStartAtMs) {
-      recordStudyActivity(projectId, "watch", boundedStartAtMs, now)
+      recordStudyActivity(projectId, "video", boundedStartAtMs, now)
     }
   }, [instanceId, projectId])
 
@@ -1554,6 +1554,11 @@ export function VideoPane({
 
   function handleEnded() {
     if (!instanceId) return
+    const video = videoRef.current
+    const completedDurationMs = durationMs > 0 ? durationMs : video ? readDurationMs(video) : 0
+    if (completedDurationMs > 0) {
+      markVideoWatchProgressCompleted(projectId, instanceId, completedDurationMs)
+    }
     clearPlaybackResumeMs(projectId, instanceId)
     lastPersistedPlaybackSecondRef.current = null
     lastPlaybackTrackedPositionRef.current = null

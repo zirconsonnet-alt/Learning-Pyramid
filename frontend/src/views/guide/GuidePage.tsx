@@ -6,6 +6,8 @@ import { useSearchParams } from "react-router-dom"
 
 import createSubjectProjectMarkdown from "../../../../docs/how-to-create-subject-project.md?raw"
 import studyReviewMarkdown from "../../../../docs/how-to-study-review.md?raw"
+import useAiChatMarkdown from "../../../../docs/how-to-use-ai-chat.md?raw"
+import usePomodoroMarkdown from "../../../../docs/how-to-use-pomodoro.md?raw"
 
 import { Button } from "@/ui/components/ui/button"
 import { startGuideWalkthrough } from "@/ui/guideWalkthrough/guideWalkthroughController"
@@ -73,13 +75,31 @@ type ParsedMarkdown = {
   headings: MarkdownHeading[]
 }
 
-type DocDefinition = {
-  slug: GuideWalkthroughDocSlug
+type GuideDocSlug = GuideWalkthroughDocSlug | "use-ai-chat" | "use-pomodoro"
+
+type BaseDocDefinition = {
+  slug: GuideDocSlug
   label: string
   audience: string
   summary: string
   sourcePath: string
   parsed: ParsedMarkdown
+}
+
+type DocDefinition = BaseDocDefinition &
+  (
+    | {
+        slug: GuideWalkthroughDocSlug
+        hasWalkthroughSteps: true
+      }
+    | {
+        slug: "use-ai-chat" | "use-pomodoro"
+        hasWalkthroughSteps: false
+      }
+  )
+
+function isWalkthroughDoc(doc: DocDefinition): doc is DocDefinition & { slug: GuideWalkthroughDocSlug; hasWalkthroughSteps: true } {
+  return doc.hasWalkthroughSteps
 }
 
 const LEGACY_GUIDE_DOC_SLUGS = new Set(["manual", "method"])
@@ -298,6 +318,7 @@ const docs: DocDefinition[] = [
     summary: "从新建学科、进入项目，到绑定并导入本地学习材料。",
     sourcePath: "仓库文档 / 如何创建学科项目",
     parsed: parseMarkdown(createSubjectProjectMarkdown),
+    hasWalkthroughSteps: true,
   },
   {
     slug: "study-review",
@@ -306,6 +327,25 @@ const docs: DocDefinition[] = [
     summary: "进入工作台后，录入复述点、提交学习并完成复习闭环。",
     sourcePath: "仓库文档 / 如何学习复习",
     parsed: parseMarkdown(studyReviewMarkdown),
+    hasWalkthroughSteps: true,
+  },
+  {
+    slug: "use-ai-chat",
+    label: "如何使用 AI 问答",
+    audience: "面向使用者",
+    summary: "确认目录、学习对象树和第三方 LLM API 后，进入项目 AI 问答开始对话。",
+    sourcePath: "仓库文档 / 如何使用 AI 问答",
+    parsed: parseMarkdown(useAiChatMarkdown),
+    hasWalkthroughSteps: false,
+  },
+  {
+    slug: "use-pomodoro",
+    label: "如何使用番茄钟",
+    audience: "面向使用者",
+    summary: "开启番茄钟、设定番茄计划，并在番茄开始后登录网页进入工作台。",
+    sourcePath: "仓库文档 / 如何使用番茄钟",
+    parsed: parseMarkdown(usePomodoroMarkdown),
+    hasWalkthroughSteps: false,
   },
 ]
 
@@ -526,10 +566,12 @@ export function GuidePage() {
                   </button>
                 )
               })}
-              <Button type="button" className="mt-3 w-full justify-center" onClick={() => startGuideWalkthrough(activeDoc.slug)}>
-                <PlayCircle className="h-4 w-4" />
-                开始引导
-              </Button>
+              {isWalkthroughDoc(activeDoc) ? (
+                <Button type="button" className="mt-3 w-full justify-center" onClick={() => startGuideWalkthrough(activeDoc.slug)}>
+                  <PlayCircle className="h-4 w-4" />
+                  开始引导
+                </Button>
+              ) : null}
             </div>
           </section>
 

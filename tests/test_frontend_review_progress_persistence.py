@@ -25,7 +25,16 @@ def test_review_pane_requires_submitted_written_answer_before_judgement() -> Non
     assert "提交答案" in source
     assert "hasSubmittedWrittenAnswer" in source
     assert "disabled={!hasSubmittedWrittenAnswer}" in source
-    assert "先提交自己的答案或跳过，再判断记忆状态。" in source
+    assert "先提交自己的答案或跳过，再判断记忆状态。" not in source
+
+
+def test_review_pane_anchor_label_links_to_instance_detail() -> None:
+    source = REVIEW_PANE.read_text(encoding="utf-8")
+
+    assert "formatAnchorLabel(" in source
+    assert 'to={`/p/${projectId}/instances/${activeAnchor.instanceId}`}' in source
+    assert "打开视频实例详情" in source
+    assert "onOpenAnchor(activeAnchor)" in source
 
 
 def test_review_pane_uses_rich_content_editor_for_written_answer_and_can_skip_to_reveal_answer() -> None:

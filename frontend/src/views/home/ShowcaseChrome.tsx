@@ -27,7 +27,7 @@ function getSectionIdFromHref(href: string) {
 export function getShowcaseNavItems(homeSectionPrefix = ""): ShowcaseNavItem[] {
   return [
     { href: buildHomeSectionHref("method", homeSectionPrefix), label: "方法" },
-    { href: buildHomeSectionHref("onboarding", homeSectionPrefix), label: "上手路径" },
+    { href: buildHomeSectionHref("onboarding", homeSectionPrefix), label: "快速上手" },
     { href: buildHomeSectionHref("membership", homeSectionPrefix), label: "会员" },
     { href: buildHomeSectionHref("faq", homeSectionPrefix), label: "常见问题" },
   ]

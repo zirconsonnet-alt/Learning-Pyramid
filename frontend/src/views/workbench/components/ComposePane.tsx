@@ -203,7 +203,7 @@ export function ComposePane({
   }, [instance, previousLearningCountForInstance, projectType])
 
   function touchComposeActivity() {
-    touchDailyStudyActivity(projectId, "compose", COMPOSE_ACTIVITY_WINDOW_MS)
+    touchDailyStudyActivity(projectId, "recallEntry", COMPOSE_ACTIVITY_WINDOW_MS)
   }
 
   useEffect(() => {

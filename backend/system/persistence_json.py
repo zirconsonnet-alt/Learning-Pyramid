@@ -63,6 +63,7 @@ from backend.models.review_task import ReviewTask
 from backend.models.review_task_queue import ReviewTaskQueue
 from backend.models.study_material import StudyMaterial, StudyMaterialType
 from backend.models.subject_material_link import SubjectMaterialLink
+from backend.models.video_watch_progress import VideoWatchProgress
 from backend.models.types import (
     AggregationEventId,
     AsrArtifactId,
@@ -326,6 +327,34 @@ def encode_global_llm_settings_payload(settings: GlobalLlmSettings) -> dict[str,
 
 def decode_global_llm_settings_payload(payload: dict[str, Any]) -> GlobalLlmSettings:
     return _decode_global_llm_settings(dict(payload))
+
+
+def _encode_video_watch_progress(item: VideoWatchProgress) -> dict[str, Any]:
+    return {
+        "projectId": str(item.project_id),
+        "instanceId": str(item.instance_id),
+        "durationMs": item.duration_ms,
+        "watchedMs": item.watched_ms,
+        "ranges": [{"startMs": int(start_ms), "endMs": int(end_ms)} for start_ms, end_ms in item.ranges],
+        "completedAtMs": None if item.completed_at is None else _ts_to_ms(item.completed_at),
+        "updatedAtMs": _ts_to_ms(item.updated_at),
+    }
+
+
+def _decode_video_watch_progress(d: dict[str, Any]) -> VideoWatchProgress:
+    ranges = []
+    for item in list(d.get("ranges", [])):
+        payload = dict(item)
+        ranges.append((int(payload.get("startMs", 0)), int(payload.get("endMs", 0))))
+    completed_at_ms = d.get("completedAtMs")
+    return VideoWatchProgress.create(
+        ProjectId(str(d["projectId"])),
+        InstanceId(str(d["instanceId"])),
+        duration_ms=None if d.get("durationMs") is None else int(d.get("durationMs")),
+        ranges=tuple(ranges),
+        completed_at=None if completed_at_ms is None else _ms_to_ts(int(completed_at_ms)),
+        updated_at=_ms_to_ts(int(d["updatedAtMs"])),
+    )
 
 
 def _encode_instance(i: Instance) -> dict[str, Any]:
@@ -1028,6 +1057,9 @@ def encode_project_payload(project_store: Any) -> dict[str, Any]:
         "instanceMediaBindings": {
             k: _encode_instance_media_binding(v) for k, v in getattr(project_store, "instance_media_bindings", {}).items()
         },
+        "videoWatchProgress": {
+            k: _encode_video_watch_progress(v) for k, v in getattr(project_store, "video_watch_progress", {}).items()
+        },
         "learningObjectNodes": {
             k: _encode_learning_object_node(v) for k, v in getattr(project_store, "learning_object_nodes", {}).items()
         },
@@ -1095,6 +1127,9 @@ def decode_project_payload(project_id: str, raw: dict[str, Any]) -> dict[str, An
         "instances": {k: _decode_instance(v) for k, v in dict(d.get("instances", {})).items()},
         "instance_media_bindings": {
             k: _decode_instance_media_binding(v) for k, v in dict(d.get("instanceMediaBindings", {})).items()
+        },
+        "video_watch_progress": {
+            k: _decode_video_watch_progress(v) for k, v in dict(d.get("videoWatchProgress", {})).items()
         },
         "learning_object_nodes": {
             k: _decode_learning_object_node(v) for k, v in dict(d.get("learningObjectNodes", {})).items()

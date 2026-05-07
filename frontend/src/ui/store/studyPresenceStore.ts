@@ -1,3 +1,5 @@
+import { recordWebPresenceActivity } from "@/ui/store/workbenchDailyStats"
+
 export type DailyStudyPresenceStats = {
   presenceMs: number
 }
@@ -69,6 +71,7 @@ function addStudyPresenceMs(projectId: string, deltaMs: number, atMs = Date.now(
   const safeDeltaMs = Math.min(deltaMs, Math.max(0, offsetMs))
   if (safeDeltaMs <= 0) return
   const current = loadDailyStudyPresenceStats(projectId, dateKey)
+  recordWebPresenceActivity(projectId, atMs - safeDeltaMs, atMs)
   saveDailyStudyPresenceStats(
     projectId,
     {

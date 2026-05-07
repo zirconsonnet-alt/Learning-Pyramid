@@ -31,6 +31,7 @@ from backend.models.review_chain import ReviewChain
 from backend.models.review_task import ReviewTask
 from backend.models.aggregation_event import AggregationEvent
 from backend.models.audit_log_event import AuditLogEvent
+from backend.models.video_watch_progress import VideoWatchProgress
 
 
 def _jsonable(v: Any) -> Any:
@@ -137,6 +138,18 @@ def instance_to_dto(
         "mediaSourceKind": media_source_kind,
         "playbackKind": playback_kind,
         "durationMs": duration_ms,
+    }
+
+
+def video_watch_progress_to_dto(item: VideoWatchProgress) -> Dict[str, Any]:
+    return {
+        "projectId": str(item.project_id),
+        "instanceId": str(item.instance_id),
+        "durationMs": item.duration_ms,
+        "watchedMs": item.watched_ms,
+        "ranges": [{"startMs": int(start_ms), "endMs": int(end_ms)} for start_ms, end_ms in item.ranges],
+        "completedAt": _jsonable(item.completed_at),
+        "updatedAt": _jsonable(item.updated_at),
     }
 
 

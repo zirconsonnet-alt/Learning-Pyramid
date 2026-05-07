@@ -304,9 +304,9 @@ export function AdminPage() {
         />
         <MetricTile
           icon={Activity}
-          label="有效学习"
+          label="活跃学习"
           value={overview ? formatDurationCompact(overview.effectiveStudyMs) : "0m"}
-          detail={`内容接触 ${overview ? formatDurationCompact(overview.watchMs) : "0m"}，复习 ${overview ? formatDurationCompact(overview.reviewMs) : "0m"}。`}
+          detail={`视频观看 ${overview ? formatDurationCompact(overview.watchMs) : "0m"}，复习 ${overview ? formatDurationCompact(overview.reviewMs) : "0m"}。`}
         />
         <MetricTile
           icon={CreditCard}

@@ -48,14 +48,18 @@ def test_task_tree_uses_only_real_children_for_edges() -> None:
     assert "return node.children" in page_source
 
 
-def test_ai_chat_task_sidebar_uses_only_real_children_for_edges() -> None:
+def test_ai_chat_sidebar_does_not_use_learning_task_tree() -> None:
     page_source = AI_CHAT_PAGE.read_text(encoding="utf-8")
 
-    assert "getTaskSidebarChildIds(node)" in page_source
+    assert "buildObjectSidebarTree(objectNodesQ.data ?? [])" in page_source
+    assert "listLearningObjectNodes" in page_source
+    assert "listRecallPointsByLearningObjectNode" in page_source
+    assert "getTaskSidebarChildIds" not in page_source
+    assert "buildTaskSidebarTree" not in page_source
+    assert "listLearningTaskNodes" not in page_source
+    assert "listRecallPointsByLearningTaskNode" not in page_source
+    assert "learningTaskNodeId:" not in page_source
     assert "displayChildNodeIds" not in page_source
-    assert "return node.children" in page_source
-    assert "displayParentById[childId] = node.nodeId" in page_source
-    assert "displayParentById[node.nodeId] ?? node.parentId" in page_source
 
 
 def test_learning_task_node_detail_uses_real_children_count_and_no_helper_copy() -> None:

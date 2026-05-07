@@ -493,9 +493,19 @@ export function ReviewPane({
                           </Link>
 
                           <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                            <span className="theme-pill-default rounded-full px-2.5 py-1 font-medium">
-                              {anchorLabel}
-                            </span>
+                            {activeAnchor ? (
+                              <Link
+                                to={`/p/${projectId}/instances/${activeAnchor.instanceId}`}
+                                className="theme-pill-default rounded-full px-2.5 py-1 font-medium transition hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                                title="打开视频实例详情"
+                              >
+                                {anchorLabel}
+                              </Link>
+                            ) : (
+                              <span className="theme-pill-default rounded-full px-2.5 py-1 font-medium">
+                                {anchorLabel}
+                              </span>
+                            )}
                             {activeRecallPoint.insights.length > 0 ? (
                               <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 font-medium text-amber-700">
                                 <Lightbulb className="h-3.5 w-3.5" />
@@ -573,13 +583,11 @@ export function ReviewPane({
                               </Button>
                             </>
                           )}
-                          <span className="text-xs text-muted-foreground">
-                            {isSkippedWrittenAnswer
-                              ? "已跳过，已展开答案，可判断记忆状态。"
-                              : hasSubmittedWrittenAnswer
-                                ? "已提交，已展开答案，可判断记忆状态。"
-                                : "先提交自己的答案或跳过，再判断记忆状态。"}
-                          </span>
+                          {hasSubmittedWrittenAnswer ? (
+                            <span className="text-xs text-muted-foreground">
+                              {isSkippedWrittenAnswer ? "已跳过，已展开答案，可判断记忆状态。" : "已提交，已展开答案，可判断记忆状态。"}
+                            </span>
+                          ) : null}
                         </div>
                       </div>
 

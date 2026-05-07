@@ -26,7 +26,6 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { ApiError } from "@/ui/api/http"
 import type { Instance } from "@/ui/api/instances"
 import { listLearningObjectNodes, listRecallPointsByLearningObjectNode, type LearningObjectNode } from "@/ui/api/learningObjects"
-import { listLearningTaskNodes, listRecallPointsByLearningTaskNode, type LearningTaskNode } from "@/ui/api/learningTaskNodes"
 import { richContentToPlainText } from "@/ui/api/richContent"
 import { getRecallPoint, type RecallPoint } from "@/ui/api/review"
 import type { MaterialSourceKind } from "@/ui/api/projects"
@@ -51,7 +50,6 @@ import { getLocalDateKey, touchDailyStudyActivity } from "@/ui/store/workbenchDa
 import { syncStudyMetricsSnapshot } from "@/ui/studyMetricsSync"
 import { buildSubtitleContextText, loadSubtitleDocumentForInstance } from "@/ui/subtitles/subtitleSupport"
 import { cn } from "@/ui/utils"
-import { formatLearningTaskNodeDisplayTitle } from "@/views/learningTasks/displayTitle"
 import { buildAiChatPath, describeAiChatContextKind, isAiChatContextKind, type AiChatContextKind } from "@/views/ai/chatRouting"
 import { MemberOnlyFeatureNotice } from "@/views/membership/membershipUi"
 import { buildGlobalSettingsPath } from "@/views/settings/globalSettingsRouting"
@@ -335,39 +333,6 @@ function parseAnchorPositionMs(position: string | null | undefined) {
   if (!match) return null
   const value = Number(match[1])
   return Number.isFinite(value) ? value : null
-}
-
-function getTaskSidebarChildIds(node: LearningTaskNode) {
-  if (node.kind !== "container") return []
-  return node.children
-}
-
-function buildTaskSidebarTree(nodes: LearningTaskNode[]): SidebarTreeData {
-  const displayParentById: Record<string, string> = {}
-  for (const node of nodes) {
-    if (node.kind !== "container") continue
-    for (const childId of getTaskSidebarChildIds(node)) {
-      displayParentById[childId] = node.nodeId
-    }
-  }
-
-  const nodeById: Record<string, SidebarNode> = {}
-  for (const node of nodes) {
-    nodeById[node.nodeId] = {
-      nodeId: node.nodeId,
-      parentId: displayParentById[node.nodeId] ?? node.parentId,
-      title: formatLearningTaskNodeDisplayTitle(node.title),
-      kind: node.kind,
-      children: node.kind === "container" ? getTaskSidebarChildIds(node) : [],
-    }
-  }
-
-  const rootIds = nodes
-    .filter((node) => (displayParentById[node.nodeId] ?? node.parentId) === null)
-    .map((node) => node.nodeId)
-    .sort((left, right) => (nodeById[left]?.title ?? left).localeCompare(nodeById[right]?.title ?? right, "zh-Hans-CN", { numeric: true }))
-
-  return { nodeById, rootIds }
 }
 
 function formatLearningObjectSidebarTitle(node: LearningObjectNode, depth: number) {
@@ -797,7 +762,6 @@ function SidebarManagementBar(props: {
 }
 
 function SidebarPanel(props: {
-  activeKind: AiChatContextKind
   activeTree: SidebarTreeData | null
   activeNodeId: string | null
   expandedNodeIds: string[]
@@ -817,7 +781,6 @@ function SidebarPanel(props: {
   onCollapseSidebar?: () => void
 }) {
   const {
-    activeKind,
     activeTree,
     activeNodeId,
     expandedNodeIds,
@@ -851,8 +814,8 @@ function SidebarPanel(props: {
       <div className="border-t border-[color:var(--theme-soft-border)] px-4 py-4">
         {activeTree ? (
           <SidebarTreeSection
-            title={activeKind === "task" ? "学习任务节点" : "学习对象节点"}
-            icon={activeKind === "task" ? "task" : "object"}
+            title="学习任务节点"
+            icon="task"
             tree={activeTree}
             selectedNodeId={activeNodeId}
             expandedNodeIds={expandedNodeIds}
@@ -975,12 +938,13 @@ export function AiChatPage() {
   const globalSettingsPath = buildGlobalSettingsPath()
 
   function touchQaActivity() {
-    touchDailyStudyActivity(pid, "qa", QA_ACTIVITY_WINDOW_MS)
+    touchDailyStudyActivity(pid, "aiQa", QA_ACTIVITY_WINDOW_MS)
   }
 
   const kindParam = searchParams.get("kind")
   const nodeIdParam = searchParams.get("nodeId")?.trim() ?? ""
   const conversationIdParam = searchParams.get("conversation")?.trim() ?? ""
+  const defaultAiChatContextKind: AiChatContextKind = "object"
 
   const conversations = useAiChatStore((state) => state.conversations)
   const createConversation = useAiChatStore((state) => state.createConversation)
@@ -1011,11 +975,6 @@ export function AiChatPage() {
   const materialSourceBindingQ = useProjectMaterialSourceBinding(pid)
   const directoryBinding = useProjectDirectoryBinding(pid)
   const instancesQ = useInstances(pid)
-  const taskNodesQ = useQuery({
-    queryKey: ["learningTaskNodes", pid],
-    queryFn: () => listLearningTaskNodes(pid),
-    enabled: !!pid,
-  })
   const objectNodesQ = useQuery({
     queryKey: ["learningObjectNodes", pid],
     queryFn: () => listLearningObjectNodes(pid),
@@ -1028,52 +987,43 @@ export function AiChatPage() {
   })
 
   const projectConversations = useMemo(
-    () => conversations.filter((conversation) => conversation.projectId === pid).sort((left, right) => right.updatedAt - left.updatedAt),
+    () =>
+      conversations
+        .filter((conversation) => conversation.projectId === pid && conversation.contextKind !== "task")
+        .sort((left, right) => right.updatedAt - left.updatedAt),
     [conversations, pid],
   )
   const instanceById = useMemo(
     () => new Map((instancesQ.data ?? []).map((instance) => [instance.instanceId, instance])),
     [instancesQ.data],
   )
-  const selectedConversation = projectConversations.find((conversation) => conversation.id === conversationIdParam) ?? null
-  const fallbackKind: AiChatContextKind =
-    isAiChatContextKind(kindParam) ? kindParam : taskNodesQ.data && taskNodesQ.data.length > 0 ? "task" : "object"
+  const rawSelectedConversation = projectConversations.find((conversation) => conversation.id === conversationIdParam) ?? null
+  const selectedConversation = rawSelectedConversation?.contextKind === "task" ? null : rawSelectedConversation
+  const fallbackKind: AiChatContextKind = kindParam === "recall" ? "recall" : defaultAiChatContextKind
   const activeKind = selectedConversation?.contextKind ?? fallbackKind
 
-  const taskTree = useMemo(() => buildTaskSidebarTree(taskNodesQ.data ?? []), [taskNodesQ.data])
   const objectTree = useMemo(() => buildObjectSidebarTree(objectNodesQ.data ?? []), [objectNodesQ.data])
-  const activeTree = activeKind === "task" ? taskTree : activeKind === "object" ? objectTree : null
-  const activeNodeId = selectedConversation?.nodeId ?? (nodeIdParam || null)
+  const activeTree = activeKind === "object" ? objectTree : null
+  const activeNodeId = selectedConversation?.nodeId ?? (kindParam === "task" ? null : nodeIdParam || null)
   const selectedRecallPointQ = useQuery({
     queryKey: ["recallPoint", pid, activeNodeId],
     queryFn: () => getRecallPoint(pid, activeNodeId ?? ""),
     enabled: !!pid && activeKind === "recall" && !!activeNodeId,
   })
   const activeRecallPoint = activeKind === "recall" ? selectedRecallPointQ.data ?? (selectedConversation ? null : recallPointQ.data ?? null) : null
-  const activeTaskRecallPointsQ = useQuery({
-    queryKey: ["aiChatTaskRecallPoints", pid, activeNodeId],
-    queryFn: () => listRecallPointsByLearningTaskNode(pid, activeNodeId ?? ""),
-    enabled: !!pid && activeKind === "task" && !!activeNodeId,
-  })
   const activeObjectRecallPointsQ = useQuery({
     queryKey: ["aiChatObjectRecallPoints", pid, activeNodeId],
     queryFn: () => listRecallPointsByLearningObjectNode(pid, activeNodeId ?? ""),
     enabled: !!pid && activeKind === "object" && !!activeNodeId,
   })
   const activeNodeLabel =
-    activeKind === "task"
-      ? getNodeLabel(taskTree, activeNodeId)
-      : activeKind === "object"
-        ? getNodeLabel(objectTree, activeNodeId)
-        : describeRecallPointTitle(activeRecallPoint, activeNodeId)
+    activeKind === "object" ? getNodeLabel(objectTree, activeNodeId) : describeRecallPointTitle(activeRecallPoint, activeNodeId)
   const activeNodeRecallPoints =
     activeKind === "recall"
       ? activeRecallPoint
         ? [activeRecallPoint]
         : []
-      : activeKind === "task"
-        ? activeTaskRecallPointsQ.data ?? []
-        : activeObjectRecallPointsQ.data ?? []
+      : activeObjectRecallPointsQ.data ?? []
   const llmConfigured = capabilitiesQ.data?.llmConfigured ?? false
   const aiChatMemberBlocked = authEnabled && (membershipQ.isLoading || Boolean(membershipQ.error) || !membershipQ.data?.isActive)
   const todayDateKey = getLocalDateKey()
@@ -1333,7 +1283,6 @@ export function AiChatPage() {
         systemPrompt,
         supplementalContext: resolvedSupplementalContext ?? undefined,
         recallPointId: activeKind === "recall" ? (activeNodeId ?? undefined) : undefined,
-        learningTaskNodeId: activeKind === "task" ? (activeNodeId ?? undefined) : undefined,
         learningObjectNodeId: activeKind === "object" ? (activeNodeId ?? undefined) : undefined,
         temperature: 0.2,
       },
@@ -1446,8 +1395,7 @@ export function AiChatPage() {
   }
 
   function resolveNodeLabel(kind: AiChatContextKind, nodeId: string) {
-    if (kind === "task") return getNodeLabel(taskTree, nodeId)
-    if (kind === "object") return getNodeLabel(objectTree, nodeId)
+    if (kind === "task" || kind === "object") return getNodeLabel(objectTree, nodeId)
     if (activeKind === "recall" && activeNodeId === nodeId) return describeRecallPointTitle(activeRecallPoint, nodeId)
     return formatRecallPointReference(nodeId, "复述点待确认")
   }
@@ -1654,7 +1602,6 @@ export function AiChatPage() {
           </DialogHeader>
           <div className="max-h-[80vh] overflow-y-auto px-4 py-4">
             <SidebarPanel
-              activeKind={activeKind}
               activeTree={activeTree}
               activeNodeId={activeNodeId}
               expandedNodeIds={expandedNodeIds}
@@ -1694,7 +1641,6 @@ export function AiChatPage() {
           ) : (
             <div className="sticky top-28 max-h-[calc(100dvh-8.75rem)] overflow-y-auto">
               <SidebarPanel
-                activeKind={activeKind}
                 activeTree={activeTree}
                 activeNodeId={activeNodeId}
                 expandedNodeIds={expandedNodeIds}
@@ -1751,7 +1697,6 @@ export function AiChatPage() {
               <LoadingNotice title="正在准备 AI 问答" message="正在确认当前账号是否已经接通可用的大模型能力。" />
             ) : null}
             {capabilitiesQ.error && !capabilitiesQ.data ? <ErrorNotice title="AI 能力状态加载失败" message={formatApiError(capabilitiesQ.error)} /> : null}
-            {taskNodesQ.error && activeKind === "task" ? <ErrorNotice title="任务节点目录加载失败" message={formatApiError(taskNodesQ.error)} /> : null}
             {objectNodesQ.error && activeKind === "object" ? <ErrorNotice title="对象节点目录加载失败" message={formatApiError(objectNodesQ.error)} /> : null}
 
             {aiChatMemberBlocked && !capabilitiesQ.isLoading ? (

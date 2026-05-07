@@ -96,6 +96,7 @@ from backend.models.types import (
     id_canonical_text,
     now_utc_ms,
 )
+from backend.models.video_watch_progress import VideoWatchProgress
 
 
 @dataclass
@@ -113,6 +114,7 @@ class ProjectStore:
 
     instances: Dict[str, Instance] = field(default_factory=dict)
     instance_media_bindings: Dict[str, InstanceMediaBinding] = field(default_factory=dict)
+    video_watch_progress: Dict[str, VideoWatchProgress] = field(default_factory=dict)
     learning_object_nodes: Dict[str, LearningObjectNode] = field(default_factory=dict)
     recall_points: Dict[str, RecallPoint] = field(default_factory=dict)
     recall_point_review_records: Dict[str, RecallPointReviewRecord] = field(default_factory=dict)
@@ -153,6 +155,7 @@ class ProjectStaged:
     instances_deleted: Set[str] = field(default_factory=set)
     instance_media_bindings: Dict[str, InstanceMediaBinding] = field(default_factory=dict)
     instance_media_bindings_deleted: Set[str] = field(default_factory=set)
+    video_watch_progress: Dict[str, VideoWatchProgress] = field(default_factory=dict)
     learning_object_nodes: Dict[str, LearningObjectNode] = field(default_factory=dict)
     learning_object_nodes_replaced: bool = False
     recall_points: Dict[str, RecallPoint] = field(default_factory=dict)
@@ -257,6 +260,9 @@ def _overlay_instance_media_bindings(ps: ProjectStore, st: ProjectStaged) -> Dic
         merged.pop(k, None)
     merged.update(getattr(st, "instance_media_bindings", {}))
     return merged
+
+def _overlay_video_watch_progress(ps: ProjectStore, st: ProjectStaged) -> Dict[str, VideoWatchProgress]:
+    return _merge_dict(getattr(ps, "video_watch_progress", {}), getattr(st, "video_watch_progress", {}))
 
 def _overlay_audit_log_events(ps: ProjectStore, st: ProjectStaged) -> Dict[str, AuditLogEvent]:
     return _merge_dict(getattr(ps, "audit_log_events", {}), getattr(st, "audit_log_events", {}))
@@ -683,6 +689,33 @@ class InstanceMediaBindingRepository:
             raise NotFound(instance_id)
         session._staged.instance_media_bindings.pop(k, None)
         session._staged.instance_media_bindings_deleted.add(k)
+
+
+class VideoWatchProgressRepository:
+    def __init__(self, g: GlobalStore) -> None:
+        self.g = g
+
+    def set(self, session: MutationSession, progress: VideoWatchProgress) -> None:
+        session.assert_open()
+        if session.mode != SessionMode.READ_WRITE:
+            raise PreconditionFailure("READ_ONLY session cannot write")
+        if str(progress.project_id) != str(session.project_id):
+            raise PreconditionFailure("VideoWatchProgressRepository.set must use matching session.project_id")
+        progress.validate_write_time()
+        session._staged.video_watch_progress[id_canonical_text(progress.instance_id)] = progress
+
+    def maybe_get(self, session: MutationSession, instance_id: InstanceId) -> Optional[VideoWatchProgress]:
+        session.assert_open()
+        return _overlay_maybe_get(
+            getattr(session._baseline, "video_watch_progress", {}),
+            session._staged.video_watch_progress,
+            id_canonical_text(instance_id),
+        )
+
+    def all(self, session: MutationSession) -> Tuple[VideoWatchProgress, ...]:
+        session.assert_open()
+        merged = _overlay_video_watch_progress(session._baseline, session._staged)
+        return tuple(merged[k] for k in sorted(merged.keys()))
 
 
 class LearningObjectNodeRepository:
@@ -2288,6 +2321,7 @@ class InMemorySystem:
         self.media_asset_repo = MediaAssetRepository(self.g)
         self.instance_repo = InstanceRepository(self.g)
         self.instance_media_binding_repo = InstanceMediaBindingRepository(self.g)
+        self.video_watch_progress_repo = VideoWatchProgressRepository(self.g)
         self.learning_object_repo = LearningObjectNodeRepository(self.g)
         self.recall_point_repo = RecallPointRepository(self.g, self.instance_repo, self.media_asset_repo)
         self.learning_task_repo = LearningTaskRepository(self.g, self.recall_point_repo)
@@ -2387,6 +2421,7 @@ class InMemorySystem:
                 ps.audit_log_events = d.get("audit_log_events", {})
                 ps.instances = d["instances"]
                 ps.instance_media_bindings = d.get("instance_media_bindings", {})
+                ps.video_watch_progress = d.get("video_watch_progress", {})
                 ps.learning_object_nodes = d["learning_object_nodes"]
                 ps.recall_points = d["recall_points"]
                 ps.recall_point_review_records = d.get("recall_point_review_records", {})
@@ -2477,6 +2512,7 @@ class InMemorySystem:
             ps.audit_log_events = d.get("audit_log_events", {})
             ps.instances = d["instances"]
             ps.instance_media_bindings = d.get("instance_media_bindings", {})
+            ps.video_watch_progress = d.get("video_watch_progress", {})
             ps.learning_object_nodes = d["learning_object_nodes"]
             ps.recall_points = d["recall_points"]
             ps.recall_point_review_records = d.get("recall_point_review_records", {})
@@ -2801,6 +2837,7 @@ class InMemorySystem:
 
             next_ps.instances = dict(_overlay_instances(ps, st))
             next_ps.instance_media_bindings = dict(_overlay_instance_media_bindings(ps, st))
+            next_ps.video_watch_progress = dict(_overlay_video_watch_progress(ps, st))
             next_ps.learning_object_nodes = dict(_overlay_learning_object_nodes(ps, st))
             next_ps.recall_points = dict(ps.recall_points)
             next_ps.recall_points.update(st.recall_points)

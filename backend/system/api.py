@@ -89,6 +89,7 @@ from backend.models.review_task import ReviewTask
 from backend.models.review_task_queue import ReviewTaskQueue
 from backend.models.study_material import StudyMaterial, StudyMaterialType
 from backend.models.subject_material_link import SubjectMaterialLink
+from backend.models.video_watch_progress import VideoWatchProgress
 from backend.models.types import (
     AsrArtifactId,
     ConvergenceId,
@@ -4187,6 +4188,83 @@ class SystemAPI:
             return self.sys.instance_repo.all(s)
         finally:
             self.sys.rollback(s)
+
+    def list_video_watch_progress(
+        self,
+        project_id: ProjectId,
+        *,
+        instance_ids: Sequence[InstanceId] | None = None,
+    ) -> Tuple[VideoWatchProgress, ...]:
+        self._ensure_startup_fs_sync_done(project_id)
+        requested = None if instance_ids is None else {id_canonical_text(instance_id) for instance_id in instance_ids}
+        s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
+        try:
+            items = self.sys.video_watch_progress_repo.all(s)
+            if requested is not None:
+                items = tuple(item for item in items if id_canonical_text(item.instance_id) in requested)
+            return items
+        finally:
+            self.sys.rollback(s)
+
+    def record_video_watch_progress_range(
+        self,
+        project_id: ProjectId,
+        instance_id: InstanceId,
+        *,
+        start_ms: int,
+        end_ms: int,
+        duration_ms: int | None = None,
+    ) -> VideoWatchProgress:
+        self._ensure_startup_fs_sync_done(project_id)
+        s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
+        try:
+            self.sys.instance_repo.get(s, instance_id)
+            now = now_utc_ms()
+            current = self.sys.video_watch_progress_repo.maybe_get(s, instance_id)
+            if current is None:
+                current = VideoWatchProgress.create(
+                    project_id,
+                    instance_id,
+                    duration_ms=duration_ms,
+                    updated_at=now,
+                )
+            progress = current.with_range(
+                start_ms=int(start_ms),
+                end_ms=int(end_ms),
+                duration_ms=duration_ms,
+                updated_at=now,
+            )
+            self.sys.video_watch_progress_repo.set(s, progress)
+            self.sys.commit(s)
+            return progress
+        except Exception:
+            if s.state == SessionState.OPEN:
+                self.sys.rollback(s)
+            raise
+
+    def mark_video_watch_progress_completed(
+        self,
+        project_id: ProjectId,
+        instance_id: InstanceId,
+        *,
+        duration_ms: int,
+    ) -> VideoWatchProgress:
+        self._ensure_startup_fs_sync_done(project_id)
+        s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
+        try:
+            self.sys.instance_repo.get(s, instance_id)
+            now = now_utc_ms()
+            current = self.sys.video_watch_progress_repo.maybe_get(s, instance_id)
+            if current is None:
+                current = VideoWatchProgress.create(project_id, instance_id, duration_ms=duration_ms, updated_at=now)
+            progress = current.with_completed(duration_ms=int(duration_ms), completed_at=now)
+            self.sys.video_watch_progress_repo.set(s, progress)
+            self.sys.commit(s)
+            return progress
+        except Exception:
+            if s.state == SessionState.OPEN:
+                self.sys.rollback(s)
+            raise
 
     def get_instance(self, project_id: ProjectId, instance_id: InstanceId) -> Instance:
         self._ensure_startup_fs_sync_done(project_id)
