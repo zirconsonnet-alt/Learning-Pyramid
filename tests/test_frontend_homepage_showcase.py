@@ -603,15 +603,20 @@ def test_homepage_membership_card_highlights_member_benefits() -> None:
     assert 'const membershipEntryLabel = isLoggedIn || !authEnabled ? "去会员中心查看" : "登录后在会员中心查看"' in source
     assert "去个人中心查看" not in source
     assert "进入项目" not in section
-    assert 'className="lp-showcase-btn lp-showcase-btn-primary lp-showcase-membership-benefits-action"' in section
+    assert 'className="lp-showcase-membership-benefits-action"' in section
+    assert 'lp-showcase-btn lp-showcase-btn-primary lp-showcase-membership-benefits-action' not in section
     assert section.index("<li>AI交互：你的助理及良师</li>") < section.index("lp-showcase-membership-benefits-action")
 
     assert ".lp-showcase-membership-card-top" in css
     assert ".lp-showcase-membership-grid" in css
     assert "grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.65fr);" in css
+    assert "align-items: start;" in css
     assert ".lp-showcase-membership-plan-grid" in css
     assert ".lp-showcase-membership-price-block" in css
     assert ".lp-showcase-membership-benefits" in css
     assert ".lp-showcase-membership-benefits-action" in css
+    assert ".lp-showcase-membership-benefits-action:hover" in css
+    assert "background: transparent;" in css
+    assert "box-shadow: none;" in css
     assert ".lp-showcase-membership-actions" not in css
     assert "grid-template-columns: minmax(0, 1fr) minmax(170px, 220px);" in css

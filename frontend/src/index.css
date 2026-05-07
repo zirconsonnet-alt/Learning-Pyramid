@@ -1435,6 +1435,7 @@
 
   .lp-showcase-membership-grid {
     grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.65fr);
+    align-items: start;
   }
 
   .lp-showcase-faq-grid {
@@ -2021,12 +2022,22 @@
   .lp-showcase-membership-benefits-action {
     width: fit-content;
     max-width: 100%;
-    min-height: 40px;
-    margin-top: 4px;
-    padding: 0 16px;
-    border-radius: 999px;
+    margin-top: 0;
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    color: var(--lp-link);
     font-size: 14px;
+    font-weight: 700;
+    line-height: 1.35;
+    text-decoration: none;
     white-space: nowrap;
+  }
+
+  .lp-showcase-membership-benefits-action:hover {
+    color: var(--lp-primary);
+    text-decoration: underline;
   }
 
   .lp-showcase-price strong {

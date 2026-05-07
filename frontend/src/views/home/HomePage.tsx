@@ -460,7 +460,7 @@ export function HomePage() {
                       <li>番茄钟：学习规划与督促</li>
                       <li>AI交互：你的助理及良师</li>
                     </ul>
-                    <Link className="lp-showcase-btn lp-showcase-btn-primary lp-showcase-membership-benefits-action" to={membershipEntryHref}>
+                    <Link className="lp-showcase-membership-benefits-action" to={membershipEntryHref}>
                       {membershipEntryLabel}
                     </Link>
                   </div>
