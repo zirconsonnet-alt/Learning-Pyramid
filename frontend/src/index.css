@@ -1434,12 +1434,12 @@
   }
 
   .lp-showcase-membership-grid {
-    grid-template-columns: minmax(0, 1.35fr) minmax(240px, 0.65fr) minmax(260px, 0.72fr);
+    grid-template-columns: minmax(0, 0.8fr) minmax(330px, 0.62fr) minmax(360px, 0.72fr);
     align-items: start;
   }
 
   .lp-showcase-membership-grid > .lp-showcase-pricing-card {
-    height: auto;
+    height: 100%;
   }
 
   .lp-showcase-faq-grid {
@@ -2000,6 +2000,22 @@
     min-width: 0;
   }
 
+  .lp-showcase-membership-plans {
+    display: grid;
+    gap: 22px;
+    align-content: start;
+  }
+
+  .lp-showcase-membership-panel {
+    display: grid;
+    gap: 16px;
+    align-content: start;
+  }
+
+  .lp-showcase-membership-panel .lp-showcase-pricing-list {
+    margin: 0;
+  }
+
   .lp-showcase-membership-price-block {
     min-width: 0;
     height: 100%;
@@ -2010,8 +2026,8 @@
   }
 
   .lp-showcase-membership-price-block-accent {
-    border-color: color-mix(in srgb, var(--lp-warning-border) 80%, transparent);
-    background: color-mix(in srgb, var(--lp-warning-bg) 72%, rgba(255, 255, 255, 0.8));
+    border-color: rgba(197, 138, 20, 0.34);
+    background: linear-gradient(135deg, rgba(255, 218, 92, 0.72) 0%, rgba(226, 166, 38, 0.82) 58%, rgba(193, 125, 16, 0.78) 100%);
   }
 
   .lp-showcase-membership-price-block h3 {
@@ -2030,23 +2046,26 @@
     margin: 0;
   }
 
-  .lp-showcase-membership-benefits {
-    display: grid;
-    gap: 14px;
-    background: color-mix(in srgb, var(--lp-warning-bg) 68%, rgba(255, 255, 255, 0.82));
-    color: var(--lp-warning-text);
+  .lp-showcase-membership-plan-action {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: auto;
   }
 
-  .lp-showcase-membership-benefits li {
-    font-size: 14px;
-    line-height: 1.35;
-    font-weight: 700;
-  }
-
-  .lp-showcase-membership-benefits-action {
+  .lp-showcase-membership-entry-action {
     width: fit-content;
     max-width: 100%;
-    margin-top: 4px;
+    white-space: nowrap;
+  }
+
+  .lp-showcase-membership-panel .lp-showcase-pricing-list li {
+    font-size: 15px;
+    font-weight: 400;
+    line-height: 1.5;
+  }
+
+  .lp-showcase-membership-panel:not(.lp-showcase-membership-benefits) .lp-showcase-pricing-list li {
     white-space: nowrap;
   }
 

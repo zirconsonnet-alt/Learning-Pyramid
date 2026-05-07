@@ -366,9 +366,9 @@ export function HomePage() {
                       </div>
                       {"ctaLabel" in item ? (
                         <div className="lp-showcase-carousel-slide-actions">
-                          <Link to={item.ctaHref} className="lp-showcase-carousel-slide-action">
+                          <a href={item.ctaHref} className="lp-showcase-carousel-slide-action">
                             {item.ctaLabel}
-                          </Link>
+                          </a>
                         </div>
                       ) : null}
                     </article>
@@ -439,7 +439,7 @@ export function HomePage() {
               <h2>会员</h2>
             </div>
             <div className="lp-showcase-pricing-grid lp-showcase-membership-grid">
-              <article className="lp-showcase-pricing-card lp-showcase-pricing-card-primary">
+              <article className="lp-showcase-pricing-card lp-showcase-membership-plans">
                 <div className="lp-showcase-membership-plan-grid">
                   <div className="lp-showcase-membership-price-block">
                     <h3>月会员</h3>
@@ -458,20 +458,22 @@ export function HomePage() {
                     <p className="lp-showcase-membership-plan-note">有效期至12月21日</p>
                   </div>
                 </div>
+                <div className="lp-showcase-membership-plan-action">
+                  <Link className="lp-showcase-btn lp-showcase-btn-primary lp-showcase-membership-entry-action" to={membershipEntryHref}>
+                    {membershipEntryLabel}
+                  </Link>
+                </div>
               </article>
 
-              <article className="lp-showcase-pricing-card lp-showcase-membership-benefits">
+              <article className="lp-showcase-pricing-card lp-showcase-membership-panel lp-showcase-membership-benefits">
                 <h3>会员权益</h3>
                 <ul className="lp-showcase-pricing-list">
                   <li>番茄钟：学习规划与督促</li>
                   <li>AI交互：你的助理及良师</li>
                 </ul>
-                <Link className="lp-showcase-btn lp-showcase-btn-primary lp-showcase-membership-benefits-action" to={membershipEntryHref}>
-                  {membershipEntryLabel}
-                </Link>
               </article>
 
-              <article className="lp-showcase-pricing-card">
+              <article className="lp-showcase-pricing-card lp-showcase-membership-panel">
                 <h3>邀请机制</h3>
                 <ul className="lp-showcase-pricing-list">
                   {inviteBullets.map((item) => (

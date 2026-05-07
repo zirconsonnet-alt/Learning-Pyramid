@@ -521,7 +521,8 @@ def test_homepage_featured_fourth_slide_uses_requested_copy_and_single_guide_but
     assert 'import { startGuideWalkthrough } from "@/ui/guideWalkthrough/guideWalkthroughController"' not in source
     assert 'startGuideWalkthrough(point.guideDocSlug)' not in source
     assert 'startGuideWalkthrough(item.guideDocSlug)' not in source
-    assert '<Link to={item.ctaHref}' in source
+    assert '<a href={item.ctaHref} className="lp-showcase-carousel-slide-action">' in source
+    assert '<Link to={item.ctaHref}' not in source
     assert "lp-showcase-carousel-slide-actions" in source
     assert "lp-showcase-carousel-slide-action" in source
     assert "color: #4d3508;" in css
@@ -599,7 +600,9 @@ def test_homepage_membership_card_highlights_member_benefits() -> None:
     assert 'className="lp-showcase-pricing-grid lp-showcase-membership-grid"' in section
     assert 'className="lp-showcase-membership-plan-grid"' in section
     assert 'className="lp-showcase-membership-price-block"' in section
-    assert 'className="lp-showcase-pricing-card lp-showcase-membership-benefits"' in section
+    assert 'className="lp-showcase-pricing-card lp-showcase-membership-plans"' in section
+    assert 'className="lp-showcase-pricing-card lp-showcase-membership-panel lp-showcase-membership-benefits"' in section
+    assert 'className="lp-showcase-pricing-card lp-showcase-membership-panel"' in section
     assert "<h3>月会员</h3>" in section
     assert "<h3>考研套餐</h3>" in section
     assert "<strong>¥15</strong>" in section
@@ -615,20 +618,39 @@ def test_homepage_membership_card_highlights_member_benefits() -> None:
     assert 'const membershipEntryLabel = isLoggedIn || !authEnabled ? "去会员中心查看" : "登录后在会员中心查看"' in source
     assert "去个人中心查看" not in source
     assert "进入项目" not in section
-    assert 'className="lp-showcase-btn lp-showcase-btn-primary lp-showcase-membership-benefits-action"' in section
+    assert 'className="lp-showcase-membership-plan-action"' in section
+    assert 'className="lp-showcase-btn lp-showcase-btn-primary lp-showcase-membership-entry-action"' in section
+    assert section.index('className="lp-showcase-membership-plan-grid"') < section.index('className="lp-showcase-membership-plan-action"')
+    assert section.index("lp-showcase-membership-entry-action") < section.index("<h3>会员权益</h3>")
+    assert 'className="lp-showcase-btn lp-showcase-btn-primary lp-showcase-membership-benefits-action"' not in section
     assert 'className="lp-showcase-membership-benefits-action"' not in section
-    assert section.index('className="lp-showcase-membership-plan-grid"') < section.index('className="lp-showcase-pricing-card lp-showcase-membership-benefits"')
+    assert section.index('className="lp-showcase-membership-plan-grid"') < section.index('className="lp-showcase-pricing-card lp-showcase-membership-panel lp-showcase-membership-benefits"')
     assert section.index("<h3>会员权益</h3>") < section.index("<h3>邀请机制</h3>")
-    assert section.index("<li>AI交互：你的助理及良师</li>") < section.index("lp-showcase-membership-benefits-action")
 
     assert ".lp-showcase-membership-card-top" not in css
     assert ".lp-showcase-membership-grid" in css
-    assert "grid-template-columns: minmax(0, 1.35fr) minmax(240px, 0.65fr) minmax(260px, 0.72fr);" in css
+    assert "grid-template-columns: minmax(0, 0.8fr) minmax(330px, 0.62fr) minmax(360px, 0.72fr);" in css
     assert "align-items: start;" in css
+    assert ".lp-showcase-membership-plans" in css
+    assert ".lp-showcase-membership-panel" in css
     assert ".lp-showcase-membership-plan-grid" in css
+    assert ".lp-showcase-membership-plan-action" in css
+    assert ".lp-showcase-membership-entry-action" in css
     assert ".lp-showcase-membership-price-block" in css
     assert ".lp-showcase-membership-benefits" in css
-    assert ".lp-showcase-membership-benefits-action" in css
+    assert ".lp-showcase-membership-price-block-accent {\n    border-color: rgba(197, 138, 20, 0.34);\n    background: linear-gradient(135deg, rgba(255, 218, 92, 0.72) 0%, rgba(226, 166, 38, 0.82) 58%, rgba(193, 125, 16, 0.78) 100%);\n  }" in css
+    assert ".lp-showcase-membership-benefits {\n    background:" not in css
+    assert ".lp-showcase-membership-benefits {\n    color:" not in css
+    assert ".lp-showcase-membership-benefits-action" not in css
     assert ".lp-showcase-membership-benefits-action:hover" not in css
     assert "color: var(--lp-link);" not in css
     assert ".lp-showcase-membership-actions" not in css
+    assert ".lp-showcase-membership-grid > .lp-showcase-pricing-card {\n    height: 100%;\n  }" in css
+    assert ".lp-showcase-membership-grid > .lp-showcase-pricing-card {\n    height: auto;\n  }" not in css
+    assert ".lp-showcase-membership-panel {\n    display: grid;\n    gap: 16px;\n    align-content: start;\n  }" in css
+    assert ".lp-showcase-membership-plan-action {\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    margin-top: auto;\n  }" in css
+    assert ".lp-showcase-membership-panel .lp-showcase-pricing-list {\n    margin: 0;\n  }" in css
+    assert ".lp-showcase-membership-panel .lp-showcase-pricing-list li {\n    font-size: 15px;\n    font-weight: 400;\n    line-height: 1.5;\n  }" in css
+    assert ".lp-showcase-membership-panel .lp-showcase-pricing-list li {\n    white-space: normal;\n  }" not in css
+    assert ".lp-showcase-membership-panel:not(.lp-showcase-membership-benefits) .lp-showcase-pricing-list li {\n    white-space: nowrap;\n  }" in css
+    assert ".lp-showcase-membership-benefits li {\n    font-size: 14px;\n    line-height: 1.35;\n    font-weight: 700;\n  }" not in css

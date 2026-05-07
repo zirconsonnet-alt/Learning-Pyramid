@@ -309,17 +309,40 @@ def test_guide_page_resolves_legacy_queries_to_first_task_document():
 def test_guide_page_uses_faq_as_default_doc_and_left_column_only_for_community_card():
     guide_page = read(GUIDE_PAGE)
     faq_doc = read(FAQ_GUIDE_DOC)
+    faq_headings = re.findall(r"^## (.+)$", faq_doc, flags=re.MULTILINE)
+    expected_headings = [
+        "创建项目前需要干什么？",
+        "为什么佣金不立即生效？",
+        "购买会员立刻就能使用AI功能吗？",
+        "我的视频资料没有字幕怎么办？",
+        "我遇到了bug，如何反馈？",
+        "我上哪里找大模型API？",
+        "我很久没再使用项目，重拾起来最有效的做法是什么？",
+        "我开启了番茄钟，是不是就只能在指定时间内学习？",
+    ]
 
     assert 'const activeDoc = docs.find((item) => item.slug === resolvedRequestedSlug) ?? docs[0]' in guide_page
     assert 'slug: "faq"' in guide_page
     assert "# LearningPyramid 常见问题" in faq_doc
+    assert faq_headings == expected_headings
     assert 'aria-label="文档目录"' not in guide_page
     assert "selectDoc(slug: string)" not in guide_page
     assert "官方群与反馈" in guide_page
     assert "/official-community-qq-group.png" in guide_page
-    assert "我应该先从哪里开始？" in faq_doc
-    assert "为什么我已经绑定目录了，学习对象树还是空的？" in faq_doc
-    assert "番茄钟开始后为什么还要登录网页？" in faq_doc
+    assert "请在本地准备好你的视频或其他学习资料" in faq_doc
+    assert "用户充值后有3天退款期，退款期过后才视为有效" in faq_doc
+    assert "购买会员仅代表获得AI使用能力，实际使用前还需设置您的API供系统调用" in faq_doc
+    assert "可以免费下载我们的字幕工具，下载后导入目录，稍作等待，即可生成字幕" in faq_doc
+    assert "扫描左侧二维码加群，即可向开发人员当面反馈。" in faq_doc
+    assert "可以注册阿里云百炼平台，它为很多免费模型提供百万token；或者付费购买Deepseek API，效果更佳。" in faq_doc
+    assert "进入项目的推荐复习页面，并复习记忆程度低于某个阈值的复述点，这会快速让你回忆起那些忘得最干净的东西。" in faq_doc
+    assert "不是，你还可以在不与计划冲突的时间内新建小番茄，开始新的学习。" in faq_doc
+    assert "我应该先从哪里开始？" not in faq_doc
+    assert "为什么我已经绑定目录了，学习对象树还是空的？" not in faq_doc
+    assert "为什么视频能看到，但复习链没有自动出现？" not in faq_doc
+    assert "AI 问答为什么不能直接用？" not in faq_doc
+    assert "番茄钟开始后为什么还要登录网页？" not in faq_doc
+    assert "考研套餐和月会员有什么区别？" not in faq_doc
 
 
 def test_guide_page_renders_current_document_outline_card():
