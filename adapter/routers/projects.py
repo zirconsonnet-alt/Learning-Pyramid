@@ -206,7 +206,9 @@ def delete_subject_material(
     cleanup_ids = [
         item.project_id
         for item in api.list_subject_materials(subjectId)  # type: ignore[arg-type]
-        if item.material_id == materialId and item.project_id is not None
+        if item.material_id == materialId
+        and item.project_id is not None
+        and str(item.project_id) != str(subjectId)
     ]
     api.delete_subject_material(subjectId, materialId)  # type: ignore[arg-type]
     if current_runtime_features().auth_enabled:

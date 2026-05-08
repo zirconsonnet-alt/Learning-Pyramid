@@ -315,6 +315,57 @@ def test_subject_material_projects_can_all_be_deleted(monkeypatch, tmp_path: Pat
     _reset_caches()
 
 
+def test_deleting_default_subject_material_keeps_hosted_subject_access(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PLM_APP_MODE", "hosted")
+    monkeypatch.setenv("PLM_ENABLE_AUTH", "true")
+    monkeypatch.setenv("PLM_ALLOW_SIGNUP", "true")
+    monkeypatch.setenv("PLM_REQUIRE_SIGNUP_INVITE", "false")
+    monkeypatch.setenv("PLM_ENABLE_ASR", "false")
+    monkeypatch.setenv("PLM_ENABLE_SERVER_MEDIA_STREAM", "false")
+    monkeypatch.setenv("PLM_PROJECTS_ROOT", str(tmp_path / "projects"))
+    monkeypatch.setenv("PLM_STORE_PATH", "")
+    monkeypatch.setenv("PLM_LEGACY_STORE_PATH", "")
+    monkeypatch.setenv("PLM_STORE_DB_PATH", str(tmp_path / "plm_store.sqlite3"))
+    monkeypatch.setenv("PLM_AUTH_DB_PATH", str(tmp_path / "plm_auth.sqlite3"))
+    monkeypatch.setenv("PLM_MEMBERSHIP_DB_PATH", str(tmp_path / "plm_membership.sqlite3"))
+    _reset_caches()
+
+    client = TestClient(create_app())
+    register_resp = client.post("/api/auth/register", json={"email": "owner@example.com", "password": "password123"})
+    assert register_resp.status_code == 200
+
+    create_subject_resp = client.post("/api/subjects", json={"title": "高等数学"})
+    assert create_subject_resp.status_code == 200
+    subject_id = create_subject_resp.json()["data"]["subjectId"]
+
+    create_course_resp = client.post(
+        f"/api/subjects/{subject_id}/materials",
+        json={"materialType": "COURSE", "title": "第二套网课"},
+    )
+    assert create_course_resp.status_code == 200
+    second_course = create_course_resp.json()["data"]
+    assert second_course["projectId"] != subject_id
+
+    delete_default_resp = client.delete(f"/api/subjects/{subject_id}/materials/legacy_main")
+    assert delete_default_resp.status_code == 200
+
+    subjects_after_delete_resp = client.get("/api/subjects")
+    assert subjects_after_delete_resp.status_code == 200
+    assert [item["subjectId"] for item in subjects_after_delete_resp.json()["data"]] == [subject_id]
+
+    materials_after_delete_resp = client.get(f"/api/subjects/{subject_id}/materials")
+    assert materials_after_delete_resp.status_code == 200
+    materials_after_delete = materials_after_delete_resp.json()["data"]
+    assert [item["materialId"] for item in materials_after_delete] == [second_course["materialId"]]
+    assert materials_after_delete[0]["projectId"] == second_course["projectId"]
+
+    context_resp = client.get(f"/api/projects/{second_course['projectId']}/subject-context")
+    assert context_resp.status_code == 200
+    assert context_resp.json()["data"]["subject"]["subjectId"] == subject_id
+
+    _reset_caches()
+
+
 def test_initialize_book_from_course_material_tree(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("PLM_APP_MODE", "local")
     monkeypatch.setenv("PLM_ENABLE_AUTH", "false")
