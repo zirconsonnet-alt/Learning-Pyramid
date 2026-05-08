@@ -100,7 +100,7 @@ export function PomodoroTransitionEffect(props: {
       currentPomodoro: snapshot.currentPomodoro,
       totalPomodoros: snapshot.totalPomodoros,
       breakMinutes: snapshot.currentPlan?.breakMinutes ?? 5,
-      hasProjectBinding: Boolean(snapshot.currentProjectId),
+      hasProjectBinding: Boolean(currentProjectTitle),
       projectTitle: currentProjectTitle ?? null,
     }
     setActiveTransition(nextCard)

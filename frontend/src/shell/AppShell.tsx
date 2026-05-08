@@ -313,7 +313,7 @@ export function AppShell() {
   const canAccessApp = !authEnabled || Boolean(currentUserQ.data)
   useBootstrapGlobalSettings(authEnabled && Boolean(currentUserQ.data?.userId), currentUserQ.data?.userId)
   useLearningPlanRemoteSync(authEnabled && Boolean(currentUserQ.data?.userId), currentUserQ.data?.userId)
-  const subjectsQ = useSubjects(canAccessApp && Boolean(routeSubjectId))
+  const subjectsQ = useSubjects(canAccessApp)
   const routeSubject = useMemo(
     () => (subjectsQ.data ?? []).find((subject) => subject.subjectId === routeSubjectId) ?? null,
     [routeSubjectId, subjectsQ.data],
@@ -413,12 +413,17 @@ export function AppShell() {
         : projectsQ.data ?? [],
     [effectiveProjectId, isVirtualStudyReviewProject, projectsQ.data],
   )
+  const subjectRootProjectIds = useMemo(
+    () => new Set((subjectsQ.data ?? []).map((subject) => subject.subjectProjectId).filter(Boolean)),
+    [subjectsQ.data],
+  )
+  const pomodoroProjectCatalogReady = !projectsQ.isLoading && !subjectsQ.isLoading
   const accessibleProjectIds = useMemo(
-    () => new Set((projectsQ.data ?? []).map((project) => project.projectId)),
-    [projectsQ.data],
+    () => new Set((projectsQ.data ?? []).filter((project) => !subjectRootProjectIds.has(project.projectId)).map((project) => project.projectId)),
+    [projectsQ.data, subjectRootProjectIds],
   )
   const pomodoroFocusProjectId =
-    pomodoroSnapshot.currentProjectId && accessibleProjectIds.has(pomodoroSnapshot.currentProjectId)
+    pomodoroProjectCatalogReady && pomodoroSnapshot.currentProjectId && accessibleProjectIds.has(pomodoroSnapshot.currentProjectId)
       ? pomodoroSnapshot.currentProjectId
       : ""
   const focusProjectTitle =
@@ -428,6 +433,7 @@ export function AppShell() {
   const upcomingJumpProjectId =
     pomodoroUpcomingSegment?.phase === "focus" &&
     pomodoroUpcomingSegment.projectId &&
+    pomodoroProjectCatalogReady &&
     accessibleProjectIds.has(pomodoroUpcomingSegment.projectId)
       ? pomodoroUpcomingSegment.projectId
       : ""
