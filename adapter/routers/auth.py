@@ -2,11 +2,23 @@ from __future__ import annotations
 
 import json
 import logging
+import hmac
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from adapter.auth import SESSION_COOKIE_NAME, clear_auth_cookie, require_request_auth_user, resolve_session_user, set_auth_cookie
+from adapter.auth import (
+    PENDING_EMAIL_VERIFICATION_COOKIE_NAME,
+    SESSION_COOKIE_NAME,
+    clear_auth_cookie,
+    clear_pending_email_verification_cookie,
+    issue_pending_email_verification_token,
+    require_request_auth_user,
+    resolve_pending_email_verification_token,
+    resolve_session_user,
+    set_auth_cookie,
+    set_pending_email_verification_cookie,
+)
 from adapter.deps import get_api, get_auth_rate_limit_store, get_auth_store, get_membership_marketing_store
 from adapter.schemas import (
     AuthCredentialsRequest,
@@ -179,6 +191,7 @@ def register_auth_user(
                 verification_email_sent = _send_signup_verification_email(auth_store=auth_store, email=user.email)
             except Exception:
                 logger.exception("failed to deliver email verification message")
+            verification_wait_token = issue_pending_email_verification_token(user_id=user.user_id, email=user.email)
             resp = JSONResponse(
                 content={
                     "ok": True,
@@ -186,9 +199,11 @@ def register_auth_user(
                         **_user_to_dto(user, auth_store),
                         "emailVerificationRequired": True,
                         "verificationEmailSent": verification_email_sent,
+                        "verificationWaitToken": verification_wait_token,
                     },
                 }
             )
+            set_pending_email_verification_cookie(resp, verification_wait_token)
             return resp
         session_token = auth_store.create_session(user.user_id)
         resp = JSONResponse(
@@ -229,6 +244,7 @@ def login_auth_user(
     auth_rate_limit_store.reset_login_failures(email=req.email)
     session_token = auth_store.create_session(user.user_id)
     resp = JSONResponse(content={"ok": True, "data": _user_to_dto(user, auth_store)})
+    clear_pending_email_verification_cookie(resp)
     set_auth_cookie(resp, session_token)
     return resp
 
@@ -243,6 +259,7 @@ def logout_auth_user(request: Request, auth_store: AuthStore = Depends(get_auth_
         auth_store.delete_session(token)
     resp = JSONResponse(content={"ok": True, "data": None})
     clear_auth_cookie(resp)
+    clear_pending_email_verification_cookie(resp)
     return resp
 
 
@@ -351,6 +368,39 @@ def confirm_email_verification(
     user = auth_store.verify_email_with_token(req.token)
     session_token = auth_store.create_session(user.user_id)
     resp = JSONResponse(content={"ok": True, "data": _user_to_dto(user, auth_store)})
+    clear_pending_email_verification_cookie(resp)
+    set_auth_cookie(resp, session_token)
+    return resp
+
+
+@router.get("/auth/email-verification/status")
+def get_email_verification_status(
+    request: Request,
+    waitToken: str = Query(min_length=16, max_length=2048),
+    auth_store: AuthStore = Depends(get_auth_store),
+) -> JSONResponse:
+    features = current_runtime_features()
+    if not features.auth_enabled or not email_verification_enabled():
+        raise HTTPException(status_code=404, detail="Not found")
+    cookie_token = str(request.cookies.get(PENDING_EMAIL_VERIFICATION_COOKIE_NAME, "")).strip()
+    if not cookie_token or not hmac.compare_digest(cookie_token, str(waitToken).strip()):
+        return JSONResponse(content={"ok": True, "data": {"status": "pending"}})
+    token_payload = resolve_pending_email_verification_token(cookie_token)
+    if token_payload is None:
+        resp = JSONResponse(content={"ok": True, "data": {"status": "expired"}})
+        clear_pending_email_verification_cookie(resp)
+        return resp
+    try:
+        user = auth_store.get_user_by_id(token_payload["user_id"])
+    except NotFound:
+        resp = JSONResponse(content={"ok": True, "data": {"status": "expired"}})
+        clear_pending_email_verification_cookie(resp)
+        return resp
+    if user.email.strip().lower() != token_payload["email"].strip().lower() or not auth_store.user_email_verified(user.user_id):
+        return JSONResponse(content={"ok": True, "data": {"status": "pending"}})
+    session_token = auth_store.create_session(user.user_id)
+    resp = JSONResponse(content={"ok": True, "data": {"status": "verified", "user": _user_to_dto(user, auth_store)}})
+    clear_pending_email_verification_cookie(resp)
     set_auth_cookie(resp, session_token)
     return resp
 

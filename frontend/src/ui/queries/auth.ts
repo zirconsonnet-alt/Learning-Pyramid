@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   confirmEmailVerification,
   confirmPasswordReset,
+  getEmailVerificationStatus,
   getCurrentUser,
   login,
   logout,
@@ -56,6 +57,16 @@ export function useRequestPasswordReset() {
 export function useRequestEmailVerification() {
   return useMutation({
     mutationFn: (params: { email: string }) => requestEmailVerification(params),
+  })
+}
+
+export function useEmailVerificationStatus(waitToken: string | null, enabled = true, refetchInterval: number | false = false) {
+  return useQuery({
+    queryKey: ["auth", "email-verification-status", waitToken],
+    queryFn: ({ signal }) => getEmailVerificationStatus({ waitToken: waitToken ?? "" }, { signal }),
+    enabled: enabled && Boolean(waitToken),
+    staleTime: 0,
+    refetchInterval,
   })
 }
 

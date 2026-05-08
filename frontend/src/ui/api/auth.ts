@@ -20,8 +20,15 @@ const NullableAuthUserSchema = AuthUserSchema.nullable()
 export const RegisterAuthResultSchema = AuthUserSchema.extend({
   emailVerificationRequired: z.boolean(),
   verificationEmailSent: z.boolean(),
+  verificationWaitToken: z.string().nullable().optional(),
 })
 export type RegisterAuthResult = z.infer<typeof RegisterAuthResultSchema>
+export const EmailVerificationStatusSchema = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("pending") }),
+  z.object({ status: z.literal("expired") }),
+  z.object({ status: z.literal("verified"), user: AuthUserSchema }),
+])
+export type EmailVerificationStatus = z.infer<typeof EmailVerificationStatusSchema>
 export const SignupHumanCheckChallengeSchema = z.object({
   parameters: z
     .object({
@@ -95,6 +102,15 @@ export function confirmEmailVerification(params: { token: string }) {
     method: "POST",
     body: { token: params.token },
     responseSchema: AuthUserSchema,
+  })
+}
+
+export function getEmailVerificationStatus(params: { waitToken: string }, options?: ApiRequestExecutionOptions) {
+  return apiRequest({
+    path: `/auth/email-verification/status?waitToken=${encodeURIComponent(params.waitToken)}`,
+    responseSchema: EmailVerificationStatusSchema,
+    signal: options?.signal,
+    timeoutMs: options?.timeoutMs,
   })
 }
 

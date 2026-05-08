@@ -1312,6 +1312,9 @@ class _AuthStoreImpl:
             updated_at=None if row["updated_at"] is None else str(row["updated_at"]),
         )
 
+    def user_email_verified(self, user_id: str) -> bool:
+        raise NotImplementedError
+
     @staticmethod
     def _row_to_admin_action_log(row: Any) -> AdminActionLog:
         return AdminActionLog(
@@ -2037,6 +2040,23 @@ class SQLiteAuthStore(_AuthStoreImpl):
         if row is None:
             raise NotFound("user")
         return self._row_to_user(row)
+
+    def user_email_verified(self, user_id: str) -> bool:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT email_verified_at
+                FROM users
+                WHERE user_id = ?
+                """,
+                (str(user_id),),
+            ).fetchone()
+        finally:
+            conn.close()
+        if row is None:
+            raise NotFound("user")
+        return bool(str(row["email_verified_at"] or "").strip())
 
     def get_user_by_public_uid(self, public_uid: str) -> AuthUser:
         normalized_uid = str(public_uid).strip().upper()
@@ -4263,6 +4283,20 @@ class PostgresAuthStore(_AuthStoreImpl):
             raise NotFound("user")
         return self._row_to_user(row)
 
+    def user_email_verified(self, user_id: str) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT email_verified_at
+                FROM users
+                WHERE user_id = %s
+                """,
+                (str(user_id),),
+            ).fetchone()
+        if row is None:
+            raise NotFound("user")
+        return bool(str(row["email_verified_at"] or "").strip())
+
     def get_user_by_public_uid(self, public_uid: str) -> AuthUser:
         normalized_uid = str(public_uid).strip().upper()
         if not normalized_uid:
@@ -6300,6 +6334,9 @@ class AuthStore:
 
     def get_user_by_id(self, user_id: str) -> AuthUser:
         return self._impl.get_user_by_id(user_id)
+
+    def user_email_verified(self, user_id: str) -> bool:
+        return self._impl.user_email_verified(user_id)
 
     def get_user_by_public_uid(self, public_uid: str) -> AuthUser:
         return self._impl.get_user_by_public_uid(public_uid)

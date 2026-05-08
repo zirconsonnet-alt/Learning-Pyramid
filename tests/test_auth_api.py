@@ -583,6 +583,48 @@ def test_email_verification_request_is_generic_for_unknown_email(auth_env: None,
     assert deliveries == []
 
 
+def test_email_verification_wait_flow_completes_cross_device(auth_env: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PLM_REQUIRE_SIGNUP_INVITE", "false")
+    _enable_email_verification(monkeypatch)
+    _reset_caches()
+
+    delivered: dict[str, object] = {}
+
+    def fake_send_email_verification_email(*, to_email: str, verification_url: str, expires_minutes: int) -> None:
+        delivered["to_email"] = to_email
+        delivered["verification_url"] = verification_url
+        delivered["expires_minutes"] = expires_minutes
+
+    monkeypatch.setattr("adapter.routers.auth.send_email_verification_email", fake_send_email_verification_email)
+
+    app = create_app()
+    desktop_client = TestClient(app)
+    mobile_client = TestClient(app)
+    test_email = "crossdevice@example.com"
+
+    register = desktop_client.post("/api/auth/register", json={"email": test_email, "password": "password123"})
+    assert register.status_code == 200
+    assert register.json()["data"]["emailVerificationRequired"] is True
+    wait_token = register.json()["data"]["verificationWaitToken"]
+    assert isinstance(wait_token, str) and len(wait_token) >= 16
+
+    pending = desktop_client.get(f"/api/auth/email-verification/status?waitToken={wait_token}")
+    assert pending.status_code == 200
+    assert pending.json()["data"] == {"status": "pending"}
+    assert desktop_client.get("/api/auth/me").json() == {"ok": True, "data": None}
+
+    token = parse_qs(urlsplit(str(delivered["verification_url"])).query)["token"][0]
+    confirm = mobile_client.post("/api/auth/email-verification/confirm", json={"token": token})
+    assert confirm.status_code == 200
+    assert confirm.json()["data"]["email"] == test_email
+
+    completed = desktop_client.get(f"/api/auth/email-verification/status?waitToken={wait_token}")
+    assert completed.status_code == 200
+    assert completed.json()["data"]["status"] == "verified"
+    assert completed.json()["data"]["user"]["email"] == test_email
+    assert desktop_client.get("/api/auth/me").json()["data"]["email"] == test_email
+
+
 def test_password_reset_request_and_confirm_flow(auth_env: None, monkeypatch: pytest.MonkeyPatch) -> None:
     _enable_password_reset(monkeypatch)
     _reset_caches()

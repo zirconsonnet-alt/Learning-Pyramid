@@ -18,7 +18,7 @@ def test_verify_mode_renders_inline_email_delivery_state() -> None:
 
     assert "verifyEmailNotice" in source
     assert "验证邮件已发送" in source
-    assert "请到邮箱点击激活链接；验证完成后就能进入工作区。" in source
+    assert "请到邮箱点击激活链接；你可以在手机或电脑上完成验证，当前页面会自动继续。" in source
     assert "激活链接已重新发送" in source
     assert "如果这个邮箱已经注册且尚未验证，我们会重新发送激活链接；如果你刚清理过账号，请直接重新注册。" in source
     assert "等待邮箱验证" in source
@@ -37,3 +37,13 @@ def test_verify_resend_request_returns_to_login_with_generic_feedback() -> None:
 
     assert 'showSuccessFeedback("验证邮件请求已处理", "如果账号尚未验证，我们会发送激活链接；如果已经完成验证，请直接登录。")' in source
     assert 'switchMode("login")' in source
+
+
+def test_verify_wait_page_polls_cross_device_completion() -> None:
+    source = AUTH_PAGE.read_text(encoding="utf-8")
+
+    assert "verificationWaitToken" in source
+    assert "useEmailVerificationStatus" in source
+    assert 'effectiveMode === "verify" && !verifyTokenPresent && Boolean(verificationWaitToken) ? "sent" : null' in source
+    assert "verifyEmailNotice === \"sent\" && verificationWaitToken ? 2000 : false" in source
+    assert "邮箱已验证，正在进入工作区。" in source

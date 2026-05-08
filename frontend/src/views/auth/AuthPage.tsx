@@ -11,6 +11,7 @@ import {
   useConfirmEmailVerification,
   useConfirmPasswordReset,
   useCurrentUser,
+  useEmailVerificationStatus,
   useLogin,
   useRegister,
   useRequestEmailVerification,
@@ -79,6 +80,7 @@ export function AuthPage() {
           ? "verify"
           : "login"
   const actionToken = searchParams.get("token")?.trim() || ""
+  const verificationWaitToken = searchParams.get("waitToken")?.trim() || ""
   const resetToken = effectiveMode === "reset" ? actionToken : ""
   const verifyToken = effectiveMode === "verify" ? actionToken : ""
   const resetTokenPresent = effectiveMode === "reset" && Boolean(resetToken)
@@ -88,12 +90,19 @@ export function AuthPage() {
   const [inviteCode, setInviteCode] = useState("")
   const [humanCheckToken, setHumanCheckToken] = useState<string | null>(null)
   const [humanCheckResetSignal, setHumanCheckResetSignal] = useState(0)
-  const [verifyEmailNotice, setVerifyEmailNotice] = useState<VerifyEmailNotice>(null)
+  const [verifyEmailNotice, setVerifyEmailNotice] = useState<VerifyEmailNotice>(
+    effectiveMode === "verify" && !verifyTokenPresent && Boolean(verificationWaitToken) ? "sent" : null,
+  )
   const returnTo = useMemo(() => resolveReturnTo(location.state), [location.state])
   const passwordValid =
     effectiveMode === "register" || resetTokenPresent ? password.length >= 8 : effectiveMode === "login" ? password.length > 0 : true
   const registerRequiresHumanCheck =
     effectiveMode === "register" && signupHumanCheckEnabled && signupHumanCheckProvider === "altcha" && Boolean(signupHumanCheckChallengeUrl)
+  const verifyStatusQ = useEmailVerificationStatus(
+    verifyEmailNotice === "sent" && verificationWaitToken ? verificationWaitToken : null,
+    effectiveMode === "verify" && !verifyTokenPresent,
+    verifyEmailNotice === "sent" && verificationWaitToken ? 2000 : false,
+  )
 
   useEffect(() => {
     const emailParam = searchParams.get("email")?.trim() || ""
@@ -107,6 +116,19 @@ export function AuthPage() {
       setVerifyEmailNotice(null)
     }
   }, [effectiveMode, verifyTokenPresent])
+
+  useEffect(() => {
+    if (effectiveMode === "verify" && !verifyTokenPresent && verificationWaitToken && !verifyEmailNotice) {
+      setVerifyEmailNotice("sent")
+    }
+  }, [effectiveMode, verificationWaitToken, verifyEmailNotice, verifyTokenPresent])
+
+  useEffect(() => {
+    if (verifyStatusQ.data?.status !== "verified") return
+    void currentUserQ.refetch()
+    showSuccessFeedback("邮箱已验证，正在进入工作区。", "当前页面已同步验证结果。")
+    nav(returnTo, { replace: true, state: { verifiedUserId: verifyStatusQ.data.user.userId } })
+  }, [currentUserQ, nav, returnTo, verifyStatusQ.data])
 
   usePageMeta({
     title:
@@ -192,19 +214,23 @@ export function AuthPage() {
     if (nextMode === "register") {
       nextParams.set("mode", "register")
       nextParams.delete("token")
+      nextParams.delete("waitToken")
       nextParams.delete("email")
     } else if (nextMode === "reset") {
       nextParams.set("mode", "reset")
       if (!resetTokenPresent) nextParams.delete("token")
+      nextParams.delete("waitToken")
       nextParams.delete("email")
     } else if (nextMode === "verify") {
       nextParams.set("mode", "verify")
       nextParams.delete("token")
+      nextParams.delete("waitToken")
       if (email.trim()) nextParams.set("email", email.trim())
       else nextParams.delete("email")
     } else {
       nextParams.delete("mode")
       nextParams.delete("token")
+      nextParams.delete("waitToken")
       nextParams.delete("email")
     }
     setSearchParams(nextParams, { replace: true })
@@ -218,6 +244,7 @@ export function AuthPage() {
     if (email.trim()) nextParams.set("email", email.trim())
     else nextParams.delete("email")
     nextParams.delete("token")
+    nextParams.delete("waitToken")
     setPassword("")
     setSearchParams(nextParams, { replace: true })
   }
@@ -270,6 +297,8 @@ export function AuthPage() {
           nextParams.set("mode", "verify")
           nextParams.set("email", payload.email)
           nextParams.delete("token")
+          if (created.verificationWaitToken?.trim()) nextParams.set("waitToken", created.verificationWaitToken.trim())
+          else nextParams.delete("waitToken")
           setVerifyEmailNotice("sent")
           setSearchParams(nextParams, { replace: true })
         } else {
@@ -295,6 +324,8 @@ export function AuthPage() {
             : effectiveMode === "verify"
               ? verifyTokenPresent
                 ? "邮箱验证失败"
+                : verifyStatusQ.data?.status === "expired"
+                  ? "邮箱验证等待已过期"
                 : "验证邮件发送失败"
               : "登录失败",
         formatApiError(err),
@@ -309,11 +340,13 @@ export function AuthPage() {
         ? resetTokenPresent
           ? confirmPasswordReset.error
           : requestPasswordReset.error
-        : effectiveMode === "verify"
-          ? verifyTokenPresent
-            ? confirmEmailVerification.error
-            : requestEmailVerification.error
-          : login.error
+            : effectiveMode === "verify"
+              ? verifyTokenPresent
+                ? confirmEmailVerification.error
+                : verifyStatusQ.data?.status === "expired"
+                  ? new ApiError("等待验证已过期，请重新发送验证邮件。", { code: "VERIFICATION_WAIT_EXPIRED", status: 400 })
+                : requestEmailVerification.error
+            : login.error
   const pending =
     effectiveMode === "register"
       ? register.isPending
@@ -353,7 +386,7 @@ export function AuthPage() {
           ? verifyTokenPresent
             ? "点击下方按钮完成邮箱验证并自动登录。"
             : verifyEmailNotice === "sent"
-              ? "验证邮件已经发出，请回到邮箱完成激活；没有收到可以重新发送。"
+              ? "验证邮件已经发出。你可以在手机或电脑上打开邮箱完成激活，当前页面会自动继续。"
               : "输入注册邮箱，我们会重新发送一封验证邮件。"
         : "使用邮箱和密码登录。"
 
@@ -407,7 +440,7 @@ export function AuthPage() {
                 message={
                   verifyEmailNotice === "resent"
                     ? "如果这个邮箱已经注册且尚未验证，我们会重新发送激活链接；如果你刚清理过账号，请直接重新注册。"
-                    : "请到邮箱点击激活链接；验证完成后就能进入工作区。"
+                    : "请到邮箱点击激活链接；你可以在手机或电脑上完成验证，当前页面会自动继续。"
                 }
                 tone="info"
               />
