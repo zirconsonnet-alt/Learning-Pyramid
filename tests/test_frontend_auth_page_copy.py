@@ -30,3 +30,10 @@ def test_authenticated_verify_resend_page_redirects_to_workspace() -> None:
     source = AUTH_PAGE.read_text(encoding="utf-8")
 
     assert 'currentUserQ.data && effectiveMode !== "reset" && (effectiveMode !== "verify" || !verifyTokenPresent)' in source
+
+
+def test_verify_resend_request_returns_to_login_with_generic_feedback() -> None:
+    source = AUTH_PAGE.read_text(encoding="utf-8")
+
+    assert 'showSuccessFeedback("验证邮件请求已处理", "如果账号尚未验证，我们会发送激活链接；如果已经完成验证，请直接登录。")' in source
+    assert 'switchMode("login")' in source

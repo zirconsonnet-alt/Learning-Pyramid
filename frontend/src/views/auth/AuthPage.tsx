@@ -252,8 +252,8 @@ export function AuthPage() {
         } else {
           if (!payload.email) return
           await requestEmailVerification.mutateAsync({ email: payload.email })
-          setVerifyEmailNotice("resent")
-          showSuccessFeedback("验证邮件已发送", "如果账号存在且尚未验证，我们已经重新发送激活链接。")
+          showSuccessFeedback("验证邮件请求已处理", "如果账号尚未验证，我们会发送激活链接；如果已经完成验证，请直接登录。")
+          switchMode("login")
         }
       } else if (effectiveMode === "register") {
         if (!payload.email || !payload.password) return
