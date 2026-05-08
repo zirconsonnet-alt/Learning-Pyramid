@@ -133,3 +133,15 @@ def test_project_video_progress_uses_persistent_instance_watch_facts() -> None:
     assert "loadVideoWatchProgressMap(pid, instanceIds" in workbench_source
     assert "markVideoWatchProgressCompleted(projectId, instanceId" in video_source
     assert "syncVideoWatchProgressRange(projectId, instanceId" in video_source
+
+
+def test_workbench_empty_project_watch_maps_avoid_redundant_state_loops() -> None:
+    source = WORKBENCH_PAGE.read_text(encoding="utf-8")
+
+    assert "function shallowRecordEqual<T>(left: Record<string, T>, right: Record<string, T>)" in source
+    assert "setVideoDurationByInstanceId((current) => (Object.keys(current).length === 0 ? current : {}))" in source
+    assert "setVideoWatchedMsByInstanceId((current) => (Object.keys(current).length === 0 ? current : {}))" in source
+    assert "setRemoteVideoWatchProgressByInstanceId((current) => (Object.keys(current).length === 0 ? current : {}))" in source
+    assert "shallowRecordEqual(current, nextDurationByInstanceId) ? current : nextDurationByInstanceId" in source
+    assert "shallowRecordEqual(current, nextWatchedMsByInstanceId) ? current : nextWatchedMsByInstanceId" in source
+    assert "shallowRecordEqual(current, remoteProgress) ? current : remoteProgress" in source

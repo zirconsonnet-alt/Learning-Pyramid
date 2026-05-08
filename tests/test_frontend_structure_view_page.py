@@ -14,7 +14,7 @@ INSTANCE_PAGE = REPO_ROOT / "frontend" / "src" / "views" / "instances" / "Instan
 def test_router_uses_single_structure_view_route() -> None:
     source = ROUTER.read_text(encoding="utf-8")
 
-    assert 'const StructureViewPage = lazyRoute(() => import("@/views/trees/StructureViewPage"), (mod) => mod.StructureViewPage)' in source
+    assert 'import { StructureViewPage } from "@/views/trees/StructureViewPage"' in source
     assert '{ path: "/p/:projectId/structure-view", element: lazyElement(<StructureViewPage />) }' in source
     assert "/p/:projectId/object-tree" not in source
     assert "/p/:projectId/task-tree" not in source

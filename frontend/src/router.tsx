@@ -6,6 +6,10 @@ import { AppShell } from "@/shell/AppShell"
 import { RouteErrorPage } from "@/views/system/RouteErrorPage"
 import { RoutePendingPage } from "@/views/system/RoutePendingPage"
 import { PomodoroWorkbenchGate } from "@/views/pomodoro/PomodoroWorkbenchGate"
+import { AiChatPage } from "@/views/ai/AiChatPage"
+import { ReviewRecommendationsPage } from "@/views/recommendations/ReviewRecommendationsPage"
+import { ProjectSettingsPage } from "@/views/settings/ProjectSettingsPage"
+import { StructureViewPage } from "@/views/trees/StructureViewPage"
 
 const CHUNK_RELOAD_MARKER = "lp:chunk-reload-attempted"
 
@@ -57,7 +61,6 @@ const AdminMembershipPage = lazyRoute(() => import("@/views/admin/AdminMembershi
 const AdminUserDetailPage = lazyRoute(() => import("@/views/admin/AdminUserDetailPage"), (mod) => mod.AdminUserDetailPage)
 const AdminUsersPage = lazyRoute(() => import("@/views/admin/AdminUsersPage"), (mod) => mod.AdminUsersPage)
 const FriendsPage = lazyRoute(() => import("@/views/friends/FriendsPage"), (mod) => mod.FriendsPage)
-const AiChatPage = lazyRoute(() => import("@/views/ai/AiChatPage"), (mod) => mod.AiChatPage)
 const LearningObjectNodePage = lazyRoute(() => import("@/views/learningObjects/LearningObjectNodePage"), (mod) => mod.LearningObjectNodePage)
 const LearningTaskNodePage = lazyRoute(() => import("@/views/learningTasks/LearningTaskNodePage"), (mod) => mod.LearningTaskNodePage)
 const MembershipPage = lazyRoute(() => import("@/views/membership/MembershipPage"), (mod) => mod.MembershipPage)
@@ -69,14 +72,11 @@ const WechatWithdrawalConfirmationPage = lazyRoute(
 const ProjectsPage = lazyRoute(() => import("@/views/projects/ProjectsPage"), (mod) => mod.ProjectsPage)
 const ProfilePage = lazyRoute(() => import("@/views/profile/ProfilePage"), (mod) => mod.ProfilePage)
 const RecallPointPage = lazyRoute(() => import("@/views/recallPoints/RecallPointPage"), (mod) => mod.RecallPointPage)
-const ReviewRecommendationsPage = lazyRoute(() => import("@/views/recommendations/ReviewRecommendationsPage"), (mod) => mod.ReviewRecommendationsPage)
 const ReviewChainPage = lazyRoute(() => import("@/views/reviewChains/ReviewChainPage"), (mod) => mod.ReviewChainPage)
 const ReviewTaskPage = lazyRoute(() => import("@/views/reviewTasks/ReviewTaskPage"), (mod) => mod.ReviewTaskPage)
-const ProjectSettingsPage = lazyRoute(() => import("@/views/settings/ProjectSettingsPage"), (mod) => mod.ProjectSettingsPage)
 const GlobalSettingsPage = lazyRoute(() => import("@/views/settings/GlobalSettingsPage"), (mod) => mod.GlobalSettingsPage)
 const SubtitleToolPage = lazyRoute(() => import("@/views/subtitleTool/SubtitleToolPage"), (mod) => mod.SubtitleToolPage)
 const SubjectDashboardPage = lazyRoute(() => import("@/views/subjects/SubjectDashboardPage"), (mod) => mod.SubjectDashboardPage)
-const StructureViewPage = lazyRoute(() => import("@/views/trees/StructureViewPage"), (mod) => mod.StructureViewPage)
 const WorkbenchPage = lazyRoute(() => import("@/views/workbench/WorkbenchPage"), (mod) => mod.WorkbenchPage)
 const PomodoroPage = lazyRoute(() => import("@/views/pomodoro/PomodoroPage"), (mod) => mod.PomodoroPage)
 const PomodoroSettingsPage = lazyRoute(() => import("@/views/pomodoro/PomodoroSettingsPage"), (mod) => mod.PomodoroSettingsPage)

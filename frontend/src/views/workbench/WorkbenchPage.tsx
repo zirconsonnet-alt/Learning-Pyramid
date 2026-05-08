@@ -72,6 +72,13 @@ function getDateKeyDaysAgo(days: number, from = new Date()) {
   return getLocalDateKey(next)
 }
 
+function shallowRecordEqual<T>(left: Record<string, T>, right: Record<string, T>) {
+  const leftKeys = Object.keys(left)
+  const rightKeys = Object.keys(right)
+  if (leftKeys.length !== rightKeys.length) return false
+  return leftKeys.every((key) => left[key] === right[key])
+}
+
 function isRelativeMaterialId(materialId: string) {
   const normalized = String(materialId).replace(/\\/g, "/").trim()
   if (!normalized) return false
@@ -409,9 +416,9 @@ export function WorkbenchPage() {
 
   useEffect(() => {
     if (!pid) {
-      setVideoDurationByInstanceId({})
-      setVideoWatchedMsByInstanceId({})
-      setRemoteVideoWatchProgressByInstanceId({})
+      setVideoDurationByInstanceId((current) => (Object.keys(current).length === 0 ? current : {}))
+      setVideoWatchedMsByInstanceId((current) => (Object.keys(current).length === 0 ? current : {}))
+      setRemoteVideoWatchProgressByInstanceId((current) => (Object.keys(current).length === 0 ? current : {}))
       return
     }
     const instanceIds = (instancesQ.data ?? []).map((item) => item.instanceId)
@@ -422,8 +429,13 @@ export function WorkbenchPage() {
         .map((item) => [item.instanceId, item.durationMs as number]),
     )
     const nextDurationByInstanceId = { ...stored, ...fromInstances }
-    setVideoDurationByInstanceId(nextDurationByInstanceId)
-    setVideoWatchedMsByInstanceId(loadVideoWatchProgressMap(pid, instanceIds, nextDurationByInstanceId, remoteVideoWatchProgressByInstanceId))
+    setVideoDurationByInstanceId((current) =>
+      shallowRecordEqual(current, nextDurationByInstanceId) ? current : nextDurationByInstanceId,
+    )
+    const nextWatchedMsByInstanceId = loadVideoWatchProgressMap(pid, instanceIds, nextDurationByInstanceId, remoteVideoWatchProgressByInstanceId)
+    setVideoWatchedMsByInstanceId((current) =>
+      shallowRecordEqual(current, nextWatchedMsByInstanceId) ? current : nextWatchedMsByInstanceId,
+    )
   }, [instancesQ.data, pid, remoteVideoWatchProgressByInstanceId])
 
   useEffect(() => {
@@ -431,8 +443,9 @@ export function WorkbenchPage() {
     const instanceIds = (instancesQ.data ?? []).map((item) => item.instanceId)
 
     const refreshWatchCoverage = () => {
-      setVideoWatchedMsByInstanceId(
-        loadVideoWatchProgressMap(pid, instanceIds, videoDurationByInstanceId, remoteVideoWatchProgressByInstanceId),
+      const nextWatchedMsByInstanceId = loadVideoWatchProgressMap(pid, instanceIds, videoDurationByInstanceId, remoteVideoWatchProgressByInstanceId)
+      setVideoWatchedMsByInstanceId((current) =>
+        shallowRecordEqual(current, nextWatchedMsByInstanceId) ? current : nextWatchedMsByInstanceId,
       )
     }
 
@@ -445,7 +458,7 @@ export function WorkbenchPage() {
     if (!pid) return
     const instanceIds = (instancesQ.data ?? []).map((item) => item.instanceId)
     if (instanceIds.length <= 0) {
-      setRemoteVideoWatchProgressByInstanceId({})
+      setRemoteVideoWatchProgressByInstanceId((current) => (Object.keys(current).length === 0 ? current : {}))
       return
     }
     const controller = new AbortController()
@@ -456,8 +469,13 @@ export function WorkbenchPage() {
           timeoutMs: 90_000,
         })
         if (controller.signal.aborted) return
-        setRemoteVideoWatchProgressByInstanceId(remoteProgress)
-        setVideoWatchedMsByInstanceId(loadVideoWatchProgressMap(pid, instanceIds, videoDurationByInstanceId, remoteProgress))
+        setRemoteVideoWatchProgressByInstanceId((current) =>
+          shallowRecordEqual(current, remoteProgress) ? current : remoteProgress,
+        )
+        const nextWatchedMsByInstanceId = loadVideoWatchProgressMap(pid, instanceIds, videoDurationByInstanceId, remoteProgress)
+        setVideoWatchedMsByInstanceId((current) =>
+          shallowRecordEqual(current, nextWatchedMsByInstanceId) ? current : nextWatchedMsByInstanceId,
+        )
       } catch {
         // Keep local watch coverage usable when remote progress sync is unavailable.
       }
