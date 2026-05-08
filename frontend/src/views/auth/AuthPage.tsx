@@ -279,8 +279,13 @@ export function AuthPage() {
         } else {
           if (!payload.email) return
           await requestEmailVerification.mutateAsync({ email: payload.email })
-          showSuccessFeedback("验证邮件请求已处理", "如果账号尚未验证，我们会发送激活链接；如果已经完成验证，请直接登录。")
-          switchMode("login")
+          if (verificationWaitToken) {
+            setVerifyEmailNotice("sent")
+            showSuccessFeedback("验证邮件请求已处理", "如果账号尚未验证，我们会发送激活链接；当前页面会继续等待验证结果。")
+          } else {
+            showSuccessFeedback("验证邮件请求已处理", "如果账号尚未验证，我们会发送激活链接；如果已经完成验证，请直接登录。")
+            switchMode("login")
+          }
         }
       } else if (effectiveMode === "register") {
         if (!payload.email || !payload.password) return

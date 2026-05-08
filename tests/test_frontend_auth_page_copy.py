@@ -44,6 +44,8 @@ def test_verify_wait_page_polls_cross_device_completion() -> None:
 
     assert "verificationWaitToken" in source
     assert "useEmailVerificationStatus" in source
+    assert 'if (verificationWaitToken)' in source
+    assert "当前页面会继续等待验证结果。" in source
     assert 'effectiveMode === "verify" && !verifyTokenPresent && Boolean(verificationWaitToken) ? "sent" : null' in source
     assert "verifyEmailNotice === \"sent\" && verificationWaitToken ? 2000 : false" in source
     assert "邮箱已验证，正在进入工作区。" in source
