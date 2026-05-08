@@ -131,7 +131,7 @@ def _send_signup_verification_email(*, auth_store: AuthStore, email: str) -> boo
 
 @router.get("/auth/human-check/challenge")
 def get_signup_human_check_challenge() -> dict:
-    return {"ok": True, "data": build_signup_human_check_challenge()}
+    return build_signup_human_check_challenge()
 
 
 @router.post("/auth/register")

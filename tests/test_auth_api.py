@@ -489,7 +489,7 @@ def test_signup_human_check_challenge_endpoint_returns_altcha_payload(auth_env: 
     resp = client.get("/api/auth/human-check/challenge")
 
     assert resp.status_code == 200
-    payload = resp.json()["data"]
+    payload = resp.json()
     assert payload["parameters"]["algorithm"] == "SHA-256"
     assert payload["parameters"]["cost"] > 0
     assert payload["parameters"]["expiresAt"] is not None
@@ -507,7 +507,7 @@ def test_signup_human_check_accepts_valid_altcha_payload(auth_env: None, monkeyp
     challenge_resp = client.get("/api/auth/human-check/challenge")
     assert challenge_resp.status_code == 200
 
-    challenge = Challenge.from_dict(challenge_resp.json()["data"])
+    challenge = Challenge.from_dict(challenge_resp.json())
     solution = solve_challenge(challenge, timeout=5)
     assert solution is not None
     token = __import__("altcha").Payload(challenge, solution).to_base64()
