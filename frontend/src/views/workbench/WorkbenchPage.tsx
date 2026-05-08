@@ -227,6 +227,7 @@ export function WorkbenchPage() {
   const [seekTo, setSeekTo] = useState<{ instanceId: string; ms: number; nonce: number } | null>(null)
   const [centerPanelMode, setCenterPanelMode] = useState<"main" | "rollup">("main")
   const [sidebarStatsExpanded, setSidebarStatsExpanded] = useState(false)
+  const [petAssistantState, setPetAssistantState] = useState<"idle" | "thinking">("idle")
   const videoPaneRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -1049,13 +1050,14 @@ export function WorkbenchPage() {
               {queueQ.error ? <p className="text-sm text-destructive">{formatApiError(queueQ.error)}</p> : null}
             </CardContent>
           </Card>
-          <DesktopPet page="workbench">
+          <DesktopPet page="workbench" assistantState={petAssistantState}>
             <WorkbenchPetAssistant
               projectId={pid}
               instance={instance}
               currentMs={currentMs}
               workStatusDetail={workStatusDetail}
               usesResolvableCourseAnchor={usesResolvableCourseAnchor}
+              onAssistantStateChange={setPetAssistantState}
               onOpenEvidence={(evidence) => {
                 onOpenAnchor({
                   instanceId: evidence.instanceId,

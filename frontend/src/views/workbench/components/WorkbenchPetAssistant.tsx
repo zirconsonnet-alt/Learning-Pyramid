@@ -33,6 +33,7 @@ type WorkbenchPetAssistantProps = {
   currentMs: number
   workStatusDetail: string
   usesResolvableCourseAnchor: boolean
+  onAssistantStateChange?: (state: "idle" | "thinking") => void
   onOpenEvidence?: (evidence: AiChatCourseEvidence) => void
 }
 
@@ -126,6 +127,7 @@ export function WorkbenchPetAssistant({
   currentMs,
   workStatusDetail,
   usesResolvableCourseAnchor,
+  onAssistantStateChange,
   onOpenEvidence,
 }: WorkbenchPetAssistantProps) {
   const [composer, setComposer] = useState("")
@@ -163,8 +165,11 @@ export function WorkbenchPetAssistant({
   const interactionDisabled = !!disabledReason || isAsking
 
   useEffect(() => {
-    return () => abortRef.current?.abort()
-  }, [])
+    return () => {
+      abortRef.current?.abort()
+      onAssistantStateChange?.("idle")
+    }
+  }, [onAssistantStateChange])
 
   useEffect(() => {
     threadEndRef.current?.scrollIntoView({ block: "nearest" })
@@ -258,6 +263,7 @@ export function WorkbenchPetAssistant({
     setError(null)
     setStatus("正在读取当前工作台...")
     setIsAsking(true)
+    onAssistantStateChange?.("thinking")
 
     try {
       if (canUseCourseAgent && instance && sourceKind) {
@@ -334,6 +340,7 @@ export function WorkbenchPetAssistant({
         abortRef.current = null
       }
       setIsAsking(false)
+      onAssistantStateChange?.("idle")
     }
   }
 
@@ -342,6 +349,7 @@ export function WorkbenchPetAssistant({
     abortRef.current = null
     setIsAsking(false)
     setStatus(null)
+    onAssistantStateChange?.("idle")
   }
 
   async function copyLatestAnswer() {

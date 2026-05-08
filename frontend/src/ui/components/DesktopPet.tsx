@@ -6,8 +6,9 @@ import xuebaoRotation from "@/assets/xuebao-rotation.gif"
 import xuebaoStand from "@/assets/xuebao-stand.png"
 import { cn } from "@/ui/utils"
 
-export function DesktopPet(props: { page?: "home" | "workbench"; children?: ReactNode }) {
+export function DesktopPet(props: { page?: "home" | "workbench"; assistantState?: "idle" | "thinking"; children?: ReactNode }) {
   const page = props.page ?? "home"
+  const assistantState = props.assistantState ?? "idle"
   const hasPopover = page === "workbench" && !!props.children
   const [isPinned, setIsPinned] = useState(false)
   const popoverId = useId()
@@ -46,6 +47,7 @@ export function DesktopPet(props: { page?: "home" | "workbench"; children?: Reac
         page === "workbench" ? "is-workbench" : "is-home",
         hasPopover && "has-popover",
         isPinned && "is-pinned",
+        assistantState === "thinking" && "is-thinking",
       )}
       aria-label="雪豹桌面宠物"
     >
@@ -65,6 +67,7 @@ export function DesktopPet(props: { page?: "home" | "workbench"; children?: Reac
           <img className="plm-desktop-pet-image plm-desktop-pet-rotation" src={xuebaoRotation} alt="" />
         </span>
         <span className="plm-desktop-pet-shadow" aria-hidden="true" />
+        {assistantState === "thinking" ? <span className="plm-desktop-pet-status-dot" aria-hidden="true" /> : null}
       </button>
       {hasPopover ? (
         <div id={popoverId} className="plm-desktop-pet-popover" role="dialog" aria-label="雪豹桌面宠物问答">

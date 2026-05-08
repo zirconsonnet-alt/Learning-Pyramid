@@ -812,6 +812,24 @@
     transform: translateY(12px);
   }
 
+  .plm-desktop-pet.is-thinking .plm-desktop-pet-shadow {
+    animation: plmDesktopPetThinkingShadow 1.4s ease-in-out infinite;
+  }
+
+  .plm-desktop-pet-status-dot {
+    position: absolute;
+    right: 16%;
+    top: 16%;
+    z-index: 2;
+    width: 13px;
+    height: 13px;
+    border-radius: 999px;
+    border: 2px solid hsl(var(--background));
+    background: hsl(var(--primary));
+    box-shadow: 0 0 0 0 hsl(var(--primary) / 0.42);
+    animation: plmDesktopPetStatusPulse 1.2s ease-out infinite;
+  }
+
   @keyframes plmDesktopPetFloat {
     0%,
     100% {
@@ -820,6 +838,29 @@
 
     50% {
       transform: translate3d(0, -7px, 0);
+    }
+  }
+
+  @keyframes plmDesktopPetThinkingShadow {
+    0%,
+    100% {
+      opacity: 0.76;
+      transform: translateY(12px) scaleX(1);
+    }
+
+    50% {
+      opacity: 0.46;
+      transform: translateY(14px) scaleX(0.86);
+    }
+  }
+
+  @keyframes plmDesktopPetStatusPulse {
+    0% {
+      box-shadow: 0 0 0 0 hsl(var(--primary) / 0.42);
+    }
+
+    100% {
+      box-shadow: 0 0 0 12px hsl(var(--primary) / 0);
     }
   }
 
@@ -870,6 +911,11 @@
 
     .plm-desktop-pet:hover .plm-desktop-pet-rotation {
       opacity: 0;
+    }
+
+    .plm-desktop-pet.is-thinking .plm-desktop-pet-shadow,
+    .plm-desktop-pet-status-dot {
+      animation: none;
     }
   }
 

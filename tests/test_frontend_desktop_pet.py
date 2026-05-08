@@ -24,6 +24,8 @@ def test_desktop_pet_component_and_assets_exist() -> None:
     assert "plm-desktop-pet-popover" in source
     assert "has-popover" in source
     assert "isPinned" in source
+    assert 'assistantState?: "idle" | "thinking"' in source
+    assert "is-thinking" in source
     assert 'aria-expanded={isPinned}' in source
     assert "plm-desktop-pet-popover-close" in source
 
@@ -48,8 +50,10 @@ def test_homepage_and_workbench_mount_desktop_pet_on_right_side() -> None:
 
     assert 'import { DesktopPet } from "@/ui/components/DesktopPet"' in workbench_source
     assert 'import { WorkbenchPetAssistant } from "@/views/workbench/components/WorkbenchPetAssistant"' in workbench_source
-    assert '<DesktopPet page="workbench">' in workbench_source
+    assert '<DesktopPet page="workbench" assistantState={petAssistantState}>' in workbench_source
+    assert 'assistantState={petAssistantState}' in workbench_source
     assert "<WorkbenchPetAssistant" in workbench_source
+    assert "setPetAssistantState" in workbench_source
 
     assert ".plm-desktop-pet" in css
     assert ".plm-desktop-pet-button" in css
@@ -57,6 +61,8 @@ def test_homepage_and_workbench_mount_desktop_pet_on_right_side() -> None:
     assert ".plm-desktop-pet.has-popover:hover .plm-desktop-pet-popover" in css
     assert ".plm-desktop-pet.has-popover.is-pinned .plm-desktop-pet-popover" in css
     assert ".plm-desktop-pet-popover-close" in css
+    assert ".plm-desktop-pet.is-thinking .plm-desktop-pet-shadow" in css
+    assert ".plm-desktop-pet-status-dot" in css
     assert ".plm-desktop-pet.is-home" in css
     assert ".plm-desktop-pet.is-workbench" in css
     assert "right: clamp(16px, 2vw, 28px);" in css
@@ -73,3 +79,6 @@ def test_workbench_pet_assistant_uses_ai_context_sources() -> None:
     assert "touchDailyStudyActivity(projectId, \"aiQa\"" in source
     assert "loadSubtitleDocumentForInstance" in source
     assert "问问雪豹" in source
+    assert 'onAssistantStateChange?: (state: "idle" | "thinking") => void' in source
+    assert 'onAssistantStateChange?.("thinking")' in source
+    assert 'onAssistantStateChange?.("idle")' in source
