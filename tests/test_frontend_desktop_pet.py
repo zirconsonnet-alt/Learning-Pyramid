@@ -23,6 +23,9 @@ def test_desktop_pet_component_and_assets_exist() -> None:
     assert "children?: ReactNode" in source
     assert "plm-desktop-pet-popover" in source
     assert "has-popover" in source
+    assert "isPinned" in source
+    assert 'aria-expanded={isPinned}' in source
+    assert "plm-desktop-pet-popover-close" in source
 
     expected_assets = [
         "xuebao-idle.gif",
@@ -52,6 +55,8 @@ def test_homepage_and_workbench_mount_desktop_pet_on_right_side() -> None:
     assert ".plm-desktop-pet-button" in css
     assert ".plm-desktop-pet-popover" in css
     assert ".plm-desktop-pet.has-popover:hover .plm-desktop-pet-popover" in css
+    assert ".plm-desktop-pet.has-popover.is-pinned .plm-desktop-pet-popover" in css
+    assert ".plm-desktop-pet-popover-close" in css
     assert ".plm-desktop-pet.is-home" in css
     assert ".plm-desktop-pet.is-workbench" in css
     assert "right: clamp(16px, 2vw, 28px);" in css
