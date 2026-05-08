@@ -24,3 +24,9 @@ def test_verify_mode_renders_inline_email_delivery_state() -> None:
     assert "等待邮箱验证" in source
     assert "重新注册" in source
     assert "nextParams.set(\"mode\", \"register\")" in source
+
+
+def test_authenticated_verify_resend_page_redirects_to_workspace() -> None:
+    source = AUTH_PAGE.read_text(encoding="utf-8")
+
+    assert 'currentUserQ.data && effectiveMode !== "reset" && (effectiveMode !== "verify" || !verifyTokenPresent)' in source

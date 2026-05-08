@@ -180,7 +180,7 @@ export function AuthPage() {
     return <Navigate to="/projects" replace />
   }
 
-  if (currentUserQ.data && effectiveMode !== "reset" && effectiveMode !== "verify") {
+  if (currentUserQ.data && effectiveMode !== "reset" && (effectiveMode !== "verify" || !verifyTokenPresent)) {
     return <Navigate to={returnTo} replace />
   }
 
