@@ -210,6 +210,18 @@ export function AuthPage() {
     setSearchParams(nextParams, { replace: true })
   }
 
+  function switchVerifyEmailToRegister() {
+    if (!allowSignup) return
+    setVerifyEmailNotice(null)
+    const nextParams = new URLSearchParams(searchParams)
+    nextParams.set("mode", "register")
+    if (email.trim()) nextParams.set("email", email.trim())
+    else nextParams.delete("email")
+    nextParams.delete("token")
+    setPassword("")
+    setSearchParams(nextParams, { replace: true })
+  }
+
   async function onSubmit() {
     const payload = {
       email: email.trim(),
@@ -394,7 +406,7 @@ export function AuthPage() {
                 title={verifyEmailNotice === "resent" ? "激活链接已重新发送" : "验证邮件已发送"}
                 message={
                   verifyEmailNotice === "resent"
-                    ? "你可以直接返回邮箱查收新邮件；如果还没收到，稍等几十秒后再试一次。"
+                    ? "如果这个邮箱已经注册且尚未验证，我们会重新发送激活链接；如果你刚清理过账号，请直接重新注册。"
                     : "请到邮箱点击激活链接；验证完成后就能进入工作区。"
                 }
                 tone="info"
@@ -507,7 +519,16 @@ export function AuthPage() {
             ) : null}
 
             {effectiveMode === "reset" || effectiveMode === "verify" ? (
-              <div className="flex items-center justify-center pt-2 text-sm text-muted-foreground">
+              <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-3 pt-2 text-sm text-muted-foreground">
+                {effectiveMode === "verify" && !verifyTokenPresent && allowSignup ? (
+                  <button
+                    type="button"
+                    onClick={switchVerifyEmailToRegister}
+                    className={cn("transition hover:text-foreground", pending && "pointer-events-none opacity-60")}
+                  >
+                    重新注册
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => switchMode("login")}

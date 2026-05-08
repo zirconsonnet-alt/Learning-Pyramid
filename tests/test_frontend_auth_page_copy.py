@@ -20,5 +20,7 @@ def test_verify_mode_renders_inline_email_delivery_state() -> None:
     assert "验证邮件已发送" in source
     assert "请到邮箱点击激活链接；验证完成后就能进入工作区。" in source
     assert "激活链接已重新发送" in source
-    assert "你可以直接返回邮箱查收新邮件；如果还没收到，稍等几十秒后再试一次。" in source
+    assert "如果这个邮箱已经注册且尚未验证，我们会重新发送激活链接；如果你刚清理过账号，请直接重新注册。" in source
     assert "等待邮箱验证" in source
+    assert "重新注册" in source
+    assert "nextParams.set(\"mode\", \"register\")" in source
