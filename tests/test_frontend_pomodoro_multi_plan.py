@@ -52,7 +52,7 @@ def test_pomodoro_page_exposes_quick_pomodoro_action() -> None:
     assert "const quickPomodoro = usePomodoroStore((state) => state.quickPomodoro)" in source
     assert "const startQuickPomodoro = usePomodoroStore((state) => state.startQuickPomodoro)" in source
     assert "function handleStartQuickPomodoro()" in source
-    assert "startQuickPomodoro(selectedProjectId)" in source
+    assert "startQuickPomodoro(resolvedSelectedWorkbenchProjectId || null)" in source
     assert 'const isFocusRunning = snapshot.status === "running" && snapshot.phase === "focus"' in source
     assert "disabled={Boolean(activeQuickPomodoro) || isFocusRunning}" in source
     assert "新建小番茄" in source
@@ -185,7 +185,7 @@ def test_pomodoro_plan_selects_projects_inside_selected_subject() -> None:
     assert "selectedSubjectIdByPlanId" in page_source
     assert "normalizeDraftSubjectId" in page_source
     assert '.filter((material) => material.projectId)' in page_source
-    assert "material.projectId !== subject.subjectProjectId" not in page_source
+    assert "subject.subjectProjectId" not in page_source
     assert "validPomodoroProjectIds" in page_source
     assert "validPomodoroProjectIds.has(snapshot.currentProjectId)" in page_source
     assert "projectBindingMessages" in page_source

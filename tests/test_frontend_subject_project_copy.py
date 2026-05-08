@@ -14,6 +14,9 @@ def test_subject_cards_show_project_count_before_last_study() -> None:
 
     assert "listSubjectMaterials" in source
     assert "subjectMaterialCountBySubjectId" in source
+    assert "subjectMaterialProjectRefs" in source
+    assert "listAuditLogEvents(subject.subjectId)" not in source
+    assert "queryKey: [\"auditLogEvents\", subject.subjectId]" not in source
     assert "{subjectProjectCountText}" in card_description
     assert card_description.index("{subjectProjectCountText}") < card_description.index("lastStudyDisplay.text")
 

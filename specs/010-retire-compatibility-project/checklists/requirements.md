@@ -32,4 +32,4 @@
 ## Notes
 
 - Validation pass: 2026-05-06.
-- Field names such as `subjectProjectId`, `material.projectId`, and `compatibilityProjectId` are retained because they are the explicit product contract being specified, not incidental implementation choices.
+- Field names such as `subjectId`, `material.projectId`, `subjectProjectId`, and `compatibilityProjectId` are retained because they define the accepted and rejected identity contracts, not incidental implementation choices.

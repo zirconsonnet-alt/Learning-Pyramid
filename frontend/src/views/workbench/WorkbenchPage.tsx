@@ -19,7 +19,6 @@ import { projectTypeRequiresLearningObjectTree, projectTypeUsesResolvableCourseA
 import { buildProjectSettingsPath } from "@/ui/projectPaths"
 import { resolveProjectFile, useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
 import { useLearningTaskNodes } from "@/ui/queries/learningTasks"
-import { useSubjectContext } from "@/ui/queries/subjects"
 import { useSystemCapabilities } from "@/ui/queries/system"
 import {
   useInstances,
@@ -221,7 +220,7 @@ export function WorkbenchPage() {
   const ps = useWorkbenchStore((s) => (pid ? s.byProjectId[pid] : undefined))
   const setSelectedInstanceId = useWorkbenchStore((s) => s.setSelectedInstanceId)
 
-  const selectedProjectId = useAppStore((s) => s.selectedProjectId)
+  const selectedWorkbenchProjectId = useAppStore((s) => s.selectedWorkbenchProjectId)
 
   const [currentMs, setCurrentMs] = useState(0)
   const [seekTo, setSeekTo] = useState<{ instanceId: string; ms: number; nonce: number } | null>(null)
@@ -236,10 +235,10 @@ export function WorkbenchPage() {
   }, [ensure, pid])
 
   useEffect(() => {
-    if (pid && selectedProjectId !== pid) {
-      useAppStore.getState().setSelectedProjectId(pid)
+    if (pid && selectedWorkbenchProjectId !== pid) {
+      useAppStore.getState().setSelectedWorkbenchProjectId(pid)
     }
-  }, [pid, selectedProjectId])
+  }, [pid, selectedWorkbenchProjectId])
 
   const instancesQ = useInstances(pid)
   const learningTaskNodesQ = useLearningTaskNodes(pid)
@@ -247,12 +246,11 @@ export function WorkbenchPage() {
   const layersQ = useLayers(pid)
   const rollUpM = useManualRollUp(pid)
   const projectConfigQ = useProjectConfig(pid)
-  const subjectContextQ = useSubjectContext(pid, !!pid)
   const setLayerConfigM = useSetLayerConfig(pid)
   const capabilitiesQ = useSystemCapabilities()
   const directoryBinding = useProjectDirectoryBinding(pid)
   const projectType = projectConfigQ.data?.projectType ?? "COURSE"
-  const projectSettingsPath = buildProjectSettingsPath(pid, { subjectProjectId: subjectContextQ.data?.subjectProjectId })
+  const projectSettingsPath = buildProjectSettingsPath(pid)
   const currentRollUpStrategy = projectConfigQ.data?.rollUpStrategy ?? "THRESHOLD_AUTO"
   const requiresLearningObjectTree = projectTypeRequiresLearningObjectTree(projectType)
   const usesResolvableCourseAnchor = projectTypeUsesResolvableCourseAnchor(projectType)
@@ -870,7 +868,6 @@ export function WorkbenchPage() {
                 <LearningObjectTree
                   projectId={pid}
                   projectType={projectType}
-                  subjectProjectId={subjectContextQ.data?.subjectProjectId}
                   selectedInstanceId={selectedInstanceId}
                   onSelectInstance={(instanceId) => {
                     setSelectedInstanceId(pid, instanceId)

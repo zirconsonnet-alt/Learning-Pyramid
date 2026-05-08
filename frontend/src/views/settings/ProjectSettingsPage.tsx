@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react"
 import { useQueries } from "@tanstack/react-query"
 import { BookOpen, Boxes, FolderTree, Settings2, TriangleAlert, Wrench } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
-import { useLocation, useNavigate, useParams } from "react-router-dom"
+import { useNavigate, useParams } from "react-router-dom"
 
 import { listRecallPointsByInstance, type Instance } from "@/ui/api/instances"
 import { ApiError } from "@/ui/api/http"
@@ -17,11 +17,11 @@ import { completeGuideWalkthroughStep } from "@/ui/guideWalkthrough/guideWalkthr
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
 import { scanProjectDirectoryMedia, useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
-import { formatProjectTypeLabel } from "@/ui/projectTypes"
 import { useProject } from "@/ui/queries/projects"
 import {
   useEditSubject,
   useEditSubjectMaterial,
+  useSubjects,
   useSubjectContext,
 } from "@/ui/queries/subjects"
 import { useSystemCapabilities } from "@/ui/queries/system"
@@ -184,12 +184,13 @@ function SettingsPanelSwitchCard(props: {
 }
 
 export function ProjectSettingsPage() {
-  const { projectId } = useParams()
-  const location = useLocation()
+  const { projectId, subjectId } = useParams()
   const navigate = useNavigate()
   const pid = projectId ?? ""
-  const projectQ = useProject(pid, { enabled: !!pid })
-  const subjectContextQ = useSubjectContext(pid, !!pid)
+  const isSubjectSettingsScope = Boolean(subjectId && !pid)
+  const projectQ = useProject(pid, { enabled: !!pid && !isSubjectSettingsScope })
+  const subjectContextQ = useSubjectContext(pid, !!pid && !isSubjectSettingsScope)
+  const subjectsQ = useSubjects(isSubjectSettingsScope)
   const editSubjectM = useEditSubject()
   const editSubjectMaterialM = useEditSubjectMaterial()
   const capabilitiesQ = useSystemCapabilities()
@@ -210,10 +211,13 @@ export function ProjectSettingsPage() {
   const projectType = projectConfigQ.data?.projectType ?? "COURSE"
   const currentRollUpStrategy = projectConfigQ.data?.rollUpStrategy ?? "THRESHOLD_AUTO"
   const subjectContext = subjectContextQ.data
-  const subjectProjectId = subjectContext?.subjectProjectId ?? pid
-  const isSubjectRoot = subjectContext?.isSubjectRoot ?? true
-  const isSubjectSettingsScope = isSubjectRoot && !location.pathname.endsWith("/project-settings")
-  const subjectTitle = subjectContext?.subject.title ?? projectQ.project?.title ?? ""
+  const subject = useMemo(
+    () => (subjectsQ.data ?? []).find((item) => item.subjectId === subjectId) ?? null,
+    [subjectId, subjectsQ.data],
+  )
+  const subjectTitle = isSubjectSettingsScope
+    ? subject?.title ?? ""
+    : subjectContext?.subject.title ?? projectQ.project?.title ?? ""
   const currentMaterial = subjectContext?.currentMaterial ?? null
   const currentMaterialTitle = currentMaterial?.title ?? projectQ.project?.title ?? ""
   const currentMaterialType =
@@ -480,7 +484,7 @@ export function ProjectSettingsPage() {
   const renameMutationError = isSubjectSettingsScope ? editSubjectM.error : editSubjectMaterialM.error
   const renameMutationPending = isSubjectSettingsScope ? editSubjectM.isPending : editSubjectMaterialM.isPending
 
-  if (!pid) {
+  if (!pid && !subjectId) {
     return (
       <div className="space-y-4">
         <ContentNotice
@@ -527,13 +531,14 @@ export function ProjectSettingsPage() {
           {isSubjectSettingsScope ? (
             <SubjectSettingsInfoCard
               subjectTitle={subjectTitle}
-              isLoading={projectQ.isLoading || subjectContextQ.isLoading}
+              isLoading={subjectsQ.isLoading}
               isPending={renameMutationPending}
-              queryError={subjectContextQ.error ?? projectQ.error}
+              queryError={subjectsQ.error}
               saveError={renameMutationError}
               onSave={async (title) => {
                 try {
-                  await editSubjectM.mutateAsync({ subjectId: subjectProjectId, title })
+                  if (!subjectId) return
+                  await editSubjectM.mutateAsync({ subjectId, title })
                   showSuccessFeedback("学科名称已更新", `当前学科现在显示为“${title}”。`)
                 } catch (err) {
                   showErrorFeedback("更新学科名称失败", formatApiError(err))
@@ -559,13 +564,11 @@ export function ProjectSettingsPage() {
               importError={importLearningObjectsM.error}
               isLoading={projectQ.isLoading || subjectContextQ.isLoading}
               isPending={renameMutationPending}
-              isSubjectRoot={false}
-              materialTitle={currentMaterialTitle}
               materialType={currentMaterialType}
               onOpenSubjectSettings={
-                subjectProjectId
+                subjectContext?.subject.subjectId
                   ? () => {
-                      navigate(`/p/${subjectProjectId}/settings`)
+                      navigate(`/subjects/${subjectContext.subject.subjectId}/settings`)
                     }
                   : undefined
               }
@@ -595,7 +598,7 @@ export function ProjectSettingsPage() {
                     showInfoFeedback("项目信息仍在加载", "等项目上下文同步完成后再试一次。")
                     return
                   }
-                  await editSubjectMaterialM.mutateAsync({ subjectId: subjectProjectId, materialId: currentMaterial.materialId, title })
+                  await editSubjectMaterialM.mutateAsync({ subjectId: currentMaterial.subjectId, materialId: currentMaterial.materialId, title })
                   showSuccessFeedback("项目名称已更新", `当前项目现在显示为“${title}”。`)
                 } catch (err) {
                   showErrorFeedback("更新项目名称失败", formatApiError(err))
@@ -988,8 +991,6 @@ function BasicInfoCard({
   importError,
   isLoading,
   isPending,
-  isSubjectRoot,
-  materialTitle,
   materialType,
   onOpenSubjectSettings,
   projectType,
@@ -1024,8 +1025,6 @@ function BasicInfoCard({
   importError: unknown
   isLoading: boolean
   isPending: boolean
-  isSubjectRoot: boolean
-  materialTitle: string
   materialType: StudyMaterial["materialType"]
   onOpenSubjectSettings?: () => void
   projectType: ProjectType
@@ -1044,7 +1043,7 @@ function BasicInfoCard({
   onSave: (title: string) => Promise<void>
 }) {
   const [titleDraft, setTitleDraft] = useState(entityTitle)
-  const subjectSummary = isSubjectRoot ? `${formatStudyMaterialTypeLabel(materialType)} · ${formatProjectTypeLabel(projectType)}` : formatStudyMaterialTypeLabel(materialType)
+  const subjectSummary = formatStudyMaterialTypeLabel(materialType)
   const directorySummary = describeDirectorySummary(directoryPermission)
 
   useEffect(() => {
@@ -1097,29 +1096,22 @@ function BasicInfoCard({
 
           <div className="space-y-3">
             <div className="space-y-1">
-              <div className="text-sm font-semibold text-foreground">{isSubjectRoot ? "当前项目" : "所属学科"}</div>
+              <div className="text-sm font-semibold text-foreground">所属学科</div>
             </div>
             <div className="rounded-[1.2rem] border border-border/70 bg-muted/15 px-4 py-3">
-              {isSubjectRoot ? (
-                <>
-                  <div className="text-sm font-semibold text-foreground">{materialTitle || "当前项目"}</div>
-                  <div className="mt-1 text-xs text-muted-foreground">{formatStudyMaterialTypeLabel(materialType)} · {formatProjectTypeLabel(projectType)}</div>
-                </>
-              ) : (
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex min-w-0 flex-wrap items-center gap-2">
-                    <div className="text-sm font-semibold text-foreground">{subjectTitle || "当前学科"}</div>
-                    <span className="theme-pill-default inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold">
-                      {subjectSummary}
-                    </span>
-                  </div>
-                  {onOpenSubjectSettings ? (
-                    <Button type="button" variant="outline" size="sm" onClick={onOpenSubjectSettings}>
-                      学科设置
-                    </Button>
-                  ) : null}
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <div className="text-sm font-semibold text-foreground">{subjectTitle || "当前学科"}</div>
+                  <span className="theme-pill-default inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold">
+                    {subjectSummary}
+                  </span>
                 </div>
-              )}
+                {onOpenSubjectSettings ? (
+                  <Button type="button" variant="outline" size="sm" onClick={onOpenSubjectSettings}>
+                    学科设置
+                  </Button>
+                ) : null}
+              </div>
             </div>
           </div>
         </section>
@@ -1128,7 +1120,7 @@ function BasicInfoCard({
 
         <section className="space-y-3">
           <div className="flex flex-wrap items-center gap-3">
-            <div className="text-sm font-semibold text-foreground">{isSubjectRoot ? "当前项目" : `当前${formatStudyMaterialTypeLabel(materialType)}项目`}</div>
+            <div className="text-sm font-semibold text-foreground">当前{formatStudyMaterialTypeLabel(materialType)}项目</div>
             {projectType === "COURSE" && browserLocalMediaEnabled ? (
               <span
                 className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${describeDirectoryPermissionTone(directoryPermission)}`}
@@ -1243,8 +1235,8 @@ function BasicInfoCard({
           ) : (
             <div className="rounded-[1.2rem] border border-border/70 bg-muted/15 px-4 py-4 text-sm text-muted-foreground">
               {projectType === "BOOK"
-                ? `当前${isSubjectRoot ? "书本入口" : "书本项目"}不依赖浏览器目录授权；请使用“书本目录初始化”把目录文本转换为学习对象树。`
-                : `当前${isSubjectRoot ? "零散知识入口" : "零散知识项目"}不接入素材目录，也不会维护学习对象树。`}
+                ? "当前书本项目不依赖浏览器目录授权；请使用“书本目录初始化”把目录文本转换为学习对象树。"
+                : "当前零散知识项目不接入素材目录，也不会维护学习对象树。"}
             </div>
           )}
 

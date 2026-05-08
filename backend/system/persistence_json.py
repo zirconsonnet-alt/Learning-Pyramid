@@ -168,11 +168,7 @@ def _encode_study_material(item: StudyMaterial) -> dict[str, Any]:
 
 
 def _decode_study_material(data: dict[str, Any]) -> StudyMaterial:
-    raw_project_id = (
-        data["projectId"]
-        if "projectId" in data
-        else data.get("compatibilityProjectId", data.get("compatibility_project_id"))
-    )
+    raw_project_id = data["projectId"]
     return StudyMaterial(
         subject_id=ProjectId(str(data["subjectId"])),
         material_id=str(data["materialId"]),

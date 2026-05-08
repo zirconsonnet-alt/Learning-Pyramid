@@ -1,48 +1,44 @@
 # Research: Retire Compatibility Project
 
-## Decision 1: Keep the subject-root project anchor, but retire the dirty field names
+## Decision 1: Subject ids are not project ids
 
-- **Decision**: Preserve the existing subject-root project anchor used by current subject settings/statistics/routing behavior, but rename its outward contract to `subjectProjectId` and stop describing it as a “compatibility project”.
-- **Rationale**: The current system uses the subject root as a real operational anchor. Removing it in the same change would turn a contract cleanup into a much larger architecture rewrite with higher risk across settings, deletion, and route resolution.
+- **Decision**: Keep the existing subject storage anchor, but do not expose it as `subjectProjectId` and do not accept it on project/workbench APIs.
+- **Rationale**: The product model is simpler and safer when subject routes consume `subjectId` and project routes consume only concrete material `projectId` values.
 - **Alternatives considered**:
-  - **Delete the subject-root anchor entirely in this feature**: Rejected because it expands scope into persistence and routing architecture redesign.
-  - **Keep the old field names and only hide them in select UI screens**: Rejected because the ambiguity would remain in the API and downstream code.
+  - **Rename the subject root to `subjectProjectId`**: Rejected because it keeps the dual-purpose identity that caused the forked user experience.
+  - **Delete the subject anchor storage in this feature**: Rejected because it expands the work into a broader persistence redesign that is not required to clean the public boundary.
 
-## Decision 2: Backward compatibility is read-only for retired field names
+## Decision 2: Historical root-backed materials are migrated, not supported as a mode
 
-- **Decision**: Previously stored subject/material records that still contain `compatibilityProjectId` or `compatibility_project_id` remain readable, but newly written records stop emitting those field names.
-- **Rationale**: This preserves user data and exported/local state safety without letting the dirty field survive indefinitely in new writes.
+- **Decision**: When a subject contains a material whose `projectId` equals the subject id, the system creates an independent material project, moves the root learning data into that project, and rewrites the material link.
+- **Rationale**: Migration removes the bad shape from active data. Keeping runtime branches for root-backed materials would preserve the problem.
 - **Alternatives considered**:
-  - **Require an operator migration before release**: Rejected because this feature explicitly needs safe rollout across existing records.
-  - **Continue writing both old and new field names forever**: Rejected because it prolongs the dirty contract instead of retiring it.
+  - **Keep accepting subject ids as project ids**: Rejected because it preserves the fork.
+  - **Require a separate operator migration before release**: Rejected because normal subject access can perform the migration idempotently.
 
-## Decision 3: No SQL schema migration is required for this phase
+## Decision 3: Retired compatibility fields are not parsed
 
-- **Decision**: Treat this feature as a payload and DTO rename rather than a relational schema redesign.
-- **Rationale**: The field is currently encoded within stored project/material payloads and adapter DTOs. The main compatibility burden is in read/write serialization and frontend/backend contract usage, not in creating or altering relational tables.
+- **Decision**: Study material payload decoding requires current `projectId`; retired `compatibilityProjectId` and `compatibility_project_id` are not fallback keys.
+- **Rationale**: The user explicitly rejected compatibility behavior. Current data must be current-shaped data.
 - **Alternatives considered**:
-  - **Introduce a dedicated subject table/model now**: Rejected because it exceeds the scope needed to retire the dirty concept safely.
-  - **Rename storage structures across every persistence layer as a breaking migration**: Rejected because backward readability is a hard requirement.
+  - **Read old fields silently**: Rejected because it allows stale snapshots to keep feeding the old model.
+  - **Write both old and new fields**: Rejected because it keeps two contracts alive.
 
-## Decision 4: The frontend must switch atomically with the backend contract
+## Decision 4: Frontend state separates subjects from workbench projects
 
-- **Decision**: Update frontend contract consumers in the same implementation wave as backend DTO changes.
-- **Rationale**: The project frontend currently reads `compatibilityProjectId` directly in subject pages, settings, AppShell, and Pomodoro logic. Updating only one side would immediately break navigation and filtering behavior.
+- **Decision**: Frontend selection state uses `selectedSubjectId` for subjects and `selectedWorkbenchProjectId` for concrete projects.
+- **Rationale**: The store should mirror the product boundary and avoid any single selected project slot that can hold subject ids.
 - **Alternatives considered**:
-  - **Backend alias period while frontend lags behind**: Rejected because it leaves two overlapping contracts alive and weakens the retirement goal.
-  - **Frontend-only remapping without backend change**: Rejected because the dirty contract would still leak outward.
+  - **Reuse `selectedProjectId` and validate at read time**: Rejected because it keeps the same ambiguity in persisted browser state.
 
-## Decision 5: Pomodoro continues filtering subject roots, but from `subjectProjectId`
+## Decision 5: Pomodoro binds from the concrete project catalog
 
-- **Decision**: Preserve the existing Pomodoro safeguard that excludes subject-root entries from bindable workbench projects, but derive the exclusion set from `subjectProjectId`.
-- **Rationale**: The user already approved this stopgap behavior. The refactor should keep the behavior while switching it to the cleaned model.
+- **Decision**: Pomodoro binding and workbench gating use valid material projects from `/api/projects`; they do not build subject-root exclusion sets.
+- **Rationale**: Once `/api/projects` no longer returns subjects, filtering subject roots in the frontend is unnecessary and error-prone.
 - **Alternatives considered**:
-  - **Drop the Pomodoro safeguard during the rename**: Rejected because it would reintroduce a broken user path.
-  - **Infer subject roots indirectly from route shape or project type alone**: Rejected because the plan needs an explicit and stable contract.
+  - **Keep subject-root filtering in Pomodoro**: Rejected because it implies subject roots remain project candidates.
 
-## Decision 6: Documentation cleanup is part of the feature, not a follow-up
+## Decision 6: Documentation cleanup is part of the feature
 
-- **Decision**: Remove the retired compatibility-project language from user-facing docs in the same feature.
-- **Rationale**: The product concept is being retired, so docs that still teach it would undermine the contract cleanup and confuse maintainers and users.
-- **Alternatives considered**:
-  - **Leave docs unchanged until after implementation**: Rejected because this repository requires docs to stay synchronized when usage or contract meaning changes.
+- **Decision**: Remove retired compatibility-project and subject-root-project language from user-facing docs and current feature docs.
+- **Rationale**: Keeping old wording would reintroduce the mental model this feature removes.

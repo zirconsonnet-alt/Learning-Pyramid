@@ -783,8 +783,8 @@ export function PomodoroPage() {
   const nav = useNavigate()
   const { planId: routePlanId } = useParams()
   const activePlanId = routePlanId ? decodeURIComponent(routePlanId) : null
-  const selectedProjectId = useAppStore((state) => state.selectedProjectId)
-  const { projectTitle: selectedProjectTitle } = useProject(selectedProjectId ?? "", { enabled: Boolean(selectedProjectId) })
+  const selectedWorkbenchProjectId = useAppStore((state) => state.selectedWorkbenchProjectId)
+  const { projectTitle: selectedWorkbenchProjectTitleFromQuery } = useProject(selectedWorkbenchProjectId ?? "", { enabled: Boolean(selectedWorkbenchProjectId) })
   const projectsQ = useProjects(true)
   const subjectsQ = useSubjects(true)
   const selectedTheme = useThemeStore((state) => state.theme)
@@ -826,10 +826,6 @@ export function PomodoroPage() {
     () => new Map((projectsQ.data ?? []).map((project) => [project.projectId, project.title] as const)),
     [projectsQ.data],
   )
-  const subjectRootProjectIds = useMemo(
-    () => new Set((subjectsQ.data ?? []).map((subject) => subject.subjectProjectId).filter(Boolean)),
-    [subjectsQ.data],
-  )
   const pomodoroProjectCatalogReady = !projectsQ.isLoading && !subjectsQ.isLoading
   const subjectMaterialQs = useQueries({
     queries: (subjectsQ.data ?? []).map((subject) => ({
@@ -844,9 +840,7 @@ export function PomodoroPage() {
     () =>
       (subjectsQ.data ?? []).map((subject, index) => ({
         subject,
-        materials: (materialResults[index] ?? []).filter(
-          (material) => material.projectId && material.projectId !== subject.subjectProjectId,
-        ),
+        materials: (materialResults[index] ?? []).filter((material) => material.projectId),
       })),
     [materialResults, subjectsQ.data],
   )
@@ -901,29 +895,28 @@ export function PomodoroPage() {
   const hasFocusProject = Boolean(snapshot.currentProjectId && validPomodoroProjectIds.has(snapshot.currentProjectId))
   const focusProjectTitle =
     snapshot.currentProjectId && hasFocusProject ? projectTitleByProjectId.get(snapshot.currentProjectId) ?? projectTitleMap.get(snapshot.currentProjectId) ?? "" : ""
-  const selectedWorkbenchProjectId =
-    pomodoroProjectCatalogReady && selectedProjectId && projectTitleMap.has(selectedProjectId) && !subjectRootProjectIds.has(selectedProjectId)
-      ? selectedProjectId
+  const resolvedSelectedWorkbenchProjectId =
+    pomodoroProjectCatalogReady && selectedWorkbenchProjectId && projectTitleMap.has(selectedWorkbenchProjectId)
+      ? selectedWorkbenchProjectId
       : ""
   const selectedWorkbenchProjectTitle =
-    selectedWorkbenchProjectId ? projectTitleMap.get(selectedWorkbenchProjectId) || selectedProjectTitle || "" : ""
+    resolvedSelectedWorkbenchProjectId ? projectTitleMap.get(resolvedSelectedWorkbenchProjectId) || selectedWorkbenchProjectTitleFromQuery || "" : ""
   const rememberedWorkbenchProjectId = extractWorkbenchProjectId(fromPath)
   const rememberedWorkbenchPath =
     pomodoroProjectCatalogReady &&
     rememberedWorkbenchProjectId &&
-    projectTitleMap.has(rememberedWorkbenchProjectId) &&
-    !subjectRootProjectIds.has(rememberedWorkbenchProjectId)
+    projectTitleMap.has(rememberedWorkbenchProjectId)
       ? fromPath
       : ""
   const focusWorkbenchPath =
     snapshot.currentProjectId && hasFocusProject ? `/p/${snapshot.currentProjectId}/workbench` : ""
-  const fallbackWorkbenchPath = selectedWorkbenchProjectId ? `/p/${selectedWorkbenchProjectId}/workbench` : ""
+  const fallbackWorkbenchPath = resolvedSelectedWorkbenchProjectId ? `/p/${resolvedSelectedWorkbenchProjectId}/workbench` : ""
   const preferredWorkbenchPath = focusWorkbenchPath || rememberedWorkbenchPath || fallbackWorkbenchPath
   const preferredWorkbenchLabel = focusWorkbenchPath
     ? `进入${focusProjectTitle || "当前番茄项目"}工作台`
     : rememberedWorkbenchPath
       ? "回到刚才的工作台"
-      : selectedWorkbenchProjectId
+      : resolvedSelectedWorkbenchProjectId
         ? `进入${selectedWorkbenchProjectTitle || "当前项目"}工作台`
         : "进入工作台"
 
@@ -1184,7 +1177,7 @@ export function PomodoroPage() {
       showInfoFeedback("番茄钟正在运行", "当前已经处于学习阶段，结束后再新建小番茄。")
       return
     }
-    const quick = startQuickPomodoro(selectedWorkbenchProjectId || null)
+    const quick = startQuickPomodoro(resolvedSelectedWorkbenchProjectId || null)
     showSuccessFeedback(
       "小番茄已创建",
       quick.projectId

@@ -72,7 +72,8 @@ def test_subject_creates_first_course_material_as_independent_project(monkeypatc
     assert create_resp.status_code == 200
     create_data = create_resp.json()["data"]
     subject_id = create_data["subjectId"]
-    assert create_data["subjectProjectId"] == subject_id
+    assert set(create_data) == {"subjectId"}
+    assert "subjectProjectId" not in create_data
     assert "compatibilityProjectId" not in create_data
 
     subject_resp = client.get("/api/subjects")
@@ -85,14 +86,14 @@ def test_subject_creates_first_course_material_as_independent_project(monkeypatc
             "state": "ACTIVE",
             "createdAt": subjects[0]["createdAt"],
             "deletedAt": None,
-            "subjectProjectId": subject_id,
         }
     ]
+    assert "subjectProjectId" not in subjects[0]
     assert "compatibilityProjectId" not in subjects[0]
 
     config_resp = client.get(f"/api/projects/{subject_id}/project-config")
-    assert config_resp.status_code == 200
-    assert config_resp.json()["data"]["projectType"] == "COURSE"
+    assert config_resp.status_code == 400
+    assert config_resp.json()["error"]["code"] == "PRECONDITION"
 
     materials_resp = client.get(f"/api/subjects/{subject_id}/materials")
     assert materials_resp.status_code == 200
@@ -131,7 +132,8 @@ def test_subject_creates_first_course_material_as_independent_project(monkeypatc
     projects_resp = client.get("/api/projects")
     assert projects_resp.status_code == 200
     project_ids = {item["projectId"] for item in projects_resp.json()["data"]}
-    assert {subject_id, first_course_project_id, book_project_id}.issubset(project_ids)
+    assert subject_id not in project_ids
+    assert {first_course_project_id, book_project_id}.issubset(project_ids)
 
     materials_after_create = client.get(f"/api/subjects/{subject_id}/materials")
     assert materials_after_create.status_code == 200
@@ -153,6 +155,9 @@ def test_subject_creates_first_course_material_as_independent_project(monkeypatc
     assert edited_book_material["title"] == "高数教材精读"
 
     delete_subject_resp = client.delete(f"/api/projects/{subject_id}")
+    assert delete_subject_resp.status_code == 400
+    assert delete_subject_resp.json()["error"]["code"] == "PRECONDITION"
+    delete_subject_resp = client.delete(f"/api/subjects/{subject_id}")
     assert delete_subject_resp.status_code == 200
     remaining_projects_resp = client.get("/api/projects")
     assert remaining_projects_resp.status_code == 200
@@ -201,28 +206,20 @@ def test_subject_context_and_material_management_endpoints(monkeypatch, tmp_path
     assert "compatibilityProjectId" not in book_material
 
     root_context_resp = client.get(f"/api/projects/{subject_id}/subject-context")
-    assert root_context_resp.status_code == 200
-    root_context = root_context_resp.json()["data"]
-    assert root_context["isSubjectRoot"] is True
-    assert root_context["subject"]["subjectId"] == subject_id
-    assert root_context["subjectProjectId"] == subject_id
-    assert root_context["currentProjectId"] == subject_id
-    assert root_context["currentMaterial"]["materialId"] == first_course_material_id
-    assert root_context["currentMaterial"]["projectId"] == first_course_project_id
-    assert "compatibilityProjectId" not in root_context["currentMaterial"]
-    assert {item["materialId"] for item in root_context["materials"]} == {first_course_material_id, book_material_id}
+    assert root_context_resp.status_code == 400
+    assert root_context_resp.json()["error"]["code"] == "PRECONDITION"
 
     child_context_resp = client.get(f"/api/projects/{book_project_id}/subject-context")
     assert child_context_resp.status_code == 200
     child_context = child_context_resp.json()["data"]
-    assert child_context["isSubjectRoot"] is False
     assert child_context["subject"]["subjectId"] == subject_id
-    assert child_context["subjectProjectId"] == subject_id
     assert child_context["currentProjectId"] == book_project_id
     assert child_context["currentMaterial"]["materialId"] == book_material_id
     assert child_context["currentMaterial"]["projectId"] == book_project_id
     assert "compatibilityProjectId" not in child_context["currentMaterial"]
     assert child_context["currentMaterial"]["title"] == "高等数学教材"
+    assert "isSubjectRoot" not in child_context
+    assert "subjectProjectId" not in child_context
 
     rename_subject_resp = client.patch(f"/api/subjects/{subject_id}", json={"title": "高等数学进阶"})
     assert rename_subject_resp.status_code == 200
@@ -259,7 +256,7 @@ def test_subject_context_and_material_management_endpoints(monkeypatch, tmp_path
     remaining_projects_resp = client.get("/api/projects")
     assert remaining_projects_resp.status_code == 200
     remaining_project_ids = {item["projectId"] for item in remaining_projects_resp.json()["data"]}
-    assert subject_id in remaining_project_ids
+    assert subject_id not in remaining_project_ids
     assert first_course_project_id in remaining_project_ids
     assert book_project_id not in remaining_project_ids
 
@@ -438,21 +435,43 @@ def test_hosted_legacy_root_material_migration_grants_child_project_access(monke
             api.sys.rollback(session)
         raise
 
-    materials_resp = client.get(f"/api/subjects/{subject_id}/materials")
-    assert materials_resp.status_code == 200
-    materials = materials_resp.json()["data"]
+    subjects_resp = client.get("/api/subjects")
+    assert subjects_resp.status_code == 200
+    subjects = subjects_resp.json()["data"]
+    assert [item["subjectId"] for item in subjects] == [str(subject_id)]
+    assert "subjectProjectId" not in subjects[0]
+
+    materials = list(api.list_subject_materials(subject_id))
     assert len(materials) == 1
     migrated = materials[0]
-    migrated_project_id = migrated["projectId"]
-    assert migrated["materialId"] != "legacy_main"
+    migrated_project_id = migrated.project_id
+    assert migrated.material_id != "legacy_main"
+    assert migrated_project_id is not None
     assert migrated_project_id != subject_id
-    assert str(migrated_project_id) in auth_store.list_project_ids_for_user(user_id)
+    assert str(migrated_project_id) not in auth_store.list_project_ids_for_user(user_id)
+
+    root_context_resp = client.get(f"/api/projects/{subject_id}/subject-context")
+    assert root_context_resp.status_code == 400
+    assert root_context_resp.json()["error"]["code"] == "PRECONDITION"
 
     context_resp = client.get(f"/api/projects/{migrated_project_id}/subject-context")
     assert context_resp.status_code == 200
     context = context_resp.json()["data"]
-    assert context["subject"]["subjectId"] == subject_id
-    assert context["currentMaterial"]["projectId"] == migrated_project_id
+    assert context["subject"]["subjectId"] == str(subject_id)
+    assert context["currentMaterial"]["projectId"] == str(migrated_project_id)
+    assert str(migrated_project_id) in auth_store.list_project_ids_for_user(user_id)
+
+    materials_resp = client.get(f"/api/subjects/{subject_id}/materials")
+    assert materials_resp.status_code == 200
+    materials_data = materials_resp.json()["data"]
+    assert len(materials_data) == 1
+    assert materials_data[0]["projectId"] == str(migrated_project_id)
+
+    projects_resp = client.get("/api/projects")
+    assert projects_resp.status_code == 200
+    project_ids = {item["projectId"] for item in projects_resp.json()["data"]}
+    assert str(subject_id) not in project_ids
+    assert str(migrated_project_id) in project_ids
 
     _reset_caches()
 

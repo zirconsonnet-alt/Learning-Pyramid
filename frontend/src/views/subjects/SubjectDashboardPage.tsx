@@ -100,9 +100,10 @@ export function SubjectDashboardPage() {
   const materialsQ = useSubjectMaterials(subjectId)
   const createMaterialM = useCreateSubjectMaterial()
   const deleteMaterialM = useDeleteSubjectMaterial()
-  const setSelectedProjectId = useAppStore((state) => state.setSelectedProjectId)
+  const selectedWorkbenchProjectId = useAppStore((state) => state.selectedWorkbenchProjectId)
+  const setSelectedWorkbenchProjectId = useAppStore((state) => state.setSelectedWorkbenchProjectId)
   const setSelectedSubjectId = useAppStore((state) => state.setSelectedSubjectId)
-  const removeRecentProjectId = useAppStore((state) => state.removeRecentProjectId)
+  const removeRecentWorkbenchProjectId = useAppStore((state) => state.removeRecentWorkbenchProjectId)
   const [createOpen, setCreateOpen] = useState(false)
   const [deleteMaterialTarget, setDeleteMaterialTarget] = useState<StudyMaterial | null>(null)
   const [deleteMaterialConfirmation, setDeleteMaterialConfirmation] = useState("")
@@ -115,7 +116,6 @@ export function SubjectDashboardPage() {
     [subjectId, subjectsQ.data],
   )
   const subjectTitle = subject?.title ?? "当前学科"
-  const subjectProjectId = subject?.subjectProjectId ?? subjectId
   const materials = useMemo(() => materialsQ.data ?? [], [materialsQ.data])
   const deleteMaterialExpectedText = deleteMaterialTarget?.title ?? ""
   const deleteMaterialMatches = deleteMaterialConfirmation.trim() === deleteMaterialExpectedText
@@ -215,13 +215,13 @@ export function SubjectDashboardPage() {
     const projectId = material.projectId
     if (!projectId) return
     setSelectedSubjectId(subjectId)
-    setSelectedProjectId(projectId)
+    setSelectedWorkbenchProjectId(projectId)
     if (target === "settings") {
       completeGuideWalkthroughStep("choose-project")
     }
     navigate(
       target === "settings"
-        ? buildProjectSettingsPath(projectId, { subjectProjectId })
+        ? buildProjectSettingsPath(projectId)
         : buildProjectWorkbenchPath(projectId),
     )
   }
@@ -232,10 +232,10 @@ export function SubjectDashboardPage() {
     try {
       await deleteMaterialM.mutateAsync({ subjectId, materialId: deleteMaterialTarget.materialId })
       if (projectId) {
-        removeRecentProjectId(projectId)
+        removeRecentWorkbenchProjectId(projectId)
       }
       const nextProjectId = materials.find((item) => item.materialId !== deleteMaterialTarget.materialId && item.projectId)?.projectId ?? null
-      setSelectedProjectId(nextProjectId)
+      setSelectedWorkbenchProjectId(nextProjectId)
       showSuccessFeedback("项目已删除", `“${deleteMaterialTarget.title}” 已从“${subjectTitle}”下移除。`)
       closeDeleteMaterialDialog()
     } catch (err) {
@@ -301,7 +301,7 @@ export function SubjectDashboardPage() {
         <div className="grid gap-4 xl:grid-cols-2">
           {sortedMaterials.map((material) => {
             const Icon = materialIconByType[material.materialType]
-            const active = material.projectId === subjectProjectId
+            const active = material.projectId === selectedWorkbenchProjectId
             const materialActivityIndex = materials.findIndex((item) => item.materialId === material.materialId)
             const materialActivityLoading = material.projectId ? Boolean(materialActivityQs[materialActivityIndex]?.isLoading) : false
             const lastStudyDisplay = formatLastStudyText(lastStudyByMaterialId[material.materialId] ?? null)

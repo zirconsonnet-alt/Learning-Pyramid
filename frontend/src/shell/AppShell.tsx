@@ -47,10 +47,16 @@ function describeArea(
     hasProject: boolean
     subjectTitle: string
     materialTitle: string
-    isSubjectSettingsScope: boolean
   },
 ) {
-  const { hasProject, isSubjectSettingsScope, materialTitle, subjectTitle } = params
+  const { hasProject, materialTitle, subjectTitle } = params
+  if (pathname.match(/^\/subjects\/[^/]+\/settings/)) {
+    return {
+      title: "学科设置",
+      context: subjectTitle,
+    }
+  }
+
   if (pathname.startsWith("/projects")) {
     return {
       title: "学科中心",
@@ -118,14 +124,14 @@ function describeArea(
     if (pathname.includes("/workbench")) {
       return {
         title: "学科工作台",
-        context: isSubjectSettingsScope ? subjectTitle : `${subjectTitle} / ${materialTitle}`,
+        context: `${subjectTitle} / ${materialTitle}`,
       }
     }
 
     if (pathname.includes("/ai-chat")) {
       return {
         title: "AI问答",
-        context: isSubjectSettingsScope ? subjectTitle : `${subjectTitle} / ${materialTitle}`,
+        context: `${subjectTitle} / ${materialTitle}`,
       }
     }
 
@@ -136,17 +142,10 @@ function describeArea(
       }
     }
 
-    if (pathname.includes("/project-settings")) {
+    if (pathname.includes("/settings")) {
       return {
         title: "项目设置",
         context: `${subjectTitle} / ${materialTitle}`,
-      }
-    }
-
-    if (pathname.includes("/settings")) {
-      return {
-        title: isSubjectSettingsScope ? "学科设置" : "项目设置",
-        context: isSubjectSettingsScope ? subjectTitle : `${subjectTitle} / ${materialTitle}`,
       }
     }
   }
@@ -301,8 +300,8 @@ export function AppShell() {
   const { projectId, subjectId: routeSubjectId } = useParams()
   const pid = projectId ?? ""
   const isProjectsScope = location.pathname === "/projects"
-  const selectedProjectId = useAppStore((state) => state.selectedProjectId)
-  const setSelectedProjectId = useAppStore((state) => state.setSelectedProjectId)
+  const selectedWorkbenchProjectId = useAppStore((state) => state.selectedWorkbenchProjectId)
+  const setSelectedWorkbenchProjectId = useAppStore((state) => state.setSelectedWorkbenchProjectId)
   const [globalMenuOpen, setGlobalMenuOpen] = useState(false)
   const [subjectMenuOpen, setSubjectMenuOpen] = useState(false)
   const [projectMenuOpen, setProjectMenuOpen] = useState(false)
@@ -318,8 +317,7 @@ export function AppShell() {
     () => (subjectsQ.data ?? []).find((subject) => subject.subjectId === routeSubjectId) ?? null,
     [routeSubjectId, subjectsQ.data],
   )
-  const routeScopedProjectId = routeSubjectId ? routeSubject?.subjectProjectId ?? "" : ""
-  const effectiveProjectId = pid || (routeSubjectId ? routeScopedProjectId : isProjectsScope ? "" : selectedProjectId || "")
+  const effectiveProjectId = pid || (isProjectsScope ? "" : selectedWorkbenchProjectId || "")
   const isVirtualStudyReviewProject = isVirtualStudyReviewProjectId(effectiveProjectId)
   const isSubjectDashboardScope = Boolean(routeSubjectId) && !pid
   const subjectContextQ = useSubjectContext(effectiveProjectId, canAccessApp && Boolean(effectiveProjectId) && !isSubjectDashboardScope)
@@ -337,19 +335,14 @@ export function AppShell() {
   const subjectTitle = subjectContextQ.data?.subject.title ?? fallbackSubjectTitle
   const fallbackMaterialTitle = projectTitle || pid || "当前项目"
   const currentMaterialTitle = subjectContextQ.data?.currentMaterial.title ?? fallbackMaterialTitle
-  const resolvedSubjectProjectId = subjectContextQ.data?.subjectProjectId ?? routeSubject?.subjectProjectId ?? ""
   const currentProjectContextId = subjectContextQ.data?.currentProjectId ?? pid
-  const isSubjectRoot = subjectContextQ.data?.isSubjectRoot ?? (!pid && Boolean(routeSubjectId))
-  const isSubjectSettingsScope = isSubjectRoot && !location.pathname.includes("/project-settings")
-  const currentMaterialProjectId =
-    subjectContextQ.data?.currentMaterial.projectId ?? (!isSubjectRoot ? currentProjectContextId : "")
-  const hasSubjectContext = Boolean(resolvedSubjectId && resolvedSubjectProjectId)
+  const currentMaterialProjectId = subjectContextQ.data?.currentMaterial.projectId ?? currentProjectContextId
+  const hasSubjectContext = Boolean(resolvedSubjectId)
   const hasProjectContext = Boolean(hasSubjectContext && currentMaterialProjectId && !isSubjectDashboardScope)
   const area = describeArea(location.pathname, {
     hasProject: Boolean(pid),
     subjectTitle,
     materialTitle: currentMaterialTitle,
-    isSubjectSettingsScope,
   })
   const capabilitiesUnavailableError = capabilitiesQ.error && !capabilitiesQ.data ? formatApiError(capabilitiesQ.error) : null
   const currentUserUnavailableError =
@@ -367,12 +360,12 @@ export function AppShell() {
   const previousPomodoroSnapshotRef = useRef<typeof pomodoroSnapshot | null>(null)
   const previousLocationRef = useRef(locationToken)
   const subjectNavItems = useMemo(
-    () => getSubjectNavItems(resolvedSubjectId, resolvedSubjectProjectId),
-    [resolvedSubjectId, resolvedSubjectProjectId],
+    () => getSubjectNavItems(resolvedSubjectId),
+    [resolvedSubjectId],
   )
   const currentProjectSettingsPath = useMemo(
-    () => buildProjectSettingsPath(currentMaterialProjectId, { subjectProjectId: resolvedSubjectProjectId }),
-    [currentMaterialProjectId, resolvedSubjectProjectId],
+    () => buildProjectSettingsPath(currentMaterialProjectId),
+    [currentMaterialProjectId],
   )
   const projectNavItems = useMemo(
     () =>
@@ -413,14 +406,10 @@ export function AppShell() {
         : projectsQ.data ?? [],
     [effectiveProjectId, isVirtualStudyReviewProject, projectsQ.data],
   )
-  const subjectRootProjectIds = useMemo(
-    () => new Set((subjectsQ.data ?? []).map((subject) => subject.subjectProjectId).filter(Boolean)),
-    [subjectsQ.data],
-  )
-  const pomodoroProjectCatalogReady = !projectsQ.isLoading && !subjectsQ.isLoading
+  const pomodoroProjectCatalogReady = !projectsQ.isLoading
   const accessibleProjectIds = useMemo(
-    () => new Set((projectsQ.data ?? []).filter((project) => !subjectRootProjectIds.has(project.projectId)).map((project) => project.projectId)),
-    [projectsQ.data, subjectRootProjectIds],
+    () => new Set((projectsQ.data ?? []).map((project) => project.projectId)),
+    [projectsQ.data],
   )
   const pomodoroFocusProjectId =
     pomodoroProjectCatalogReady && pomodoroSnapshot.currentProjectId && accessibleProjectIds.has(pomodoroSnapshot.currentProjectId)
@@ -521,10 +510,9 @@ export function AppShell() {
               : "已关闭"
 
   useEffect(() => {
-    const nextSelectedProjectId = pid || (isSubjectDashboardScope ? "" : routeScopedProjectId)
-    if (!nextSelectedProjectId || selectedProjectId === nextSelectedProjectId) return
-    setSelectedProjectId(nextSelectedProjectId)
-  }, [isSubjectDashboardScope, pid, routeScopedProjectId, selectedProjectId, setSelectedProjectId])
+    if (!pid || selectedWorkbenchProjectId === pid) return
+    setSelectedWorkbenchProjectId(pid)
+  }, [pid, selectedWorkbenchProjectId, setSelectedWorkbenchProjectId])
 
   useEffect(() => {
     if (previousLocationRef.current === locationToken) return

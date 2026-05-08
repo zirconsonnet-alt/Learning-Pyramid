@@ -7,7 +7,6 @@ Represents the top-level learning domain visible in the product.
 Fields:
 
 - `subjectId`: Stable subject identity.
-- `subjectProjectId`: Subject-root project anchor used for subject-level routes, settings, and statistics.
 - `title`: User-visible subject name.
 - `state`: Subject lifecycle state.
 - `createdAt`: Subject creation timestamp.
@@ -15,9 +14,9 @@ Fields:
 
 Validation rules:
 
-- `subjectId` and `subjectProjectId` must both resolve for active subjects.
-- The subject-root anchor remains a subject-level concept, not a normal material project choice.
-- Current outward product contracts must not expose `compatibilityProjectId` for a subject.
+- `subjectId` must resolve for active subjects.
+- A subject ID is not a project ID and must not be used for `/projects/{projectId}` API calls or `/p/{projectId}` routes.
+- Current outward product contracts must not expose `compatibilityProjectId` or `subjectProjectId` for a subject.
 
 ## Study Material
 
@@ -63,28 +62,24 @@ Fields:
 - `subject`: Current subject.
 - `currentMaterial`: Material active for the current route/project scope.
 - `materials`: All materials visible under the subject.
-- `isSubjectRoot`: Whether the current route is operating at the subject-root scope.
 - `currentProjectId`: Current resolved route/project identity.
-- `subjectProjectId`: Current subject-root anchor identity.
 
 Validation rules:
 
-- Subject context must always distinguish subject-root scope from material-project scope explicitly.
+- Subject context exists for material-project scope only.
 - When the current route is a material project, `currentMaterial.projectId` must resolve the active project target.
-- When the current route is the subject root, the context may identify the first available material for navigation, but that material must still be an independent material project.
+- Subject pages use `subjectId` directly and do not resolve through a subject-root project.
 
-## Legacy Subject/Material Record
-
-Represents persisted pre-refactor data that still uses the retired field names.
+## Historical Root-Backed Material
 
 Fields:
 
-- `legacySubjectProjectField`: Historical subject-level compatibility field name if present.
-- `legacyMaterialProjectField`: Historical material-level compatibility field name if present.
-- `currentResolvedProjectId`: Cleaned project identity obtained during read.
+- `subjectId`: Owning subject identity.
+- `materialId`: Historical material identity.
+- `projectId`: Historical value that equals `subjectId` before migration.
 
 Validation rules:
 
-- Legacy records must remain readable without user intervention.
+- Historical root-backed materials are migrated to current subject/material/project identities without preserving old public entry points.
 - Newly written records must not persist the retired field names.
-- If a legacy record is missing or has an inconsistent retired field, the system must fail safely rather than silently inventing a new relationship.
+- If a material record is missing `projectId`, the system must fail safely rather than silently inventing a new relationship.

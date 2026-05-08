@@ -6,7 +6,7 @@ import { useNavigate } from "react-router-dom"
 import { listAuditLogEvents, type AuditLogEvent } from "@/ui/api/auditLog"
 import { ApiError } from "@/ui/api/http"
 import { getSystemDataSafetyStatus } from "@/ui/api/system"
-import type { Subject } from "@/ui/api/subjects"
+import type { StudyMaterial, Subject } from "@/ui/api/subjects"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import {
@@ -20,6 +20,7 @@ import {
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
 import { completeGuideWalkthroughStep } from "@/ui/guideWalkthrough/guideWalkthroughController"
+import { buildSubjectSettingsPath } from "@/ui/projectPaths"
 import { useCreateSubject, useDeleteSubject, useSubjects } from "@/ui/queries/subjects"
 import { listSubjectMaterials } from "@/ui/api/subjects"
 import { useAppStore } from "@/ui/store/appStore"
@@ -99,17 +100,21 @@ function getProjectLastStudyAt(events: AuditLogEvent[] | undefined) {
   return latest
 }
 
+type SubjectMaterialProjectRef = {
+  subjectId: string
+  projectId: string
+}
+
 export function ProjectsPage() {
   const nav = useNavigate()
   const { data, isLoading, error } = useSubjects()
   const create = useCreateSubject()
   const del = useDeleteSubject()
 
-  const selectedProjectId = useAppStore((s) => s.selectedProjectId)
-  const recentProjectIds = useAppStore((s) => s.recentProjectIds)
+  const selectedSubjectId = useAppStore((s) => s.selectedSubjectId)
+  const recentSubjectIds = useAppStore((s) => s.recentSubjectIds)
   const setSelectedSubjectId = useAppStore((s) => s.setSelectedSubjectId)
-  const setSelectedProjectId = useAppStore((s) => s.setSelectedProjectId)
-  const removeRecentProjectId = useAppStore((s) => s.removeRecentProjectId)
+  const removeRecentSubjectId = useAppStore((s) => s.removeRecentSubjectId)
 
   const subjects = useMemo(() => data ?? [], [data])
   const dataSafety = useQuery({
@@ -129,15 +134,6 @@ export function ProjectsPage() {
   const deleteDialogHint =
     "删除前建议确认是否还有未处理的内容绑定、草稿或工作流入口需要保留。该操作完成后，当前浏览器会同步清掉这个学科的本地上下文。"
   const deleteMatches = deleteConfirmation.trim() === deleteExpectedText
-  const projectActivityQs = useQueries({
-    queries: subjects.map((subject) => ({
-      queryKey: ["auditLogEvents", subject.subjectProjectId],
-      queryFn: () => listAuditLogEvents(subject.subjectProjectId),
-      enabled: !isLoading && !error,
-      staleTime: 60_000,
-      refetchInterval: 60_000,
-    })),
-  })
   const subjectMaterialQs = useQueries({
     queries: subjects.map((subject) => ({
       queryKey: ["subjectMaterials", subject.subjectId],
@@ -146,15 +142,44 @@ export function ProjectsPage() {
       staleTime: 60_000,
     })),
   })
+  const subjectMaterialProjectRefs = useMemo<SubjectMaterialProjectRef[]>(() => {
+    return subjects.flatMap((subject, index) => {
+      const materials = (subjectMaterialQs[index]?.data ?? []) as StudyMaterial[]
+      return materials
+        .filter((material) => Boolean(material.projectId))
+        .map((material) => ({
+          subjectId: subject.subjectId,
+          projectId: material.projectId as string,
+        }))
+    })
+  }, [subjectMaterialQs, subjects])
+  const projectActivityQs = useQueries({
+    queries: subjectMaterialProjectRefs.map((item) => ({
+      queryKey: ["auditLogEvents", item.projectId],
+      queryFn: () => listAuditLogEvents(item.projectId),
+      enabled: !isLoading && !error,
+      staleTime: 60_000,
+      refetchInterval: 60_000,
+    })),
+  })
 
-  const lastStudyByProjectId = useMemo(() => {
-    const entries = subjects.map((subject, index) => [subject.subjectId, getProjectLastStudyAt(projectActivityQs[index]?.data)] as const)
-    return Object.fromEntries(entries)
-  }, [projectActivityQs, subjects])
-  const activityLoadingByProjectId = useMemo(() => {
-    const entries = subjects.map((subject, index) => [subject.subjectId, Boolean(projectActivityQs[index]?.isLoading)] as const)
-    return Object.fromEntries(entries)
-  }, [projectActivityQs, subjects])
+  const lastStudyBySubjectId = useMemo(() => {
+    const latestBySubject: Record<string, string | null> = Object.fromEntries(subjects.map((subject) => [subject.subjectId, null]))
+    subjectMaterialProjectRefs.forEach((item, index) => {
+      const occurredAt = getProjectLastStudyAt(projectActivityQs[index]?.data)
+      if (!occurredAt) return
+      const current = latestBySubject[item.subjectId]
+      if (!current || Date.parse(occurredAt) > Date.parse(current)) latestBySubject[item.subjectId] = occurredAt
+    })
+    return latestBySubject
+  }, [projectActivityQs, subjectMaterialProjectRefs, subjects])
+  const activityLoadingBySubjectId = useMemo(() => {
+    const loadingBySubject: Record<string, boolean> = Object.fromEntries(subjects.map((subject) => [subject.subjectId, false]))
+    subjectMaterialProjectRefs.forEach((item, index) => {
+      if (projectActivityQs[index]?.isLoading) loadingBySubject[item.subjectId] = true
+    })
+    return loadingBySubject
+  }, [projectActivityQs, subjectMaterialProjectRefs, subjects])
   const subjectMaterialCountBySubjectId = useMemo(() => {
     const entries = subjects.map((subject, index) => [subject.subjectId, subjectMaterialQs[index]?.data?.length ?? 0] as const)
     return Object.fromEntries(entries)
@@ -170,7 +195,7 @@ export function ProjectsPage() {
       })
     }
 
-    const recentRank = new Map(recentProjectIds.map((projectId, index) => [projectId, index]))
+    const recentRank = new Map(recentSubjectIds.map((subjectId, index) => [subjectId, index]))
     return items.sort((a, b) => {
       const aRank = recentRank.get(a.subjectId)
       const bRank = recentRank.get(b.subjectId)
@@ -183,7 +208,7 @@ export function ProjectsPage() {
       const bTime = Date.parse(b.createdAt)
       return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0)
     })
-  }, [subjects, recentProjectIds, sortMode])
+  }, [subjects, recentSubjectIds, sortMode])
 
   function openDeleteDialog(project: Subject) {
     del.reset()
@@ -207,7 +232,6 @@ export function ProjectsPage() {
       })
       setTitle("")
       setSelectedSubjectId(res.subjectId)
-      setSelectedProjectId(res.subjectProjectId)
       setCreateOpen(false)
       showSuccessFeedback("学科已创建", `“${t}” 已准备好。先在项目中心里选择或创建项目。`)
       nav(`/subjects/${res.subjectId}`)
@@ -223,7 +247,7 @@ export function ProjectsPage() {
     try {
       await del.mutateAsync(deleteTarget.subjectId)
       useWorkbenchStore.getState().resetProject(deleteTarget.subjectId)
-      removeRecentProjectId(deleteTarget.subjectId)
+      removeRecentSubjectId(deleteTarget.subjectId)
       closeDeleteDialog()
       showSuccessFeedback("学科已删除", `“${deletedTitle}” 已从当前工作区移除。`)
     } catch (err) {
@@ -232,10 +256,8 @@ export function ProjectsPage() {
   }
 
   function openSubject(subject: Subject, target: "dashboard" | "settings") {
-    const projectId = subject.subjectProjectId
     setSelectedSubjectId(subject.subjectId)
-    setSelectedProjectId(projectId)
-    nav(target === "dashboard" ? `/subjects/${subject.subjectId}` : `/p/${projectId}/settings`)
+    nav(target === "dashboard" ? `/subjects/${subject.subjectId}` : buildSubjectSettingsPath(subject.subjectId))
   }
 
   return (
@@ -287,15 +309,15 @@ export function ProjectsPage() {
             <div className="grid gap-4 xl:grid-cols-2">
               {sortedSubjects.map((p) => (
                 (() => {
-                  const lastStudyDisplay = formatLastStudyText(lastStudyByProjectId[p.subjectId] ?? null)
-                  const activityLoading = activityLoadingByProjectId[p.subjectId]
+                  const lastStudyDisplay = formatLastStudyText(lastStudyBySubjectId[p.subjectId] ?? null)
+                  const activityLoading = activityLoadingBySubjectId[p.subjectId]
                   const subjectProjectCountText = `${subjectMaterialCountBySubjectId[p.subjectId] ?? 0} 个项目`
                   return (
                     <Card
                       key={p.subjectId}
                       className={cn(
                         "h-full border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] shadow-[var(--theme-soft-shadow)] transition-all duration-200",
-                        selectedProjectId === p.subjectId && "border-primary/20 shadow-[0_24px_60px_-38px_rgba(30,58,95,0.34)] ring-1 ring-primary/10",
+                        selectedSubjectId === p.subjectId && "border-primary/20 shadow-[0_24px_60px_-38px_rgba(30,58,95,0.34)] ring-1 ring-primary/10",
                       )}
                     >
                       <CardHeader className="space-y-4">
@@ -310,7 +332,7 @@ export function ProjectsPage() {
                             </CardDescription>
                           </div>
                           <div className="flex flex-wrap items-center gap-2">
-                            {selectedProjectId === p.subjectId ? <span className="theme-meta-strong">当前学科</span> : null}
+                            {selectedSubjectId === p.subjectId ? <span className="theme-meta-strong">当前学科</span> : null}
                           </div>
                         </div>
                       </CardHeader>

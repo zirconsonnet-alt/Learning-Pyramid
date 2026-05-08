@@ -3,7 +3,6 @@ import { Navigate, useLocation, useParams } from "react-router-dom"
 
 import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
 import { useProjects } from "@/ui/queries/projects"
-import { useSubjects } from "@/ui/queries/subjects"
 import { getPomodoroSnapshot, isQuickPomodoroSessionActive, usePomodoroNow, usePomodoroStore } from "@/ui/store/pomodoroStore"
 import { buildPomodoroPath } from "@/views/pomodoro/pomodoroRouting"
 
@@ -18,7 +17,6 @@ export function PomodoroWorkbenchGate(props: { children: ReactNode }) {
   const pomodoroActive = enabled || Boolean(activeQuickPomodoro)
   const now = usePomodoroNow(pomodoroActive)
   const projectsQ = useProjects(true)
-  const subjectsQ = useSubjects(true)
 
   if (!projectId) {
     return <>{children}</>
@@ -33,11 +31,8 @@ export function PomodoroWorkbenchGate(props: { children: ReactNode }) {
   }
 
   const snapshot = getPomodoroSnapshot({ enabled, weeklySchedule, quickPomodoro }, now)
-  const subjectRootProjectIds = new Set((subjectsQ.data ?? []).map((subject) => subject.subjectProjectId).filter(Boolean))
-  const pomodoroProjectCatalogReady = !projectsQ.isLoading && !subjectsQ.isLoading
-  const accessibleProjectIds = new Set(
-    (projectsQ.data ?? []).filter((item) => !subjectRootProjectIds.has(item.projectId)).map((item) => item.projectId),
-  )
+  const pomodoroProjectCatalogReady = !projectsQ.isLoading
+  const accessibleProjectIds = new Set((projectsQ.data ?? []).map((item) => item.projectId))
   const focusProjectId =
     pomodoroProjectCatalogReady && snapshot.currentProjectId && accessibleProjectIds.has(snapshot.currentProjectId)
       ? snapshot.currentProjectId

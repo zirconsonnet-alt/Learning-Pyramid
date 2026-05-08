@@ -198,20 +198,20 @@ def test_subject_project_contract_no_longer_exposes_compatibility_project_id() -
         assert "compatibilityProjectId" not in source
 
     subjects_api_source = SUBJECTS_API.read_text(encoding="utf-8")
-    assert "subjectProjectId: z.string()" in subjects_api_source
+    assert "subjectProjectId" not in subjects_api_source
     assert "projectId: z.string().nullable()" in subjects_api_source
     assert "const CreateSubjectResultSchema = z.object({" in subjects_api_source
 
     projects_source = PROJECTS_PAGE.read_text(encoding="utf-8")
-    assert "subject.subjectProjectId" in projects_source
-    assert "res.subjectProjectId" in projects_source
+    assert "subject.subjectProjectId" not in projects_source
+    assert "res.subjectProjectId" not in projects_source
 
     subject_dashboard_source = SUBJECT_DASHBOARD_PAGE.read_text(encoding="utf-8")
-    assert "subject?.subjectProjectId" in subject_dashboard_source
+    assert "subject?.subjectProjectId" not in subject_dashboard_source
     assert "material.projectId" in subject_dashboard_source
 
     app_shell_source = APP_SHELL.read_text(encoding="utf-8")
-    assert "routeSubject?.subjectProjectId" in app_shell_source
+    assert "routeSubject?.subjectProjectId" not in app_shell_source
     assert "subjectContextQ.data?.currentMaterial.projectId" in app_shell_source
 
 

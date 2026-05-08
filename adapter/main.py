@@ -15,7 +15,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from adapter.auth import auth_error_response, resolve_session_user
 from adapter.errors import register_exception_handlers
-from adapter.deps import get_auth_store
+from adapter.deps import get_api, get_auth_store
 from adapter.runtime_status import collect_runtime_status
 from adapter.routers import admin, asr, auth, friends, layers, learning_tasks, materials, media, membership, profile, projects, push, review, system, validation
 from backend.system.hosted_deployment_checks import hosted_runtime_warnings, validate_hosted_runtime_or_raise
@@ -104,6 +104,33 @@ def _extract_project_id(path: str) -> str | None:
     return project_id or None
 
 
+def _project_precondition_error_response(request: Request, message: str) -> JSONResponse:
+    payload = {"ok": False, "error": {"code": "PRECONDITION", "message": message}}
+    request_id = getattr(request.state, "request_id", None)
+    headers = {"X-Request-ID": str(request_id)} if request_id else None
+    return JSONResponse(status_code=400, content=payload, headers=headers)
+
+
+def _grant_subject_material_project_access_if_allowed(api, auth_store, user_id: str, project_id: str) -> bool:
+    allowed = set(auth_store.list_project_ids_for_user(user_id))
+    if project_id in allowed:
+        return True
+    try:
+        payload = api.get_subject_context(project_id)
+    except Exception:
+        return False
+
+    subject_id = str(getattr(payload["subject"], "project_id"))
+    if subject_id not in allowed:
+        return False
+    for material in payload["materials"]:
+        material_project_id = getattr(material, "project_id", None)
+        if material_project_id is not None:
+            auth_store.add_project_owner(str(material_project_id), user_id)
+    auth_store.add_project_owner(project_id, user_id)
+    return True
+
+
 def create_app() -> FastAPI:
     _configure_logging()
     validate_hosted_runtime_or_raise()
@@ -190,6 +217,16 @@ def create_app() -> FastAPI:
 
         if request.method.upper() == "OPTIONS" or not path.startswith("/api"):
             return await call_next(request)
+        project_id = _extract_project_id(path)
+        if project_id is not None:
+            api = get_api()
+            try:
+                await run_in_threadpool(api.require_material_project, project_id)
+            except Exception as exc:
+                if exc.__class__.__name__ == "PreconditionFailure":
+                    return _project_precondition_error_response(request, str(exc))
+                raise
+
         if not features.auth_enabled:
             return await call_next(request)
 
@@ -210,10 +247,16 @@ def create_app() -> FastAPI:
             )
 
         request.state.auth_user = user
-        project_id = _extract_project_id(path)
         has_project_access = True
         if project_id is not None:
-            has_project_access = await run_in_threadpool(auth_store.user_has_project_access, user.user_id, project_id)
+            api = get_api()
+            has_project_access = await run_in_threadpool(
+                _grant_subject_material_project_access_if_allowed,
+                api,
+                auth_store,
+                user.user_id,
+                project_id,
+            )
         if project_id is not None and not has_project_access:
             return auth_error_response(
                 status_code=403,

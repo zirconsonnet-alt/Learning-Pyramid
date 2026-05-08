@@ -74,7 +74,6 @@ def subject_to_dto(p: Project) -> Dict[str, Any]:
         "state": _jsonable(p.state),
         "createdAt": _jsonable(p.created_at),
         "deletedAt": _jsonable(p.deleted_at),
-        "subjectProjectId": str(p.project_id),
     }
 
 
@@ -97,9 +96,7 @@ def subject_context_to_dto(payload: Dict[str, Any]) -> Dict[str, Any]:
         "subject": subject_to_dto(subject),
         "currentMaterial": study_material_to_dto(current_material),
         "materials": [study_material_to_dto(item) for item in materials],
-        "isSubjectRoot": bool(payload["is_subject_root"]),
         "currentProjectId": str(payload["current_project_id"]),
-        "subjectProjectId": str(payload["subject_project_id"]),
     }
 
 

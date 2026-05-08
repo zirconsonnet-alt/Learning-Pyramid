@@ -1,10 +1,10 @@
-export function buildSubjectSettingsPath(subjectProjectId: string) {
-  return subjectProjectId ? `/p/${subjectProjectId}/settings` : ""
+export function buildSubjectSettingsPath(subjectId: string) {
+  return subjectId ? `/subjects/${subjectId}/settings` : ""
 }
 
-export function buildProjectSettingsPath(projectId: string, options?: { subjectProjectId?: string }) {
+export function buildProjectSettingsPath(projectId: string) {
   if (!projectId) return ""
-  return options?.subjectProjectId && options.subjectProjectId === projectId ? `/p/${projectId}/project-settings` : `/p/${projectId}/settings`
+  return `/p/${projectId}/settings`
 }
 
 export function buildProjectWorkbenchPath(projectId: string) {

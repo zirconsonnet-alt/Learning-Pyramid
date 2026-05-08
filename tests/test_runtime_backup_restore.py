@@ -20,21 +20,22 @@ def test_runtime_backup_restore_task_marker() -> None:
     assert True
 
 
-def test_decode_study_material_accepts_legacy_compatibility_project_id() -> None:
-    for legacy_key in ("compatibilityProjectId", "compatibility_project_id"):
-        material = _decode_study_material(
+def test_decode_study_material_requires_project_id() -> None:
+    try:
+        _decode_study_material(
             {
                 "subjectId": "subject_legacy",
                 "materialId": "legacy_main",
                 "materialType": "COURSE",
                 "title": "旧网课材料",
                 "createdAtMs": 0,
-                legacy_key: "subject_legacy",
+                "compatibilityProjectId": "subject_legacy",
             }
         )
-
-        assert material.project_id == ProjectId("subject_legacy")
-        assert not hasattr(material, "compatibility_project_id")
+    except KeyError as exc:
+        assert exc.args == ("projectId",)
+    else:
+        raise AssertionError("study material payloads must use projectId")
 
 
 def test_encode_study_material_writes_project_id_without_compatibility_project_id() -> None:

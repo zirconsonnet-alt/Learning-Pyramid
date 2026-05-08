@@ -97,7 +97,7 @@ def _load_authorized_subject_context(
     except NotFound as exc:
         raise PreconditionFailure("project is not accessible for current user") from exc
 
-    subject_id = str(payload["subject_project_id"])
+    subject_id = str(getattr(payload["subject"], "project_id"))
     if subject_id not in allowed:
         raise PreconditionFailure("project is not accessible for current user")
 
@@ -163,7 +163,7 @@ def create_subject(
         user = require_request_auth_user(request)
         auth_store.add_project_owner(pid, user.user_id)
         _ensure_auth_material_project_ownership(request, auth_store, api.list_subject_materials(pid))
-    return {"ok": True, "data": {"subjectId": str(pid), "subjectProjectId": str(pid)}}
+    return {"ok": True, "data": {"subjectId": str(pid)}}
 
 
 @router.patch("/subjects/{subjectId}")

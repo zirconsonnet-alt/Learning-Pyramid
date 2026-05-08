@@ -8,7 +8,6 @@ export const SubjectSchema = z.object({
   state: z.string(),
   createdAt: z.string(),
   deletedAt: z.string().nullable(),
-  subjectProjectId: z.string(),
 })
 export type Subject = z.infer<typeof SubjectSchema>
 
@@ -29,16 +28,13 @@ export const SubjectContextSchema = z.object({
   subject: SubjectSchema,
   currentMaterial: StudyMaterialSchema,
   materials: z.array(StudyMaterialSchema),
-  isSubjectRoot: z.boolean(),
   currentProjectId: z.string(),
-  subjectProjectId: z.string(),
 })
 export type SubjectContext = z.infer<typeof SubjectContextSchema>
 
 const SubjectListSchema = z.array(SubjectSchema)
 const CreateSubjectResultSchema = z.object({
   subjectId: z.string(),
-  subjectProjectId: z.string(),
 })
 const StudyMaterialListSchema = z.array(StudyMaterialSchema)
 

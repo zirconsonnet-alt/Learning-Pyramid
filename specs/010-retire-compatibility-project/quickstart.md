@@ -43,14 +43,15 @@ npm run build
 5. Confirm Pomodoro project selection offers only real material projects, not the subject root.
 6. Delete a material project and confirm the subject remains.
 7. Delete the subject and confirm all related project entries are removed together.
-8. Re-open historical data or a saved runtime snapshot created before the refactor and confirm the subject and material routes still resolve.
+8. Re-open data with a historical root-backed material and confirm normal subject access migrates it to an independent material project.
 
 ## Expected Checks
 
-- Current subject contracts expose `subjectProjectId` and not `compatibilityProjectId`.
-- Current material contracts expose `projectId` and not `compatibilityProjectId`.
-- Historical records using the retired field names remain readable, and historical root-backed materials are migrated to independent material projects.
-- AppShell, settings, and Pomodoro still distinguish subject-root scope from material-project scope correctly.
+- Current subject contracts expose `subjectId` without `subjectProjectId` or `compatibilityProjectId`.
+- Current material contracts expose `projectId` without `compatibilityProjectId`.
+- Historical root-backed materials are migrated to independent material projects.
+- Study material payload decoding requires `projectId`; retired compatibility field names are not fallback inputs.
+- AppShell, settings, and Pomodoro use material project ids for project-bound behavior.
 - User-facing docs no longer describe a compatibility-project concept.
 - User-facing docs no longer describe a default-project concept.
 

@@ -2044,9 +2044,44 @@ class SystemAPI:
         project_store = self._get_project_store(project_id)
         return getattr(project_store, "subject_material_link", None)
 
-    def _resolve_subject_project_id(self, project_id: ProjectId) -> ProjectId:
+    def _resolve_subject_id(self, project_id: ProjectId) -> ProjectId:
         link = self._get_subject_material_link(project_id)
         return link.subject_id if link is not None else project_id
+
+    def is_subject_root_project(self, project_id: ProjectId) -> bool:
+        try:
+            project_store = self._get_project_store(project_id)
+        except NotFound:
+            return False
+        return (
+            self._get_subject_material_link(project_id) is None
+            and (
+                bool(getattr(project_store, "study_materials_initialized", False))
+                or bool(getattr(project_store, "study_materials", {}))
+            )
+        )
+
+    def require_material_project(self, project_id: ProjectId) -> None:
+        if self.is_subject_root_project(project_id):
+            raise PreconditionFailure("subject id is not a project id")
+
+    def migrate_all_subject_material_projects(self) -> Tuple[ProjectId, ...]:
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            candidates = tuple(sql_store.list_projects_metadata(active_only=True))
+        else:
+            candidates = tuple(
+                ps.project
+                for ps in self.sys.g.projects.values()
+                if ps.project is not None and ps.project.state == ProjectState.ACTIVE
+            )
+        migrated_subject_ids: list[ProjectId] = []
+        for project in candidates:
+            if not self.is_subject_root_project(project.project_id):
+                continue
+            self._ensure_subject_materials_are_independent(project.project_id)
+            migrated_subject_ids.append(project.project_id)
+        return tuple(migrated_subject_ids)
 
     def _list_subject_materials_from_store(self, subject_id: ProjectId) -> Tuple[StudyMaterial, ...]:
         project_store = self._get_project_store(subject_id)
@@ -4063,7 +4098,9 @@ class SystemAPI:
         return subject_id
 
     def get_subject_context(self, project_id: ProjectId) -> dict[str, object]:
-        resolved_subject_id = self._resolve_subject_project_id(project_id)
+        if self.is_subject_root_project(project_id):
+            raise PreconditionFailure("subject id is not a project id")
+        resolved_subject_id = self._resolve_subject_id(project_id)
         self._ensure_subject_materials_are_independent(resolved_subject_id)
         subject = self._get_active_project_metadata(resolved_subject_id)
         materials = self._list_subject_materials_from_store(resolved_subject_id)
@@ -4072,35 +4109,48 @@ class SystemAPI:
             "subject": subject,
             "current_material": current_material,
             "materials": materials,
-            "is_subject_root": id_canonical_text(project_id) == id_canonical_text(resolved_subject_id),
             "current_project_id": project_id,
-            "subject_project_id": resolved_subject_id,
         }
 
     def edit_subject(self, subject_id: ProjectId, title: str) -> None:
-        self.edit_project(self._resolve_subject_project_id(subject_id), title)
+        self.edit_project(self._resolve_subject_id(subject_id), title)
 
     def delete_subject(self, subject_id: ProjectId) -> None:
-        self.delete_project(self._resolve_subject_project_id(subject_id))
+        self.delete_project(self._resolve_subject_id(subject_id))
 
     def list_projects(self) -> Tuple:
         sql_store = self._sql_store()
         if sql_store is not None:
-            return sql_store.list_projects_metadata(active_only=True)
+            return tuple(
+                project
+                for project in sql_store.list_projects_metadata(active_only=True)
+                if not self.is_subject_root_project(project.project_id)
+            )
 
         projects = [ps.project for ps in self.sys.g.projects.values() if ps.project is not None and ps.project.state == ProjectState.ACTIVE]
+        projects = [project for project in projects if not self.is_subject_root_project(project.project_id)]
         projects.sort(key=lambda p: id_canonical_text(p.project_id))
         return tuple(projects)
 
     def list_subjects(self) -> Tuple[Project, ...]:
+        self.migrate_all_subject_material_projects()
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            return tuple(
+                project
+                for project in sql_store.list_projects_metadata(active_only=True)
+                if self.is_subject_root_project(project.project_id)
+            )
         return tuple(
-            project
-            for project in self.list_projects()
-            if self._get_subject_material_link(project.project_id) is None
+            ps.project
+            for ps in self.sys.g.projects.values()
+            if ps.project is not None
+            and ps.project.state == ProjectState.ACTIVE
+            and self.is_subject_root_project(ps.project.project_id)
         )
 
     def list_subject_materials(self, subject_id: ProjectId) -> Tuple[StudyMaterial, ...]:
-        resolved_subject_id = self._resolve_subject_project_id(subject_id)
+        resolved_subject_id = self._resolve_subject_id(subject_id)
         self._get_active_project_metadata(resolved_subject_id)
         self._ensure_subject_materials_are_independent(resolved_subject_id)
         return self._list_subject_materials_from_store(resolved_subject_id)
@@ -4112,7 +4162,7 @@ class SystemAPI:
         material_type: StudyMaterialType,
         title: str | None = None,
     ) -> StudyMaterial:
-        resolved_subject_id = self._resolve_subject_project_id(subject_id)
+        resolved_subject_id = self._resolve_subject_id(subject_id)
         self._ensure_subject_materials_are_independent(resolved_subject_id)
         subject = self._get_active_project_metadata(resolved_subject_id)
         normalized_title = str(title or "").strip() or self._default_material_title_for_type(material_type)
@@ -4166,7 +4216,7 @@ class SystemAPI:
         return material
 
     def edit_subject_material(self, subject_id: ProjectId, material_id: str, *, title: str) -> StudyMaterial:
-        resolved_subject_id = self._resolve_subject_project_id(subject_id)
+        resolved_subject_id = self._resolve_subject_id(subject_id)
         self._ensure_subject_materials_are_independent(resolved_subject_id)
         material = self._find_subject_material(resolved_subject_id, material_id)
         material_project_id = material.project_id
@@ -4190,7 +4240,7 @@ class SystemAPI:
         return self._find_subject_material(resolved_subject_id, material_id)
 
     def delete_subject_material(self, subject_id: ProjectId, material_id: str) -> None:
-        resolved_subject_id = self._resolve_subject_project_id(subject_id)
+        resolved_subject_id = self._resolve_subject_id(subject_id)
         self._ensure_subject_materials_are_independent(resolved_subject_id)
         material = self._find_subject_material(resolved_subject_id, material_id)
         material_project_id = material.project_id
@@ -4767,7 +4817,7 @@ class SystemAPI:
         *,
         source_material_id: str,
     ) -> dict[str, object]:
-        resolved_subject_id = self._resolve_subject_project_id(project_id)
+        resolved_subject_id = self._resolve_subject_id(project_id)
         target_material_link = self._get_subject_material_link(project_id)
         if target_material_link is None:
             raise PreconditionFailure(

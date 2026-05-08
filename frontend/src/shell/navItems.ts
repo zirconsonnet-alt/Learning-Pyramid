@@ -24,11 +24,11 @@ export function getGlobalNavItems(options?: { includeAdmin?: boolean; includeMem
   return items
 }
 
-export function getSubjectNavItems(subjectId: string, subjectProjectId: string) {
-  if (!subjectId || !subjectProjectId) return []
+export function getSubjectNavItems(subjectId: string) {
+  if (!subjectId) return []
   return [
     { to: `/subjects/${subjectId}`, label: "项目中心", icon: LayoutDashboard },
-    { to: `/p/${subjectProjectId}/settings`, label: "学科设置", icon: Settings2 },
+    { to: `/subjects/${subjectId}/settings`, label: "学科设置", icon: Settings2 },
   ] satisfies NavItem[]
 }
 

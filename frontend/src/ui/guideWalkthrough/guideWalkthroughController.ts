@@ -188,7 +188,7 @@ function getPomodoroPlanIdFromPathname(pathname: string) {
 
 function resolveGuideProjectId(pathname: string) {
   const state = useAppStore.getState()
-  return state.selectedProjectId ?? getProjectIdFromPathname(pathname) ?? state.recentProjectIds[0] ?? null
+  return state.selectedWorkbenchProjectId ?? getProjectIdFromPathname(pathname) ?? state.recentWorkbenchProjectIds[0] ?? null
 }
 
 function resolveGuideSubjectId(pathname: string) {

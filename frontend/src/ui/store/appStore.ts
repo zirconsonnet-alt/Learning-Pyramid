@@ -3,22 +3,25 @@ import { persist } from "zustand/middleware"
 
 type AppState = {
   selectedSubjectId: string | null
-  selectedProjectId: string | null
-  recentProjectIds: string[]
+  selectedWorkbenchProjectId: string | null
+  recentSubjectIds: string[]
+  recentWorkbenchProjectIds: string[]
   setSelectedSubjectId: (subjectId: string | null) => void
-  setSelectedProjectId: (projectId: string | null) => void
-  removeRecentProjectId: (projectId: string) => void
+  setSelectedWorkbenchProjectId: (projectId: string | null) => void
+  removeRecentSubjectId: (subjectId: string) => void
+  removeRecentWorkbenchProjectId: (projectId: string) => void
   reset: () => void
 }
 
 const initialAppState = {
   selectedSubjectId: null as string | null,
-  selectedProjectId: null as string | null,
-  recentProjectIds: [] as string[],
+  selectedWorkbenchProjectId: null as string | null,
+  recentSubjectIds: [] as string[],
+  recentWorkbenchProjectIds: [] as string[],
 }
 
-function touchRecentProjectIds(recentProjectIds: string[], projectId: string) {
-  return [projectId, ...recentProjectIds.filter((item) => item !== projectId)].slice(0, 24)
+function touchRecentIds(recentIds: string[], id: string) {
+  return [id, ...recentIds.filter((item) => item !== id)].slice(0, 24)
 }
 
 export const useAppStore = create<AppState>()(
@@ -26,18 +29,24 @@ export const useAppStore = create<AppState>()(
     (set) => ({
       ...initialAppState,
       setSelectedSubjectId: (subjectId) =>
-        set(() => ({
+        set((state) => ({
           selectedSubjectId: subjectId,
+          recentSubjectIds: subjectId ? touchRecentIds(state.recentSubjectIds, subjectId) : state.recentSubjectIds,
         })),
-      setSelectedProjectId: (projectId) =>
+      setSelectedWorkbenchProjectId: (projectId) =>
         set((state) => ({
-          selectedProjectId: projectId,
-          recentProjectIds: projectId ? touchRecentProjectIds(state.recentProjectIds, projectId) : state.recentProjectIds,
+          selectedWorkbenchProjectId: projectId,
+          recentWorkbenchProjectIds: projectId ? touchRecentIds(state.recentWorkbenchProjectIds, projectId) : state.recentWorkbenchProjectIds,
         })),
-      removeRecentProjectId: (projectId) =>
+      removeRecentSubjectId: (subjectId) =>
         set((state) => ({
-          recentProjectIds: state.recentProjectIds.filter((item) => item !== projectId),
-          selectedProjectId: state.selectedProjectId === projectId ? null : state.selectedProjectId,
+          recentSubjectIds: state.recentSubjectIds.filter((item) => item !== subjectId),
+          selectedSubjectId: state.selectedSubjectId === subjectId ? null : state.selectedSubjectId,
+        })),
+      removeRecentWorkbenchProjectId: (projectId) =>
+        set((state) => ({
+          recentWorkbenchProjectIds: state.recentWorkbenchProjectIds.filter((item) => item !== projectId),
+          selectedWorkbenchProjectId: state.selectedWorkbenchProjectId === projectId ? null : state.selectedWorkbenchProjectId,
         })),
       reset: () => set(initialAppState),
     }),

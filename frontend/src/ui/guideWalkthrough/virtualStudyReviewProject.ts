@@ -13,7 +13,6 @@ import {
   VIRTUAL_STUDY_REVIEW_MATERIAL_ID,
   VIRTUAL_STUDY_REVIEW_PROJECT_ID,
   VIRTUAL_STUDY_REVIEW_SUBJECT_ID,
-  VIRTUAL_STUDY_REVIEW_SUBJECT_PROJECT_ID,
 } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
 import { getBaseUrl } from "@/ui/api/http"
 import { useAppStore } from "@/ui/store/appStore"
@@ -84,7 +83,6 @@ function createBaseVirtualStudyReviewState(): VirtualStudyReviewState {
     state: "ACTIVE",
     createdAt,
     deletedAt: null,
-    subjectProjectId: VIRTUAL_STUDY_REVIEW_SUBJECT_PROJECT_ID,
   }
   const subjectMaterial: StudyMaterial = {
     subjectId: VIRTUAL_STUDY_REVIEW_SUBJECT_ID,
@@ -224,9 +222,7 @@ function createBaseVirtualStudyReviewState(): VirtualStudyReviewState {
     subject,
     currentMaterial: subjectMaterial,
     materials: [subjectMaterial],
-    isSubjectRoot: false,
     currentProjectId: VIRTUAL_STUDY_REVIEW_PROJECT_ID,
-    subjectProjectId: VIRTUAL_STUDY_REVIEW_SUBJECT_PROJECT_ID,
   }
 
   return {
@@ -277,14 +273,14 @@ function cloneVirtualStudyReviewState() {
 export function startVirtualStudyReviewProjectSession() {
   virtualStudyReviewState = createBaseVirtualStudyReviewState()
   useAppStore.getState().setSelectedSubjectId(VIRTUAL_STUDY_REVIEW_SUBJECT_ID)
-  useAppStore.getState().setSelectedProjectId(VIRTUAL_STUDY_REVIEW_PROJECT_ID)
+  useAppStore.getState().setSelectedWorkbenchProjectId(VIRTUAL_STUDY_REVIEW_PROJECT_ID)
   return virtualStudyReviewState
 }
 
 export function clearVirtualStudyReviewProjectSession() {
   virtualStudyReviewState = null
   useWorkbenchStore.getState().resetProject(VIRTUAL_STUDY_REVIEW_PROJECT_ID)
-  useAppStore.getState().removeRecentProjectId(VIRTUAL_STUDY_REVIEW_PROJECT_ID)
+  useAppStore.getState().removeRecentWorkbenchProjectId(VIRTUAL_STUDY_REVIEW_PROJECT_ID)
   if (useAppStore.getState().selectedSubjectId === VIRTUAL_STUDY_REVIEW_SUBJECT_ID) {
     useAppStore.getState().setSelectedSubjectId(null)
   }

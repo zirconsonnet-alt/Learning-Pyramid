@@ -162,13 +162,11 @@ function TreeNode({
 export function LearningObjectTree({
   projectId,
   projectType,
-  subjectProjectId,
   selectedInstanceId,
   onSelectInstance,
 }: {
   projectId: string
   projectType: ProjectType
-  subjectProjectId?: string
   selectedInstanceId: string | null
   onSelectInstance: (instanceId: string) => void
 }) {
@@ -266,7 +264,7 @@ export function LearningObjectTree({
             </Button>
           ) : null}
           <Button asChild size="sm" variant={canImportHere ? "outline" : "default"} className="rounded-full">
-            <Link to={buildProjectSettingsPath(projectId, { subjectProjectId })}>
+            <Link to={buildProjectSettingsPath(projectId)}>
               {projectType === "BOOK" ? "去初始化目录" : "前往项目设置"}
             </Link>
           </Button>
