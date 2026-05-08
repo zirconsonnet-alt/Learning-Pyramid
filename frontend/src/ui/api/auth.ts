@@ -22,6 +22,17 @@ export const RegisterAuthResultSchema = AuthUserSchema.extend({
   verificationEmailSent: z.boolean(),
 })
 export type RegisterAuthResult = z.infer<typeof RegisterAuthResultSchema>
+export const SignupHumanCheckChallengeSchema = z.object({
+  parameters: z
+    .object({
+      algorithm: z.string(),
+      cost: z.number(),
+      expiresAt: z.number().optional(),
+    })
+    .passthrough(),
+  signature: z.string(),
+})
+export type SignupHumanCheckChallenge = z.infer<typeof SignupHumanCheckChallengeSchema>
 
 export function getCurrentUser(options?: ApiRequestExecutionOptions) {
   return apiRequest({
@@ -57,6 +68,15 @@ export function register(params: {
       humanCheckToken: params.humanCheckToken?.trim() ? params.humanCheckToken.trim() : undefined,
     },
     responseSchema: RegisterAuthResultSchema,
+  })
+}
+
+export function getSignupHumanCheckChallenge(options?: ApiRequestExecutionOptions) {
+  return apiRequest({
+    path: "/auth/human-check/challenge",
+    responseSchema: SignupHumanCheckChallengeSchema,
+    signal: options?.signal,
+    timeoutMs: options?.timeoutMs,
   })
 }
 

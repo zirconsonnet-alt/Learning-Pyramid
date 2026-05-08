@@ -5,6 +5,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
+from altcha import Challenge, solve_challenge
 from fastapi.testclient import TestClient
 
 from adapter.deps import (
@@ -52,9 +53,8 @@ def _enable_email_verification(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _enable_signup_human_check(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PLM_ENABLE_SIGNUP_HUMAN_CHECK", "true")
-    monkeypatch.setenv("PLM_TURNSTILE_SITE_KEY", "turnstile-site-key")
-    monkeypatch.setenv("PLM_TURNSTILE_SECRET_KEY", "turnstile-secret-key")
-    monkeypatch.setenv("PLM_TURNSTILE_EXPECTED_HOSTNAME", "testserver")
+    monkeypatch.setenv("PLM_ALTCHA_HMAC_SECRET", "altcha-hmac-secret")
+    monkeypatch.setenv("PLM_ALTCHA_CHALLENGE_TTL_SECONDS", "120")
 
 
 @pytest.fixture()
@@ -472,12 +472,53 @@ def test_signup_human_check_verifies_token_when_enabled(auth_env: None, monkeypa
     client = TestClient(create_app())
     resp = client.post(
         "/api/auth/register",
-        json={"email": "member@example.com", "password": "password123", "humanCheckToken": "turnstile-token"},
+        json={"email": "member@example.com", "password": "password123", "humanCheckToken": "altcha-token"},
     )
 
     assert resp.status_code == 200
-    assert verified["token"] == "turnstile-token"
+    assert verified["token"] == "altcha-token"
     assert verified["remote_ip"] == "testclient"
+
+
+def test_signup_human_check_challenge_endpoint_returns_altcha_payload(auth_env: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PLM_REQUIRE_SIGNUP_INVITE", "false")
+    _enable_signup_human_check(monkeypatch)
+    _reset_caches()
+
+    client = TestClient(create_app())
+    resp = client.get("/api/auth/human-check/challenge")
+
+    assert resp.status_code == 200
+    payload = resp.json()["data"]
+    assert payload["parameters"]["algorithm"] == "SHA-256"
+    assert payload["parameters"]["cost"] > 0
+    assert payload["parameters"]["expiresAt"] is not None
+    assert isinstance(payload["signature"], str)
+    assert payload["signature"]
+
+
+def test_signup_human_check_accepts_valid_altcha_payload(auth_env: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PLM_REQUIRE_SIGNUP_INVITE", "false")
+    monkeypatch.setenv("PLM_ALTCHA_COST", "10")
+    _enable_signup_human_check(monkeypatch)
+    _reset_caches()
+
+    client = TestClient(create_app())
+    challenge_resp = client.get("/api/auth/human-check/challenge")
+    assert challenge_resp.status_code == 200
+
+    challenge = Challenge.from_dict(challenge_resp.json()["data"])
+    solution = solve_challenge(challenge, timeout=5)
+    assert solution is not None
+    token = __import__("altcha").Payload(challenge, solution).to_base64()
+
+    resp = client.post(
+        "/api/auth/register",
+        json={"email": "member@example.com", "password": "password123", "humanCheckToken": token},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["data"]["email"] == "member@example.com"
 
 
 def test_email_verification_registration_requires_confirmation(auth_env: None, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -33,7 +33,7 @@ from backend.system.password_reset_delivery import (
     send_password_reset_email,
 )
 from backend.system.runtime_features import current_runtime_features
-from backend.system.signup_human_check import verify_signup_human_check
+from backend.system.signup_human_check import build_signup_human_check_challenge, verify_signup_human_check
 
 
 router = APIRouter()
@@ -127,6 +127,11 @@ def _send_signup_verification_email(*, auth_store: AuthStore, email: str) -> boo
         expires_minutes=cfg.token_ttl_minutes,
     )
     return True
+
+
+@router.get("/auth/human-check/challenge")
+def get_signup_human_check_challenge() -> dict:
+    return {"ok": True, "data": build_signup_human_check_challenge()}
 
 
 @router.post("/auth/register")

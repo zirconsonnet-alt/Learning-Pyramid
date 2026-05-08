@@ -112,7 +112,7 @@ def hosted_runtime_warnings() -> tuple[str, ...]:
         )
     if public_signup and not signup_human_check_cfg.enabled:
         warnings.append(
-            "Public sign-up without invite codes should enable human verification. Configure PLM_ENABLE_SIGNUP_HUMAN_CHECK=true together with PLM_TURNSTILE_SITE_KEY and PLM_TURNSTILE_SECRET_KEY before opening free registration."
+            "Public sign-up without invite codes should enable human verification. Configure PLM_ENABLE_SIGNUP_HUMAN_CHECK=true together with PLM_ALTCHA_HMAC_SECRET before opening free registration."
         )
     if password_reset_cfg.requested and not password_reset_cfg.delivery_ready:
         warnings.append(
@@ -124,7 +124,7 @@ def hosted_runtime_warnings() -> tuple[str, ...]:
         )
     if signup_human_check_cfg.requested and not signup_human_check_cfg.ready:
         warnings.append(
-            "Sign-up human verification is only partially configured. Complete PLM_TURNSTILE_SITE_KEY and PLM_TURNSTILE_SECRET_KEY or disable PLM_ENABLE_SIGNUP_HUMAN_CHECK."
+            "Sign-up human verification is only partially configured. Complete PLM_ALTCHA_HMAC_SECRET or disable PLM_ENABLE_SIGNUP_HUMAN_CHECK."
         )
     if features.auth_enabled and not current_auth_rate_limit_config().enabled:
         warnings.append("PLM_ENABLE_AUTH_RATE_LIMITS=false disables login and sign-up throttling in hosted mode.")

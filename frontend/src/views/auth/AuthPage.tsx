@@ -20,7 +20,7 @@ import { useSystemCapabilities } from "@/ui/queries/system"
 import { usePageMeta } from "@/ui/seo/usePageMeta"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { cn } from "@/ui/utils"
-import { TurnstileWidget } from "@/views/auth/TurnstileWidget"
+import { AltchaWidget } from "@/views/auth/AltchaWidget"
 
 type AuthMode = "login" | "register" | "reset" | "verify"
 
@@ -47,7 +47,8 @@ export function AuthPage() {
   const passwordResetEnabled = capabilitiesQ.data?.passwordResetEnabled ?? false
   const emailVerificationEnabled = capabilitiesQ.data?.emailVerificationEnabled ?? false
   const signupHumanCheckEnabled = capabilitiesQ.data?.signupHumanCheckEnabled ?? false
-  const signupHumanCheckSiteKey = capabilitiesQ.data?.signupHumanCheckSiteKey ?? null
+  const signupHumanCheckProvider = capabilitiesQ.data?.signupHumanCheckProvider ?? null
+  const signupHumanCheckChallengeUrl = capabilitiesQ.data?.signupHumanCheckChallengeUrl ?? null
   const currentUserQ = useCurrentUser(authEnabled)
   const login = useLogin()
   const register = useRegister()
@@ -89,7 +90,8 @@ export function AuthPage() {
   const returnTo = useMemo(() => resolveReturnTo(location.state), [location.state])
   const passwordValid =
     effectiveMode === "register" || resetTokenPresent ? password.length >= 8 : effectiveMode === "login" ? password.length > 0 : true
-  const registerRequiresHumanCheck = effectiveMode === "register" && signupHumanCheckEnabled && Boolean(signupHumanCheckSiteKey)
+  const registerRequiresHumanCheck =
+    effectiveMode === "register" && signupHumanCheckEnabled && signupHumanCheckProvider === "altcha" && Boolean(signupHumanCheckChallengeUrl)
 
   useEffect(() => {
     const emailParam = searchParams.get("email")?.trim() || ""
@@ -404,8 +406,12 @@ export function AuthPage() {
               </div>
             ) : null}
 
-            {registerRequiresHumanCheck && signupHumanCheckSiteKey ? (
-              <TurnstileWidget siteKey={signupHumanCheckSiteKey} resetSignal={humanCheckResetSignal} onTokenChange={setHumanCheckToken} />
+            {registerRequiresHumanCheck && signupHumanCheckChallengeUrl ? (
+              <AltchaWidget
+                challengeUrl={signupHumanCheckChallengeUrl}
+                resetSignal={humanCheckResetSignal}
+                onTokenChange={setHumanCheckToken}
+              />
             ) : null}
 
             <Button

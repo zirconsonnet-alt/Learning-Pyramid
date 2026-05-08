@@ -150,7 +150,7 @@ def test_hosted_mode_warns_about_signup_and_example_postgres_password(monkeypatc
         in warnings
     )
     assert (
-        "Public sign-up without invite codes should enable human verification. Configure PLM_ENABLE_SIGNUP_HUMAN_CHECK=true together with PLM_TURNSTILE_SITE_KEY and PLM_TURNSTILE_SECRET_KEY before opening free registration."
+        "Public sign-up without invite codes should enable human verification. Configure PLM_ENABLE_SIGNUP_HUMAN_CHECK=true together with PLM_ALTCHA_HMAC_SECRET before opening free registration."
         in warnings
     )
     assert "PLM_SECURE_COOKIES is disabled. Use this only for temporary plain-HTTP localhost testing." in warnings
@@ -185,8 +185,7 @@ def test_hosted_mode_warns_about_partial_email_verification_and_human_check_conf
     monkeypatch.setenv("PLM_MEDIA_ACCESS_TOKEN_SECRET", "real-secret")
     monkeypatch.delenv("PLM_SMTP_HOST", raising=False)
     monkeypatch.delenv("PLM_SMTP_FROM_EMAIL", raising=False)
-    monkeypatch.setenv("PLM_TURNSTILE_SITE_KEY", "turnstile-site-key")
-    monkeypatch.delenv("PLM_TURNSTILE_SECRET_KEY", raising=False)
+    monkeypatch.delenv("PLM_ALTCHA_HMAC_SECRET", raising=False)
 
     warnings = hosted_runtime_warnings()
 
@@ -195,7 +194,7 @@ def test_hosted_mode_warns_about_partial_email_verification_and_human_check_conf
         in warnings
     )
     assert (
-        "Sign-up human verification is only partially configured. Complete PLM_TURNSTILE_SITE_KEY and PLM_TURNSTILE_SECRET_KEY or disable PLM_ENABLE_SIGNUP_HUMAN_CHECK."
+        "Sign-up human verification is only partially configured. Complete PLM_ALTCHA_HMAC_SECRET or disable PLM_ENABLE_SIGNUP_HUMAN_CHECK."
         in warnings
     )
 

@@ -51,6 +51,8 @@ def get_system_capabilities(
     auth_store: AuthStore = Depends(get_auth_store),
 ) -> dict:
     features = current_runtime_features()
+    human_check_cfg = current_signup_human_check_config()
+    human_check_enabled = signup_human_check_enabled()
     current_user = get_request_auth_user(request)
     ready, runtime = collect_runtime_status(
         user_id=None if current_user is None else current_user.user_id,
@@ -69,8 +71,9 @@ def get_system_capabilities(
             "signupInviteRequired": features.signup_invite_required,
             "passwordResetEnabled": password_reset_enabled(),
             "emailVerificationEnabled": email_verification_enabled(),
-            "signupHumanCheckEnabled": signup_human_check_enabled(),
-            "signupHumanCheckSiteKey": current_signup_human_check_config().site_key if signup_human_check_enabled() else None,
+            "signupHumanCheckEnabled": human_check_enabled,
+            "signupHumanCheckProvider": human_check_cfg.provider if human_check_enabled else None,
+            "signupHumanCheckChallengeUrl": human_check_cfg.challenge_url if human_check_enabled else None,
             "sqlBackend": runtime.get("sqlBackend"),
             "llmConfigured": bool(runtime.get("llmConfigured", False)),
             "storyGenerationConfigured": bool(runtime.get("storyGenerationConfigured", False)),

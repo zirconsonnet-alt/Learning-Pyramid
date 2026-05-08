@@ -211,7 +211,7 @@ Recommended migration/rollback workflow:
 - Hosted auth also keeps `PLM_REQUIRE_SIGNUP_INVITE=true` by default. Leave it that way for bootstrap or invite-based registration; only set it to `false` when you intentionally want free public registration.
 - When `PLM_ALLOW_SIGNUP=true` and `PLM_REQUIRE_SIGNUP_INVITE=true`, normal users must register with an invite code, and fresh deployments should set `PLM_BOOTSTRAP_SUPER_ADMIN_EMAILS` first so the initial administrator can sign up without one.
 - `PLM_BOOTSTRAP_SUPER_ADMIN_EMAILS` acts as a persistent break-glass allowlist while it stays configured; remove it after bootstrap if you do not want those addresses to keep regaining `super_admin`.
-- If you plan to open registration publicly, set `PLM_ENABLE_PASSWORD_RESET=true`, `PLM_ENABLE_EMAIL_VERIFICATION=true`, and `PLM_ENABLE_SIGNUP_HUMAN_CHECK=true`, then complete `PLM_SMTP_HOST`, `PLM_SMTP_FROM_EMAIL`, `PLM_PUBLIC_ORIGIN`, `PLM_TURNSTILE_SITE_KEY`, and `PLM_TURNSTILE_SECRET_KEY`.
+- If you plan to open registration publicly, set `PLM_ENABLE_PASSWORD_RESET=true`, `PLM_ENABLE_EMAIL_VERIFICATION=true`, and `PLM_ENABLE_SIGNUP_HUMAN_CHECK=true`, then complete `PLM_SMTP_HOST`, `PLM_SMTP_FROM_EMAIL`, `PLM_PUBLIC_ORIGIN`, and `PLM_ALTCHA_HMAC_SECRET`.
 - Set `PLM_SECURE_COOKIES=true` when serving behind HTTPS.
 - If you expose the app on a public domain, put it behind a reverse proxy that terminates TLS.
 - The shipped `.env.selfhost.example` now uses `change-me` placeholders for secrets; replace them before booting the hosted app.

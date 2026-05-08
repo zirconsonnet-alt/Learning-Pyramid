@@ -137,7 +137,8 @@ def test_system_capabilities_reflect_hosted_env(monkeypatch, tmp_path: Path) -> 
             "passwordResetEnabled": False,
             "emailVerificationEnabled": False,
             "signupHumanCheckEnabled": False,
-            "signupHumanCheckSiteKey": None,
+            "signupHumanCheckProvider": None,
+            "signupHumanCheckChallengeUrl": None,
             "llmConfigured": False,
             "storyGenerationConfigured": False,
             "llmSource": "none",
@@ -176,9 +177,8 @@ def test_system_capabilities_report_signup_protection_flags(monkeypatch, tmp_pat
     monkeypatch.setenv("PLM_REQUIRE_SIGNUP_INVITE", "false")
     monkeypatch.setenv("PLM_ENABLE_EMAIL_VERIFICATION", "true")
     monkeypatch.setenv("PLM_ENABLE_SIGNUP_HUMAN_CHECK", "true")
-    monkeypatch.setenv("PLM_TURNSTILE_SITE_KEY", "turnstile-site-key")
-    monkeypatch.setenv("PLM_TURNSTILE_SECRET_KEY", "turnstile-secret-key")
-    monkeypatch.setenv("PLM_TURNSTILE_EXPECTED_HOSTNAME", "example.com")
+    monkeypatch.setenv("PLM_ALTCHA_HMAC_SECRET", "altcha-hmac-secret")
+    monkeypatch.setenv("PLM_ALTCHA_CHALLENGE_URL", "https://example.com/api/auth/human-check/challenge")
     monkeypatch.setenv("PLM_PUBLIC_ORIGIN", "https://example.com")
     monkeypatch.setenv("PLM_TRUSTED_HOSTS", "testserver,example.com")
     monkeypatch.setenv("PLM_SMTP_HOST", "smtp.example.com")
@@ -197,7 +197,8 @@ def test_system_capabilities_report_signup_protection_flags(monkeypatch, tmp_pat
     assert resp.json()["data"]["signupInviteRequired"] is False
     assert resp.json()["data"]["emailVerificationEnabled"] is True
     assert resp.json()["data"]["signupHumanCheckEnabled"] is True
-    assert resp.json()["data"]["signupHumanCheckSiteKey"] == "turnstile-site-key"
+    assert resp.json()["data"]["signupHumanCheckProvider"] == "altcha"
+    assert resp.json()["data"]["signupHumanCheckChallengeUrl"] == "https://example.com/api/auth/human-check/challenge"
 
 
 def test_public_download_catalog_and_assets_are_public(monkeypatch, tmp_path: Path) -> None:

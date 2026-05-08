@@ -136,7 +136,7 @@ docker compose \
   up --build
 ```
 
-The hosted stack now expects `PLM_MEDIA_ACCESS_TOKEN_SECRET` to be set to a real secret in `.env`. Hosted runtime defaults to `PLM_ALLOW_SIGNUP=false`, `PLM_REQUIRE_SIGNUP_INVITE=true`, and the shipped self-host example also defaults to `PLM_SECURE_COOKIES=true`; if you intentionally enable sign-up, fresh deployments should set `PLM_BOOTSTRAP_SUPER_ADMIN_EMAILS` first so the initial admin can register without an invite, clear that allowlist afterward if you do not want it to remain a break-glass `super_admin` mapping, and truly free public registration should also turn on `PLM_ENABLE_PASSWORD_RESET=true`, `PLM_ENABLE_EMAIL_VERIFICATION=true`, and `PLM_ENABLE_SIGNUP_HUMAN_CHECK=true` with `PLM_SMTP_*`, `PLM_PUBLIC_ORIGIN`, and `PLM_TURNSTILE_*` configured.
+The hosted stack now expects `PLM_MEDIA_ACCESS_TOKEN_SECRET` to be set to a real secret in `.env`. Hosted runtime defaults to `PLM_ALLOW_SIGNUP=false`, `PLM_REQUIRE_SIGNUP_INVITE=true`, and the shipped self-host example also defaults to `PLM_SECURE_COOKIES=true`; if you intentionally enable sign-up, fresh deployments should set `PLM_BOOTSTRAP_SUPER_ADMIN_EMAILS` first so the initial admin can register without an invite, clear that allowlist afterward if you do not want it to remain a break-glass `super_admin` mapping, and truly free public registration should also turn on `PLM_ENABLE_PASSWORD_RESET=true`, `PLM_ENABLE_EMAIL_VERIFICATION=true`, and `PLM_ENABLE_SIGNUP_HUMAN_CHECK=true` with `PLM_SMTP_*`, `PLM_PUBLIC_ORIGIN`, and `PLM_ALTCHA_HMAC_SECRET` configured.
 
 For Windows server sync, the normal helper flow is just:
 
@@ -181,11 +181,12 @@ Overrides:
 - `PLM_PASSWORD_RESET_TOKEN_TTL_MINUTES`: password reset link lifetime in minutes
 - `PLM_ENABLE_EMAIL_VERIFICATION`: sends a verification email after sign-up and blocks login until the mailbox is confirmed
 - `PLM_EMAIL_VERIFICATION_TOKEN_TTL_MINUTES`: email verification link lifetime in minutes
-- `PLM_ENABLE_SIGNUP_HUMAN_CHECK`: requires a Turnstile challenge before hosted sign-up
-- `PLM_TURNSTILE_SITE_KEY`: Cloudflare Turnstile site key exposed to the sign-up page
-- `PLM_TURNSTILE_SECRET_KEY`: Cloudflare Turnstile server-side secret used to validate the sign-up challenge
-- `PLM_TURNSTILE_EXPECTED_HOSTNAME`: optional expected hostname override for Turnstile validation
-- `PLM_TURNSTILE_TIMEOUT_SECONDS`: Turnstile validation timeout in seconds
+- `PLM_ENABLE_SIGNUP_HUMAN_CHECK`: requires an ALTCHA proof-of-work challenge before hosted sign-up
+- `PLM_ALTCHA_HMAC_SECRET`: server-side secret used to sign and validate ALTCHA sign-up challenges
+- `PLM_ALTCHA_CHALLENGE_URL`: optional public challenge endpoint URL; defaults to `/api/auth/human-check/challenge`
+- `PLM_ALTCHA_ALGORITHM`: optional ALTCHA algorithm override; defaults to `SHA-256`
+- `PLM_ALTCHA_COST`: optional proof-of-work cost; defaults to `1000`
+- `PLM_ALTCHA_CHALLENGE_TTL_SECONDS`: optional challenge lifetime in seconds; defaults to `600`
 - `PLM_SMTP_HOST`: SMTP host used for password reset and email verification mail
 - `PLM_SMTP_PORT`: SMTP port used for password reset mail
 - `PLM_SMTP_USERNAME`: optional SMTP username

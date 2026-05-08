@@ -14,7 +14,8 @@ export const SystemCapabilitiesSchema = z.object({
   passwordResetEnabled: z.boolean(),
   emailVerificationEnabled: z.boolean(),
   signupHumanCheckEnabled: z.boolean(),
-  signupHumanCheckSiteKey: z.string().nullable(),
+  signupHumanCheckProvider: z.literal("altcha").nullable(),
+  signupHumanCheckChallengeUrl: z.string().nullable(),
   llmConfigured: z.boolean(),
   storyGenerationConfigured: z.boolean(),
   llmSource: z.enum(["user", "global", "env", "none"]),
@@ -116,6 +117,7 @@ export const SystemRuntimeSchema = z
     baiduNetdiskEnabled: z.boolean(),
     emailVerificationEnabled: z.boolean().optional(),
     signupHumanCheckEnabled: z.boolean().optional(),
+    signupHumanCheckProvider: z.literal("altcha").nullable().optional(),
     sqlBackend: z.string(),
   })
   .passthrough()
