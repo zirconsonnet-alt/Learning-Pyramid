@@ -12,6 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/ui/components/ui/dialog"
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
+import { completeGuideWalkthroughStep } from "@/ui/guideWalkthrough/guideWalkthroughController"
 import { buildProjectSettingsPath, buildProjectWorkbenchPath } from "@/ui/projectPaths"
 import { useCreateSubjectMaterial, useDeleteSubjectMaterial, useSubjectMaterials, useSubjects } from "@/ui/queries/subjects"
 import { useAppStore } from "@/ui/store/appStore"
@@ -100,6 +101,7 @@ export function SubjectDashboardPage() {
   const createMaterialM = useCreateSubjectMaterial()
   const deleteMaterialM = useDeleteSubjectMaterial()
   const setSelectedProjectId = useAppStore((state) => state.setSelectedProjectId)
+  const setSelectedSubjectId = useAppStore((state) => state.setSelectedSubjectId)
   const removeRecentProjectId = useAppStore((state) => state.removeRecentProjectId)
   const [createOpen, setCreateOpen] = useState(false)
   const [deleteMaterialTarget, setDeleteMaterialTarget] = useState<StudyMaterial | null>(null)
@@ -212,7 +214,11 @@ export function SubjectDashboardPage() {
   function openMaterial(material: StudyMaterial, target: "workbench" | "settings") {
     const projectId = material.projectId
     if (!projectId) return
+    setSelectedSubjectId(subjectId)
     setSelectedProjectId(projectId)
+    if (target === "settings") {
+      completeGuideWalkthroughStep("choose-project")
+    }
     navigate(
       target === "settings"
         ? buildProjectSettingsPath(projectId, { subjectProjectId })

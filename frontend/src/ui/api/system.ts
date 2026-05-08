@@ -1,6 +1,7 @@
 import { z } from "zod"
 
 import { ApiError, apiRequest, getBaseUrl, type ApiRequestExecutionOptions } from "@/ui/api/http"
+import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
 
 export const SystemCapabilitiesSchema = z.object({
   appMode: z.enum(["local", "hosted"]),
@@ -464,6 +465,13 @@ export function askProjectLlmChatCompletion(
   },
   options?: ApiRequestExecutionOptions,
 ) {
+  if (isVirtualStudyReviewProjectId(projectId)) {
+    throw new ApiError("引导示范项目不提供 AI 对话。", {
+      code: "PRECONDITION",
+      status: 400,
+      details: { projectId },
+    })
+  }
   return apiRequest({
     path: `/projects/${projectId}/llm/chat-completions`,
     method: "POST",

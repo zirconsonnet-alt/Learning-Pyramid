@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ApiError } from "@/ui/api/http"
 import { editLearningTask, getLearningTask } from "@/ui/api/learningTasks"
 import { editLearningTaskNode, getLearningTaskNode, getLearningTaskNodeBinding, listLearningTaskNodes } from "@/ui/api/learningTaskNodes"
+import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
+import { getVirtualStudyReviewLearningTaskNodes } from "@/ui/guideWalkthrough/virtualStudyReviewProject"
 
 const LEARNING_TASK_QUERY_TIMEOUT_MS = 90_000
 
@@ -25,7 +27,10 @@ export function useLearningTaskNode(projectId: string, nodeId: string) {
 export function useLearningTaskNodes(projectId: string) {
   return useQuery({
     queryKey: ["learningTaskNodes", projectId],
-    queryFn: ({ signal }) => listLearningTaskNodes(projectId, { signal, timeoutMs: LEARNING_TASK_QUERY_TIMEOUT_MS }),
+    queryFn: ({ signal }) =>
+      isVirtualStudyReviewProjectId(projectId)
+        ? getVirtualStudyReviewLearningTaskNodes()
+        : listLearningTaskNodes(projectId, { signal, timeoutMs: LEARNING_TASK_QUERY_TIMEOUT_MS }),
     enabled: !!projectId,
   })
 }

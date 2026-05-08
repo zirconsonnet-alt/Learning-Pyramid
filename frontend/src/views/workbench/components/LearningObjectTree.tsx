@@ -9,6 +9,8 @@ import { ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { listLearningObjectNodes, type LearningObjectNode } from "@/ui/api/learningObjects"
 import { Button } from "@/ui/components/ui/button"
 import { completeGuideWalkthroughStep } from "@/ui/guideWalkthrough/guideWalkthroughController"
+import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
+import { getVirtualStudyReviewLearningObjectNodes } from "@/ui/guideWalkthrough/virtualStudyReviewProject"
 import {
   isSyntheticFilesContainer,
   sortLearningObjectNodeIdsForDisplay,
@@ -174,7 +176,10 @@ export function LearningObjectTree({
   const importLearningObjectsM = useImportLearningObjectsFromBrowser(projectId)
   const q = useQuery({
     queryKey: ["learningObjectNodes", projectId],
-    queryFn: ({ signal }) => listLearningObjectNodes(projectId, { signal, timeoutMs: LEARNING_OBJECT_TREE_QUERY_TIMEOUT_MS }),
+    queryFn: ({ signal }) =>
+      isVirtualStudyReviewProjectId(projectId)
+        ? getVirtualStudyReviewLearningObjectNodes()
+        : listLearningObjectNodes(projectId, { signal, timeoutMs: LEARNING_OBJECT_TREE_QUERY_TIMEOUT_MS }),
     enabled: !!projectId,
   })
 

@@ -14,6 +14,7 @@ import { ErrorNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { useCurrentUser, useLogout } from "@/ui/queries/auth"
 import { useProject, useProjects } from "@/ui/queries/projects"
+import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
 import { useSystemCapabilities } from "@/ui/queries/system"
 import { usePomodoroPreTransitionSpeech, usePomodoroTransitionSound } from "@/ui/pomodoroAudio"
 import { setPomodoroRestMusicPhaseActive } from "@/ui/pomodoroRestMusicPlayer"
@@ -319,10 +320,11 @@ export function AppShell() {
   )
   const routeScopedProjectId = routeSubjectId ? routeSubject?.subjectProjectId ?? "" : ""
   const effectiveProjectId = pid || (routeSubjectId ? routeScopedProjectId : isProjectsScope ? "" : selectedProjectId || "")
+  const isVirtualStudyReviewProject = isVirtualStudyReviewProjectId(effectiveProjectId)
   const isSubjectDashboardScope = Boolean(routeSubjectId) && !pid
   const subjectContextQ = useSubjectContext(effectiveProjectId, canAccessApp && Boolean(effectiveProjectId) && !isSubjectDashboardScope)
-  const { projectTitle } = useProject(effectiveProjectId, { enabled: canAccessApp && Boolean(effectiveProjectId) })
-  const projectsQ = useProjects(canAccessApp)
+  const { projectTitle } = useProject(effectiveProjectId, { enabled: canAccessApp && Boolean(effectiveProjectId) && !isVirtualStudyReviewProject })
+  const projectsQ = useProjects(canAccessApp && !isVirtualStudyReviewProject)
   const logout = useLogout()
   const pomodoroEnabled = usePomodoroStore((state) => state.enabled)
   const pomodoroWeeklySchedule = usePomodoroStore((state) => state.weeklySchedule)
@@ -397,8 +399,19 @@ export function AppShell() {
     [pomodoroEnabled, pomodoroNow, pomodoroQuickPomodoro, pomodoroWeeklySchedule],
   )
   const pomodoroAccessibleProjects = useMemo(
-    () => projectsQ.data ?? [],
-    [projectsQ.data],
+    () =>
+      isVirtualStudyReviewProject
+        ? [
+            {
+              projectId: effectiveProjectId,
+              title: "学习复习引导示范项目",
+              state: "ACTIVE",
+              createdAt: new Date().toISOString(),
+              deletedAt: null,
+            },
+          ]
+        : projectsQ.data ?? [],
+    [effectiveProjectId, isVirtualStudyReviewProject, projectsQ.data],
   )
   const accessibleProjectIds = useMemo(
     () => new Set((projectsQ.data ?? []).map((project) => project.projectId)),

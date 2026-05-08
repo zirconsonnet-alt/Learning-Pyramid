@@ -13,6 +13,7 @@ import type { ProjectType } from "@/ui/api/projects"
 import { ContentNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
+import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
 import { projectTypeRequiresLearningObjectTree, projectTypeUsesResolvableCourseAnchor } from "@/ui/projectTypes"
 import { buildProjectSettingsPath } from "@/ui/projectPaths"
 import { resolveProjectFile, useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
@@ -212,6 +213,7 @@ export function WorkbenchPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const pid = projectId ?? ""
+  const isVirtualStudyReviewProject = isVirtualStudyReviewProjectId(pid)
 
   const ensure = useWorkbenchStore((s) => s.ensure)
   const ps = useWorkbenchStore((s) => (pid ? s.byProjectId[pid] : undefined))
@@ -269,7 +271,7 @@ export function WorkbenchPage() {
     queries: missingInstances.map((item) => ({
       queryKey: ["recallPointsByInstance", pid, item.instanceId],
       queryFn: () => listRecallPointsByInstance(pid, item.instanceId),
-      enabled: !!pid,
+      enabled: !!pid && !isVirtualStudyReviewProject,
     })),
   })
   const actionableMissingInstanceCount = useMemo(
@@ -333,7 +335,7 @@ export function WorkbenchPage() {
   const estimateDateFrom = useMemo(() => getDateKeyDaysAgo(180), [todayDateKey])
 
   useEffect(() => {
-    if (!pid) return
+    if (!pid || isVirtualStudyReviewProject) return
     if (!capabilitiesQ.data?.authEnabled) return
 
     let cancelled = false
@@ -361,10 +363,10 @@ export function WorkbenchPage() {
       cancelled = true
       window.clearInterval(timer)
     }
-  }, [capabilitiesQ.data?.authEnabled, pid, todayDateKey])
+  }, [capabilitiesQ.data?.authEnabled, isVirtualStudyReviewProject, pid, todayDateKey])
 
   useEffect(() => {
-    if (!pid) return
+    if (!pid || isVirtualStudyReviewProject) return
     if (!capabilitiesQ.data?.authEnabled) return
 
     let cancelled = false
@@ -388,7 +390,7 @@ export function WorkbenchPage() {
     return () => {
       cancelled = true
     }
-  }, [capabilitiesQ.data?.authEnabled, estimateDateFrom, pid, todayDateKey])
+  }, [capabilitiesQ.data?.authEnabled, estimateDateFrom, isVirtualStudyReviewProject, pid, todayDateKey])
 
   useEffect(() => {
     if (!pid) return

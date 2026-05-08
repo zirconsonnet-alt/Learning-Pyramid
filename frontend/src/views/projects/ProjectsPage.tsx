@@ -107,6 +107,7 @@ export function ProjectsPage() {
 
   const selectedProjectId = useAppStore((s) => s.selectedProjectId)
   const recentProjectIds = useAppStore((s) => s.recentProjectIds)
+  const setSelectedSubjectId = useAppStore((s) => s.setSelectedSubjectId)
   const setSelectedProjectId = useAppStore((s) => s.setSelectedProjectId)
   const removeRecentProjectId = useAppStore((s) => s.removeRecentProjectId)
 
@@ -205,6 +206,7 @@ export function ProjectsPage() {
         title: t,
       })
       setTitle("")
+      setSelectedSubjectId(res.subjectId)
       setSelectedProjectId(res.subjectProjectId)
       setCreateOpen(false)
       showSuccessFeedback("学科已创建", `“${t}” 已准备好。先在项目中心里选择或创建项目。`)
@@ -231,6 +233,7 @@ export function ProjectsPage() {
 
   function openSubject(subject: Subject, target: "dashboard" | "settings") {
     const projectId = subject.subjectProjectId
+    setSelectedSubjectId(subject.subjectId)
     setSelectedProjectId(projectId)
     nav(target === "dashboard" ? `/subjects/${subject.subjectId}` : `/p/${projectId}/settings`)
   }

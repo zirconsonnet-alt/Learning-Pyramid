@@ -12,6 +12,10 @@ import {
   listSubjects,
   type StudyMaterialType,
 } from "@/ui/api/subjects"
+import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
+import {
+  getVirtualStudyReviewSubjectContext,
+} from "@/ui/guideWalkthrough/virtualStudyReviewProject"
 
 export function useSubjects(enabled = true) {
   return useQuery({ queryKey: ["subjects"], queryFn: listSubjects, enabled })
@@ -70,7 +74,7 @@ export function useSubjectMaterials(subjectId: string) {
 export function useSubjectContext(projectId: string, enabled = true) {
   return useQuery({
     queryKey: ["subjectContext", projectId],
-    queryFn: () => getProjectSubjectContext(projectId),
+    queryFn: () => (isVirtualStudyReviewProjectId(projectId) ? getVirtualStudyReviewSubjectContext() : getProjectSubjectContext(projectId)),
     enabled: enabled && !!projectId,
     staleTime: 30_000,
   })

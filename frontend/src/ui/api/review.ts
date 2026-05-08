@@ -1,6 +1,11 @@
 import { z } from "zod"
 
 import { apiRequest, type ApiRequestExecutionOptions } from "@/ui/api/http"
+import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
+import {
+  getVirtualStudyReviewRecallPoint,
+  searchVirtualStudyReviewRecallPoints,
+} from "@/ui/guideWalkthrough/virtualStudyReviewProject"
 import { normalizeRichContent, RichContentSchema } from "@/ui/api/richContent"
 
 export const ReviewTaskSchema = z.object({
@@ -138,6 +143,9 @@ export function getRangeSnapshot(projectId: string, rangeId: string) {
 }
 
 export function getRecallPoint(projectId: string, recallPointId: string) {
+  if (isVirtualStudyReviewProjectId(projectId)) {
+    return Promise.resolve(getVirtualStudyReviewRecallPoint(recallPointId))
+  }
   return apiRequest({ path: `/projects/${projectId}/recall-points/${recallPointId}`, responseSchema: RecallPointSchema })
 }
 
@@ -153,6 +161,9 @@ export function searchRecallPoints(
   },
   options?: ApiRequestExecutionOptions,
 ) {
+  if (isVirtualStudyReviewProjectId(projectId)) {
+    return Promise.resolve(searchVirtualStudyReviewRecallPoints(params?.q ?? "").slice(0, params?.limit ?? 500))
+  }
   const search = new URLSearchParams()
   if (params?.q !== undefined && params.q.trim()) search.set("q", params.q.trim())
   if (params?.limit !== undefined) search.set("limit", String(params.limit))

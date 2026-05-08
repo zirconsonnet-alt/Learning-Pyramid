@@ -52,9 +52,9 @@ type GuideWalkthroughStep = {
 | `ai-select-node` | `第 3 步：进入项目 AI 问答界面`, item 4 | `ai-learning-object-node` | Explain that a concrete learning object should be selected as context |
 | `ai-send-message` | `第 3 步：进入项目 AI 问答界面`, item 5 | `ai-message-composer` | Explain that the user asks inside the composer after context is selected |
 | `pomodoro-open-settings` | `第 1 步：先开启番茄钟`, item 2 | `pomodoro-settings-entry` | Explain that disabled Pomodoro requires opening Pomodoro settings first |
-| `pomodoro-enable-clock` | `第 1 步：先开启番茄钟`, item 3 | `pomodoro-enable-toggle` | Explain that the global Pomodoro switch must be enabled |
-| `pomodoro-create-plan` | `第 2 步：设定番茄计划`, items 1-4 | `pomodoro-plan-editor` | Explain weekday, start time, focus/rest duration, and Pomodoro count setup |
-| `pomodoro-bind-project` | `第 2 步：设定番茄计划`, item 5 | `pomodoro-project-binding` | Explain that binding projects lets the workbench open for the correct learning target |
+| `pomodoro-enable-clock` | `第 1 步：先开启番茄钟`, item 3 | `pomodoro-session-status` | Explain that the global Pomodoro switch must be enabled |
+| `pomodoro-create-plan` | `第 2 步：设定番茄计划`, items 1-4 | `pomodoro-create-plan-button` | Explain weekday, start time, focus/rest duration, and Pomodoro count setup |
+| `pomodoro-bind-project` | `第 2 步：设定番茄计划`, item 5 | `pomodoro-project-binding` | Explain that binding projects happens inside the plan detail project selector |
 | `pomodoro-enter-web` | `第 3 步：番茄开始后登录网页`, items 1-5 | `pomodoro-web-entry-reminder` | Explain that the web page must be open and logged in when the Pomodoro starts |
 
 ## Validation Rules

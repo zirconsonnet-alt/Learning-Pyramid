@@ -3,6 +3,8 @@ import { z } from "zod"
 import { AsrArtifactSchema } from "@/ui/api/asr"
 import { apiRequest, type ApiRequestExecutionOptions } from "@/ui/api/http"
 import { RecallPointSchema } from "@/ui/api/review"
+import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
+import { getVirtualStudyReviewRecallPointsForTaskNode } from "@/ui/guideWalkthrough/virtualStudyReviewProject"
 
 export const LearningTaskLeafSchema = z.object({
   kind: z.literal("leaf"),
@@ -77,6 +79,9 @@ export function editLearningTaskNode(projectId: string, nodeId: string, title: s
 }
 
 export function listRecallPointsByLearningTaskNode(projectId: string, nodeId: string) {
+  if (isVirtualStudyReviewProjectId(projectId)) {
+    return Promise.resolve(getVirtualStudyReviewRecallPointsForTaskNode(nodeId))
+  }
   return apiRequest({
     path: `/projects/${projectId}/learning-task-nodes/${nodeId}/recall-points`,
     responseSchema: z.array(RecallPointSchema),

@@ -18,13 +18,30 @@ import { getProjectStorageConfig } from "@/ui/api/projectStorageConfig"
 import { getQueue } from "@/ui/api/queue"
 import { commitReviewTask, getRangeSnapshot, getRecallPoint, getReviewTask } from "@/ui/api/review"
 import type { RichContent } from "@/ui/api/richContent"
+import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
+import {
+  commitVirtualStudyReviewTask,
+  getVirtualStudyReviewInstances,
+  getVirtualStudyReviewLayers,
+  getVirtualStudyReviewPlaybackDescriptor,
+  getVirtualStudyReviewProjectConfig,
+  getVirtualStudyReviewQueue,
+  getVirtualStudyReviewRangeSnapshot,
+  getVirtualStudyReviewRecallPoint,
+  getVirtualStudyReviewRecallPointIdsByInstance,
+  getVirtualStudyReviewReviewTask,
+  submitVirtualStudyReviewLearningTask,
+} from "@/ui/guideWalkthrough/virtualStudyReviewProject"
 
 const WORKBENCH_QUERY_TIMEOUT_MS = 90_000
 
 export function useInstances(projectId: string) {
   return useQuery({
     queryKey: ["instances", projectId],
-    queryFn: ({ signal }) => listInstances(projectId, { signal, timeoutMs: WORKBENCH_QUERY_TIMEOUT_MS }),
+    queryFn: ({ signal }) =>
+      isVirtualStudyReviewProjectId(projectId)
+        ? getVirtualStudyReviewInstances()
+        : listInstances(projectId, { signal, timeoutMs: WORKBENCH_QUERY_TIMEOUT_MS }),
     enabled: !!projectId,
   })
 }
@@ -32,7 +49,7 @@ export function useInstances(projectId: string) {
 export function useMissingInstances(projectId: string) {
   return useQuery({
     queryKey: ["missingInstances", projectId],
-    queryFn: () => listMissingInstances(projectId),
+    queryFn: () => (isVirtualStudyReviewProjectId(projectId) ? { instanceIds: [] } : listMissingInstances(projectId)),
     enabled: !!projectId,
   })
 }
@@ -40,7 +57,10 @@ export function useMissingInstances(projectId: string) {
 export function useRecallPointsByInstance(projectId: string, instanceId: string) {
   return useQuery({
     queryKey: ["recallPointsByInstance", projectId, instanceId],
-    queryFn: ({ signal }) => listRecallPointsByInstance(projectId, instanceId, { signal, timeoutMs: WORKBENCH_QUERY_TIMEOUT_MS }),
+    queryFn: ({ signal }) =>
+      isVirtualStudyReviewProjectId(projectId)
+        ? getVirtualStudyReviewRecallPointIdsByInstance(instanceId)
+        : listRecallPointsByInstance(projectId, instanceId, { signal, timeoutMs: WORKBENCH_QUERY_TIMEOUT_MS }),
     enabled: !!projectId && !!instanceId,
   })
 }
@@ -48,7 +68,10 @@ export function useRecallPointsByInstance(projectId: string, instanceId: string)
 export function useInstancePlaybackDescriptor(projectId: string, instanceId: string, enabled = true) {
   return useQuery({
     queryKey: ["instancePlaybackDescriptor", projectId, instanceId],
-    queryFn: ({ signal }) => getInstancePlaybackDescriptor(projectId, instanceId, { signal, timeoutMs: WORKBENCH_QUERY_TIMEOUT_MS }),
+    queryFn: ({ signal }) =>
+      isVirtualStudyReviewProjectId(projectId)
+        ? getVirtualStudyReviewPlaybackDescriptor(instanceId)
+        : getInstancePlaybackDescriptor(projectId, instanceId, { signal, timeoutMs: WORKBENCH_QUERY_TIMEOUT_MS }),
     enabled: enabled && !!projectId && !!instanceId,
     staleTime: 15_000,
   })
@@ -57,9 +80,12 @@ export function useInstancePlaybackDescriptor(projectId: string, instanceId: str
 export function useQueue(projectId: string) {
   return useQuery({
     queryKey: ["queue", projectId],
-    queryFn: ({ signal }) => getQueue(projectId, { signal, timeoutMs: WORKBENCH_QUERY_TIMEOUT_MS }),
+    queryFn: ({ signal }) =>
+      isVirtualStudyReviewProjectId(projectId)
+        ? getVirtualStudyReviewQueue()
+        : getQueue(projectId, { signal, timeoutMs: WORKBENCH_QUERY_TIMEOUT_MS }),
     enabled: !!projectId,
-    refetchInterval: 5_000,
+    refetchInterval: isVirtualStudyReviewProjectId(projectId) ? false : 5_000,
   })
 }
 
@@ -100,7 +126,10 @@ export function useLearningObjectNode(projectId: string, nodeId: string) {
 export function useLayers(projectId: string) {
   return useQuery({
     queryKey: ["layers", projectId],
-    queryFn: ({ signal }) => listLayers(projectId, { signal, timeoutMs: WORKBENCH_QUERY_TIMEOUT_MS }),
+    queryFn: ({ signal }) =>
+      isVirtualStudyReviewProjectId(projectId)
+        ? getVirtualStudyReviewLayers()
+        : listLayers(projectId, { signal, timeoutMs: WORKBENCH_QUERY_TIMEOUT_MS }),
     enabled: !!projectId,
   })
 }
@@ -108,9 +137,9 @@ export function useLayers(projectId: string) {
 export function useProjectConfig(projectId: string) {
   return useQuery({
     queryKey: ["projectConfig", projectId],
-    queryFn: () => getProjectConfig(projectId),
+    queryFn: () => (isVirtualStudyReviewProjectId(projectId) ? getVirtualStudyReviewProjectConfig() : getProjectConfig(projectId)),
     enabled: !!projectId,
-    refetchInterval: 5000,
+    refetchInterval: isVirtualStudyReviewProjectId(projectId) ? false : 5000,
   })
 }
 
@@ -213,7 +242,10 @@ export function useSubmitLearningTask(projectId: string) {
     mutationFn: (p: {
       title: string
       items: { question: RichContent; answer: RichContent; anchor: { instanceId: string; position: string } | null; references: string[] }[]
-    }) => submitLearningTask({ projectId, ...p }),
+    }) =>
+      isVirtualStudyReviewProjectId(projectId)
+        ? Promise.resolve(submitVirtualStudyReviewLearningTask(p))
+        : submitLearningTask({ projectId, ...p }),
     onSuccess: async () => {
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["queue", projectId] }),
@@ -258,13 +290,16 @@ export function useInitializeBookLearningObjectsFromSubjectMaterial(projectId: s
 export function useReviewBundle(projectId: string, headId: string) {
   const reviewTaskQ = useQuery({
     queryKey: ["reviewTask", projectId, headId],
-    queryFn: () => getReviewTask(projectId, headId),
+    queryFn: () => (isVirtualStudyReviewProjectId(projectId) ? getVirtualStudyReviewReviewTask(headId) : getReviewTask(projectId, headId)),
     enabled: !!projectId && !!headId,
   })
 
   const rangeQ = useQuery({
     queryKey: ["range", projectId, reviewTaskQ.data?.inputRangeId],
-    queryFn: () => getRangeSnapshot(projectId, reviewTaskQ.data!.inputRangeId),
+    queryFn: () =>
+      isVirtualStudyReviewProjectId(projectId)
+        ? getVirtualStudyReviewRangeSnapshot(reviewTaskQ.data!.inputRangeId)
+        : getRangeSnapshot(projectId, reviewTaskQ.data!.inputRangeId),
     enabled: !!projectId && !!reviewTaskQ.data?.inputRangeId,
   })
 
@@ -272,7 +307,7 @@ export function useReviewBundle(projectId: string, headId: string) {
     queries:
       rangeQ.data?.recallPointIds.map((rpId) => ({
         queryKey: ["recallPoint", projectId, rpId],
-        queryFn: () => getRecallPoint(projectId, rpId),
+        queryFn: () => (isVirtualStudyReviewProjectId(projectId) ? getVirtualStudyReviewRecallPoint(rpId) : getRecallPoint(projectId, rpId)),
         enabled: !!projectId && !!rpId,
       })) ?? [],
   })
@@ -288,10 +323,12 @@ export function useCommitReviewTask(projectId: string) {
       canRecall: number[]
       appendedInsights?: { recallPointId: string; insight: RichContent }[]
     }) =>
-      commitReviewTask(projectId, p.reviewTaskId, {
-        canRecall: p.canRecall,
-        appendedInsights: p.appendedInsights,
-      }),
+      isVirtualStudyReviewProjectId(projectId)
+        ? Promise.resolve(commitVirtualStudyReviewTask(p))
+        : commitReviewTask(projectId, p.reviewTaskId, {
+            canRecall: p.canRecall,
+            appendedInsights: p.appendedInsights,
+          }),
     onSuccess: async () => {
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["queue", projectId] }),

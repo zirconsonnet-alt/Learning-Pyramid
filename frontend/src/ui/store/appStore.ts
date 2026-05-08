@@ -2,14 +2,17 @@ import { create } from "zustand"
 import { persist } from "zustand/middleware"
 
 type AppState = {
+  selectedSubjectId: string | null
   selectedProjectId: string | null
   recentProjectIds: string[]
+  setSelectedSubjectId: (subjectId: string | null) => void
   setSelectedProjectId: (projectId: string | null) => void
   removeRecentProjectId: (projectId: string) => void
   reset: () => void
 }
 
 const initialAppState = {
+  selectedSubjectId: null as string | null,
   selectedProjectId: null as string | null,
   recentProjectIds: [] as string[],
 }
@@ -22,6 +25,10 @@ export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
       ...initialAppState,
+      setSelectedSubjectId: (subjectId) =>
+        set(() => ({
+          selectedSubjectId: subjectId,
+        })),
       setSelectedProjectId: (projectId) =>
         set((state) => ({
           selectedProjectId: projectId,

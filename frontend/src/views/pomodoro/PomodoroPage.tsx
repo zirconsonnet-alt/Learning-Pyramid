@@ -29,6 +29,7 @@ import { useUpdateMyGlobalSettings } from "@/ui/queries/profile"
 import { useSubjects } from "@/ui/queries/subjects"
 import { useSystemCapabilities } from "@/ui/queries/system"
 import { usePageMeta } from "@/ui/seo/usePageMeta"
+import { completeGuideWalkthroughStep } from "@/ui/guideWalkthrough/guideWalkthroughController"
 import { useAppStore } from "@/ui/store/appStore"
 import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { listPomodoroActivityRecords, type PomodoroActivityRecord } from "@/ui/store/pomodoroActivityStore"
@@ -1035,6 +1036,7 @@ export function PomodoroPage() {
       const nextDrafts = appendDefaultPomodoroPlanDraft(prev, defaultPrompts)
       const nextDraft = nextDrafts[nextDrafts.length - 1]
       if (nextDraft) {
+        completeGuideWalkthroughStep("pomodoro-create-plan")
         window.setTimeout(() => nav(buildPomodoroPlanPath(nextDraft.id)), 0)
       }
       return nextDrafts
@@ -1098,6 +1100,7 @@ export function PomodoroPage() {
       await persistPomodoroSettings({ enabled: nextEnabled, weeklySchedule: draftSchedule })
       setEnabled(nextEnabled)
       if (nextEnabled) {
+        completeGuideWalkthroughStep("pomodoro-enable-clock")
         showInfoFeedback(
           "番茄钟已开启",
           enabledDayCount > 0
@@ -1395,9 +1398,9 @@ export function PomodoroPage() {
 
                     <div className="space-y-2">
                       <Label htmlFor={`pomodoro-subject-${pomodoroDraft.id}`}>学科</Label>
-                      <select
-                        id={`pomodoro-subject-${pomodoroDraft.id}`}
-                        className="theme-select h-10 w-full rounded-xl px-3 text-sm"
+                <select
+                  id={`pomodoro-subject-${pomodoroDraft.id}`}
+                  className="theme-select h-10 w-full rounded-xl px-3 text-sm"
                         value={draftSubjectId}
                         onChange={(event) => {
                           const nextSubjectId = event.target.value
@@ -1437,23 +1440,26 @@ export function PomodoroPage() {
                               <Label htmlFor={`pomodoro-project-${pomodoroDraft.id}-${index}`}>番茄 {index + 1}</Label>
                               <select
                                 id={`pomodoro-project-${pomodoroDraft.id}-${index}`}
+                                data-guide-tour={index === 0 ? "pomodoro-project-binding" : undefined}
                                 className="theme-select h-10 w-full rounded-xl px-3 text-sm"
                                 value={projectId && validPomodoroProjectIds.has(projectId) ? projectId : ""}
                                 disabled={!draftSubjectId}
-                                onChange={(event) =>
+                                onChange={(event) => {
+                                  const nextProjectId = event.target.value.trim() || null
                                   updatePomodoroDraft(pomodoroDraft.id, (draft) => {
                                     const nextProjectIds = normalizeDraftProjectIds(
                                       draft.projectIds,
                                       normalizeCountInput(draft.pomodoroCount, 4),
                                     )
-                                    nextProjectIds[index] = event.target.value.trim() || null
+                                    nextProjectIds[index] = nextProjectId
                                     return {
                                       ...draft,
                                       subjectId: draftSubjectId,
                                       projectIds: nextProjectIds,
                                     }
                                   })
-                                }
+                                  if (nextProjectId) completeGuideWalkthroughStep("pomodoro-bind-project")
+                                }}
                               >
                                 <option value="">请选择项目</option>
                                 {selectableProjects.map((project) => (
@@ -1590,7 +1596,7 @@ export function PomodoroPage() {
               <div className="text-3xl font-semibold tracking-[-0.04em] text-foreground sm:text-4xl">{headlineCountdown}</div>
             </div>
             <div className="flex flex-wrap gap-3">
-              <Button variant={enabled ? "outline" : "default"} onClick={handleTogglePomodoro} disabled={updateGlobalSettings.isPending || planConflictMessages.length > 0}>
+              <Button data-guide-tour="pomodoro-session-status" variant={enabled ? "outline" : "default"} onClick={handleTogglePomodoro} disabled={updateGlobalSettings.isPending || planConflictMessages.length > 0}>
                 <TimerReset className="h-4 w-4" />
                 {enabled ? "关闭番茄钟" : "开启番茄钟"}
               </Button>
@@ -1599,19 +1605,27 @@ export function PomodoroPage() {
                 {quickPomodoroButtonLabel}
               </Button>
               <Button variant="outline" asChild>
-                <Link to={buildPomodoroSettingsPath()} aria-label="打开番茄钟设置">
+                <Link to={buildPomodoroSettingsPath()} aria-label="打开番茄钟设置" data-guide-tour="pomodoro-settings-entry">
                   <Settings2 className="h-4 w-4" />
                   番茄钟设置
                 </Link>
               </Button>
               {snapshot.canUseWorkbench && preferredWorkbenchPath ? (
                 <Button asChild>
-                  <Link to={preferredWorkbenchPath}>
+                  <Link
+                    to={preferredWorkbenchPath}
+                    data-guide-tour="pomodoro-web-entry-reminder"
+                    onClick={() => completeGuideWalkthroughStep("pomodoro-enter-web")}
+                  >
                     <PanelsTopLeft className="h-4 w-4" />
                     {preferredWorkbenchLabel}
                   </Link>
                 </Button>
-              ) : null}
+              ) : (
+                <span className="sr-only" data-guide-tour="pomodoro-web-entry-reminder">
+                  番茄开始后登录网页进入工作台
+                </span>
+              )}
             </div>
           </div>
           <Button
@@ -1624,7 +1638,7 @@ export function PomodoroPage() {
           </Button>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div data-guide-tour="pomodoro-enable-toggle" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <MetricTile label="今日开始" value={snapshot.startAtMs !== null ? snapshot.startTime : "未启用"} />
           <MetricTile label="启用日期" value={`${enabledDayCount} 天`} />
           <MetricTile label="下次开始" value={formatDateTime(snapshot.nextStartAtMs)} />
@@ -1699,14 +1713,14 @@ export function PomodoroPage() {
             </div>
           </div>
         ) : (
-        <div data-pomodoro-plan-overview className="space-y-5">
+        <div data-pomodoro-plan-overview data-guide-tour="pomodoro-plan-editor" className="space-y-5">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <div className="text-lg font-semibold text-foreground">
                 番茄计划：{enabledDraftCount > 0 ? `${enabledDraftCount}组` : "未启用"}
               </div>
             </div>
-            <Button type="button" variant="outline" onClick={addPomodoroDraftPlan}>
+            <Button type="button" variant="outline" data-guide-tour="pomodoro-create-plan-button" onClick={addPomodoroDraftPlan}>
               <Plus className="h-4 w-4" />
               新增计划
             </Button>

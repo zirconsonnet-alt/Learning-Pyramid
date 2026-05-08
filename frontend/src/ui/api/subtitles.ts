@@ -1,6 +1,7 @@
 import { z } from "zod"
 
 import { apiRequest, type ApiRequestExecutionOptions } from "@/ui/api/http"
+import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
 
 export const SubtitleSegmentSchema = z.object({
   startMs: z.number().int(),
@@ -29,6 +30,12 @@ export const InstanceSubtitleFileSchema = z.discriminatedUnion("found", [
 export type InstanceSubtitleFile = z.infer<typeof InstanceSubtitleFileSchema>
 
 export function getInstanceSubtitleFile(projectId: string, instanceId: string, options?: ApiRequestExecutionOptions) {
+  if (isVirtualStudyReviewProjectId(projectId)) {
+    return Promise.resolve({
+      found: false as const,
+      instanceId,
+    })
+  }
   return apiRequest({
     path: `/projects/${projectId}/instances/${instanceId}/subtitle-file`,
     responseSchema: InstanceSubtitleFileSchema,

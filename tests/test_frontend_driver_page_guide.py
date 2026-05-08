@@ -10,6 +10,7 @@ GUIDE_PAGE = SRC / "views" / "guide" / "GuidePage.tsx"
 PROJECTS_PAGE = SRC / "views" / "projects" / "ProjectsPage.tsx"
 SUBJECT_DASHBOARD_PAGE = SRC / "views" / "subjects" / "SubjectDashboardPage.tsx"
 PROJECT_SETTINGS_PAGE = SRC / "views" / "settings" / "ProjectSettingsPage.tsx"
+WORKBENCH_PAGE = SRC / "views" / "workbench" / "WorkbenchPage.tsx"
 LEARNING_OBJECT_TREE = SRC / "views" / "workbench" / "components" / "LearningObjectTree.tsx"
 COMPOSE_PANE = SRC / "views" / "workbench" / "components" / "ComposePane.tsx"
 REVIEW_PANE = SRC / "views" / "workbench" / "components" / "ReviewPane.tsx"
@@ -24,6 +25,8 @@ WALKTHROUGH_DIR = SRC / "ui" / "guideWalkthrough"
 COPY_MODULE = WALKTHROUGH_DIR / "guideWalkthroughCopy.ts"
 STEPS_MODULE = WALKTHROUGH_DIR / "guideWalkthroughSteps.ts"
 CONTROLLER_MODULE = WALKTHROUGH_DIR / "guideWalkthroughController.ts"
+VIRTUAL_STUDY_REVIEW_MODULE = WALKTHROUGH_DIR / "virtualStudyReviewProject.ts"
+VIRTUAL_PROJECT_IDS_MODULE = WALKTHROUGH_DIR / "guideVirtualProjectIds.ts"
 CREATE_SUBJECT_PROJECT_DOC = ROOT / "docs" / "how-to-create-subject-project.md"
 STUDY_REVIEW_DOC = ROOT / "docs" / "how-to-study-review.md"
 POMODORO_GUIDE_DOC = ROOT / "docs" / "how-to-use-pomodoro.md"
@@ -212,7 +215,7 @@ def test_guide_page_registers_pomodoro_guide_with_walkthrough_steps():
     pomodoro_doc = read(POMODORO_GUIDE_DOC)
     steps = read(STEPS_MODULE)
     router = read(SRC / "router.tsx")
-    demo_page = read(GUIDE_DEMO_POMODORO_PAGE)
+    pomodoro_page = read(SRC / "views" / "pomodoro" / "PomodoroPage.tsx")
 
     assert 'slug: "use-pomodoro"' in guide_page
     assert 'label: "如何使用番茄钟"' in guide_page
@@ -228,24 +231,17 @@ def test_guide_page_registers_pomodoro_guide_with_walkthrough_steps():
 
     assert 'export type GuideWalkthroughDocSlug = "create-subject-project" | "study-review" | "use-ai-chat" | "use-pomodoro"' in steps
     assert '"use-pomodoro"' in steps
-    assert 'path: "/guide/demo/pomodoro"' in router
-    assert GUIDE_DEMO_POMODORO_PAGE.exists()
+    assert 'path: "/pomodoro"' in router
+    assert 'routeHint: "/pomodoro"' in steps
+    assert 'routeHint: "/guide/demo/pomodoro"' not in steps
     for anchor in [
         "pomodoro-settings-entry",
-        "pomodoro-enable-toggle",
-        "pomodoro-plan-editor",
-        "pomodoro-project-binding",
+        "pomodoro-session-status",
+        "pomodoro-create-plan-button",
         "pomodoro-web-entry-reminder",
     ]:
-        assert f'data-guide-tour="{anchor}"' in demo_page
-    for step_id in [
-        "pomodoro-open-settings",
-        "pomodoro-enable-clock",
-        "pomodoro-create-plan",
-        "pomodoro-bind-project",
-        "pomodoro-enter-web",
-    ]:
-        assert f'completeGuideWalkthroughStep("{step_id}")' in demo_page
+        assert f'data-guide-tour="{anchor}"' in pomodoro_page
+    assert 'data-guide-tour={index === 0 ? "pomodoro-project-binding" : undefined}' in pomodoro_page
 
 
 def test_guide_page_registers_ai_chat_guide_with_walkthrough_steps():
@@ -253,7 +249,8 @@ def test_guide_page_registers_ai_chat_guide_with_walkthrough_steps():
     ai_chat_doc = read(AI_CHAT_GUIDE_DOC)
     steps = read(STEPS_MODULE)
     router = read(SRC / "router.tsx")
-    demo_page = read(GUIDE_DEMO_AI_CHAT_PAGE)
+    ai_chat_page = read(SRC / "views" / "ai" / "AiChatPage.tsx")
+    global_settings_page = read(SRC / "views" / "settings" / "GlobalSettingsPage.tsx")
 
     assert 'slug: "use-ai-chat"' in guide_page
     assert 'label: "如何使用 AI 问答"' in guide_page
@@ -271,24 +268,18 @@ def test_guide_page_registers_ai_chat_guide_with_walkthrough_steps():
 
     assert 'export type GuideWalkthroughDocSlug = "create-subject-project" | "study-review" | "use-ai-chat" | "use-pomodoro"' in steps
     assert '"use-ai-chat"' in steps
-    assert 'path: "/guide/demo/ai-chat"' in router
-    assert GUIDE_DEMO_AI_CHAT_PAGE.exists()
+    assert 'path: "/p/:projectId/ai-chat"' in router
+    assert 'routeHint: "/p/:projectId/ai-chat"' in steps
+    assert 'routeHint: "/guide/demo/ai-chat"' not in steps
     for anchor in [
-        "ai-context-check",
-        "ai-llm-check",
         "ai-chat-entry",
-        "ai-learning-object-node",
         "ai-message-composer",
     ]:
-        assert f'data-guide-tour="{anchor}"' in demo_page
-    for step_id in [
-        "ai-confirm-context",
-        "ai-confirm-llm",
-        "ai-open-chat",
-        "ai-select-node",
-        "ai-send-message",
-    ]:
-        assert f'completeGuideWalkthroughStep("{step_id}")' in demo_page
+        assert f'data-guide-tour="{anchor}"' in ai_chat_page
+    assert 'data-guide-tour="ai-context-check"' in ai_chat_page
+    assert 'data-guide-tour={!isContainer ? "ai-learning-object-node" : undefined}' in ai_chat_page
+    assert 'data-guide-tour="ai-llm-check"' in global_settings_page
+    assert 'completeGuideWalkthroughStep("ai-send-message")' in ai_chat_page
 
 
 def test_guide_page_removes_left_column_walkthrough_start_action():
@@ -369,10 +360,11 @@ def test_walkthrough_steps_are_split_by_current_document():
     assert "resolveGuideWalkthroughCopy(step.sourceRef, options.getDocSlug())" in controller
 
 
-def test_create_subject_project_guide_uses_transient_virtual_project_route_and_actions():
+def test_create_subject_project_guide_uses_real_product_routes_and_actions():
     steps = read(STEPS_MODULE)
     router = read(SRC / "router.tsx")
-    demo_page = read(GUIDE_DEMO_CREATE_SUBJECT_PROJECT_PAGE)
+    projects_page = read(PROJECTS_PAGE)
+    subject_dashboard_page = read(SUBJECT_DASHBOARD_PAGE)
     create_doc_steps = re.search(
         r"CREATE_SUBJECT_PROJECT_GUIDE_STEPS: GuideWalkthroughStep\[\] = \[(.*?)\]\s*\n\nexport const STUDY_REVIEW_GUIDE_STEPS",
         steps,
@@ -381,12 +373,10 @@ def test_create_subject_project_guide_uses_transient_virtual_project_route_and_a
 
     assert create_doc_steps
     create_doc_block = create_doc_steps.group(1)
-    assert GUIDE_DEMO_CREATE_SUBJECT_PROJECT_PAGE.exists()
-    assert 'path: "/guide/demo/create-subject-project"' in router
-    assert 'routeHint: "/guide/demo/create-subject-project"' in create_doc_block
-    assert "/projects" not in create_doc_block
-    assert "/subjects/:subjectId" not in create_doc_block
-    assert "/p/:projectId/project-settings" not in create_doc_block
+    assert 'path: "/projects"' in router
+    assert 'routeHint: "/projects"' in create_doc_block
+    assert 'routeHint: "/guide/demo/create-subject-project"' not in create_doc_block
+    assert 'routeHint: "/p/:projectId/settings"' in create_doc_block
     assert 'id: "import-directory"' in create_doc_block
     assert 'id: "open-workbench"' not in create_doc_block
     assert 'routeHint: "/p/:projectId/workbench"' not in create_doc_block
@@ -395,23 +385,11 @@ def test_create_subject_project_guide_uses_transient_virtual_project_route_and_a
         "new-subject-button",
         "create-subject-submit",
         "subject-project-settings-entry",
-        "authorize-directory-button",
-        "import-directory-button",
     ]:
-        assert f'data-guide-tour="{anchor}"' in demo_page
-    for step_id in [
-        "create-subject",
-        "create-subject-submit",
-        "choose-project",
-        "authorize-directory",
-        "import-directory",
-    ]:
-        assert f'completeGuideWalkthroughStep("{step_id}")' in demo_page
-
-    assert "createProject" not in demo_page
-    assert "useCreateSubject" not in demo_page
-    assert "importLearningObjectsFromBrowser" not in demo_page
-    assert "useImportLearningObjectsFromBrowser" not in demo_page
+        assert f'data-guide-tour="{anchor}"' in (projects_page + subject_dashboard_page)
+    assert 'data-guide-tour="authorize-directory-button"' in read(PROJECT_SETTINGS_PAGE)
+    assert 'data-guide-tour="import-directory-button"' in read(PROJECT_SETTINGS_PAGE)
+    assert 'completeGuideWalkthroughStep("create-subject-submit")' in projects_page
 
 
 def test_create_subject_project_guide_sync_step_waits_for_directory_authorization_completion():
@@ -444,11 +422,14 @@ def test_create_subject_step_source_and_initial_drive_call():
     assert ".drive(" in controller
 
 
-def test_study_review_guide_uses_transient_virtual_project_route_and_actions():
+def test_study_review_guide_uses_real_workbench_route_and_actions():
     steps = read(STEPS_MODULE)
     controller = read(CONTROLLER_MODULE)
     router = read(SRC / "router.tsx")
-    demo_workbench = read(GUIDE_DEMO_WORKBENCH_PAGE)
+    workbench_page = read(WORKBENCH_PAGE)
+    learning_object_tree = read(LEARNING_OBJECT_TREE)
+    compose_pane = read(COMPOSE_PANE)
+    review_pane = read(REVIEW_PANE)
 
     study_doc_steps = re.search(
         r"STUDY_REVIEW_GUIDE_STEPS: GuideWalkthroughStep\[\] = \[(.*?)\]\s*\n\nexport const USE_AI_CHAT_GUIDE_STEPS",
@@ -458,11 +439,10 @@ def test_study_review_guide_uses_transient_virtual_project_route_and_actions():
     assert study_doc_steps
     study_doc_block = study_doc_steps.group(1)
 
-    assert GUIDE_DEMO_WORKBENCH_PAGE.exists()
-    assert 'path: "/guide/demo/study-review"' in router
-    assert 'routeHint: "/guide/demo/study-review"' in study_doc_block
+    assert 'path: "/p/:projectId/workbench"' in router
+    assert 'routeHint: "/p/guide-virtual-study-review/workbench"' in study_doc_block
     assert 'routeHint: "/p/:projectId/workbench"' not in study_doc_block
-    assert "/p/:projectId/workbench" not in study_doc_block
+    assert 'routeHint: "/guide/demo/study-review"' not in study_doc_block
     assert 'targetAnchor: "learning-object-tree-item"' in study_doc_block
     study_step_ids = re.findall(r'id:\s*"([^"]+)"', study_doc_block)
     assert study_step_ids == [
@@ -491,7 +471,7 @@ def test_study_review_guide_uses_transient_virtual_project_route_and_actions():
         assert 'advanceOn: "completion-event"' in step.group(0)
 
     assert "resolveGuideRouteHint" in controller
-    assert "completeGuideWalkthroughStep" in demo_workbench
+    assert "completeGuideWalkthroughStep" in (learning_object_tree + compose_pane + review_pane)
     for anchor in [
         "learning-object-tree-item",
         "add-recall-point-button",
@@ -502,15 +482,54 @@ def test_study_review_guide_uses_transient_virtual_project_route_and_actions():
         "review-memory-choice-buttons",
         "submit-review-button",
     ]:
-        assert f'data-guide-tour="{anchor}"' in demo_workbench
-    for step_id in study_step_ids:
-        assert f'completeGuideWalkthroughStep("{step_id}")' in demo_workbench
+        assert f'data-guide-tour="{anchor}"' in (workbench_page + learning_object_tree + compose_pane + review_pane)
 
-    assert "/api/guide/demo-media/study-review" in demo_workbench
-    assert "submitLearningTask" not in demo_workbench
-    assert "commitReviewTask" not in demo_workbench
-    assert "useSubmitLearningTask" not in demo_workbench
-    assert "useCommitReviewTask" not in demo_workbench
+
+def test_study_review_walkthrough_uses_ephemeral_virtual_project_context():
+    steps = read(STEPS_MODULE)
+    controller = read(CONTROLLER_MODULE)
+    virtual_ids = read(VIRTUAL_PROJECT_IDS_MODULE)
+    virtual_project = read(VIRTUAL_STUDY_REVIEW_MODULE)
+    workbench_queries = read(SRC / "ui" / "queries" / "workbench.ts")
+    project_queries = read(SRC / "ui" / "queries" / "projects.ts")
+    subject_queries = read(SRC / "ui" / "queries" / "subjects.ts")
+    app_shell = read(APP_SHELL)
+    workbench_page = read(WORKBENCH_PAGE)
+    study_metrics_sync = read(SRC / "ui" / "studyMetricsSync.ts")
+
+    assert VIRTUAL_STUDY_REVIEW_MODULE.exists()
+    assert VIRTUAL_PROJECT_IDS_MODULE.exists()
+    assert 'VIRTUAL_STUDY_REVIEW_PROJECT_ID = "guide-virtual-study-review"' in virtual_ids
+    assert "isVirtualStudyReviewProjectId" in virtual_ids
+    assert "startVirtualStudyReviewProjectSession" in virtual_project
+    assert "clearVirtualStudyReviewProjectSession" in virtual_project
+    assert "useWorkbenchStore.getState().resetProject(VIRTUAL_STUDY_REVIEW_PROJECT_ID)" in virtual_project
+    assert "removeVirtualStudyReviewLocalStorage()" in virtual_project
+    assert 'projectType: "COURSE"' in virtual_project
+    assert 'VIRTUAL_STUDY_REVIEW_VIDEO_URL' in virtual_project
+    assert '"/guide/demo-media/study-review"' in virtual_project
+    assert 'projectType: "BOOK"' not in virtual_project
+
+    assert 'routeHint: "/p/guide-virtual-study-review/workbench"' in steps
+    assert 'routeHint: "/p/:projectId/workbench"' not in re.search(
+        r"STUDY_REVIEW_GUIDE_STEPS: GuideWalkthroughStep\[\] = \[(.*?)\]\s*\n\nexport const USE_AI_CHAT_GUIDE_STEPS",
+        steps,
+        flags=re.DOTALL,
+    ).group(1)
+
+    assert "startVirtualStudyReviewProjectSession()" in controller
+    assert "clearVirtualStudyReviewProjectSession()" in controller
+    assert 'requestedDocSlug === "study-review"' in controller
+
+    for source in [
+        workbench_queries,
+        project_queries,
+        subject_queries,
+        app_shell,
+        workbench_page,
+        study_metrics_sync,
+    ]:
+        assert "isVirtualStudyReviewProjectId" in source
 
 
 def test_all_source_references_resolve_in_manual():
@@ -626,6 +645,7 @@ def test_walkthrough_can_run_during_pomodoro_and_stops_before_locked_workbench()
     controller = read(CONTROLLER_MODULE)
 
     assert "shouldEndGuideWalkthroughBeforeWorkbench" in controller
+    assert "isVirtualStudyReviewProjectId(stepProjectId)" in controller
     assert "usePomodoroStore.getState()" in controller
     assert "getPomodoroSnapshot({ enabled: state.enabled, weeklySchedule: state.weeklySchedule, quickPomodoro: state.quickPomodoro }, now)" in controller
     assert "snapshot.shouldRestrictWorkbench && !snapshot.canUseWorkbench" in controller
@@ -652,6 +672,49 @@ def test_walkthrough_can_run_during_pomodoro_and_stops_before_locked_workbench()
     assert highlighted_function
     assert "event.preventDefault()" in highlighted_function.group(0)
     assert "event.stopPropagation()" in highlighted_function.group(0)
+
+
+def test_pomodoro_workbench_gate_does_not_redirect_virtual_study_review_project():
+    gate = read(SRC / "views" / "pomodoro" / "PomodoroWorkbenchGate.tsx")
+
+    assert "isVirtualStudyReviewProjectId" in gate
+    assert "isVirtualStudyReviewProjectId(projectId)" in gate
+    assert "return <>{children}</>" in gate[gate.index("isVirtualStudyReviewProjectId(projectId)"):]
+
+
+def test_pomodoro_walkthrough_branches_by_timer_state_and_has_completion_events():
+    controller = read(CONTROLLER_MODULE)
+    steps = read(STEPS_MODULE)
+    pomodoro_page = read(SRC / "views" / "pomodoro" / "PomodoroPage.tsx")
+
+    assert "resolveGuideWalkthroughSessionSteps" in controller
+    assert "getPomodoroGuideStepIdsForSnapshot" in controller
+    assert 'snapshot.status === "running" && snapshot.phase === "focus"' in controller
+    assert 'pomodoro-enable-clock' in controller
+    assert 'pomodoro-create-plan' in controller
+    assert 'pomodoro-bind-project' in controller
+    assert 'pomodoro-enter-web' in controller
+
+    pomodoro_steps = re.search(
+        r"USE_POMODORO_GUIDE_STEPS: GuideWalkthroughStep\[\] = \[(.*?)\]\s*\n\nexport const GUIDE_WALKTHROUGH_STEPS_BY_DOC",
+        steps,
+        flags=re.DOTALL,
+    )
+    assert pomodoro_steps
+    assert 'targetAnchor: "pomodoro-session-status"' in pomodoro_steps.group(1)
+    assert 'advanceOn: "completion-event"' in pomodoro_steps.group(1)
+
+    assert 'data-guide-tour="pomodoro-session-status"' in pomodoro_page
+    assert 'data-guide-tour="pomodoro-enable-toggle"' in pomodoro_page
+    assert 'data-guide-tour="pomodoro-create-plan-button"' in pomodoro_page
+    assert 'data-guide-tour={index === 0 ? "pomodoro-project-binding" : undefined}' in pomodoro_page
+    for step_id in [
+        "pomodoro-enable-clock",
+        "pomodoro-create-plan",
+        "pomodoro-bind-project",
+        "pomodoro-enter-web",
+    ]:
+        assert f'completeGuideWalkthroughStep("{step_id}")' in pomodoro_page
 
 
 def test_create_subject_submit_step_has_distinct_copy_and_dialog_target():

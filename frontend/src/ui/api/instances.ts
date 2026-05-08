@@ -1,6 +1,12 @@
 import { z } from "zod"
 
 import { apiRequest, type ApiRequestExecutionOptions } from "@/ui/api/http"
+import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
+import {
+  getVirtualStudyReviewRecallPointIdsByInstance,
+  getVirtualStudyReviewRemoteVideoWatchProgress,
+  setVirtualStudyReviewVideoWatchProgress,
+} from "@/ui/guideWalkthrough/virtualStudyReviewProject"
 
 export const InstanceMediaSourceKindSchema = z.enum(["SERVER_FS", "BROWSER_LOCAL", "NATIVE_LOCAL", "MANUAL", "BAIDU_NETDISK"])
 export type InstanceMediaSourceKind = z.infer<typeof InstanceMediaSourceKindSchema>
@@ -60,6 +66,9 @@ export function listMissingInstances(projectId: string, options?: ApiRequestExec
 }
 
 export function listRecallPointsByInstance(projectId: string, instanceId: string, options?: ApiRequestExecutionOptions) {
+  if (isVirtualStudyReviewProjectId(projectId)) {
+    return Promise.resolve(getVirtualStudyReviewRecallPointIdsByInstance(instanceId))
+  }
   return apiRequest({
     path: `/projects/${projectId}/instances/${instanceId}/recall-points`,
     responseSchema: RecallPointIdsByInstanceSchema,
@@ -73,6 +82,9 @@ export function fetchVideoWatchProgressMap(
   instanceIds: string[],
   options?: ApiRequestExecutionOptions,
 ) {
+  if (isVirtualStudyReviewProjectId(projectId)) {
+    return Promise.resolve(getVirtualStudyReviewRemoteVideoWatchProgress(instanceIds))
+  }
   const params = new URLSearchParams()
   for (const instanceId of instanceIds) params.append("instanceIds", instanceId)
   const query = params.toString()
@@ -89,6 +101,13 @@ export function syncVideoWatchProgressRange(
   instanceId: string,
   params: { startMs: number; endMs: number; durationMs?: number | null },
 ) {
+  if (isVirtualStudyReviewProjectId(projectId)) {
+    setVirtualStudyReviewVideoWatchProgress(instanceId, {
+      watchedMs: Math.max(0, params.endMs),
+      durationMs: params.durationMs,
+    })
+    return Promise.resolve(getVirtualStudyReviewRemoteVideoWatchProgress([instanceId])[instanceId])
+  }
   return apiRequest({
     path: `/projects/${projectId}/instances/${instanceId}/video-watch-progress/ranges`,
     method: "POST",
@@ -102,6 +121,14 @@ export function markVideoWatchProgressCompleted(
   instanceId: string,
   params: { durationMs: number },
 ) {
+  if (isVirtualStudyReviewProjectId(projectId)) {
+    setVirtualStudyReviewVideoWatchProgress(instanceId, {
+      watchedMs: params.durationMs,
+      durationMs: params.durationMs,
+      completed: true,
+    })
+    return Promise.resolve(getVirtualStudyReviewRemoteVideoWatchProgress([instanceId])[instanceId])
+  }
   return apiRequest({
     path: `/projects/${projectId}/instances/${instanceId}/video-watch-progress/completed`,
     method: "POST",

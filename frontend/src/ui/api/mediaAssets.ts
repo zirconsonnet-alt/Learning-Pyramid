@@ -2,6 +2,7 @@ import { z } from "zod"
 
 import { apiRequest } from "@/ui/api/http"
 import { getBaseUrl } from "@/ui/api/http"
+import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
 
 const IMAGE_UPLOAD_TARGET_BYTES = 900_000
 const IMAGE_UPLOAD_MAX_DIMENSION = 1800
@@ -100,6 +101,13 @@ export async function prepareImageFileForUpload(file: File): Promise<File> {
 }
 
 export async function uploadMediaAsset(projectId: string, file: File) {
+  if (isVirtualStudyReviewProjectId(projectId)) {
+    return {
+      assetId: `virtual-${Date.now()}`,
+      mimeType: file.type || "image/jpeg",
+      url: "",
+    }
+  }
   const uploadFile = await prepareImageFileForUpload(file)
   return apiRequest({
     path: `/projects/${projectId}/media-assets`,
@@ -115,5 +123,8 @@ export async function uploadMediaAsset(projectId: string, file: File) {
 }
 
 export function mediaAssetUrl(projectId: string, assetId: string) {
+  if (isVirtualStudyReviewProjectId(projectId)) {
+    return ""
+  }
   return `${getBaseUrl()}/projects/${projectId}/media-assets/${assetId}`
 }

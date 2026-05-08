@@ -9,6 +9,11 @@ import {
   type MaterialSourceKind,
   type ProjectType,
 } from "@/ui/api/projects"
+import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
+import {
+  getVirtualStudyReviewProject,
+  getVirtualStudyReviewProjectMaterialSourceBinding,
+} from "@/ui/guideWalkthrough/virtualStudyReviewProject"
 
 const PROJECT_BINDING_QUERY_TIMEOUT_MS = 90_000
 
@@ -17,8 +22,9 @@ export function useProjects(enabled = true) {
 }
 
 export function useProject(projectId?: string, options?: { enabled?: boolean }) {
-  const query = useProjects(options?.enabled ?? true)
-  const project = projectId ? query.data?.find((item) => item.projectId === projectId) ?? null : null
+  const isVirtualProject = isVirtualStudyReviewProjectId(projectId)
+  const query = useProjects((options?.enabled ?? true) && !isVirtualProject)
+  const project = isVirtualProject ? getVirtualStudyReviewProject() : projectId ? query.data?.find((item) => item.projectId === projectId) ?? null : null
 
   return {
     ...query,
@@ -64,8 +70,11 @@ export function useEditProject() {
 export function useProjectMaterialSourceBinding(projectId: string) {
   return useQuery({
     queryKey: ["projectMaterialSourceBinding", projectId],
-    queryFn: ({ signal }) => getProjectMaterialSourceBinding(projectId, { signal, timeoutMs: PROJECT_BINDING_QUERY_TIMEOUT_MS }),
+    queryFn: ({ signal }) =>
+      isVirtualStudyReviewProjectId(projectId)
+        ? getVirtualStudyReviewProjectMaterialSourceBinding()
+        : getProjectMaterialSourceBinding(projectId, { signal, timeoutMs: PROJECT_BINDING_QUERY_TIMEOUT_MS }),
     enabled: !!projectId,
-    refetchInterval: 5000,
+    refetchInterval: isVirtualStudyReviewProjectId(projectId) ? false : 5000,
   })
 }

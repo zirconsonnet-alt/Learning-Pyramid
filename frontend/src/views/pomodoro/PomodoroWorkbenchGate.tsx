@@ -1,6 +1,7 @@
 import type { ReactNode } from "react"
 import { Navigate, useLocation, useParams } from "react-router-dom"
 
+import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
 import { useProjects } from "@/ui/queries/projects"
 import { getPomodoroSnapshot, isQuickPomodoroSessionActive, usePomodoroNow, usePomodoroStore } from "@/ui/store/pomodoroStore"
 import { buildPomodoroPath } from "@/views/pomodoro/pomodoroRouting"
@@ -18,6 +19,10 @@ export function PomodoroWorkbenchGate(props: { children: ReactNode }) {
   const projectsQ = useProjects(true)
 
   if (!projectId) {
+    return <>{children}</>
+  }
+
+  if (isVirtualStudyReviewProjectId(projectId)) {
     return <>{children}</>
   }
 

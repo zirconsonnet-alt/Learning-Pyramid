@@ -42,6 +42,7 @@ import { useMembershipSummary } from "@/ui/queries/membership"
 import { useProjectMaterialSourceBinding } from "@/ui/queries/projects"
 import { useSystemCapabilities } from "@/ui/queries/system"
 import { useInstances } from "@/ui/queries/workbench"
+import { completeGuideWalkthroughStep } from "@/ui/guideWalkthrough/guideWalkthroughController"
 import { isSyntheticFilesContainer, sortLearningObjectNodeIdsForDisplay } from "@/ui/learningObjectDisplayOrder"
 import { type AiChatConversation, type AiChatCourseEvidence, type AiChatMessage, useAiChatStore } from "@/ui/store/aiChatStore"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
@@ -547,6 +548,7 @@ function SidebarTreeNodeRow(props: {
         </button>
         <button
           type="button"
+          data-guide-tour={!isContainer ? "ai-learning-object-node" : undefined}
           className={cn(
             "flex min-w-0 flex-1 items-center gap-2 rounded-2xl px-3 py-2 text-left transition",
             isSelected
@@ -811,7 +813,7 @@ function SidebarPanel(props: {
         />
       </div>
 
-      <div className="border-t border-[color:var(--theme-soft-border)] px-4 py-4">
+      <div data-guide-tour="ai-context-check" className="border-t border-[color:var(--theme-soft-border)] px-4 py-4">
         {activeTree ? (
           <SidebarTreeSection
             title="学习任务节点"
@@ -1342,6 +1344,7 @@ export function AiChatPage() {
     const switchingContext = activeNodeId !== nodeId
     setMobileSidebarOpen(false)
     setChatError("")
+    completeGuideWalkthroughStep("ai-select-node")
     navigateToContext({ kind: activeKind, nodeId })
     if (switchingContext) {
       showSuccessFeedback("已切换问答上下文", "新节点会从新会话开始，旧会话已经保留在历史列表里。")
@@ -1464,6 +1467,7 @@ export function AiChatPage() {
     if (!trimmed || !pid || !activeNodeId || !llmConfigured || aiChatMemberBlocked || isStreaming) return
 
     touchQaActivity()
+    completeGuideWalkthroughStep("ai-send-message")
     const userMessage = createMessage("user", trimmed)
     const assistantDraft = createMessage("assistant", "")
     const controller = new AbortController()
@@ -1663,7 +1667,10 @@ export function AiChatPage() {
           )}
         </aside>
 
-        <section className="flex min-h-[calc(100dvh-8.75rem)] flex-col overflow-hidden rounded-[2rem] border border-[color:var(--theme-soft-border)] bg-[linear-gradient(180deg,hsl(var(--background)/0.96),hsl(var(--background)/0.92))] shadow-[0_34px_90px_-46px_rgba(15,23,42,0.28)]">
+        <section
+          data-guide-tour="ai-chat-entry"
+          className="flex min-h-[calc(100dvh-8.75rem)] flex-col overflow-hidden rounded-[2rem] border border-[color:var(--theme-soft-border)] bg-[linear-gradient(180deg,hsl(var(--background)/0.96),hsl(var(--background)/0.92))] shadow-[0_34px_90px_-46px_rgba(15,23,42,0.28)]"
+        >
           <div className="border-b border-[color:var(--theme-soft-border)] px-5 py-4 sm:px-7">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div className="min-w-0">
@@ -1778,7 +1785,7 @@ export function AiChatPage() {
 
           <div className="border-t border-[color:var(--theme-soft-border)] px-4 py-4 sm:px-7">
             <div className="mx-auto max-w-3xl">
-              <div className="rounded-[1.9rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] shadow-[0_28px_64px_-40px_rgba(15,23,42,0.24)]">
+              <div data-guide-tour="ai-message-composer" className="rounded-[1.9rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] shadow-[0_28px_64px_-40px_rgba(15,23,42,0.24)]">
                 <textarea
                   ref={composerRef}
                   value={composerValue}

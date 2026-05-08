@@ -13,7 +13,22 @@ import {
 } from "./guideWalkthroughSteps"
 import { showInfoFeedback } from "@/ui/store/feedbackStore"
 import { useAppStore } from "@/ui/store/appStore"
-import { describePomodoroPhase, getPomodoroSnapshot, usePomodoroStore } from "@/ui/store/pomodoroStore"
+import {
+  describePomodoroPhase,
+  getActivePomodoroDayPlans,
+  getPomodoroSnapshot,
+  hasEnabledPomodoroSchedule,
+  usePomodoroStore,
+  type PomodoroSnapshot,
+} from "@/ui/store/pomodoroStore"
+import {
+  VIRTUAL_STUDY_REVIEW_PROJECT_ID,
+  isVirtualStudyReviewProjectId,
+} from "@/ui/guideWalkthrough/guideVirtualProjectIds"
+import {
+  clearVirtualStudyReviewProjectSession,
+  startVirtualStudyReviewProjectSession,
+} from "@/ui/guideWalkthrough/virtualStudyReviewProject"
 
 const START_GUIDE_WALKTHROUGH_EVENT = "learningpyramid:start-guide-walkthrough"
 const DESTROY_GUIDE_WALKTHROUGH_EVENT = "learningpyramid:destroy-guide-walkthrough"
@@ -25,7 +40,6 @@ const TARGET_WAIT_INTERVAL_MS = 50
 const TARGET_WAIT_MAX_ATTEMPTS = 20
 const GUIDE_WALKTHROUGH_POMODORO_NON_FOCUS_TITLE = "当前不是学习时间"
 const GUIDE_WALKTHROUGH_POMODORO_NON_FOCUS_MESSAGE = "当前处于{phaseLabel}，工作台会在下一段学习时间重新放行。本次引导先到这里。"
-
 type GuideNavigate = (to: string, options?: { replace?: boolean }) => void
 
 const WALKTHROUGH_QUERY_PARAM = "walkthrough"
@@ -45,6 +59,15 @@ function dispatchGuideWalkthroughEvent(name: string) {
 function dispatchGuideWalkthroughCustomEvent(name: string, detail: Record<string, string>) {
   if (typeof window === "undefined") return
   window.dispatchEvent(new CustomEvent(name, { detail }))
+}
+
+function cleanupVirtualStudyReviewProjectForDoc(docSlug: GuideWalkthroughDocSlug) {
+  if (docSlug !== "study-review") return
+  clearVirtualStudyReviewProjectSession()
+}
+
+function shouldLeaveVirtualStudyReviewRoute(pathname: string) {
+  return pathname === `/p/${VIRTUAL_STUDY_REVIEW_PROJECT_ID}` || pathname.startsWith(`/p/${VIRTUAL_STUDY_REVIEW_PROJECT_ID}/`)
 }
 
 export function startGuideWalkthrough(docSlug: GuideWalkthroughDocSlug = DEFAULT_GUIDE_WALKTHROUGH_DOC_SLUG) {
@@ -70,11 +93,48 @@ function isWorkbenchGuideStep(step: GuideWalkthroughStep | undefined) {
   return Boolean(step?.routeHint?.includes("/workbench"))
 }
 
+function getProjectIdFromRouteHint(routeHint: string | undefined) {
+  return routeHint?.match(/^\/p\/([^/]+)/)?.[1] ?? null
+}
+
 export function shouldEndGuideWalkthroughBeforeWorkbench(step: GuideWalkthroughStep | undefined, now = Date.now()) {
   if (!isWorkbenchGuideStep(step)) return false
+  const stepProjectId = getProjectIdFromRouteHint(step?.routeHint)
+  if (stepProjectId && isVirtualStudyReviewProjectId(stepProjectId)) return false
   const state = usePomodoroStore.getState()
   const snapshot = getPomodoroSnapshot({ enabled: state.enabled, weeklySchedule: state.weeklySchedule, quickPomodoro: state.quickPomodoro }, now)
   return snapshot.shouldRestrictWorkbench && !snapshot.canUseWorkbench
+}
+
+export function getPomodoroGuideStepIdsForSnapshot(snapshot: PomodoroSnapshot, hasSavedSchedule: boolean) {
+  const stepIds: GuideWalkthroughStep["id"][] = ["pomodoro-open-settings"]
+
+  if (snapshot.status === "running" && snapshot.phase === "focus") {
+    stepIds.push("pomodoro-enter-web")
+    return stepIds
+  }
+
+  if (!snapshot.enabled) {
+    stepIds.push("pomodoro-enable-clock")
+  }
+
+  if (!hasSavedSchedule && !snapshot.hasEnabledSchedule) {
+    stepIds.push("pomodoro-create-plan", "pomodoro-bind-project")
+  }
+
+  stepIds.push("pomodoro-enter-web")
+  return stepIds
+}
+
+export function resolveGuideWalkthroughSessionSteps(docSlug: GuideWalkthroughDocSlug) {
+  const steps = getGuideWalkthroughSteps(docSlug)
+  if (docSlug !== "use-pomodoro") return steps
+
+  const state = usePomodoroStore.getState()
+  const snapshot = getPomodoroSnapshot({ enabled: state.enabled, weeklySchedule: state.weeklySchedule, quickPomodoro: state.quickPomodoro })
+  const hasSavedSchedule = hasEnabledPomodoroSchedule(state.weeklySchedule)
+  const stepIds = new Set(getPomodoroGuideStepIdsForSnapshot(snapshot, hasSavedSchedule))
+  return steps.filter((step) => stepIds.has(step.id))
 }
 
 function notifyGuideWalkthroughEndedBeforeWorkbench(now = Date.now()) {
@@ -118,17 +178,58 @@ function getProjectIdFromPathname(pathname: string) {
   return pathname.match(/^\/p\/([^/]+)/)?.[1] ?? null
 }
 
+function getSubjectIdFromPathname(pathname: string) {
+  return pathname.match(/^\/subjects\/([^/]+)/)?.[1] ?? null
+}
+
+function getPomodoroPlanIdFromPathname(pathname: string) {
+  return pathname.match(/^\/pomodoro\/plans\/([^/]+)/)?.[1] ?? null
+}
+
 function resolveGuideProjectId(pathname: string) {
   const state = useAppStore.getState()
   return state.selectedProjectId ?? getProjectIdFromPathname(pathname) ?? state.recentProjectIds[0] ?? null
 }
 
+function resolveGuideSubjectId(pathname: string) {
+  const state = useAppStore.getState()
+  return state.selectedSubjectId ?? getSubjectIdFromPathname(pathname) ?? null
+}
+
+function resolveGuidePomodoroPlanId(pathname: string) {
+  const activePlanId = getPomodoroPlanIdFromPathname(pathname)
+  if (activePlanId) return activePlanId
+  const weeklySchedule = usePomodoroStore.getState().weeklySchedule
+  for (const daySchedule of Object.values(weeklySchedule)) {
+    const firstPlan = getActivePomodoroDayPlans(daySchedule)[0] ?? daySchedule.plans[0]
+    if (firstPlan?.id) return firstPlan.id
+  }
+  return null
+}
+
 export function resolveGuideRouteHint(step: GuideWalkthroughStep | undefined, pathname: string) {
   if (!step?.routeHint) return null
-  if (!step.routeHint.includes(":projectId")) return step.routeHint.includes(":") ? null : step.routeHint
+  let resolvedRouteHint = step.routeHint
 
-  const projectId = resolveGuideProjectId(pathname)
-  return projectId ? step.routeHint.replace(":projectId", encodeURIComponent(projectId)) : null
+  if (resolvedRouteHint.includes(":subjectId")) {
+    const subjectId = resolveGuideSubjectId(pathname)
+    if (!subjectId) return null
+    resolvedRouteHint = resolvedRouteHint.replace(":subjectId", encodeURIComponent(subjectId))
+  }
+
+  if (resolvedRouteHint.includes(":projectId")) {
+    const projectId = resolveGuideProjectId(pathname)
+    if (!projectId) return null
+    resolvedRouteHint = resolvedRouteHint.replace(":projectId", encodeURIComponent(projectId))
+  }
+
+  if (resolvedRouteHint.includes(":planId")) {
+    const planId = resolveGuidePomodoroPlanId(pathname)
+    if (!planId) return null
+    resolvedRouteHint = resolvedRouteHint.replace(":planId", encodeURIComponent(planId))
+  }
+
+  return resolvedRouteHint.includes(":") ? null : resolvedRouteHint
 }
 
 export function handleRouteHint(step: GuideWalkthroughStep | undefined, navigate: GuideNavigate, pathname: string) {
@@ -274,6 +375,7 @@ export function useGuideWalkthroughController({ navigate, pathname }: { navigate
   const statusRef = useRef<GuideWalkthroughSessionStatus>("idle")
   const latestPathnameRef = useRef(pathname)
   const activeDocSlugRef = useRef<GuideWalkthroughDocSlug>(DEFAULT_GUIDE_WALKTHROUGH_DOC_SLUG)
+  const activeSessionStepsRef = useRef<GuideWalkthroughStep[]>(getGuideWalkthroughSteps(DEFAULT_GUIDE_WALKTHROUGH_DOC_SLUG))
 
   useEffect(() => {
     latestPathnameRef.current = pathname
@@ -282,7 +384,7 @@ export function useGuideWalkthroughController({ navigate, pathname }: { navigate
       getPathname: () => getCurrentPathname(latestPathnameRef.current),
       navigate,
       getDocSlug: () => activeDocSlugRef.current,
-      getSteps: () => getGuideWalkthroughSteps(activeDocSlugRef.current),
+      getSteps: () => activeSessionStepsRef.current,
     })
     driverRef.current.refresh()
   }, [navigate, pathname])
@@ -292,14 +394,19 @@ export function useGuideWalkthroughController({ navigate, pathname }: { navigate
       getPathname: () => getCurrentPathname(latestPathnameRef.current),
       navigate,
       getDocSlug: () => activeDocSlugRef.current,
-      getSteps: () => getGuideWalkthroughSteps(activeDocSlugRef.current),
+      getSteps: () => activeSessionStepsRef.current,
     }
 
     function runWalkthroughForDoc(requestedDocSlug: GuideWalkthroughDocSlug) {
+      cleanupVirtualStudyReviewProjectForDoc(activeDocSlugRef.current)
       cleanupGuideWalkthrough(driverRef, statusRef)
       statusRef.current = "running"
 
       activeDocSlugRef.current = requestedDocSlug
+      activeSessionStepsRef.current = resolveGuideWalkthroughSessionSteps(requestedDocSlug)
+      if (requestedDocSlug === "study-review") {
+        startVirtualStudyReviewProjectSession()
+      }
 
       const firstStep = options.getSteps()[0]
       if (!firstStep) return
@@ -328,6 +435,10 @@ export function useGuideWalkthroughController({ navigate, pathname }: { navigate
               stageRadius: 12,
               steps: buildDriverSteps(options),
               onDestroyed: () => {
+                cleanupVirtualStudyReviewProjectForDoc(activeDocSlugRef.current)
+                if (isVirtualStudyReviewProjectId(getProjectIdFromPathname(getCurrentPathname(latestPathnameRef.current)))) {
+                  navigate("/projects", { replace: true })
+                }
                 driverRef.current = null
                 statusRef.current = "closed"
                 window.setTimeout(() => {
@@ -350,11 +461,16 @@ export function useGuideWalkthroughController({ navigate, pathname }: { navigate
     }
 
     function destroyActiveWalkthrough() {
+      cleanupVirtualStudyReviewProjectForDoc(activeDocSlugRef.current)
+      if (shouldLeaveVirtualStudyReviewRoute(getCurrentPathname(latestPathnameRef.current))) {
+        navigate("/projects", { replace: true })
+      }
       cleanupGuideWalkthrough(driverRef, statusRef)
     }
 
     function refreshActiveWalkthrough() {
       if (!driverRef.current?.isActive()) return
+      activeSessionStepsRef.current = resolveGuideWalkthroughSessionSteps(activeDocSlugRef.current)
       replaceGuideWalkthroughSteps(driverRef.current, options)
       driverRef.current.refresh()
     }
@@ -381,6 +497,7 @@ export function useGuideWalkthroughController({ navigate, pathname }: { navigate
       window.removeEventListener(DESTROY_GUIDE_WALKTHROUGH_EVENT, destroyActiveWalkthrough)
       window.removeEventListener(REFRESH_GUIDE_WALKTHROUGH_EVENT, refreshActiveWalkthrough)
       window.removeEventListener(GUIDE_WALKTHROUGH_STEP_COMPLETED_EVENT, completeActiveWalkthroughStep)
+      cleanupVirtualStudyReviewProjectForDoc(activeDocSlugRef.current)
       cleanupGuideWalkthrough(driverRef, statusRef)
     }
   }, [navigate])
