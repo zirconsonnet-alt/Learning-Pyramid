@@ -52,7 +52,7 @@ As a product maintainer, I want downstream flows such as Pomodoro binding, setti
 
 ### Edge Cases
 
-- What happens when a legacy subject contains only the historical default material whose project identity is the same as the subject root?
+- What happens when a legacy subject contains only a historical root-backed material whose project identity is the same as the subject root?
 - How does the system handle records where the old compatibility field is missing, null, or inconsistent with the current subject-material relationship?
 - What happens when a user opens a bookmarked route that previously relied on the old field name for subject or project resolution?
 - How does the system behave when a subject is deleted after some of its child projects were already removed or are no longer accessible?
@@ -71,7 +71,7 @@ As a product maintainer, I want downstream flows such as Pomodoro binding, setti
 - **FR-008**: The system MUST preserve subject and project deletion behavior, including cleanup of related project scopes, after the model rename.
 - **FR-009**: The system MUST preserve project-selection rules in Pomodoro and other project-bound flows so that subject roots are not treated as normal material projects.
 - **FR-010**: The system MUST preserve subject-material relationships for course, book, and loose-points materials under the cleaned naming model.
-- **FR-011**: The system MUST keep the current default-material behavior for existing subjects unless the user explicitly changes materials.
+- **FR-011**: The system MUST migrate historical root-backed materials into independent material projects so subject roots are no longer treated as learning projects.
 - **FR-012**: The system MUST provide enough contract clarity that downstream product features can determine whether they are working with a subject root or a material project without inferring from misleading field names.
 
 ### Key Entities *(include if feature involves data)*

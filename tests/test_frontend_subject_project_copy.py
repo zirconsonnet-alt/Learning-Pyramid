@@ -4,6 +4,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PROJECTS_PAGE = REPO_ROOT / "frontend" / "src" / "views" / "projects" / "ProjectsPage.tsx"
 SUBJECT_DASHBOARD_PAGE = REPO_ROOT / "frontend" / "src" / "views" / "subjects" / "SubjectDashboardPage.tsx"
+CREATE_SUBJECT_PROJECT_DEMO_PAGE = REPO_ROOT / "frontend" / "src" / "views" / "guide" / "CreateSubjectProjectDemoPage.tsx"
 STUDY_MATERIALS = REPO_ROOT / "frontend" / "src" / "ui" / "subjects" / "studyMaterials.ts"
 
 
@@ -34,12 +35,21 @@ def test_book_project_creation_hint_uses_short_activity_copy() -> None:
 
 
 def test_subject_project_pages_avoid_compatibility_project_wording() -> None:
-    for source_path in (PROJECTS_PAGE, SUBJECT_DASHBOARD_PAGE, STUDY_MATERIALS):
+    for source_path in (PROJECTS_PAGE, SUBJECT_DASHBOARD_PAGE, CREATE_SUBJECT_PROJECT_DEMO_PAGE, STUDY_MATERIALS):
         source = source_path.read_text(encoding="utf-8")
         assert "compatibilityProjectId" not in source
         assert "兼容项目" not in source
         assert "兼容工作台" not in source
         assert "兼容入口" not in source
+        assert "legacy_main" not in source
+        assert "默认网课项目" not in source
+
+
+def test_subject_project_pages_avoid_default_project_wording() -> None:
+    for source_path in (PROJECTS_PAGE, SUBJECT_DASHBOARD_PAGE, CREATE_SUBJECT_PROJECT_DEMO_PAGE, STUDY_MATERIALS):
+        source = source_path.read_text(encoding="utf-8")
+        assert "默认项目" not in source
+        assert "默认网课项目" not in source
 
 
 def test_delete_subject_dialog_uses_warning_as_confirmation_placeholder() -> None:

@@ -78,14 +78,14 @@
 
 - [x] T022 [P] [US2] Add JSON persistence regression for decoding old `compatibilityProjectId` material payloads in `tests/test_runtime_backup_restore.py`
 - [x] T023 [P] [US2] Add persistence regression that newly encoded study materials write `projectId` and omit `compatibilityProjectId` in `tests/test_runtime_backup_restore.py`
-- [x] T024 [P] [US2] Add subject-context regression covering a legacy default material whose project identity equals the subject root in `tests/test_subjects_api.py`
+- [x] T024 [P] [US2] Add subject-context regression covering a legacy root-backed material whose project identity equals the subject root in `tests/test_subjects_api.py`
 
 ### Implementation for User Story 2
 
 - [x] T025 [US2] Update `_encode_study_material` to write `projectId` in `backend/system/persistence_json.py`
 - [x] T026 [US2] Update `_decode_study_material` to read `projectId` first and fall back to old `compatibilityProjectId` in `backend/system/persistence_json.py`
-- [x] T027 [US2] Ensure default material fallback creates `StudyMaterial(project_id=subject.project_id)` in `backend/system/api.py`
-- [x] T028 [US2] Ensure subject context resolves old default-material and child-material routes using `StudyMaterial.project_id` in `backend/system/api.py`
+- [x] T027 [US2] Ensure legacy root-backed materials are migrated to child material projects in `backend/system/api.py`
+- [x] T028 [US2] Ensure subject context resolves migrated materials and child-material routes using `StudyMaterial.project_id` in `backend/system/api.py`
 - [x] T029 [US2] Run `python -m pytest tests/test_subjects_api.py tests/test_runtime_backup_restore.py -q` and confirm legacy readability and new-write behavior pass
 
 **Checkpoint**: User Story 2 should preserve old data access without reintroducing old outward contracts.
@@ -173,7 +173,7 @@ Task: "T011 [P] [US1] Update frontend contract/static tests for SubjectSchema, S
 ```text
 Task: "T022 [P] [US2] Add JSON persistence regression for decoding old compatibilityProjectId material payloads in tests/test_runtime_backup_restore.py"
 Task: "T023 [P] [US2] Add persistence regression that newly encoded study materials write projectId and omit compatibilityProjectId in tests/test_runtime_backup_restore.py"
-Task: "T024 [P] [US2] Add subject-context regression covering a legacy default material whose project identity equals the subject root in tests/test_subjects_api.py"
+Task: "T024 [P] [US2] Add subject-context regression covering a legacy root-backed material whose project identity equals the subject root in tests/test_subjects_api.py"
 ```
 
 ## Parallel Example: User Story 3

@@ -3,7 +3,12 @@ from __future__ import annotations
 import json
 
 from backend.models.study_material import StudyMaterial, StudyMaterialType
+from backend.models.enums import SessionMode
 from backend.models.types import ProjectId, now_utc_ms
+from backend.system.api import SystemAPI
+from backend.system.inmemory_system import SessionState
+from backend.system.inmemory_system import InMemorySystem
+from backend.system.persistence_store import JsonSnapshotStore
 from backend.system.persistence_json import _decode_study_material, _encode_study_material
 from tools.backup_runtime_bundle import backup_runtime_bundle, verify_runtime_bundle
 from tools.restore_runtime_bundle import restore_runtime_bundle
@@ -46,6 +51,61 @@ def test_encode_study_material_writes_project_id_without_compatibility_project_i
 
     assert payload["projectId"] == "project_book_1"
     assert "compatibilityProjectId" not in payload
+
+
+def test_legacy_root_backed_study_material_is_migrated_to_child_project(tmp_path) -> None:
+    legacy_store = JsonSnapshotStore(tmp_path / "legacy-store.json")
+    legacy_api = SystemAPI(InMemorySystem(persist_store=legacy_store))
+    subject_root = tmp_path / "legacy-subject-root"
+    subject_id = legacy_api.create_project("旧高数", project_root=subject_root.as_posix())
+    legacy_api.import_learning_objects_from_browser_scan(
+        subject_id,
+        root_title="旧网课",
+        relative_file_paths=("第一章/1.1 极限.mp4",),
+    )
+    image_asset = legacy_api.create_media_asset(
+        subject_id,
+        content=b"legacy-image",
+        mime_type="image/png",
+        filename="legacy.png",
+    )
+    subject = legacy_api._get_active_project_metadata(subject_id)
+    s = legacy_api.sys.begin_session(subject_id, SessionMode.READ_WRITE)
+    try:
+        s._staged.study_materials = {
+            "legacy_main": StudyMaterial(
+                subject_id=subject.project_id,
+                material_id="legacy_main",
+                material_type=StudyMaterialType.COURSE,
+                title="旧网课材料",
+                created_at=subject.created_at,
+                project_id=subject.project_id,
+            )
+        }
+        s._staged.study_materials_replaced = True
+        legacy_api.sys.commit(s)
+    except Exception:
+        if s.state == SessionState.OPEN:
+            legacy_api.sys.rollback(s)
+        raise
+
+    restored_api = SystemAPI(InMemorySystem(persist_store=legacy_store))
+
+    materials = restored_api.list_subject_materials(subject_id)
+
+    assert len(materials) == 1
+    migrated = materials[0]
+    assert migrated.material_id != "legacy_main"
+    assert migrated.project_id is not None
+    assert migrated.project_id != subject_id
+    assert migrated.title == "旧网课材料"
+    assert len(restored_api.list_instances(migrated.project_id)) == 1
+    assert len(restored_api.list_learning_object_nodes(migrated.project_id)) == 3
+    assert restored_api.list_learning_object_roots(migrated.project_id)
+    assert restored_api.list_instances(subject_id) == tuple()
+    assert restored_api.list_learning_object_nodes(subject_id) == tuple()
+    assert restored_api.get_media_asset(migrated.project_id, image_asset.asset_id).project_id == migrated.project_id
+    assert restored_api.resolve_media_asset_file_path(migrated.project_id, image_asset.asset_id).read_bytes() == b"legacy-image"
 
 
 def test_backup_manifest_includes_media_checksums(tmp_path) -> None:

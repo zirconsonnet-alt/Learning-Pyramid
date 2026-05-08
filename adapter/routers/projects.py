@@ -26,7 +26,7 @@ from adapter.schemas import (
     SetProjectMaterialSourceBindingRequest,
 )
 from backend.models.enums import MaterialSourceKind, ProjectType, RollUpStrategy
-from backend.models.errors import PreconditionFailure
+from backend.models.errors import NotFound, PreconditionFailure
 from backend.models.study_material import StudyMaterialType
 from backend.system.api import SystemAPI
 from backend.system.auth_store import AuthStore
@@ -58,6 +58,52 @@ def _ensure_auth_project_access(project_id: str, request: Request, auth_store: A
     user = require_request_auth_user(request)
     if str(project_id) not in set(auth_store.list_project_ids_for_user(user.user_id)):
         raise PreconditionFailure("project is not accessible for current user")
+
+
+def _ensure_auth_material_project_ownership(request: Request, auth_store: AuthStore, materials: list | tuple) -> None:
+    if not current_runtime_features().auth_enabled:
+        return
+    user = require_request_auth_user(request)
+    allowed = set(auth_store.list_project_ids_for_user(user.user_id))
+    for item in materials:
+        project_id = getattr(item, "project_id", None)
+        if project_id is None:
+            continue
+        normalized_project_id = str(project_id)
+        if normalized_project_id in allowed:
+            continue
+        auth_store.add_project_owner(normalized_project_id, user.user_id)
+        allowed.add(normalized_project_id)
+
+
+def _load_authorized_subject_context(
+    project_id: str,
+    request: Request,
+    api: SystemAPI,
+    auth_store: AuthStore,
+) -> dict:
+    if not current_runtime_features().auth_enabled:
+        return api.get_subject_context(project_id)  # type: ignore[arg-type]
+
+    user = require_request_auth_user(request)
+    allowed = set(auth_store.list_project_ids_for_user(user.user_id))
+    if str(project_id) in allowed:
+        payload = api.get_subject_context(project_id)  # type: ignore[arg-type]
+        _ensure_auth_material_project_ownership(request, auth_store, tuple(payload["materials"]))
+        return payload
+
+    try:
+        payload = api.get_subject_context(project_id)  # type: ignore[arg-type]
+    except NotFound as exc:
+        raise PreconditionFailure("project is not accessible for current user") from exc
+
+    subject_id = str(payload["subject_project_id"])
+    if subject_id not in allowed:
+        raise PreconditionFailure("project is not accessible for current user")
+
+    auth_store.add_project_owner(project_id, user.user_id)
+    _ensure_auth_material_project_ownership(request, auth_store, tuple(payload["materials"]))
+    return payload
 
 
 def _parse_material_source_kind(raw: str | None) -> MaterialSourceKind:
@@ -116,6 +162,7 @@ def create_subject(
     if current_runtime_features().auth_enabled:
         user = require_request_auth_user(request)
         auth_store.add_project_owner(pid, user.user_id)
+        _ensure_auth_material_project_ownership(request, auth_store, api.list_subject_materials(pid))
     return {"ok": True, "data": {"subjectId": str(pid), "subjectProjectId": str(pid)}}
 
 
@@ -157,6 +204,7 @@ def list_subject_materials(
 ) -> dict:
     _ensure_auth_subject_access(subjectId, request, auth_store)
     items = api.list_subject_materials(subjectId)  # type: ignore[arg-type]
+    _ensure_auth_material_project_ownership(request, auth_store, items)
     return {"ok": True, "data": [study_material_to_dto(item) for item in items]}
 
 
@@ -174,9 +222,7 @@ def create_subject_material(
         material_type=_parse_study_material_type(req.materialType),
         title=req.title,
     )
-    if current_runtime_features().auth_enabled and item.project_id is not None:
-        user = require_request_auth_user(request)
-        auth_store.add_project_owner(item.project_id, user.user_id)
+    _ensure_auth_material_project_ownership(request, auth_store, (item,))
     return {"ok": True, "data": study_material_to_dto(item)}
 
 
@@ -224,8 +270,7 @@ def get_project_subject_context(
     api: SystemAPI = Depends(get_api),
     auth_store: AuthStore = Depends(get_auth_store),
 ) -> dict:
-    _ensure_auth_project_access(projectId, request, auth_store)
-    payload = api.get_subject_context(projectId)  # type: ignore[arg-type]
+    payload = _load_authorized_subject_context(projectId, request, api, auth_store)
     return {"ok": True, "data": subject_context_to_dto(payload)}
 
 

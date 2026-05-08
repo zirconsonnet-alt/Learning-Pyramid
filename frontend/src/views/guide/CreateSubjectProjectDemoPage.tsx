@@ -120,7 +120,7 @@ export function CreateSubjectProjectDemoPage() {
 
               {subjectCreated ? (
                 <div className="rounded-[1.25rem] border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-                  “{subjectTitle.trim()}” 已在本次演示中创建，并自动带出一个默认网课项目。
+                  “{subjectTitle.trim()}” 已在本次演示中创建，并自动带出第一个网课项目。
                 </div>
               ) : null}
             </CardContent>
@@ -135,7 +135,7 @@ export function CreateSubjectProjectDemoPage() {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <div className="text-sm font-semibold text-foreground">线性代数视频课</div>
-                    <div className="mt-1 text-xs text-muted-foreground">默认网课项目 · 只存在于本次演示</div>
+                    <div className="mt-1 text-xs text-muted-foreground">网课项目 · 只存在于本次演示</div>
                   </div>
                   <Button
                     type="button"

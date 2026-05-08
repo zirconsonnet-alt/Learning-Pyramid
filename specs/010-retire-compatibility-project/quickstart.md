@@ -38,7 +38,7 @@ npm run build
 
 1. Create a subject.
 2. Confirm the subject opens in the subject dashboard and still routes into subject-level settings correctly.
-3. Create at least one non-default material project under that subject.
+3. Confirm the subject has an automatically created first material project whose project id is different from the subject root id.
 4. Open the material project workbench and project settings.
 5. Confirm Pomodoro project selection offers only real material projects, not the subject root.
 6. Delete a material project and confirm the subject remains.
@@ -49,9 +49,10 @@ npm run build
 
 - Current subject contracts expose `subjectProjectId` and not `compatibilityProjectId`.
 - Current material contracts expose `projectId` and not `compatibilityProjectId`.
-- Historical records using the retired field names remain readable.
+- Historical records using the retired field names remain readable, and historical root-backed materials are migrated to independent material projects.
 - AppShell, settings, and Pomodoro still distinguish subject-root scope from material-project scope correctly.
 - User-facing docs no longer describe a compatibility-project concept.
+- User-facing docs no longer describe a default-project concept.
 
 ## Latest Validation Notes
 

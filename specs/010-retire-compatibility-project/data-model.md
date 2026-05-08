@@ -35,7 +35,7 @@ Fields:
 Validation rules:
 
 - Every material belongs to exactly one subject.
-- `projectId` may equal the subject-root anchor for legacy default-material behavior, but that legacy case must still be represented through `projectId`, not the retired compatibility field name.
+- `projectId` must point to a material project. Historical records where `projectId` equals the subject-root anchor are migrated to an independent material project before normal product flows expose them.
 - Current outward product contracts must not expose `compatibilityProjectId` for a material.
 
 ## Material Project
@@ -71,7 +71,7 @@ Validation rules:
 
 - Subject context must always distinguish subject-root scope from material-project scope explicitly.
 - When the current route is a material project, `currentMaterial.projectId` must resolve the active project target.
-- When the current route is the subject root, the context must still identify the current default material without reintroducing the retired naming concept.
+- When the current route is the subject root, the context may identify the first available material for navigation, but that material must still be an independent material project.
 
 ## Legacy Subject/Material Record
 

@@ -14,6 +14,10 @@ from adapter.deps import (
     get_membership_store,
 )
 from adapter.main import create_app
+from backend.models.enums import SessionMode
+from backend.models.study_material import StudyMaterial, StudyMaterialType
+from backend.models.types import ProjectId
+from backend.system.inmemory_system import SessionState
 
 
 def _reset_caches() -> None:
@@ -53,7 +57,7 @@ def _flatten_outline_from_learning_object_nodes(nodes: list[dict]) -> list[tuple
     return outline
 
 
-def test_subject_creates_default_course_material_project(monkeypatch, tmp_path: Path) -> None:
+def test_subject_creates_first_course_material_as_independent_project(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("PLM_APP_MODE", "local")
     monkeypatch.setenv("PLM_ENABLE_AUTH", "false")
     monkeypatch.setenv("PLM_STORE_PATH", "")
@@ -94,12 +98,15 @@ def test_subject_creates_default_course_material_project(monkeypatch, tmp_path: 
     assert materials_resp.status_code == 200
     materials = materials_resp.json()["data"]
     assert len(materials) == 1
-    assert materials[0]["subjectId"] == subject_id
-    assert materials[0]["materialId"] == "legacy_main"
-    assert materials[0]["materialType"] == "COURSE"
-    assert materials[0]["title"] == "网课材料"
-    assert materials[0]["projectId"] == subject_id
-    assert "compatibilityProjectId" not in materials[0]
+    first_course_material = materials[0]
+    first_course_project_id = first_course_material["projectId"]
+    assert first_course_material["subjectId"] == subject_id
+    assert first_course_material["materialId"] != "legacy_main"
+    assert first_course_material["materialType"] == "COURSE"
+    assert first_course_material["title"] == "网课材料"
+    assert first_course_project_id
+    assert first_course_project_id != subject_id
+    assert "compatibilityProjectId" not in first_course_material
 
     create_book_resp = client.post(
         f"/api/subjects/{subject_id}/materials",
@@ -124,12 +131,12 @@ def test_subject_creates_default_course_material_project(monkeypatch, tmp_path: 
     projects_resp = client.get("/api/projects")
     assert projects_resp.status_code == 200
     project_ids = {item["projectId"] for item in projects_resp.json()["data"]}
-    assert {subject_id, book_project_id}.issubset(project_ids)
+    assert {subject_id, first_course_project_id, book_project_id}.issubset(project_ids)
 
     materials_after_create = client.get(f"/api/subjects/{subject_id}/materials")
     assert materials_after_create.status_code == 200
     material_ids = {item["materialId"] for item in materials_after_create.json()["data"]}
-    assert "legacy_main" in material_ids
+    assert first_course_material["materialId"] in material_ids
     assert book_material["materialId"] in material_ids
 
     child_view = client.get(f"/api/subjects/{book_project_id}/materials")
@@ -151,6 +158,7 @@ def test_subject_creates_default_course_material_project(monkeypatch, tmp_path: 
     assert remaining_projects_resp.status_code == 200
     remaining_project_ids = {item["projectId"] for item in remaining_projects_resp.json()["data"]}
     assert subject_id not in remaining_project_ids
+    assert first_course_project_id not in remaining_project_ids
     assert book_project_id not in remaining_project_ids
     remaining_subjects_resp = client.get("/api/subjects")
     assert remaining_subjects_resp.status_code == 200
@@ -173,6 +181,13 @@ def test_subject_context_and_material_management_endpoints(monkeypatch, tmp_path
     create_subject_resp = client.post("/api/subjects", json={"title": "高等数学"})
     assert create_subject_resp.status_code == 200
     subject_id = create_subject_resp.json()["data"]["subjectId"]
+    materials_resp = client.get(f"/api/subjects/{subject_id}/materials")
+    assert materials_resp.status_code == 200
+    first_course_material = materials_resp.json()["data"][0]
+    first_course_material_id = first_course_material["materialId"]
+    first_course_project_id = first_course_material["projectId"]
+    assert first_course_material_id != "legacy_main"
+    assert first_course_project_id != subject_id
 
     create_book_resp = client.post(
         f"/api/subjects/{subject_id}/materials",
@@ -192,10 +207,10 @@ def test_subject_context_and_material_management_endpoints(monkeypatch, tmp_path
     assert root_context["subject"]["subjectId"] == subject_id
     assert root_context["subjectProjectId"] == subject_id
     assert root_context["currentProjectId"] == subject_id
-    assert root_context["currentMaterial"]["materialId"] == "legacy_main"
-    assert root_context["currentMaterial"]["projectId"] == subject_id
+    assert root_context["currentMaterial"]["materialId"] == first_course_material_id
+    assert root_context["currentMaterial"]["projectId"] == first_course_project_id
     assert "compatibilityProjectId" not in root_context["currentMaterial"]
-    assert {item["materialId"] for item in root_context["materials"]} == {"legacy_main", book_material_id}
+    assert {item["materialId"] for item in root_context["materials"]} == {first_course_material_id, book_material_id}
 
     child_context_resp = client.get(f"/api/projects/{book_project_id}/subject-context")
     assert child_context_resp.status_code == 200
@@ -239,12 +254,13 @@ def test_subject_context_and_material_management_endpoints(monkeypatch, tmp_path
     remaining_materials_resp = client.get(f"/api/subjects/{subject_id}/materials")
     assert remaining_materials_resp.status_code == 200
     remaining_materials = remaining_materials_resp.json()["data"]
-    assert [item["materialId"] for item in remaining_materials] == ["legacy_main"]
+    assert [item["materialId"] for item in remaining_materials] == [first_course_material_id]
 
     remaining_projects_resp = client.get("/api/projects")
     assert remaining_projects_resp.status_code == 200
     remaining_project_ids = {item["projectId"] for item in remaining_projects_resp.json()["data"]}
     assert subject_id in remaining_project_ids
+    assert first_course_project_id in remaining_project_ids
     assert book_project_id not in remaining_project_ids
 
     delete_subject_resp = client.delete(f"/api/subjects/{subject_id}")
@@ -274,9 +290,12 @@ def test_subject_material_projects_can_all_be_deleted(monkeypatch, tmp_path: Pat
     materials_resp = client.get(f"/api/subjects/{subject_id}/materials")
     assert materials_resp.status_code == 200
     materials = materials_resp.json()["data"]
-    assert [item["materialId"] for item in materials] == ["legacy_main"]
+    assert len(materials) == 1
+    first_course_material = materials[0]
+    assert first_course_material["materialId"] != "legacy_main"
+    assert first_course_material["projectId"] != subject_id
 
-    delete_material_resp = client.delete(f"/api/subjects/{subject_id}/materials/legacy_main")
+    delete_material_resp = client.delete(f"/api/subjects/{subject_id}/materials/{first_course_material['materialId']}")
     assert delete_material_resp.status_code == 200
 
     subjects_after_delete_resp = client.get("/api/subjects")
@@ -315,7 +334,7 @@ def test_subject_material_projects_can_all_be_deleted(monkeypatch, tmp_path: Pat
     _reset_caches()
 
 
-def test_deleting_default_subject_material_keeps_hosted_subject_access(monkeypatch, tmp_path: Path) -> None:
+def test_deleting_first_subject_material_keeps_hosted_subject_access(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("PLM_APP_MODE", "hosted")
     monkeypatch.setenv("PLM_ENABLE_AUTH", "true")
     monkeypatch.setenv("PLM_ALLOW_SIGNUP", "true")
@@ -337,6 +356,11 @@ def test_deleting_default_subject_material_keeps_hosted_subject_access(monkeypat
     create_subject_resp = client.post("/api/subjects", json={"title": "高等数学"})
     assert create_subject_resp.status_code == 200
     subject_id = create_subject_resp.json()["data"]["subjectId"]
+    materials_resp = client.get(f"/api/subjects/{subject_id}/materials")
+    assert materials_resp.status_code == 200
+    first_course = materials_resp.json()["data"][0]
+    assert first_course["materialId"] != "legacy_main"
+    assert first_course["projectId"] != subject_id
 
     create_course_resp = client.post(
         f"/api/subjects/{subject_id}/materials",
@@ -346,8 +370,8 @@ def test_deleting_default_subject_material_keeps_hosted_subject_access(monkeypat
     second_course = create_course_resp.json()["data"]
     assert second_course["projectId"] != subject_id
 
-    delete_default_resp = client.delete(f"/api/subjects/{subject_id}/materials/legacy_main")
-    assert delete_default_resp.status_code == 200
+    delete_first_resp = client.delete(f"/api/subjects/{subject_id}/materials/{first_course['materialId']}")
+    assert delete_first_resp.status_code == 200
 
     subjects_after_delete_resp = client.get("/api/subjects")
     assert subjects_after_delete_resp.status_code == 200
@@ -366,6 +390,73 @@ def test_deleting_default_subject_material_keeps_hosted_subject_access(monkeypat
     _reset_caches()
 
 
+def test_hosted_legacy_root_material_migration_grants_child_project_access(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PLM_APP_MODE", "hosted")
+    monkeypatch.setenv("PLM_ENABLE_AUTH", "true")
+    monkeypatch.setenv("PLM_ALLOW_SIGNUP", "true")
+    monkeypatch.setenv("PLM_REQUIRE_SIGNUP_INVITE", "false")
+    monkeypatch.setenv("PLM_ENABLE_ASR", "false")
+    monkeypatch.setenv("PLM_ENABLE_SERVER_MEDIA_STREAM", "false")
+    monkeypatch.setenv("PLM_PROJECTS_ROOT", str(tmp_path / "projects"))
+    monkeypatch.setenv("PLM_STORE_PATH", "")
+    monkeypatch.setenv("PLM_LEGACY_STORE_PATH", "")
+    monkeypatch.setenv("PLM_STORE_DB_PATH", str(tmp_path / "plm_store.sqlite3"))
+    monkeypatch.setenv("PLM_AUTH_DB_PATH", str(tmp_path / "plm_auth.sqlite3"))
+    monkeypatch.setenv("PLM_MEMBERSHIP_DB_PATH", str(tmp_path / "plm_membership.sqlite3"))
+    _reset_caches()
+
+    client = TestClient(create_app())
+    register_resp = client.post("/api/auth/register", json={"email": "legacy-owner@example.com", "password": "password123"})
+    assert register_resp.status_code == 200
+    user_id = register_resp.json()["data"]["userId"]
+
+    api = get_api()
+    auth_store = get_auth_store()
+    subject_id = api.create_project("旧高数")
+    auth_store.add_project_owner(subject_id, user_id)
+    subject = api._get_active_project_metadata(subject_id)
+    session = api.sys.begin_session(subject_id, SessionMode.READ_WRITE)
+    try:
+        session._staged.study_materials = {
+            "legacy_main": StudyMaterial(
+                subject_id=ProjectId(str(subject_id)),
+                material_id="legacy_main",
+                material_type=StudyMaterialType.COURSE,
+                title="旧网课材料",
+                created_at=subject.created_at,
+                project_id=ProjectId(str(subject_id)),
+            )
+        }
+        session._staged.study_materials_replaced = True
+        api.sys.commit(session)
+        sql_store = api._sql_store()
+        assert sql_store is not None
+        api._persist_project_store_sql_direct(sql_store, subject_id)
+        api._reload_sql_state()
+    except Exception:
+        if session.state == SessionState.OPEN:
+            api.sys.rollback(session)
+        raise
+
+    materials_resp = client.get(f"/api/subjects/{subject_id}/materials")
+    assert materials_resp.status_code == 200
+    materials = materials_resp.json()["data"]
+    assert len(materials) == 1
+    migrated = materials[0]
+    migrated_project_id = migrated["projectId"]
+    assert migrated["materialId"] != "legacy_main"
+    assert migrated_project_id != subject_id
+    assert str(migrated_project_id) in auth_store.list_project_ids_for_user(user_id)
+
+    context_resp = client.get(f"/api/projects/{migrated_project_id}/subject-context")
+    assert context_resp.status_code == 200
+    context = context_resp.json()["data"]
+    assert context["subject"]["subjectId"] == subject_id
+    assert context["currentMaterial"]["projectId"] == migrated_project_id
+
+    _reset_caches()
+
+
 def test_initialize_book_from_course_material_tree(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("PLM_APP_MODE", "local")
     monkeypatch.setenv("PLM_ENABLE_AUTH", "false")
@@ -380,9 +471,16 @@ def test_initialize_book_from_course_material_tree(monkeypatch, tmp_path: Path) 
     create_subject_resp = client.post("/api/subjects", json={"title": "高等数学"})
     assert create_subject_resp.status_code == 200
     subject_id = create_subject_resp.json()["data"]["subjectId"]
+    materials_resp = client.get(f"/api/subjects/{subject_id}/materials")
+    assert materials_resp.status_code == 200
+    course_material = materials_resp.json()["data"][0]
+    course_material_id = course_material["materialId"]
+    course_project_id = course_material["projectId"]
+    assert course_material_id != "legacy_main"
+    assert course_project_id != subject_id
 
     import_course_resp = client.post(
-        f"/api/projects/{subject_id}/import-learning-objects-from-browser",
+        f"/api/projects/{course_project_id}/import-learning-objects-from-browser",
         json={
             "rootTitle": "高数网课",
             "relativeFilePaths": [
@@ -406,7 +504,7 @@ def test_initialize_book_from_course_material_tree(monkeypatch, tmp_path: Path) 
 
     initialize_from_course_resp = client.post(
         f"/api/projects/{book_project_id}/initialize-book-learning-objects-from-material",
-        json={"sourceMaterialId": "legacy_main"},
+        json={"sourceMaterialId": course_material_id},
     )
     assert initialize_from_course_resp.status_code == 200
     init_data = initialize_from_course_resp.json()["data"]
@@ -414,7 +512,7 @@ def test_initialize_book_from_course_material_tree(monkeypatch, tmp_path: Path) 
     assert init_data["created_learning_object_nodes_count"] == 6
     assert init_data["root_count"] == 1
 
-    source_nodes_resp = client.get(f"/api/projects/{subject_id}/learning-object-nodes")
+    source_nodes_resp = client.get(f"/api/projects/{course_project_id}/learning-object-nodes")
     assert source_nodes_resp.status_code == 200
     target_nodes_resp = client.get(f"/api/projects/{book_project_id}/learning-object-nodes")
     assert target_nodes_resp.status_code == 200
