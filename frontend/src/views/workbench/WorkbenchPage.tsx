@@ -11,6 +11,7 @@ import { getInstancePlaybackDescriptor } from "@/ui/api/media"
 import type { LearningTaskNode } from "@/ui/api/learningTaskNodes"
 import type { ProjectType } from "@/ui/api/projects"
 import { ContentNotice } from "@/ui/components/contentEmptyState"
+import { DesktopPet } from "@/ui/components/DesktopPet"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
@@ -42,6 +43,7 @@ import { LearningObjectTree } from "@/views/workbench/components/LearningObjectT
 import { ReviewPane } from "@/views/workbench/components/ReviewPane"
 import { RollupPane } from "@/views/workbench/components/RollupPane"
 import { VideoPane } from "@/views/workbench/components/VideoPane"
+import { WorkbenchPetAssistant } from "@/views/workbench/components/WorkbenchPetAssistant"
 import { estimateProjectStudyTime } from "@/views/workbench/studyEstimate"
 
 function formatApiError(err: unknown) {
@@ -1047,6 +1049,21 @@ export function WorkbenchPage() {
               {queueQ.error ? <p className="text-sm text-destructive">{formatApiError(queueQ.error)}</p> : null}
             </CardContent>
           </Card>
+          <DesktopPet page="workbench">
+            <WorkbenchPetAssistant
+              projectId={pid}
+              instance={instance}
+              currentMs={currentMs}
+              workStatusDetail={workStatusDetail}
+              usesResolvableCourseAnchor={usesResolvableCourseAnchor}
+              onOpenEvidence={(evidence) => {
+                onOpenAnchor({
+                  instanceId: evidence.instanceId,
+                  position: `t=${Math.max(0, Math.floor((evidence.startMs + evidence.endMs) / 2))}`,
+                })
+              }}
+            />
+          </DesktopPet>
         </aside>
       </div>
     </div>

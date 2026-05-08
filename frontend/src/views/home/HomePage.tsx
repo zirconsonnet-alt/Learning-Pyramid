@@ -21,6 +21,7 @@ import carouselTakeNotes from "@/assets/carousel-take-notes.webp"
 import methodFocusCompression from "@/assets/method-focus-compression.webp"
 import methodInterleavedReview from "@/assets/method-interleaved-review.webp"
 import methodLayeredReview from "@/assets/method-layered-review.webp"
+import { DesktopPet } from "@/ui/components/DesktopPet"
 import { usePageMeta } from "@/ui/seo/usePageMeta"
 import { ShowcaseFooter, ShowcaseSiteHeader, useShowcaseEntryPaths } from "@/views/home/ShowcaseChrome"
 
@@ -502,6 +503,7 @@ export function HomePage() {
         </section>
 
       </main>
+      <DesktopPet page="home" />
       <ShowcaseFooter />
     </div>
   )

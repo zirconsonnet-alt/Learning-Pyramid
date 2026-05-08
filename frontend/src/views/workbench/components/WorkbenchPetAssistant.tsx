@@ -1,0 +1,469 @@
+import { useEffect, useMemo, useRef, useState } from "react"
+import { Copy, Send, Sparkles, Square } from "lucide-react"
+
+import type { Instance } from "@/ui/api/instances"
+import type { MaterialSourceKind } from "@/ui/api/projects"
+import { ApiError } from "@/ui/api/http"
+import { askProjectLlmStream } from "@/ui/api/system"
+import { MarkdownRichText } from "@/ui/components/MarkdownRichText"
+import { Button } from "@/ui/components/ui/button"
+import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
+import { askCourseAgent } from "@/ui/llm/courseAgent"
+import { useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
+import { useMembershipSummary } from "@/ui/queries/membership"
+import { useProjectMaterialSourceBinding } from "@/ui/queries/projects"
+import { useSystemCapabilities } from "@/ui/queries/system"
+import type { AiChatCourseEvidence } from "@/ui/store/aiChatStore"
+import { showInfoFeedback } from "@/ui/store/feedbackStore"
+import { touchDailyStudyActivity } from "@/ui/store/workbenchDailyStats"
+import { buildSubtitleContextText, loadSubtitleDocumentForInstance } from "@/ui/subtitles/subtitleSupport"
+import { cn } from "@/ui/utils"
+
+type WorkbenchPetAssistantTurn = {
+  id: string
+  role: "user" | "assistant"
+  content: string
+  createdAt: number
+  evidence?: AiChatCourseEvidence[]
+}
+
+type WorkbenchPetAssistantProps = {
+  projectId: string
+  instance: Instance | null
+  currentMs: number
+  workStatusDetail: string
+  usesResolvableCourseAnchor: boolean
+  onOpenEvidence?: (evidence: AiChatCourseEvidence) => void
+}
+
+const QA_ACTIVITY_WINDOW_MS = 30_000
+
+function createLocalId() {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+function formatAssistantError(error: unknown) {
+  if (error instanceof ApiError) return `${error.code}: ${error.message}`
+  if (error instanceof Error) return error.message
+  return "雪豹助手暂时不可用"
+}
+
+function formatPlaybackClock(ms: number) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000))
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+  }
+  return `${minutes}:${String(seconds).padStart(2, "0")}`
+}
+
+function formatEvidenceTimeRange(startMs: number, endMs: number) {
+  return startMs === endMs ? formatPlaybackClock(startMs) : `${formatPlaybackClock(startMs)}-${formatPlaybackClock(endMs)}`
+}
+
+function buildConversationPrompt(messages: WorkbenchPetAssistantTurn[], latestUserInput: string) {
+  const recentBlocks: string[] = []
+  let charBudget = 4_000
+
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    const block = `${message.role === "user" ? "用户" : "雪豹助手"}：\n${message.content.trim()}`
+    if (!block.trim()) continue
+    if (recentBlocks.length > 0 && block.length > charBudget) break
+    recentBlocks.unshift(block)
+    charBudget -= block.length
+  }
+
+  const sections = recentBlocks.length > 0 ? ["以下是同一个工作台弹窗里的最近对话，请延续上下文回答最后一个用户问题。", ...recentBlocks] : []
+  sections.push(`用户：\n${latestUserInput.trim()}`)
+  return sections.join("\n\n")
+}
+
+function buildWorkbenchSystemPrompt(nodeLabel: string) {
+  return [
+    "请使用简体中文回答。",
+    "你是学习工作台右侧桌宠弹窗里的 AI 问答助手。",
+    `当前问答围绕“${nodeLabel}”和工作台状态展开。`,
+    "优先使用当前内容、播放位置、字幕和项目上下文，不要编造项目内不存在的事实。",
+    "回答要直接、可执行；如果上下文不足，请明确说明还缺什么。",
+  ].join(" ")
+}
+
+function buildWorkbenchSupplementalContext(params: {
+  instance: Instance | null
+  currentMs: number
+  workStatusDetail: string
+  sourceKind: MaterialSourceKind | null
+}) {
+  const lines = ["Workbench context:"]
+  lines.push(`Status: ${params.workStatusDetail}`)
+  if (params.instance) {
+    lines.push(`Current material: ${params.instance.materialDisplayName || params.instance.materialId}`)
+    lines.push(`Instance ID: ${params.instance.instanceId}`)
+    lines.push(`Material ID: ${params.instance.materialId}`)
+    lines.push(`Playback position: ${formatPlaybackClock(params.currentMs)} (${Math.max(0, Math.floor(params.currentMs))} ms)`)
+  } else {
+    lines.push("Current material: none selected")
+  }
+  if (params.sourceKind) lines.push(`Material source kind: ${params.sourceKind}`)
+  return lines.join("\n")
+}
+
+async function copyText(text: string) {
+  if (!text.trim()) return
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+  throw new Error("当前环境不支持剪贴板")
+}
+
+export function WorkbenchPetAssistant({
+  projectId,
+  instance,
+  currentMs,
+  workStatusDetail,
+  usesResolvableCourseAnchor,
+  onOpenEvidence,
+}: WorkbenchPetAssistantProps) {
+  const [composer, setComposer] = useState("")
+  const [turns, setTurns] = useState<WorkbenchPetAssistantTurn[]>([])
+  const [status, setStatus] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [isAsking, setIsAsking] = useState(false)
+  const abortRef = useRef<AbortController | null>(null)
+  const threadEndRef = useRef<HTMLDivElement | null>(null)
+
+  const capabilitiesQ = useSystemCapabilities()
+  const authEnabled = capabilitiesQ.data?.authEnabled ?? false
+  const membershipQ = useMembershipSummary(authEnabled)
+  const materialSourceBindingQ = useProjectMaterialSourceBinding(projectId)
+  const directoryBinding = useProjectDirectoryBinding(projectId)
+
+  const sourceKind = (instance?.mediaSourceKind ?? materialSourceBindingQ.data?.sourceKind ?? null) as MaterialSourceKind | null
+  const llmConfigured = capabilitiesQ.data?.llmConfigured ?? false
+  const memberBlocked = authEnabled && (membershipQ.isLoading || Boolean(membershipQ.error) || !membershipQ.data?.isActive)
+  const virtualProjectBlocked = isVirtualStudyReviewProjectId(projectId)
+  const nodeLabel = instance?.materialDisplayName || instance?.materialId || "当前工作台"
+  const canUseCourseAgent =
+    usesResolvableCourseAnchor &&
+    !!instance &&
+    !!sourceKind &&
+    (sourceKind !== "BROWSER_LOCAL" || directoryBinding.permission === "granted")
+
+  const disabledReason = useMemo(() => {
+    if (virtualProjectBlocked) return "引导示范项目不提供 AI 对话。"
+    if (capabilitiesQ.isLoading) return "正在确认 AI 服务状态..."
+    if (!llmConfigured) return "当前还没有配置可用的 LLM 服务。"
+    if (memberBlocked) return "雪豹问答是会员专属功能，请先前往会员中心开通会员。"
+    return null
+  }, [capabilitiesQ.isLoading, llmConfigured, memberBlocked, virtualProjectBlocked])
+  const interactionDisabled = !!disabledReason || isAsking
+
+  useEffect(() => {
+    return () => abortRef.current?.abort()
+  }, [])
+
+  useEffect(() => {
+    threadEndRef.current?.scrollIntoView({ block: "nearest" })
+  }, [turns, status])
+
+  async function loadSubtitleSupplementalContext() {
+    if (!canUseCourseAgent || !instance || !sourceKind) return null
+    try {
+      const document = await loadSubtitleDocumentForInstance({
+        projectId,
+        instance,
+        sourceKind,
+      })
+      if (!document) return null
+      return buildSubtitleContextText({
+        nodeLabel,
+        fileName: document.fileName,
+        segments: document.segments,
+        anchorMs: currentMs,
+      })
+    } catch {
+      return null
+    }
+  }
+
+  async function askWithProjectContext(params: {
+    prompt: string
+    historyMessages: WorkbenchPetAssistantTurn[]
+    controller: AbortController
+    assistantTurnId: string
+  }) {
+    setStatus("正在整理工作台上下文...")
+    const subtitleContext = await loadSubtitleSupplementalContext()
+    if (params.controller.signal.aborted) return null
+
+    const supplementalContext = [
+      buildWorkbenchSupplementalContext({ instance, currentMs, workStatusDetail, sourceKind }),
+      subtitleContext,
+    ]
+      .filter((item): item is string => !!item?.trim())
+      .join("\n\n")
+
+    const result = await askProjectLlmStream(
+      projectId,
+      {
+        prompt: buildConversationPrompt(params.historyMessages, params.prompt),
+        systemPrompt: buildWorkbenchSystemPrompt(nodeLabel),
+        supplementalContext,
+        temperature: 0.2,
+      },
+      {
+        timeoutMs: 90_000,
+        signal: params.controller.signal,
+        onDelta: (_chunk, accumulated) => {
+          touchDailyStudyActivity(projectId, "aiQa", QA_ACTIVITY_WINDOW_MS)
+          setTurns((current) =>
+            current.map((turn) => (turn.id === params.assistantTurnId ? { ...turn, content: accumulated } : turn)),
+          )
+        },
+      },
+    )
+
+    return result.content
+  }
+
+  async function submitQuestion() {
+    const prompt = composer.trim()
+    if (!prompt) {
+      setError("先输入一个问题，再让雪豹帮你看工作台。")
+      return
+    }
+    if (interactionDisabled) {
+      setError(disabledReason ?? "雪豹助手正在回答上一个问题。")
+      return
+    }
+
+    touchDailyStudyActivity(projectId, "aiQa", QA_ACTIVITY_WINDOW_MS)
+    const controller = new AbortController()
+    abortRef.current = controller
+    const historyMessages = turns
+    const userTurn: WorkbenchPetAssistantTurn = {
+      id: createLocalId(),
+      role: "user",
+      content: prompt,
+      createdAt: Date.now(),
+    }
+    const assistantTurnId = createLocalId()
+
+    setTurns((current) => [...current, userTurn])
+    setComposer("")
+    setError(null)
+    setStatus("正在读取当前工作台...")
+    setIsAsking(true)
+
+    try {
+      if (canUseCourseAgent && instance && sourceKind) {
+        try {
+          setStatus("正在检索当前内容字幕...")
+          const result = await askCourseAgent({
+            projectId,
+            instance,
+            sourceKind,
+            nodeLabel,
+            userPrompt: prompt,
+            systemPrompt: buildWorkbenchSystemPrompt(nodeLabel),
+            anchorMs: currentMs,
+            initialFrame: null,
+            canCaptureVideoFrame: false,
+            historyMessages: historyMessages.map((turn) => ({
+              role: turn.role,
+              content: turn.content,
+            })),
+            temperature: 0.2,
+            signal: controller.signal,
+            timeoutMs: 90_000,
+            onStatus: (nextStatus) => {
+              touchDailyStudyActivity(projectId, "aiQa", QA_ACTIVITY_WINDOW_MS)
+              setStatus(nextStatus)
+            },
+          })
+          if (controller.signal.aborted) return
+          setTurns((current) => [
+            ...current,
+            {
+              id: assistantTurnId,
+              role: "assistant",
+              content: result.content,
+              createdAt: Date.now(),
+              evidence: result.evidence,
+            },
+          ])
+          setStatus(null)
+          return
+        } catch {
+          if (controller.signal.aborted) return
+          setStatus("当前内容上下文不足，正在切换到项目问答...")
+        }
+      }
+
+      setTurns((current) => [
+        ...current,
+        {
+          id: assistantTurnId,
+          role: "assistant",
+          content: "",
+          createdAt: Date.now(),
+        },
+      ])
+      const content = await askWithProjectContext({
+        prompt,
+        historyMessages,
+        controller,
+        assistantTurnId,
+      })
+      if (controller.signal.aborted || content === null) return
+      setTurns((current) =>
+        current.map((turn) => (turn.id === assistantTurnId ? { ...turn, content: content.trim() || "我没有拿到可用回答。" } : turn)),
+      )
+      setStatus(null)
+    } catch (requestError) {
+      if (controller.signal.aborted) return
+      setError(formatAssistantError(requestError))
+      setStatus(null)
+      setTurns((current) => current.filter((turn) => turn.id !== assistantTurnId || turn.content.trim()))
+    } finally {
+      if (abortRef.current === controller) {
+        abortRef.current = null
+      }
+      setIsAsking(false)
+    }
+  }
+
+  function stopQuestion() {
+    abortRef.current?.abort()
+    abortRef.current = null
+    setIsAsking(false)
+    setStatus(null)
+  }
+
+  async function copyLatestAnswer() {
+    const latestAssistantTurn = [...turns].reverse().find((turn) => turn.role === "assistant" && turn.content.trim())
+    if (!latestAssistantTurn) return
+    try {
+      await copyText(latestAssistantTurn.content)
+      showInfoFeedback("回答已复制", "雪豹助手的最新回答已经复制到剪贴板。")
+    } catch (copyError) {
+      setError(formatAssistantError(copyError))
+    }
+  }
+
+  const hasConversation = turns.length > 0
+
+  return (
+    <section className="flex h-full flex-col rounded-[1.25rem] border border-border/80 bg-background/95 p-3 shadow-[0_24px_70px_-42px_rgba(31,41,55,0.55)] backdrop-blur">
+      <header className="flex items-start gap-2 border-b border-border/70 pb-2.5">
+        <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+          <Sparkles className="h-4 w-4" />
+        </span>
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-foreground">问问雪豹</div>
+          <div className="mt-0.5 truncate text-xs text-muted-foreground">{nodeLabel}</div>
+        </div>
+      </header>
+
+      <div className="mt-3 min-h-[180px] flex-1 space-y-3 overflow-y-auto pr-1">
+        {!hasConversation ? (
+          <div className="rounded-[1rem] border border-dashed border-border/80 bg-muted/30 px-3 py-3 text-xs leading-5 text-muted-foreground">
+            鼠标停在雪豹身上就能在这里提问。它会优先读取当前内容、播放位置和字幕，再结合工作台状态回答。
+          </div>
+        ) : null}
+        {turns.map((turn) => (
+          <article key={turn.id} className={cn("space-y-2", turn.role === "user" ? "text-right" : "text-left")}>
+            <div
+              className={cn(
+                "inline-block max-w-[92%] rounded-[1rem] px-3 py-2 text-sm leading-6",
+                turn.role === "user"
+                  ? "bg-primary text-primary-foreground"
+                  : "border border-border/70 bg-card text-card-foreground",
+              )}
+            >
+              {turn.role === "assistant" ? (
+                turn.content.trim() ? (
+                  <MarkdownRichText text={turn.content} className="space-y-2" textClassName="text-sm leading-6" />
+                ) : (
+                  <span className="text-muted-foreground">正在组织回答...</span>
+                )
+              ) : (
+                <span className="whitespace-pre-wrap">{turn.content}</span>
+              )}
+            </div>
+            {turn.evidence?.length ? (
+              <div className="flex flex-wrap gap-1.5">
+                {turn.evidence.slice(0, 4).map((evidence, index) => (
+                  <button
+                    key={`${evidence.kind}-${evidence.startMs}-${index}`}
+                    type="button"
+                    className="rounded-full border border-border/80 bg-background px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary"
+                    onClick={() => onOpenEvidence?.(evidence)}
+                  >
+                    {formatEvidenceTimeRange(evidence.startMs, evidence.endMs)} · {evidence.title}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </article>
+        ))}
+        <div ref={threadEndRef} />
+      </div>
+
+      {status ? <div className="mt-2 rounded-lg bg-primary/10 px-3 py-2 text-xs text-primary">{status}</div> : null}
+      {error ? <div className="mt-2 rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">{error}</div> : null}
+      {disabledReason ? <div className="mt-2 rounded-lg bg-muted/60 px-3 py-2 text-xs text-muted-foreground">{disabledReason}</div> : null}
+
+      <form
+        className="mt-3 space-y-2"
+        onSubmit={(event) => {
+          event.preventDefault()
+          void submitQuestion()
+        }}
+      >
+        <textarea
+          value={composer}
+          onChange={(event) => setComposer(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault()
+              void submitQuestion()
+            }
+          }}
+          disabled={!!disabledReason}
+          rows={3}
+          className="min-h-[74px] w-full resize-none rounded-[1rem] border border-input bg-background px-3 py-2 text-sm leading-5 outline-none transition-colors placeholder:text-muted-foreground focus:border-primary/50 focus:ring-2 focus:ring-primary/15 disabled:cursor-not-allowed disabled:opacity-60"
+          placeholder="问当前内容、进度或复述点..."
+        />
+        <div className="flex items-center justify-between gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="复制最新回答"
+            title="复制最新回答"
+            onClick={() => void copyLatestAnswer()}
+            disabled={!turns.some((turn) => turn.role === "assistant" && turn.content.trim())}
+          >
+            <Copy className="h-4 w-4" />
+          </Button>
+          {isAsking ? (
+            <Button type="button" variant="outline" size="sm" onClick={stopQuestion}>
+              <Square className="mr-1.5 h-3.5 w-3.5" />
+              停止
+            </Button>
+          ) : (
+            <Button type="submit" size="sm" disabled={!!disabledReason || !composer.trim()}>
+              <Send className="mr-1.5 h-3.5 w-3.5" />
+              发送
+            </Button>
+          )}
+        </div>
+      </form>
+    </section>
+  )
+}

@@ -658,6 +658,183 @@
     box-shadow: var(--theme-card-main-shadow);
   }
 
+  .plm-desktop-pet {
+    position: fixed;
+    right: clamp(16px, 2vw, 28px);
+    bottom: clamp(28px, 8vh, 88px);
+    z-index: 18;
+    width: clamp(132px, 12vw, 184px);
+    pointer-events: none;
+  }
+
+  .plm-desktop-pet.is-home {
+    bottom: clamp(40px, 9vh, 104px);
+  }
+
+  .plm-desktop-pet.is-workbench {
+    bottom: clamp(22px, 5vh, 52px);
+  }
+
+  .plm-desktop-pet-button {
+    position: relative;
+    display: block;
+    width: 100%;
+    aspect-ratio: 1;
+    pointer-events: auto;
+    filter: drop-shadow(0 18px 26px rgba(20, 58, 101, 0.18));
+    transform-origin: 50% 100%;
+    animation: plmDesktopPetFloat 4.8s ease-in-out infinite;
+  }
+
+  .plm-desktop-pet-button:focus-visible {
+    outline: 2px solid hsl(var(--primary) / 0.56);
+    outline-offset: 6px;
+    border-radius: 999px;
+  }
+
+  .plm-desktop-pet-stage {
+    position: relative;
+    z-index: 1;
+    display: block;
+    width: 100%;
+    height: 100%;
+    transform: scale(2.35);
+  }
+
+  .plm-desktop-pet-image {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    image-rendering: pixelated;
+    user-select: none;
+    -webkit-user-drag: none;
+  }
+
+  .plm-desktop-pet-stand {
+    opacity: 0;
+  }
+
+  .plm-desktop-pet-idle {
+    opacity: 1;
+  }
+
+  .plm-desktop-pet-rotation {
+    opacity: 0;
+  }
+
+  .plm-desktop-pet:hover .plm-desktop-pet-idle {
+    opacity: 0;
+  }
+
+  .plm-desktop-pet:hover .plm-desktop-pet-rotation {
+    opacity: 1;
+  }
+
+  .plm-desktop-pet-popover {
+    position: absolute;
+    right: calc(100% - 10px);
+    bottom: 12px;
+    width: min(390px, calc(100vw - 42px));
+    max-height: min(620px, calc(100vh - 96px));
+    opacity: 0;
+    pointer-events: none;
+    transform: translate3d(10px, 8px, 0) scale(0.98);
+    transform-origin: 100% 100%;
+    transition:
+      opacity 150ms ease,
+      transform 150ms ease;
+  }
+
+  .plm-desktop-pet-popover::after {
+    content: "";
+    position: absolute;
+    right: -24px;
+    bottom: 22px;
+    width: 28px;
+    height: 88px;
+  }
+
+  .plm-desktop-pet.has-popover:hover .plm-desktop-pet-popover,
+  .plm-desktop-pet.has-popover:focus-within .plm-desktop-pet-popover {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  .plm-desktop-pet-shadow {
+    position: absolute;
+    left: 18%;
+    right: 18%;
+    bottom: 24%;
+    height: 12%;
+    border-radius: 999px;
+    background: rgba(25, 61, 103, 0.14);
+    filter: blur(7px);
+    transform: translateY(12px);
+  }
+
+  @keyframes plmDesktopPetFloat {
+    0%,
+    100% {
+      transform: translate3d(0, 0, 0);
+    }
+
+    50% {
+      transform: translate3d(0, -7px, 0);
+    }
+  }
+
+  @media (max-width: 1280px) {
+    .plm-desktop-pet.is-workbench {
+      position: static;
+      width: 136px;
+      margin: 14px auto 0;
+    }
+
+    .plm-desktop-pet.is-workbench .plm-desktop-pet-popover {
+      right: 50%;
+      bottom: calc(100% - 16px);
+      width: min(390px, calc(100vw - 32px));
+      max-height: min(560px, calc(100vh - 112px));
+      transform: translate3d(50%, 12px, 0) scale(0.98);
+      transform-origin: 50% 100%;
+    }
+
+    .plm-desktop-pet.is-workbench .plm-desktop-pet-popover::after {
+      right: calc(50% - 20px);
+      bottom: -24px;
+      width: 40px;
+      height: 28px;
+    }
+
+    .plm-desktop-pet.is-workbench.has-popover:hover .plm-desktop-pet-popover,
+    .plm-desktop-pet.is-workbench.has-popover:focus-within .plm-desktop-pet-popover {
+      transform: translate3d(50%, 0, 0) scale(1);
+    }
+  }
+
+  @media (max-width: 1080px) {
+    .plm-desktop-pet.is-home {
+      display: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .plm-desktop-pet-button {
+      animation: none;
+    }
+
+    .plm-desktop-pet:hover .plm-desktop-pet-idle {
+      opacity: 1;
+    }
+
+    .plm-desktop-pet:hover .plm-desktop-pet-rotation {
+      opacity: 0;
+    }
+  }
+
   .theme-card-header {
     @apply border-b border-border/60 pb-4;
     background: var(--theme-card-header-bg);
