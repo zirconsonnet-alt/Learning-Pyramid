@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react"
 import { Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
-import { ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
+import { ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent } from "@/ui/components/ui/card"
 import { Input } from "@/ui/components/ui/input"
@@ -23,6 +23,7 @@ import { cn } from "@/ui/utils"
 import { AltchaWidget } from "@/views/auth/AltchaWidget"
 
 type AuthMode = "login" | "register" | "reset" | "verify"
+type VerifyEmailNotice = "sent" | "resent" | null
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -87,6 +88,7 @@ export function AuthPage() {
   const [inviteCode, setInviteCode] = useState("")
   const [humanCheckToken, setHumanCheckToken] = useState<string | null>(null)
   const [humanCheckResetSignal, setHumanCheckResetSignal] = useState(0)
+  const [verifyEmailNotice, setVerifyEmailNotice] = useState<VerifyEmailNotice>(null)
   const returnTo = useMemo(() => resolveReturnTo(location.state), [location.state])
   const passwordValid =
     effectiveMode === "register" || resetTokenPresent ? password.length >= 8 : effectiveMode === "login" ? password.length > 0 : true
@@ -100,6 +102,12 @@ export function AuthPage() {
     }
   }, [effectiveMode, email, searchParams])
 
+  useEffect(() => {
+    if (effectiveMode !== "verify" || verifyTokenPresent) {
+      setVerifyEmailNotice(null)
+    }
+  }, [effectiveMode, verifyTokenPresent])
+
   usePageMeta({
     title:
       effectiveMode === "register"
@@ -108,9 +116,11 @@ export function AuthPage() {
           ? resetTokenPresent
             ? "重置密码 | LearningPyramid"
             : "找回密码 | LearningPyramid"
-          : effectiveMode === "verify"
-            ? verifyTokenPresent
-              ? "验证邮箱 | LearningPyramid"
+        : effectiveMode === "verify"
+          ? verifyTokenPresent
+            ? "验证邮箱 | LearningPyramid"
+            : verifyEmailNotice === "sent"
+              ? "等待邮箱验证 | LearningPyramid"
               : "重新发送验证邮件 | LearningPyramid"
           : "登录 | LearningPyramid",
     description:
@@ -175,6 +185,7 @@ export function AuthPage() {
   }
 
   function switchMode(nextMode: AuthMode) {
+    setVerifyEmailNotice(null)
     if (nextMode === "register" && !allowSignup) return
     if (nextMode === "reset" && !passwordResetEnabled) return
     const nextParams = new URLSearchParams(searchParams)
@@ -229,6 +240,7 @@ export function AuthPage() {
         } else {
           if (!payload.email) return
           await requestEmailVerification.mutateAsync({ email: payload.email })
+          setVerifyEmailNotice("resent")
           showSuccessFeedback("验证邮件已发送", "如果账号存在且尚未验证，我们已经重新发送激活链接。")
         }
       } else if (effectiveMode === "register") {
@@ -246,6 +258,7 @@ export function AuthPage() {
           nextParams.set("mode", "verify")
           nextParams.set("email", payload.email)
           nextParams.delete("token")
+          setVerifyEmailNotice("sent")
           setSearchParams(nextParams, { replace: true })
         } else {
           showSuccessFeedback("账号已创建", "正在进入工作区。")
@@ -311,7 +324,9 @@ export function AuthPage() {
         : effectiveMode === "verify"
           ? verifyTokenPresent
             ? "验证邮箱"
-            : "重新发送验证邮件"
+            : verifyEmailNotice === "sent"
+              ? "等待邮箱验证"
+              : "重新发送验证邮件"
           : "欢迎回来"
   const description =
     effectiveMode === "register"
@@ -325,7 +340,9 @@ export function AuthPage() {
         : effectiveMode === "verify"
           ? verifyTokenPresent
             ? "点击下方按钮完成邮箱验证并自动登录。"
-            : "输入注册邮箱，我们会重新发送一封验证邮件。"
+            : verifyEmailNotice === "sent"
+              ? "验证邮件已经发出，请回到邮箱完成激活；没有收到可以重新发送。"
+              : "输入注册邮箱，我们会重新发送一封验证邮件。"
         : "使用邮箱和密码登录。"
 
   return (
@@ -363,10 +380,25 @@ export function AuthPage() {
                   type="email"
                   autoComplete="email"
                   value={email}
-                  onChange={(event) => setEmail(event.target.value)}
+                  onChange={(event) => {
+                    setEmail(event.target.value)
+                    if (verifyEmailNotice) setVerifyEmailNotice(null)
+                  }}
                   placeholder="you@example.com"
                 />
               </div>
+            ) : null}
+
+            {effectiveMode === "verify" && !verifyTokenPresent && verifyEmailNotice ? (
+              <ContentNotice
+                title={verifyEmailNotice === "resent" ? "激活链接已重新发送" : "验证邮件已发送"}
+                message={
+                  verifyEmailNotice === "resent"
+                    ? "你可以直接返回邮箱查收新邮件；如果还没收到，稍等几十秒后再试一次。"
+                    : "请到邮箱点击激活链接；验证完成后就能进入工作区。"
+                }
+                tone="info"
+              />
             ) : null}
 
             {effectiveMode === "register" || effectiveMode === "login" || resetTokenPresent ? (
