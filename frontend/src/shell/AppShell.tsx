@@ -20,6 +20,7 @@ import { usePomodoroPreTransitionSpeech, usePomodoroTransitionSound } from "@/ui
 import { setPomodoroRestMusicPhaseActive } from "@/ui/pomodoroRestMusicPlayer"
 import { useGuideWalkthroughController } from "@/ui/guideWalkthrough/guideWalkthroughController"
 import { buildProjectSettingsPath } from "@/ui/projectPaths"
+import { checkFrontendFreshness } from "@/ui/runtime/frontendFreshness"
 import { useAppStore } from "@/ui/store/appStore"
 import { recordPomodoroActivity } from "@/ui/store/pomodoroActivityStore"
 import {
@@ -515,6 +516,7 @@ export function AppShell() {
   }, [pid, selectedWorkbenchProjectId, setSelectedWorkbenchProjectId])
 
   useEffect(() => {
+    void checkFrontendFreshness()
     if (previousLocationRef.current === locationToken) return
     previousLocationRef.current = locationToken
     const frame = window.requestAnimationFrame(() => {

@@ -3,6 +3,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MAIN = REPO_ROOT / "frontend" / "src" / "main.tsx"
+APP_SHELL = REPO_ROOT / "frontend" / "src" / "shell" / "AppShell.tsx"
 FRESHNESS_MONITOR = REPO_ROOT / "frontend" / "src" / "ui" / "runtime" / "frontendFreshness.ts"
 
 
@@ -24,7 +25,16 @@ def test_frontend_freshness_monitor_checks_latest_index_bundle_and_reload_once()
     assert 'window.addEventListener("focus", handleWindowFocus)' in source
     assert 'window.addEventListener("pageshow", handlePageShow)' in source
     assert 'document.addEventListener("visibilitychange", handleVisibilityChange)' in source
-    assert 'window.history.pushState = function pushState' in source
-    assert 'window.history.replaceState = function replaceState' in source
+    assert 'window.history.pushState = function pushState' not in source
+    assert 'window.history.replaceState = function replaceState' not in source
+    assert 'window.addEventListener("popstate", handleHistoryNavigation)' in source
     assert 'sessionStorage.getItem(RELOAD_MARKER)' in source
     assert 'sessionStorage.setItem(RELOAD_MARKER, reloadMarker)' in source
+
+
+def test_app_shell_checks_frontend_freshness_after_router_navigation() -> None:
+    source = APP_SHELL.read_text(encoding="utf-8")
+
+    assert 'import { checkFrontendFreshness } from "@/ui/runtime/frontendFreshness"' in source
+    assert "void checkFrontendFreshness()" in source
+    assert "}, [locationToken])" in source

@@ -81,23 +81,13 @@ export function installFrontendFreshnessMonitor() {
     if (document.visibilityState !== "visible") return
     scheduleFrontendFreshnessCheck()
   }
-
-  const originalPushState = window.history.pushState
-  window.history.pushState = function pushState(...args: Parameters<History["pushState"]>) {
-    const result = originalPushState.apply(this, args)
+  const handleHistoryNavigation = () => {
     scheduleFrontendFreshnessCheck()
-    return result
-  }
-
-  const originalReplaceState = window.history.replaceState
-  window.history.replaceState = function replaceState(...args: Parameters<History["replaceState"]>) {
-    const result = originalReplaceState.apply(this, args)
-    scheduleFrontendFreshnessCheck()
-    return result
   }
 
   window.addEventListener("focus", handleWindowFocus)
   window.addEventListener("pageshow", handlePageShow)
+  window.addEventListener("popstate", handleHistoryNavigation)
   document.addEventListener("visibilitychange", handleVisibilityChange)
 
   scheduleFrontendFreshnessCheck(true)
