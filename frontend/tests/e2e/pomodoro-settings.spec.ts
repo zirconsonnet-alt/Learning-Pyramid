@@ -71,6 +71,95 @@ test("pomodoro can be turned off even when saved schedule is invalid", async ({ 
   expectNoConsoleIssues(consoleIssues)
 })
 
+test("pomodoro blocks workbench when enabled without an active focus segment", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page, {
+    globalSettings: createMockGlobalSettings({
+      pomodoro: {
+        enabled: true,
+        transitionSoundEnabled: false,
+        defaultFocusPrompt: "",
+        defaultBreakPrompt: "",
+        microBreaks: {
+          enabled: false,
+          minIntervalSeconds: 180,
+          maxIntervalSeconds: 300,
+          durationSeconds: 10,
+        },
+        weeklySchedule: {
+          mon: { plans: [] },
+          tue: { plans: [] },
+          wed: { plans: [] },
+          thu: { plans: [] },
+          fri: { plans: [] },
+          sat: { plans: [] },
+          sun: { plans: [] },
+        },
+      },
+    }),
+  })
+  await page.addInitScript(({ subjectId, projectId }) => {
+    window.localStorage.setItem(
+      "plm-app",
+      JSON.stringify({
+        state: {
+          selectedSubjectId: subjectId,
+          selectedWorkbenchProjectId: projectId,
+          selectedWorkbenchProjectRef: { subjectId, projectId },
+          recentSubjectIds: [subjectId],
+          recentWorkbenchProjectIds: [projectId],
+          recentWorkbenchProjectRefs: [{ subjectId, projectId }],
+        },
+        version: 0,
+      }),
+    )
+  }, { subjectId: subject.subjectId, projectId: project.projectId })
+
+  await page.goto("/pomodoro")
+  await expect(page.getByRole("link", { name: /进入.*工作台/ })).toHaveCount(0)
+  await page.goto(`/subjects/${subject.subjectId}/projects/${project.projectId}/workbench`)
+  await expect(page).toHaveURL(/\/pomodoro$/)
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
+test("pomodoro allows only the focused project workbench during focus time", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page, {
+    globalSettings: createMockGlobalSettings({
+      pomodoro: {
+        enabled: true,
+        transitionSoundEnabled: false,
+        defaultFocusPrompt: "",
+        defaultBreakPrompt: "",
+        microBreaks: {
+          enabled: false,
+          minIntervalSeconds: 180,
+          maxIntervalSeconds: 300,
+          durationSeconds: 10,
+        },
+        weeklySchedule: {
+          mon: { plans: [] },
+          tue: { plans: [] },
+          wed: { plans: [] },
+          thu: { plans: [] },
+          fri: { plans: [] },
+          sat: { plans: [createPomodoroPlan({ startTime: "08:00", focusMinutes: 180 })] },
+          sun: { plans: [] },
+        },
+      },
+    }),
+  })
+
+  await page.clock.setFixedTime(new Date("2026-05-09T00:30:00Z"))
+  await page.goto("/pomodoro")
+  await expect(page.getByRole("link", { name: "进入自动化测试项目工作台" })).toBeVisible()
+  await page.goto(`/subjects/${subject.subjectId}/projects/${project.projectId}/workbench`)
+  await expect(page).toHaveURL(new RegExp(`/subjects/${subject.subjectId}/projects/${project.projectId}/workbench$`))
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
 test("pomodoro delete plan persists after returning to overview", async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
   await installMockApi(page, {

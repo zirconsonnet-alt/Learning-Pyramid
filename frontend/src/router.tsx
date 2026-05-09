@@ -10,6 +10,7 @@ import { AiChatPage } from "@/views/ai/AiChatPage"
 import { ReviewRecommendationsPage } from "@/views/recommendations/ReviewRecommendationsPage"
 import { ProjectSettingsPage } from "@/views/settings/ProjectSettingsPage"
 import { StructureViewPage } from "@/views/trees/StructureViewPage"
+import { PomodoroWorkbenchGate } from "@/views/pomodoro/PomodoroWorkbenchGate"
 
 const CHUNK_RELOAD_MARKER = "lp:chunk-reload-attempted"
 
@@ -124,7 +125,7 @@ export const router = createBrowserRouter([
       { path: "/projects", element: lazyElement(<ProjectsPage />) },
       { path: "/subjects/:subjectId", element: lazyElement(<SubjectDashboardPage />) },
       { path: "/subjects/:subjectId/settings", element: lazyElement(<ProjectSettingsPage />) },
-      { path: "/subjects/:subjectId/projects/:projectId/workbench", element: lazyElement(<WorkbenchPage />) },
+      { path: "/subjects/:subjectId/projects/:projectId/workbench", element: <PomodoroWorkbenchGate>{lazyElement(<WorkbenchPage />)}</PomodoroWorkbenchGate> },
       { path: "/subjects/:subjectId/projects/:projectId/settings", element: lazyElement(<ProjectSettingsPage />) },
       { path: "/subjects/:subjectId/projects/:projectId/ai-chat", element: lazyElement(<AiChatPage />) },
       { path: "/subjects/:subjectId/projects/:projectId/recommended-reviews", element: lazyElement(<ReviewRecommendationsPage />) },

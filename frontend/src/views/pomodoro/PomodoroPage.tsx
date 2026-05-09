@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQueries } from "@tanstack/react-query"
 import { BarChart3, CircleStop, FolderOpen, Music2, PanelsTopLeft, Pause, Play, Plus, RefreshCw, RotateCcw, Save, Settings2, SkipForward, TimerReset, Trash2, Volume2 } from "lucide-react"
-import { Link, useLocation, useNavigate, useParams } from "react-router-dom"
+import { Link, useNavigate, useParams } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
 import { listSubjectMaterials, type StudyMaterial, type Subject } from "@/ui/api/subjects"
@@ -24,7 +24,7 @@ import {
 import { readPomodoroWallpaperBlob } from "@/ui/pomodoroWallpaper"
 import { useCurrentUser } from "@/ui/queries/auth"
 import { useMembershipSummary } from "@/ui/queries/membership"
-import { useProject, useProjects } from "@/ui/queries/projects"
+import { useProjects } from "@/ui/queries/projects"
 import { useUpdateMyGlobalSettings } from "@/ui/queries/profile"
 import { useSubjects } from "@/ui/queries/subjects"
 import { useSystemCapabilities } from "@/ui/queries/system"
@@ -176,23 +176,8 @@ function normalizeDraftSubjectId(
   return inferredSubjectIds.length === 1 ? inferredSubjectIds[0] : ""
 }
 
-function extractWorkbenchProjectId(path: string) {
-  const match = /^\/subjects\/[^/]+\/projects\/([^/?#]+)\/workbench(?:[/?#]|$)/.exec(path)
-  if (!match?.[1]) return ""
-  try {
-    return decodeURIComponent(match[1])
-  } catch {
-    return match[1]
-  }
-}
-
 function buildScopedWorkbenchPath(subjectId: string, projectId: string) {
   return subjectId && projectId ? `/subjects/${encodeURIComponent(subjectId)}/projects/${encodeURIComponent(projectId)}/workbench` : ""
-}
-
-function getUsableProjectTitle(value: string) {
-  const title = value.trim()
-  return title && title !== "未知项目" && title !== "加载项目中..." && title !== "未选择项目" ? title : ""
 }
 
 function buildPomodoroSubjectProjectOptions(
@@ -427,18 +412,6 @@ function MetricDonut(props: { summary: Pick<PomodoroPlanMetricSummary, "schedule
       </div>
     </div>
   )
-}
-
-function readLocationState(locationState: unknown) {
-  if (!locationState || typeof locationState !== "object") {
-    return {
-      fromPath: "",
-    }
-  }
-  const input = locationState as { from?: unknown }
-  return {
-    fromPath: typeof input.from === "string" ? input.from : "",
-  }
 }
 
 function formatDateTime(ms: number | null) {
@@ -784,16 +757,10 @@ function RestMusicPlayer(props: { isRestPhase: boolean }) {
 }
 
 export function PomodoroPage() {
-  const location = useLocation()
   const nav = useNavigate()
   const { planId: routePlanId } = useParams()
   const activePlanId = routePlanId ? decodeURIComponent(routePlanId) : null
-  const selectedWorkbenchProjectId = useAppStore((state) => state.selectedWorkbenchProjectId)
   const selectedWorkbenchProjectRef = useAppStore((state) => state.selectedWorkbenchProjectRef)
-  const { projectTitle: selectedWorkbenchProjectTitleFromQuery } = useProject(selectedWorkbenchProjectId ?? "", {
-    enabled: Boolean(selectedWorkbenchProjectId),
-    subjectId: selectedWorkbenchProjectRef?.subjectId,
-  })
   const projectsQ = useProjects(true)
   const subjectsQ = useSubjects(true)
   const selectedTheme = useThemeStore((state) => state.theme)
@@ -810,7 +777,6 @@ export function PomodoroPage() {
   const clearQuickPomodoro = usePomodoroStore((state) => state.clearQuickPomodoro)
   const quickPomodoroClockActive = isQuickPomodoroSessionActive(quickPomodoro)
   const now = usePomodoroNow(enabled || quickPomodoroClockActive)
-  const { fromPath } = useMemo(() => readLocationState(location.state), [location.state])
   const [pomodoroDrafts, setPomodoroDrafts] = useState<PomodoroPlanDraft[]>(() => toPomodoroPlanDrafts(weeklySchedule))
   const [selectedSubjectIdByPlanId, setSelectedSubjectIdByPlanId] = useState<Record<string, string>>({})
   const [pomodoroOverviewMode, setPomodoroOverviewMode] = useState<"plans" | "stats">("plans")
@@ -918,37 +884,16 @@ export function PomodoroPage() {
     validPomodoroProjectRefs.has(pomodoroProjectRefKey(selectedWorkbenchProjectRef))
       ? selectedWorkbenchProjectRef
       : null
-  const resolvedSelectedWorkbenchProjectId = resolvedSelectedWorkbenchProjectRef?.projectId ?? ""
-  const resolvedSelectedWorkbenchProjectKey = pomodoroProjectRefKey(resolvedSelectedWorkbenchProjectRef)
-  const selectedWorkbenchProjectTitle =
-    resolvedSelectedWorkbenchProjectId
-      ? getUsableProjectTitle(projectTitleByProjectRef.get(resolvedSelectedWorkbenchProjectKey) ?? "") ||
-        getUsableProjectTitle(projectTitleByRef.get(resolvedSelectedWorkbenchProjectKey) ?? "") ||
-        getUsableProjectTitle(selectedWorkbenchProjectTitleFromQuery)
-      : ""
-  const rememberedWorkbenchProjectId = extractWorkbenchProjectId(fromPath)
-  const rememberedWorkbenchPath =
-    pomodoroProjectCatalogReady &&
-    rememberedWorkbenchProjectId &&
-    selectedWorkbenchProjectRef?.projectId === rememberedWorkbenchProjectId &&
-    validPomodoroProjectRefs.has(pomodoroProjectRefKey(selectedWorkbenchProjectRef))
-      ? fromPath
-      : ""
   const focusWorkbenchPath =
     focusProjectRef && hasFocusProject
       ? buildScopedWorkbenchPath(focusProjectRef.subjectId, focusProjectRef.projectId)
       : ""
-  const fallbackWorkbenchPath = resolvedSelectedWorkbenchProjectId
-    ? buildScopedWorkbenchPath(resolvedSelectedWorkbenchProjectRef?.subjectId ?? "", resolvedSelectedWorkbenchProjectId)
+  const activeWorkbenchPath = snapshot.status === "running" && snapshot.phase === "focus" && snapshot.canUseWorkbench
+    ? focusWorkbenchPath
     : ""
-  const preferredWorkbenchPath = focusWorkbenchPath || rememberedWorkbenchPath || fallbackWorkbenchPath
-  const preferredWorkbenchLabel = focusWorkbenchPath
+  const activeWorkbenchLabel = activeWorkbenchPath
     ? `进入${focusProjectTitle || "当前番茄项目"}工作台`
-    : rememberedWorkbenchPath
-      ? "回到刚才的工作台"
-      : resolvedSelectedWorkbenchProjectId
-        ? `进入${selectedWorkbenchProjectTitle || "当前项目"}工作台`
-        : "进入工作台"
+    : "进入工作台"
 
   useEffect(() => {
     setPomodoroDrafts(toPomodoroPlanDrafts(weeklySchedule))
@@ -1720,15 +1665,15 @@ export function PomodoroPage() {
                   番茄钟设置
                 </Link>
               </Button>
-              {snapshot.canUseWorkbench && preferredWorkbenchPath ? (
+              {activeWorkbenchPath ? (
                 <Button asChild>
                   <Link
-                    to={preferredWorkbenchPath}
+                    to={activeWorkbenchPath}
                     data-guide-tour="pomodoro-web-entry-reminder"
                     onClick={() => completeGuideWalkthroughStep("pomodoro-enter-web")}
                   >
                     <PanelsTopLeft className="h-4 w-4" />
-                    {preferredWorkbenchLabel}
+                    {activeWorkbenchLabel}
                   </Link>
                 </Button>
               ) : (

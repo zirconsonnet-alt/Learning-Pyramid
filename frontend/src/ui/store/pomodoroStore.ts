@@ -670,7 +670,7 @@ export function getPomodoroSnapshot(
     nextStartAtMs: nextStart.nextStartAtMs,
     nextStartDay: nextStart.nextStartDay,
     canUseWorkbench: false,
-    shouldRestrictWorkbench: enabled && hasEnabledSchedule,
+    shouldRestrictWorkbench: enabled,
     currentProjectRef: null,
     currentProjectId: null,
     ...overrides,
@@ -720,6 +720,8 @@ export function getPomodoroSnapshot(
 
     const elapsedMs = Math.max(0, now - activeQuickPomodoro.startAtMs)
     const remainingMs = Math.max(0, activeQuickPomodoro.endAtMs - now)
+    const currentProjectRef = quickSegment?.projectRef ?? null
+    const canUseWorkbench = Boolean(currentProjectRef)
 
     return createBaseSnapshot({
       status: "running",
@@ -740,10 +742,10 @@ export function getPomodoroSnapshot(
       startTime: quickPlan.startTime,
       startAtMs: activeQuickPomodoro.startAtMs,
       endAtMs: activeQuickPomodoro.endAtMs,
-      canUseWorkbench: true,
-      shouldRestrictWorkbench: false,
-      currentProjectRef: activeQuickPomodoro.projectRef,
-      currentProjectId: activeQuickPomodoro.projectRef?.projectId ?? null,
+      canUseWorkbench,
+      shouldRestrictWorkbench: !canUseWorkbench,
+      currentProjectRef,
+      currentProjectId: currentProjectRef?.projectId ?? null,
     })
   }
 
@@ -751,8 +753,6 @@ export function getPomodoroSnapshot(
     return createBaseSnapshot({
       status: "idle",
       idleReason: "not_configured",
-      canUseWorkbench: true,
-      shouldRestrictWorkbench: false,
     })
   }
 
@@ -817,8 +817,8 @@ export function getPomodoroSnapshot(
   const completedPomodoros = runningItem.segments.filter(
     (item) => item.phase === "focus" && item.endOffsetMs <= elapsedMs,
   ).length
-  const canUseWorkbench = segment?.phase === "focus"
   const currentProjectRef = segment?.phase === "focus" ? segment.projectRef ?? null : null
+  const canUseWorkbench = Boolean(currentProjectRef)
 
   return createBaseSnapshot({
     status: "running",
