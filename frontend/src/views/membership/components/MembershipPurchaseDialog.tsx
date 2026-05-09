@@ -163,8 +163,6 @@ export function MembershipPaymentDialog(props: {
                       />
                       <div className="min-w-0 flex-1 space-y-2">
                         <div className="font-medium text-foreground">{activeCheckout.paymentPayload.instruction}</div>
-                        <div>失效时间 {formatMembershipDateTime(activeCheckout.paymentPayload.expiresAt)}</div>
-                        <div className="break-all text-xs text-muted-foreground">{activeCheckout.paymentPayload.codeUrl}</div>
                         <div className="flex flex-wrap gap-2 pt-1">
                           <Button variant="outline" onClick={onCopyPaymentLink}>
                             <CreditCard className="h-4 w-4" />

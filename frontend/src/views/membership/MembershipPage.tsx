@@ -144,11 +144,7 @@ function CouponBagDialog(props: {
                     <div className="shrink-0 text-right">
                       <div className="text-2xl font-semibold tracking-tight text-foreground">{formatMembershipCouponValue(coupon)}</div>
                       <div className="mt-1 text-xs text-muted-foreground">
-                        {coupon.status === "used" && coupon.usedAt
-                          ? `已于 ${formatMembershipDateTime(coupon.usedAt)} 使用`
-                          : coupon.expiresAt
-                            ? `${formatMembershipDateTime(coupon.expiresAt)} 到期`
-                            : "长期有效"}
+                        {coupon.expiresAt ? `${formatMembershipDateTime(coupon.expiresAt)} 到期` : "长期有效"}
                       </div>
                     </div>
                   </div>
@@ -320,6 +316,7 @@ export function MembershipPage() {
   const startPayoutBinding = useStartPayoutBindingAttempt()
 
   const coupons = useMemo(() => couponsQ.data ?? [], [couponsQ.data])
+  const visibleCoupons = useMemo(() => coupons.filter((coupon) => coupon.status !== "used"), [coupons])
   const availableCoupons = useMemo(() => coupons.filter((item) => item.status === "available"), [coupons])
   const supportedProviders = useMemo(() => summaryQ.data?.supportedPaymentProviders ?? [], [summaryQ.data?.supportedPaymentProviders])
   const effectiveSelectedProvider = supportedProviders.includes(selectedProvider)
@@ -335,8 +332,7 @@ export function MembershipPage() {
   )
   const recentInvites = useMemo(() => inviteSummaryQ.data?.recentInvites ?? [], [inviteSummaryQ.data?.recentInvites])
   const availableCouponCount = availableCoupons.length
-  const usedCouponCount = coupons.filter((coupon) => coupon.status === "used").length
-  const expiredCouponCount = coupons.filter((coupon) => coupon.status === "expired").length
+  const expiredCouponCount = visibleCoupons.filter((coupon) => coupon.status === "expired").length
   const inviteLabelsByUserId = useMemo(
     () =>
       new Map(
@@ -662,7 +658,7 @@ export function MembershipPage() {
 
   return (
     <>
-      <CouponBagDialog open={couponBagOpen} onOpenChange={setCouponBagOpen} coupons={coupons} inviteLabelsByUserId={inviteLabelsByUserId} />
+      <CouponBagDialog open={couponBagOpen} onOpenChange={setCouponBagOpen} coupons={visibleCoupons} inviteLabelsByUserId={inviteLabelsByUserId} />
       <InviteRecordsDialog
         open={inviteRecordsOpen}
         onOpenChange={setInviteRecordsOpen}
@@ -763,7 +759,7 @@ export function MembershipPage() {
                       : "opacity-90 hover:opacity-100",
                   )}
                 >
-                  <MembershipPlanPriceBlock title="月会员" price="¥20" unit="/ 月" note={`首单 ${formatMembershipPrice(summary?.firstOrderPriceCent ?? 0)} · 续费 ${formatMembershipPrice(summary?.renewalPriceCent ?? 0)}`}>
+                  <MembershipPlanPriceBlock title="月会员" price="¥20" unit="/ 月" note="首单最低15元">
                     {effectiveSelectedPlanId === "monthly" && selectedCoupon ? (
                       <div className="mt-2 text-xs text-[color:var(--theme-warm-text)]">已选 {formatMembershipCouponValue(selectedCoupon)}</div>
                     ) : null}
@@ -780,7 +776,7 @@ export function MembershipPage() {
                       : "opacity-90 hover:opacity-100",
                   )}
                 >
-                  <MembershipPlanPriceBlock title="考研套餐" price="¥15" unit="/ 月" note="单最低15元 有效期至12月21日" accent>
+                  <MembershipPlanPriceBlock title="考研套餐" price="¥15" unit="/ 月" note="有效期至12月21日" accent>
                     {effectiveSelectedPlanId === "graduate_exam" ? (
                       <div className="mt-2 text-xs text-[color:var(--theme-warm-text)]">
                       {preview?.planId === "graduate_exam"
@@ -802,13 +798,13 @@ export function MembershipPage() {
             <div className="border-b border-[color:var(--theme-soft-border)] px-6 py-5 sm:px-8">
               <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
                 <div className="space-y-2">
-                  <div className="text-[11px] uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">当前状态</div>
+                  <div className="text-sm font-medium text-[color:var(--theme-subtle-text)]">当前状态</div>
                   <div className="text-2xl font-semibold tracking-tight text-foreground">{membershipState}</div>
                   {summary?.currentEndsAt ? <div className="text-sm leading-6 text-muted-foreground">有效期至 {formatMembershipDateTime(summary.currentEndsAt)}</div> : null}
                 </div>
                 <div className="flex w-full max-w-[22rem] flex-col gap-3 md:w-auto">
                   <div className="rounded-[1.25rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-5 py-4">
-                    <div className="text-[11px] uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">邀请码</div>
+                    <div className="text-sm font-medium text-[color:var(--theme-subtle-text)]">邀请码</div>
                     {inviteSummaryQ.error ? <div className="mt-3 text-sm text-destructive">{formatMembershipApiError(inviteSummaryQ.error)}</div> : null}
                     {!inviteSummaryQ.error ? (
                       <div className="mt-3 space-y-3">
@@ -936,82 +932,90 @@ export function MembershipPage() {
             </div>
           </div>
 
-          <div className="theme-card-main overflow-hidden">
-            <div className="border-b border-[color:var(--theme-soft-border)] px-6 py-5 sm:px-8">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <Ticket className="h-4 w-4 text-primary" />
-                  <div className="text-sm font-semibold text-foreground">我的优惠券</div>
+          <div className="space-y-6">
+            <div className="theme-card-main overflow-hidden">
+              <div className="border-b border-[color:var(--theme-soft-border)] px-6 py-5 sm:px-8">
+                <div className="text-sm font-semibold text-foreground">会员权益</div>
+              </div>
+              <div className="divide-y divide-[color:var(--theme-soft-border)] px-6 py-2 sm:px-8">
+                <div className="py-4">
+                  <div className="text-sm font-semibold text-foreground">番茄钟：学习规划与督促</div>
                 </div>
-                <Button type="button" variant="outline" onClick={() => setCouponBagOpen(true)} disabled={couponsQ.isLoading}>
-                  <Ticket className="h-4 w-4" />
-                  券包
-                </Button>
+                <div className="py-4">
+                  <div className="text-sm font-semibold text-foreground">AI交互：你的助理及良师</div>
+                </div>
               </div>
             </div>
 
-            <div className="space-y-5 px-6 py-6 sm:px-8">
-              <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3">
-                <div className="theme-soft-surface rounded-[1.2rem] px-4 py-4">
-                  <div className="text-[11px] uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">可用</div>
-                  <div className="mt-2 text-2xl font-semibold tracking-tight text-foreground">{availableCouponCount}</div>
-                </div>
-                <div className="theme-soft-surface rounded-[1.2rem] px-4 py-4">
-                  <div className="text-[11px] uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">已使用</div>
-                  <div className="mt-2 text-2xl font-semibold tracking-tight text-foreground">{usedCouponCount}</div>
-                </div>
-                <div className="theme-soft-surface rounded-[1.2rem] px-4 py-4">
-                  <div className="text-[11px] uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">已过期</div>
-                  <div className="mt-2 text-2xl font-semibold tracking-tight text-foreground">{expiredCouponCount}</div>
+            <div className="theme-card-main overflow-hidden">
+              <div className="border-b border-[color:var(--theme-soft-border)] px-6 py-5 sm:px-8">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <Ticket className="h-4 w-4 text-primary" />
+                    <div className="text-sm font-semibold text-foreground">我的优惠券</div>
+                  </div>
+                  <Button type="button" variant="outline" onClick={() => setCouponBagOpen(true)} disabled={couponsQ.isLoading}>
+                    <Ticket className="h-4 w-4" />
+                    券包
+                  </Button>
                 </div>
               </div>
 
-              {couponsQ.error ? <div className="text-sm text-destructive">{formatMembershipApiError(couponsQ.error)}</div> : null}
-
-              {!couponsQ.error && coupons.length === 0 ? (
-                <div className="theme-subtle-surface rounded-[1.4rem] border-dashed px-5 py-10 text-center text-sm leading-7 text-[color:var(--theme-subtle-text)]">
-                  暂时还没有优惠券。绑定好友邀请码后会收到 7.5 折会员券。
+              <div className="space-y-5 px-6 py-6 sm:px-8">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+                  <div className="theme-soft-surface rounded-[1.2rem] px-4 py-4">
+                    <div className="text-[11px] uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">可用</div>
+                    <div className="mt-2 text-2xl font-semibold tracking-tight text-foreground">{availableCouponCount}</div>
+                  </div>
+                  <div className="theme-soft-surface rounded-[1.2rem] px-4 py-4">
+                    <div className="text-[11px] uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">已过期</div>
+                    <div className="mt-2 text-2xl font-semibold tracking-tight text-foreground">{expiredCouponCount}</div>
+                  </div>
                 </div>
-              ) : null}
 
-              {coupons.length > 0 ? (
-                <div className="space-y-3">
-                  {coupons.map((coupon) => {
-                    const sourceInviteLabel = coupon.sourceInviteeUserId ? inviteLabelsByUserId.get(coupon.sourceInviteeUserId) : null
-                    return (
-                      <div key={coupon.couponId} className="theme-soft-surface rounded-[1.3rem] p-4">
-                        <div className="flex items-start justify-between gap-4">
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <div className="text-sm font-semibold text-foreground">{coupon.title || describeMembershipCouponSource(coupon.source)}</div>
-                              <StatusPill tone={coupon.status === "available" ? "accent" : "default"}>
-                                {describeMembershipCouponStatus(coupon.status)}
-                              </StatusPill>
+                {couponsQ.error ? <div className="text-sm text-destructive">{formatMembershipApiError(couponsQ.error)}</div> : null}
+
+                {!couponsQ.error && visibleCoupons.length === 0 ? (
+                  <div className="theme-subtle-surface rounded-[1.4rem] border-dashed px-5 py-10 text-center text-sm leading-7 text-[color:var(--theme-subtle-text)]">
+                    暂时还没有优惠券。绑定好友邀请码后会收到 7.5 折会员券。
+                  </div>
+                ) : null}
+
+                {visibleCoupons.length > 0 ? (
+                  <div className="space-y-3">
+                    {visibleCoupons.map((coupon) => {
+                      const sourceInviteLabel = coupon.sourceInviteeUserId ? inviteLabelsByUserId.get(coupon.sourceInviteeUserId) : null
+                      return (
+                        <div key={coupon.couponId} className="theme-soft-surface rounded-[1.3rem] p-4">
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <div className="text-sm font-semibold text-foreground">{coupon.title || describeMembershipCouponSource(coupon.source)}</div>
+                                <StatusPill tone={coupon.status === "available" ? "accent" : "default"}>
+                                  {describeMembershipCouponStatus(coupon.status)}
+                                </StatusPill>
+                              </div>
+                              <div className="mt-2 text-sm leading-6 text-muted-foreground">
+                                满 {formatMembershipPrice(coupon.minSpendCent)} 可用，创建于 {formatMembershipDateTime(coupon.createdAt)}。
+                              </div>
+                              <div className="mt-1 text-xs leading-6 text-[color:var(--theme-subtle-text)]">
+                                来源：{describeMembershipCouponSource(coupon.source)}
+                                {sourceInviteLabel ? ` · 邀请用户 ${sourceInviteLabel}` : ""}
+                              </div>
                             </div>
-                            <div className="mt-2 text-sm leading-6 text-muted-foreground">
-                              满 {formatMembershipPrice(coupon.minSpendCent)} 可用，创建于 {formatMembershipDateTime(coupon.createdAt)}。
-                            </div>
-                            <div className="mt-1 text-xs leading-6 text-[color:var(--theme-subtle-text)]">
-                              来源：{describeMembershipCouponSource(coupon.source)}
-                              {sourceInviteLabel ? ` · 邀请用户 ${sourceInviteLabel}` : ""}
-                            </div>
-                          </div>
-                          <div className="shrink-0 text-right text-xs leading-6 text-muted-foreground">
-                            <div className="text-2xl font-semibold tracking-tight text-foreground">{formatMembershipCouponValue(coupon)}</div>
-                            <div className="mt-1">
-                              {coupon.status === "used" && coupon.usedAt
-                                ? `已于 ${formatMembershipDateTime(coupon.usedAt)} 使用`
-                                : coupon.expiresAt
-                                  ? `${formatMembershipDateTime(coupon.expiresAt)} 到期`
-                                  : "长期有效"}
+                            <div className="shrink-0 text-right text-xs leading-6 text-muted-foreground">
+                              <div className="text-2xl font-semibold tracking-tight text-foreground">{formatMembershipCouponValue(coupon)}</div>
+                              <div className="mt-1">
+                                {coupon.expiresAt ? `${formatMembershipDateTime(coupon.expiresAt)} 到期` : "长期有效"}
+                              </div>
                             </div>
                           </div>
                         </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              ) : null}
+                      )
+                    })}
+                  </div>
+                ) : null}
+              </div>
             </div>
           </div>
         </div>
