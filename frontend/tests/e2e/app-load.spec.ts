@@ -17,3 +17,29 @@ test(journeyIds.appLoad, async ({ page }) => {
 
   expectNoConsoleIssues(consoleIssues)
 })
+
+test("home guide dropdown matches section headings", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page)
+
+  await page.goto("/")
+  const header = page.locator(".lp-showcase-site-header")
+  await expect(header).toHaveClass(/theme-shell-header/)
+  await expect(header.locator(".lp-showcase-brand-mark")).toHaveCSS("width", "40px")
+  const guideButton = page.getByRole("button", { name: /^导览/ })
+  await expect(guideButton).toHaveText("导览")
+  await expect(guideButton).toHaveCSS("border-radius", "12px")
+
+  await guideButton.click()
+  const guideMenu = page.locator(".lp-showcase-nav-dropdown-menu")
+  await expect(guideMenu).toBeVisible()
+
+  const expectedItems = ["方法", "改变，从现在开始", "会员", "常见问题"]
+  await expect(guideMenu.getByRole("link")).toHaveText(expectedItems)
+
+  await guideMenu.getByRole("link", { name: "改变，从现在开始" }).click()
+  await expect(page).toHaveURL(/#onboarding$/)
+  await expect(page.locator("#onboarding")).toBeInViewport()
+
+  expectNoConsoleIssues(consoleIssues)
+})

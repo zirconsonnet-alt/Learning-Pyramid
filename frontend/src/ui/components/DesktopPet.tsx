@@ -58,6 +58,7 @@ export function DesktopPet(props: { page?: "home" | "workbench"; assistantState?
           if (hasPopover) setPinRequested((current) => !current)
         }}
       >
+        <span className="plm-desktop-pet-hit-area" aria-hidden="true" />
         <span className="plm-desktop-pet-stage" aria-hidden="true">
           <img className="plm-desktop-pet-image plm-desktop-pet-stand" src={xuebaoStand} alt="" />
           <img className="plm-desktop-pet-image plm-desktop-pet-idle" src={xuebaoIdle} alt="" />

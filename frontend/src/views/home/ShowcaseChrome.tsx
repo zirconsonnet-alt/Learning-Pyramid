@@ -28,7 +28,7 @@ function getSectionIdFromHref(href: string) {
 export function getShowcaseNavItems(homeSectionPrefix = ""): ShowcaseNavItem[] {
   return [
     { href: buildHomeSectionHref("method", homeSectionPrefix), label: "方法" },
-    { href: buildHomeSectionHref("onboarding", homeSectionPrefix), label: "快速上手" },
+    { href: buildHomeSectionHref("onboarding", homeSectionPrefix), label: "改变，从现在开始" },
     { href: buildHomeSectionHref("membership", homeSectionPrefix), label: "会员" },
     { href: buildHomeSectionHref("faq", homeSectionPrefix), label: "常见问题" },
   ]
@@ -130,7 +130,7 @@ export function ShowcaseSiteHeader(props: { homeSectionPrefix?: string }) {
       if (sectionElements.length === 0) return
 
       const viewportAnchorY = window.scrollY + SHOWCASE_SCROLL_SPY_OFFSET
-      let nextActiveSectionId = sectionElements[0]?.id ?? ""
+      let nextActiveSectionId = ""
 
       for (const sectionElement of sectionElements) {
         if (sectionElement.offsetTop <= viewportAnchorY) {
@@ -183,7 +183,7 @@ export function ShowcaseSiteHeader(props: { homeSectionPrefix?: string }) {
   }, [sectionMenuOpen])
 
   return (
-    <header className="lp-showcase-site-header">
+    <header className="lp-showcase-site-header theme-shell-header">
       <div className="lp-showcase-container lp-showcase-nav">
         <Link className="lp-showcase-brand" to="/">
           <img
