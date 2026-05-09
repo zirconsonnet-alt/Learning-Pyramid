@@ -554,6 +554,74 @@ class SystemAPI:
     def _replace_project_scoped_ids(self, items: dict[str, object], project_id: ProjectId) -> dict[str, object]:
         return {key: self._retarget_project_id(value, project_id) for key, value in items.items()}
 
+    def _retarget_subject_activity_audit_events(
+        self,
+        items: dict[str, AuditLogEvent],
+        project_id: ProjectId,
+    ) -> dict[str, AuditLogEvent]:
+        return {
+            key: replace(value, project_id=project_id)
+            for key, value in items.items()
+            if value.kind not in {AuditEventKind.PROJECT_CREATED, AuditEventKind.PROJECT_DELETED}
+        }
+
+    @staticmethod
+    def _keep_subject_lifecycle_audit_events(items: dict[str, AuditLogEvent]) -> dict[str, AuditLogEvent]:
+        return {
+            key: value
+            for key, value in items.items()
+            if value.kind in {AuditEventKind.PROJECT_CREATED, AuditEventKind.PROJECT_DELETED}
+        }
+
+    @staticmethod
+    def _has_non_bootstrap_audit_events(project_store: object) -> bool:
+        for event in getattr(project_store, "audit_log_events", {}).values():
+            if getattr(event, "kind", None) not in {AuditEventKind.PROJECT_CREATED, AuditEventKind.PROJECT_DELETED}:
+                return True
+        return False
+
+    @staticmethod
+    def _has_migratable_project_content(project_store: object) -> bool:
+        content_fields = (
+            "material_allowlist",
+            "media_assets",
+            "instances",
+            "instance_media_bindings",
+            "video_watch_progress",
+            "learning_object_nodes",
+            "recall_points",
+            "recall_point_review_records",
+            "learning_tasks",
+            "learning_task_nodes",
+            "range_snapshots",
+            "asr_artifacts",
+            "review_tasks",
+            "convergences",
+            "review_chains",
+            "entry_regs",
+            "aggregation_events",
+        )
+        for field_name in content_fields:
+            value = getattr(project_store, field_name, None)
+            if isinstance(value, dict) and value:
+                return True
+            if value is not None and not isinstance(value, dict):
+                return True
+        return SystemAPI._has_non_bootstrap_audit_events(project_store)
+
+    def _is_legacy_bare_subject_project(self, project_id: ProjectId) -> bool:
+        project_store = self._get_project_store(project_id)
+        project = project_store.project
+        if project is None or project.state != ProjectState.ACTIVE:
+            return False
+        if self._get_subject_material_link(project_id) is not None:
+            return False
+        if getattr(project_store, "study_materials_initialized", False):
+            return False
+        if getattr(project_store, "study_materials", {}):
+            return False
+        return self._has_migratable_project_content(project_store)
+
     def _move_legacy_subject_root_content_to_material_project(
         self,
         *,
@@ -576,6 +644,7 @@ class SystemAPI:
         child_store.material_allowlist = (
             None if subject_store.material_allowlist is None else replace(subject_store.material_allowlist, project_id=material_project_id)
         )
+        child_store.audit_log_events.update(self._retarget_subject_activity_audit_events(subject_store.audit_log_events, material_project_id))
         child_store.media_assets = self._replace_project_scoped_ids(subject_store.media_assets, material_project_id)  # type: ignore[assignment]
         child_store.instances = self._replace_project_scoped_ids(subject_store.instances, material_project_id)  # type: ignore[assignment]
         child_store.instance_media_bindings = self._replace_project_scoped_ids(subject_store.instance_media_bindings, material_project_id)  # type: ignore[assignment]
@@ -600,6 +669,7 @@ class SystemAPI:
         child_store.aggregation_events = self._replace_project_scoped_ids(subject_store.aggregation_events, material_project_id)  # type: ignore[assignment]
 
         subject_store.material_allowlist = None
+        subject_store.audit_log_events = self._keep_subject_lifecycle_audit_events(subject_store.audit_log_events)
         subject_store.media_assets = {}
         subject_store.instances = {}
         subject_store.instance_media_bindings = {}
@@ -2077,7 +2147,7 @@ class SystemAPI:
             )
         migrated_subject_ids: list[ProjectId] = []
         for project in candidates:
-            if not self.is_subject_root_project(project.project_id):
+            if not self.is_subject_root_project(project.project_id) and not self._is_legacy_bare_subject_project(project.project_id):
                 continue
             self._ensure_subject_materials_are_independent(project.project_id)
             migrated_subject_ids.append(project.project_id)
@@ -2101,6 +2171,22 @@ class SystemAPI:
     def _legacy_subject_root_materials(self, subject_id: ProjectId) -> tuple[StudyMaterial, ...]:
         project_store = self._get_project_store(subject_id)
         study_materials = tuple(getattr(project_store, "study_materials", {}).values())
+        if (
+            not study_materials
+            and not getattr(project_store, "study_materials_initialized", False)
+            and self._is_legacy_bare_subject_project(subject_id)
+        ):
+            project = self._get_active_project_metadata(subject_id)
+            return (
+                StudyMaterial(
+                    subject_id=subject_id,
+                    material_id="legacy_main",
+                    material_type=StudyMaterialType.COURSE,
+                    title=project.title,
+                    created_at=project.created_at,
+                    project_id=subject_id,
+                ),
+            )
         return tuple(
             item
             for item in study_materials
@@ -4146,7 +4232,7 @@ class SystemAPI:
             for ps in self.sys.g.projects.values()
             if ps.project is not None
             and ps.project.state == ProjectState.ACTIVE
-            and self.is_subject_root_project(ps.project.project_id)
+            and (self.is_subject_root_project(ps.project.project_id) or self._is_legacy_bare_subject_project(ps.project.project_id))
         )
 
     def list_subject_materials(self, subject_id: ProjectId) -> Tuple[StudyMaterial, ...]:

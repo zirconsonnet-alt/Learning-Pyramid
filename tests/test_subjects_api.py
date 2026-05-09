@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -14,9 +15,11 @@ from adapter.deps import (
     get_membership_store,
 )
 from adapter.main import create_app
-from backend.models.enums import SessionMode
+from backend.models.audit_log_event import AuditLogEvent
+from backend.models.enums import AuditEventKind, AuditResultCode, SessionMode
 from backend.models.study_material import StudyMaterial, StudyMaterialType
 from backend.models.types import ProjectId
+from backend.models.types import now_utc_ms
 from backend.system.inmemory_system import SessionState
 
 
@@ -472,6 +475,83 @@ def test_hosted_legacy_root_material_migration_grants_child_project_access(monke
     project_ids = {item["projectId"] for item in projects_resp.json()["data"]}
     assert str(subject_id) not in project_ids
     assert str(migrated_project_id) in project_ids
+
+    _reset_caches()
+
+
+def test_hosted_legacy_bare_project_with_user_activity_becomes_subject(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("PLM_APP_MODE", "hosted")
+    monkeypatch.setenv("PLM_ENABLE_AUTH", "true")
+    monkeypatch.setenv("PLM_ALLOW_SIGNUP", "true")
+    monkeypatch.setenv("PLM_REQUIRE_SIGNUP_INVITE", "false")
+    monkeypatch.setenv("PLM_ENABLE_ASR", "false")
+    monkeypatch.setenv("PLM_ENABLE_SERVER_MEDIA_STREAM", "false")
+    monkeypatch.setenv("PLM_PROJECTS_ROOT", str(tmp_path / "projects"))
+    monkeypatch.setenv("PLM_STORE_PATH", "")
+    monkeypatch.setenv("PLM_LEGACY_STORE_PATH", "")
+    monkeypatch.setenv("PLM_STORE_DB_PATH", str(tmp_path / "plm_store.sqlite3"))
+    monkeypatch.setenv("PLM_AUTH_DB_PATH", str(tmp_path / "plm_auth.sqlite3"))
+    monkeypatch.setenv("PLM_MEMBERSHIP_DB_PATH", str(tmp_path / "plm_membership.sqlite3"))
+    _reset_caches()
+
+    client = TestClient(create_app())
+    register_resp = client.post("/api/auth/register", json={"email": "bare-legacy-owner@example.com", "password": "password123"})
+    assert register_resp.status_code == 200
+    user_id = register_resp.json()["data"]["userId"]
+
+    api = get_api()
+    auth_store = get_auth_store()
+    subject_id = api.create_project("概率论与数理统计")
+    auth_store.add_project_owner(subject_id, user_id)
+    occurred_at = now_utc_ms()
+    session = api.sys.begin_session(subject_id, SessionMode.READ_WRITE)
+    try:
+        api.sys.audit_log_repo.append(
+            session,
+            AuditLogEvent(
+                project_id=subject_id,
+                event_id=api.idgen.new_audit_event_id(subject_id),
+                occurred_at=occurred_at,
+                kind=AuditEventKind.SUBMIT_LEARNING_TASK,
+                api_name="submit_learning_task",
+                result=AuditResultCode.OK,
+                payload=json.dumps({"legacy": True}, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
+            ),
+        )
+        api.sys.commit(session)
+        sql_store = api._sql_store()
+        assert sql_store is not None
+        api._persist_project_store_sql_direct(sql_store, subject_id)
+        api._reload_sql_state()
+    except Exception:
+        if session.state == SessionState.OPEN:
+            api.sys.rollback(session)
+        raise
+
+    subjects_resp = client.get("/api/subjects")
+    assert subjects_resp.status_code == 200
+    subjects = subjects_resp.json()["data"]
+    assert [item["subjectId"] for item in subjects] == [str(subject_id)]
+
+    materials_resp = client.get(f"/api/subjects/{subject_id}/materials")
+    assert materials_resp.status_code == 200
+    materials = materials_resp.json()["data"]
+    assert len(materials) == 1
+    migrated = materials[0]
+    assert migrated["subjectId"] == str(subject_id)
+    assert migrated["title"] == "概率论与数理统计"
+    assert migrated["materialType"] == "COURSE"
+    assert migrated["projectId"] != str(subject_id)
+    assert str(migrated["projectId"]) in auth_store.list_project_ids_for_user(user_id)
+
+    projects_resp = client.get("/api/projects")
+    assert projects_resp.status_code == 200
+    project_ids = {item["projectId"] for item in projects_resp.json()["data"]}
+    assert str(subject_id) not in project_ids
+    assert migrated["projectId"] in project_ids
+
+    migrated_events = list(api.list_audit_log_events(ProjectId(migrated["projectId"])))
+    assert any(item.kind == AuditEventKind.SUBMIT_LEARNING_TASK for item in migrated_events)
 
     _reset_caches()
 
