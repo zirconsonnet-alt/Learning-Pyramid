@@ -12,7 +12,6 @@ import {
   type GuideWalkthroughStep,
 } from "./guideWalkthroughSteps"
 import { showInfoFeedback } from "@/ui/store/feedbackStore"
-import { useAppStore } from "@/ui/store/appStore"
 import {
   describePomodoroPhase,
   getActivePomodoroDayPlans,
@@ -187,13 +186,11 @@ function getPomodoroPlanIdFromPathname(pathname: string) {
 }
 
 function resolveGuideProjectId(pathname: string) {
-  const state = useAppStore.getState()
-  return state.selectedWorkbenchProjectRef?.projectId ?? getProjectIdFromPathname(pathname) ?? state.recentWorkbenchProjectRefs[0]?.projectId ?? null
+  return getProjectIdFromPathname(pathname)
 }
 
 function resolveGuideSubjectId(pathname: string) {
-  const state = useAppStore.getState()
-  return state.selectedSubjectId ?? getSubjectIdFromPathname(pathname) ?? null
+  return getSubjectIdFromPathname(pathname)
 }
 
 function resolveGuidePomodoroPlanId(pathname: string) {

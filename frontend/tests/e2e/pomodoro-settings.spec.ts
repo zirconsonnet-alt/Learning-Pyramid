@@ -123,6 +123,60 @@ test("pomodoro blocks workbench when enabled without an active focus segment", a
   expectNoConsoleIssues(consoleIssues)
 })
 
+test("pomodoro does not start quick pomodoro from stale selected project", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page, {
+    globalSettings: createMockGlobalSettings({
+      pomodoro: {
+        enabled: true,
+        transitionSoundEnabled: false,
+        defaultFocusPrompt: "",
+        defaultBreakPrompt: "",
+        microBreaks: {
+          enabled: false,
+          minIntervalSeconds: 180,
+          maxIntervalSeconds: 300,
+          durationSeconds: 10,
+        },
+        weeklySchedule: {
+          mon: { plans: [] },
+          tue: { plans: [] },
+          wed: { plans: [] },
+          thu: { plans: [] },
+          fri: { plans: [] },
+          sat: { plans: [] },
+          sun: { plans: [] },
+        },
+      },
+    }),
+  })
+  await page.addInitScript(({ subjectId, projectId }) => {
+    window.localStorage.setItem(
+      "plm-app",
+      JSON.stringify({
+        state: {
+          selectedSubjectId: subjectId,
+          selectedWorkbenchProjectId: projectId,
+          selectedWorkbenchProjectRef: { subjectId, projectId },
+          recentSubjectIds: [subjectId],
+          recentWorkbenchProjectIds: [projectId],
+          recentWorkbenchProjectRefs: [{ subjectId, projectId }],
+        },
+        version: 0,
+      }),
+    )
+  }, { subjectId: subject.subjectId, projectId: project.projectId })
+
+  await page.goto("/pomodoro")
+  await page.waitForLoadState("networkidle")
+  const quickPomodoroButton = page.getByRole("button", { name: "新建小番茄" })
+  await expect(quickPomodoroButton).toBeVisible()
+  await expect(quickPomodoroButton).toBeDisabled()
+  await expect(page.getByRole("link", { name: /进入.*工作台/ })).toHaveCount(0)
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
 test("pomodoro allows only the focused project workbench during focus time", async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
   await installMockApi(page, {
@@ -192,9 +246,47 @@ test("pomodoro delete plan persists after returning to overview", async ({ page 
   await expect(page.getByText("计划 1")).toBeVisible()
   await page.getByRole("button", { name: "删除计划" }).click()
   await expect(page).toHaveURL(/\/pomodoro$/)
-  await expect(page.getByText("还没有计划，新增一组后再进入详情设置。")).toBeVisible()
+  await expect(page.getByText("番茄计划：0组")).toBeVisible()
+  await expect(page.getByText("还没有计划，新增一组后再进入详情设置。")).toHaveCount(0)
   await page.reload()
-  await expect(page.getByText("还没有计划，新增一组后再进入详情设置。")).toBeVisible()
+  await expect(page.getByText("番茄计划：0组")).toBeVisible()
+  await expect(page.getByText("还没有计划，新增一组后再进入详情设置。")).toHaveCount(0)
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
+test("pomodoro save plan returns to overview", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page, {
+    globalSettings: createMockGlobalSettings({
+      pomodoro: {
+        enabled: false,
+        transitionSoundEnabled: false,
+        defaultFocusPrompt: "",
+        defaultBreakPrompt: "",
+        microBreaks: {
+          enabled: false,
+          minIntervalSeconds: 180,
+          maxIntervalSeconds: 300,
+          durationSeconds: 10,
+        },
+        weeklySchedule: {
+          mon: { plans: [] },
+          tue: { plans: [] },
+          wed: { plans: [] },
+          thu: { plans: [] },
+          fri: { plans: [] },
+          sat: { plans: [createPomodoroPlan({ id: "save_me" })] },
+          sun: { plans: [] },
+        },
+      },
+    }),
+  })
+
+  await page.goto("/pomodoro/plans/save_me")
+  await expect(page.getByText("计划 1")).toBeVisible()
+  await page.getByRole("button", { name: "保存" }).click()
+  await expect(page).toHaveURL(/\/pomodoro$/)
 
   expectNoConsoleIssues(consoleIssues)
 })
@@ -208,7 +300,8 @@ test("pomodoro restore returns to overview when current draft no longer exists",
   await expect(page.getByText("计划 1")).toBeVisible()
   await page.getByRole("button", { name: "恢复" }).click()
   await expect(page).toHaveURL(/\/pomodoro$/)
-  await expect(page.getByText("还没有计划，新增一组后再进入详情设置。")).toBeVisible()
+  await expect(page.getByText("番茄计划：0组")).toBeVisible()
+  await expect(page.getByText("还没有计划，新增一组后再进入详情设置。")).toHaveCount(0)
 
   expectNoConsoleIssues(consoleIssues)
 })

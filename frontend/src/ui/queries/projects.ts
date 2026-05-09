@@ -14,7 +14,6 @@ import {
   getVirtualStudyReviewProject,
   getVirtualStudyReviewProjectMaterialSourceBinding,
 } from "@/ui/guideWalkthrough/virtualStudyReviewProject"
-import { useAppStore } from "@/ui/store/appStore"
 
 const PROJECT_BINDING_QUERY_TIMEOUT_MS = 90_000
 
@@ -25,7 +24,6 @@ export function useProjects(enabled = true) {
 export function useProject(projectId?: string, options?: { enabled?: boolean; subjectId?: string }) {
   const isVirtualProject = isVirtualStudyReviewProjectId(projectId)
   const query = useProjects((options?.enabled ?? true) && !isVirtualProject)
-  const selectedWorkbenchProjectRef = useAppStore((state) => state.selectedWorkbenchProjectRef)
   const project =
     isVirtualProject
       ? getVirtualStudyReviewProject()
@@ -34,7 +32,6 @@ export function useProject(projectId?: string, options?: { enabled?: boolean; su
             if (item.projectId !== projectId) return false
             if (options?.subjectId && item.subjectId && item.subjectId !== options.subjectId) return false
             if (options?.subjectId && !item.subjectId) return false
-            if (!options?.subjectId && selectedWorkbenchProjectRef?.projectId === projectId && selectedWorkbenchProjectRef?.subjectId && item.subjectId && item.subjectId !== selectedWorkbenchProjectRef.subjectId) return false
             return true
           }) ?? null
         : null

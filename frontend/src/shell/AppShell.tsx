@@ -301,7 +301,6 @@ export function AppShell() {
   useGuideWalkthroughController({ navigate: nav, pathname: location.pathname })
   const { projectId, subjectId: routeSubjectId } = useParams()
   const pid = projectId ?? ""
-  const isProjectsScope = location.pathname === "/projects"
   const selectedWorkbenchProjectId = useAppStore((state) => state.selectedWorkbenchProjectId)
   const setSelectedWorkbenchProjectId = useAppStore((state) => state.setSelectedWorkbenchProjectId)
   const [globalMenuOpen, setGlobalMenuOpen] = useState(false)
@@ -319,7 +318,7 @@ export function AppShell() {
     () => (subjectsQ.data ?? []).find((subject) => subject.subjectId === routeSubjectId) ?? null,
     [routeSubjectId, subjectsQ.data],
   )
-  const effectiveProjectId = pid || (isProjectsScope ? "" : selectedWorkbenchProjectId || "")
+  const effectiveProjectId = pid
   const isVirtualStudyReviewProject = isVirtualStudyReviewProjectId(effectiveProjectId)
   const isSubjectDashboardScope = Boolean(routeSubjectId) && !pid
   const subjectContextQ = useSubjectContext(effectiveProjectId, canAccessApp && Boolean(effectiveProjectId) && !isSubjectDashboardScope && !routeSubjectId)

@@ -30,7 +30,6 @@ import { useSubjects } from "@/ui/queries/subjects"
 import { useSystemCapabilities } from "@/ui/queries/system"
 import { usePageMeta } from "@/ui/seo/usePageMeta"
 import { completeGuideWalkthroughStep } from "@/ui/guideWalkthrough/guideWalkthroughController"
-import { useAppStore } from "@/ui/store/appStore"
 import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { listPomodoroActivityRecords, type PomodoroActivityRecord } from "@/ui/store/pomodoroActivityStore"
 import {
@@ -758,9 +757,8 @@ function RestMusicPlayer(props: { isRestPhase: boolean }) {
 
 export function PomodoroPage() {
   const nav = useNavigate()
-  const { planId: routePlanId } = useParams()
+  const { planId: routePlanId, subjectId: routeSubjectId, projectId: routeProjectId } = useParams()
   const activePlanId = routePlanId ? decodeURIComponent(routePlanId) : null
-  const selectedWorkbenchProjectRef = useAppStore((state) => state.selectedWorkbenchProjectRef)
   const projectsQ = useProjects(true)
   const subjectsQ = useSubjects(true)
   const selectedTheme = useThemeStore((state) => state.theme)
@@ -878,11 +876,15 @@ export function PomodoroPage() {
   const hasFocusProject = Boolean(focusProjectKey && validPomodoroProjectRefs.has(focusProjectKey))
   const focusProjectTitle =
     focusProjectRef && hasFocusProject ? projectTitleByProjectRef.get(focusProjectKey) ?? projectTitleByRef.get(focusProjectKey) ?? "" : ""
-  const resolvedSelectedWorkbenchProjectRef =
+  const routeProjectRef =
+    routeSubjectId && routeProjectId
+      ? { subjectId: routeSubjectId, projectId: routeProjectId }
+      : null
+  const resolvedQuickPomodoroProjectRef =
     pomodoroProjectCatalogReady &&
-    selectedWorkbenchProjectRef &&
-    validPomodoroProjectRefs.has(pomodoroProjectRefKey(selectedWorkbenchProjectRef))
-      ? selectedWorkbenchProjectRef
+    routeProjectRef &&
+    validPomodoroProjectRefs.has(pomodoroProjectRefKey(routeProjectRef))
+      ? routeProjectRef
       : null
   const focusWorkbenchPath =
     focusProjectRef && hasFocusProject
@@ -946,7 +948,6 @@ export function PomodoroPage() {
   const draftActiveDays = POMODORO_WEEKDAYS.filter((day) => draftSchedule[day].plans.some((plan) => plan.enabled))
   const enabledDayCount = draftActiveDays.length
   const activeDaySummary = formatActiveDaySummary(draftActiveDays)
-  const enabledDraftCount = pomodoroDrafts.filter((draft) => draft.activeDays.length > 0).length
   const projectBindingMessages = useMemo(
     () => {
       if (pomodoroProjectOptionsLoading) return []
@@ -1106,6 +1107,7 @@ export function PomodoroPage() {
         "番茄钟排程已保存",
         enabledDayCount > 0 ? `当前在${activeDaySummary}生效。` : "排程已保存，但还没有启用任何日期。",
       )
+      nav(buildPomodoroPath())
     } catch (err) {
       showErrorFeedback("保存番茄钟排程失败", formatApiError(err))
     }
@@ -1175,14 +1177,14 @@ export function PomodoroPage() {
       showInfoFeedback("番茄钟正在运行", "当前已经处于学习阶段，结束后再新建小番茄。")
       return
     }
-    if (!resolvedSelectedWorkbenchProjectRef) {
-      showInfoFeedback("先选择学科项目", "进入学科下的具体项目工作台后，再新建小番茄。")
+    if (!resolvedQuickPomodoroProjectRef) {
+      showInfoFeedback("先进入项目工作台", "进入学科下的具体项目工作台后，再新建小番茄。")
       return
     }
-    startQuickPomodoro(resolvedSelectedWorkbenchProjectRef)
+    startQuickPomodoro(resolvedQuickPomodoroProjectRef)
     showSuccessFeedback(
       "小番茄已创建",
-      "10 秒后开始 25 分钟学习，系统会进入当前选中项目的工作台。",
+      "10 秒后开始 25 分钟学习，系统会进入当前项目工作台。",
     )
   }
 
@@ -1655,7 +1657,7 @@ export function PomodoroPage() {
                 <TimerReset className="h-4 w-4" />
                 {enabled ? "关闭番茄钟" : "开启番茄钟"}
               </Button>
-              <Button variant={activeQuickPomodoro ? "destructive" : "outline"} onClick={handleQuickPomodoroButtonClick} disabled={!activeQuickPomodoro && (isFocusRunning || !resolvedSelectedWorkbenchProjectRef)}>
+              <Button variant={activeQuickPomodoro ? "destructive" : "outline"} onClick={handleQuickPomodoroButtonClick} disabled={!activeQuickPomodoro && (isFocusRunning || !resolvedQuickPomodoroProjectRef)}>
                 {activeQuickPomodoro ? <CircleStop className="h-4 w-4" /> : <TimerReset className="h-4 w-4" />}
                 {quickPomodoroButtonLabel}
               </Button>
@@ -1772,7 +1774,7 @@ export function PomodoroPage() {
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <div className="text-lg font-semibold text-foreground">
-                番茄计划：{enabledDraftCount > 0 ? `${enabledDraftCount}组` : "未启用"}
+                番茄计划：{pomodoroDrafts.length}组
               </div>
             </div>
             <Button type="button" variant="outline" data-guide-tour="pomodoro-create-plan-button" onClick={addPomodoroDraftPlan}>
@@ -1786,12 +1788,6 @@ export function PomodoroPage() {
               计划时间冲突：{planConflictMessages.join("；")}
             </div>
           ) : null}
-          {pomodoroDrafts.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-[color:var(--theme-soft-border)] px-4 py-8 text-sm text-muted-foreground">
-              还没有计划，新增一组后再进入详情设置。
-            </div>
-          ) : null}
-
           <div className="grid gap-3 md:grid-cols-2">
             {pomodoroDrafts.map((pomodoroDraft, draftIndex) => {
               const draftPomodoroCount = normalizeCountInput(pomodoroDraft.pomodoroCount, 4)

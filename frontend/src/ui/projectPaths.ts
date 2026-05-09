@@ -1,5 +1,3 @@
-import { useAppStore } from "@/ui/store/appStore"
-
 export function buildSubjectSettingsPath(subjectId: string) {
   return subjectId ? `/subjects/${subjectId}/settings` : ""
 }
@@ -16,8 +14,7 @@ function currentSubjectIdForProject(projectId: string) {
     const currentProjectId = decodeURIComponent(match?.[2] ?? "")
     if (subjectId && currentProjectId === projectId) return subjectId
   }
-  const projectRef = useAppStore.getState().selectedWorkbenchProjectRef
-  return projectRef?.projectId === projectId ? projectRef.subjectId : ""
+  return ""
 }
 
 export function buildCurrentProjectPath(projectId: string, suffix: string) {
