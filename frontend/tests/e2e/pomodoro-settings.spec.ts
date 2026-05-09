@@ -27,7 +27,7 @@ test(journeyIds.pomodoro, async ({ page }) => {
 
   await recordJourney(journeyIds.pomodoro, async () => {
     await page.goto("/pomodoro")
-    await expect(page.getByText("番茄钟")).toBeVisible()
+    await expect(page.getByText("番茄钟", { exact: true })).toBeVisible()
     await page.getByRole("button", { name: "统计" }).click()
     await expect(page.getByText("今天还没有可统计的番茄记录。")).toBeVisible()
   })
@@ -123,7 +123,7 @@ test("pomodoro blocks workbench when enabled without an active focus segment", a
   expectNoConsoleIssues(consoleIssues)
 })
 
-test("pomodoro does not start quick pomodoro from stale selected project", async ({ page }) => {
+test("pomodoro creates quick pomodoro from an explicit subject and project selection", async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
   await installMockApi(page, {
     globalSettings: createMockGlobalSettings({
@@ -171,8 +171,22 @@ test("pomodoro does not start quick pomodoro from stale selected project", async
   await page.waitForLoadState("networkidle")
   const quickPomodoroButton = page.getByRole("button", { name: "新建小番茄" })
   await expect(quickPomodoroButton).toBeVisible()
-  await expect(quickPomodoroButton).toBeDisabled()
   await expect(page.getByRole("link", { name: /进入.*工作台/ })).toHaveCount(0)
+  await quickPomodoroButton.click()
+  const dialog = page.getByRole("dialog", { name: "新建小番茄" })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByLabel("学科")).toHaveValue("")
+  await expect(dialog.getByLabel("项目")).toBeDisabled()
+  await expect(dialog.getByRole("button", { name: "创建小番茄" })).toBeDisabled()
+
+  await dialog.getByLabel("学科").selectOption(subject.subjectId)
+  await dialog.getByLabel("项目").selectOption(project.projectId)
+  await dialog.getByRole("button", { name: "创建小番茄" }).click()
+
+  await expect(dialog).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "结束小番茄" })).toBeVisible()
+  await expect(page.getByRole("link", { name: "进入自动化测试项目工作台" })).toHaveCount(0)
+  await expect(page.getByText("10 秒后开始 25 分钟学习，系统会进入所选项目工作台。")).toBeVisible()
 
   expectNoConsoleIssues(consoleIssues)
 })

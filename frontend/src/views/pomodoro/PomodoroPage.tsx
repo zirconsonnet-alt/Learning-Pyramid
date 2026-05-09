@@ -13,6 +13,7 @@ import {
   subscribePomodoroRestMusicPlayer,
 } from "@/ui/pomodoroRestMusicPlayer"
 import { Button } from "@/ui/components/ui/button"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/ui/components/ui/dialog"
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
 import {
@@ -757,7 +758,7 @@ function RestMusicPlayer(props: { isRestPhase: boolean }) {
 
 export function PomodoroPage() {
   const nav = useNavigate()
-  const { planId: routePlanId, subjectId: routeSubjectId, projectId: routeProjectId } = useParams()
+  const { planId: routePlanId } = useParams()
   const activePlanId = routePlanId ? decodeURIComponent(routePlanId) : null
   const projectsQ = useProjects(true)
   const subjectsQ = useSubjects(true)
@@ -781,6 +782,9 @@ export function PomodoroPage() {
   const [testingPromptKey, setTestingPromptKey] = useState("")
   const [deletingPomodoroDraftId, setDeletingPomodoroDraftId] = useState("")
   const [wallpaperUrl, setWallpaperUrl] = useState("")
+  const [quickPomodoroDialogOpen, setQuickPomodoroDialogOpen] = useState(false)
+  const [quickPomodoroSubjectId, setQuickPomodoroSubjectId] = useState("")
+  const [quickPomodoroProjectId, setQuickPomodoroProjectId] = useState("")
   const [pomodoroActivityRecords, setPomodoroActivityRecords] = useState<PomodoroActivityRecord[]>(() => listPomodoroActivityRecords())
   const wallpaperObjectUrlRef = useRef("")
 
@@ -809,7 +813,6 @@ export function PomodoroPage() {
       ),
     [projectsQ.data],
   )
-  const pomodoroProjectCatalogReady = !projectsQ.isLoading && !subjectsQ.isLoading
   const subjectMaterialQs = useQueries({
     queries: (subjectsQ.data ?? []).map((subject) => ({
       queryKey: ["subjectMaterials", subject.subjectId],
@@ -876,16 +879,14 @@ export function PomodoroPage() {
   const hasFocusProject = Boolean(focusProjectKey && validPomodoroProjectRefs.has(focusProjectKey))
   const focusProjectTitle =
     focusProjectRef && hasFocusProject ? projectTitleByProjectRef.get(focusProjectKey) ?? projectTitleByRef.get(focusProjectKey) ?? "" : ""
-  const routeProjectRef =
-    routeSubjectId && routeProjectId
-      ? { subjectId: routeSubjectId, projectId: routeProjectId }
+  const quickPomodoroSelectableProjects = quickPomodoroSubjectId ? subjectProjectOptions.get(quickPomodoroSubjectId) ?? [] : []
+  const quickPomodoroProjectRef =
+    quickPomodoroSubjectId && quickPomodoroProjectId
+      ? { subjectId: quickPomodoroSubjectId, projectId: quickPomodoroProjectId }
       : null
-  const resolvedQuickPomodoroProjectRef =
-    pomodoroProjectCatalogReady &&
-    routeProjectRef &&
-    validPomodoroProjectRefs.has(pomodoroProjectRefKey(routeProjectRef))
-      ? routeProjectRef
-      : null
+  const canCreateQuickPomodoro =
+    Boolean(quickPomodoroProjectRef) &&
+    validPomodoroProjectRefs.has(pomodoroProjectRefKey(quickPomodoroProjectRef))
   const focusWorkbenchPath =
     focusProjectRef && hasFocusProject
       ? buildScopedWorkbenchPath(focusProjectRef.subjectId, focusProjectRef.projectId)
@@ -920,6 +921,18 @@ export function PomodoroPage() {
     if (pomodoroOverviewMode !== "stats") return
     setPomodoroActivityRecords(listPomodoroActivityRecords())
   }, [pomodoroOverviewMode, now])
+
+  useEffect(() => {
+    if (!quickPomodoroSubjectId) {
+      if (quickPomodoroProjectId) setQuickPomodoroProjectId("")
+      return
+    }
+    if (!quickPomodoroProjectId) return
+    const projects = subjectProjectOptions.get(quickPomodoroSubjectId) ?? []
+    if (!projects.some((project) => project.projectId === quickPomodoroProjectId)) {
+      setQuickPomodoroProjectId("")
+    }
+  }, [quickPomodoroProjectId, quickPomodoroSubjectId, subjectProjectOptions])
 
   useEffect(() => {
     let cancelled = false
@@ -1172,19 +1185,30 @@ export function PomodoroPage() {
     }
   }
 
+  function openQuickPomodoroDialog() {
+    if (isFocusRunning) {
+      showInfoFeedback("番茄钟正在运行", "当前已经处于学习阶段，结束后再新建小番茄。")
+      return
+    }
+    setQuickPomodoroDialogOpen(true)
+  }
+
   function handleStartQuickPomodoro() {
     if (isFocusRunning) {
       showInfoFeedback("番茄钟正在运行", "当前已经处于学习阶段，结束后再新建小番茄。")
       return
     }
-    if (!resolvedQuickPomodoroProjectRef) {
-      showInfoFeedback("先进入项目工作台", "进入学科下的具体项目工作台后，再新建小番茄。")
+    if (!quickPomodoroProjectRef || !canCreateQuickPomodoro) {
+      showInfoFeedback("先选择项目", "请选择学科和项目后再创建小番茄。")
       return
     }
-    startQuickPomodoro(resolvedQuickPomodoroProjectRef)
+    startQuickPomodoro(quickPomodoroProjectRef)
+    setQuickPomodoroDialogOpen(false)
+    setQuickPomodoroSubjectId("")
+    setQuickPomodoroProjectId("")
     showSuccessFeedback(
       "小番茄已创建",
-      "10 秒后开始 25 分钟学习，系统会进入当前项目工作台。",
+      "10 秒后开始 25 分钟学习，系统会进入所选项目工作台。",
     )
   }
 
@@ -1194,7 +1218,7 @@ export function PomodoroPage() {
       showInfoFeedback("小番茄已结束", "工作台已恢复当前番茄之外的访问。")
       return
     }
-    handleStartQuickPomodoro()
+    openQuickPomodoroDialog()
   }
 
   const wallpaperBackdrop = wallpaperUrl ? (
@@ -1657,7 +1681,7 @@ export function PomodoroPage() {
                 <TimerReset className="h-4 w-4" />
                 {enabled ? "关闭番茄钟" : "开启番茄钟"}
               </Button>
-              <Button variant={activeQuickPomodoro ? "destructive" : "outline"} onClick={handleQuickPomodoroButtonClick} disabled={!activeQuickPomodoro && (isFocusRunning || !resolvedQuickPomodoroProjectRef)}>
+              <Button variant={activeQuickPomodoro ? "destructive" : "outline"} onClick={handleQuickPomodoroButtonClick}>
                 {activeQuickPomodoro ? <CircleStop className="h-4 w-4" /> : <TimerReset className="h-4 w-4" />}
                 {quickPomodoroButtonLabel}
               </Button>
@@ -1820,6 +1844,64 @@ export function PomodoroPage() {
         )}
       </section>
       </div>
+      <Dialog open={quickPomodoroDialogOpen} onOpenChange={setQuickPomodoroDialogOpen}>
+        <DialogContent className="max-w-md rounded-[1.25rem] border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)]">
+          <DialogHeader>
+            <DialogTitle>新建小番茄</DialogTitle>
+            <DialogDescription className="sr-only">选择学科和项目后创建小番茄。</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="quick-pomodoro-subject">学科</Label>
+              <select
+                id="quick-pomodoro-subject"
+                className="theme-select h-10 w-full rounded-xl px-3 text-sm"
+                value={quickPomodoroSubjectId}
+                onChange={(event) => {
+                  setQuickPomodoroSubjectId(event.target.value)
+                  setQuickPomodoroProjectId("")
+                }}
+              >
+                <option value="">请选择学科</option>
+                {(subjectsQ.data ?? []).map((subject) => (
+                  <option key={subject.subjectId} value={subject.subjectId}>
+                    {subject.title}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="quick-pomodoro-project">项目</Label>
+              <select
+                id="quick-pomodoro-project"
+                className="theme-select h-10 w-full rounded-xl px-3 text-sm"
+                value={quickPomodoroProjectId}
+                disabled={!quickPomodoroSubjectId || pomodoroProjectOptionsLoading}
+                onChange={(event) => setQuickPomodoroProjectId(event.target.value)}
+              >
+                <option value="">请选择项目</option>
+                {quickPomodoroSelectableProjects.map((project) => (
+                  <option key={project.projectId} value={project.projectId}>
+                    {getPomodoroSubjectProjectOptionLabel(project)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {availablePomodoroProjects.length === 0 && !pomodoroProjectOptionsLoading ? (
+              <div className="text-sm text-muted-foreground">暂无可用项目。</div>
+            ) : null}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setQuickPomodoroDialogOpen(false)}>
+              取消
+            </Button>
+            <Button type="button" onClick={handleStartQuickPomodoro} disabled={!canCreateQuickPomodoro}>
+              <TimerReset className="h-4 w-4" />
+              创建小番茄
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   )
 }
