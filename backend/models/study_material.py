@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from dataclasses import dataclass
 from enum import Enum
 
@@ -20,3 +18,10 @@ class StudyMaterial:
     title: str
     created_at: Timestamp
     project_id: ProjectId | None = None
+    internal_project_key: ProjectId | None = None
+
+    @property
+    def project_ref(self) -> tuple[ProjectId, ProjectId] | None:
+        if self.project_id is None:
+            return None
+        return (self.subject_id, self.project_id)

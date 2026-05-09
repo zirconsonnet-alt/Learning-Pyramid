@@ -7,6 +7,7 @@ import { richContentImageAssetIds, richContentToPlainText } from "@/ui/api/richC
 import { ContentEmptyState, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
+import { buildCurrentProjectPath } from "@/ui/projectPaths"
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -22,7 +23,7 @@ function formatInstanceLabel(instanceId: string | null | undefined, instanceTitl
 
 function buildWorkbenchHref(projectId: string, instanceId: string, position: string) {
   const params = new URLSearchParams({ instanceId, position })
-  return `/p/${projectId}/workbench?${params.toString()}`
+  return buildCurrentProjectPath(projectId, `/workbench?${params.toString()}`)
 }
 
 export function RecallPointListCard({
@@ -107,7 +108,7 @@ export function RecallPointListCard({
 
                   <div className="flex shrink-0 flex-wrap gap-2 md:w-[11rem] md:flex-col md:items-stretch">
                     <Button size="sm" className="rounded-full md:w-full" asChild>
-                      <Link to={`/p/${projectId}/recall-points/${rp.recallPointId}`}>
+                      <Link to={buildCurrentProjectPath(projectId, `/recall-points/${rp.recallPointId}`)}>
                         查看详情
                       </Link>
                     </Button>

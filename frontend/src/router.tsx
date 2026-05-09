@@ -5,7 +5,7 @@ import { createBrowserRouter, Navigate } from "react-router-dom"
 import { AppShell } from "@/shell/AppShell"
 import { RouteErrorPage } from "@/views/system/RouteErrorPage"
 import { RoutePendingPage } from "@/views/system/RoutePendingPage"
-import { PomodoroWorkbenchGate } from "@/views/pomodoro/PomodoroWorkbenchGate"
+import { InvalidProjectLinkPage } from "@/views/system/InvalidProjectLinkPage"
 import { AiChatPage } from "@/views/ai/AiChatPage"
 import { ReviewRecommendationsPage } from "@/views/recommendations/ReviewRecommendationsPage"
 import { ProjectSettingsPage } from "@/views/settings/ProjectSettingsPage"
@@ -124,6 +124,18 @@ export const router = createBrowserRouter([
       { path: "/projects", element: lazyElement(<ProjectsPage />) },
       { path: "/subjects/:subjectId", element: lazyElement(<SubjectDashboardPage />) },
       { path: "/subjects/:subjectId/settings", element: lazyElement(<ProjectSettingsPage />) },
+      { path: "/subjects/:subjectId/projects/:projectId/workbench", element: lazyElement(<WorkbenchPage />) },
+      { path: "/subjects/:subjectId/projects/:projectId/settings", element: lazyElement(<ProjectSettingsPage />) },
+      { path: "/subjects/:subjectId/projects/:projectId/ai-chat", element: lazyElement(<AiChatPage />) },
+      { path: "/subjects/:subjectId/projects/:projectId/recommended-reviews", element: lazyElement(<ReviewRecommendationsPage />) },
+      { path: "/subjects/:subjectId/projects/:projectId/structure-view", element: lazyElement(<StructureViewPage />) },
+      { path: "/subjects/:subjectId/projects/:projectId/learning-task-nodes/:nodeId", element: lazyElement(<LearningTaskNodePage />) },
+      { path: "/subjects/:subjectId/projects/:projectId/learning-object-nodes/:nodeId", element: lazyElement(<LearningObjectNodePage />) },
+      { path: "/subjects/:subjectId/projects/:projectId/instances/:instanceId", element: lazyElement(<InstancePage />) },
+      { path: "/subjects/:subjectId/projects/:projectId/review-chains/:reviewChainId", element: lazyElement(<ReviewChainPage />) },
+      { path: "/subjects/:subjectId/projects/:projectId/convergences/:convergenceId", element: lazyElement(<ConvergencePage />) },
+      { path: "/subjects/:subjectId/projects/:projectId/review-tasks/:reviewTaskId", element: lazyElement(<ReviewTaskPage />) },
+      { path: "/subjects/:subjectId/projects/:projectId/recall-points/:recallPointId", element: lazyElement(<RecallPointPage />) },
       { path: "/friends", element: lazyElement(<FriendsPage />) },
       { path: "/groups", element: <Navigate to="/friends" replace /> },
       { path: "/groups/:groupId", element: <Navigate to="/friends" replace /> },
@@ -139,27 +151,23 @@ export const router = createBrowserRouter([
       { path: "/admin/users/:userId", element: lazyElement(<AdminUserDetailPage />) },
       {
         path: "/p/:projectId/workbench",
-        element: lazyElement(
-          <PomodoroWorkbenchGate>
-            <WorkbenchPage />
-          </PomodoroWorkbenchGate>,
-        ),
+        element: <InvalidProjectLinkPage />,
       },
       { path: "/pomodoro", element: lazyElement(<PomodoroPage />) },
       { path: "/pomodoro/plans/:planId", element: lazyElement(<PomodoroPage />) },
       { path: "/pomodoro/settings", element: lazyElement(<PomodoroSettingsPage />) },
-      { path: "/p/:projectId/pomodoro", element: <Navigate to="/pomodoro" replace /> },
-      { path: "/p/:projectId/recommended-reviews", element: lazyElement(<ReviewRecommendationsPage />) },
-      { path: "/p/:projectId/settings", element: lazyElement(<ProjectSettingsPage />) },
-      { path: "/p/:projectId/ai-chat", element: lazyElement(<AiChatPage />) },
-      { path: "/p/:projectId/structure-view", element: lazyElement(<StructureViewPage />) },
-      { path: "/p/:projectId/learning-task-nodes/:nodeId", element: lazyElement(<LearningTaskNodePage />) },
-      { path: "/p/:projectId/learning-object-nodes/:nodeId", element: lazyElement(<LearningObjectNodePage />) },
-      { path: "/p/:projectId/instances/:instanceId", element: lazyElement(<InstancePage />) },
-      { path: "/p/:projectId/review-chains/:reviewChainId", element: lazyElement(<ReviewChainPage />) },
-      { path: "/p/:projectId/convergences/:convergenceId", element: lazyElement(<ConvergencePage />) },
-      { path: "/p/:projectId/review-tasks/:reviewTaskId", element: lazyElement(<ReviewTaskPage />) },
-      { path: "/p/:projectId/recall-points/:recallPointId", element: lazyElement(<RecallPointPage />) },
+      { path: "/p/:projectId/pomodoro", element: <InvalidProjectLinkPage /> },
+      { path: "/p/:projectId/recommended-reviews", element: <InvalidProjectLinkPage /> },
+      { path: "/p/:projectId/settings", element: <InvalidProjectLinkPage /> },
+      { path: "/p/:projectId/ai-chat", element: <InvalidProjectLinkPage /> },
+      { path: "/p/:projectId/structure-view", element: <InvalidProjectLinkPage /> },
+      { path: "/p/:projectId/learning-task-nodes/:nodeId", element: <InvalidProjectLinkPage /> },
+      { path: "/p/:projectId/learning-object-nodes/:nodeId", element: <InvalidProjectLinkPage /> },
+      { path: "/p/:projectId/instances/:instanceId", element: <InvalidProjectLinkPage /> },
+      { path: "/p/:projectId/review-chains/:reviewChainId", element: <InvalidProjectLinkPage /> },
+      { path: "/p/:projectId/convergences/:convergenceId", element: <InvalidProjectLinkPage /> },
+      { path: "/p/:projectId/review-tasks/:reviewTaskId", element: <InvalidProjectLinkPage /> },
+      { path: "/p/:projectId/recall-points/:recallPointId", element: <InvalidProjectLinkPage /> },
     ],
   },
 ])

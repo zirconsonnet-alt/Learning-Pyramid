@@ -162,6 +162,19 @@ If you still need hot reload and Vite dev server:
 LearningPyramid.dev.bat
 ```
 
+## Frontend automation
+
+Rendered frontend automation is documented in [docs/frontend-automation.md](docs/frontend-automation.md). The required local gate is:
+
+```powershell
+pnpm --dir frontend install
+pnpm --dir frontend exec playwright install chromium
+pnpm --dir frontend build
+pnpm --dir frontend test:e2e
+```
+
+The existing `tests/test_frontend_*.py` checks remain supplemental static guards; they are not a substitute for the rendered Playwright journeys.
+
 ## Data location
 
 By default, user data is stored under:

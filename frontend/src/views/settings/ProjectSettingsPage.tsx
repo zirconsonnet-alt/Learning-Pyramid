@@ -23,6 +23,7 @@ import {
   useEditSubjectMaterial,
   useSubjects,
   useSubjectContext,
+  useScopedSubjectContext,
 } from "@/ui/queries/subjects"
 import { useSystemCapabilities } from "@/ui/queries/system"
 import {
@@ -189,7 +190,8 @@ export function ProjectSettingsPage() {
   const pid = projectId ?? ""
   const isSubjectSettingsScope = Boolean(subjectId && !pid)
   const projectQ = useProject(pid, { enabled: !!pid && !isSubjectSettingsScope })
-  const subjectContextQ = useSubjectContext(pid, !!pid && !isSubjectSettingsScope)
+  const subjectContextQ = useSubjectContext(pid, !!pid && !isSubjectSettingsScope && !subjectId)
+  const scopedSubjectContextQ = useScopedSubjectContext(subjectId ?? "", pid, !!pid && !!subjectId && !isSubjectSettingsScope)
   const subjectsQ = useSubjects(isSubjectSettingsScope)
   const editSubjectM = useEditSubject()
   const editSubjectMaterialM = useEditSubjectMaterial()
@@ -210,7 +212,7 @@ export function ProjectSettingsPage() {
   const bulkRemapM = useBulkRemapRecallPointsInstance(pid)
   const projectType = projectConfigQ.data?.projectType ?? "COURSE"
   const currentRollUpStrategy = projectConfigQ.data?.rollUpStrategy ?? "THRESHOLD_AUTO"
-  const subjectContext = subjectContextQ.data
+  const subjectContext = scopedSubjectContextQ.data ?? subjectContextQ.data
   const subject = useMemo(
     () => (subjectsQ.data ?? []).find((item) => item.subjectId === subjectId) ?? null,
     [subjectId, subjectsQ.data],

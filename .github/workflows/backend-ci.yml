@@ -5,6 +5,34 @@ on:
   pull_request:
 
 jobs:
+  frontend-automation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.30.3 --activate
+      - name: Install frontend dependencies
+        run: pnpm --dir frontend install --frozen-lockfile
+      - name: Install Playwright browsers
+        run: pnpm --dir frontend exec playwright install --with-deps chromium
+      - name: Build frontend
+        run: pnpm --dir frontend build
+      - name: Run frontend automation
+        run: pnpm --dir frontend test:e2e
+      - name: Upload frontend automation artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-automation-artifacts
+          path: |
+            frontend/test-results/
+            frontend/playwright-report/
+
   sqlite-tests:
     runs-on: ubuntu-latest
     steps:

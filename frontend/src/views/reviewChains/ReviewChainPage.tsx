@@ -14,6 +14,7 @@ import {
   formatRangeReference,
   formatReviewTaskReference,
 } from "@/ui/displayIdentifiers"
+import { buildCurrentProjectPath } from "@/ui/projectPaths"
 import { useProject } from "@/ui/queries/projects"
 import { useReviewChain, useReviewChainBinding } from "@/ui/queries/reviewChains"
 import { cn } from "@/ui/utils"
@@ -58,11 +59,11 @@ function formatQueueItemReference(kind: "CONVERGENCE" | "REVIEW_TASK", id: strin
 }
 
 function reviewTaskDetailPath(projectId: string, reviewTaskId: string) {
-  return `/p/${projectId}/review-tasks/${reviewTaskId}`
+  return buildCurrentProjectPath(projectId, `/review-tasks/${reviewTaskId}`)
 }
 
 function convergenceDetailPath(projectId: string, convergenceId: string) {
-  return `/p/${projectId}/convergences/${convergenceId}`
+  return buildCurrentProjectPath(projectId, `/convergences/${convergenceId}`)
 }
 
 export function ReviewChainPage() {
@@ -126,7 +127,7 @@ export function ReviewChainPage() {
   const entryValue = bindingQ.data ? (
     <Link
       className="text-primary underline-offset-4 hover:underline"
-      to={`/p/${pid}/learning-task-nodes/${bindingQ.data.entryNodeId}`}
+      to={buildCurrentProjectPath(pid, `/learning-task-nodes/${bindingQ.data.entryNodeId}`)}
     >
       {bindingQ.data.entryNodeTitle}
     </Link>
@@ -143,7 +144,7 @@ export function ReviewChainPage() {
       className="-ml-2 h-8 rounded-full px-2 text-[#60748c] hover:bg-[#f3f7fb] hover:text-foreground"
       asChild
     >
-      <Link to={`/p/${pid}/workbench`}>
+      <Link to={buildCurrentProjectPath(pid, "/workbench")}>
         <ChevronLeft className="h-4 w-4" />
         返回工作台
       </Link>
@@ -188,7 +189,7 @@ export function ReviewChainPage() {
           message="这条复习链可能已经被清理，或当前入口已失效。请返回工作台继续处理当前项目。"
           action={
             <Button variant="outline" asChild>
-              <Link to={`/p/${pid}/workbench`}>返回工作台</Link>
+              <Link to={buildCurrentProjectPath(pid, "/workbench")}>返回工作台</Link>
             </Button>
           }
         />

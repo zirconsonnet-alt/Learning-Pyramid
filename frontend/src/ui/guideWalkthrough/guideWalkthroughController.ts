@@ -67,7 +67,7 @@ function cleanupVirtualStudyReviewProjectForDoc(docSlug: GuideWalkthroughDocSlug
 }
 
 function shouldLeaveVirtualStudyReviewRoute(pathname: string) {
-  return pathname === `/p/${VIRTUAL_STUDY_REVIEW_PROJECT_ID}` || pathname.startsWith(`/p/${VIRTUAL_STUDY_REVIEW_PROJECT_ID}/`)
+  return pathname === `/subjects/${VIRTUAL_STUDY_REVIEW_PROJECT_ID}/projects/${VIRTUAL_STUDY_REVIEW_PROJECT_ID}` || pathname.startsWith(`/subjects/${VIRTUAL_STUDY_REVIEW_PROJECT_ID}/projects/${VIRTUAL_STUDY_REVIEW_PROJECT_ID}/`)
 }
 
 export function startGuideWalkthrough(docSlug: GuideWalkthroughDocSlug = DEFAULT_GUIDE_WALKTHROUGH_DOC_SLUG) {
@@ -94,7 +94,7 @@ function isWorkbenchGuideStep(step: GuideWalkthroughStep | undefined) {
 }
 
 function getProjectIdFromRouteHint(routeHint: string | undefined) {
-  return routeHint?.match(/^\/p\/([^/]+)/)?.[1] ?? null
+  return routeHint?.match(/^\/subjects\/[^/]+\/projects\/([^/]+)/)?.[1] ?? null
 }
 
 export function shouldEndGuideWalkthroughBeforeWorkbench(step: GuideWalkthroughStep | undefined, now = Date.now()) {
@@ -175,7 +175,7 @@ export function resolveGuideTargetElement(step: GuideWalkthroughStep) {
 }
 
 function getProjectIdFromPathname(pathname: string) {
-  return pathname.match(/^\/p\/([^/]+)/)?.[1] ?? null
+  return pathname.match(/^\/subjects\/[^/]+\/projects\/([^/]+)/)?.[1] ?? null
 }
 
 function getSubjectIdFromPathname(pathname: string) {
@@ -188,7 +188,7 @@ function getPomodoroPlanIdFromPathname(pathname: string) {
 
 function resolveGuideProjectId(pathname: string) {
   const state = useAppStore.getState()
-  return state.selectedWorkbenchProjectId ?? getProjectIdFromPathname(pathname) ?? state.recentWorkbenchProjectIds[0] ?? null
+  return state.selectedWorkbenchProjectRef?.projectId ?? getProjectIdFromPathname(pathname) ?? state.recentWorkbenchProjectRefs[0]?.projectId ?? null
 }
 
 function resolveGuideSubjectId(pathname: string) {

@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useParams } from "react-router-dom"
 
 import {
   createSubject,
@@ -8,6 +9,7 @@ import {
   editSubject,
   editSubjectMaterial,
   getProjectSubjectContext,
+  getScopedProjectSubjectContext,
   listSubjectMaterials,
   listSubjects,
   type StudyMaterialType,
@@ -72,10 +74,28 @@ export function useSubjectMaterials(subjectId: string) {
 }
 
 export function useSubjectContext(projectId: string, enabled = true) {
+  const { subjectId = "" } = useParams()
   return useQuery({
-    queryKey: ["subjectContext", projectId],
-    queryFn: () => (isVirtualStudyReviewProjectId(projectId) ? getVirtualStudyReviewSubjectContext() : getProjectSubjectContext(projectId)),
+    queryKey: subjectId ? ["subjectContext", subjectId, projectId] : ["subjectContext", projectId],
+    queryFn: () =>
+      isVirtualStudyReviewProjectId(projectId)
+        ? getVirtualStudyReviewSubjectContext()
+        : subjectId
+          ? getScopedProjectSubjectContext(subjectId, projectId)
+          : getProjectSubjectContext(projectId),
     enabled: enabled && !!projectId,
+    staleTime: 30_000,
+  })
+}
+
+export function useScopedSubjectContext(subjectId: string, projectId: string, enabled = true) {
+  return useQuery({
+    queryKey: ["subjectContext", subjectId, projectId],
+    queryFn: () =>
+      isVirtualStudyReviewProjectId(projectId)
+        ? getVirtualStudyReviewSubjectContext()
+        : getScopedProjectSubjectContext(subjectId, projectId),
+    enabled: enabled && !!subjectId && !!projectId,
     staleTime: 30_000,
   })
 }

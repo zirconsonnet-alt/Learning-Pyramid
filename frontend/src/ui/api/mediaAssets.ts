@@ -1,7 +1,6 @@
 import { z } from "zod"
 
-import { apiRequest } from "@/ui/api/http"
-import { getBaseUrl } from "@/ui/api/http"
+import { apiRequest, apiUrl } from "@/ui/api/http"
 import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
 
 const IMAGE_UPLOAD_TARGET_BYTES = 900_000
@@ -126,5 +125,5 @@ export function mediaAssetUrl(projectId: string, assetId: string) {
   if (isVirtualStudyReviewProjectId(projectId)) {
     return ""
   }
-  return `${getBaseUrl()}/projects/${projectId}/media-assets/${assetId}`
+  return apiUrl(`/projects/${projectId}/media-assets/${assetId}`)
 }

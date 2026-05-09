@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import Any, List, Optional
 
 from pydantic import BaseModel, EmailStr, Field, root_validator
@@ -372,6 +370,11 @@ class UpdateUserServiceSettingsRequest(BaseModel):
     clearApiKey: bool = False
 
 
+class UserPomodoroProjectReferenceRequest(BaseModel):
+    subjectId: str = Field(min_length=1, max_length=200)
+    projectId: str = Field(min_length=1, max_length=200)
+
+
 class UserPomodoroSettingsRequest(BaseModel):
     id: Optional[str] = None
     enabled: bool = False
@@ -379,7 +382,7 @@ class UserPomodoroSettingsRequest(BaseModel):
     focusMinutes: int = Field(ge=1, le=180)
     breakMinutes: int = Field(ge=1, le=60)
     pomodoroCount: int = Field(ge=1, le=12)
-    projectIds: List[Optional[str]] = Field(default_factory=list)
+    projectRefs: List[Optional[UserPomodoroProjectReferenceRequest]] = Field(default_factory=list)
     breakPrompt: str = Field(default="", max_length=200)
     focusPrompts: List[str] = Field(default_factory=list)
 

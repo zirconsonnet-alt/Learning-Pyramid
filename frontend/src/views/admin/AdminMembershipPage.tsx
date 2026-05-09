@@ -203,7 +203,7 @@ export function AdminMembershipPage() {
   const [orderStatus, setOrderStatus] = useState("all")
   const [orderType, setOrderType] = useState("all")
   const [orderProvider, setOrderProvider] = useState("all")
-  const [selectedOrderId, setSelectedOrderId] = useState("")
+  const [requestedOrderId, setRequestedOrderId] = useState("")
   const [inviteSearch, setInviteSearch] = useState("")
   const [inviteStatus, setInviteStatus] = useState("all")
   const [couponSearch, setCouponSearch] = useState("")
@@ -266,6 +266,10 @@ export function AdminMembershipPage() {
   const payoutIdentitiesQ = useAdminPayoutIdentities({ limit: 30 }, true)
   const withdrawalEventsQ = useAdminWithdrawalEvents({ limit: 50 }, true)
   const withdrawalWarningsQ = useAdminWithdrawalWarnings({ status: "open", limit: 50 }, true)
+  const selectedOrderId =
+    requestedOrderId && (ordersQ.data ?? []).some((item) => item.orderId === requestedOrderId)
+      ? requestedOrderId
+      : ordersQ.data?.[0]?.orderId ?? ""
   const orderDetailQ = useAdminMembershipOrderDetail(selectedOrderId, Boolean(selectedOrderId))
   const grantCoupon = useGrantAdminMembershipCoupon()
   const grantMembership = useGrantAdminMembershipMonths()
@@ -282,17 +286,6 @@ export function AdminMembershipPage() {
   const selectedOrderStatus = orderDetailQ.data?.order.status ?? ""
   const hasActiveOrder =
     (ordersQ.data ?? []).some((item) => activeOrderStatuses.has(item.status)) || activeOrderStatuses.has(selectedOrderStatus)
-
-  useEffect(() => {
-    const orders = ordersQ.data ?? []
-    if (orders.length === 0) {
-      if (selectedOrderId) setSelectedOrderId("")
-      return
-    }
-    if (!selectedOrderId || !orders.some((item) => item.orderId === selectedOrderId)) {
-      setSelectedOrderId(orders[0].orderId)
-    }
-  }, [ordersQ.data, selectedOrderId])
 
   useEffect(() => {
     if (!hasActiveOrder || typeof window === "undefined") return
@@ -359,7 +352,7 @@ export function AdminMembershipPage() {
   }
 
   async function onSyncPayment(orderId: string) {
-    setSelectedOrderId(orderId)
+    setRequestedOrderId(orderId)
     try {
       const result = await syncPayment.mutateAsync({ orderId })
       if (result.confirmed) {
@@ -389,7 +382,7 @@ export function AdminMembershipPage() {
   }
 
   async function onCloseOrder(orderId: string, orderType: string, provider: string) {
-    setSelectedOrderId(orderId)
+    setRequestedOrderId(orderId)
     if (
       typeof window !== "undefined" &&
       !window.confirm(
@@ -496,7 +489,7 @@ export function AdminMembershipPage() {
   }
 
   async function onRefundOrder(orderId: string, orderType: string, provider: string, status: string) {
-    setSelectedOrderId(orderId)
+    setRequestedOrderId(orderId)
     const actionLabel =
       provider === "wechat_native" && status === "paid"
         ? "发起微信退款"
@@ -1206,7 +1199,7 @@ export function AdminMembershipPage() {
                         ? "border-primary/40 bg-primary/10 shadow-sm"
                         : "border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)]",
                     )}
-                    onClick={() => setSelectedOrderId(order.orderId)}
+                    onClick={() => setRequestedOrderId(order.orderId)}
                   >
                     <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                       <div className="min-w-0 flex-1 space-y-2">

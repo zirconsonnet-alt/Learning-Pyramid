@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import { useEffect, useMemo, useRef, useState } from "react"
 import { ChevronDown } from "lucide-react"
 import { Link, useLocation } from "react-router-dom"
@@ -105,18 +106,23 @@ export function ShowcaseSiteHeader(props: { homeSectionPrefix?: string }) {
     () => navItems.find((item) => getSectionIdFromHref(item.href) === activeHomeSectionId)?.label ?? "",
     [activeHomeSectionId, navItems],
   )
-  const [sectionMenuOpen, setSectionMenuOpen] = useState(false)
+  const [sectionMenuState, setSectionMenuState] = useState<{ open: boolean; routeKey: string }>({
+    open: false,
+    routeKey: `${location.pathname}${location.hash}`,
+  })
+  const currentRouteKey = `${location.pathname}${location.hash}`
+  const sectionMenuOpen = sectionMenuState.open && sectionMenuState.routeKey === currentRouteKey
   const sectionMenuRef = useRef<HTMLDivElement | null>(null)
   const homeSectionMenuLabel =
     location.pathname === "/" ? (activeHomeSectionLabel ? `导览 · ${activeHomeSectionLabel}` : "导览") : "首页导览"
 
   useEffect(() => {
-    if (location.pathname !== "/") {
-      setActiveHomeSectionId("")
-      return
-    }
-
     const resolveActiveSection = () => {
+      if (location.pathname !== "/") {
+        setActiveHomeSectionId("")
+        return
+      }
+
       const sectionElements = homeSectionIds
         .map((sectionId) => document.getElementById(sectionId))
         .filter((element): element is HTMLElement => Boolean(element))
@@ -153,21 +159,17 @@ export function ShowcaseSiteHeader(props: { homeSectionPrefix?: string }) {
   }, [homeSectionIds, location.hash, location.pathname])
 
   useEffect(() => {
-    setSectionMenuOpen(false)
-  }, [location.hash, location.pathname])
-
-  useEffect(() => {
     if (!sectionMenuOpen) return
 
     const onPointerDown = (event: MouseEvent | TouchEvent) => {
       const target = event.target
       if (!(target instanceof Node)) return
       if (sectionMenuRef.current?.contains(target)) return
-      setSectionMenuOpen(false)
+      setSectionMenuState((current) => ({ ...current, open: false }))
     }
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setSectionMenuOpen(false)
+      if (event.key === "Escape") setSectionMenuState((current) => ({ ...current, open: false }))
     }
 
     document.addEventListener("mousedown", onPointerDown)
@@ -203,7 +205,7 @@ export function ShowcaseSiteHeader(props: { homeSectionPrefix?: string }) {
               className={cn("lp-showcase-nav-link lp-showcase-nav-dropdown-trigger", location.pathname === "/" && "is-active")}
               aria-haspopup="menu"
               aria-expanded={sectionMenuOpen}
-              onClick={() => setSectionMenuOpen((current) => !current)}
+              onClick={() => setSectionMenuState({ open: !sectionMenuOpen, routeKey: currentRouteKey })}
             >
               <span>{homeSectionMenuLabel}</span>
               <ChevronDown className={cn("h-4 w-4 transition-transform duration-200", sectionMenuOpen && "rotate-180")} />
@@ -220,7 +222,7 @@ export function ShowcaseSiteHeader(props: { homeSectionPrefix?: string }) {
                       {...item}
                       isActive={isActive}
                       className="lp-showcase-nav-dropdown-item"
-                      onNavigate={() => setSectionMenuOpen(false)}
+                      onNavigate={() => setSectionMenuState((current) => ({ ...current, open: false }))}
                     />
                   )
                 })}

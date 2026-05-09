@@ -12,6 +12,7 @@ import { ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/conte
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader } from "@/ui/components/ui/card"
 import { Input } from "@/ui/components/ui/input"
+import { buildCurrentProjectPath } from "@/ui/projectPaths"
 import { useEditLearningTask, useEditLearningTaskNode, useLearningTask, useLearningTaskNode, useLearningTaskNodeBinding } from "@/ui/queries/learningTasks"
 import { useInstances } from "@/ui/queries/workbench"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
@@ -81,7 +82,7 @@ export function LearningTaskNodePage() {
       className="-ml-2 h-8 rounded-full px-2 text-[#60748c] hover:bg-[#f3f7fb] hover:text-foreground"
       asChild
     >
-      <Link to={`/p/${pid}/structure-view?view=task`}>
+      <Link to={buildCurrentProjectPath(pid, "/structure-view?view=task")}>
         <ChevronLeft className="h-4 w-4" />
         返回学习任务树
       </Link>
@@ -106,7 +107,7 @@ export function LearningTaskNodePage() {
             {
               label: "复习关系",
               value: bindingQ.data?.reviewChainId ? (
-                <Link className="text-primary underline-offset-4 hover:underline" to={`/p/${pid}/review-chains/${bindingQ.data.reviewChainId}`}>
+                <Link className="text-primary underline-offset-4 hover:underline" to={buildCurrentProjectPath(pid, `/review-chains/${bindingQ.data.reviewChainId}`)}>
                   查看复习链
                 </Link>
               ) : (
@@ -127,7 +128,7 @@ export function LearningTaskNodePage() {
         />
       ) : null}
       <Button asChild className="w-full">
-        <Link to={`/p/${pid}/ai-chat`}>
+        <Link to={buildCurrentProjectPath(pid, "/ai-chat")}>
           <Sparkles className="h-4 w-4" />
           AI问答
         </Link>
@@ -149,7 +150,7 @@ export function LearningTaskNodePage() {
           message="这个任务节点可能已经被重建或移除。你可以返回学习任务树重新选择。"
           action={
             <Button variant="outline" asChild>
-              <Link to={`/p/${pid}/structure-view?view=task`}>返回学习任务树</Link>
+              <Link to={buildCurrentProjectPath(pid, "/structure-view?view=task")}>返回学习任务树</Link>
             </Button>
           }
         />
@@ -218,7 +219,7 @@ function LeafLearningTaskCard(props: {
         {
           label: "复习关系",
           value: reviewChainId ? (
-            <Link className="text-primary underline-offset-4 hover:underline" to={`/p/${projectId}/review-chains/${reviewChainId}`}>
+            <Link className="text-primary underline-offset-4 hover:underline" to={buildCurrentProjectPath(projectId, `/review-chains/${reviewChainId}`)}>
               查看复习链
             </Link>
           ) : (

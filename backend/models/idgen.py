@@ -23,6 +23,7 @@ from backend.models.types import (
 class InMemoryIdGenerator:
     _counters: Dict[str, int]
     _SYSTEM_PROJECT_SEQ_KEY = "__system__:proj"
+    _SYSTEM_SUBJECT_SEQ_KEY = "__system__:subj"
 
     def __init__(self) -> None:
         self._counters = {}
@@ -31,6 +32,22 @@ class InMemoryIdGenerator:
         cur = int(self._counters.get(self._SYSTEM_PROJECT_SEQ_KEY, 0))
         if n > cur:
             self._counters[self._SYSTEM_PROJECT_SEQ_KEY] = n
+
+    def ensure_subject_id_seq_at_least(self, n: int) -> None:
+        cur = int(self._counters.get(self._SYSTEM_SUBJECT_SEQ_KEY, 0))
+        if n > cur:
+            self._counters[self._SYSTEM_SUBJECT_SEQ_KEY] = n
+
+    def ensure_project_scoped_seq_at_least(self, project_id: ProjectId, prefix: str, n: int) -> None:
+        key = f"{project_id}:{prefix}"
+        cur = int(self._counters.get(key, 0))
+        if n > cur:
+            self._counters[key] = n
+
+    def new_subject_id(self) -> ProjectId:
+        n = int(self._counters.get(self._SYSTEM_SUBJECT_SEQ_KEY, 0)) + 1
+        self._counters[self._SYSTEM_SUBJECT_SEQ_KEY] = n
+        return ProjectId(f"subj_{n:06d}")
 
     def new_project_id(self) -> ProjectId:
         """

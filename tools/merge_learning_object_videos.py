@@ -14,8 +14,6 @@ Usage (PowerShell):
   python tools/merge_learning_object_videos.py --store .plm_store.json --project proj_000014 --dry-run
 """
 
-from __future__ import annotations
-
 import argparse
 import copy
 import json

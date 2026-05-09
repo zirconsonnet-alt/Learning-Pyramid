@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import {
   ArrowUpRight,
   CheckCircle2,
@@ -23,6 +23,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/car
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/ui/components/ui/dialog"
 import { Input } from "@/ui/components/ui/input"
 import { formatInstanceReference } from "@/ui/displayIdentifiers"
+import { buildCurrentProjectPath } from "@/ui/projectPaths"
 import { useProject } from "@/ui/queries/projects"
 import { useAllReviewRecommendations } from "@/ui/queries/reviewRecommendations"
 import { cn } from "@/ui/utils"
@@ -84,50 +85,37 @@ function StatBlock({ label, value, detail }: { label: string; value: string; det
 export function ReviewRecommendationsPage() {
   const { projectId } = useParams()
   const pid = projectId ?? ""
-  const [activeRecallPointId, setActiveRecallPointId] = useState<string | null>(null)
+  const [selectedRecallPointId, setSelectedRecallPointId] = useState<string | null>(null)
   const [revealedAnswerIds, setRevealedAnswerIds] = useState<Record<string, boolean>>({})
   const [sessionAnswers, setSessionAnswers] = useState<Record<string, SessionAnswer>>({})
   const [writtenAnswerDrafts, setWrittenAnswerDrafts] = useState<Record<string, RichContent>>({})
   const [submittedWrittenAnswers, setSubmittedWrittenAnswers] = useState<Record<string, boolean>>({})
   const [insightDrafts, setInsightDrafts] = useState<Record<string, string>>({})
   const [showInsightEditor, setShowInsightEditor] = useState<Record<string, boolean>>({})
-  const [workspaceRecommendations, setWorkspaceRecommendations] = useState<ReviewRecommendationItem[]>([])
+  const [workspaceRecommendationsByProjectId, setWorkspaceRecommendationsByProjectId] = useState<Record<string, ReviewRecommendationItem[]>>({})
   const [recommendationThresholdPercent, setRecommendationThresholdPercent] = useState(70)
   const [thresholdDraft, setThresholdDraft] = useState("70")
   const [thresholdDialogOpen, setThresholdDialogOpen] = useState(false)
   const allReviewRecommendationsQ = useAllReviewRecommendations(pid)
   const { projectTitle } = useProject(pid)
-
-  useEffect(() => {
-    setActiveRecallPointId(null)
-    setRevealedAnswerIds({})
-    setSessionAnswers({})
-    setWrittenAnswerDrafts({})
-    setSubmittedWrittenAnswers({})
-    setInsightDrafts({})
-    setShowInsightEditor({})
-    setWorkspaceRecommendations([])
-    setRecommendationThresholdPercent(70)
-    setThresholdDraft("70")
-    setThresholdDialogOpen(false)
-  }, [pid])
-
-  useEffect(() => {
-    if (workspaceRecommendations.length > 0 || !allReviewRecommendationsQ.data) return
+  const workspaceRecommendations = useMemo(
+    () => workspaceRecommendationsByProjectId[pid] ?? [],
+    [pid, workspaceRecommendationsByProjectId],
+  )
+  const effectiveWorkspaceRecommendations = useMemo(() => {
+    if (workspaceRecommendations.length > 0 || !allReviewRecommendationsQ.data) return workspaceRecommendations
     const threshold = recommendationThresholdPercent / 100
-    setWorkspaceRecommendations(
-      allReviewRecommendationsQ.data.items.filter((item) => item.estimatedMemoryStrength < threshold),
-    )
-  }, [allReviewRecommendationsQ.data, recommendationThresholdPercent, workspaceRecommendations.length])
+    return allReviewRecommendationsQ.data.items.filter((item) => item.estimatedMemoryStrength < threshold)
+  }, [allReviewRecommendationsQ.data, recommendationThresholdPercent, workspaceRecommendations])
 
   const reviewWorkspaceEntries = useMemo<ReviewWorkspaceEntry[]>(
     () =>
-      workspaceRecommendations.map((item, index) => ({
+      effectiveWorkspaceRecommendations.map((item, index) => ({
         recallPoint: item.recallPoint,
         rankLabel: `#${index + 1}`,
         recommendation: item,
       })),
-    [workspaceRecommendations],
+    [effectiveWorkspaceRecommendations],
   )
   const reviewWorkspaceIdSet = useMemo(
     () => new Set(reviewWorkspaceEntries.map((entry) => entry.recallPoint.recallPointId)),
@@ -137,22 +125,16 @@ export function ReviewRecommendationsPage() {
     () => new Set(Object.keys(sessionAnswers).filter((recallPointId) => sessionAnswers[recallPointId] !== undefined)),
     [sessionAnswers],
   )
+  const activeRecallPointId =
+    selectedRecallPointId && reviewWorkspaceIdSet.has(selectedRecallPointId)
+      ? selectedRecallPointId
+      : reviewWorkspaceEntries[0]?.recallPoint.recallPointId ?? null
   const activeEntry = reviewWorkspaceEntries.find((entry) => entry.recallPoint.recallPointId === activeRecallPointId) ?? null
   const activeReviewEntryIndex = activeEntry
     ? reviewWorkspaceEntries.findIndex((entry) => entry.recallPoint.recallPointId === activeEntry.recallPoint.recallPointId)
     : -1
   const answeredCount = reviewWorkspaceEntries.filter((entry) => sessionAnswers[entry.recallPoint.recallPointId] !== undefined).length
   const completionPercent = reviewWorkspaceEntries.length > 0 ? Math.round((answeredCount / reviewWorkspaceEntries.length) * 100) : 0
-
-  useEffect(() => {
-    if (reviewWorkspaceEntries.length === 0) {
-      if (activeRecallPointId !== null) setActiveRecallPointId(null)
-      return
-    }
-    if (!activeRecallPointId || !reviewWorkspaceIdSet.has(activeRecallPointId)) {
-      setActiveRecallPointId(reviewWorkspaceEntries[0].recallPoint.recallPointId)
-    }
-  }, [activeRecallPointId, reviewWorkspaceEntries, reviewWorkspaceIdSet])
 
   if (!pid) {
     return (
@@ -174,7 +156,7 @@ export function ReviewRecommendationsPage() {
     if (!allReviewRecommendationsQ.data) return
     const nextThresholdPercent = clampThresholdPercent(Number(thresholdDraft))
     const threshold = nextThresholdPercent / 100
-    const answeredEntries = workspaceRecommendations.filter((item) => answeredRecallPointIds.has(item.recallPoint.recallPointId))
+    const answeredEntries = effectiveWorkspaceRecommendations.filter((item) => answeredRecallPointIds.has(item.recallPoint.recallPointId))
     const answeredIds = new Set(answeredEntries.map((item) => item.recallPoint.recallPointId))
     const nextUnansweredEntries = allReviewRecommendationsQ.data.items.filter(
       (item) => !answeredIds.has(item.recallPoint.recallPointId) && item.estimatedMemoryStrength < threshold,
@@ -182,7 +164,7 @@ export function ReviewRecommendationsPage() {
 
     setRecommendationThresholdPercent(nextThresholdPercent)
     setThresholdDraft(String(nextThresholdPercent))
-    setWorkspaceRecommendations([...answeredEntries, ...nextUnansweredEntries])
+    setWorkspaceRecommendationsByProjectId((current) => ({ ...current, [pid]: [...answeredEntries, ...nextUnansweredEntries] }))
     setThresholdDialogOpen(false)
   }
 
@@ -244,7 +226,7 @@ export function ReviewRecommendationsPage() {
   function goToReviewEntry(index: number) {
     const next = reviewWorkspaceEntries[index]
     if (!next) return
-    setActiveRecallPointId(next.recallPoint.recallPointId)
+    setSelectedRecallPointId(next.recallPoint.recallPointId)
   }
 
   return (
@@ -258,7 +240,7 @@ export function ReviewRecommendationsPage() {
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" asChild>
-            <Link to={`/p/${pid}/workbench`}>返回工作台</Link>
+            <Link to={buildCurrentProjectPath(pid, "/workbench")}>返回工作台</Link>
           </Button>
           <Button variant="outline" onClick={() => setThresholdDialogOpen(true)} disabled={allReviewRecommendationsQ.isFetching}>
             <SlidersHorizontal className="h-4 w-4" />
@@ -319,7 +301,7 @@ export function ReviewRecommendationsPage() {
                     <button
                       key={`recommended-review-progress-${rpId}`}
                       type="button"
-                      onClick={() => setActiveRecallPointId(rpId)}
+                      onClick={() => setSelectedRecallPointId(rpId)}
                       aria-current={isActive ? "true" : undefined}
                       className={cn(
                         "flex size-10 items-center justify-center rounded-xl border text-sm font-semibold transition-all",
@@ -385,7 +367,7 @@ export function ReviewRecommendationsPage() {
                           </div>
 
                           <Link
-                            to={`/p/${pid}/recall-points/${rpId}`}
+                            to={buildCurrentProjectPath(pid, `/recall-points/${rpId}`)}
                             className="-mx-2 -my-1 mt-2 block rounded-2xl px-2 py-1 transition hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                             title="打开复述点详情"
                           >
@@ -416,7 +398,7 @@ export function ReviewRecommendationsPage() {
                       <div className="mt-3 flex flex-wrap gap-2">
                         {activeEntry.recallPoint.anchor ? (
                           <Button variant="outline" size="sm" className="rounded-full" asChild>
-                            <Link to={`/p/${pid}/instances/${activeEntry.recallPoint.anchor.instanceId}`}>
+                            <Link to={buildCurrentProjectPath(pid, `/instances/${activeEntry.recallPoint.anchor.instanceId}`)}>
                               <PlayCircle className="h-4 w-4" />
                               回到锚点
                             </Link>

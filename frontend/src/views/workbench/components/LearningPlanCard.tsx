@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 
 import type { LearningObjectNode } from "@/ui/api/learningObjects"
 import { Button } from "@/ui/components/ui/button"
@@ -75,17 +75,10 @@ function PlanEditorDialog({
   nodes: LearningObjectNode[]
   onSave: (plan: LearningPlan) => void
 }) {
-  const [title, setTitle] = useState("")
-  const [targetDays, setTargetDays] = useState("14")
-  const [targetKind, setTargetKind] = useState<LearningPlanTargetKind>("PROJECT")
-  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([])
-
-  useEffect(() => {
-    setTitle(existingPlan?.title ?? "完成当前学习目标")
-    setTargetDays(String(existingPlan?.targetDays ?? 14))
-    setTargetKind(existingPlan?.targetKind ?? "PROJECT")
-    setSelectedNodeIds(existingPlan?.learningObjectNodeIds ?? [])
-  }, [existingPlan, open])
+  const [title, setTitle] = useState(existingPlan?.title ?? "完成当前学习目标")
+  const [targetDays, setTargetDays] = useState(String(existingPlan?.targetDays ?? 14))
+  const [targetKind, setTargetKind] = useState<LearningPlanTargetKind>(existingPlan?.targetKind ?? "PROJECT")
+  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>(existingPlan?.learningObjectNodeIds ?? [])
 
   const options = useMemo(() => selectablePlanNodes(nodes), [nodes])
   const normalizedDays = normalizePlanTargetDays(Number.parseInt(targetDays, 10))
@@ -249,6 +242,7 @@ export function LearningPlanCard(props: LearningPlanCardProps) {
       )}
 
       <PlanEditorDialog
+        key={`${editorOpen ? "open" : "closed"}:${plan?.planId ?? "new"}:${plan?.updatedAt ?? 0}`}
         open={editorOpen}
         onOpenChange={setEditorOpen}
         projectId={projectId}

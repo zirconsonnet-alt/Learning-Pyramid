@@ -2,6 +2,7 @@ import { Link } from "react-router-dom"
 
 import { Button } from "@/ui/components/ui/button"
 import { formatReviewTaskReference } from "@/ui/displayIdentifiers"
+import { buildCurrentProjectPath } from "@/ui/projectPaths"
 import { cn } from "@/ui/utils"
 
 type ReviewTaskField = {
@@ -37,7 +38,7 @@ export function ReviewTaskSummaryCard({
             {tag ? <span className="rounded-full border px-2 py-0.5 text-xs">{tag}</span> : null}
             <Link
               className="text-xs font-medium text-primary hover:underline"
-              to={`/p/${projectId}/review-tasks/${reviewTaskId}`}
+              to={buildCurrentProjectPath(projectId, `/review-tasks/${reviewTaskId}`)}
             >
               {formatReviewTaskReference(reviewTaskId)}
             </Link>
@@ -46,7 +47,7 @@ export function ReviewTaskSummaryCard({
         <div className="flex items-center gap-3">
           {statusText ? <div className="text-xs text-muted-foreground">{statusText}</div> : null}
           <Button size="sm" variant="outline" asChild>
-            <Link to={`/p/${projectId}/review-tasks/${reviewTaskId}`}>查看详情</Link>
+            <Link to={buildCurrentProjectPath(projectId, `/review-tasks/${reviewTaskId}`)}>查看详情</Link>
           </Button>
         </div>
       </div>

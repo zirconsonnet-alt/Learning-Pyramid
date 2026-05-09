@@ -3,6 +3,7 @@ import Danmaku from "danmaku"
 import { useNavigate } from "react-router-dom"
 
 import type { RecallPoint } from "@/ui/api/review"
+import { buildCurrentProjectPath } from "@/ui/projectPaths"
 import {
   richContentHasMeaning,
   richContentToPlainText,
@@ -251,7 +252,7 @@ export function useVideoBarrage({
 
   const openBarrageRecallPoint = useCallback(
     (recallPointId: string) => {
-      navigate(`/p/${projectId}/recall-points/${recallPointId}`)
+      navigate(buildCurrentProjectPath(projectId, `/recall-points/${recallPointId}`))
     },
     [navigate, projectId],
   )

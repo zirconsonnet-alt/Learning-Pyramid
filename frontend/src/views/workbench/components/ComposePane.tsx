@@ -147,10 +147,10 @@ export function ComposePane({
   const questionRefs = useRef<Record<string, HTMLTextAreaElement | null>>({})
   const answerRefs = useRef<Record<string, HTMLTextAreaElement | null>>({})
   const lastRecommendedTitleRef = useRef("")
-  const previousDraftScopeRef = useRef<{ scopeKey: string; count: number } | null>(null)
-  const [activeDraftId, setActiveDraftId] = useState<string | null>(null)
+  const [selectedDraftId, setSelectedDraftId] = useState<string | null>(null)
   const [referencePicker, setReferencePicker] = useState<{
     field: ReferencePickerField
+    draftId: string
     query: string
     highlightedIndex: number
   } | null>(null)
@@ -225,7 +225,7 @@ export function ComposePane({
     touchComposeActivity()
     const draft = createDraft(projectType, activeScopeInstanceId, currentMs)
     addDraft(projectId, draft)
-    setActiveDraftId(draft.localId)
+    setSelectedDraftId(draft.localId)
     completeGuideWalkthroughStep("add-recall-point")
     window.setTimeout(() => focusDraftFields(draft), 80)
   }
@@ -277,10 +277,13 @@ export function ComposePane({
 
   const completedDraftCount = drafts.filter((draft) => isDraftComplete(draft)).length
   const completionPercent = drafts.length > 0 ? Math.round((completedDraftCount / drafts.length) * 100) : 0
-  const resolvedActiveDraftId = drafts.some((draft) => draft.localId === activeDraftId) ? activeDraftId : (drafts[0]?.localId ?? null)
+  const resolvedActiveDraftId = drafts.some((draft) => draft.localId === selectedDraftId)
+    ? selectedDraftId
+    : drafts[0]?.localId ?? null
   const activeDraftIndex = resolvedActiveDraftId ? drafts.findIndex((draft) => draft.localId === resolvedActiveDraftId) : -1
   const activeDraft = activeDraftIndex >= 0 ? drafts[activeDraftIndex] : null
-  const deferredReferenceQuery = useDeferredValue(referencePicker?.query.trim() ?? "")
+  const effectiveReferencePicker = referencePicker?.draftId === resolvedActiveDraftId ? referencePicker : null
+  const deferredReferenceQuery = useDeferredValue(effectiveReferencePicker?.query.trim() ?? "")
   const referenceSearchQ = useQuery({
     queryKey: ["recallPointSearch", projectId, deferredReferenceQuery],
     queryFn: ({ signal }) =>
@@ -289,7 +292,7 @@ export function ComposePane({
         { q: deferredReferenceQuery || undefined, limit: MAX_REFERENCE_PICKER_ITEMS * 4 },
         { signal },
       ),
-    enabled: !!projectId && !!referencePicker,
+    enabled: !!projectId && !!effectiveReferencePicker,
     placeholderData: (previous) => previous,
     staleTime: 30_000,
   })
@@ -307,34 +310,17 @@ export function ComposePane({
     [referenceSearchQ.data],
   )
   const selectedReferenceIds = activeDraft?.references ?? []
-  const referencePickerCandidates = useMemo(() => {
-    if (!referencePicker || !activeDraft) return []
+  const referencePickerCandidates = (() => {
+    if (!effectiveReferencePicker || !activeDraft) return []
+    const referenceIdSet = new Set(activeDraft.references)
     return allReferenceCandidates
-      .filter((candidate) => !activeDraft.references.includes(candidate.recallPointId))
+      .filter((candidate) => !referenceIdSet.has(candidate.recallPointId))
       .slice(0, MAX_REFERENCE_PICKER_ITEMS)
-  }, [activeDraft, allReferenceCandidates, referencePicker])
-
-  useEffect(() => {
-    setReferencePicker((current) => {
-      if (!current) return current
-      if (!activeDraft) return null
-      const maxIndex = Math.max(referencePickerCandidates.length - 1, 0)
-      if (current.highlightedIndex <= maxIndex) return current
-      return { ...current, highlightedIndex: maxIndex }
-    })
-  }, [activeDraft, referencePickerCandidates.length])
-
-  useEffect(() => {
-    setReferencePicker(null)
-  }, [resolvedActiveDraftId])
-
-  useEffect(() => {
-    const previous = previousDraftScopeRef.current
-    previousDraftScopeRef.current = { scopeKey: taskScopeKey, count: drafts.length }
-    if (!previous || previous.scopeKey !== taskScopeKey || drafts.length <= previous.count) return
-    const newestDraft = drafts[drafts.length - 1]
-    if (newestDraft) setActiveDraftId(newestDraft.localId)
-  }, [drafts, taskScopeKey])
+  })()
+  const effectiveReferencePickerHighlightIndex = Math.min(
+    effectiveReferencePicker?.highlightedIndex ?? 0,
+    Math.max(referencePickerCandidates.length - 1, 0),
+  )
 
   function focusDraftFields(draft: DraftRecallPoint) {
     const questionFilled = richContentHasMeaning(draft.question)
@@ -355,7 +341,7 @@ export function ComposePane({
 
   function focusDraft(draft: DraftRecallPoint) {
     touchComposeActivity()
-    setActiveDraftId(draft.localId)
+    setSelectedDraftId(draft.localId)
     window.setTimeout(() => focusDraftFields(draft), 80)
   }
 
@@ -367,7 +353,7 @@ export function ComposePane({
   function openReferencePicker(field: ReferencePickerField) {
     if (!activeDraft) return
     touchComposeActivity()
-    setReferencePicker({ field, query: "", highlightedIndex: 0 })
+    setReferencePicker({ field, draftId: activeDraft.localId, query: "", highlightedIndex: 0 })
   }
 
   function closeReferencePicker(field?: ReferencePickerField) {
@@ -378,7 +364,7 @@ export function ComposePane({
   }
 
   function confirmReferencePickerSelection(field: ReferencePickerField) {
-    const selected = referencePickerCandidates[referencePicker?.highlightedIndex ?? 0]
+    const selected = referencePickerCandidates[effectiveReferencePickerHighlightIndex]
     if (!selected || !activeDraft) {
       closeReferencePicker(field)
       return
@@ -392,7 +378,7 @@ export function ComposePane({
     const nextDraft = drafts[index]
     if (!nextDraft) return
     touchComposeActivity()
-    setActiveDraftId(nextDraft.localId)
+    setSelectedDraftId(nextDraft.localId)
   }
 
   return (
@@ -620,12 +606,12 @@ export function ComposePane({
                         openReferencePicker("question")
                       }}
                       referencePicker={
-                        referencePicker?.field === "question"
+                        effectiveReferencePicker?.field === "question"
                           ? {
                               isOpen: true,
                               isLoading: referenceSearchQ.isLoading || (referenceSearchQ.isFetching && !referenceSearchQ.data),
-                              query: referencePicker.query,
-                              highlightedIndex: referencePicker.highlightedIndex,
+                              query: effectiveReferencePicker.query,
+                              highlightedIndex: effectiveReferencePickerHighlightIndex,
                               candidates: referencePickerCandidates,
                               onQueryChange: (query) => setReferencePicker((current) => (current ? { ...current, query, highlightedIndex: 0 } : current)),
                               onHighlightChange: (index) =>
@@ -674,12 +660,12 @@ export function ComposePane({
                         openReferencePicker("answer")
                       }}
                       referencePicker={
-                        referencePicker?.field === "answer"
+                        effectiveReferencePicker?.field === "answer"
                           ? {
                               isOpen: true,
                               isLoading: referenceSearchQ.isLoading || (referenceSearchQ.isFetching && !referenceSearchQ.data),
-                              query: referencePicker.query,
-                              highlightedIndex: referencePicker.highlightedIndex,
+                              query: effectiveReferencePicker.query,
+                              highlightedIndex: effectiveReferencePickerHighlightIndex,
                               candidates: referencePickerCandidates,
                               onQueryChange: (query) => setReferencePicker((current) => (current ? { ...current, query, highlightedIndex: 0 } : current)),
                               onHighlightChange: (index) =>

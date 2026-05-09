@@ -1,5 +1,5 @@
 import { ChevronLeft, Copy, History, Ticket, Users } from "lucide-react"
-import { type FormEvent, useEffect, useMemo, useState } from "react"
+import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { QRCodeSVG } from "qrcode.react"
 
@@ -289,14 +289,15 @@ export function MembershipPage() {
   const [couponBagOpen, setCouponBagOpen] = useState(false)
   const [inviteRecordsOpen, setInviteRecordsOpen] = useState(false)
   const [withdrawalRecordsOpen, setWithdrawalRecordsOpen] = useState(false)
-  const [latestCheckout, setLatestCheckout] = useState<MembershipCreateOrderResult | null>(null)
+  const [checkoutByOrderId, setCheckoutByOrderId] = useState<Record<string, MembershipCreateOrderResult>>({})
   const [withdrawAmountYuan, setWithdrawAmountYuan] = useState("5")
   const [activeBindingAttemptId, setActiveBindingAttemptId] = useState("")
-  const [activeBindingQrPayload, setActiveBindingQrPayload] = useState("")
+  const [startedBindingQrPayload, setStartedBindingQrPayload] = useState("")
   const [bindingDialogOpen, setBindingDialogOpen] = useState(false)
   const [withdrawalConfirmationUrl, setWithdrawalConfirmationUrl] = useState("")
   const [withdrawalConfirmationDialogOpen, setWithdrawalConfirmationDialogOpen] = useState(false)
 
+  const latestCheckout = Object.values(checkoutByOrderId).at(-1) ?? null
   const shouldAutoRefresh = latestCheckout?.order.provider === "wechat_native" && latestCheckout.order.status === "pending"
   const summaryQ = useMembershipSummary(true, shouldAutoRefresh ? 5_000 : false)
   const couponsQ = useMembershipCoupons(20)
@@ -315,20 +316,21 @@ export function MembershipPage() {
   const requestWithdrawal = useRequestCommissionWithdrawal()
   const startPayoutBinding = useStartPayoutBindingAttempt()
 
-  const coupons = couponsQ.data ?? []
-  const availableCoupons = coupons.filter((item) => item.status === "available")
-  const supportedProviders = summaryQ.data?.supportedPaymentProviders ?? []
+  const coupons = useMemo(() => couponsQ.data ?? [], [couponsQ.data])
+  const availableCoupons = useMemo(() => coupons.filter((item) => item.status === "available"), [coupons])
+  const supportedProviders = useMemo(() => summaryQ.data?.supportedPaymentProviders ?? [], [summaryQ.data?.supportedPaymentProviders])
   const effectiveSelectedProvider = supportedProviders.includes(selectedProvider)
     ? selectedProvider
     : supportedProviders.includes("wechat_native")
       ? "wechat_native"
       : supportedProviders[0] ?? ""
-  const activeCheckout = latestCheckout?.order.orderId === pendingOrder?.orderId ? latestCheckout : null
+  const activeCheckout = pendingOrder ? checkoutByOrderId[pendingOrder.orderId] ?? null : null
+  const activeBindingQrPayload = bindingAttemptQ.data?.qrCodePayload || startedBindingQrPayload
   const selectedCoupon = useMemo(
     () => availableCoupons.find((item) => item.couponId === selectedCouponId) ?? null,
     [availableCoupons, selectedCouponId],
   )
-  const recentInvites = inviteSummaryQ.data?.recentInvites ?? []
+  const recentInvites = useMemo(() => inviteSummaryQ.data?.recentInvites ?? [], [inviteSummaryQ.data?.recentInvites])
   const availableCouponCount = availableCoupons.length
   const usedCouponCount = coupons.filter((coupon) => coupon.status === "used").length
   const expiredCouponCount = coupons.filter((coupon) => coupon.status === "expired").length
@@ -342,23 +344,13 @@ export function MembershipPage() {
   const autoSyncIntervalMs = Math.max(3, activeCheckout?.paymentPayload.pollIntervalSeconds ?? 5) * 1_000
 
   useEffect(() => {
-    if (!latestCheckout) return
-    const refreshedOrder = ordersQ.data?.find((item) => item.orderId === latestCheckout.order.orderId)
-    if (refreshedOrder && refreshedOrder.status !== "pending") {
-      setLatestCheckout(null)
-    }
-  }, [latestCheckout, ordersQ.data])
-
-  useEffect(() => {
     const attempt = bindingAttemptQ.data
     if (!attempt) return
-    if (attempt.qrCodePayload && attempt.qrCodePayload !== activeBindingQrPayload) {
-      setActiveBindingQrPayload(attempt.qrCodePayload)
-    }
     if (attempt.status === "bound" || attempt.nextAction === "withdraw" || attempt.nextAction === "confirm_withdrawal") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setBindingDialogOpen(false)
       setActiveBindingAttemptId("")
-      setActiveBindingQrPayload("")
+      setStartedBindingQrPayload("")
       if (attempt.withdrawal?.confirmationUrl) {
         setWithdrawalConfirmationUrl(attempt.withdrawal.confirmationUrl)
         setWithdrawalConfirmationDialogOpen(true)
@@ -368,9 +360,9 @@ export function MembershipPage() {
         attempt.withdrawal ? "请用手机微信扫描弹窗二维码确认收款。" : "提现会使用已验证的微信收款身份，页面只显示脱敏标识。",
       )
     }
-  }, [activeBindingQrPayload, bindingAttemptQ.data])
+  }, [bindingAttemptQ.data])
 
-  async function syncPaymentStatus(order: MembershipOrder, options?: { manual?: boolean }) {
+  const syncPaymentStatus = useCallback(async (order: MembershipOrder, options?: { manual?: boolean }) => {
     const manual = options?.manual ?? true
     try {
       const result = await syncPayment.mutateAsync({ orderId: order.orderId })
@@ -379,12 +371,20 @@ export function MembershipPage() {
           result.idempotent ? "支付状态已同步" : "会员已开通",
           result.membership.currentEndsAt ? `会员有效期已更新到 ${formatMembershipDateTime(result.membership.currentEndsAt)}。` : "会员权益已经发放。",
         )
-        setLatestCheckout(null)
+        setCheckoutByOrderId((current) => {
+          const next = { ...current }
+          delete next[result.order.orderId]
+          return next
+        })
         setPurchaseOpen(false)
         return
       }
       if (result.order.status === "closed") {
-        setLatestCheckout(null)
+        setCheckoutByOrderId((current) => {
+          const next = { ...current }
+          delete next[result.order.orderId]
+          return next
+        })
         setPurchaseOpen(false)
         showSuccessFeedback(
           "订单已关闭",
@@ -406,7 +406,7 @@ export function MembershipPage() {
         showErrorFeedback("同步支付状态失败", formatMembershipApiError(err))
       }
     }
-  }
+  }, [syncPayment])
 
   useEffect(() => {
     if (!purchaseOpen || !pendingOrder || pendingOrder.provider !== "wechat_native" || syncPayment.isPending) {
@@ -426,6 +426,7 @@ export function MembershipPage() {
     activeCheckout?.paymentPayload.statusCheckSupported,
     autoSyncIntervalMs,
     syncPayment.isPending,
+    syncPaymentStatus,
   ])
 
   async function onCreateOrder() {
@@ -439,7 +440,7 @@ export function MembershipPage() {
         planId: effectiveSelectedPlanId,
         couponId: selectedCouponId || undefined,
       })
-      setLatestCheckout(result)
+      setCheckoutByOrderId((current) => ({ ...current, [result.order.orderId]: result }))
       showSuccessFeedback(
         result.reusedExistingOrder ? "待支付订单已更新" : "订单已创建",
         result.paymentPayload.provider === "wechat_native"
@@ -464,7 +465,11 @@ export function MembershipPage() {
         result.idempotent ? "支付状态已同步" : "会员已开通",
         result.membership.currentEndsAt ? `会员有效期已更新到 ${formatMembershipDateTime(result.membership.currentEndsAt)}。` : "会员权益已经发放。",
       )
-      setLatestCheckout(null)
+      setCheckoutByOrderId((current) => {
+        const next = { ...current }
+        delete next[order.orderId]
+        return next
+      })
       setPurchaseOpen(false)
       if (selectedCouponId && order.couponId === selectedCouponId) {
         setSelectedCouponId("")
@@ -484,7 +489,11 @@ export function MembershipPage() {
     }
     try {
       const result = await closeOrder.mutateAsync({ orderId: order.orderId })
-      setLatestCheckout((current) => (current?.order.orderId === order.orderId ? null : current))
+      setCheckoutByOrderId((current) => {
+        const next = { ...current }
+        delete next[order.orderId]
+        return next
+      })
       setPurchaseOpen(false)
       showSuccessFeedback(
         result.idempotent ? "订单已关闭" : "待支付订单已关闭",
@@ -603,7 +612,7 @@ export function MembershipPage() {
         amountCent,
       })
       setActiveBindingAttemptId(result.bindingAttemptId)
-      setActiveBindingQrPayload(result.qrCodePayload ?? result.mobileBindingUrl ?? "")
+      setStartedBindingQrPayload(result.qrCodePayload ?? result.mobileBindingUrl ?? "")
       setBindingDialogOpen(true)
       showSuccessFeedback(
         amountCent > 0 ? "提现扫码已开始" : "微信收款身份绑定已开始",

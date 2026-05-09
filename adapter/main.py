@@ -1,6 +1,5 @@
-from __future__ import annotations
-
 import logging
+import json
 import os
 import time
 import uuid
@@ -9,7 +8,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -104,11 +103,93 @@ def _extract_project_id(path: str) -> str | None:
     return project_id or None
 
 
+def _extract_scoped_project_ref(path: str) -> tuple[str, str] | None:
+    prefix = "/api/subjects/"
+    if not path.startswith(prefix):
+        return None
+    parts = path[len(prefix) :].split("/")
+    if len(parts) < 3 or parts[1] != "projects":
+        return None
+    subject_id = parts[0].strip()
+    project_id = parts[2].strip()
+    if not subject_id or not project_id:
+        return None
+    return subject_id, project_id
+
+
+def _rewrite_scoped_project_api_path(path: str, subject_id: str, project_id: str, internal_project_id: str) -> str:
+    prefix = f"/api/subjects/{subject_id}/projects/{project_id}"
+    if not path.startswith(prefix):
+        return path
+    suffix = path[len(prefix) :]
+    return f"/api/projects/{internal_project_id}{suffix}"
+
+
 def _project_precondition_error_response(request: Request, message: str) -> JSONResponse:
     payload = {"ok": False, "error": {"code": "PRECONDITION", "message": message}}
     request_id = getattr(request.state, "request_id", None)
     headers = {"X-Request-ID": str(request_id)} if request_id else None
     return JSONResponse(status_code=400, content=payload, headers=headers)
+
+
+def _old_project_entry_error_response(request: Request) -> JSONResponse:
+    return _project_precondition_error_response(request, "旧项目链接已失效，请从学科中心重新进入项目")
+
+
+def _replace_scoped_project_values(value, *, subject_id: str, project_id: str, internal_project_id: str):
+    if isinstance(value, list):
+        return [
+            _replace_scoped_project_values(item, subject_id=subject_id, project_id=project_id, internal_project_id=internal_project_id)
+            for item in value
+        ]
+    if isinstance(value, dict):
+        out = {
+            str(key): _replace_scoped_project_values(item, subject_id=subject_id, project_id=project_id, internal_project_id=internal_project_id)
+            for key, item in value.items()
+        }
+        if out.get("projectId") == internal_project_id:
+            out["projectId"] = project_id
+        if out.get("currentProjectId") == internal_project_id:
+            out["currentProjectId"] = project_id
+        if out.get("projectId") == project_id and "subjectId" not in out:
+            out["subjectId"] = subject_id
+        return out
+    if isinstance(value, str):
+        return value.replace(
+            f"/api/projects/{internal_project_id}",
+            f"/api/subjects/{subject_id}/projects/{project_id}",
+        ).replace(
+            f"/projects/{internal_project_id}",
+            f"/subjects/{subject_id}/projects/{project_id}",
+        )
+    return value
+
+
+async def _response_with_scoped_project_values(request: Request, response):
+    subject_id = getattr(request.state, "scoped_subject_id", None)
+    project_id = getattr(request.state, "scoped_project_id", None)
+    internal_project_id = getattr(request.state, "internal_project_id", None)
+    if not subject_id or not project_id or not internal_project_id:
+        return response
+    content_type = str(response.headers.get("content-type") or "").lower()
+    if not content_type.startswith("application/json"):
+        return response
+    body = b""
+    async for chunk in response.body_iterator:
+        body += chunk
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except Exception:
+        return Response(content=body, status_code=response.status_code, headers=dict(response.headers), media_type=content_type)
+    rewritten = _replace_scoped_project_values(
+        payload,
+        subject_id=str(subject_id),
+        project_id=str(project_id),
+        internal_project_id=str(internal_project_id),
+    )
+    headers = dict(response.headers)
+    headers.pop("content-length", None)
+    return JSONResponse(status_code=response.status_code, content=rewritten, headers=headers)
 
 
 def _grant_subject_material_project_access_if_allowed(api, auth_store, user_id: str, project_id: str) -> bool:
@@ -218,23 +299,35 @@ def create_app() -> FastAPI:
         if request.method.upper() == "OPTIONS" or not path.startswith("/api"):
             return await call_next(request)
         project_id = _extract_project_id(path)
+        scoped_project_ref = _extract_scoped_project_ref(path)
         if project_id is not None:
+            return _old_project_entry_error_response(request)
+        internal_project_id = None
+        if scoped_project_ref is not None:
             api = get_api()
             try:
-                await run_in_threadpool(api.require_material_project, project_id)
+                internal_project_id = str(await run_in_threadpool(api.resolve_scoped_project_internal_key, scoped_project_ref[0], scoped_project_ref[1]))
             except Exception as exc:
-                if exc.__class__.__name__ == "PreconditionFailure":
+                if exc.__class__.__name__ in {"PreconditionFailure", "NotFound"}:
                     return _project_precondition_error_response(request, str(exc))
                 raise
+            request.state.scoped_subject_id = scoped_project_ref[0]
+            request.state.scoped_project_id = scoped_project_ref[1]
+            request.state.internal_project_id = internal_project_id
+            rewritten_path = _rewrite_scoped_project_api_path(path, scoped_project_ref[0], scoped_project_ref[1], internal_project_id)
+            request.scope["path"] = rewritten_path
+            request.scope["raw_path"] = rewritten_path.encode("utf-8")
 
         if not features.auth_enabled:
-            return await call_next(request)
+            response = await call_next(request)
+            return await _response_with_scoped_project_values(request, response)
 
         if _is_public_api_path(path):
             if _public_api_path_supports_optional_auth(path):
                 auth_store = get_auth_store()
                 request.state.auth_user = await run_in_threadpool(resolve_session_user, request, auth_store)
-            return await call_next(request)
+            response = await call_next(request)
+            return await _response_with_scoped_project_values(request, response)
 
         auth_store = get_auth_store()
         user = await run_in_threadpool(resolve_session_user, request, auth_store)
@@ -247,6 +340,18 @@ def create_app() -> FastAPI:
             )
 
         request.state.auth_user = user
+        if scoped_project_ref is not None:
+            allowed = set(auth_store.list_project_ids_for_user(user.user_id))
+            if scoped_project_ref[0] not in allowed:
+                return auth_error_response(
+                    status_code=403,
+                    code="FORBIDDEN",
+                    message="Project access denied",
+                    request_id=getattr(request.state, "request_id", None),
+                )
+            if internal_project_id is not None:
+                auth_store.add_project_owner(internal_project_id, user.user_id)
+
         has_project_access = True
         if project_id is not None:
             api = get_api()
@@ -265,7 +370,8 @@ def create_app() -> FastAPI:
                 request_id=getattr(request.state, "request_id", None),
             )
 
-        return await call_next(request)
+        response = await call_next(request)
+        return await _response_with_scoped_project_values(request, response)
 
     app.include_router(auth.router, prefix="/api", tags=["auth"])
     app.include_router(profile.router, prefix="/api", tags=["profile"])

@@ -13,8 +13,13 @@ export type PomodoroSegment = {
   durationMs: number
   startOffsetMs: number
   endOffsetMs: number
-  projectId: string | null
+  projectRef: PomodoroProjectReference | null
   promptText: string
+}
+
+export type PomodoroProjectReference = {
+  subjectId: string
+  projectId: string
 }
 
 export type PomodoroPlanSchedule = {
@@ -24,7 +29,7 @@ export type PomodoroPlanSchedule = {
   focusMinutes: number
   breakMinutes: number
   pomodoroCount: number
-  projectIds: Array<string | null>
+  projectRefs: Array<PomodoroProjectReference | null>
   breakPrompt: string
   focusPrompts: string[]
 }
@@ -40,7 +45,7 @@ export type QuickPomodoroSession = {
   createdAtMs: number
   startAtMs: number
   endAtMs: number
-  projectId: string | null
+  projectRef: PomodoroProjectReference | null
 }
 
 export type PomodoroDefaultPrompts = {
@@ -83,6 +88,7 @@ export type PomodoroSnapshot = {
   nextStartDay: PomodoroWeekday | null
   canUseWorkbench: boolean
   shouldRestrictWorkbench: boolean
+  currentProjectRef: PomodoroProjectReference | null
   currentProjectId: string | null
 }
 
@@ -93,7 +99,7 @@ export type PomodoroUpcomingSegmentPreview = {
   totalPomodoros: number
   startsInMs: number
   startAtMs: number
-  projectId: string | null
+  projectRef: PomodoroProjectReference | null
   promptText: string
 }
 
@@ -119,7 +125,7 @@ type PomodoroState = {
     microBreaks?: Partial<RandomMicroBreakSettings>
   }) => void
   setDefaultPrompts: (prompts: Partial<PomodoroDefaultPrompts>) => void
-  startQuickPomodoro: (projectId?: string | null) => QuickPomodoroSession
+  startQuickPomodoro: (projectRef?: PomodoroProjectReference | null) => QuickPomodoroSession
   clearQuickPomodoro: () => void
   reset: () => void
 }
@@ -207,18 +213,35 @@ function normalizePomodoroProjectId(value: unknown) {
   return text || null
 }
 
+function normalizePomodoroSubjectId(value: unknown) {
+  const text = typeof value === "string" ? value.trim() : ""
+  return text || null
+}
+
+export function pomodoroProjectRefKey(projectRef: PomodoroProjectReference | null | undefined) {
+  return projectRef ? `${projectRef.subjectId}:${projectRef.projectId}` : ""
+}
+
+function normalizePomodoroProjectReference(value: unknown): PomodoroProjectReference | null {
+  if (!value || typeof value !== "object") return null
+  const raw = value as Partial<PomodoroProjectReference>
+  const subjectId = normalizePomodoroSubjectId(raw.subjectId)
+  const projectId = normalizePomodoroProjectId(raw.projectId)
+  return subjectId && projectId ? { subjectId, projectId } : null
+}
+
 function createSessionId() {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 }
 
-export function createQuickPomodoroSession(projectId?: string | null, now = Date.now()): QuickPomodoroSession {
+export function createQuickPomodoroSession(projectRef?: PomodoroProjectReference | null, now = Date.now()): QuickPomodoroSession {
   const startAtMs = now + QUICK_POMODORO_PREPARE_MS
   return {
     id: createSessionId(),
     createdAtMs: now,
     startAtMs,
     endAtMs: startAtMs + QUICK_POMODORO_FOCUS_MS,
-    projectId: normalizePomodoroProjectId(projectId),
+    projectRef: normalizePomodoroProjectReference(projectRef),
   }
 }
 
@@ -234,7 +257,7 @@ function normalizeQuickPomodoroSession(value: unknown): QuickPomodoroSession | n
     createdAtMs,
     startAtMs,
     endAtMs,
-    projectId: normalizePomodoroProjectId(raw.projectId),
+    projectRef: normalizePomodoroProjectReference(raw.projectRef),
   }
 }
 
@@ -247,14 +270,14 @@ export function normalizePomodoroPromptText(value: unknown) {
   return text.slice(0, MAX_POMODORO_PROMPT_LENGTH)
 }
 
-function normalizePomodoroProjectIds(value: unknown, pomodoroCount: number) {
+function normalizePomodoroProjectRefs(value: unknown, pomodoroCount: number) {
   const normalizedCount = normalizePomodoroCount(pomodoroCount)
   const raw = Array.isArray(value) ? value : []
-  const projectIds: Array<string | null> = []
+  const projectRefs: Array<PomodoroProjectReference | null> = []
   for (let index = 0; index < normalizedCount; index += 1) {
-    projectIds.push(normalizePomodoroProjectId(raw[index]))
+    projectRefs.push(normalizePomodoroProjectReference(raw[index]))
   }
-  return projectIds
+  return projectRefs
 }
 
 function normalizePomodoroFocusPrompts(value: unknown, pomodoroCount: number) {
@@ -290,7 +313,7 @@ export function createPomodoroPlanSchedule(
     focusMinutes: normalizeFocusMinutes(overrides?.focusMinutes ?? DEFAULT_FOCUS_MINUTES),
     breakMinutes: normalizeBreakMinutes(overrides?.breakMinutes ?? DEFAULT_BREAK_MINUTES),
     pomodoroCount,
-    projectIds: normalizePomodoroProjectIds(overrides?.projectIds, pomodoroCount),
+    projectRefs: normalizePomodoroProjectRefs(overrides?.projectRefs, pomodoroCount),
     breakPrompt: normalizePomodoroPromptText(overrides?.breakPrompt),
     focusPrompts: normalizePomodoroFocusPrompts(overrides?.focusPrompts, pomodoroCount),
   }
@@ -305,7 +328,7 @@ export function buildQuickPomodoroPlan(quickPomodoro: QuickPomodoroSession): Pom
       focusMinutes: Math.floor(QUICK_POMODORO_FOCUS_MS / 60_000),
       breakMinutes: DEFAULT_BREAK_MINUTES,
       pomodoroCount: 1,
-      projectIds: [quickPomodoro.projectId],
+      projectRefs: [quickPomodoro.projectRef],
       focusPrompts: [""],
       breakPrompt: "",
     },
@@ -516,7 +539,7 @@ export function buildPomodoroSegments(
   focusMinutes: number,
   breakMinutes: number,
   pomodoroCount: number,
-  projectIds?: Array<string | null>,
+  projectRefs?: Array<PomodoroProjectReference | null>,
   focusPrompts?: string[],
   breakPrompt?: string,
   options?: { planId?: string; planIndex?: number },
@@ -524,7 +547,7 @@ export function buildPomodoroSegments(
   const normalizedFocusMinutes = normalizeFocusMinutes(focusMinutes)
   const normalizedBreakMinutes = normalizeBreakMinutes(breakMinutes)
   const normalizedPomodoroCount = normalizePomodoroCount(pomodoroCount)
-  const normalizedProjectIds = normalizePomodoroProjectIds(projectIds, normalizedPomodoroCount)
+  const normalizedProjectRefs = normalizePomodoroProjectRefs(projectRefs, normalizedPomodoroCount)
   const normalizedFocusPrompts = normalizePomodoroFocusPrompts(focusPrompts, normalizedPomodoroCount)
   const normalizedBreakPrompt = normalizePomodoroPromptText(breakPrompt)
   const planId = normalizePomodoroPlanId(options?.planId, "plan-1")
@@ -543,7 +566,7 @@ export function buildPomodoroSegments(
       durationMs: focusDurationMs,
       startOffsetMs: offsetMs,
       endOffsetMs: offsetMs + focusDurationMs,
-      projectId: normalizedProjectIds[index] ?? null,
+      projectRef: normalizedProjectRefs[index] ?? null,
       promptText: normalizedFocusPrompts[index] ?? "",
     })
     offsetMs += focusDurationMs
@@ -557,7 +580,7 @@ export function buildPomodoroSegments(
         durationMs: breakDurationMs,
         startOffsetMs: offsetMs,
         endOffsetMs: offsetMs + breakDurationMs,
-        projectId: null,
+        projectRef: null,
         promptText: normalizedBreakPrompt,
       })
       offsetMs += breakDurationMs
@@ -587,7 +610,7 @@ export function getPomodoroSnapshot(
       plan.focusMinutes,
       plan.breakMinutes,
       plan.pomodoroCount,
-      plan.projectIds,
+      plan.projectRefs,
       plan.focusPrompts,
       plan.breakPrompt,
       { planId: plan.id, planIndex },
@@ -648,6 +671,7 @@ export function getPomodoroSnapshot(
     nextStartDay: nextStart.nextStartDay,
     canUseWorkbench: false,
     shouldRestrictWorkbench: enabled && hasEnabledSchedule,
+    currentProjectRef: null,
     currentProjectId: null,
     ...overrides,
   })
@@ -667,7 +691,7 @@ export function getPomodoroSnapshot(
       quickPlan.focusMinutes,
       quickPlan.breakMinutes,
       quickPlan.pomodoroCount,
-      quickPlan.projectIds,
+      quickPlan.projectRefs,
       quickPlan.focusPrompts,
       quickPlan.breakPrompt,
       { planId: quickPlan.id, planIndex: -1 },
@@ -718,7 +742,8 @@ export function getPomodoroSnapshot(
       endAtMs: activeQuickPomodoro.endAtMs,
       canUseWorkbench: true,
       shouldRestrictWorkbench: false,
-      currentProjectId: activeQuickPomodoro.projectId,
+      currentProjectRef: activeQuickPomodoro.projectRef,
+      currentProjectId: activeQuickPomodoro.projectRef?.projectId ?? null,
     })
   }
 
@@ -793,7 +818,7 @@ export function getPomodoroSnapshot(
     (item) => item.phase === "focus" && item.endOffsetMs <= elapsedMs,
   ).length
   const canUseWorkbench = segment?.phase === "focus"
-  const currentProjectId = segment?.phase === "focus" ? segment.projectId ?? null : null
+  const currentProjectRef = segment?.phase === "focus" ? segment.projectRef ?? null : null
 
   return createBaseSnapshot({
     status: "running",
@@ -816,7 +841,8 @@ export function getPomodoroSnapshot(
     endAtMs: runningItem.endAtMs,
     canUseWorkbench,
     shouldRestrictWorkbench: !canUseWorkbench,
-    currentProjectId,
+    currentProjectRef,
+    currentProjectId: currentProjectRef?.projectId ?? null,
   })
 }
 
@@ -828,7 +854,7 @@ export function getPomodoroUpcomingSegmentPreview(
   if (!snapshot.enabled || !snapshot.hasEnabledSchedule) return null
 
   if (snapshot.status === "idle" && snapshot.idleReason === "waiting") {
-    const projectId = snapshot.currentPlan?.projectIds[0] ?? null
+    const projectRef = snapshot.currentPlan?.projectRefs[0] ?? null
     if (snapshot.startAtMs === null) return null
     return {
       weekday: snapshot.weekday,
@@ -837,7 +863,7 @@ export function getPomodoroUpcomingSegmentPreview(
       totalPomodoros: snapshot.totalPomodoros,
       startsInMs: snapshot.untilStartMs,
       startAtMs: snapshot.startAtMs,
-      projectId,
+      projectRef,
       promptText: snapshot.currentPlan?.focusPrompts[0] ?? "",
     }
   }
@@ -847,7 +873,7 @@ export function getPomodoroUpcomingSegmentPreview(
       snapshot.currentPlan.focusMinutes,
       snapshot.currentPlan.breakMinutes,
       snapshot.currentPlan.pomodoroCount,
-      snapshot.currentPlan.projectIds,
+      snapshot.currentPlan.projectRefs,
       snapshot.currentPlan.focusPrompts,
       snapshot.currentPlan.breakPrompt,
       { planId: snapshot.currentPlan.id, planIndex: snapshot.currentPlanIndex },
@@ -873,7 +899,7 @@ export function getPomodoroUpcomingSegmentPreview(
               totalPomodoros: snapshot.totalPomodoros,
               startsInMs: snapshot.segmentRemainingMs,
               startAtMs: snapshot.startAtMs + snapshot.segment.endOffsetMs,
-              projectId: null,
+              projectRef: null,
               promptText: snapshot.currentPlan.breakPrompt,
             }
           : null
@@ -886,7 +912,7 @@ export function getPomodoroUpcomingSegmentPreview(
       totalPomodoros: snapshot.totalPomodoros,
       startsInMs: snapshot.segmentRemainingMs,
       startAtMs: snapshot.startAtMs + nextSegment.startOffsetMs,
-      projectId: nextSegment.projectId ?? null,
+      projectRef: nextSegment.projectRef ?? null,
       promptText: nextSegment.promptText,
     }
   }
@@ -1007,8 +1033,8 @@ export const usePomodoroStore = create<PomodoroState>()(
           defaultFocusPrompt: normalizePomodoroPromptText(prompts.focusPrompt ?? state.defaultFocusPrompt),
           defaultBreakPrompt: normalizePomodoroPromptText(prompts.breakPrompt ?? state.defaultBreakPrompt),
         })),
-      startQuickPomodoro: (projectId) => {
-        const quickPomodoro = createQuickPomodoroSession(projectId)
+      startQuickPomodoro: (projectRef) => {
+        const quickPomodoro = createQuickPomodoroSession(projectRef)
         set((state) => ({
           ...state,
           quickPomodoro,

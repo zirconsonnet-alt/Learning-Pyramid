@@ -1,3 +1,5 @@
+import { buildCurrentProjectPath } from "@/ui/projectPaths"
+
 export type AiChatContextKind = "task" | "object" | "recall"
 
 export function isAiChatContextKind(value: string | null | undefined): value is AiChatContextKind {
@@ -18,5 +20,5 @@ export function buildAiChatPath(
   searchParams.set("kind", params.kind)
   searchParams.set("nodeId", params.nodeId)
   if (params.conversationId) searchParams.set("conversation", params.conversationId)
-  return `/p/${projectId}/ai-chat?${searchParams.toString()}`
+  return `${buildCurrentProjectPath(projectId, "/ai-chat")}?${searchParams.toString()}`
 }

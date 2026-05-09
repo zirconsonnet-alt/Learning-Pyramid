@@ -1,5 +1,10 @@
 import { getLocalDateKey } from "@/ui/store/workbenchDailyStats"
 
+export type PomodoroActivityProjectReference = {
+  subjectId: string
+  projectId: string
+}
+
 export type PomodoroActivityRecord = {
   recordId: string
   kind: "pomodoro"
@@ -8,6 +13,7 @@ export type PomodoroActivityRecord = {
   planIndex: number
   pomodoroIndex: number
   pomodoroLabel: string
+  projectRef: PomodoroActivityProjectReference | null
   projectId: string | null
   startAtMs: number
   endAtMs: number
@@ -19,7 +25,7 @@ type RecordPomodoroActivityInput = {
   planId: string
   planIndex: number
   pomodoroIndex: number
-  projectId: string | null
+  projectRef: PomodoroActivityProjectReference | null
   startAtMs: number
   endAtMs: number
 }
@@ -36,7 +42,18 @@ function normalizeRecord(raw: unknown): PomodoroActivityRecord | null {
   if (!Number.isFinite(pomodoroIndex) || pomodoroIndex < 1) return null
   const dateKey = typeof input.dateKey === "string" && input.dateKey.trim() ? input.dateKey.trim() : getLocalDateKey(new Date(endAtMs))
   const planId = typeof input.planId === "string" && input.planId.trim() ? input.planId.trim() : "unknown-plan"
-  const projectId = typeof input.projectId === "string" && input.projectId.trim() ? input.projectId.trim() : null
+  const projectRef =
+    input.projectRef &&
+    typeof input.projectRef === "object" &&
+    typeof input.projectRef.subjectId === "string" &&
+    input.projectRef.subjectId.trim() &&
+    typeof input.projectRef.projectId === "string" &&
+    input.projectRef.projectId.trim()
+      ? {
+          subjectId: input.projectRef.subjectId.trim(),
+          projectId: input.projectRef.projectId.trim(),
+        }
+      : null
   return {
     recordId: typeof input.recordId === "string" && input.recordId.trim()
       ? input.recordId.trim()
@@ -49,7 +66,8 @@ function normalizeRecord(raw: unknown): PomodoroActivityRecord | null {
     pomodoroLabel: typeof input.pomodoroLabel === "string" && input.pomodoroLabel.trim()
       ? input.pomodoroLabel.trim()
       : `番茄 ${Math.max(1, Math.round(pomodoroIndex))}`,
-    projectId,
+    projectRef,
+    projectId: projectRef?.projectId ?? null,
     startAtMs: Math.floor(startAtMs),
     endAtMs: Math.floor(endAtMs),
     durationMs: Math.max(0, Math.floor(endAtMs - startAtMs)),

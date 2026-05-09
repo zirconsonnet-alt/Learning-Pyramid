@@ -24,6 +24,7 @@ import type { Instance } from "@/ui/api/instances"
 import { ApiError } from "@/ui/api/http"
 import { uploadMediaAsset } from "@/ui/api/mediaAssets"
 import { resolvePlaybackDescriptorUrl } from "@/ui/api/media"
+import { apiUrl } from "@/ui/api/http"
 import { getRecallPoint, searchRecallPoints, type RecallPoint } from "@/ui/api/review"
 import {
   appendImageBlock,
@@ -306,6 +307,7 @@ async function captureDisplayedVideoFrameFile(video: HTMLVideoElement, timeMs: n
 }
 
 export function VideoPane({
+  subjectId,
   projectId,
   instance,
   setCurrentMs,
@@ -315,6 +317,7 @@ export function VideoPane({
   queueHasGate,
   allowCaptureDrafts = true,
 }: {
+  subjectId: string
   projectId: string
   instance: Instance | null
   setCurrentMs: (v: number) => void
@@ -1370,7 +1373,7 @@ export function VideoPane({
       return playbackDescriptorUrl
     }
     if (serverMediaStreamEnabled && playbackKind === "FILE") {
-      return resolvePlaybackDescriptorUrl(`/api/projects/${projectId}/media/instances/${instance.instanceId}`)
+      return resolvePlaybackDescriptorUrl(apiUrl(`/projects/${projectId}/media/instances/${instance.instanceId}`))
     }
     return null
   }, [effectiveSourceKind, instance, localSrc, playbackDescriptorUrl, playbackKind, projectId, serverMediaStreamEnabled])
@@ -1726,7 +1729,8 @@ export function VideoPane({
     ].join(":")
   }, [pomodoroSnapshot.segment, pomodoroSnapshot.startAtMs])
   const pomodoroMicroBreakProjectAllowed =
-    !pomodoroSnapshot.currentProjectId || pomodoroSnapshot.currentProjectId === projectId
+    !pomodoroSnapshot.currentProjectRef ||
+    (pomodoroSnapshot.currentProjectRef.subjectId === subjectId && pomodoroSnapshot.currentProjectRef.projectId === projectId)
   const pomodoroMicroBreakEligible =
     pomodoroMicroBreaks.enabled &&
     pomodoroSnapshot.status === "running" &&
@@ -1927,16 +1931,17 @@ export function VideoPane({
     [pomodoroEnabled, pomodoroNow, pomodoroQuickPomodoro, pomodoroWeeklySchedule],
   )
   const fullscreenUpcomingProjectTitle = useMemo(() => {
-    const upcomingProjectId = pomodoroUpcomingSegment?.projectId ?? ""
+    const upcomingProjectId = pomodoroUpcomingSegment?.projectRef?.projectId ?? ""
     if (!upcomingProjectId) return ""
     return projectsQ.data?.find((project) => project.projectId === upcomingProjectId)?.title ?? ""
-  }, [pomodoroUpcomingSegment?.projectId, projectsQ.data])
+  }, [pomodoroUpcomingSegment?.projectRef?.projectId, projectsQ.data])
+  const upcomingProjectRef = pomodoroUpcomingSegment?.projectRef ?? null
   const showFullscreenFocusPreview =
     !showMicroBreakOverlay &&
     isShellFullscreen &&
     pomodoroUpcomingSegment?.phase === "focus" &&
-    Boolean(pomodoroUpcomingSegment?.projectId) &&
-    pomodoroUpcomingSegment.projectId !== projectId &&
+    Boolean(upcomingProjectRef) &&
+    (upcomingProjectRef?.subjectId !== subjectId || upcomingProjectRef?.projectId !== projectId) &&
     pomodoroUpcomingSegment.startsInMs > 0 &&
     pomodoroUpcomingSegment.startsInMs <= POMODORO_TRANSITION_PREVIEW_WINDOW_MS
   const showFullscreenBreakPreview =

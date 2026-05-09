@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import json
 import os
 import sqlite3
@@ -2484,8 +2482,9 @@ class SQLiteSnapshotStore:
         return payload
 
     @staticmethod
-    def _project_payload_from_snapshot_row(row: sqlite3.Row) -> dict[str, Any]:
+    def _project_payload_from_snapshot_row(row: sqlite3.Row, existing_project_payload: dict[str, Any] | None = None) -> dict[str, Any]:
         deleted_at_ms_raw = row["deleted_at_ms"]
+        existing = dict(existing_project_payload or {})
         return {
             "project": {
                 "projectId": str(row["project_id"]),
@@ -2493,6 +2492,10 @@ class SQLiteSnapshotStore:
                 "state": str(row["project_state"]),
                 "createdAtMs": int(row["created_at_ms"]),
                 "deletedAtMs": None if deleted_at_ms_raw is None else int(deleted_at_ms_raw),
+                "subjectId": existing.get("subjectId"),
+                "scopedProjectId": existing.get("scopedProjectId"),
+                "legacyGlobalProjectId": existing.get("legacyGlobalProjectId"),
+                "projectSequence": int(existing.get("projectSequence") or 0),
             }
         }
 
@@ -2531,7 +2534,10 @@ class SQLiteSnapshotStore:
     def _hydrate_project_payload_from_row(self, conn: sqlite3.Connection, *, row: sqlite3.Row) -> tuple[dict[str, Any], bool]:
         compat_payload = self._decode_compat_snapshot_payload(row["snapshot_json"])
         project_payload = dict(compat_payload)
-        project_payload["project"] = self._project_payload_from_snapshot_row(row)["project"]
+        project_payload["project"] = self._project_payload_from_snapshot_row(
+            row,
+            existing_project_payload=dict(project_payload.get("project") or {}),
+        )["project"]
         return (
             self._hydrate_project_payload(
                 conn,

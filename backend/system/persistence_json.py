@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from datetime import datetime, timedelta, timezone
 from pathlib import PurePosixPath
 from typing import Any, Dict, Optional, Tuple
@@ -116,6 +114,10 @@ def _encode_project(p: Project) -> dict[str, Any]:
         "state": p.state.value,
         "createdAtMs": _ts_to_ms(p.created_at),
         "deletedAtMs": None if p.deleted_at is None else _ts_to_ms(p.deleted_at),
+        "subjectId": None if p.subject_id is None else str(p.subject_id),
+        "scopedProjectId": None if p.scoped_project_id is None else str(p.scoped_project_id),
+        "legacyGlobalProjectId": None if p.legacy_global_project_id is None else str(p.legacy_global_project_id),
+        "projectSequence": int(getattr(p, "project_sequence", 0)),
     }
 
 
@@ -126,6 +128,10 @@ def _decode_project(d: dict[str, Any]) -> Project:
         state=ProjectState(d["state"]),
         created_at=_ms_to_ts(int(d["createdAtMs"])),
         deleted_at=None if d.get("deletedAtMs") is None else _ms_to_ts(int(d["deletedAtMs"])),
+        subject_id=None if d.get("subjectId") is None else ProjectId(str(d.get("subjectId"))),
+        scoped_project_id=None if d.get("scopedProjectId") is None else ProjectId(str(d.get("scopedProjectId"))),
+        legacy_global_project_id=None if d.get("legacyGlobalProjectId") is None else ProjectId(str(d.get("legacyGlobalProjectId"))),
+        project_sequence=int(d.get("projectSequence") or 0),
     )
 
 
@@ -164,11 +170,13 @@ def _encode_study_material(item: StudyMaterial) -> dict[str, Any]:
         "title": item.title,
         "createdAtMs": _ts_to_ms(item.created_at),
         "projectId": None if item.project_id is None else str(item.project_id),
+        "internalProjectKey": None if item.internal_project_key is None else str(item.internal_project_key),
     }
 
 
 def _decode_study_material(data: dict[str, Any]) -> StudyMaterial:
     raw_project_id = data["projectId"]
+    raw_internal_project_key = data.get("internalProjectKey")
     return StudyMaterial(
         subject_id=ProjectId(str(data["subjectId"])),
         material_id=str(data["materialId"]),
@@ -176,6 +184,7 @@ def _decode_study_material(data: dict[str, Any]) -> StudyMaterial:
         title=str(data["title"]),
         created_at=_ms_to_ts(int(data["createdAtMs"])),
         project_id=None if raw_project_id is None else ProjectId(str(raw_project_id)),
+        internal_project_key=None if raw_internal_project_key is None else ProjectId(str(raw_internal_project_key)),
     )
 
 
@@ -184,6 +193,7 @@ def _encode_subject_material_link(link: SubjectMaterialLink) -> dict[str, Any]:
         "subjectId": str(link.subject_id),
         "materialId": link.material_id,
         "materialType": link.material_type.value,
+        "projectId": None if link.project_id is None else str(link.project_id),
     }
 
 
@@ -192,6 +202,7 @@ def _decode_subject_material_link(data: dict[str, Any]) -> SubjectMaterialLink:
         subject_id=ProjectId(str(data["subjectId"])),
         material_id=str(data["materialId"]),
         material_type=StudyMaterialType(str(data["materialType"])),
+        project_id=None if data.get("projectId") is None else ProjectId(str(data.get("projectId"))),
     )
 
 

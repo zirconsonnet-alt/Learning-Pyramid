@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { ChevronRight, FileVideo, FolderOpen, HardDriveDownload, RefreshCw } from "lucide-react"
 import { Link } from "react-router-dom"
@@ -84,26 +84,18 @@ export function BaiduNetdiskImportDialog({
   const accountsQ = useBaiduNetdiskCloudAccounts(open)
   const importMutation = useImportLearningObjectsFromBaiduNetdisk(projectId)
 
-  const [accountId, setAccountId] = useState("")
+  const [selectedAccountId, setSelectedAccountId] = useState("")
   const [dirPath, setDirPath] = useState("/")
-  const [selectedItemsByPath, setSelectedItemsByPath] = useState<Record<string, BaiduNetdiskFileItem>>({})
-
-  useEffect(() => {
-    if (!open) return
-    if (!accountId && accountsQ.data && accountsQ.data.length > 0) {
-      setAccountId(accountsQ.data[0].accountId)
-    }
-  }, [accountId, accountsQ.data, open])
-
-  useEffect(() => {
-    if (!open) {
-      setDirPath("/")
-      setSelectedItemsByPath({})
-      return
-    }
-    setDirPath("/")
-    setSelectedItemsByPath({})
-  }, [accountId, open])
+  const [selectedItemsByScope, setSelectedItemsByScope] = useState<Record<string, Record<string, BaiduNetdiskFileItem>>>({})
+  const accountId =
+    accountsQ.data?.some((account) => account.accountId === selectedAccountId)
+      ? selectedAccountId
+      : accountsQ.data?.[0]?.accountId ?? ""
+  const selectionScopeKey = `${open ? "open" : "closed"}:${accountId}`
+  const selectedItemsByPath = useMemo(
+    () => selectedItemsByScope[selectionScopeKey] ?? {},
+    [selectedItemsByScope, selectionScopeKey],
+  )
 
   const filesQ = useQuery({
     queryKey: ["baiduNetdiskFiles", projectId, accountId, dirPath],
@@ -131,13 +123,17 @@ export function BaiduNetdiskImportDialog({
 
   function toggleItem(item: BaiduNetdiskFileItem) {
     if (!isVideoItem(item)) return
-    setSelectedItemsByPath((current) => {
-      const next = { ...current }
-      if (next[item.path]) {
-        delete next[item.path]
+    setSelectedItemsByScope((current) => {
+      const currentSelection = current[selectionScopeKey] ?? {}
+      const nextSelection = { ...currentSelection }
+      if (nextSelection[item.path]) {
+        delete nextSelection[item.path]
       } else {
-        next[item.path] = item
+        nextSelection[item.path] = item
       }
+      const next = { ...current }
+      if (Object.keys(nextSelection).length > 0) next[selectionScopeKey] = nextSelection
+      else delete next[selectionScopeKey]
       return next
     })
   }
@@ -167,8 +163,13 @@ export function BaiduNetdiskImportDialog({
     }
   }
 
+  function handleOpenChange(nextOpen: boolean) {
+    if (nextOpen) setDirPath("/")
+    onOpenChange(nextOpen)
+  }
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-4xl">
         <DialogHeader>
           <DialogTitle>从百度网盘导入视频</DialogTitle>
@@ -201,7 +202,10 @@ export function BaiduNetdiskImportDialog({
                       <button
                         key={account.accountId}
                         type="button"
-                        onClick={() => setAccountId(account.accountId)}
+                        onClick={() => {
+                          setSelectedAccountId(account.accountId)
+                          setDirPath("/")
+                        }}
                         className={cn(
                           "w-full rounded-[1rem] border px-3 py-3 text-left transition",
                           active

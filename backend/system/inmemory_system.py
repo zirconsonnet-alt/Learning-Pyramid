@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import json
 import os
 from dataclasses import dataclass, field, replace
@@ -1038,7 +1036,7 @@ class RecallPointRepository:
 
 class RecallPointReviewRecordRepository:
     def __init__(
-        self, g: GlobalStore, recall_point_repo: RecallPointRepository, review_task_repo: ReviewTaskRepository
+        self, g: GlobalStore, recall_point_repo: RecallPointRepository, review_task_repo: "ReviewTaskRepository"
     ) -> None:
         self.g = g
         self.recall_point_repo = recall_point_repo
@@ -1198,7 +1196,7 @@ class LearningTaskNodeRepository:
         g: GlobalStore,
         learning_task_repo: LearningTaskRepository,
         recall_point_repo: RecallPointRepository,
-        learning_object_repo: LearningObjectRepository,
+        learning_object_repo: "LearningObjectNodeRepository",
     ) -> None:
         self.g = g
         self.learning_task_repo = learning_task_repo
@@ -2372,28 +2370,58 @@ class InMemorySystem:
         older snapshots may not have a persisted system-wide project id counter.
         """
 
-        def parse_proj_num(s: str) -> Optional[int]:
-            if not s.startswith("proj_"):
+        def parse_seq_num(s: str, prefix: str) -> Optional[int]:
+            if not s.startswith(prefix):
                 return None
             suffix = s.split("_", 1)[1]
             return int(suffix) if suffix.isdigit() else None
 
-        max_n = 0
+        max_project_n = 0
+        max_subject_n = 0
 
         for pid in self.g.projects.keys():
-            n = parse_proj_num(pid)
+            n = parse_seq_num(pid, "proj_")
             if n is not None:
-                max_n = max(max_n, n)
+                max_project_n = max(max_project_n, n)
+            n = parse_seq_num(pid, "subj_")
+            if n is not None:
+                max_subject_n = max(max_subject_n, n)
 
         for k in self.g.idgen._counters.keys():
             if k.startswith("__system__:"):
                 continue
             project_part = k.split(":", 1)[0]
-            n = parse_proj_num(project_part)
+            n = parse_seq_num(project_part, "proj_")
             if n is not None:
-                max_n = max(max_n, n)
+                max_project_n = max(max_project_n, n)
+            n = parse_seq_num(project_part, "subj_")
+            if n is not None:
+                max_subject_n = max(max_subject_n, n)
 
-        self.g.idgen.ensure_project_id_seq_at_least(max_n)
+        self.g.idgen.ensure_project_id_seq_at_least(max_project_n)
+        self.g.idgen.ensure_subject_id_seq_at_least(max_subject_n)
+
+    def _ensure_project_audit_event_seq(self) -> bool:
+        def parse_seq_num(s: str, prefix: str) -> Optional[int]:
+            marker = f"{prefix}_"
+            if not s.startswith(marker):
+                return None
+            suffix = s.removeprefix(marker)
+            return int(suffix) if suffix.isdigit() else None
+
+        updated = False
+        for project_id, project_store in self.g.projects.items():
+            max_audit_n = 0
+            for item in getattr(project_store, "audit_log_events", {}).values():
+                n = parse_seq_num(str(getattr(item, "event_id", "")), "audit")
+                if n is not None and n > max_audit_n:
+                    max_audit_n = n
+            if max_audit_n > 0:
+                before = int(self.g.idgen._counters.get(f"{project_id}:audit", 0))
+                self.g.idgen.ensure_project_scoped_seq_at_least(ProjectId(project_id), "audit", max_audit_n)
+                after = int(self.g.idgen._counters.get(f"{project_id}:audit", 0))
+                updated = updated or after != before
+        return updated
 
     def _load_persisted(self) -> bool:
         if self._persist_store is None:
@@ -2713,6 +2741,9 @@ class InMemorySystem:
 
             self.g.projects[str(ProjectId(pid))] = ps
 
+        if self._ensure_project_audit_event_seq():
+            needs_persist = True
+
         return needs_persist
 
     def _persist_to_disk(self, projects_override: Optional[Dict[str, ProjectStore]] = None) -> None:
@@ -2900,8 +2931,9 @@ class InMemorySystem:
         *,
         initial_source_kind: MaterialSourceKind = MaterialSourceKind.SERVER_FS,
         initial_project_type: ProjectType = ProjectType.COURSE,
+        project_id: ProjectId | None = None,
     ) -> ProjectId:
-        pid = self.g.idgen.new_project_id()
+        pid = project_id or self.g.idgen.new_project_id()
         s = self._begin_project_bootstrap_session(pid)
         try:
             if not isinstance(initial_source_kind, MaterialSourceKind):

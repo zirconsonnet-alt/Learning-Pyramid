@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from fastapi import APIRouter, Depends, Query, Request
 
 from adapter.auth import require_request_auth_user

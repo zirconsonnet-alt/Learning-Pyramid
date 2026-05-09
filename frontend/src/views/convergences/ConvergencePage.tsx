@@ -14,6 +14,7 @@ import {
   formatRangeReference,
   formatReviewTaskReference,
 } from "@/ui/displayIdentifiers"
+import { buildCurrentProjectPath } from "@/ui/projectPaths"
 import { useProject } from "@/ui/queries/projects"
 import { useConvergence } from "@/ui/queries/reviewChains"
 import { cn } from "@/ui/utils"
@@ -308,7 +309,7 @@ function ConvergenceRoundListCard({
                   </div>
                   <div className="flex shrink-0 flex-wrap gap-2 md:w-[11rem] md:flex-col md:items-stretch">
                     <Button size="sm" className="rounded-full md:w-full" asChild>
-                      <Link to={`/p/${projectId}/review-tasks/${entry.reviewTaskId}`}>查看复习任务</Link>
+                      <Link to={buildCurrentProjectPath(projectId, `/review-tasks/${entry.reviewTaskId}`)}>查看复习任务</Link>
                     </Button>
                   </div>
                 </div>

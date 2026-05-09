@@ -20,13 +20,27 @@ type UseVideoSubtitlesParams = {
   subtitleDelayMs: number
 }
 
+type SubtitleLoadState = {
+  document: SubtitleDocument | null
+  isLoading: boolean
+  missingText: string | null
+  errorText: string | null
+}
+
 export function useVideoSubtitles(params: UseVideoSubtitlesParams) {
   const { projectId, instance, playbackMs, subtitlesEnabled, detectionEnabled, sourceKind, subtitleDelayMs } = params
-  const [document, setDocument] = useState<SubtitleDocument | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
-  const [missingText, setMissingText] = useState<string | null>(null)
-  const [errorText, setErrorText] = useState<string | null>(null)
+  const [loadState, setLoadState] = useState<SubtitleLoadState>({
+    document: null,
+    isLoading: false,
+    missingText: null,
+    errorText: null,
+  })
   const [retryNonce, setRetryNonce] = useState(0)
+  const sourceReady = detectionEnabled && instance && sourceKind
+  const document = sourceReady ? loadState.document : null
+  const isLoading = sourceReady ? loadState.isLoading : false
+  const missingText = sourceReady ? loadState.missingText : null
+  const errorText = sourceReady ? loadState.errorText : null
 
   const effectivePlaybackMs = useMemo(
     () => Math.max(0, Math.floor(playbackMs - subtitleDelayMs)),
@@ -35,35 +49,36 @@ export function useVideoSubtitles(params: UseVideoSubtitlesParams) {
 
   useEffect(() => {
     if (!detectionEnabled || !instance || !sourceKind) {
-      setDocument(null)
-      setIsLoading(false)
-      setMissingText(null)
-      setErrorText(null)
       return
     }
 
     let cancelled = false
-    setIsLoading(true)
-    setMissingText(null)
-    setErrorText(null)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoadState((current) => ({
+      document: current.document,
+      isLoading: true,
+      missingText: null,
+      errorText: null,
+    }))
 
     void loadSubtitleDocumentForInstance({ projectId, instance, sourceKind })
       .then((nextDocument) => {
         if (cancelled) return
-        setDocument(nextDocument)
-        if (!nextDocument) {
-          setMissingText(`当前视频同目录下没有找到同名字幕文件（支持 ${SUPPORTED_SUBTITLE_EXTENSIONS_LABEL}）。`)
-        }
+        setLoadState({
+          document: nextDocument,
+          isLoading: false,
+          missingText: nextDocument ? null : `当前视频同目录下没有找到同名字幕文件（支持 ${SUPPORTED_SUBTITLE_EXTENSIONS_LABEL}）。`,
+          errorText: null,
+        })
       })
       .catch((error) => {
         if (cancelled) return
-        setDocument(null)
-        setMissingText(null)
-        setErrorText(error instanceof Error ? error.message : "读取字幕文件失败")
-      })
-      .finally(() => {
-        if (cancelled) return
-        setIsLoading(false)
+        setLoadState({
+          document: null,
+          isLoading: false,
+          missingText: null,
+          errorText: error instanceof Error ? error.message : "读取字幕文件失败",
+        })
       })
 
     return () => {

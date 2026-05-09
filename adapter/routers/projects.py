@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from fastapi import APIRouter, Depends, Request
 
 from adapter.auth import require_request_auth_user
@@ -13,6 +11,7 @@ from adapter.mappers import (
     study_material_to_dto,
     subject_context_to_dto,
     subject_to_dto,
+    with_project_reference,
 )
 from adapter.schemas import (
     CreateProjectRequest,
@@ -66,7 +65,7 @@ def _ensure_auth_material_project_ownership(request: Request, auth_store: AuthSt
     user = require_request_auth_user(request)
     allowed = set(auth_store.list_project_ids_for_user(user.user_id))
     for item in materials:
-        project_id = getattr(item, "project_id", None)
+        project_id = getattr(item, "internal_project_key", None) or getattr(item, "project_id", None)
         if project_id is None:
             continue
         normalized_project_id = str(project_id)
@@ -104,6 +103,22 @@ def _load_authorized_subject_context(
     auth_store.add_project_owner(project_id, user.user_id)
     _ensure_auth_material_project_ownership(request, auth_store, tuple(payload["materials"]))
     return payload
+
+
+def _legacy_project_route_disabled() -> None:
+    raise PreconditionFailure("旧项目链接已失效，请从学科中心重新进入项目")
+
+
+def _current_scoped_project_ref(request: Request) -> tuple[str, str] | None:
+    subject_id = getattr(request.state, "scoped_subject_id", None)
+    project_id = getattr(request.state, "scoped_project_id", None)
+    if subject_id is None or project_id is None:
+        return None
+    return str(subject_id), str(project_id)
+
+
+def _resolve_scoped_project_id(subject_id: str, project_id: str, api: SystemAPI) -> str:
+    return str(api.resolve_scoped_project_internal_key(subject_id, project_id))  # type: ignore[arg-type]
 
 
 def _parse_material_source_kind(raw: str | None) -> MaterialSourceKind:
@@ -250,7 +265,7 @@ def delete_subject_material(
 ) -> dict:
     _ensure_auth_subject_access(subjectId, request, auth_store)
     cleanup_ids = [
-        item.project_id
+        item.internal_project_key or item.project_id
         for item in api.list_subject_materials(subjectId)  # type: ignore[arg-type]
         if item.material_id == materialId
         and item.project_id is not None
@@ -270,7 +285,24 @@ def get_project_subject_context(
     api: SystemAPI = Depends(get_api),
     auth_store: AuthStore = Depends(get_auth_store),
 ) -> dict:
+    scoped_ref = _current_scoped_project_ref(request)
+    if scoped_ref is None:
+        _legacy_project_route_disabled()
     payload = _load_authorized_subject_context(projectId, request, api, auth_store)
+    payload["current_project_id"] = scoped_ref[1]
+    return {"ok": True, "data": subject_context_to_dto(payload)}
+
+
+@router.get("/subjects/{subjectId}/projects/{projectId}/subject-context")
+def get_scoped_project_subject_context(
+    subjectId: str,
+    projectId: str,
+    request: Request,
+    api: SystemAPI = Depends(get_api),
+    auth_store: AuthStore = Depends(get_auth_store),
+) -> dict:
+    _ensure_auth_subject_access(subjectId, request, auth_store)
+    payload = api.get_scoped_subject_context(subjectId, projectId)  # type: ignore[arg-type]
     return {"ok": True, "data": subject_context_to_dto(payload)}
 
 
@@ -281,32 +313,24 @@ def create_project(
     api: SystemAPI = Depends(get_api),
     auth_store: AuthStore = Depends(get_auth_store),
 ) -> dict:
-    pid = api.create_project(
-        req.title,
-        project_root=req.projectRoot,
-        initial_source_kind=_parse_material_source_kind(req.initialSourceKind),
-        initial_project_type=_parse_project_type(req.initialProjectType),
-    )
-    if current_runtime_features().auth_enabled:
-        user = require_request_auth_user(request)
-        auth_store.add_project_owner(pid, user.user_id)
-    return {"ok": True, "data": {"projectId": str(pid)}}
+    _legacy_project_route_disabled()
+
+
+@router.get("/subjects/{subjectId}/projects/{projectId}/project-config")
+def get_scoped_project_config(subjectId: str, projectId: str, api: SystemAPI = Depends(get_api)) -> dict:
+    internal_project_id = _resolve_scoped_project_id(subjectId, projectId, api)
+    cfg = api.get_project_config(internal_project_id)  # type: ignore[arg-type]
+    return {"ok": True, "data": with_project_reference(project_config_to_dto(cfg), subject_id=subjectId, project_id=projectId)}
 
 
 @router.delete("/projects/{projectId}")
 def delete_project(projectId: str, api: SystemAPI = Depends(get_api), auth_store: AuthStore = Depends(get_auth_store)) -> dict:
-    related_project_ids = api.list_membership_cleanup_project_ids(projectId)  # type: ignore[arg-type]
-    api.delete_project(projectId)  # type: ignore[arg-type]
-    if current_runtime_features().auth_enabled:
-        for related_project_id in related_project_ids:
-            auth_store.remove_project_memberships(related_project_id)
-    return {"ok": True, "data": None}
+    _legacy_project_route_disabled()
 
 
 @router.patch("/projects/{projectId}")
 def edit_project(projectId: str, req: EditProjectRequest, api: SystemAPI = Depends(get_api)) -> dict:
-    api.edit_project(projectId, req.title)  # type: ignore[arg-type]
-    return {"ok": True, "data": None}
+    _legacy_project_route_disabled()
 
 
 @router.get("/projects/{projectId}/project-config")

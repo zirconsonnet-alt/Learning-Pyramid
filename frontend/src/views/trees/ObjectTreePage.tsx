@@ -11,6 +11,7 @@ import {
   isSyntheticFilesContainer,
   sortLearningObjectNodeIdsForDisplay,
 } from "@/ui/learningObjectDisplayOrder"
+import { buildCurrentProjectPath } from "@/ui/projectPaths"
 import { projectTypeRequiresLearningObjectTree } from "@/ui/projectTypes"
 import { useProjectConfig } from "@/ui/queries/workbench"
 import {
@@ -238,7 +239,7 @@ export function ObjectTreePage() {
             zoomPercent={zoomPercent}
             focusNodeId={hoveredNodeId}
             onNodeHover={setHoveredNodeId}
-            onNodeSelect={(node) => nav(`/p/${pid}/learning-object-nodes/${node.nodeId}`)}
+            onNodeSelect={(node) => nav(buildCurrentProjectPath(pid, `/learning-object-nodes/${node.nodeId}`))}
           />
         ) : null}
       </div>

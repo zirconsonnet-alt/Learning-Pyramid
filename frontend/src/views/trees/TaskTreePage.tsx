@@ -7,6 +7,7 @@ import { ApiError } from "@/ui/api/http"
 import { listAggregationEvents, type AggregationEvent } from "@/ui/api/layers"
 import { listLearningTaskNodes, type LearningTaskNode } from "@/ui/api/learningTaskNodes"
 import { ContentEmptyState, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
+import { buildCurrentProjectPath } from "@/ui/projectPaths"
 import { formatLearningTaskNodeDisplayTitle, isDefaultAggregationTitle } from "@/views/learningTasks/displayTitle"
 import { type LearningTaskTreeNode, LearningTaskTreeCanvas } from "@/views/trees/components/LearningTaskTreeCanvas"
 import { TreeCanvasZoomControl } from "@/views/trees/components/TreeCanvasViewport"
@@ -243,7 +244,7 @@ export function TaskTreePage() {
             zoomPercent={zoomPercent}
             focusNodeId={hoveredNodeId}
             onNodeHover={setHoveredNodeId}
-            onNodeSelect={(node) => nav(`/p/${pid}/learning-task-nodes/${node.nodeId}`)}
+            onNodeSelect={(node) => nav(buildCurrentProjectPath(pid, `/learning-task-nodes/${node.nodeId}`))}
           />
         ) : null}
       </div>

@@ -47,6 +47,30 @@ export function getBaseUrl() {
   return v && v.trim() ? v.trim().replace(/\/$/, "") : "/api"
 }
 
+function currentScopedProjectPathPrefix(projectId: string) {
+  if (typeof window === "undefined") return null
+  const match = window.location.pathname.match(/^\/subjects\/([^/]+)\/projects\/([^/]+)/)
+  if (!match) return null
+  const subjectId = decodeURIComponent(match[1] ?? "")
+  const currentProjectId = decodeURIComponent(match[2] ?? "")
+  if (!subjectId || currentProjectId !== projectId) return null
+  return `/subjects/${encodeURIComponent(subjectId)}/projects/${encodeURIComponent(projectId)}`
+}
+
+export function scopedApiPath(path: string) {
+  const normalized = path.startsWith("/") ? path : `/${path}`
+  const match = normalized.match(/^\/projects\/([^/?#]+)(.*)$/)
+  if (!match) return normalized
+  const projectId = decodeURIComponent(match[1] ?? "")
+  const suffix = match[2] ?? ""
+  const scopedPrefix = currentScopedProjectPathPrefix(projectId)
+  return scopedPrefix ? `${scopedPrefix}${suffix}` : normalized
+}
+
+export function apiUrl(path: string) {
+  return `${getBaseUrl()}${scopedApiPath(path)}`
+}
+
 function resolveTimeoutMs(method: ApiRequestMethod, timeoutMs?: number) {
   if (typeof timeoutMs === "number" && timeoutMs >= 0) return timeoutMs
   return method === "GET" ? API_GET_TIMEOUT_MS : API_MUTATION_TIMEOUT_MS
@@ -115,7 +139,7 @@ export async function apiRequest<T>({
   payloadTooLargeMessage?: string
 }): Promise<T> {
   const requestMethod = method ?? "GET"
-  const url = `${getBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`
+  const url = apiUrl(path)
   const controller = new AbortController()
   const listeners: Array<() => void> = []
   const effectiveTimeoutMs = resolveTimeoutMs(requestMethod, timeoutMs)

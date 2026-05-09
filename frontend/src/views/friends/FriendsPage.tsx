@@ -113,9 +113,9 @@ export function FriendsPage() {
   const [profileFriend, setProfileFriend] = useState<Friend | null>(null)
 
   const friendProfileQ = useFriendProfile(profileFriend?.userId, Boolean(profileFriend))
-  const friends = friendsQ.data ?? []
-  const incomingRequests = incomingRequestsQ.data ?? []
-  const outgoingRequests = outgoingRequestsQ.data ?? []
+  const friends = useMemo(() => friendsQ.data ?? [], [friendsQ.data])
+  const incomingRequests = useMemo(() => incomingRequestsQ.data ?? [], [incomingRequestsQ.data])
+  const outgoingRequests = useMemo(() => outgoingRequestsQ.data ?? [], [outgoingRequestsQ.data])
   const incomingPendingRequests = incomingRequests.filter((item) => item.status === "pending")
   const outgoingPendingRequests = outgoingRequests.filter((item) => item.status === "pending")
   const incomingPendingCount = incomingPendingRequests.length

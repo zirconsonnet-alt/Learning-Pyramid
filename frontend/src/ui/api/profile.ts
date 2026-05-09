@@ -11,7 +11,17 @@ const UserPomodoroPlanSchema = z.object({
   focusMinutes: z.number().int().min(1).max(180),
   breakMinutes: z.number().int().min(1).max(60),
   pomodoroCount: z.number().int().min(1).max(12),
-  projectIds: z.array(z.string().nullable()).max(12).default([]),
+  projectRefs: z
+    .array(
+      z
+        .object({
+          subjectId: z.string().min(1),
+          projectId: z.string().min(1),
+        })
+        .nullable(),
+    )
+    .max(12)
+    .default([]),
   breakPrompt: z.string().max(200).optional().default(""),
   focusPrompts: z.array(z.string().max(200)).max(12).default([]),
 })

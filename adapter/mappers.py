@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -59,7 +57,8 @@ def _jsonable(v: Any) -> Any:
 
 def project_to_dto(p: Project) -> Dict[str, Any]:
     return {
-        "projectId": str(p.project_id),
+        "subjectId": None if p.subject_id is None else str(p.subject_id),
+        "projectId": str(p.public_project_id),
         "title": p.title,
         "state": _jsonable(p.state),
         "createdAt": _jsonable(p.created_at),
@@ -98,6 +97,13 @@ def subject_context_to_dto(payload: Dict[str, Any]) -> Dict[str, Any]:
         "materials": [study_material_to_dto(item) for item in materials],
         "currentProjectId": str(payload["current_project_id"]),
     }
+
+
+def with_project_reference(dto: Dict[str, Any], *, subject_id: str, project_id: str) -> Dict[str, Any]:
+    out = dict(dto)
+    out["subjectId"] = str(subject_id)
+    out["projectId"] = str(project_id)
+    return out
 
 
 def project_storage_config_to_dto(c: ProjectStorageConfig) -> Dict[str, Any]:

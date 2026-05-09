@@ -54,6 +54,20 @@ function directoryPickerSupported() {
   return typeof window !== "undefined" && "showDirectoryPicker" in window && typeof indexedDB !== "undefined"
 }
 
+function currentScopedDirectoryKey(projectId: string) {
+  if (typeof window === "undefined") return projectId
+  const match = window.location.pathname.match(/^\/subjects\/([^/]+)\/projects\/([^/]+)/)
+  if (!match) return projectId
+  const subjectId = decodeURIComponent(match[1] ?? "")
+  const currentProjectId = decodeURIComponent(match[2] ?? "")
+  if (!subjectId || currentProjectId !== projectId) return projectId
+  return `${subjectId}:${projectId}`
+}
+
+function directoryPickerId(projectKey: string) {
+  return `plm-${projectKey.replace(/[^a-zA-Z0-9_-]/g, "-")}`.slice(0, 32)
+}
+
 function defaultState(): LocalDirectoryBindingState {
   return {
     supported: directoryPickerSupported(),
@@ -243,7 +257,7 @@ function normalizeRelativeMaterialPath(materialId: string) {
 }
 
 export async function resolveProjectFile(projectId: string, materialId: string): Promise<File | null> {
-  const record = await loadDirectoryRecord(projectId)
+  const record = await loadDirectoryRecord(currentScopedDirectoryKey(projectId))
   if (!record) return null
   const permission = await queryHandlePermission(record.handle)
   if (permission !== "granted") return null
@@ -263,7 +277,7 @@ export async function resolveProjectSameStemSiblingFile(
   materialId: string,
   extensions: readonly string[],
 ): Promise<File | null> {
-  const record = await loadDirectoryRecord(projectId)
+  const record = await loadDirectoryRecord(currentScopedDirectoryKey(projectId))
   if (!record) return null
   const permission = await queryHandlePermission(record.handle)
   if (permission !== "granted") return null
@@ -303,7 +317,7 @@ export async function resolveProjectSameStemSiblingFile(
 }
 
 export async function scanProjectDirectoryMedia(projectId: string): Promise<ProjectDirectoryScanResult> {
-  const record = await loadDirectoryRecord(projectId)
+  const record = await loadDirectoryRecord(currentScopedDirectoryKey(projectId))
   if (!record) {
     throw new Error("当前项目还没有绑定本地素材目录。")
   }
@@ -393,6 +407,7 @@ export async function resolvePomodoroRestMusicFile(relativePath: string): Promis
 
 export function useProjectDirectoryBinding(projectId: string) {
   const [state, setState] = useState<ProjectDirectoryBindingState>(defaultState)
+  const projectKey = currentScopedDirectoryKey(projectId)
 
   useEffect(() => {
     let cancelled = false
@@ -409,7 +424,7 @@ export function useProjectDirectoryBinding(projectId: string) {
         return
       }
       setState((prev) => ({ ...prev, loading: true, error: null }))
-      const next = await loadBindingState(projectId)
+      const next = await loadBindingState(projectKey)
       if (!cancelled) {
         setState(next)
       }
@@ -419,7 +434,7 @@ export function useProjectDirectoryBinding(projectId: string) {
 
     function onChanged(event: Event) {
       const detail = (event as CustomEvent<{ projectId?: string }>).detail
-      if (!detail || detail.projectId === projectId) {
+      if (!detail || detail.projectId === projectKey) {
         void refresh()
       }
     }
@@ -429,30 +444,30 @@ export function useProjectDirectoryBinding(projectId: string) {
       cancelled = true
       window.removeEventListener(PROJECT_DIRECTORY_CHANGED_EVENT, onChanged)
     }
-  }, [projectId])
+  }, [projectId, projectKey])
 
   async function authorizeDirectory(): Promise<DirectoryBindingPermission> {
     if (!directoryPickerSupported()) return "unsupported"
     if (!projectId) return "missing"
-    const handle = await window.showDirectoryPicker({ id: `plm-${projectId}`, mode: "read" })
-    await saveDirectoryRecord(projectId, handle)
-    notifyProjectDirectoryChanged(projectId)
+    const handle = await window.showDirectoryPicker({ id: directoryPickerId(projectKey), mode: "read" })
+    await saveDirectoryRecord(projectKey, handle)
+    notifyProjectDirectoryChanged(projectKey)
     return await queryHandlePermission(handle)
   }
 
   async function requestPermission(): Promise<DirectoryBindingPermission> {
     if (!projectId) return "missing"
-    const record = await loadDirectoryRecord(projectId)
+    const record = await loadDirectoryRecord(projectKey)
     if (!record) return "missing"
     const state = await record.handle.requestPermission({ mode: "read" })
-    notifyProjectDirectoryChanged(projectId)
+    notifyProjectDirectoryChanged(projectKey)
     return permissionStateToBindingPermission(state)
   }
 
   async function clearDirectory() {
     if (!projectId) return
-    await deleteDirectoryRecord(projectId)
-    notifyProjectDirectoryChanged(projectId)
+    await deleteDirectoryRecord(projectKey)
+    notifyProjectDirectoryChanged(projectKey)
   }
 
   return {

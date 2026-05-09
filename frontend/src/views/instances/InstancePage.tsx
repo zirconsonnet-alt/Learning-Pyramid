@@ -11,6 +11,7 @@ import { ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/conte
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader } from "@/ui/components/ui/card"
 import { formatInstanceReference, formatMaterialReference } from "@/ui/displayIdentifiers"
+import { buildScopedProjectPath } from "@/ui/projectPaths"
 import { RecallPointListCard } from "@/views/recallPoints/components/RecallPointListCard"
 import { VideoPane } from "@/views/workbench/components/VideoPane"
 
@@ -28,11 +29,11 @@ function formatTimestamp(value: string | null) {
 }
 
 export function InstancePage() {
-  const { projectId, instanceId } = useParams()
+  const { subjectId = "", projectId, instanceId } = useParams()
   const navigate = useNavigate()
   const pid = projectId ?? ""
   const iid = instanceId ?? ""
-  const setCurrentMs = useCallback((_value: number) => undefined, [])
+  const setCurrentMs = useCallback(() => undefined, [])
 
   const instancesQ = useQuery({
     queryKey: ["instances", pid],
@@ -83,7 +84,7 @@ export function InstancePage() {
   const recallPointsLoading = recallPointIdsQ.isLoading || recallPointQs.some((query) => query.isLoading)
   const recallPointsError = recallPointIdsQ.error ?? recallPointQs.find((query) => query.error)?.error ?? null
   const boundObjectNodeValue = boundObjectNode ? (
-    <Link className="text-primary underline-offset-4 hover:underline" to={`/p/${pid}/learning-object-nodes/${boundObjectNode.nodeId}`}>
+    <Link className="text-primary underline-offset-4 hover:underline" to={buildScopedProjectPath(subjectId, pid, `/learning-object-nodes/${boundObjectNode.nodeId}`)}>
       {boundObjectNode.title}
     </Link>
   ) : objectNodesQ.isLoading ? (
@@ -98,7 +99,7 @@ export function InstancePage() {
       className="-ml-2 h-8 rounded-full px-2 text-[#60748c] hover:bg-[#f3f7fb] hover:text-foreground"
       asChild
     >
-      <Link to={`/p/${pid}/structure-view?view=object`}>
+      <Link to={buildScopedProjectPath(subjectId, pid, "/structure-view?view=object")}>
         <ChevronLeft className="h-4 w-4" />
         返回学习对象树
       </Link>
@@ -145,7 +146,7 @@ export function InstancePage() {
           message="这个实例可能已经被移除，或当前入口已失效。请返回对象树重新选择。"
           action={
             <Button variant="outline" asChild>
-              <Link to={`/p/${pid}/structure-view?view=object`}>返回学习对象树</Link>
+              <Link to={buildScopedProjectPath(subjectId, pid, "/structure-view?view=object")}>返回学习对象树</Link>
             </Button>
           }
         />
@@ -157,6 +158,7 @@ export function InstancePage() {
           <div className="min-w-0 space-y-4">
             <VideoPane
               key={instance.instanceId}
+              subjectId={subjectId}
               projectId={pid}
               instance={instance}
               setCurrentMs={setCurrentMs}

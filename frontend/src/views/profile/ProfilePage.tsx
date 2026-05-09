@@ -452,7 +452,10 @@ export function ProfilePage() {
   )
 
   const selectedStudyTotalsByDate = useMemo(
-    () => loadDailyStudyTotalsByDate(selectedLearningProjectIds),
+    () => {
+      void studyMetricSyncRevision
+      return loadDailyStudyTotalsByDate(selectedLearningProjectIds)
+    },
     [selectedLearningProjectIds, studyMetricSyncRevision],
   )
 

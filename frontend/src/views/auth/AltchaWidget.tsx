@@ -8,6 +8,10 @@ type AltchaElement = HTMLElement &
     value?: string
     reset?: () => void
   }
+type AltchaError = {
+  message: string
+  scopeKey: string
+} | null
 
 const ALTCHA_STYLE: CSSProperties = {
   "--altcha-border-color": "hsl(var(--border))",
@@ -18,6 +22,7 @@ const ALTCHA_STYLE: CSSProperties = {
 } as CSSProperties
 
 declare module "react" {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace JSX {
     interface IntrinsicElements {
       "altcha-widget": React.DetailedHTMLProps<React.HTMLAttributes<AltchaElement>, AltchaElement> & {
@@ -53,7 +58,9 @@ function extractVerifiedPayload(event: Event, widget: AltchaElement | null): str
 export function AltchaWidget(props: AltchaWidgetProps) {
   const { challengeUrl, resetSignal, onTokenChange } = props
   const widgetRef = useRef<AltchaElement | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const challengeScopeKey = `${challengeUrl}:${resetSignal}`
+  const [error, setError] = useState<AltchaError>(null)
+  const visibleError = error?.scopeKey === challengeScopeKey ? error.message : null
 
   useEffect(() => {
     const widget = widgetRef.current
@@ -66,10 +73,10 @@ export function AltchaWidget(props: AltchaWidgetProps) {
     const handleStateChange = (event: Event) => {
       const state = String((event as CustomEvent<{ state?: unknown }>).detail?.state ?? "")
       if (state === "error") {
-        setError("人机校验失败，请重试。")
+        setError({ message: "人机校验失败，请重试。", scopeKey: challengeScopeKey })
         onTokenChange(null)
       } else if (state === "expired") {
-        setError("人机校验已过期，请重新校验。")
+        setError({ message: "人机校验已过期，请重新校验。", scopeKey: challengeScopeKey })
         onTokenChange(null)
       } else if (state !== "verified") {
         setError(null)
@@ -77,7 +84,7 @@ export function AltchaWidget(props: AltchaWidgetProps) {
       }
     }
     const handleExpired = () => {
-      setError("人机校验已过期，请重新校验。")
+      setError({ message: "人机校验已过期，请重新校验。", scopeKey: challengeScopeKey })
       onTokenChange(null)
     }
 
@@ -89,11 +96,10 @@ export function AltchaWidget(props: AltchaWidgetProps) {
       widget.removeEventListener("statechange", handleStateChange)
       widget.removeEventListener("expired", handleExpired)
     }
-  }, [onTokenChange])
+  }, [challengeScopeKey, onTokenChange])
 
   useEffect(() => {
     onTokenChange(null)
-    setError(null)
     widgetRef.current?.reset?.()
   }, [challengeUrl, resetSignal, onTokenChange])
 
@@ -108,7 +114,7 @@ export function AltchaWidget(props: AltchaWidgetProps) {
         language="zh-cn"
         style={ALTCHA_STYLE}
       />
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
+      {visibleError ? <p className="text-sm text-destructive">{visibleError}</p> : null}
     </div>
   )
 }

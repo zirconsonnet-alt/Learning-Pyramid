@@ -1,12 +1,16 @@
 from datetime import datetime, timezone
 import hashlib
 from pathlib import PurePosixPath
+from dataclasses import dataclass
 from typing import Any, NewType, TypeAlias, Union
 
 # =========
 # ID types
 # =========
 ProjectId = NewType("ProjectId", str)
+SubjectId = NewType("SubjectId", str)
+ScopedProjectId = NewType("ScopedProjectId", str)
+InternalProjectKey = NewType("InternalProjectKey", str)
 InstanceId = NewType("InstanceId", str)
 LearningObjectNodeId = NewType("LearningObjectNodeId", str)
 RecallPointId = NewType("RecallPointId", str)
@@ -33,6 +37,18 @@ MemoryCanvasId = NewType("MemoryCanvasId", str)
 MemoryCanvasVersionId = NewType("MemoryCanvasVersionId", str)
 CanvasEdgeId = NewType("CanvasEdgeId", str)
 StoryArtifactId = NewType("StoryArtifactId", str)
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectReference:
+    subject_id: ProjectId
+    project_id: ProjectId
+
+    def validate_write_time(self) -> None:
+        if not str(self.subject_id or "").strip():
+            raise ValueError("ProjectReference.subject_id must be non-empty")
+        if not str(self.project_id or "").strip():
+            raise ValueError("ProjectReference.project_id must be non-empty")
 
 # =========
 # Scalar types

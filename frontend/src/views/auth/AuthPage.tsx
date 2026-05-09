@@ -81,11 +81,12 @@ export function AuthPage() {
           : "login"
   const actionToken = searchParams.get("token")?.trim() || ""
   const verificationWaitToken = searchParams.get("waitToken")?.trim() || ""
+  const emailParam = searchParams.get("email")?.trim() || ""
   const resetToken = effectiveMode === "reset" ? actionToken : ""
   const verifyToken = effectiveMode === "verify" ? actionToken : ""
   const resetTokenPresent = effectiveMode === "reset" && Boolean(resetToken)
   const verifyTokenPresent = effectiveMode === "verify" && Boolean(verifyToken)
-  const [email, setEmail] = useState(searchParams.get("email")?.trim() || "")
+  const [emailDraft, setEmailDraft] = useState(emailParam)
   const [password, setPassword] = useState("")
   const [inviteCode, setInviteCode] = useState("")
   const [humanCheckToken, setHumanCheckToken] = useState<string | null>(null)
@@ -98,30 +99,14 @@ export function AuthPage() {
     effectiveMode === "register" || resetTokenPresent ? password.length >= 8 : effectiveMode === "login" ? password.length > 0 : true
   const registerRequiresHumanCheck =
     effectiveMode === "register" && signupHumanCheckEnabled && signupHumanCheckProvider === "altcha" && Boolean(signupHumanCheckChallengeUrl)
+  const email = effectiveMode === "verify" && emailParam ? emailParam : emailDraft
+  const effectiveVerifyEmailNotice =
+    effectiveMode === "verify" && !verifyTokenPresent && verificationWaitToken ? (verifyEmailNotice ?? "sent") : verifyEmailNotice
   const verifyStatusQ = useEmailVerificationStatus(
-    verifyEmailNotice === "sent" && verificationWaitToken ? verificationWaitToken : null,
+    effectiveVerifyEmailNotice === "sent" && verificationWaitToken ? verificationWaitToken : null,
     effectiveMode === "verify" && !verifyTokenPresent,
-    verifyEmailNotice === "sent" && verificationWaitToken ? 2000 : false,
+    effectiveVerifyEmailNotice === "sent" && verificationWaitToken ? 2000 : false,
   )
-
-  useEffect(() => {
-    const emailParam = searchParams.get("email")?.trim() || ""
-    if (effectiveMode === "verify" && emailParam && emailParam !== email) {
-      setEmail(emailParam)
-    }
-  }, [effectiveMode, email, searchParams])
-
-  useEffect(() => {
-    if (effectiveMode !== "verify" || verifyTokenPresent) {
-      setVerifyEmailNotice(null)
-    }
-  }, [effectiveMode, verifyTokenPresent])
-
-  useEffect(() => {
-    if (effectiveMode === "verify" && !verifyTokenPresent && verificationWaitToken && !verifyEmailNotice) {
-      setVerifyEmailNotice("sent")
-    }
-  }, [effectiveMode, verificationWaitToken, verifyEmailNotice, verifyTokenPresent])
 
   useEffect(() => {
     if (verifyStatusQ.data?.status !== "verified") return
@@ -141,7 +126,7 @@ export function AuthPage() {
         : effectiveMode === "verify"
           ? verifyTokenPresent
             ? "验证邮箱 | LearningPyramid"
-            : verifyEmailNotice === "sent"
+            : effectiveVerifyEmailNotice === "sent"
               ? "等待邮箱验证 | LearningPyramid"
               : "重新发送验证邮件 | LearningPyramid"
           : "登录 | LearningPyramid",
@@ -374,7 +359,7 @@ export function AuthPage() {
         : effectiveMode === "verify"
           ? verifyTokenPresent
             ? "验证邮箱"
-            : verifyEmailNotice === "sent"
+            : effectiveVerifyEmailNotice === "sent"
               ? "等待邮箱验证"
               : "重新发送验证邮件"
           : "欢迎回来"
@@ -390,7 +375,7 @@ export function AuthPage() {
         : effectiveMode === "verify"
           ? verifyTokenPresent
             ? "点击下方按钮完成邮箱验证并自动登录。"
-            : verifyEmailNotice === "sent"
+            : effectiveVerifyEmailNotice === "sent"
               ? "验证邮件已经发出。你可以在手机或电脑上打开邮箱完成激活，当前页面会自动继续。"
               : "输入注册邮箱，我们会重新发送一封验证邮件。"
         : "使用邮箱和密码登录。"
@@ -431,7 +416,7 @@ export function AuthPage() {
                   autoComplete="email"
                   value={email}
                   onChange={(event) => {
-                    setEmail(event.target.value)
+                    setEmailDraft(event.target.value)
                     if (verifyEmailNotice) setVerifyEmailNotice(null)
                   }}
                   placeholder="you@example.com"
@@ -439,11 +424,11 @@ export function AuthPage() {
               </div>
             ) : null}
 
-            {effectiveMode === "verify" && !verifyTokenPresent && verifyEmailNotice ? (
+            {effectiveMode === "verify" && !verifyTokenPresent && effectiveVerifyEmailNotice ? (
               <ContentNotice
-                title={verifyEmailNotice === "resent" ? "激活链接已重新发送" : "验证邮件已发送"}
+                title={effectiveVerifyEmailNotice === "resent" ? "激活链接已重新发送" : "验证邮件已发送"}
                 message={
-                  verifyEmailNotice === "resent"
+                  effectiveVerifyEmailNotice === "resent"
                     ? "如果这个邮箱已经注册且尚未验证，我们会重新发送激活链接；如果你刚清理过账号，请直接重新注册。"
                     : "请到邮箱点击激活链接；你可以在手机或电脑上完成验证，当前页面会自动继续。"
                 }

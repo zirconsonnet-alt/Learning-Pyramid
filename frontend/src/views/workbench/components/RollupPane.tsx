@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { useQueries } from "@tanstack/react-query"
 import { ChevronLeft, ChevronRight, ListChecks, Sparkles } from "lucide-react"
 import { Link } from "react-router-dom"
@@ -9,6 +9,7 @@ import type { LearningTaskNode } from "@/ui/api/learningTaskNodes"
 import { ContentEmptyState } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
+import { buildCurrentProjectPath } from "@/ui/projectPaths"
 import { cn } from "@/ui/utils"
 import { formatLearningTaskNodeDisplayTitle } from "@/views/learningTasks/displayTitle"
 
@@ -31,7 +32,7 @@ function RollupTaskListItem({
 }) {
   return (
     <Link
-      to={`/p/${projectId}/learning-task-nodes/${node.nodeId}`}
+      to={buildCurrentProjectPath(projectId, `/learning-task-nodes/${node.nodeId}`)}
       className="group flex items-start gap-3 px-4 py-3 text-left transition-colors hover:[background:var(--theme-subtle-bg)]"
     >
       <span className="theme-icon-surface h-10 w-10 shrink-0 text-sm font-semibold">
@@ -101,17 +102,11 @@ export function RollupPane({
     [aggregationQueueQs, layers],
   )
 
-  useEffect(() => {
-    if (layers.length === 0) {
-      setSelectedLayerIndex(null)
-      return
-    }
-    if (selectedLayerIndex !== null && layers.some((layer) => layer.layerIndex === selectedLayerIndex)) return
-    const preferredLayer = layers.find((layer) => (candidateCountByLayerIndex[layer.layerIndex] ?? 0) > 0) ?? layers[0]
-    setSelectedLayerIndex(preferredLayer.layerIndex)
-  }, [candidateCountByLayerIndex, layers, selectedLayerIndex])
-
-  const selectedLayerPosition = layers.findIndex((layer) => layer.layerIndex === selectedLayerIndex)
+  const effectiveSelectedLayerIndex =
+    selectedLayerIndex !== null && layers.some((layer) => layer.layerIndex === selectedLayerIndex)
+      ? selectedLayerIndex
+      : (layers.find((layer) => (candidateCountByLayerIndex[layer.layerIndex] ?? 0) > 0) ?? layers[0])?.layerIndex ?? null
+  const selectedLayerPosition = layers.findIndex((layer) => layer.layerIndex === effectiveSelectedLayerIndex)
   const selectedLayer = selectedLayerPosition >= 0 ? layers[selectedLayerPosition] : null
   const selectedAggregationQueueQ = selectedLayerPosition >= 0 ? aggregationQueueQs[selectedLayerPosition] : null
   const selectedNodeIds = selectedAggregationQueueQ?.data?.currentNodeIds ?? []

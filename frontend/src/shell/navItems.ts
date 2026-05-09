@@ -2,6 +2,7 @@ import type { LucideIcon } from "lucide-react"
 import { BookOpenText, Bot, Clock3, FolderKanban, LayoutDashboard, PanelsTopLeft, Settings2, Shield, Workflow } from "lucide-react"
 
 import { buildGlobalSettingsPath } from "@/views/settings/globalSettingsRouting"
+import { buildCurrentProjectPath } from "@/ui/projectPaths"
 
 export type NavItem = {
   to: string
@@ -35,10 +36,10 @@ export function getSubjectNavItems(subjectId: string) {
 export function getProjectNavItems(pid: string, options?: { settingsLabel?: string; settingsTo?: string }): NavItem[] {
   if (!pid) return []
   return [
-    { to: `/p/${pid}/workbench`, label: "工作台", icon: PanelsTopLeft, guideTourAnchor: "workbench-nav" },
-    { to: `/p/${pid}/ai-chat`, label: "AI问答", icon: Bot },
-    { to: `/p/${pid}/recommended-reviews`, label: "推荐复习", icon: Clock3 },
-    { to: `/p/${pid}/structure-view`, label: "结构视图", icon: Workflow },
-    { to: options?.settingsTo ?? `/p/${pid}/settings`, label: options?.settingsLabel ?? "项目设置", icon: Settings2, guideTourAnchor: "project-settings-nav" },
+    { to: buildCurrentProjectPath(pid, "/workbench"), label: "工作台", icon: PanelsTopLeft, guideTourAnchor: "workbench-nav" },
+    { to: buildCurrentProjectPath(pid, "/ai-chat"), label: "AI问答", icon: Bot },
+    { to: buildCurrentProjectPath(pid, "/recommended-reviews"), label: "推荐复习", icon: Clock3 },
+    { to: buildCurrentProjectPath(pid, "/structure-view"), label: "结构视图", icon: Workflow },
+    { to: options?.settingsTo ?? buildCurrentProjectPath(pid, "/settings"), label: options?.settingsLabel ?? "项目设置", icon: Settings2, guideTourAnchor: "project-settings-nav" },
   ]
 }

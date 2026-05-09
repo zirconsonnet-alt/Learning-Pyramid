@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import {
   Bot,
@@ -45,6 +45,7 @@ import { useInstances } from "@/ui/queries/workbench"
 import { completeGuideWalkthroughStep } from "@/ui/guideWalkthrough/guideWalkthroughController"
 import { isSyntheticFilesContainer, sortLearningObjectNodeIdsForDisplay } from "@/ui/learningObjectDisplayOrder"
 import { type AiChatConversation, type AiChatCourseEvidence, type AiChatMessage, useAiChatStore } from "@/ui/store/aiChatStore"
+import { buildCurrentProjectPath } from "@/ui/projectPaths"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { createStudyPresenceTracker } from "@/ui/store/studyPresenceStore"
 import { getLocalDateKey, touchDailyStudyActivity } from "@/ui/store/workbenchDailyStats"
@@ -939,9 +940,9 @@ export function AiChatPage() {
   const pid = projectId ?? ""
   const globalSettingsPath = buildGlobalSettingsPath()
 
-  function touchQaActivity() {
+  const touchQaActivity = useCallback(() => {
     touchDailyStudyActivity(pid, "aiQa", QA_ACTIVITY_WINDOW_MS)
-  }
+  }, [pid])
 
   const kindParam = searchParams.get("kind")
   const nodeIdParam = searchParams.get("nodeId")?.trim() ?? ""
@@ -1030,7 +1031,7 @@ export function AiChatPage() {
   const aiChatMemberBlocked = authEnabled && (membershipQ.isLoading || Boolean(membershipQ.error) || !membershipQ.data?.isActive)
   const todayDateKey = getLocalDateKey()
   const interactionDisabled = !pid || !activeNodeId || !llmConfigured || aiChatMemberBlocked
-  const persistedMessages = selectedConversation?.messages ?? []
+  const persistedMessages = useMemo(() => selectedConversation?.messages ?? [], [selectedConversation?.messages])
   const latestAssistantIndex = useMemo(() => {
     for (let index = persistedMessages.length - 1; index >= 0; index -= 1) {
       if (persistedMessages[index]?.role === "assistant") return index
@@ -1120,7 +1121,7 @@ export function AiChatPage() {
       navigate(buildAiChatPath(pid, { kind: kindParam, nodeId: activeNodeId }), { replace: true })
       return
     }
-    navigate(`/p/${pid}/ai-chat`, { replace: true })
+    navigate(buildCurrentProjectPath(pid, "/ai-chat"), { replace: true })
   }, [activeNodeId, conversationIdParam, kindParam, navigate, pid, selectedConversation])
 
   useEffect(() => {
@@ -1146,7 +1147,7 @@ export function AiChatPage() {
     if (latestMessage?.role === "assistant") {
       touchQaActivity()
     }
-  }, [visibleMessages])
+  }, [touchQaActivity, visibleMessages])
 
   function resolveActiveCourseAgentContext():
     | {
@@ -1327,7 +1328,7 @@ export function AiChatPage() {
     const search = new URLSearchParams()
     search.set("instanceId", evidence.instanceId)
     search.set("position", `t=${Math.max(0, Math.floor((evidence.startMs + evidence.endMs) / 2))}`)
-    navigate(`/p/${pid}/workbench?${search.toString()}`)
+    navigate(buildCurrentProjectPath(pid, `/workbench?${search.toString()}`))
   }
 
   function resetStreamingState() {

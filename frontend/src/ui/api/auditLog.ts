@@ -21,3 +21,12 @@ export function listAuditLogEvents(projectId: string, options?: ApiRequestExecut
     timeoutMs: options?.timeoutMs,
   })
 }
+
+export function listScopedAuditLogEvents(subjectId: string, projectId: string, options?: ApiRequestExecutionOptions) {
+  return apiRequest({
+    path: `/subjects/${subjectId}/projects/${projectId}/audit-log-events`,
+    responseSchema: z.array(AuditLogEventSchema),
+    signal: options?.signal,
+    timeoutMs: options?.timeoutMs,
+  })
+}

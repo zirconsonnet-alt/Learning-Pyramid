@@ -156,7 +156,7 @@ export function importLearningObjectsFromBaiduNetdisk(
     method: "POST",
     body: {
       accountId: params.accountId,
-      items: params.items,
+      items: params.items.map((item) => BaiduNetdiskImportItemSchema.parse(item)),
     },
     responseSchema: ImportLearningObjectsFromBaiduNetdiskResultSchema,
   })

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 
 APP_ID = "LearningPyramid"
 APP_NAME = "LearningPyramid"

@@ -357,6 +357,7 @@ class SystemAPI:
         *,
         initial_source_kind: MaterialSourceKind,
         initial_project_type: ProjectType,
+        project_id: ProjectId | None = None,
     ) -> ProjectId:
         if not isinstance(initial_source_kind, MaterialSourceKind):
             raise PreconditionFailure("create_project.initial_source_kind must be MaterialSourceKind")
@@ -364,7 +365,7 @@ class SystemAPI:
             raise PreconditionFailure("create_project.initial_project_type must be ProjectType")
         if initial_project_type in {ProjectType.BOOK, ProjectType.LOOSE_POINTS} and initial_source_kind != MaterialSourceKind.MANUAL:
             raise PreconditionFailure("create_project for BOOK/LOOSE_POINTS must use MANUAL source kind")
-        pid = self.idgen.new_project_id()
+        pid = project_id or self.idgen.new_project_id()
         resolved_project_root = project_root
         if resolved_project_root is None:
             auto_project_root, _ = allocate_project_root(title)
@@ -476,6 +477,10 @@ class SystemAPI:
             state=ProjectState.DELETED,
             created_at=project_store.project.created_at,
             deleted_at=deleted_at,
+            subject_id=project_store.project.subject_id,
+            scoped_project_id=project_store.project.scoped_project_id,
+            legacy_global_project_id=project_store.project.legacy_global_project_id,
+            project_sequence=project_store.project.project_sequence,
         )
         deleted_project.validate_write_time()
 
@@ -2114,6 +2119,53 @@ class SystemAPI:
         project_store = self._get_project_store(project_id)
         return getattr(project_store, "subject_material_link", None)
 
+    @staticmethod
+    def _material_internal_project_key(material: StudyMaterial) -> ProjectId | None:
+        return material.internal_project_key or material.project_id
+
+    @staticmethod
+    def _scoped_project_id_for_sequence(n: int) -> ProjectId:
+        return ProjectId(f"proj_{int(n):06d}")
+
+    @staticmethod
+    def _parse_scoped_project_sequence(project_id: ProjectId | None) -> int:
+        raw = str(project_id or "")
+        if not raw.startswith("proj_"):
+            return 0
+        suffix = raw[5:]
+        return int(suffix) if suffix.isdigit() else 0
+
+    def _next_scoped_project_id(self, subject: Project, materials: Sequence[StudyMaterial]) -> tuple[ProjectId, int]:
+        current = int(getattr(subject, "project_sequence", 0) or 0)
+        current = max(current, self._parse_scoped_project_sequence(subject.project_id))
+        for material in materials:
+            current = max(current, self._parse_scoped_project_sequence(material.project_id))
+        next_sequence = current + 1
+        return self._scoped_project_id_for_sequence(next_sequence), next_sequence
+
+    def resolve_scoped_project_internal_key(self, subject_id: ProjectId, project_id: ProjectId) -> ProjectId:
+        resolved_subject_id = self._resolve_subject_id(subject_id)
+        if id_canonical_text(resolved_subject_id) != id_canonical_text(subject_id):
+            raise PreconditionFailure("subject id is not a subject")
+        self._get_active_project_metadata(resolved_subject_id)
+        for material in self._list_subject_materials_from_store(resolved_subject_id):
+            if material.project_id is None:
+                continue
+            if id_canonical_text(material.project_id) != id_canonical_text(project_id):
+                continue
+            internal_key = self._material_internal_project_key(material)
+            if internal_key is None:
+                raise PreconditionFailure("scoped project missing internal storage key")
+            return internal_key
+        raise NotFound(project_id)
+
+    def get_scoped_subject_context(self, subject_id: ProjectId, project_id: ProjectId) -> dict[str, object]:
+        internal_project_key = self.resolve_scoped_project_internal_key(subject_id, project_id)
+        payload = self.get_subject_context(internal_project_key)
+        payload["current_project_id"] = project_id
+        payload["current_internal_project_key"] = internal_project_key
+        return payload
+
     def _resolve_subject_id(self, project_id: ProjectId) -> ProjectId:
         link = self._get_subject_material_link(project_id)
         return link.subject_id if link is not None else project_id
@@ -2214,6 +2266,10 @@ class SystemAPI:
                     initial_project_type=project_type,
                 )
                 created_project_ids.append(material_project_id)
+                subject = subject_store.project
+                if subject is None:
+                    raise NotFound(subject_id)
+                scoped_project_id, next_sequence = self._next_scoped_project_id(subject, tuple(next_materials.values()))
                 material_id = self._new_study_material_id(legacy_material.material_type)
                 while material_id in next_materials:
                     material_id = self._new_study_material_id(legacy_material.material_type)
@@ -2223,19 +2279,30 @@ class SystemAPI:
                     material_type=legacy_material.material_type,
                     title=legacy_material.title,
                     created_at=legacy_material.created_at,
-                    project_id=material_project_id,
+                    project_id=scoped_project_id,
+                    internal_project_key=material_project_id,
                 )
                 self._move_legacy_subject_root_content_to_material_project(
                     subject_id=subject_id,
                     material_project_id=material_project_id,
                 )
                 child_store = self._get_project_store(material_project_id)
+                if child_store.project is not None:
+                    child_store.project = replace(
+                        child_store.project,
+                        subject_id=subject_id,
+                        scoped_project_id=scoped_project_id,
+                        legacy_global_project_id=material_project_id,
+                    )
                 child_store.subject_material_link = SubjectMaterialLink(
                     subject_id=subject_id,
                     material_id=migrated.material_id,
                     material_type=migrated.material_type,
+                    project_id=scoped_project_id,
                 )
                 next_materials[migrated.material_id] = migrated
+                if subject_store.project is not None:
+                    subject_store.project = replace(subject_store.project, project_sequence=next_sequence)
 
             subject_store = self._get_project_store(subject_id)
             subject_store.study_materials = next_materials
@@ -4131,6 +4198,7 @@ class SystemAPI:
         *,
         initial_source_kind: MaterialSourceKind = MaterialSourceKind.SERVER_FS,
         initial_project_type: ProjectType = ProjectType.COURSE,
+        project_id: ProjectId | None = None,
     ) -> ProjectId:
         sql_store = self._sql_store()
         if sql_store is not None:
@@ -4140,19 +4208,23 @@ class SystemAPI:
                 project_root,
                 initial_source_kind=initial_source_kind,
                 initial_project_type=initial_project_type,
+                project_id=project_id,
             )
         return self.sys.create_project(
             title,
             project_root,
             initial_source_kind=initial_source_kind,
             initial_project_type=initial_project_type,
+            project_id=project_id,
         )
 
     def create_subject(self, title: str) -> ProjectId:
+        subject_id = ProjectId(str(self.idgen.new_subject_id()))
         subject_id = self.create_project(
             title,
             initial_source_kind=MaterialSourceKind.SERVER_FS,
             initial_project_type=ProjectType.COURSE,
+            project_id=subject_id,
         )
         material: StudyMaterial | None = None
         try:
@@ -4171,9 +4243,10 @@ class SystemAPI:
                 title="网课材料",
             )
         except Exception:
-            if material is not None and material.project_id is not None:
+            material_project_id = None if material is None else self._material_internal_project_key(material)
+            if material_project_id is not None:
                 try:
-                    self.delete_project(material.project_id)
+                    self.delete_project(material_project_id)
                 except Exception:
                     pass
             try:
@@ -4259,19 +4332,23 @@ class SystemAPI:
             initial_source_kind=source_kind,
             initial_project_type=project_type,
         )
+        existing_materials = self._list_subject_materials_from_store(resolved_subject_id)
+        scoped_project_id, next_sequence = self._next_scoped_project_id(subject, existing_materials)
         material = StudyMaterial(
             subject_id=subject.project_id,
             material_id=material_id,
             material_type=material_type,
             title=normalized_title,
             created_at=now_utc_ms(),
-            project_id=material_project_id,
+            project_id=scoped_project_id,
+            internal_project_key=material_project_id,
         )
         try:
             subject_session = self.sys.begin_session(resolved_subject_id, SessionMode.READ_WRITE)
             try:
                 next_materials = {item.material_id: item for item in self._list_subject_materials_from_store(resolved_subject_id)}
                 next_materials[material.material_id] = material
+                subject_session._staged.project = replace(subject, project_sequence=next_sequence)
                 subject_session._staged.study_materials = next_materials
                 subject_session._staged.study_materials_replaced = True
                 self.sys.commit(subject_session)
@@ -4286,6 +4363,14 @@ class SystemAPI:
                     subject_id=resolved_subject_id,
                     material_id=material.material_id,
                     material_type=material.material_type,
+                    project_id=scoped_project_id,
+                )
+                child_project = self.sys.project_repo.get(child_session, material_project_id)
+                child_session._staged.project = replace(
+                    child_project,
+                    subject_id=resolved_subject_id,
+                    scoped_project_id=scoped_project_id,
+                    legacy_global_project_id=material_project_id,
                 )
                 child_session._staged.subject_material_link_replaced = True
                 self.sys.commit(child_session)
@@ -4305,7 +4390,7 @@ class SystemAPI:
         resolved_subject_id = self._resolve_subject_id(subject_id)
         self._ensure_subject_materials_are_independent(resolved_subject_id)
         material = self._find_subject_material(resolved_subject_id, material_id)
-        material_project_id = material.project_id
+        material_project_id = self._material_internal_project_key(material)
         if material_project_id is None:
             raise PreconditionFailure("当前项目缺少可重命名的项目标识")
         if id_canonical_text(material_project_id) == id_canonical_text(resolved_subject_id):
@@ -4329,7 +4414,7 @@ class SystemAPI:
         resolved_subject_id = self._resolve_subject_id(subject_id)
         self._ensure_subject_materials_are_independent(resolved_subject_id)
         material = self._find_subject_material(resolved_subject_id, material_id)
-        material_project_id = material.project_id
+        material_project_id = self._material_internal_project_key(material)
         if material_project_id is None:
             raise PreconditionFailure("当前项目缺少可删除的项目标识")
         if id_canonical_text(material_project_id) == id_canonical_text(resolved_subject_id):
@@ -4356,7 +4441,9 @@ class SystemAPI:
         for material in self._list_subject_materials_from_store(project_id):
             if material.project_id is None:
                 continue
-            related_project_ids[id_canonical_text(material.project_id)] = material.project_id
+            internal_key = self._material_internal_project_key(material)
+            if internal_key is not None:
+                related_project_ids[id_canonical_text(internal_key)] = internal_key
         return tuple(related_project_ids[key] for key in sorted(related_project_ids.keys()))
 
     def edit_project(self, project_id: ProjectId, title: str) -> None:
@@ -4374,6 +4461,10 @@ class SystemAPI:
                 state=project.state,
                 created_at=project.created_at,
                 deleted_at=project.deleted_at,
+                subject_id=project.subject_id,
+                scoped_project_id=project.scoped_project_id,
+                legacy_global_project_id=project.legacy_global_project_id,
+                project_sequence=project.project_sequence,
             )
             updated_project.validate_write_time()
             self.sys.project_repo.update(s, updated_project)
@@ -4403,6 +4494,7 @@ class SystemAPI:
                         title=str(title).strip(),
                         created_at=current.created_at,
                         project_id=current.project_id,
+                        internal_project_key=current.internal_project_key,
                     )
                     subject_session._staged.study_materials = next_materials
                     subject_session._staged.study_materials_replaced = True

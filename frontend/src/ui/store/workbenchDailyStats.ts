@@ -5,6 +5,11 @@ export type StudyMetricRange = {
   endMs: number
 }
 
+export type StudyProjectReference = {
+  subjectId: string
+  projectId: string
+}
+
 export type DailyWorkbenchStats = {
   schemaVersion: number
   webPresenceMs: number
@@ -22,6 +27,7 @@ export type DailyWorkbenchStats = {
 
 export type DailyStudyMetricEntry = DailyWorkbenchStats & {
   projectId: string
+  projectRef?: StudyProjectReference | null
   dateKey: string
   presenceRanges: StudyMetricRange[]
   videoRanges: StudyMetricRange[]
@@ -37,6 +43,7 @@ export type DailyStudyMetricEntry = DailyWorkbenchStats & {
 
 export type PomodoroSegmentMetricSummary = DailyWorkbenchStats & {
   projectId: string | null
+  projectRef: StudyProjectReference | null
   dateKey: string
   planId: string
   planIndex: number
@@ -464,6 +471,7 @@ export function sliceDailyWebPresenceMetrics(projectId: string | null, startAtMs
 
 export function loadPomodoroSegmentMetricSummary(params: {
   projectId: string | null
+  projectRef?: StudyProjectReference | null
   dateKey: string
   planId: string
   planIndex: number
@@ -489,6 +497,7 @@ export function loadPomodoroSegmentMetricSummary(params: {
   return {
     ...metrics,
     projectId: params.projectId,
+    projectRef: params.projectRef ?? null,
     dateKey: params.dateKey,
     planId: params.planId,
     planIndex: params.planIndex,

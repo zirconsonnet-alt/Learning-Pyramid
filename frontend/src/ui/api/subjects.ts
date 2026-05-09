@@ -107,3 +107,10 @@ export function getProjectSubjectContext(projectId: string) {
     responseSchema: SubjectContextSchema,
   })
 }
+
+export function getScopedProjectSubjectContext(subjectId: string, projectId: string) {
+  return apiRequest({
+    path: `/subjects/${subjectId}/projects/${projectId}/subject-context`,
+    responseSchema: SubjectContextSchema,
+  })
+}

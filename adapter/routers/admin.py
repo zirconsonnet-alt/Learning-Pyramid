@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from fastapi import APIRouter, Depends, Request
 
 from adapter.auth import require_admin_user, require_super_admin_user

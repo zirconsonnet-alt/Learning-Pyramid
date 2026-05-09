@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import base64
 import hashlib
 import hmac
@@ -541,7 +539,7 @@ def _normalize_pomodoro_prompt_text(value: str | None) -> str:
     return text
 
 
-def _normalize_pomodoro_micro_break_settings(value: Any) -> PomodoroMicroBreakSettings:
+def _normalize_pomodoro_micro_break_settings(value: Any) -> "PomodoroMicroBreakSettings":
     payload = value if isinstance(value, dict) else {}
     min_interval_seconds = _clamp_int(
         payload.get("minIntervalSeconds", DEFAULT_POMODORO_MICRO_BREAKS["minIntervalSeconds"]),
@@ -568,7 +566,7 @@ def _normalize_pomodoro_micro_break_settings(value: Any) -> PomodoroMicroBreakSe
     )
 
 
-def _pomodoro_micro_break_settings_to_json(item: PomodoroMicroBreakSettings) -> dict[str, Any]:
+def _pomodoro_micro_break_settings_to_json(item: "PomodoroMicroBreakSettings") -> dict[str, Any]:
     normalized = _normalize_pomodoro_micro_break_settings(
         {
             "enabled": item.enabled,
@@ -595,10 +593,10 @@ def _create_pomodoro_schedule_day(
     focus_minutes: int = DEFAULT_POMODORO_FOCUS_MINUTES,
     break_minutes: int = DEFAULT_POMODORO_BREAK_MINUTES,
     pomodoro_count: int = DEFAULT_POMODORO_COUNT,
-    project_ids: Iterable[str | None] | None = None,
+    project_refs: Iterable[dict[str, str] | None] | None = None,
     break_prompt: str | None = None,
     focus_prompts: Iterable[str | None] | None = None,
-) -> PomodoroScheduleDay:
+) -> "PomodoroScheduleDay":
     normalized_day_key = str(day_key or "").strip().lower()
     if normalized_day_key not in POMODORO_WEEKDAY_KEYS:
         raise PreconditionFailure("pomodoro weekday must be one of mon, tue, wed, thu, fri, sat, sun")
@@ -626,21 +624,21 @@ def _create_pomodoro_schedule_day(
             field_name="pomodoro break minutes",
         ),
         pomodoro_count=normalized_pomodoro_count,
-        project_ids=_normalize_pomodoro_project_ids(project_ids, pomodoro_count=normalized_pomodoro_count),
+        project_refs=_normalize_pomodoro_project_refs(project_refs, pomodoro_count=normalized_pomodoro_count),
         break_prompt=_normalize_pomodoro_prompt_text(break_prompt),
         focus_prompts=_normalize_pomodoro_focus_prompts(focus_prompts, pomodoro_count=normalized_pomodoro_count),
     )
 
 
-def _pomodoro_plan_duration_minutes(item: PomodoroScheduleDay) -> int:
+def _pomodoro_plan_duration_minutes(item: "PomodoroScheduleDay") -> int:
     return int(item.focus_minutes) * int(item.pomodoro_count) + int(item.break_minutes) * max(
         0,
         int(item.pomodoro_count) - 1,
     )
 
 
-def _validate_pomodoro_day_plan_conflicts(day_key: str, items: Iterable[PomodoroScheduleDay]) -> None:
-    enabled_ranges: list[tuple[int, int, PomodoroScheduleDay]] = []
+def _validate_pomodoro_day_plan_conflicts(day_key: str, items: Iterable["PomodoroScheduleDay"]) -> None:
+    enabled_ranges: list[tuple[int, int, "PomodoroScheduleDay"]] = []
     for item in items:
         if not item.enabled:
             continue
@@ -651,33 +649,38 @@ def _validate_pomodoro_day_plan_conflicts(day_key: str, items: Iterable[Pomodoro
         enabled_ranges.append((start_minutes, end_minutes, item))
 
     enabled_ranges.sort(key=lambda value: (value[0], value[2].plan_id))
-    previous: tuple[int, int, PomodoroScheduleDay] | None = None
+    previous: tuple[int, int, "PomodoroScheduleDay"] | None = None
     for current in enabled_ranges:
         if previous is not None and current[0] < previous[1]:
             raise PreconditionFailure(f"pomodoro plans for {day_key} overlap")
         previous = current
 
 
-def _normalize_pomodoro_project_id(value: Any) -> str | None:
-    text = str(value or "").strip()
-    return text or None
+def _normalize_pomodoro_project_ref(value: Any) -> dict[str, str] | None:
+    if not isinstance(value, dict):
+        return None
+    subject_id = str(value.get("subjectId") or "").strip()
+    project_id = str(value.get("projectId") or "").strip()
+    if not subject_id or not project_id:
+        return None
+    return {"subjectId": subject_id, "projectId": project_id}
 
 
-def _normalize_pomodoro_project_ids(
-    raw_project_ids: Iterable[str | None] | None,
+def _normalize_pomodoro_project_refs(
+    raw_project_refs: Iterable[dict[str, str] | None] | None,
     *,
     pomodoro_count: int,
-) -> tuple[str | None, ...]:
+) -> tuple[dict[str, str] | None, ...]:
     normalized_count = _clamp_int(
         pomodoro_count,
         minimum=1,
         maximum=12,
         field_name="pomodoro count",
     )
-    raw_items = list(raw_project_ids or [])
-    normalized: list[str | None] = []
+    raw_items = list(raw_project_refs or [])
+    normalized: list[dict[str, str] | None] = []
     for index in range(normalized_count):
-        normalized.append(_normalize_pomodoro_project_id(raw_items[index] if index < len(raw_items) else None))
+        normalized.append(_normalize_pomodoro_project_ref(raw_items[index] if index < len(raw_items) else None))
     return tuple(normalized)
 
 
@@ -705,7 +708,7 @@ def _normalize_pomodoro_weekly_schedule(
     legacy_focus_minutes: int | float | str | None = DEFAULT_POMODORO_FOCUS_MINUTES,
     legacy_break_minutes: int | float | str | None = DEFAULT_POMODORO_BREAK_MINUTES,
     legacy_pomodoro_count: int | float | str | None = DEFAULT_POMODORO_COUNT,
-) -> tuple[PomodoroScheduleDay, ...]:
+) -> tuple["PomodoroScheduleDay", ...]:
     payload = raw_schedule if isinstance(raw_schedule, dict) else {}
     normalized_focus_minutes = _clamp_int(
         legacy_focus_minutes,
@@ -725,7 +728,7 @@ def _normalize_pomodoro_weekly_schedule(
         maximum=12,
         field_name="pomodoro count",
     )
-    items: list[PomodoroScheduleDay] = []
+    items: list["PomodoroScheduleDay"] = []
     for day_key in POMODORO_WEEKDAY_KEYS:
         day_payload = payload.get(day_key)
         if not isinstance(day_payload, dict):
@@ -736,7 +739,7 @@ def _normalize_pomodoro_weekly_schedule(
         if len(plan_payloads) > MAX_POMODORO_PLANS_PER_DAY:
             raise PreconditionFailure(f"pomodoro plans for {day_key} must be at most {MAX_POMODORO_PLANS_PER_DAY}")
 
-        day_items: list[PomodoroScheduleDay] = []
+        day_items: list["PomodoroScheduleDay"] = []
         for plan_index, raw_plan in enumerate(plan_payloads):
             plan_payload = raw_plan if isinstance(raw_plan, dict) else {}
             day_items.append(
@@ -749,7 +752,7 @@ def _normalize_pomodoro_weekly_schedule(
                     focus_minutes=plan_payload.get("focusMinutes", normalized_focus_minutes),
                     break_minutes=plan_payload.get("breakMinutes", normalized_break_minutes),
                     pomodoro_count=plan_payload.get("pomodoroCount", normalized_pomodoro_count),
-                    project_ids=plan_payload.get("projectIds"),
+                    project_refs=plan_payload.get("projectRefs"),
                     break_prompt=plan_payload.get("breakPrompt"),
                     focus_prompts=plan_payload.get("focusPrompts"),
                 )
@@ -759,7 +762,7 @@ def _normalize_pomodoro_weekly_schedule(
     return tuple(items)
 
 
-def _pomodoro_weekly_schedule_to_json(items: Iterable[PomodoroScheduleDay]) -> dict[str, dict[str, Any]]:
+def _pomodoro_weekly_schedule_to_json(items: Iterable["PomodoroScheduleDay"]) -> dict[str, dict[str, Any]]:
     payload: dict[str, dict[str, Any]] = {day_key: {"plans": []} for day_key in POMODORO_WEEKDAY_KEYS}
     for item in items:
         if item.day_key not in payload:
@@ -786,8 +789,8 @@ def _pomodoro_weekly_schedule_to_json(items: Iterable[PomodoroScheduleDay]) -> d
                 maximum=12,
                 field_name="pomodoro count",
             ),
-            "projectIds": list(
-                _normalize_pomodoro_project_ids(item.project_ids, pomodoro_count=item.pomodoro_count)
+            "projectRefs": list(
+                _normalize_pomodoro_project_refs(item.project_refs, pomodoro_count=item.pomodoro_count)
             ),
             "breakPrompt": _normalize_pomodoro_prompt_text(item.break_prompt),
             "focusPrompts": list(
@@ -934,7 +937,7 @@ class PomodoroScheduleDay:
     focus_minutes: int
     break_minutes: int
     pomodoro_count: int
-    project_ids: tuple[str | None, ...] = ()
+    project_refs: tuple[dict[str, str] | None, ...] = ()
     break_prompt: str = ""
     focus_prompts: tuple[str, ...] = ()
 

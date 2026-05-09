@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import base64
 import json
 import logging
@@ -891,26 +889,12 @@ class MembershipPaymentService:
                         )
                         continue
                     logger.warning(
-                        "wechatpay_response_verify_skipped method=%s uri=%s %s",
+                        "wechatpay_response_verify_failed method=%s uri=%s %s",
                         resolved_method,
                         resolved_uri,
                         last_verify_context,
                     )
-                    break
-            try:
-                payload = response.json()
-            except Exception as exc:
-                raise PreconditionFailure("wechat_native returned a non-JSON response") from exc
-            if not isinstance(payload, dict):
-                raise PreconditionFailure("wechat_native returned an unexpected response payload")
-            return payload
-        if last_verify_error is not None:
-            logger.warning(
-                "wechatpay_response_verify_not_enforced method=%s uri=%s %s",
-                resolved_method,
-                resolved_uri,
-                last_verify_context,
-            )
+                    raise exc
             try:
                 payload = response.json()
             except Exception as exc:

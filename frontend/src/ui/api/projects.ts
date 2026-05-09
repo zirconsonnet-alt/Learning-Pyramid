@@ -3,6 +3,7 @@ import { z } from "zod"
 import { apiRequest, type ApiRequestExecutionOptions } from "@/ui/api/http"
 
 export const ProjectSchema = z.object({
+  subjectId: z.string().nullable().optional(),
   projectId: z.string(),
   title: z.string(),
   state: z.string(),

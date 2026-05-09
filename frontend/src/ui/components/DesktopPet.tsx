@@ -10,7 +10,8 @@ export function DesktopPet(props: { page?: "home" | "workbench"; assistantState?
   const page = props.page ?? "home"
   const assistantState = props.assistantState ?? "idle"
   const hasPopover = page === "workbench" && !!props.children
-  const [isPinned, setIsPinned] = useState(false)
+  const [pinRequested, setPinRequested] = useState(false)
+  const isPinned = hasPopover && pinRequested
   const popoverId = useId()
   const rootRef = useRef<HTMLElement | null>(null)
 
@@ -21,10 +22,10 @@ export function DesktopPet(props: { page?: "home" | "workbench"; assistantState?
       const target = event.target
       if (!(target instanceof Node)) return
       if (rootRef.current?.contains(target)) return
-      setIsPinned(false)
+      setPinRequested(false)
     }
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setIsPinned(false)
+      if (event.key === "Escape") setPinRequested(false)
     }
 
     document.addEventListener("pointerdown", onPointerDown)
@@ -33,10 +34,6 @@ export function DesktopPet(props: { page?: "home" | "workbench"; assistantState?
       document.removeEventListener("pointerdown", onPointerDown)
       document.removeEventListener("keydown", onKeyDown)
     }
-  }, [hasPopover, isPinned])
-
-  useEffect(() => {
-    if (!hasPopover && isPinned) setIsPinned(false)
   }, [hasPopover, isPinned])
 
   return (
@@ -58,7 +55,7 @@ export function DesktopPet(props: { page?: "home" | "workbench"; assistantState?
         aria-controls={hasPopover ? popoverId : undefined}
         aria-label={hasPopover ? (isPinned ? "收起雪豹问答" : "固定展开雪豹问答") : "雪豹桌面宠物"}
         onClick={() => {
-          if (hasPopover) setIsPinned((current) => !current)
+          if (hasPopover) setPinRequested((current) => !current)
         }}
       >
         <span className="plm-desktop-pet-stage" aria-hidden="true">
@@ -76,7 +73,7 @@ export function DesktopPet(props: { page?: "home" | "workbench"; assistantState?
             className="plm-desktop-pet-popover-close"
             aria-label="关闭雪豹问答"
             title="关闭雪豹问答"
-            onClick={() => setIsPinned(false)}
+            onClick={() => setPinRequested(false)}
           >
             <X className="h-4 w-4" />
           </button>

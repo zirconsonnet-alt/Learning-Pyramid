@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import json
 import threading
 from contextlib import contextmanager
@@ -804,7 +802,7 @@ class PostgresStore(SQLiteSnapshotStore):
 
     def list_projects_metadata(self, *, active_only: bool = True) -> tuple[Project, ...]:
         query = """
-            SELECT project_id, project_title, project_state, created_at_ms, deleted_at_ms
+            SELECT project_id, project_title, project_state, created_at_ms, deleted_at_ms, snapshot_json
             FROM project_snapshots
         """
         params: tuple[Any, ...] = tuple()
@@ -813,16 +811,24 @@ class PostgresStore(SQLiteSnapshotStore):
             params = (ProjectState.ACTIVE.value,)
         query += " ORDER BY project_id ASC"
         rows = self._fetchall(query, params)
-        return tuple(
-            Project(
+        projects: list[Project] = []
+        for row in rows:
+            snapshot = json.loads(str(row["snapshot_json"]))
+            project_payload = dict(snapshot.get("project") or {}) if isinstance(snapshot, dict) else {}
+            projects.append(Project(
                 project_id=ProjectId(str(row["project_id"])),
                 title=str(row["project_title"]),
                 state=ProjectState(str(row["project_state"])),
                 created_at=self._ms_to_ts(int(row["created_at_ms"])),
                 deleted_at=self._ms_to_ts(None if row["deleted_at_ms"] is None else int(row["deleted_at_ms"])),
-            )
-            for row in rows
-        )
+                subject_id=None if project_payload.get("subjectId") is None else ProjectId(str(project_payload.get("subjectId"))),
+                scoped_project_id=None if project_payload.get("scopedProjectId") is None else ProjectId(str(project_payload.get("scopedProjectId"))),
+                legacy_global_project_id=None
+                if project_payload.get("legacyGlobalProjectId") is None
+                else ProjectId(str(project_payload.get("legacyGlobalProjectId"))),
+                project_sequence=int(project_payload.get("projectSequence") or 0),
+            ))
+        return tuple(projects)
 
     def get_project_config(self, project_id: str) -> ProjectConfig | None:
         row = self._fetchone(

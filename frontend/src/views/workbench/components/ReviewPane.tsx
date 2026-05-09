@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   ArrowUpRight,
   CheckCircle2,
@@ -24,6 +24,7 @@ import {
 import type { Instance } from "@/ui/api/instances"
 import { RichContentEditor } from "@/ui/components/RichContentEditor"
 import { RichContentRenderer } from "@/ui/components/RichContentRenderer"
+import { buildCurrentProjectPath } from "@/ui/projectPaths"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import { formatInstanceReference } from "@/ui/displayIdentifiers"
@@ -97,9 +98,9 @@ export function ReviewPane({
   const { reviewTaskQ, rangeQ, recallPointQs } = useReviewBundle(projectId, headId)
   const commit = useCommitReviewTask(projectId)
 
-  function touchReviewActivity() {
+  const touchReviewActivity = useCallback(() => {
     touchDailyStudyActivity(projectId, "review", REVIEW_ACTIVITY_WINDOW_MS)
-  }
+  }, [projectId])
 
   const [sessionStateByHeadId, setSessionStateByHeadId] = useState<Record<string, ReviewSessionState>>(() =>
     loadReviewSessionStateByHeadId(projectId),
@@ -167,7 +168,7 @@ export function ReviewPane({
   useEffect(() => {
     if (!resolvedActiveRecallPointId || totalCount <= 0 || loading || error) return
     touchReviewActivity()
-  }, [error, loading, resolvedActiveRecallPointId, totalCount])
+  }, [error, loading, resolvedActiveRecallPointId, totalCount, touchReviewActivity])
 
   function chooseAnswer(rpId: string, nextValue: 0 | 1) {
     if (!hasUnlockedAnswer(rpId)) return
@@ -479,7 +480,7 @@ export function ReviewPane({
                           </div>
 
                           <Link
-                            to={`/p/${projectId}/recall-points/${rpId}`}
+                            to={buildCurrentProjectPath(projectId, `/recall-points/${rpId}`)}
                             className="group mt-2 block rounded-2xl px-2 py-1 -mx-2 -my-1 transition hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                             title="打开复述点详情"
                           >
@@ -495,7 +496,7 @@ export function ReviewPane({
                           <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                             {activeAnchor ? (
                               <Link
-                                to={`/p/${projectId}/instances/${activeAnchor.instanceId}`}
+                                to={buildCurrentProjectPath(projectId, `/instances/${activeAnchor.instanceId}`)}
                                 className="theme-pill-default rounded-full px-2.5 py-1 font-medium transition hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                                 title="打开视频实例详情"
                               >

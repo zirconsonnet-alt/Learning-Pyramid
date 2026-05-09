@@ -14,6 +14,7 @@ import {
 import { ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader } from "@/ui/components/ui/card"
+import { buildCurrentProjectPath } from "@/ui/projectPaths"
 import { buildAiChatPath } from "@/views/ai/chatRouting"
 import { RecallPointListCard } from "@/views/recallPoints/components/RecallPointListCard"
 import { NodeExportCard } from "@/views/shared/NodeExportCard"
@@ -107,7 +108,7 @@ export function LearningObjectNodePage() {
       className="-ml-2 h-8 rounded-full px-2 text-[#60748c] hover:bg-[#f3f7fb] hover:text-foreground"
       asChild
     >
-      <Link to={`/p/${pid}/structure-view?view=object`}>
+      <Link to={buildCurrentProjectPath(pid, "/structure-view?view=object")}>
         <ChevronLeft className="h-4 w-4" />
         返回学习对象树
       </Link>
@@ -127,7 +128,7 @@ export function LearningObjectNodePage() {
           {
             label: "实例入口",
             value: boundInstance ? (
-              <Link className="text-primary underline-offset-4 hover:underline" to={`/p/${pid}/instances/${boundInstance.instanceId}`}>
+              <Link className="text-primary underline-offset-4 hover:underline" to={buildCurrentProjectPath(pid, `/instances/${boundInstance.instanceId}`)}>
                 查看实例
               </Link>
             ) : (
@@ -165,7 +166,7 @@ export function LearningObjectNodePage() {
           message="这个对象节点可能已经被重建或移除。你可以返回学习对象树重新选择。"
           action={
             <Button variant="outline" asChild>
-              <Link to={`/p/${pid}/structure-view?view=object`}>返回学习对象树</Link>
+              <Link to={buildCurrentProjectPath(pid, "/structure-view?view=object")}>返回学习对象树</Link>
             </Button>
           }
         />

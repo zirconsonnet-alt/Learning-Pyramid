@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import argparse
 import hashlib
 import json
@@ -15,6 +13,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
+from typing import Callable
 from urllib.parse import urljoin, urlsplit
 import urllib.request
 from zipfile import ZipFile
@@ -55,8 +54,21 @@ try:
     PYSIDE6_AVAILABLE = True
     PYSIDE6_IMPORT_ERROR: Exception | None = None
 except Exception as exc:
-    QGuiApplication = None
-    QBoxLayout = None
+    class _PySide6TypeStub:
+        def __getattr__(self, name):
+            return self
+
+        def __or__(self, other):
+            return self
+
+        def __ror__(self, other):
+            return self
+
+        def __call__(self, *args, **kwargs):
+            return self
+
+    _QT_STUB = _PySide6TypeStub()
+    QSettings = QTimer = Qt = QFont = QGuiApplication = QApplication = QBoxLayout = QCheckBox = QComboBox = QFileDialog = QFrame = QGridLayout = QHBoxLayout = QLabel = QLineEdit = QMainWindow = QMessageBox = QPlainTextEdit = QProgressBar = QPushButton = QScrollArea = QSizePolicy = QSpinBox = QVBoxLayout = QWidget = _QT_STUB
     PYSIDE6_AVAILABLE = False
     PYSIDE6_IMPORT_ERROR = exc
 
@@ -438,7 +450,7 @@ def _sha256_file(path: Path) -> str:
 def download_release_zip(
     release: UpdateRelease,
     *,
-    on_progress: callable | None = None,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> Path:
     update_root = Path(tempfile.gettempdir()) / "LearningPyramidSubtitleTool" / "updates" / release.version
     if update_root.exists():
@@ -638,8 +650,8 @@ def run_batch(
     options: BatchOptions,
     runtime: RuntimePaths,
     *,
-    log: callable,
-    progress: callable,
+    log: Callable[[str], None],
+    progress: Callable[[str], None],
     cancel_event: threading.Event,
     process_controller: ProcessController,
 ) -> BatchSummary:
@@ -703,8 +715,8 @@ def generate_subtitle_for_video(
     language: str,
     cancel_event: threading.Event,
     process_controller: ProcessController,
-    log: callable,
-    progress: callable,
+    log: Callable[[str], None],
+    progress: Callable[[str], None],
 ) -> None:
     with tempfile.TemporaryDirectory(prefix="lp-subtitle-tool-") as tmpdir:
         tmp_root = Path(tmpdir)
@@ -779,7 +791,7 @@ def _run_process(
     *,
     cancel_event: threading.Event,
     process_controller: ProcessController,
-    on_heartbeat: callable | None = None,
+    on_heartbeat: Callable[[], None] | None = None,
 ) -> None:
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     process = subprocess.Popen(

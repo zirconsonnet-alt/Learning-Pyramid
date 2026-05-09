@@ -9,7 +9,7 @@ import { PomodoroPreTransitionNotice, PomodoroTransitionEffect } from "@/shell/P
 import { ApiError } from "@/ui/api/http"
 import { useBootstrapGlobalSettings } from "@/ui/globalSettingsSync"
 import { useLearningPlanRemoteSync } from "@/ui/learningPlans/learningPlanRemoteSync"
-import { useSubjectContext, useSubjects } from "@/ui/queries/subjects"
+import { useScopedSubjectContext, useSubjectContext, useSubjects } from "@/ui/queries/subjects"
 import { ErrorNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { useCurrentUser, useLogout } from "@/ui/queries/auth"
@@ -28,6 +28,7 @@ import {
   getPomodoroSnapshot,
   getPomodoroUpcomingSegmentPreview,
   isQuickPomodoroSessionActive,
+  pomodoroProjectRefKey,
   usePomodoroNow,
   usePomodoroStore,
 } from "@/ui/store/pomodoroStore"
@@ -321,8 +322,10 @@ export function AppShell() {
   const effectiveProjectId = pid || (isProjectsScope ? "" : selectedWorkbenchProjectId || "")
   const isVirtualStudyReviewProject = isVirtualStudyReviewProjectId(effectiveProjectId)
   const isSubjectDashboardScope = Boolean(routeSubjectId) && !pid
-  const subjectContextQ = useSubjectContext(effectiveProjectId, canAccessApp && Boolean(effectiveProjectId) && !isSubjectDashboardScope)
-  const { projectTitle } = useProject(effectiveProjectId, { enabled: canAccessApp && Boolean(effectiveProjectId) && !isVirtualStudyReviewProject })
+  const subjectContextQ = useSubjectContext(effectiveProjectId, canAccessApp && Boolean(effectiveProjectId) && !isSubjectDashboardScope && !routeSubjectId)
+  const scopedSubjectContextQ = useScopedSubjectContext(routeSubjectId ?? "", pid, canAccessApp && Boolean(routeSubjectId) && Boolean(pid) && !isSubjectDashboardScope)
+  const subjectContext = scopedSubjectContextQ.data ?? subjectContextQ.data
+  const { projectTitle } = useProject(effectiveProjectId, { enabled: canAccessApp && Boolean(effectiveProjectId) && !isVirtualStudyReviewProject, subjectId: routeSubjectId })
   const projectsQ = useProjects(canAccessApp && !isVirtualStudyReviewProject)
   const logout = useLogout()
   const pomodoroEnabled = usePomodoroStore((state) => state.enabled)
@@ -331,13 +334,13 @@ export function AppShell() {
   const pomodoroTransitionSoundEnabled = usePomodoroStore((state) => state.transitionSoundEnabled)
   const activePomodoroQuickSession = isQuickPomodoroSessionActive(pomodoroQuickPomodoro) ? pomodoroQuickPomodoro : null
   const pomodoroNow = usePomodoroNow(pomodoroEnabled || Boolean(activePomodoroQuickSession))
-  const resolvedSubjectId = subjectContextQ.data?.subject.subjectId ?? routeSubject?.subjectId ?? ""
+  const resolvedSubjectId = subjectContext?.subject.subjectId ?? routeSubject?.subjectId ?? ""
   const fallbackSubjectTitle = routeSubject?.title || projectTitle || pid || "当前学科"
-  const subjectTitle = subjectContextQ.data?.subject.title ?? fallbackSubjectTitle
+  const subjectTitle = subjectContext?.subject.title ?? fallbackSubjectTitle
   const fallbackMaterialTitle = projectTitle || pid || "当前项目"
-  const currentMaterialTitle = subjectContextQ.data?.currentMaterial.title ?? fallbackMaterialTitle
-  const currentProjectContextId = subjectContextQ.data?.currentProjectId ?? pid
-  const currentMaterialProjectId = subjectContextQ.data?.currentMaterial.projectId ?? currentProjectContextId
+  const currentMaterialTitle = subjectContext?.currentMaterial.title ?? fallbackMaterialTitle
+  const currentProjectContextId = subjectContext?.currentProjectId ?? pid
+  const currentMaterialProjectId = subjectContext?.currentMaterial.projectId ?? currentProjectContextId
   const hasSubjectContext = Boolean(resolvedSubjectId)
   const hasProjectContext = Boolean(hasSubjectContext && currentMaterialProjectId && !isSubjectDashboardScope)
   const area = describeArea(location.pathname, {
@@ -365,8 +368,8 @@ export function AppShell() {
     [resolvedSubjectId],
   )
   const currentProjectSettingsPath = useMemo(
-    () => buildProjectSettingsPath(currentMaterialProjectId),
-    [currentMaterialProjectId],
+    () => buildProjectSettingsPath(resolvedSubjectId, currentMaterialProjectId),
+    [currentMaterialProjectId, resolvedSubjectId],
   )
   const projectNavItems = useMemo(
     () =>
@@ -408,30 +411,47 @@ export function AppShell() {
     [effectiveProjectId, isVirtualStudyReviewProject, projectsQ.data],
   )
   const pomodoroProjectCatalogReady = !projectsQ.isLoading
-  const accessibleProjectIds = useMemo(
-    () => new Set((projectsQ.data ?? []).map((project) => project.projectId)),
+  const accessibleProjectRefs = useMemo(
+    () =>
+      new Set(
+        (projectsQ.data ?? [])
+          .map((project) =>
+            project.subjectId ? pomodoroProjectRefKey({ subjectId: project.subjectId, projectId: project.projectId }) : "",
+          )
+          .filter(Boolean),
+      ),
     [projectsQ.data],
   )
+  const hasAccessiblePomodoroProjectRef = (projectRef: typeof pomodoroSnapshot.currentProjectRef) =>
+    Boolean(projectRef && accessibleProjectRefs.has(pomodoroProjectRefKey(projectRef)))
+  const findPomodoroProject = (projectRef: typeof pomodoroSnapshot.currentProjectRef) =>
+    projectRef
+      ? pomodoroAccessibleProjects.find(
+          (project) => project.subjectId === projectRef.subjectId && project.projectId === projectRef.projectId,
+        ) ?? null
+      : null
+  const pomodoroFocusProjectRef = pomodoroSnapshot.currentProjectRef
   const pomodoroFocusProjectId =
-    pomodoroProjectCatalogReady && pomodoroSnapshot.currentProjectId && accessibleProjectIds.has(pomodoroSnapshot.currentProjectId)
-      ? pomodoroSnapshot.currentProjectId
+    pomodoroProjectCatalogReady && pomodoroFocusProjectRef && hasAccessiblePomodoroProjectRef(pomodoroFocusProjectRef)
+      ? pomodoroFocusProjectRef.projectId
       : ""
   const focusProjectTitle =
-    pomodoroFocusProjectId
-      ? pomodoroAccessibleProjects.find((project) => project.projectId === pomodoroFocusProjectId)?.title ?? ""
-      : ""
+    pomodoroFocusProjectId ? findPomodoroProject(pomodoroFocusProjectRef)?.title ?? "" : ""
+  const pomodoroFocusWorkbenchPath =
+    pomodoroFocusProjectRef && pomodoroFocusProjectId
+      ? `/subjects/${encodeURIComponent(pomodoroFocusProjectRef.subjectId)}/projects/${encodeURIComponent(pomodoroFocusProjectRef.projectId)}/workbench`
+      : "/projects"
   const upcomingJumpProjectId =
     pomodoroUpcomingSegment?.phase === "focus" &&
-    pomodoroUpcomingSegment.projectId &&
+    pomodoroUpcomingSegment.projectRef &&
     pomodoroProjectCatalogReady &&
-    accessibleProjectIds.has(pomodoroUpcomingSegment.projectId)
-      ? pomodoroUpcomingSegment.projectId
+    hasAccessiblePomodoroProjectRef(pomodoroUpcomingSegment.projectRef)
+      ? pomodoroUpcomingSegment.projectRef.projectId
       : ""
   const upcomingJumpProjectTitle =
-    upcomingJumpProjectId
-      ? pomodoroAccessibleProjects.find((project) => project.projectId === upcomingJumpProjectId)?.title ?? ""
-      : ""
-  const upcomingJumpPath = upcomingJumpProjectId ? `/p/${upcomingJumpProjectId}/workbench` : ""
+    upcomingJumpProjectId ? findPomodoroProject(pomodoroUpcomingSegment?.projectRef ?? null)?.title ?? "" : ""
+  const upcomingJumpSubjectId = pomodoroUpcomingSegment?.phase === "focus" ? pomodoroUpcomingSegment.projectRef?.subjectId ?? "" : ""
+  const upcomingJumpPath = upcomingJumpProjectId && upcomingJumpSubjectId ? `/subjects/${upcomingJumpSubjectId}/projects/${upcomingJumpProjectId}/workbench` : ""
   const shouldShowPomodoroPreJumpNotice =
     pomodoroUpcomingSegment?.phase === "focus" &&
     Boolean(upcomingJumpPath) &&
@@ -447,8 +467,9 @@ export function AppShell() {
     pomodoroSnapshot.phase === "focus" &&
     Boolean(pomodoroFocusProjectId) &&
     Boolean(pid) &&
+    Boolean(routeSubjectId) &&
     location.pathname.includes("/workbench") &&
-    pid !== pomodoroFocusProjectId
+    (routeSubjectId !== pomodoroFocusProjectRef?.subjectId || pid !== pomodoroFocusProjectId)
   usePomodoroTransitionSound(pomodoroSnapshot, pomodoroTransitionSoundEnabled)
   useEffect(() => {
     setPomodoroRestMusicPhaseActive(
@@ -470,21 +491,23 @@ export function AppShell() {
     const completedSegmentKey = `${previousSnapshot.currentPlan.id}:${previousSnapshot.currentPlanIndex}:${pomodoroIndex}:${startAtMs}:${endAtMs}`
     if (completedPomodoroSegmentKeyRef.current === completedSegmentKey) return
     completedPomodoroSegmentKeyRef.current = completedSegmentKey
-    const completedProjectId =
-      previousSnapshot.segment.projectId && accessibleProjectIds.has(previousSnapshot.segment.projectId)
-        ? previousSnapshot.segment.projectId
-        : accessibleProjectIds.has(previousSnapshot.currentPlan.projectIds[pomodoroIndex - 1] ?? "")
-          ? previousSnapshot.currentPlan.projectIds[pomodoroIndex - 1] ?? null
+    const fallbackProjectRef = previousSnapshot.currentPlan.projectRefs[pomodoroIndex - 1] ?? null
+    const completedProjectRef =
+      previousSnapshot.segment.projectRef && hasAccessiblePomodoroProjectRef(previousSnapshot.segment.projectRef)
+        ? previousSnapshot.segment.projectRef
+        : pomodoroProjectRefKey(previousSnapshot.currentPlan.projectRefs[pomodoroIndex - 1]) &&
+            hasAccessiblePomodoroProjectRef(fallbackProjectRef)
+          ? fallbackProjectRef
           : null
     recordPomodoroActivity({
       planId: previousSnapshot.currentPlan.id,
       planIndex: previousSnapshot.currentPlanIndex,
       pomodoroIndex,
-      projectId: completedProjectId,
+      projectRef: completedProjectRef,
       startAtMs,
       endAtMs,
     })
-  }, [accessibleProjectIds, pomodoroNow, pomodoroSnapshot])
+  }, [accessibleProjectRefs, pomodoroAccessibleProjects, pomodoroNow, pomodoroSnapshot])
   usePomodoroPreTransitionSpeech(
     pomodoroUpcomingSegment &&
       pomodoroUpcomingSegment.startsInMs > 0 &&
@@ -663,7 +686,7 @@ export function AppShell() {
         message={`当前番茄钟已锁定“${focusProjectTitle || "当前番茄项目"}”，不能进入这个项目工作台。请先完成或停止当前番茄，再切换到其他项目。`}
         action={
           <Button asChild>
-            <Link to={`/p/${pomodoroFocusProjectId}/workbench`}>进入当前番茄工作台</Link>
+            <Link to={pomodoroFocusWorkbenchPath}>进入当前番茄工作台</Link>
           </Button>
         }
       />

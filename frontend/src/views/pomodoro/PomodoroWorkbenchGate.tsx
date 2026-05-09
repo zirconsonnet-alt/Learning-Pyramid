@@ -3,12 +3,12 @@ import { Navigate, useLocation, useParams } from "react-router-dom"
 
 import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
 import { useProjects } from "@/ui/queries/projects"
-import { getPomodoroSnapshot, isQuickPomodoroSessionActive, usePomodoroNow, usePomodoroStore } from "@/ui/store/pomodoroStore"
+import { getPomodoroSnapshot, isQuickPomodoroSessionActive, pomodoroProjectRefKey, usePomodoroNow, usePomodoroStore } from "@/ui/store/pomodoroStore"
 import { buildPomodoroPath } from "@/views/pomodoro/pomodoroRouting"
 
 export function PomodoroWorkbenchGate(props: { children: ReactNode }) {
   const { children } = props
-  const { projectId } = useParams()
+  const { subjectId, projectId } = useParams()
   const location = useLocation()
   const enabled = usePomodoroStore((state) => state.enabled)
   const weeklySchedule = usePomodoroStore((state) => state.weeklySchedule)
@@ -32,16 +32,25 @@ export function PomodoroWorkbenchGate(props: { children: ReactNode }) {
 
   const snapshot = getPomodoroSnapshot({ enabled, weeklySchedule, quickPomodoro }, now)
   const pomodoroProjectCatalogReady = !projectsQ.isLoading
-  const accessibleProjectIds = new Set((projectsQ.data ?? []).map((item) => item.projectId))
+  const focusProjectRef = snapshot.currentProjectRef
+  const accessibleProjectRefs = new Set(
+    (projectsQ.data ?? [])
+      .map((item) => (item.subjectId ? pomodoroProjectRefKey({ subjectId: item.subjectId, projectId: item.projectId }) : ""))
+      .filter(Boolean),
+  )
+  const focusProjectKey = pomodoroProjectRefKey(focusProjectRef)
   const focusProjectId =
-    pomodoroProjectCatalogReady && snapshot.currentProjectId && accessibleProjectIds.has(snapshot.currentProjectId)
-      ? snapshot.currentProjectId
+    pomodoroProjectCatalogReady &&
+    focusProjectRef &&
+    focusProjectKey &&
+    accessibleProjectRefs.has(focusProjectKey)
+      ? focusProjectRef.projectId
       : ""
 
-  if (snapshot.canUseWorkbench && focusProjectId && projectId !== focusProjectId) {
+  if (snapshot.canUseWorkbench && focusProjectRef && (subjectId !== focusProjectRef.subjectId || projectId !== focusProjectId)) {
     return (
       <Navigate
-        to={`/p/${focusProjectId}/workbench`}
+        to={`/subjects/${encodeURIComponent(focusProjectRef.subjectId)}/projects/${encodeURIComponent(focusProjectRef.projectId)}/workbench`}
         replace
         state={{
           from: `${location.pathname}${location.search}${location.hash}`,

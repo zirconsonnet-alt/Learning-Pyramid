@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from pathlib import Path, PurePath
 
 from backend.models.enums import FsSyncPolicy, MaterialSourceKind

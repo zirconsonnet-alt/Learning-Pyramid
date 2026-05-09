@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import smtplib
 import ssl
 from dataclasses import dataclass

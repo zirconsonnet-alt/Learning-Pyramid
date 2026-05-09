@@ -3,7 +3,7 @@ import { useQueries } from "@tanstack/react-query"
 import { ArrowLeft, ArrowRight, ArrowUpDown, BookOpenText, ChevronDown, Lightbulb, Plus, Settings2, Trash2, Video } from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 
-import { listAuditLogEvents, type AuditLogEvent } from "@/ui/api/auditLog"
+import { listScopedAuditLogEvents, type AuditLogEvent } from "@/ui/api/auditLog"
 import type { StudyMaterial, StudyMaterialType } from "@/ui/api/subjects"
 import { ApiError } from "@/ui/api/http"
 import { ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
@@ -101,9 +101,12 @@ export function SubjectDashboardPage() {
   const createMaterialM = useCreateSubjectMaterial()
   const deleteMaterialM = useDeleteSubjectMaterial()
   const selectedWorkbenchProjectId = useAppStore((state) => state.selectedWorkbenchProjectId)
+  const selectedWorkbenchProjectRef = useAppStore((state) => state.selectedWorkbenchProjectRef)
   const setSelectedWorkbenchProjectId = useAppStore((state) => state.setSelectedWorkbenchProjectId)
+  const setSelectedWorkbenchProjectRef = useAppStore((state) => state.setSelectedWorkbenchProjectRef)
   const setSelectedSubjectId = useAppStore((state) => state.setSelectedSubjectId)
   const removeRecentWorkbenchProjectId = useAppStore((state) => state.removeRecentWorkbenchProjectId)
+  const removeRecentWorkbenchProjectRef = useAppStore((state) => state.removeRecentWorkbenchProjectRef)
   const [createOpen, setCreateOpen] = useState(false)
   const [deleteMaterialTarget, setDeleteMaterialTarget] = useState<StudyMaterial | null>(null)
   const [deleteMaterialConfirmation, setDeleteMaterialConfirmation] = useState("")
@@ -121,8 +124,8 @@ export function SubjectDashboardPage() {
   const deleteMaterialMatches = deleteMaterialConfirmation.trim() === deleteMaterialExpectedText
   const materialActivityQs = useQueries({
     queries: materials.map((material) => ({
-      queryKey: ["auditLogEvents", material.projectId ?? material.materialId],
-      queryFn: () => listAuditLogEvents(material.projectId ?? ""),
+      queryKey: ["auditLogEvents", subjectId, material.projectId ?? material.materialId],
+      queryFn: () => listScopedAuditLogEvents(subjectId, material.projectId ?? ""),
       enabled: Boolean(material.projectId) && !materialsQ.isLoading && !materialsQ.error,
       staleTime: 60_000,
       refetchInterval: 60_000,
@@ -215,14 +218,14 @@ export function SubjectDashboardPage() {
     const projectId = material.projectId
     if (!projectId) return
     setSelectedSubjectId(subjectId)
-    setSelectedWorkbenchProjectId(projectId)
+    setSelectedWorkbenchProjectRef({ subjectId, projectId })
     if (target === "settings") {
       completeGuideWalkthroughStep("choose-project")
     }
     navigate(
       target === "settings"
-        ? buildProjectSettingsPath(projectId)
-        : buildProjectWorkbenchPath(projectId),
+        ? buildProjectSettingsPath(subjectId, projectId)
+        : buildProjectWorkbenchPath(subjectId, projectId),
     )
   }
 
@@ -233,9 +236,11 @@ export function SubjectDashboardPage() {
       await deleteMaterialM.mutateAsync({ subjectId, materialId: deleteMaterialTarget.materialId })
       if (projectId) {
         removeRecentWorkbenchProjectId(projectId)
+        removeRecentWorkbenchProjectRef({ subjectId, projectId })
       }
       const nextProjectId = materials.find((item) => item.materialId !== deleteMaterialTarget.materialId && item.projectId)?.projectId ?? null
       setSelectedWorkbenchProjectId(nextProjectId)
+      setSelectedWorkbenchProjectRef(nextProjectId ? { subjectId, projectId: nextProjectId } : null)
       showSuccessFeedback("项目已删除", `“${deleteMaterialTarget.title}” 已从“${subjectTitle}”下移除。`)
       closeDeleteMaterialDialog()
     } catch (err) {
@@ -301,7 +306,9 @@ export function SubjectDashboardPage() {
         <div className="grid gap-4 xl:grid-cols-2">
           {sortedMaterials.map((material) => {
             const Icon = materialIconByType[material.materialType]
-            const active = material.projectId === selectedWorkbenchProjectId
+            const active =
+              material.projectId === selectedWorkbenchProjectId &&
+              selectedWorkbenchProjectRef?.subjectId === subjectId
             const materialActivityIndex = materials.findIndex((item) => item.materialId === material.materialId)
             const materialActivityLoading = material.projectId ? Boolean(materialActivityQs[materialActivityIndex]?.isLoading) : false
             const lastStudyDisplay = formatLastStudyText(lastStudyByMaterialId[material.materialId] ?? null)

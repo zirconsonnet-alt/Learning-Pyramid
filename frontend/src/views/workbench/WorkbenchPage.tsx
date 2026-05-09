@@ -3,7 +3,7 @@ import { useQueries } from "@tanstack/react-query"
 import { FolderTree, RadioTower } from "lucide-react"
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 
-import { getBaseUrl } from "@/ui/api/http"
+import { apiUrl } from "@/ui/api/http"
 import { ApiError } from "@/ui/api/http"
 import { fetchVideoWatchProgressMap, listRecallPointsByInstance, type VideoWatchProgress } from "@/ui/api/instances"
 import type { Instance } from "@/ui/api/instances"
@@ -145,7 +145,7 @@ async function resolveInstanceDurationMs(params: {
     return null
   }
   if (serverMediaStreamEnabled) {
-    return await readMediaDurationMs(`${getBaseUrl()}/projects/${projectId}/media/instances/${instance.instanceId}`)
+    return await readMediaDurationMs(apiUrl(`/projects/${projectId}/media/instances/${instance.instanceId}`))
   }
   if (!browserLocalMediaEnabled || directoryPermission !== "granted") return null
   if (!isRelativeMaterialId(instance.materialId)) return null
@@ -210,7 +210,7 @@ function StudyModePane({
 }
 
 export function WorkbenchPage() {
-  const { projectId } = useParams()
+  const { projectId, subjectId = "" } = useParams()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const pid = projectId ?? ""
@@ -221,6 +221,7 @@ export function WorkbenchPage() {
   const setSelectedInstanceId = useWorkbenchStore((s) => s.setSelectedInstanceId)
 
   const selectedWorkbenchProjectId = useAppStore((s) => s.selectedWorkbenchProjectId)
+  const selectedWorkbenchProjectRef = useAppStore((s) => s.selectedWorkbenchProjectRef)
 
   const [currentMs, setCurrentMs] = useState(0)
   const [seekTo, setSeekTo] = useState<{ instanceId: string; ms: number; nonce: number } | null>(null)
@@ -235,10 +236,14 @@ export function WorkbenchPage() {
   }, [ensure, pid])
 
   useEffect(() => {
+    if (subjectId && pid && (selectedWorkbenchProjectRef?.subjectId !== subjectId || selectedWorkbenchProjectRef?.projectId !== pid)) {
+      useAppStore.getState().setSelectedWorkbenchProjectRef({ subjectId, projectId: pid })
+      return
+    }
     if (pid && selectedWorkbenchProjectId !== pid) {
       useAppStore.getState().setSelectedWorkbenchProjectId(pid)
     }
-  }, [pid, selectedWorkbenchProjectId])
+  }, [pid, selectedWorkbenchProjectId, selectedWorkbenchProjectRef?.projectId, selectedWorkbenchProjectRef?.subjectId, subjectId])
 
   const instancesQ = useInstances(pid)
   const learningTaskNodesQ = useLearningTaskNodes(pid)
@@ -250,7 +255,7 @@ export function WorkbenchPage() {
   const capabilitiesQ = useSystemCapabilities()
   const directoryBinding = useProjectDirectoryBinding(pid)
   const projectType = projectConfigQ.data?.projectType ?? "COURSE"
-  const projectSettingsPath = buildProjectSettingsPath(pid)
+  const projectSettingsPath = buildProjectSettingsPath(subjectId, pid)
   const currentRollUpStrategy = projectConfigQ.data?.rollUpStrategy ?? "THRESHOLD_AUTO"
   const requiresLearningObjectTree = projectTypeRequiresLearningObjectTree(projectType)
   const usesResolvableCourseAnchor = projectTypeUsesResolvableCourseAnchor(projectType)
@@ -333,7 +338,10 @@ export function WorkbenchPage() {
   }, [pid])
 
   const todayDateKey = getLocalDateKey()
-  const estimateDateFrom = useMemo(() => getDateKeyDaysAgo(180), [todayDateKey])
+  const estimateDateFrom = useMemo(() => {
+    void todayDateKey
+    return getDateKeyDaysAgo(180)
+  }, [todayDateKey])
 
   useEffect(() => {
     if (!pid || isVirtualStudyReviewProject) return
@@ -663,7 +671,11 @@ export function WorkbenchPage() {
 
   const videoProgressPercent = videoProgress.totalMs > 0 ? Math.min(100, Math.max(0, (videoProgress.watchedMs / videoProgress.totalMs) * 100)) : 0
   const projectStudyMetricEntries = useMemo(
-    () => listDailyStudyMetricEntries([pid]),
+    () => {
+      void studyEstimateRevision
+      void todayStats
+      return listDailyStudyMetricEntries([pid])
+    },
     [pid, studyEstimateRevision, todayStats],
   )
   const projectRecallPointCount = useMemo(
@@ -866,6 +878,7 @@ export function WorkbenchPage() {
               </CardHeader>
               <CardContent className="pt-2 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:overscroll-contain xl:pr-3">
                 <LearningObjectTree
+                  subjectId={subjectId}
                   projectId={pid}
                   projectType={projectType}
                   selectedInstanceId={selectedInstanceId}
@@ -885,6 +898,7 @@ export function WorkbenchPage() {
             {usesResolvableCourseAnchor ? (
               <VideoPane
                 key={instance?.instanceId ?? "none"}
+                subjectId={subjectId}
                 projectId={pid}
                 instance={instance}
                 setCurrentMs={setCurrentMs}

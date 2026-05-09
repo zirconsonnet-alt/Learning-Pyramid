@@ -19,6 +19,7 @@ import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
+import { buildCurrentProjectPath } from "@/ui/projectPaths"
 import { projectTypeRequiresAnchor } from "@/ui/projectTypes"
 import { useInstances, useProjectConfig } from "@/ui/queries/workbench"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
@@ -79,7 +80,7 @@ function formatAnchorPosition(position: string | null | undefined) {
 }
 
 function buildRecallPointDetailPath(projectId: string, recallPointId: string) {
-  return `/p/${projectId}/recall-points/${recallPointId}`
+  return buildCurrentProjectPath(projectId, `/recall-points/${recallPointId}`)
 }
 
 function renderRichContentPreview(projectId: string, value: RichContent, emptyText: string) {
@@ -238,7 +239,7 @@ function RecallPointDetailLayout({
     [instancesQ.data, recallPoint.anchor],
   )
   const anchorInstanceValue = recallPoint.anchor ? (
-    <Link className="text-primary underline-offset-4 hover:underline" to={`/p/${projectId}/instances/${recallPoint.anchor.instanceId}`}>
+    <Link className="text-primary underline-offset-4 hover:underline" to={buildCurrentProjectPath(projectId, `/instances/${recallPoint.anchor.instanceId}`)}>
       {anchorInstance?.materialDisplayName ?? (instancesQ.isLoading ? "读取中..." : "未找到内容实例")}
     </Link>
   ) : (

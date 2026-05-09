@@ -320,5 +320,5 @@
 
 <!-- SPECKIT START -->
 当前 Spec Kit feature 的技术背景、受影响路径、验证命令与实施边界见：
-`specs/017-lazy-chart-frame/plan.md`
+`specs/013-scoped-project-ids/plan.md`
 <!-- SPECKIT END -->

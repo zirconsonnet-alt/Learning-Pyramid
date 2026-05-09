@@ -13,6 +13,7 @@ import {
   formatRecallPointReference,
   formatReviewTaskReference,
 } from "@/ui/displayIdentifiers"
+import { buildCurrentProjectPath } from "@/ui/projectPaths"
 import { useProject } from "@/ui/queries/projects"
 import { useReviewTaskDetails } from "@/ui/queries/reviewTasks"
 
@@ -232,7 +233,7 @@ export function ReviewTaskPage() {
 
                           <div className="flex shrink-0 flex-wrap gap-2 md:w-[11rem] md:flex-col md:items-stretch">
                             <Button size="sm" className="rounded-full md:w-full" asChild>
-                              <Link to={`/p/${pid}/recall-points/${recallPointId}`}>查看详情</Link>
+                              <Link to={buildCurrentProjectPath(pid, `/recall-points/${recallPointId}`)}>查看详情</Link>
                             </Button>
                           </div>
                         </div>

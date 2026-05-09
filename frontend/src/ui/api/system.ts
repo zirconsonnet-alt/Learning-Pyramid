@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-import { ApiError, apiRequest, getBaseUrl, type ApiRequestExecutionOptions } from "@/ui/api/http"
+import { ApiError, apiRequest, apiUrl, getBaseUrl, type ApiRequestExecutionOptions } from "@/ui/api/http"
 import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
 
 export const SystemCapabilitiesSchema = z.object({
@@ -505,7 +505,7 @@ export async function askProjectLlmStream(
   },
   options?: AskProjectLlmStreamOptions,
 ): Promise<{ content: string }> {
-  const url = `${getBaseUrl()}/projects/${projectId}/llm/ask/stream`
+  const url = apiUrl(`/projects/${projectId}/llm/ask/stream`)
   const controller = new AbortController()
   const listeners: Array<() => void> = []
   const timeoutMs = options?.timeoutMs ?? 90_000

@@ -1,6 +1,6 @@
 import type { Instance } from "@/ui/api/instances"
 import type { MaterialSourceKind } from "@/ui/api/projects"
-import { ApiError, getBaseUrl } from "@/ui/api/http"
+import { ApiError, apiUrl } from "@/ui/api/http"
 import { askProjectLlmChatCompletion, type RawChatCompletionResponse } from "@/ui/api/system"
 import { resolveProjectFile } from "@/ui/localMedia/projectDirectory"
 import type { AiChatCourseEvidence } from "@/ui/store/aiChatStore"
@@ -1230,7 +1230,7 @@ async function resolveVideoSource(params: AskCourseAgentParams): Promise<{ src: 
   }
 
   return {
-    src: `${getBaseUrl()}/projects/${params.projectId}/media/instances/${params.instance.instanceId}`,
+    src: apiUrl(`/projects/${params.projectId}/media/instances/${params.instance.instanceId}`),
   }
 }
 
