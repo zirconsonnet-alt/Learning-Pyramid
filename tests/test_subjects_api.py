@@ -451,7 +451,7 @@ def test_hosted_legacy_root_material_migration_grants_child_project_access(monke
     assert migrated.material_id != "legacy_main"
     assert migrated_project_id is not None
     assert migrated_project_id != subject_id
-    assert str(migrated_project_id) not in auth_store.list_project_ids_for_user(user_id)
+    assert str(migrated_project_id) in auth_store.list_project_ids_for_user(user_id)
 
     root_context_resp = client.get(f"/api/projects/{subject_id}/subject-context")
     assert root_context_resp.status_code == 400

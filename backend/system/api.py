@@ -2235,6 +2235,8 @@ class SystemAPI:
                     material_id=migrated.material_id,
                     material_type=migrated.material_type,
                 )
+                if current_runtime_features().auth_enabled:
+                    AuthStore().copy_project_memberships(str(subject_id), str(material_project_id))
                 next_materials[migrated.material_id] = migrated
 
             subject_store = self._get_project_store(subject_id)

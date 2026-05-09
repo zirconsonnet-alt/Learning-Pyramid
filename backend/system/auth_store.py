@@ -3063,6 +3063,35 @@ class SQLiteAuthStore(_AuthStoreImpl):
             finally:
                 conn.close()
 
+    def copy_project_memberships(self, source_project_id: str, target_project_id: str) -> None:
+        now_text = _utc_now().isoformat()
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    "SELECT user_id, role FROM project_memberships WHERE project_id = ?",
+                    (str(source_project_id),),
+                ).fetchall()
+                for row in rows:
+                    conn.execute(
+                        """
+                        INSERT OR IGNORE INTO project_memberships (project_id, user_id, role, created_at)
+                        VALUES (?, ?, ?, ?)
+                        """,
+                        (str(target_project_id), str(row["user_id"]), str(row["role"]), now_text),
+                    )
+                    conn.execute(
+                        """
+                        UPDATE project_memberships
+                        SET role = ?
+                        WHERE project_id = ? AND user_id = ?
+                        """,
+                        (str(row["role"]), str(target_project_id), str(row["user_id"])),
+                    )
+                conn.commit()
+            finally:
+                conn.close()
+
     def remove_project_memberships(self, project_id: str) -> None:
         with self._lock:
             conn = self._connect()
@@ -5235,6 +5264,22 @@ class PostgresAuthStore(_AuthStoreImpl):
                 )
                 conn.commit()
 
+    def copy_project_memberships(self, source_project_id: str, target_project_id: str) -> None:
+        with self._lock:
+            with self._connect() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO project_memberships (project_id, user_id, role, created_at)
+                    SELECT %s, user_id, role, %s
+                    FROM project_memberships
+                    WHERE project_id = %s
+                    ON CONFLICT(project_id, user_id) DO UPDATE SET
+                        role = EXCLUDED.role
+                    """,
+                    (str(target_project_id), _utc_now().isoformat(), str(source_project_id)),
+                )
+                conn.commit()
+
     def remove_project_memberships(self, project_id: str) -> None:
         with self._lock:
             with self._connect() as conn:
@@ -6302,6 +6347,9 @@ class AuthStore:
 
     def add_project_owner(self, project_id: str, user_id: str) -> None:
         self._impl.add_project_owner(project_id, user_id)
+
+    def copy_project_memberships(self, source_project_id: str, target_project_id: str) -> None:
+        self._impl.copy_project_memberships(source_project_id, target_project_id)
 
     def remove_project_memberships(self, project_id: str) -> None:
         self._impl.remove_project_memberships(project_id)
