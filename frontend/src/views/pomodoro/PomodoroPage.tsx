@@ -190,6 +190,11 @@ function buildScopedWorkbenchPath(subjectId: string, projectId: string) {
   return subjectId && projectId ? `/subjects/${encodeURIComponent(subjectId)}/projects/${encodeURIComponent(projectId)}/workbench` : ""
 }
 
+function getUsableProjectTitle(value: string) {
+  const title = value.trim()
+  return title && title !== "未知项目" && title !== "加载项目中..." && title !== "未选择项目" ? title : ""
+}
+
 function buildPomodoroSubjectProjectOptions(
   subjects: Subject[],
   materialResults: Array<StudyMaterial[] | undefined>,
@@ -916,7 +921,11 @@ export function PomodoroPage() {
   const resolvedSelectedWorkbenchProjectId = resolvedSelectedWorkbenchProjectRef?.projectId ?? ""
   const resolvedSelectedWorkbenchProjectKey = pomodoroProjectRefKey(resolvedSelectedWorkbenchProjectRef)
   const selectedWorkbenchProjectTitle =
-    resolvedSelectedWorkbenchProjectId ? projectTitleByRef.get(resolvedSelectedWorkbenchProjectKey) || selectedWorkbenchProjectTitleFromQuery || "" : ""
+    resolvedSelectedWorkbenchProjectId
+      ? getUsableProjectTitle(projectTitleByProjectRef.get(resolvedSelectedWorkbenchProjectKey) ?? "") ||
+        getUsableProjectTitle(projectTitleByRef.get(resolvedSelectedWorkbenchProjectKey) ?? "") ||
+        getUsableProjectTitle(selectedWorkbenchProjectTitleFromQuery)
+      : ""
   const rememberedWorkbenchProjectId = extractWorkbenchProjectId(fromPath)
   const rememberedWorkbenchPath =
     pomodoroProjectCatalogReady &&
