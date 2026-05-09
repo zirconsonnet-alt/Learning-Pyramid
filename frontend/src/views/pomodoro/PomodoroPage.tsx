@@ -810,6 +810,7 @@ export function PomodoroPage() {
   const [selectedSubjectIdByPlanId, setSelectedSubjectIdByPlanId] = useState<Record<string, string>>({})
   const [pomodoroOverviewMode, setPomodoroOverviewMode] = useState<"plans" | "stats">("plans")
   const [testingPromptKey, setTestingPromptKey] = useState("")
+  const [deletingPomodoroDraftId, setDeletingPomodoroDraftId] = useState("")
   const [wallpaperUrl, setWallpaperUrl] = useState("")
   const [pomodoroActivityRecords, setPomodoroActivityRecords] = useState<PomodoroActivityRecord[]>(() => listPomodoroActivityRecords())
   const wallpaperObjectUrlRef = useRef("")
@@ -1100,8 +1101,21 @@ export function PomodoroPage() {
     })
   }
 
-  function removePomodoroDraftPlan(draftId: string) {
-    setPomodoroDrafts((prev) => prev.filter((draft) => draft.id !== draftId))
+  async function removePomodoroDraftPlan(draftId: string) {
+    const nextDrafts = pomodoroDrafts.filter((draft) => draft.id !== draftId)
+    const nextSchedule = buildPomodoroScheduleFromPlanDrafts(nextDrafts)
+    try {
+      setDeletingPomodoroDraftId(draftId)
+      await persistPomodoroSettings({ weeklySchedule: nextSchedule })
+      setPomodoroDrafts(nextDrafts)
+      setSettings({ enabled, weeklySchedule: nextSchedule, transitionSoundEnabled, microBreaks })
+      showInfoFeedback("番茄计划已删除", nextDrafts.length > 0 ? "剩余计划已经保存。" : "当前没有番茄计划。")
+      if (activePlanId === draftId) nav(buildPomodoroPath())
+    } catch (err) {
+      showErrorFeedback("删除番茄计划失败", formatApiError(err))
+    } finally {
+      setDeletingPomodoroDraftId((current) => (current === draftId ? "" : current))
+    }
   }
 
   async function persistPomodoroSettings(overrides?: {
@@ -1144,6 +1158,17 @@ export function PomodoroPage() {
   }
 
   async function handleTogglePomodoro() {
+    const nextEnabled = !enabled
+    if (!nextEnabled) {
+      try {
+        await persistPomodoroSettings({ enabled: false, weeklySchedule: draftSchedule })
+        setEnabled(false)
+        showInfoFeedback("番茄钟已关闭", "工作台已恢复正常访问，不再受自动排程限制。")
+      } catch (err) {
+        showErrorFeedback("关闭番茄钟失败", formatApiError(err))
+      }
+      return
+    }
     if (planConflictMessages.length > 0) {
       showErrorFeedback("计划时间冲突", planConflictMessages.join("；"))
       return
@@ -1152,7 +1177,6 @@ export function PomodoroPage() {
       showInfoFeedback("先补全番茄项目", "开启番茄钟前，需要给学习时段选好项目。")
       return
     }
-    const nextEnabled = !enabled
     try {
       await persistPomodoroSettings({ enabled: nextEnabled, weeklySchedule: draftSchedule })
       setEnabled(nextEnabled)
@@ -1164,8 +1188,6 @@ export function PomodoroPage() {
             ? `之后会在${activeDaySummary}自动开始，学习时段只会放行当前番茄绑定的项目工作台。`
             : "番茄钟已开启，但你还没启用任何日期排程。",
         )
-      } else {
-        showInfoFeedback("番茄钟已关闭", "工作台已恢复正常访问，不再受自动排程限制。")
       }
     } catch (err) {
       showErrorFeedback(nextEnabled ? "开启番茄钟失败" : "关闭番茄钟失败", formatApiError(err))
@@ -1242,7 +1264,7 @@ export function PomodoroPage() {
         <div data-pomodoro-wallpaper-scope="page" className="relative z-10 mx-auto flex w-full max-w-3xl flex-col gap-6">
           <MemberOnlyFeatureNotice
             title="番茄钟是会员专属功能"
-            message="当前账号还没有有效会员，所以这里先不开放番茄钟。开通会员后，就可以继续使用排程、小番茄和相关设置。"
+            message="当前账号还没有有效会员。开通会员后，就可以继续使用排程、小番茄和相关设置。"
           />
         </div>
       </>
@@ -1627,7 +1649,16 @@ export function PomodoroPage() {
                     <Save className="h-4 w-4" />
                     保存
                   </Button>
-                  <Button variant="outline" onClick={() => setPomodoroDrafts(toPomodoroPlanDrafts(weeklySchedule))}>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      const restoredDrafts = toPomodoroPlanDrafts(weeklySchedule)
+                      setPomodoroDrafts(restoredDrafts)
+                      if (activePlanId && !restoredDrafts.some((draft) => draft.id === activePlanId)) {
+                        nav(buildPomodoroPath())
+                      }
+                    }}
+                  >
                     <RotateCcw className="h-4 w-4" />
                     恢复
                   </Button>
@@ -1641,6 +1672,7 @@ export function PomodoroPage() {
                   size="sm"
                   className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                   onClick={() => removePomodoroDraftPlan(activePomodoroDraft.id)}
+                  disabled={deletingPomodoroDraftId === activePomodoroDraft.id}
                 >
                   <Trash2 className="h-4 w-4" />
                   删除计划

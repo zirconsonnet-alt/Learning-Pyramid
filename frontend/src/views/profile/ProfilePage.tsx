@@ -3,7 +3,7 @@ import { useQueries } from "@tanstack/react-query"
 import { Activity, ArrowRight, Camera, ChevronDown, KeyRound, Mail, Save } from "lucide-react"
 import { Link } from "react-router-dom"
 
-import { type AuditLogEvent, listAuditLogEvents } from "@/ui/api/auditLog"
+import { type AuditLogEvent, listAuditLogEvents, listScopedAuditLogEvents } from "@/ui/api/auditLog"
 import { ApiError } from "@/ui/api/http"
 import { ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
@@ -372,8 +372,11 @@ export function ProfilePage() {
   const activeProjects = useMemo(() => (projectsQ.data ?? []).filter((project) => project.state !== "DELETED"), [projectsQ.data])
   const auditLogQs = useQueries({
     queries: activeProjects.map((project) => ({
-      queryKey: ["auditLogEvents", project.projectId],
-      queryFn: () => listAuditLogEvents(project.projectId),
+      queryKey: project.subjectId ? ["auditLogEvents", project.subjectId, project.projectId] : ["auditLogEvents", project.projectId],
+      queryFn: () =>
+        project.subjectId
+          ? listScopedAuditLogEvents(project.subjectId, project.projectId)
+          : listAuditLogEvents(project.projectId),
       enabled: !projectsQ.isLoading && !projectsQ.error,
       staleTime: 60_000,
       refetchOnWindowFocus: false,

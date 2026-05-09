@@ -1,13 +1,11 @@
 import { useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { ChevronRight } from "lucide-react"
-import { Link } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
 import type { ProjectType } from "@/ui/api/projects"
 import { ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { listLearningObjectNodes, type LearningObjectNode } from "@/ui/api/learningObjects"
-import { Button } from "@/ui/components/ui/button"
 import { completeGuideWalkthroughStep } from "@/ui/guideWalkthrough/guideWalkthroughController"
 import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
 import { getVirtualStudyReviewLearningObjectNodes } from "@/ui/guideWalkthrough/virtualStudyReviewProject"
@@ -15,10 +13,7 @@ import {
   isSyntheticFilesContainer,
   sortLearningObjectNodeIdsForDisplay,
 } from "@/ui/learningObjectDisplayOrder"
-import { scanProjectDirectoryMedia, useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
-import { buildProjectSettingsPath } from "@/ui/projectPaths"
-import { useImportLearningObjectsFromBrowser } from "@/ui/queries/workbench"
-import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
+import { useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
 import { cn } from "@/ui/utils"
 
 const LEARNING_OBJECT_TREE_QUERY_TIMEOUT_MS = 90_000
@@ -160,20 +155,17 @@ function TreeNode({
 }
 
 export function LearningObjectTree({
-  subjectId,
   projectId,
   projectType,
   selectedInstanceId,
   onSelectInstance,
 }: {
-  subjectId: string
   projectId: string
   projectType: ProjectType
   selectedInstanceId: string | null
   onSelectInstance: (instanceId: string) => void
 }) {
   const directoryBinding = useProjectDirectoryBinding(projectId)
-  const importLearningObjectsM = useImportLearningObjectsFromBrowser(projectId)
   const q = useQuery({
     queryKey: ["learningObjectNodes", projectId],
     queryFn: ({ signal }) =>
@@ -224,23 +216,6 @@ export function LearningObjectTree({
     })
   }
 
-  async function onImportHere() {
-    try {
-      const scan = await scanProjectDirectoryMedia(projectId)
-      const result = await importLearningObjectsM.mutateAsync(scan)
-      if (result.unchanged) {
-        showInfoFeedback("目录已是最新", "当前已授权目录里的媒体文件没有变化。")
-        return
-      }
-      showSuccessFeedback(
-        "内容目录已导入",
-        `已导入 ${scan.relativeFilePaths.length} 个媒体文件，新增 ${result.created_instances_count} 个实例。`,
-      )
-    } catch (err) {
-      showErrorFeedback("导入本地目录失败", formatApiError(err))
-    }
-  }
-
   if (q.isLoading) {
     return <LoadingNotice title="正在加载内容目录" message="正在读取这个项目的学习对象树和内容层级。" />
   }
@@ -250,27 +225,16 @@ export function LearningObjectTree({
   }
 
   if (rootIds.length === 0) {
-    const canImportHere = projectType === "COURSE" && directoryBinding.permission === "granted" && !directoryBinding.loading
+    const emptyMessage =
+      projectType === "BOOK"
+        ? "尚未初始化书本目录。"
+        : directoryBinding.permission === "missing"
+          ? "尚未绑定素材目录。"
+          : "尚未导入内容目录。"
+
     return (
-      <div data-guide-tour="learning-object-tree" className="space-y-3 rounded-[1rem] border border-dashed border-border/70 bg-white p-4">
-        <div className="text-sm font-medium text-foreground">当前还没有学习对象</div>
-        <div className="text-sm text-muted-foreground">
-          {projectType === "BOOK"
-            ? "书本项目需要先在项目设置里粘贴目录文本，或一键复用某个网课项目的学习对象树。"
-            : "先接入内容目录后，学习对象树会显示在这里。"}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {canImportHere ? (
-            <Button size="sm" className="rounded-full" onClick={() => void onImportHere()} disabled={importLearningObjectsM.isPending}>
-              {importLearningObjectsM.isPending ? "导入中..." : "立即导入"}
-            </Button>
-          ) : null}
-          <Button asChild size="sm" variant={canImportHere ? "outline" : "default"} className="rounded-full">
-            <Link to={buildProjectSettingsPath(subjectId, projectId)}>
-              {projectType === "BOOK" ? "去初始化目录" : "前往项目设置"}
-            </Link>
-          </Button>
-        </div>
+      <div data-guide-tour="learning-object-tree" className="rounded-[1rem] border border-dashed border-border/70 bg-white p-4 text-sm text-muted-foreground">
+        {emptyMessage}
       </div>
     )
   }

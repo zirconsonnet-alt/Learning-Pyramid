@@ -107,7 +107,7 @@ export function GlobalSettingsPage() {
         ) : (
           <MemberOnlyFeatureNotice
             title="大模型配置是会员专属功能"
-            message="当前账号还没有有效会员，所以这里先不开放个人 LLM 配置。开通后就可以保存自己的 Base URL、模型名和 API Key。"
+            message="当前账号还没有有效会员。开通后就可以保存自己的 Base URL、模型名和 API Key。"
           />
         )
       ) : (

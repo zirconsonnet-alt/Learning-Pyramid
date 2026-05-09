@@ -1,6 +1,5 @@
-import { ChevronLeft, Copy, History, Ticket, Users } from "lucide-react"
+import { Copy, History, Ticket, Users } from "lucide-react"
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react"
-import { Link } from "react-router-dom"
 import { QRCodeSVG } from "qrcode.react"
 
 import type { CommissionWithdrawal, CouponRecord, InviteReferral, MembershipCreateOrderResult, MembershipOrder } from "@/ui/api/membership"
@@ -27,7 +26,8 @@ import {
 } from "@/ui/queries/membership"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { cn } from "@/ui/utils"
-import { MembershipPurchaseDialog } from "@/views/membership/components/MembershipPurchaseDialog"
+import { MembershipPlanPriceBlock } from "@/views/membership/components/MembershipPlanPriceBlock"
+import { MembershipPaymentDialog, MembershipPurchaseDialog } from "@/views/membership/components/MembershipPurchaseDialog"
 import {
   copyTextToClipboard,
   describeInviteRecordStatus,
@@ -286,6 +286,7 @@ export function MembershipPage() {
   const [selectedCouponId, setSelectedCouponId] = useState("")
   const [selectedProvider, setSelectedProvider] = useState("")
   const [purchaseOpen, setPurchaseOpen] = useState(false)
+  const [paymentOpen, setPaymentOpen] = useState(false)
   const [couponBagOpen, setCouponBagOpen] = useState(false)
   const [inviteRecordsOpen, setInviteRecordsOpen] = useState(false)
   const [withdrawalRecordsOpen, setWithdrawalRecordsOpen] = useState(false)
@@ -307,6 +308,8 @@ export function MembershipPage() {
   const withdrawalsQ = useCommissionWithdrawals()
   const ordersQ = useMembershipOrders(20, true, shouldAutoRefresh ? 5_000 : false)
   const pendingOrder = (ordersQ.data ?? []).find((item) => item.status === "pending")
+  const latestPendingCheckout = latestCheckout?.order.status === "pending" ? latestCheckout : null
+  const paymentOrder = pendingOrder ?? latestPendingCheckout?.order
   const effectiveSelectedPlanId = pendingOrder?.planId || selectedPlanId
   const previewQ = useMembershipOrderPreview(selectedCouponId || undefined, effectiveSelectedPlanId)
   const createOrder = useCreateMembershipOrder()
@@ -324,7 +327,7 @@ export function MembershipPage() {
     : supportedProviders.includes("wechat_native")
       ? "wechat_native"
       : supportedProviders[0] ?? ""
-  const activeCheckout = pendingOrder ? checkoutByOrderId[pendingOrder.orderId] ?? null : null
+  const activeCheckout = paymentOrder ? checkoutByOrderId[paymentOrder.orderId] ?? (latestPendingCheckout?.order.orderId === paymentOrder.orderId ? latestPendingCheckout : null) : null
   const activeBindingQrPayload = bindingAttemptQ.data?.qrCodePayload || startedBindingQrPayload
   const selectedCoupon = useMemo(
     () => availableCoupons.find((item) => item.couponId === selectedCouponId) ?? null,
@@ -377,6 +380,7 @@ export function MembershipPage() {
           return next
         })
         setPurchaseOpen(false)
+        setPaymentOpen(false)
         return
       }
       if (result.order.status === "closed") {
@@ -386,6 +390,7 @@ export function MembershipPage() {
           return next
         })
         setPurchaseOpen(false)
+        setPaymentOpen(false)
         showSuccessFeedback(
           "订单已关闭",
           result.remote.remoteStatus === "closed"
@@ -409,19 +414,19 @@ export function MembershipPage() {
   }, [syncPayment])
 
   useEffect(() => {
-    if (!purchaseOpen || !pendingOrder || pendingOrder.provider !== "wechat_native" || syncPayment.isPending) {
+    if (!paymentOpen || !paymentOrder || paymentOrder.provider !== "wechat_native" || syncPayment.isPending) {
       return
     }
     if (activeCheckout?.paymentPayload.provider === "wechat_native" && !activeCheckout.paymentPayload.statusCheckSupported) {
       return
     }
     const timer = window.setInterval(() => {
-      void syncPaymentStatus(pendingOrder, { manual: false })
+      void syncPaymentStatus(paymentOrder, { manual: false })
     }, autoSyncIntervalMs)
     return () => window.clearInterval(timer)
   }, [
-    purchaseOpen,
-    pendingOrder,
+    paymentOpen,
+    paymentOrder,
     activeCheckout?.paymentPayload.provider,
     activeCheckout?.paymentPayload.statusCheckSupported,
     autoSyncIntervalMs,
@@ -430,17 +435,20 @@ export function MembershipPage() {
   ])
 
   async function onCreateOrder() {
-    if (!effectiveSelectedProvider) {
+    const provider = pendingOrder?.provider || effectiveSelectedProvider
+    if (!provider) {
       showErrorFeedback("创建会员订单失败", "暂未开放支付方式，请稍后再试。")
       return
     }
     try {
       const result = await createOrder.mutateAsync({
-        provider: effectiveSelectedProvider,
+        provider,
         planId: effectiveSelectedPlanId,
         couponId: selectedCouponId || undefined,
       })
       setCheckoutByOrderId((current) => ({ ...current, [result.order.orderId]: result }))
+      setPurchaseOpen(false)
+      setPaymentOpen(true)
       showSuccessFeedback(
         result.reusedExistingOrder ? "待支付订单已更新" : "订单已创建",
         result.paymentPayload.provider === "wechat_native"
@@ -452,6 +460,15 @@ export function MembershipPage() {
     } catch (err) {
       showErrorFeedback("创建会员订单失败", formatMembershipApiError(err))
     }
+  }
+
+  function openPurchaseFlow() {
+    if (pendingOrder) {
+      setPurchaseOpen(false)
+      setPaymentOpen(true)
+      return
+    }
+    setPurchaseOpen(true)
   }
 
   async function onConfirmPayment(order: MembershipOrder) {
@@ -471,6 +488,7 @@ export function MembershipPage() {
         return next
       })
       setPurchaseOpen(false)
+      setPaymentOpen(false)
       if (selectedCouponId && order.couponId === selectedCouponId) {
         setSelectedCouponId("")
       }
@@ -495,6 +513,7 @@ export function MembershipPage() {
         return next
       })
       setPurchaseOpen(false)
+      setPaymentOpen(false)
       showSuccessFeedback(
         result.idempotent ? "订单已关闭" : "待支付订单已关闭",
         result.order.provider === "wechat_native" ? "这笔订单已停止等待支付。" : "这笔订单已关闭，不会再继续等待支付。",
@@ -689,20 +708,27 @@ export function MembershipPage() {
         selectedProvider={effectiveSelectedProvider}
         supportedProviders={supportedProviders}
         availableCoupons={availableCoupons}
-        pendingOrder={pendingOrder}
+        createPending={createOrder.isPending}
+        onSelectCoupon={setSelectedCouponId}
+        onSelectPlan={setSelectedPlanId}
+        onSelectProvider={setSelectedProvider}
+        onConfirm={() => void onCreateOrder()}
+      />
+
+      <MembershipPaymentDialog
+        open={paymentOpen}
+        onOpenChange={setPaymentOpen}
+        order={paymentOrder}
         activeCheckout={activeCheckout}
         createPending={createOrder.isPending}
         confirmPending={confirmPayment.isPending}
         syncPending={syncPayment.isPending}
         closePending={closeOrder.isPending}
-        onSelectCoupon={setSelectedCouponId}
-        onSelectPlan={setSelectedPlanId}
-        onSelectProvider={setSelectedProvider}
+        onResumePayment={() => void onCreateOrder()}
         onConfirmPayment={(order) => void onConfirmPayment(order)}
         onSyncPayment={(order) => void onSyncPayment(order)}
         onCloseOrder={(order) => void onCloseOrder(order)}
         onCopyPaymentLink={() => void onCopyPaymentLink()}
-        onConfirm={() => void onCreateOrder()}
       />
 
       <section className="mx-auto max-w-4xl">
@@ -714,14 +740,8 @@ export function MembershipPage() {
                   <h1 className="text-3xl font-semibold tracking-tight text-foreground">会员中心</h1>
                 </div>
 
-                <div className="flex flex-wrap gap-2">
-                  <Button asChild variant="ghost">
-                    <Link to="/profile">
-                      <ChevronLeft className="h-4 w-4" />
-                      返回个人中心
-                    </Link>
-                  </Button>
-                  <Button onClick={() => setPurchaseOpen(true)} disabled={purchaseDisabled}>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button onClick={openPurchaseFlow} disabled={purchaseDisabled}>
                     {purchaseButtonLabel}
                   </Button>
                   <Button type="button" variant="outline" onClick={() => void onCopyInviteCode()} disabled={!inviteSummaryQ.data?.inviteCode}>
@@ -737,44 +757,40 @@ export function MembershipPage() {
                   onClick={() => setSelectedPlanId("monthly")}
                   aria-pressed={effectiveSelectedPlanId === "monthly"}
                   className={cn(
-                    "rounded-[1.35rem] border px-5 py-4 text-left shadow-[var(--theme-soft-shadow)] backdrop-blur transition",
+                    "group min-w-0 text-left transition",
                     effectiveSelectedPlanId === "monthly"
-                      ? "border-primary/30 bg-[hsl(var(--primary)/0.1)]"
-                      : "border-[color:var(--theme-soft-border)] bg-[hsl(var(--background)/0.75)] hover:border-primary/20",
+                      ? "opacity-100"
+                      : "opacity-90 hover:opacity-100",
                   )}
                 >
-                  <div className="text-[11px] uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">月会员</div>
-                  <div className="mt-2 text-2xl font-semibold tracking-tight text-foreground">¥20 / 30 天</div>
-                  <div className="mt-2 text-sm leading-6 text-muted-foreground">
-                    首单 {formatMembershipPrice(summary?.firstOrderPriceCent ?? 0)} · 续费 {formatMembershipPrice(summary?.renewalPriceCent ?? 0)}
-                  </div>
-                  {effectiveSelectedPlanId === "monthly" && selectedCoupon ? (
-                    <div className="mt-1 text-xs text-[color:var(--theme-warm-text)]">已选 {formatMembershipCouponValue(selectedCoupon)}</div>
-                  ) : null}
+                  <MembershipPlanPriceBlock title="月会员" price="¥20" unit="/ 月" note={`首单 ${formatMembershipPrice(summary?.firstOrderPriceCent ?? 0)} · 续费 ${formatMembershipPrice(summary?.renewalPriceCent ?? 0)}`}>
+                    {effectiveSelectedPlanId === "monthly" && selectedCoupon ? (
+                      <div className="mt-2 text-xs text-[color:var(--theme-warm-text)]">已选 {formatMembershipCouponValue(selectedCoupon)}</div>
+                    ) : null}
+                  </MembershipPlanPriceBlock>
                 </button>
                 <button
                   type="button"
                   onClick={() => setSelectedPlanId("graduate_exam")}
                   aria-pressed={effectiveSelectedPlanId === "graduate_exam"}
                   className={cn(
-                    "rounded-[1.35rem] border px-5 py-4 text-left shadow-[var(--theme-soft-shadow)] backdrop-blur transition",
+                    "group min-w-0 text-left transition",
                     effectiveSelectedPlanId === "graduate_exam"
-                      ? "border-primary/30 bg-[hsl(var(--primary)/0.1)]"
-                      : "border-[color:var(--theme-soft-border)] bg-[hsl(var(--background)/0.75)] hover:border-primary/20",
+                      ? "opacity-100"
+                      : "opacity-90 hover:opacity-100",
                   )}
                 >
-                  <div className="text-[11px] uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">考研套餐</div>
-                  <div className="mt-2 text-2xl font-semibold tracking-tight text-foreground">¥15 / 月</div>
-                  <div className="mt-2 text-sm leading-6 text-muted-foreground">单最低15元 有效期至12月21日</div>
-                  {effectiveSelectedPlanId === "graduate_exam" ? (
-                    <div className="mt-1 text-xs text-[color:var(--theme-warm-text)]">
+                  <MembershipPlanPriceBlock title="考研套餐" price="¥15" unit="/ 月" note="单最低15元 有效期至12月21日" accent>
+                    {effectiveSelectedPlanId === "graduate_exam" ? (
+                      <div className="mt-2 text-xs text-[color:var(--theme-warm-text)]">
                       {preview?.planId === "graduate_exam"
                         ? `当前预估 ${formatMembershipPrice(preview.payableAmountCent)}`
                         : previewQ.isLoading
                           ? "正在计算当前价格"
                           : "支付前自动计算实际价格"}
-                    </div>
-                  ) : null}
+                      </div>
+                    ) : null}
+                  </MembershipPlanPriceBlock>
                 </button>
               </div>
             </div>

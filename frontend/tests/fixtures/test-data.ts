@@ -22,6 +22,7 @@ export const subject = {
 }
 
 export const project = {
+  subjectId: subject.subjectId,
   projectId: "proj_e2e",
   title: "自动化测试项目",
   state: "ACTIVE",

@@ -350,7 +350,7 @@ export function PomodoroSettingsPage() {
         </Button>
         <MemberOnlyFeatureNotice
           title="番茄钟设置是会员专属功能"
-          message="当前账号还没有有效会员，所以默认提示词、随机微休息、休息音乐目录和壁纸设置先不开放。"
+          message="当前账号还没有有效会员。开通会员后，就可以继续设置默认提示词、随机微休息、休息音乐目录和壁纸。"
         />
       </div>
     )

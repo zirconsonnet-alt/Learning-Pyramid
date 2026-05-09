@@ -24,6 +24,7 @@ import methodLayeredReview from "@/assets/method-layered-review.webp"
 import { DesktopPet } from "@/ui/components/DesktopPet"
 import { usePageMeta } from "@/ui/seo/usePageMeta"
 import { ShowcaseFooter, ShowcaseSiteHeader, useShowcaseEntryPaths } from "@/views/home/ShowcaseChrome"
+import { MembershipPlanPriceBlock } from "@/views/membership/components/MembershipPlanPriceBlock"
 
 const mechanismCards = [
   {
@@ -442,22 +443,8 @@ export function HomePage() {
             <div className="lp-showcase-pricing-grid lp-showcase-membership-grid">
               <article className="lp-showcase-pricing-card lp-showcase-membership-plans">
                 <div className="lp-showcase-membership-plan-grid">
-                  <div className="lp-showcase-membership-price-block">
-                    <h3>月会员</h3>
-                    <div className="lp-showcase-price">
-                      <strong>¥20</strong>
-                      <span>/ 月</span>
-                    </div>
-                    <p className="lp-showcase-membership-plan-note">首单最低15元</p>
-                  </div>
-                  <div className="lp-showcase-membership-price-block lp-showcase-membership-price-block-accent">
-                    <h3>考研套餐</h3>
-                    <div className="lp-showcase-price">
-                      <strong>¥15</strong>
-                      <span>/ 月</span>
-                    </div>
-                    <p className="lp-showcase-membership-plan-note">有效期至12月21日</p>
-                  </div>
+                  <MembershipPlanPriceBlock title="月会员" price="¥20" unit="/ 月" note="首单最低15元" />
+                  <MembershipPlanPriceBlock title="考研套餐" price="¥15" unit="/ 月" note="有效期至12月21日" accent />
                 </div>
                 <div className="lp-showcase-membership-plan-action">
                   <Link className="lp-showcase-btn lp-showcase-btn-primary lp-showcase-membership-entry-action" to={membershipEntryHref}>

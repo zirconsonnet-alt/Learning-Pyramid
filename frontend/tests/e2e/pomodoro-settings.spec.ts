@@ -1,9 +1,25 @@
 import { expect, test } from "@playwright/test"
 
 import { collectConsoleIssues, expectNoConsoleIssues } from "../fixtures/app-checks"
-import { installMockApi } from "../fixtures/mock-api"
+import { createMockGlobalSettings, installMockApi } from "../fixtures/mock-api"
 import { journeyIds } from "../fixtures/journeys"
 import { recordJourney } from "../fixtures/journey-result"
+import { project, subject } from "../fixtures/test-data"
+
+function createPomodoroPlan(overrides: Partial<ReturnType<typeof createMockGlobalSettings>["pomodoro"]["weeklySchedule"]["sat"]["plans"][number]> = {}) {
+  return {
+    id: "plan_e2e",
+    enabled: true,
+    startTime: "20:00",
+    focusMinutes: 25,
+    breakMinutes: 5,
+    pomodoroCount: 1,
+    projectRefs: [{ subjectId: subject.subjectId, projectId: project.projectId }],
+    breakPrompt: "",
+    focusPrompts: [""],
+    ...overrides,
+  }
+}
 
 test(journeyIds.pomodoro, async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
@@ -15,6 +31,95 @@ test(journeyIds.pomodoro, async ({ page }) => {
     await page.getByRole("button", { name: "统计" }).click()
     await expect(page.getByText("今天还没有可统计的番茄记录。")).toBeVisible()
   })
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
+test("pomodoro can be turned off even when saved schedule is invalid", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page, {
+    globalSettings: createMockGlobalSettings({
+      pomodoro: {
+        enabled: true,
+        transitionSoundEnabled: false,
+        defaultFocusPrompt: "",
+        defaultBreakPrompt: "",
+        microBreaks: {
+          enabled: false,
+          minIntervalSeconds: 180,
+          maxIntervalSeconds: 300,
+          durationSeconds: 10,
+        },
+        weeklySchedule: {
+          mon: { plans: [] },
+          tue: { plans: [] },
+          wed: { plans: [] },
+          thu: { plans: [] },
+          fri: { plans: [] },
+          sat: { plans: [createPomodoroPlan({ projectRefs: [null] })] },
+          sun: { plans: [] },
+        },
+      },
+    }),
+  })
+
+  await page.goto("/pomodoro")
+  await expect(page.getByRole("button", { name: "关闭番茄钟" })).toBeVisible()
+  await page.getByRole("button", { name: "关闭番茄钟" }).click()
+  await expect(page.getByRole("button", { name: "开启番茄钟" })).toBeVisible()
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
+test("pomodoro delete plan persists after returning to overview", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page, {
+    globalSettings: createMockGlobalSettings({
+      pomodoro: {
+        enabled: false,
+        transitionSoundEnabled: false,
+        defaultFocusPrompt: "",
+        defaultBreakPrompt: "",
+        microBreaks: {
+          enabled: false,
+          minIntervalSeconds: 180,
+          maxIntervalSeconds: 300,
+          durationSeconds: 10,
+        },
+        weeklySchedule: {
+          mon: { plans: [] },
+          tue: { plans: [] },
+          wed: { plans: [] },
+          thu: { plans: [] },
+          fri: { plans: [] },
+          sat: { plans: [createPomodoroPlan({ id: "delete_me" })] },
+          sun: { plans: [] },
+        },
+      },
+    }),
+  })
+
+  await page.goto("/pomodoro/plans/delete_me")
+  await expect(page.getByText("计划 1")).toBeVisible()
+  await page.getByRole("button", { name: "删除计划" }).click()
+  await expect(page).toHaveURL(/\/pomodoro$/)
+  await expect(page.getByText("还没有计划，新增一组后再进入详情设置。")).toBeVisible()
+  await page.reload()
+  await expect(page.getByText("还没有计划，新增一组后再进入详情设置。")).toBeVisible()
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
+test("pomodoro restore returns to overview when current draft no longer exists", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page)
+
+  await page.goto("/pomodoro")
+  await page.getByRole("button", { name: "新增计划" }).click()
+  await expect(page.getByText("计划 1")).toBeVisible()
+  await page.getByRole("button", { name: "恢复" }).click()
+  await expect(page).toHaveURL(/\/pomodoro$/)
+  await expect(page.getByText("还没有计划，新增一组后再进入详情设置。")).toBeVisible()
 
   expectNoConsoleIssues(consoleIssues)
 })

@@ -221,19 +221,6 @@ export function AuthPage() {
     setSearchParams(nextParams, { replace: true })
   }
 
-  function switchVerifyEmailToRegister() {
-    if (!allowSignup) return
-    setVerifyEmailNotice(null)
-    const nextParams = new URLSearchParams(searchParams)
-    nextParams.set("mode", "register")
-    if (email.trim()) nextParams.set("email", email.trim())
-    else nextParams.delete("email")
-    nextParams.delete("token")
-    nextParams.delete("waitToken")
-    setPassword("")
-    setSearchParams(nextParams, { replace: true })
-  }
-
   async function onSubmit() {
     const payload = {
       email: email.trim(),
@@ -376,17 +363,16 @@ export function AuthPage() {
           ? verifyTokenPresent
             ? "点击下方按钮完成邮箱验证并自动登录。"
             : effectiveVerifyEmailNotice === "sent"
-              ? "验证邮件已经发出。你可以在手机或电脑上打开邮箱完成激活，当前页面会自动继续。"
+              ? ""
               : "输入注册邮箱，我们会重新发送一封验证邮件。"
-        : "使用邮箱和密码登录。"
-
+        : ""
   return (
     <div className="relative flex min-h-dvh items-center justify-center overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(197,214,239,0.58),_transparent_42%),linear-gradient(180deg,_#f7f5f1_0%,_#eef2f8_100%)] px-6 py-10">
       <Card className="w-full max-w-md border-white/85 bg-white/92 shadow-[0_30px_90px_-42px_rgba(15,23,42,0.28)]">
         <CardContent className="p-6 sm:p-8">
-          <div className="mb-6 space-y-2">
+          <div className="mb-6">
             <h1 className="text-2xl font-semibold tracking-tight text-foreground">{title}</h1>
-            <p className="text-sm leading-6 text-muted-foreground">{description}</p>
+            {description ? <p className="mt-2 text-sm leading-6 text-muted-foreground">{description}</p> : null}
           </div>
 
           {allowSignup && effectiveMode !== "reset" && effectiveMode !== "verify" ? (
@@ -541,17 +527,8 @@ export function AuthPage() {
               </div>
             ) : null}
 
-            {effectiveMode === "reset" || effectiveMode === "verify" ? (
+            {effectiveMode === "reset" ? (
               <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-3 pt-2 text-sm text-muted-foreground">
-                {effectiveMode === "verify" && !verifyTokenPresent && allowSignup ? (
-                  <button
-                    type="button"
-                    onClick={switchVerifyEmailToRegister}
-                    className={cn("transition hover:text-foreground", pending && "pointer-events-none opacity-60")}
-                  >
-                    重新注册
-                  </button>
-                ) : null}
                 <button
                   type="button"
                   onClick={() => switchMode("login")}

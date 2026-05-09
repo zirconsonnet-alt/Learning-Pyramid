@@ -24,6 +24,20 @@ test(journeyIds.workbench, async ({ page }) => {
   expectNoConsoleIssues(consoleIssues)
 })
 
+test("workbench empty content tree avoids duplicate setup prompt", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page, { contentState: "empty" })
+
+  await gotoWorkbench(page)
+  await expect(page.getByText("先绑定并授权素材目录")).toBeVisible()
+  const contentTreeCard = page.locator("#workbench-content-tree")
+  await expect(contentTreeCard.getByText("尚未绑定素材目录")).toBeVisible()
+  await expect(contentTreeCard.getByText("当前还没有学习对象")).toHaveCount(0)
+  await expect(contentTreeCard.getByRole("link", { name: "前往项目设置" })).toHaveCount(0)
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
 test(journeyIds.review, async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
   await installMockApi(page)

@@ -116,6 +116,14 @@ export function ShowcaseSiteHeader(props: { homeSectionPrefix?: string }) {
   const homeSectionMenuLabel =
     location.pathname === "/" ? (activeHomeSectionLabel ? `导览 · ${activeHomeSectionLabel}` : "导览") : "首页导览"
 
+  function openSectionMenu() {
+    setSectionMenuState({ open: true, routeKey: currentRouteKey })
+  }
+
+  function closeSectionMenu() {
+    setSectionMenuState((current) => ({ ...current, open: false }))
+  }
+
   useEffect(() => {
     const resolveActiveSection = () => {
       if (location.pathname !== "/") {
@@ -199,7 +207,19 @@ export function ShowcaseSiteHeader(props: { homeSectionPrefix?: string }) {
         </Link>
 
         <nav className="lp-showcase-nav-links" aria-label="主导航">
-          <div ref={sectionMenuRef} className="lp-showcase-nav-dropdown">
+          <div
+            ref={sectionMenuRef}
+            className="lp-showcase-nav-dropdown"
+            onMouseEnter={openSectionMenu}
+            onMouseLeave={closeSectionMenu}
+            onFocusCapture={openSectionMenu}
+            onBlurCapture={(event) => {
+              const currentTarget = event.currentTarget
+              window.requestAnimationFrame(() => {
+                if (!currentTarget.contains(document.activeElement)) closeSectionMenu()
+              })
+            }}
+          >
             <button
               type="button"
               className={cn("lp-showcase-nav-link lp-showcase-nav-dropdown-trigger", location.pathname === "/" && "is-active")}
@@ -213,19 +233,21 @@ export function ShowcaseSiteHeader(props: { homeSectionPrefix?: string }) {
 
             {sectionMenuOpen ? (
               <div className="lp-showcase-nav-dropdown-menu" aria-label={homeSectionMenuLabel}>
-                {navItems.map((item) => {
-                  const sectionId = getSectionIdFromHref(item.href)
-                  const isActive = location.pathname === "/" && sectionId === activeHomeSectionId
-                  return (
-                    <ShowcaseNavLink
-                      key={`menu-${item.label}-${item.href}`}
-                      {...item}
-                      isActive={isActive}
-                      className="lp-showcase-nav-dropdown-item"
-                      onNavigate={() => setSectionMenuState((current) => ({ ...current, open: false }))}
-                    />
-                  )
-                })}
+                <div className="lp-showcase-nav-dropdown-menu-panel">
+                  {navItems.map((item) => {
+                    const sectionId = getSectionIdFromHref(item.href)
+                    const isActive = location.pathname === "/" && sectionId === activeHomeSectionId
+                    return (
+                      <ShowcaseNavLink
+                        key={`menu-${item.label}-${item.href}`}
+                        {...item}
+                        isActive={isActive}
+                        className="lp-showcase-nav-dropdown-item"
+                        onNavigate={closeSectionMenu}
+                      />
+                    )
+                  })}
+                </div>
               </div>
             ) : null}
           </div>

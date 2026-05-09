@@ -2460,7 +2460,7 @@ export function VideoPane({
                           <MemberOnlyFeatureNotice
                             compact
                             title="视频助手是会员专属功能"
-                            message="当前账号还没有有效会员，所以视频播放器里的 AI 问答先不开放。开通后就可以继续围绕当前画面和字幕提问。"
+                            message="当前账号还没有有效会员。开通后就可以继续围绕当前画面和字幕提问。"
                             className="border-white/10 bg-white/[0.06] text-left shadow-none [&_h2]:text-white [&_p]:text-white/60"
                           />
                         ) : assistantTurns.length === 0 && !isAssistantAsking ? (

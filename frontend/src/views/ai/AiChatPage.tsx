@@ -1711,7 +1711,7 @@ export function AiChatPage() {
               <MemberOnlyFeatureNotice
                 className="mx-auto max-w-3xl"
                 title="AI 问答是会员专属功能"
-                message="当前账号还没有有效会员，所以这里先不开放 AI 问答。开通会员后，就可以继续使用项目问答和节点上下文提问。"
+                message="当前账号还没有有效会员。开通会员后，就可以继续使用项目问答和节点上下文提问。"
               />
             ) : null}
 

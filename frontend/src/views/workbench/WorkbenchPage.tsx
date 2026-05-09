@@ -878,7 +878,6 @@ export function WorkbenchPage() {
               </CardHeader>
               <CardContent className="pt-2 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:overscroll-contain xl:pr-3">
                 <LearningObjectTree
-                  subjectId={subjectId}
                   projectId={pid}
                   projectType={projectType}
                   selectedInstanceId={selectedInstanceId}

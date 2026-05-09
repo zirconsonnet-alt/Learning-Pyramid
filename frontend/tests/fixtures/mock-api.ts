@@ -62,14 +62,91 @@ function buildOrder(status = "pending") {
   }
 }
 
+type MockMembershipOrder = ReturnType<typeof buildOrder>
+
 type MockAuthState = "signed-in" | "signed-out"
+type MockContentState = "ready" | "empty"
+type MockPomodoroWeekday = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun"
+type MockPomodoroPlan = {
+  id: string
+  enabled: boolean
+  startTime: string
+  focusMinutes: number
+  breakMinutes: number
+  pomodoroCount: number
+  projectRefs: Array<{ subjectId: string; projectId: string } | null>
+  breakPrompt: string
+  focusPrompts: string[]
+}
+type MockGlobalSettings = {
+  theme: string
+  pomodoro: {
+    enabled: boolean
+    transitionSoundEnabled: boolean
+    defaultFocusPrompt: string
+    defaultBreakPrompt: string
+    microBreaks: {
+      enabled: boolean
+      minIntervalSeconds: number
+      maxIntervalSeconds: number
+      durationSeconds: number
+    }
+    weeklySchedule: Record<MockPomodoroWeekday, { plans: MockPomodoroPlan[] }>
+  }
+  defaultProjectReviewTemplate: Array<{ kind: "CONVERGENCE" | "REVIEW_TASK"; count?: number }>
+  learningPlans: { plans: unknown[]; progressSnapshots: unknown[] }
+  updatedAt: string | null
+}
 
-export async function installMockApi(page: Page, options: { authState?: MockAuthState } = {}) {
+function createEmptyPomodoroSchedule(): MockGlobalSettings["pomodoro"]["weeklySchedule"] {
+  return {
+    mon: { plans: [] },
+    tue: { plans: [] },
+    wed: { plans: [] },
+    thu: { plans: [] },
+    fri: { plans: [] },
+    sat: { plans: [] },
+    sun: { plans: [] },
+  }
+}
+
+export function createMockGlobalSettings(overrides: Partial<MockGlobalSettings> = {}): MockGlobalSettings {
+  return {
+    theme: "warm-paper",
+    pomodoro: {
+      enabled: false,
+      transitionSoundEnabled: false,
+      defaultFocusPrompt: "",
+      defaultBreakPrompt: "",
+      microBreaks: {
+        enabled: false,
+        minIntervalSeconds: 180,
+        maxIntervalSeconds: 300,
+        durationSeconds: 10,
+      },
+      weeklySchedule: createEmptyPomodoroSchedule(),
+      ...overrides.pomodoro,
+    },
+    defaultProjectReviewTemplate: [{ kind: "CONVERGENCE" }],
+    learningPlans: { plans: [], progressSnapshots: [] },
+    updatedAt: nowIso,
+    ...overrides,
+  }
+}
+
+export async function installMockApi(page: Page, options: { authState?: MockAuthState; contentState?: MockContentState; globalSettings?: MockGlobalSettings } = {}) {
   const authState = options.authState ?? "signed-in"
+  const contentState = options.contentState ?? "ready"
+  let globalSettings = options.globalSettings ?? createMockGlobalSettings()
+  let membershipOrders: MockMembershipOrder[] = []
 
-  await page.route("**/api/**", async (route) => {
+  await page.route("**/*", async (route) => {
     const request = route.request()
     const url = new URL(request.url())
+    if (!url.pathname.startsWith("/api/")) {
+      await route.continue()
+      return
+    }
     const path = url.pathname.replace(/^\/api/, "") || "/"
     const method = request.method()
 
@@ -115,6 +192,28 @@ export async function installMockApi(page: Page, options: { authState?: MockAuth
 
     if (path === "/auth/login" || path === "/auth/register") {
       await fulfill(route, path.endsWith("register") ? { ...testUser, emailVerificationRequired: false, verificationEmailSent: false, verificationWaitToken: null } : testUser)
+      return
+    }
+
+    if (path === "/profile/me") {
+      await fulfill(route, testUser)
+      return
+    }
+
+    if (path === "/profile/me/global-settings") {
+      if (method === "PUT") {
+        const payload = JSON.parse(request.postData() || "{}") as Partial<MockGlobalSettings>
+        globalSettings = {
+          ...globalSettings,
+          ...payload,
+          pomodoro: {
+            ...globalSettings.pomodoro,
+            ...payload.pomodoro,
+          },
+          updatedAt: new Date().toISOString(),
+        }
+      }
+      await fulfill(route, globalSettings)
       return
     }
 
@@ -175,7 +274,7 @@ export async function installMockApi(page: Page, options: { authState?: MockAuth
     }
 
     if (path === `/projects/${project.projectId}/instances`) {
-      await fulfill(route, [instance])
+      await fulfill(route, contentState === "empty" ? [] : [instance])
       return
     }
 
@@ -210,12 +309,12 @@ export async function installMockApi(page: Page, options: { authState?: MockAuth
     }
 
     if (path === `/projects/${project.projectId}/learning-object-roots`) {
-      await fulfill(route, { rootLearningObjectNodeIds: [learningObjectNode.nodeId] })
+      await fulfill(route, { rootLearningObjectNodeIds: contentState === "empty" ? [] : [learningObjectNode.nodeId] })
       return
     }
 
     if (path === `/projects/${project.projectId}/learning-object-nodes`) {
-      await fulfill(route, [learningObjectNode])
+      await fulfill(route, contentState === "empty" ? [] : [learningObjectNode])
       return
     }
 
@@ -225,6 +324,11 @@ export async function installMockApi(page: Page, options: { authState?: MockAuth
     }
 
     if (path === `/projects/${project.projectId}/audit-log-events`) {
+      await fulfill(route, [])
+      return
+    }
+
+    if (path === `/subjects/${subject.subjectId}/projects/${project.projectId}/audit-log-events`) {
       await fulfill(route, [])
       return
     }
@@ -297,23 +401,29 @@ export async function installMockApi(page: Page, options: { authState?: MockAuth
     }
 
     if (path === "/membership/orders") {
-      await fulfill(route, method === "POST" ? {
-        order: buildOrder(),
-        paymentPayload: {
-          mode: "manual",
-          provider: "manual_test",
-          providerLabel: "手动测试",
-          instruction: "自动化测试订单",
-          providerTradeNoHint: "manual_e2e",
-          expiresAt: null,
-          codeUrl: null,
-          qrImageDataUrl: null,
-          openUrl: null,
-          pollIntervalSeconds: null,
-          statusCheckSupported: true,
-        },
-        reusedExistingOrder: false,
-      } : [])
+      if (method === "POST") {
+        const order = membershipOrders.find((item) => item.status === "pending") ?? buildOrder()
+        membershipOrders = [order]
+        await fulfill(route, {
+          order,
+          paymentPayload: {
+            mode: "manual",
+            provider: "manual_test",
+            providerLabel: "手动测试",
+            instruction: "自动化测试订单",
+            providerTradeNoHint: "manual_e2e",
+            expiresAt: null,
+            codeUrl: null,
+            qrImageDataUrl: null,
+            openUrl: null,
+            pollIntervalSeconds: null,
+            statusCheckSupported: true,
+          },
+          reusedExistingOrder: false,
+        })
+        return
+      }
+      await fulfill(route, membershipOrders)
       return
     }
 

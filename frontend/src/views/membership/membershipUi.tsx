@@ -144,7 +144,7 @@ export function StatusPill(props: { children: ReactNode; tone?: "default" | "acc
 
 export function MemberOnlyFeatureNotice({
   title = "会员专属功能",
-  message = "开通会员后即可使用 AI 能力和番茄钟；当前账号还没有有效会员，所以这里先为你锁定。",
+  message = "当前账号还没有有效会员。开通会员后即可使用 AI 能力和番茄钟。",
   className,
   compact = false,
 }: {
