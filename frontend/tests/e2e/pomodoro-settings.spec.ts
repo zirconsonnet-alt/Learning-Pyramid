@@ -187,6 +187,7 @@ test("pomodoro creates quick pomodoro from an explicit subject and project selec
   await expect(page.getByRole("button", { name: "结束小番茄" })).toBeVisible()
   await expect(page.getByRole("link", { name: "进入自动化测试项目工作台" })).toHaveCount(0)
   await expect(page.getByText("10 秒后开始 25 分钟学习，系统会进入所选项目工作台。")).toBeVisible()
+  await expect(page).toHaveURL(new RegExp(`/subjects/${subject.subjectId}/projects/${project.projectId}/workbench$`), { timeout: 15_000 })
 
   expectNoConsoleIssues(consoleIssues)
 })
@@ -221,8 +222,51 @@ test("pomodoro allows only the focused project workbench during focus time", asy
 
   await page.clock.setFixedTime(new Date("2026-05-09T00:30:00Z"))
   await page.goto("/pomodoro")
-  await expect(page.getByRole("link", { name: "进入自动化测试项目工作台" })).toBeVisible()
-  await page.goto(`/subjects/${subject.subjectId}/projects/${project.projectId}/workbench`)
+  await expect(page).toHaveURL(new RegExp(`/subjects/${subject.subjectId}/projects/${project.projectId}/workbench$`))
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
+test("pomodoro focused workbench does not depend on legacy project catalog", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page, {
+    globalSettings: createMockGlobalSettings({
+      pomodoro: {
+        enabled: true,
+        transitionSoundEnabled: false,
+        defaultFocusPrompt: "",
+        defaultBreakPrompt: "",
+        microBreaks: {
+          enabled: false,
+          minIntervalSeconds: 180,
+          maxIntervalSeconds: 300,
+          durationSeconds: 10,
+        },
+        weeklySchedule: {
+          mon: { plans: [] },
+          tue: { plans: [] },
+          wed: { plans: [] },
+          thu: { plans: [] },
+          fri: { plans: [] },
+          sat: { plans: [createPomodoroPlan({ startTime: "08:00", focusMinutes: 180 })] },
+          sun: { plans: [] },
+        },
+      },
+    }),
+  })
+  await page.route("**/api/projects", async (route) => {
+    await route.fulfill({
+      status: 400,
+      contentType: "application/json; charset=utf-8",
+      body: JSON.stringify({
+        ok: false,
+        error: { code: "PRECONDITION", message: "旧项目列表已失效，请从学科中心进入项目" },
+      }),
+    })
+  })
+
+  await page.clock.setFixedTime(new Date("2026-05-09T00:30:00Z"))
+  await page.goto("/pomodoro")
   await expect(page).toHaveURL(new RegExp(`/subjects/${subject.subjectId}/projects/${project.projectId}/workbench$`))
 
   expectNoConsoleIssues(consoleIssues)

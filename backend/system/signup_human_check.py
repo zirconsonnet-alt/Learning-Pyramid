@@ -71,17 +71,17 @@ class SignupHumanCheckConfig:
 
 
 def current_signup_human_check_config() -> SignupHumanCheckConfig:
-    hmac_secret = _env_text("PLM_ALTCHA_HMAC_SECRET")
+    hmac_secret = _env_text("LEARNINGPYRAMID_ALTCHA_HMAC_SECRET")
     return SignupHumanCheckConfig(
-        requested=_env_bool("PLM_ENABLE_SIGNUP_HUMAN_CHECK", False),
+        requested=_env_bool("LEARNINGPYRAMID_ENABLE_SIGNUP_HUMAN_CHECK", False),
         auth_enabled=current_runtime_features().auth_enabled,
         provider=_ALTCHA_PROVIDER,
         hmac_secret=hmac_secret,
-        challenge_url=_env_text("PLM_ALTCHA_CHALLENGE_URL") or _DEFAULT_CHALLENGE_URL,
-        algorithm=_env_text("PLM_ALTCHA_ALGORITHM") or _DEFAULT_ALGORITHM,
-        cost=_env_int("PLM_ALTCHA_COST", _DEFAULT_COST, minimum=1),
-        ttl_seconds=_env_int("PLM_ALTCHA_CHALLENGE_TTL_SECONDS", _DEFAULT_TTL_SECONDS, minimum=30),
-        hmac_algorithm=_env_text("PLM_ALTCHA_HMAC_ALGORITHM") or _DEFAULT_HMAC_ALGORITHM,
+        challenge_url=_env_text("LEARNINGPYRAMID_ALTCHA_CHALLENGE_URL") or _DEFAULT_CHALLENGE_URL,
+        algorithm=_env_text("LEARNINGPYRAMID_ALTCHA_ALGORITHM") or _DEFAULT_ALGORITHM,
+        cost=_env_int("LEARNINGPYRAMID_ALTCHA_COST", _DEFAULT_COST, minimum=1),
+        ttl_seconds=_env_int("LEARNINGPYRAMID_ALTCHA_CHALLENGE_TTL_SECONDS", _DEFAULT_TTL_SECONDS, minimum=30),
+        hmac_algorithm=_env_text("LEARNINGPYRAMID_ALTCHA_HMAC_ALGORITHM") or _DEFAULT_HMAC_ALGORITHM,
         ready=bool(hmac_secret),
     )
 

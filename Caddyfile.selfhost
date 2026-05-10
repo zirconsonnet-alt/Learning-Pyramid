@@ -1,4 +1,4 @@
-{$PLM_PUBLIC_HOST} {
+{$LEARNINGPYRAMID_PUBLIC_HOST} {
   encode zstd gzip
   reverse_proxy app:8001
 }

@@ -18,4 +18,4 @@ Desktop users bind a receiving identity from the membership page by opening a QR
 
 Commission withdrawal confirmation must be tested inside a supported WeChat client when production merchant transfer is enabled. The frontend calls `WeixinJSBridge.invoke("requestMerchantTransfer", ...)` only when the backend returns a confirmation package; that callback means the user confirmation UI returned, not that the transfer has succeeded.
 
-Final withdrawal state still comes from `/api/payments/wechat/transfer-notify` or `tools/reconcile_commission_withdrawals.py`. For local development, keep `PLM_ENABLE_MANUAL_TEST_PAYMENT=true` and use the `manual_test` binding/withdrawal path instead of a real WeChat client.
+Final withdrawal state still comes from `/api/payments/wechat/transfer-notify` or `tools/reconcile_commission_withdrawals.py`. For local development, keep `LEARNINGPYRAMID_ENABLE_MANUAL_TEST_PAYMENT=true` and use the `manual_test` binding/withdrawal path instead of a real WeChat client.

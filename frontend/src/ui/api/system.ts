@@ -1,6 +1,7 @@
 import { z } from "zod"
 
 import { ApiError, apiRequest, apiUrl, getBaseUrl, type ApiRequestExecutionOptions } from "@/ui/api/http"
+import { projectApiPath, type ProjectScope } from "@/ui/api/projectScope"
 import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
 
 export const SystemCapabilitiesSchema = z.object({
@@ -400,9 +401,9 @@ export const ProjectLlmDebugRecordSchema = z.object({
 })
 export type ProjectLlmDebugRecord = z.infer<typeof ProjectLlmDebugRecordSchema>
 
-export function getLatestProjectLlmDebug(projectId: string, options?: ApiRequestExecutionOptions) {
+export function getLatestProjectLlmDebug(scope: ProjectScope, options?: ApiRequestExecutionOptions) {
   return apiRequest({
-    path: `/projects/${projectId}/llm/debug/latest`,
+    path: projectApiPath(scope, "/llm/debug/latest"),
     responseSchema: ProjectLlmDebugRecordSchema.nullable(),
     signal: options?.signal,
     timeoutMs: options?.timeoutMs,
@@ -429,7 +430,7 @@ export function askSystemLlm(
 }
 
 export function askProjectLlm(
-  projectId: string,
+  scope: ProjectScope,
   body: {
     prompt: string
     systemPrompt?: string
@@ -443,7 +444,7 @@ export function askProjectLlm(
   options?: ApiRequestExecutionOptions,
 ) {
   return apiRequest({
-    path: `/projects/${projectId}/llm/ask`,
+    path: projectApiPath(scope, "/llm/ask"),
     method: "POST",
     body,
     responseSchema: AskSystemLlmResultSchema,
@@ -453,7 +454,7 @@ export function askProjectLlm(
 }
 
 export function askProjectLlmChatCompletion(
-  projectId: string,
+  scope: ProjectScope,
   body: {
     messages: Array<Record<string, unknown>>
     tools?: Array<Record<string, unknown>>
@@ -465,15 +466,15 @@ export function askProjectLlmChatCompletion(
   },
   options?: ApiRequestExecutionOptions,
 ) {
-  if (isVirtualStudyReviewProjectId(projectId)) {
+  if (isVirtualStudyReviewProjectId(scope.projectId)) {
     throw new ApiError("引导示范项目不提供 AI 对话。", {
       code: "PRECONDITION",
       status: 400,
-      details: { projectId },
+      details: { projectId: scope.projectId },
     })
   }
   return apiRequest({
-    path: `/projects/${projectId}/llm/chat-completions`,
+    path: projectApiPath(scope, "/llm/chat-completions"),
     method: "POST",
     body,
     responseSchema: RawChatCompletionResponseSchema,
@@ -492,7 +493,7 @@ type AskProjectLlmStreamOptions = ApiRequestExecutionOptions & {
 }
 
 export async function askProjectLlmStream(
-  projectId: string,
+  scope: ProjectScope,
   body: {
     prompt: string
     systemPrompt?: string
@@ -505,7 +506,7 @@ export async function askProjectLlmStream(
   },
   options?: AskProjectLlmStreamOptions,
 ): Promise<{ content: string }> {
-  const url = apiUrl(`/projects/${projectId}/llm/ask/stream`)
+  const url = apiUrl(projectApiPath(scope, "/llm/ask/stream"))
   const controller = new AbortController()
   const listeners: Array<() => void> = []
   const timeoutMs = options?.timeoutMs ?? 90_000

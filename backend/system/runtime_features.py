@@ -40,24 +40,24 @@ def _env_text(name: str) -> str | None:
 
 
 def current_runtime_features() -> RuntimeFeatures:
-    raw_mode = (os.getenv("PLM_APP_MODE") or os.getenv("APP_MODE") or "local").strip().lower()
+    raw_mode = (os.getenv("LEARNINGPYRAMID_APP_MODE") or "local").strip().lower()
     app_mode = "hosted" if raw_mode == "hosted" else "local"
     hosted = app_mode == "hosted"
     return RuntimeFeatures(
         app_mode=app_mode,
-        asr_enabled=_env_bool("PLM_ENABLE_ASR", True),
-        server_media_stream_enabled=_env_bool("PLM_ENABLE_SERVER_MEDIA_STREAM", not hosted),
-        browser_local_media_enabled=_env_bool("PLM_ENABLE_BROWSER_LOCAL_MEDIA", True),
-        baidu_netdisk_enabled=_env_bool("PLM_ENABLE_BAIDU_NETDISK", False),
-        auth_enabled=_env_bool("PLM_ENABLE_AUTH", hosted),
-        allow_signup=_env_bool("PLM_ALLOW_SIGNUP", False),
-        signup_invite_required=_env_bool("PLM_REQUIRE_SIGNUP_INVITE", True),
-        data_safety_storage_checks_enabled=_env_bool("PLM_ENABLE_DATA_SAFETY_STORAGE_CHECKS", False),
+        asr_enabled=_env_bool("LEARNINGPYRAMID_ENABLE_ASR", True),
+        server_media_stream_enabled=_env_bool("LEARNINGPYRAMID_ENABLE_SERVER_MEDIA_STREAM", not hosted),
+        browser_local_media_enabled=_env_bool("LEARNINGPYRAMID_ENABLE_BROWSER_LOCAL_MEDIA", True),
+        baidu_netdisk_enabled=_env_bool("LEARNINGPYRAMID_ENABLE_BAIDU_NETDISK", False),
+        auth_enabled=_env_bool("LEARNINGPYRAMID_ENABLE_AUTH", hosted),
+        allow_signup=_env_bool("LEARNINGPYRAMID_ALLOW_SIGNUP", False),
+        signup_invite_required=_env_bool("LEARNINGPYRAMID_REQUIRE_SIGNUP_INVITE", True),
+        data_safety_storage_checks_enabled=_env_bool("LEARNINGPYRAMID_ENABLE_DATA_SAFETY_STORAGE_CHECKS", False),
     )
 
 
 def default_client_runtime_kind() -> ClientRuntimeKind:
-    raw = (os.getenv("PLM_CLIENT_RUNTIME_KIND") or "").strip().upper()
+    raw = (os.getenv("LEARNINGPYRAMID_CLIENT_RUNTIME_KIND") or "").strip().upper()
     if raw:
         try:
             return ClientRuntimeKind(raw)
@@ -91,13 +91,13 @@ def _service_config_from_env(
     prefix: str,
     default_base_url: str | None = None,
 ) -> LocalServiceConfig | None:
-    base_url = _env_text(f"PLM_NATIVE_{prefix}_BASE_URL") or default_base_url
+    base_url = _env_text(f"LEARNINGPYRAMID_NATIVE_{prefix}_BASE_URL") or default_base_url
     if base_url is None:
         return None
     cfg = LocalServiceConfig(
         base_url=base_url,
-        api_key=_env_text(f"PLM_NATIVE_{prefix}_API_KEY"),
-        model_name=_env_text(f"PLM_NATIVE_{prefix}_MODEL"),
+        api_key=_env_text(f"LEARNINGPYRAMID_NATIVE_{prefix}_API_KEY"),
+        model_name=_env_text(f"LEARNINGPYRAMID_NATIVE_{prefix}_MODEL"),
     )
     cfg.validate_write_time()
     return cfg

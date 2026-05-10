@@ -434,7 +434,7 @@ export function useGuideWalkthroughController({ navigate, pathname }: { navigate
               onDestroyed: () => {
                 cleanupVirtualStudyReviewProjectForDoc(activeDocSlugRef.current)
                 if (isVirtualStudyReviewProjectId(getProjectIdFromPathname(getCurrentPathname(latestPathnameRef.current)))) {
-                  navigate("/projects", { replace: true })
+                  navigate("/subjects", { replace: true })
                 }
                 driverRef.current = null
                 statusRef.current = "closed"
@@ -460,7 +460,7 @@ export function useGuideWalkthroughController({ navigate, pathname }: { navigate
     function destroyActiveWalkthrough() {
       cleanupVirtualStudyReviewProjectForDoc(activeDocSlugRef.current)
       if (shouldLeaveVirtualStudyReviewRoute(getCurrentPathname(latestPathnameRef.current))) {
-        navigate("/projects", { replace: true })
+        navigate("/subjects", { replace: true })
       }
       cleanupGuideWalkthrough(driverRef, statusRef)
     }

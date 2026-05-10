@@ -66,9 +66,9 @@ class HttpRuntimeConfig:
 
 def current_http_runtime_config() -> HttpRuntimeConfig:
     features = current_runtime_features()
-    public_origin = _normalized_origin(os.getenv("PLM_PUBLIC_ORIGIN"))
+    public_origin = _normalized_origin(os.getenv("LEARNINGPYRAMID_PUBLIC_ORIGIN"))
 
-    raw_allowed_origins = _split_csv(os.getenv("PLM_ALLOWED_ORIGINS"))
+    raw_allowed_origins = _split_csv(os.getenv("LEARNINGPYRAMID_ALLOWED_ORIGINS"))
     if raw_allowed_origins:
         allowed_origins = raw_allowed_origins
     elif features.app_mode == "local":
@@ -78,7 +78,7 @@ def current_http_runtime_config() -> HttpRuntimeConfig:
     else:
         allowed_origins = tuple()
 
-    raw_trusted_hosts = _split_csv(os.getenv("PLM_TRUSTED_HOSTS"))
+    raw_trusted_hosts = _split_csv(os.getenv("LEARNINGPYRAMID_TRUSTED_HOSTS"))
     if raw_trusted_hosts:
         trusted_hosts = raw_trusted_hosts
     elif public_origin is not None:
@@ -87,9 +87,9 @@ def current_http_runtime_config() -> HttpRuntimeConfig:
     else:
         trusted_hosts = tuple()
 
-    proxy_headers_enabled = str(os.getenv("PLM_PROXY_HEADERS", "true")).strip().lower() in {"1", "true", "yes", "on"}
-    forwarded_allow_ips = (os.getenv("PLM_FORWARDED_ALLOW_IPS") or "127.0.0.1").strip() or "127.0.0.1"
-    api_docs_enabled = _env_bool("PLM_ENABLE_API_DOCS", features.app_mode == "local")
+    proxy_headers_enabled = str(os.getenv("LEARNINGPYRAMID_PROXY_HEADERS", "true")).strip().lower() in {"1", "true", "yes", "on"}
+    forwarded_allow_ips = (os.getenv("LEARNINGPYRAMID_FORWARDED_ALLOW_IPS") or "127.0.0.1").strip() or "127.0.0.1"
+    api_docs_enabled = _env_bool("LEARNINGPYRAMID_ENABLE_API_DOCS", features.app_mode == "local")
 
     return HttpRuntimeConfig(
         allowed_origins=_dedupe(allowed_origins),

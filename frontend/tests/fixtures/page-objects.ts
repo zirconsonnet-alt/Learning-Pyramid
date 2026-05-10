@@ -8,7 +8,7 @@ export function projectPath(suffix: string) {
 }
 
 export async function gotoProjects(page: Page) {
-  await page.goto("/projects")
+  await page.goto("/subjects")
   await expect(page.getByRole("heading", { name: "所有学科" })).toBeVisible()
 }
 

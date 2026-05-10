@@ -18,8 +18,8 @@ if [ ! -f "$SQL_FILE" ]; then
   exit 1
 fi
 
-PGUSER="$(grep '^PLM_POSTGRES_USER=' .env | head -n1 | cut -d= -f2- || true)"
-PGDB="$(grep '^PLM_POSTGRES_DB=' .env | head -n1 | cut -d= -f2- || true)"
+PGUSER="$(grep '^LEARNINGPYRAMID_POSTGRES_USER=' .env | head -n1 | cut -d= -f2- || true)"
+PGDB="$(grep '^LEARNINGPYRAMID_POSTGRES_DB=' .env | head -n1 | cut -d= -f2- || true)"
 
 [ -n "$PGUSER" ] || PGUSER="learningpyramid"
 [ -n "$PGDB" ] || PGDB="learningpyramid"

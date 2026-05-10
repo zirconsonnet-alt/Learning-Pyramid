@@ -81,7 +81,7 @@ def backup_runtime_bundle(
     audit_path: Path | None = None,
 ) -> Path:
     cfg = current_sql_runtime_config()
-    store = create_persist_store(legacy_root=REPO_ROOT)
+    store = create_persist_store()
     auth = AuthStore()
     media_payload: dict[str, str] = {}
     media_checksums: dict[str, str] = {}

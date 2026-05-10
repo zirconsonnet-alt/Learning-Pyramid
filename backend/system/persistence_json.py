@@ -116,7 +116,6 @@ def _encode_project(p: Project) -> dict[str, Any]:
         "deletedAtMs": None if p.deleted_at is None else _ts_to_ms(p.deleted_at),
         "subjectId": None if p.subject_id is None else str(p.subject_id),
         "scopedProjectId": None if p.scoped_project_id is None else str(p.scoped_project_id),
-        "legacyGlobalProjectId": None if p.legacy_global_project_id is None else str(p.legacy_global_project_id),
         "projectSequence": int(getattr(p, "project_sequence", 0)),
     }
 
@@ -130,7 +129,6 @@ def _decode_project(d: dict[str, Any]) -> Project:
         deleted_at=None if d.get("deletedAtMs") is None else _ms_to_ts(int(d["deletedAtMs"])),
         subject_id=None if d.get("subjectId") is None else ProjectId(str(d.get("subjectId"))),
         scoped_project_id=None if d.get("scopedProjectId") is None else ProjectId(str(d.get("scopedProjectId"))),
-        legacy_global_project_id=None if d.get("legacyGlobalProjectId") is None else ProjectId(str(d.get("legacyGlobalProjectId"))),
         project_sequence=int(d.get("projectSequence") or 0),
     )
 
@@ -431,17 +429,13 @@ def _encode_project_storage_config(c: ProjectStorageConfig) -> dict[str, Any]:
 def _decode_project_storage_config(d: dict[str, Any]) -> ProjectStorageConfig:
     project_id = ProjectId(d["projectId"])
     updated_at = _ms_to_ts(int(d["updatedAtMs"]))
-    if "projectRoot" in d:
-        return ProjectStorageConfig(
-            project_id=project_id,
-            project_root=PurePosixPath(d["projectRoot"]),
-            learning_object_root=PurePosixPath(str(d.get("learningObjectRoot") or "learning_objects")),
-            fs_sync_policy=FsSyncPolicy(str(d.get("fsSyncPolicy") or "STARTUP_SYNC")),
-            updated_at=updated_at,
-        )
-    return ProjectStorageConfig.from_legacy_scan_root(
-        project_id,
-        PurePosixPath(d["scanRoot"]),
+    if "projectRoot" not in d:
+        raise ValueError("ProjectStorageConfig.projectRoot is required")
+    return ProjectStorageConfig(
+        project_id=project_id,
+        project_root=PurePosixPath(d["projectRoot"]),
+        learning_object_root=PurePosixPath(str(d.get("learningObjectRoot") or "learning_objects")),
+        fs_sync_policy=FsSyncPolicy(str(d.get("fsSyncPolicy") or "STARTUP_SYNC")),
         updated_at=updated_at,
     )
 
@@ -470,6 +464,14 @@ def encode_project_storage_config_payload(config: ProjectStorageConfig) -> dict[
 
 def decode_project_storage_config_payload(payload: dict[str, Any]) -> ProjectStorageConfig:
     return _decode_project_storage_config(dict(payload))
+
+
+def encode_project_material_source_binding_payload(binding: ProjectMaterialSourceBinding) -> dict[str, Any]:
+    return _encode_project_material_source_binding(binding)
+
+
+def decode_project_material_source_binding_payload(payload: dict[str, Any]) -> ProjectMaterialSourceBinding:
+    return _decode_project_material_source_binding(dict(payload))
 
 
 def _encode_material_allowlist(a: MaterialAllowlist) -> dict[str, Any]:
@@ -521,24 +523,12 @@ def _encode_audit_log_event(ev: AuditLogEvent) -> dict[str, Any]:
     }
 
 
-def _decode_audit_event_kind(raw: object) -> AuditEventKind:
-    value = str(raw)
-    legacy_map = {
-        "CREATE_LLM_SESSION": AuditEventKind.EDIT_PROJECT_CONFIG,
-        "LLM_CHAT_TURN": AuditEventKind.EDIT_PROJECT_CONFIG,
-        "CLOSE_LLM_SESSION": AuditEventKind.EDIT_PROJECT_CONFIG,
-    }
-    if value in legacy_map:
-        return legacy_map[value]
-    return AuditEventKind(value)
-
-
 def _decode_audit_log_event(d: dict[str, Any]) -> AuditLogEvent:
     return AuditLogEvent(
         project_id=ProjectId(d["projectId"]),
         event_id=str(d["eventId"]),
         occurred_at=_ms_to_ts(int(d["occurredAtMs"])),
-        kind=_decode_audit_event_kind(d["kind"]),
+        kind=AuditEventKind(str(d["kind"])),
         api_name=str(d["apiName"]),
         result=AuditResultCode(d["result"]),
         payload=str(d.get("payload", "")),
@@ -1016,7 +1006,7 @@ def encode_project_payload(project_store: Any) -> dict[str, Any]:
         raise ValueError("ProjectStore.project must be present")
     proj: Project = project_store.project  # type: ignore[assignment]
 
-    # Compatibility: per-layer control fields are persisted as layer_index-keyed maps.
+    # Per-layer control fields are persisted as layer_index-keyed maps.
     # The domain model stores them on Layer, so derive the maps from Layer objects here.
     layers = tuple(getattr(project_store, "layers", {}).values())
     aggregation_k_node: dict[str, int] = {}
@@ -1106,9 +1096,11 @@ def encode_project_payload(project_store: Any) -> dict[str, Any]:
 def decode_project_payload(project_id: str, raw: dict[str, Any]) -> dict[str, Any]:
     d = dict(raw)
     project = _decode_project(dict(d["project"]))
+    if d.get("projectScanConfig") is not None:
+        raise ValueError("projectScanConfig is not supported")
     raw_storage_cfg = d.get("projectStorageConfig")
-    if raw_storage_cfg is None:
-        raw_storage_cfg = d.get("projectScanConfig")
+    if raw_storage_cfg is None and project.state != ProjectState.DELETED:
+        raise ValueError("projectStorageConfig is required")
     raw_material_source_binding = d.get("projectMaterialSourceBinding")
     raw_study_materials = d.get("studyMaterials")
     study_materials = {k: _decode_study_material(v) for k, v in dict(raw_study_materials or {}).items()}

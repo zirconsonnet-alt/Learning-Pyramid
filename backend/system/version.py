@@ -2,7 +2,6 @@
 APP_ID = "LearningPyramid"
 APP_NAME = "LearningPyramid"
 APP_PACKAGE_NAME = APP_ID
-LEGACY_APP_IDS = ("PLM3", "学习金字塔")
 LAUNCHER_EXE_BASENAME = APP_ID
 STOP_EXE_BASENAME = f"{APP_ID}-stop"
 SERVER_EXE_BASENAME = f"{APP_ID}-server"

@@ -23,7 +23,7 @@ def _require_psycopg():
 
 
 def _default_postgres_dsn() -> str | None:
-    for env_name in ("PLM_POSTGRES_DSN", "PLM_STORE_POSTGRES_DSN"):
+    for env_name in ("LEARNINGPYRAMID_POSTGRES_DSN", "LEARNINGPYRAMID_STORE_POSTGRES_DSN"):
         value = os.getenv(env_name, "").strip()
         if value:
             return value
@@ -61,8 +61,8 @@ def migrate_sqlite_to_postgres(
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Migrate LearningPyramid SQLite runtime data into PostgreSQL.")
-    parser.add_argument("--store-db", type=Path, default=resolve_store_db_path(), help="Path to plm_store.sqlite3")
-    parser.add_argument("--auth-db", type=Path, default=resolve_auth_db_path(), help="Path to plm_auth.sqlite3")
+    parser.add_argument("--store-db", type=Path, default=resolve_store_db_path(), help="Path to learningpyramid_store.sqlite3")
+    parser.add_argument("--auth-db", type=Path, default=resolve_auth_db_path(), help="Path to learningpyramid_auth.sqlite3")
     parser.add_argument("--skip-auth", action="store_true", help="Do not migrate the auth database")
     parser.add_argument("--postgres-dsn", default=_default_postgres_dsn(), help="Target PostgreSQL DSN")
     parser.add_argument("--sql-output", type=Path, help="Optional path to also persist the generated data-only SQL that was applied")
@@ -72,7 +72,7 @@ def _parse_args() -> argparse.Namespace:
 def main() -> int:
     args = _parse_args()
     if not args.postgres_dsn:
-        raise ValueError("--postgres-dsn is required unless PLM_POSTGRES_DSN or PLM_STORE_POSTGRES_DSN is set")
+        raise ValueError("--postgres-dsn is required unless LEARNINGPYRAMID_POSTGRES_DSN or LEARNINGPYRAMID_STORE_POSTGRES_DSN is set")
 
     sql_text = migrate_sqlite_to_postgres(
         store_db=Path(args.store_db),

@@ -33,7 +33,6 @@ from .constants import GLOBAL_QUEUE
 from .constants import MATERIAL_ALLOWLIST_V1
 from .convergence import Convergence
 from .material_allowlist import MaterialAllowlist
-from .project_scan_config import ProjectScanConfig
 from .review_chain import ReviewChain, ReviewChainItem, ReviewChainItemKind
 from .review_task import ReviewTask
 from .review_task_queue import ReviewTaskQueue
@@ -110,7 +109,6 @@ __all__ = [
     "RangeSnapshot",
     "GLOBAL_QUEUE",
     "MATERIAL_ALLOWLIST_V1",
-    "ProjectScanConfig",
     "MaterialAllowlist",
     "ReviewTask",
     "Convergence",

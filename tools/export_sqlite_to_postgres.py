@@ -12,8 +12,8 @@ from backend.system.postgres_schema import export_sqlite_to_postgres_sql
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Export LearningPyramid SQLite stores to a PostgreSQL SQL script.")
-    parser.add_argument("--store-db", type=Path, default=resolve_store_db_path(), help="Path to plm_store.sqlite3")
-    parser.add_argument("--auth-db", type=Path, default=resolve_auth_db_path(), help="Path to plm_auth.sqlite3")
+    parser.add_argument("--store-db", type=Path, default=resolve_store_db_path(), help="Path to learningpyramid_store.sqlite3")
+    parser.add_argument("--auth-db", type=Path, default=resolve_auth_db_path(), help="Path to learningpyramid_auth.sqlite3")
     parser.add_argument("--skip-auth", action="store_true", help="Do not export the auth database")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--schema-only", action="store_true", help="Export schema and migration metadata without row data")

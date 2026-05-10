@@ -866,37 +866,37 @@ if [ -f "`$APP_DIR/.env.selfhost.sync" ]; then
   merge_env_overlay "`$APP_DIR/.env" "`$APP_DIR/.env.selfhost.sync"
 fi
 
-MEDIA_ACCESS_TOKEN_SECRET=`$(read_env PLM_MEDIA_ACCESS_TOKEN_SECRET)
-POSTGRES_PASSWORD=`$(read_env PLM_POSTGRES_PASSWORD)
-ALLOW_SIGNUP=`$(printf '%s' "`$(read_env PLM_ALLOW_SIGNUP)" | tr '[:upper:]' '[:lower:]')
-SECURE_COOKIES=`$(printf '%s' "`$(read_env PLM_SECURE_COOKIES)" | tr '[:upper:]' '[:lower:]')
-PUBLIC_ORIGIN=`$(read_env PLM_PUBLIC_ORIGIN)
-TRUSTED_HOSTS_RAW=`$(read_env PLM_TRUSTED_HOSTS)
+MEDIA_ACCESS_TOKEN_SECRET=`$(read_env LEARNINGPYRAMID_MEDIA_ACCESS_TOKEN_SECRET)
+POSTGRES_PASSWORD=`$(read_env LEARNINGPYRAMID_POSTGRES_PASSWORD)
+ALLOW_SIGNUP=`$(printf '%s' "`$(read_env LEARNINGPYRAMID_ALLOW_SIGNUP)" | tr '[:upper:]' '[:lower:]')
+SECURE_COOKIES=`$(printf '%s' "`$(read_env LEARNINGPYRAMID_SECURE_COOKIES)" | tr '[:upper:]' '[:lower:]')
+PUBLIC_ORIGIN=`$(read_env LEARNINGPYRAMID_PUBLIC_ORIGIN)
+TRUSTED_HOSTS_RAW=`$(read_env LEARNINGPYRAMID_TRUSTED_HOSTS)
 
 if [ -z "`$MEDIA_ACCESS_TOKEN_SECRET" ] || looks_like_placeholder "`$MEDIA_ACCESS_TOKEN_SECRET"; then
-  echo "PLM_MEDIA_ACCESS_TOKEN_SECRET must be set to a non-placeholder value in `$APP_DIR/.env before deploy." >&2
+  echo "LEARNINGPYRAMID_MEDIA_ACCESS_TOKEN_SECRET must be set to a non-placeholder value in `$APP_DIR/.env before deploy." >&2
   exit 1
 fi
 
 if [ -z "`$POSTGRES_PASSWORD" ] || [ "`$POSTGRES_PASSWORD" = "learningpyramid" ] || looks_like_placeholder "`$POSTGRES_PASSWORD"; then
-  echo "PLM_POSTGRES_PASSWORD still looks unset or example-like in `$APP_DIR/.env. Update it before deploy." >&2
+  echo "LEARNINGPYRAMID_POSTGRES_PASSWORD still looks unset or example-like in `$APP_DIR/.env. Update it before deploy." >&2
   exit 1
 fi
 
 if [ "`$ALLOW_SIGNUP" = "1" ] || [ "`$ALLOW_SIGNUP" = "true" ] || [ "`$ALLOW_SIGNUP" = "yes" ] || [ "`$ALLOW_SIGNUP" = "on" ]; then
-  echo "Warning: PLM_ALLOW_SIGNUP=true keeps the hosted deployment open for self-registration." >&2
+  echo "Warning: LEARNINGPYRAMID_ALLOW_SIGNUP=true keeps the hosted deployment open for self-registration." >&2
 fi
 
 if [ "`$SECURE_COOKIES" != "1" ] && [ "`$SECURE_COOKIES" != "true" ] && [ "`$SECURE_COOKIES" != "yes" ] && [ "`$SECURE_COOKIES" != "on" ]; then
-  echo "Warning: PLM_SECURE_COOKIES is disabled. Use that only for temporary plain-HTTP localhost testing." >&2
+  echo "Warning: LEARNINGPYRAMID_SECURE_COOKIES is disabled. Use that only for temporary plain-HTTP localhost testing." >&2
 fi
 
 if [ -z "`$PUBLIC_ORIGIN" ]; then
-  echo "Warning: PLM_PUBLIC_ORIGIN is empty. Set it before public deployment." >&2
+  echo "Warning: LEARNINGPYRAMID_PUBLIC_ORIGIN is empty. Set it before public deployment." >&2
 fi
 
 if [ -z "`$TRUSTED_HOSTS_RAW" ]; then
-  echo "Warning: PLM_TRUSTED_HOSTS is empty. Set it before public deployment." >&2
+  echo "Warning: LEARNINGPYRAMID_TRUSTED_HOSTS is empty. Set it before public deployment." >&2
 fi
 
 cd "`$APP_DIR"
@@ -958,7 +958,7 @@ get_container_frontend_dist_fingerprint() {
   if [ -z "`$container_id" ]; then
     return 0
   fi
-  docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "`$container_id" 2>/dev/null | grep '^PLM_FRONTEND_DIST_FINGERPRINT=' | tail -n 1 | cut -d= -f2- | tr -d '\r'
+  docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "`$container_id" 2>/dev/null | grep '^LEARNINGPYRAMID_FRONTEND_DIST_FINGERPRINT=' | tail -n 1 | cut -d= -f2- | tr -d '\r'
 }
 
 wait_for_expected_app_container_frontend() {
@@ -991,13 +991,13 @@ hard_refresh_app_container() {
   echo "Running hard app container refresh to pick up the new frontend bundle..." >&2
   compose_selfhost stop app || true
   compose_selfhost rm -f app || true
-  PLM_FRONTEND_DIST_FINGERPRINT="`$FRONTEND_DIST_FINGERPRINT" compose_selfhost build --pull --no-cache app
-  PLM_FRONTEND_DIST_FINGERPRINT="`$FRONTEND_DIST_FINGERPRINT" compose_selfhost up -d --force-recreate --no-deps app
+  LEARNINGPYRAMID_FRONTEND_DIST_FINGERPRINT="`$FRONTEND_DIST_FINGERPRINT" compose_selfhost build --pull --no-cache app
+  LEARNINGPYRAMID_FRONTEND_DIST_FINGERPRINT="`$FRONTEND_DIST_FINGERPRINT" compose_selfhost up -d --force-recreate --no-deps app
 }
 
 echo "Refreshing app container with the deployed frontend bundle..."
-PLM_FRONTEND_DIST_FINGERPRINT="`$FRONTEND_DIST_FINGERPRINT" compose_selfhost build --no-cache app
-PLM_FRONTEND_DIST_FINGERPRINT="`$FRONTEND_DIST_FINGERPRINT" compose_selfhost up -d --force-recreate app
+LEARNINGPYRAMID_FRONTEND_DIST_FINGERPRINT="`$FRONTEND_DIST_FINGERPRINT" compose_selfhost build --no-cache app
+LEARNINGPYRAMID_FRONTEND_DIST_FINGERPRINT="`$FRONTEND_DIST_FINGERPRINT" compose_selfhost up -d --force-recreate app
 
 if ! wait_for_expected_app_container_frontend 10 2; then
   echo "Warning: app container does not expose the freshly deployed frontend bundle yet." >&2
@@ -1025,8 +1025,8 @@ fi
 echo "Verified app container frontend bundle: asset=`$LAST_APP_FRONTEND_ENTRY_ASSET fingerprint=`$LAST_APP_FRONTEND_FINGERPRINT"
 compose_selfhost ps
 
-PUBLIC_HOST=`$(grep '^PLM_PUBLIC_HOST=' .env | cut -d= -f2- | tr -d '\r' | xargs || true)
-TRUSTED_HOSTS=`$(grep '^PLM_TRUSTED_HOSTS=' .env | cut -d= -f2- | tr -d '\r' | xargs || true)
+PUBLIC_HOST=`$(grep '^LEARNINGPYRAMID_PUBLIC_HOST=' .env | cut -d= -f2- | tr -d '\r' | xargs || true)
+TRUSTED_HOSTS=`$(grep '^LEARNINGPYRAMID_TRUSTED_HOSTS=' .env | cut -d= -f2- | tr -d '\r' | xargs || true)
 HOST_HEADER="`$PUBLIC_HOST"
 if [ -z "`$HOST_HEADER" ] && [ -n "`$TRUSTED_HOSTS" ]; then
   HOST_HEADER=`$(printf '%s' "`$TRUSTED_HOSTS" | cut -d, -f1 | xargs)

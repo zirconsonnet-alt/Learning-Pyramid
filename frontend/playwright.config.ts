@@ -1,8 +1,8 @@
 import { defineConfig, devices } from "@playwright/test"
 
-const port = Number(process.env.PLM_FRONTEND_E2E_PORT ?? 4173)
-const baseURL = process.env.PLM_FRONTEND_E2E_BASE_URL ?? `http://127.0.0.1:${port}`
-const command = process.env.PLM_FRONTEND_E2E_USE_DEV_SERVER === "1"
+const port = Number(process.env.LEARNINGPYRAMID_FRONTEND_E2E_PORT ?? 4173)
+const baseURL = process.env.LEARNINGPYRAMID_FRONTEND_E2E_BASE_URL ?? `http://127.0.0.1:${port}`
+const command = process.env.LEARNINGPYRAMID_FRONTEND_E2E_USE_DEV_SERVER === "1"
   ? `pnpm exec vite --host 127.0.0.1 --port ${port} --strictPort`
   : `pnpm exec vite preview --host 127.0.0.1 --port ${port} --strictPort`
 

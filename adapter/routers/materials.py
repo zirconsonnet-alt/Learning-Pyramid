@@ -9,6 +9,7 @@ from adapter.mappers import (
     recall_point_to_dto,
     video_watch_progress_to_dto,
 )
+from adapter.scoped_projects import ScopedProject, resolve_scoped_project
 from adapter.schemas import (
     AddInstanceRequest,
     AddLearningObjectContainerRequest,
@@ -31,81 +32,76 @@ from adapter.deps import get_auth_store
 router = APIRouter()
 
 
-@router.get("/projects/{projectId}/instances")
-def list_instances(projectId: str, api: SystemAPI = Depends(get_api)) -> dict:
-    project_binding = api.get_project_material_source_binding(projectId)  # type: ignore[arg-type]
-    media_service = api._instance_media_service()
-    items = []
-    for instance in api.list_instances(projectId):  # type: ignore[arg-type]
-        media_binding = media_service.get_instance_media_binding(projectId, str(instance.instance_id))
-        effective_source_kind = media_binding.source_kind if media_binding is not None else project_binding.source_kind
-        items.append(
-            instance_to_dto(
-                instance,
-                media_source_kind=effective_source_kind.value,
-                playback_kind="FILE" if media_binding is None else media_binding.playback_kind,
-                duration_ms=None if media_binding is None else media_binding.duration_ms,
-            )
+@router.get("/subjects/{subjectId}/projects/{projectId}/instances")
+def list_instances(project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
+    items = [
+        instance_to_dto(
+            item.instance,
+            media_source_kind=item.media_source_kind,
+            playback_kind=item.playback_kind,
+            duration_ms=item.duration_ms,
         )
+        for item in api.list_instances_with_media_summary(project.internal_project_id)  # type: ignore[arg-type]
+    ]
     return {"ok": True, "data": items}
 
 
-@router.post("/projects/{projectId}/instances")
-def add_instance(projectId: str, req: AddInstanceRequest, api: SystemAPI = Depends(get_api)) -> dict:
-    iid = api.add_instance(projectId, req.materialId)  # type: ignore[arg-type]
+@router.post("/subjects/{subjectId}/projects/{projectId}/instances")
+def add_instance(req: AddInstanceRequest, project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
+    iid = api.add_instance(project.internal_project_id, req.materialId)  # type: ignore[arg-type]
     return {"ok": True, "data": {"instanceId": str(iid)}}
 
 
-@router.post("/projects/{projectId}/initialize-book-learning-objects")
+@router.post("/subjects/{subjectId}/projects/{projectId}/initialize-book-learning-objects")
 def initialize_book_learning_objects(
-    projectId: str,
     req: InitializeBookLearningObjectsRequest,
+    project: ScopedProject = Depends(resolve_scoped_project),
     api: SystemAPI = Depends(get_api),
 ) -> dict:
     result = api.initialize_book_learning_objects(  # type: ignore[arg-type]
-        projectId,
+        project.internal_project_id,
         outline_items=tuple((int(item.depth), item.title) for item in req.items),
     )
     return {"ok": True, "data": result}
 
 
-@router.post("/projects/{projectId}/initialize-book-learning-objects-from-material")
+@router.post("/subjects/{subjectId}/projects/{projectId}/initialize-book-learning-objects-from-material")
 def initialize_book_learning_objects_from_material(
-    projectId: str,
     req: InitializeBookLearningObjectsFromMaterialRequest,
+    project: ScopedProject = Depends(resolve_scoped_project),
     api: SystemAPI = Depends(get_api),
 ) -> dict:
     result = api.initialize_book_learning_objects_from_subject_material(  # type: ignore[arg-type]
-        projectId,
+        project.internal_project_id,
         source_material_id=req.sourceMaterialId,
     )
     return {"ok": True, "data": result}
 
 
-@router.post("/projects/{projectId}/sync-learning-objects-from-fs")
-def sync_learning_objects_from_fs(projectId: str, api: SystemAPI = Depends(get_api)) -> dict:
-    report = api.sync_learning_objects_from_fs(projectId)  # type: ignore[arg-type]
+@router.post("/subjects/{subjectId}/projects/{projectId}/sync-learning-objects-from-fs")
+def sync_learning_objects_from_fs(project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
+    report = api.sync_learning_objects_from_fs(project.internal_project_id)  # type: ignore[arg-type]
     return {"ok": True, "data": report}
 
 
-@router.post("/projects/{projectId}/import-learning-objects-from-browser")
+@router.post("/subjects/{subjectId}/projects/{projectId}/import-learning-objects-from-browser")
 def import_learning_objects_from_browser(
-    projectId: str,
     req: ImportBrowserDirectoryRequest,
+    project: ScopedProject = Depends(resolve_scoped_project),
     api: SystemAPI = Depends(get_api),
 ) -> dict:
     report = api.import_learning_objects_from_browser_scan(  # type: ignore[arg-type]
-        projectId,
+        project.internal_project_id,
         root_title=req.rootTitle,
         relative_file_paths=req.relativeFilePaths,
     )
     return {"ok": True, "data": report}
 
 
-@router.get("/projects/{projectId}/baidu-netdisk/files")
+@router.get("/subjects/{subjectId}/projects/{projectId}/baidu-netdisk/files")
 def list_baidu_netdisk_files(
-    projectId: str,
     request: Request,
+    project: ScopedProject = Depends(resolve_scoped_project),
     accountId: str = Query(min_length=1),
     dirPath: str = Query(default="/"),
     page: int = Query(default=1, ge=1),
@@ -113,6 +109,7 @@ def list_baidu_netdisk_files(
     api: SystemAPI = Depends(get_api),
     auth_store: AuthStore = Depends(get_auth_store),
 ) -> dict:
+    _ = project
     user = require_request_auth_user(request)
     data = api.list_baidu_netdisk_files(
         auth_store=auth_store,
@@ -125,17 +122,17 @@ def list_baidu_netdisk_files(
     return {"ok": True, "data": data}
 
 
-@router.post("/projects/{projectId}/import-learning-objects-from-baidu-netdisk")
+@router.post("/subjects/{subjectId}/projects/{projectId}/import-learning-objects-from-baidu-netdisk")
 def import_learning_objects_from_baidu_netdisk(
-    projectId: str,
     req: ImportLearningObjectsFromBaiduNetdiskRequest,
     request: Request,
+    project: ScopedProject = Depends(resolve_scoped_project),
     api: SystemAPI = Depends(get_api),
     auth_store: AuthStore = Depends(get_auth_store),
 ) -> dict:
     user = require_request_auth_user(request)
     report = api.import_learning_objects_from_baidu_netdisk(  # type: ignore[arg-type]
-        projectId,
+        project.internal_project_id,
         auth_store=auth_store,
         user_id=user.user_id,
         account_id=req.accountId,
@@ -144,68 +141,68 @@ def import_learning_objects_from_baidu_netdisk(
     return {"ok": True, "data": report}
 
 
-@router.get("/projects/{projectId}/missing-instances")
-def list_missing_instances(projectId: str, api: SystemAPI = Depends(get_api)) -> dict:
-    ids = api.list_missing_instances(projectId)  # type: ignore[arg-type]
+@router.get("/subjects/{subjectId}/projects/{projectId}/missing-instances")
+def list_missing_instances(project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
+    ids = api.list_missing_instances(project.internal_project_id)  # type: ignore[arg-type]
     return {"ok": True, "data": {"instanceIds": [str(x) for x in ids]}}
 
 
-@router.get("/projects/{projectId}/video-watch-progress")
+@router.get("/subjects/{subjectId}/projects/{projectId}/video-watch-progress")
 def list_video_watch_progress(
-    projectId: str,
     instanceIds: list[str] | None = Query(default=None),
+    project: ScopedProject = Depends(resolve_scoped_project),
     api: SystemAPI = Depends(get_api),
 ) -> dict:
     ids = None if instanceIds is None else tuple(InstanceId(item) for item in instanceIds)
-    items = api.list_video_watch_progress(projectId, instance_ids=ids)  # type: ignore[arg-type]
-    return {"ok": True, "data": {str(item.instance_id): video_watch_progress_to_dto(item) for item in items}}
+    items = api.list_video_watch_progress(project.internal_project_id, instance_ids=ids)  # type: ignore[arg-type]
+    return {"ok": True, "data": {str(item.instance_id): video_watch_progress_to_dto(item, public_project_id=project.project_id) for item in items}}
 
 
-@router.post("/projects/{projectId}/instances/{instanceId}/video-watch-progress/ranges")
+@router.post("/subjects/{subjectId}/projects/{projectId}/instances/{instanceId}/video-watch-progress/ranges")
 def record_video_watch_progress_range(
-    projectId: str,
     instanceId: str,
     req: VideoWatchProgressRangeRequest,
+    project: ScopedProject = Depends(resolve_scoped_project),
     api: SystemAPI = Depends(get_api),
 ) -> dict:
     item = api.record_video_watch_progress_range(  # type: ignore[arg-type]
-        projectId,
+        project.internal_project_id,
         InstanceId(instanceId),
         start_ms=req.startMs,
         end_ms=req.endMs,
         duration_ms=req.durationMs,
     )
-    return {"ok": True, "data": video_watch_progress_to_dto(item)}
+    return {"ok": True, "data": video_watch_progress_to_dto(item, public_project_id=project.project_id)}
 
 
-@router.post("/projects/{projectId}/instances/{instanceId}/video-watch-progress/completed")
+@router.post("/subjects/{subjectId}/projects/{projectId}/instances/{instanceId}/video-watch-progress/completed")
 def mark_video_watch_progress_completed(
-    projectId: str,
     instanceId: str,
     req: VideoWatchProgressCompletedRequest,
+    project: ScopedProject = Depends(resolve_scoped_project),
     api: SystemAPI = Depends(get_api),
 ) -> dict:
     item = api.mark_video_watch_progress_completed(  # type: ignore[arg-type]
-        projectId,
+        project.internal_project_id,
         InstanceId(instanceId),
         duration_ms=req.durationMs,
     )
-    return {"ok": True, "data": video_watch_progress_to_dto(item)}
+    return {"ok": True, "data": video_watch_progress_to_dto(item, public_project_id=project.project_id)}
 
 
-@router.get("/projects/{projectId}/instances/{instanceId}/recall-points")
-def list_recall_points_by_instance(projectId: str, instanceId: str, api: SystemAPI = Depends(get_api)) -> dict:
-    ids = api.list_recall_points_by_instance(projectId, InstanceId(instanceId))  # type: ignore[arg-type]
+@router.get("/subjects/{subjectId}/projects/{projectId}/instances/{instanceId}/recall-points")
+def list_recall_points_by_instance(instanceId: str, project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
+    ids = api.list_recall_points_by_instance(project.internal_project_id, InstanceId(instanceId))  # type: ignore[arg-type]
     return {"ok": True, "data": {"recallPointIds": [str(x) for x in ids]}}
 
 
-@router.post("/projects/{projectId}/instances/remap-recall-points")
+@router.post("/subjects/{subjectId}/projects/{projectId}/instances/remap-recall-points")
 def bulk_remap_recall_points_instance(
-    projectId: str, req: BulkRemapRecallPointsInstanceRequest, api: SystemAPI = Depends(get_api)
+    req: BulkRemapRecallPointsInstanceRequest, project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)
 ) -> dict:
     rp_ids = None if req.recallPointIds is None else tuple(RecallPointId(x) for x in req.recallPointIds)
     n = api.bulk_remap_recall_points_instance(  # type: ignore[arg-type]
-        projectId,
+        project.internal_project_id,
         from_instance_id=InstanceId(req.fromInstanceId),
         to_instance_id=InstanceId(req.toInstanceId),
         recall_point_ids=rp_ids,
@@ -213,58 +210,58 @@ def bulk_remap_recall_points_instance(
     return {"ok": True, "data": {"movedCount": int(n)}}
 
 
-@router.post("/projects/{projectId}/learning-objects/leaf")
-def add_learning_object_leaf(projectId: str, req: AddLearningObjectLeafRequest, api: SystemAPI = Depends(get_api)) -> dict:
+@router.post("/subjects/{subjectId}/projects/{projectId}/learning-objects/leaf")
+def add_learning_object_leaf(req: AddLearningObjectLeafRequest, project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
     parent = None if req.parentId is None else LearningObjectNodeId(req.parentId)
     nid = api.add_learning_object_leaf(  # type: ignore[arg-type]
-        projectId, parent_id=parent, instance_id=InstanceId(req.instanceId), title=req.title
+        project.internal_project_id, parent_id=parent, instance_id=InstanceId(req.instanceId), title=req.title
     )
     return {"ok": True, "data": {"nodeId": str(nid)}}
 
 
-@router.post("/projects/{projectId}/learning-objects/container")
+@router.post("/subjects/{subjectId}/projects/{projectId}/learning-objects/container")
 def add_learning_object_container(
-    projectId: str, req: AddLearningObjectContainerRequest, api: SystemAPI = Depends(get_api)
+    req: AddLearningObjectContainerRequest, project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)
 ) -> dict:
     parent = None if req.parentId is None else LearningObjectNodeId(req.parentId)
     children = tuple(LearningObjectNodeId(x) for x in req.children)
     nid = api.add_learning_object_container(  # type: ignore[arg-type]
-        projectId, parent_id=parent, children=children, title=req.title
+        project.internal_project_id, parent_id=parent, children=children, title=req.title
     )
     return {"ok": True, "data": {"nodeId": str(nid)}}
 
 
-@router.get("/projects/{projectId}/learning-objects/{nodeId}")
-def get_learning_object_node(projectId: str, nodeId: str, api: SystemAPI = Depends(get_api)) -> dict:
-    n = api.get_learning_object_node(projectId, nodeId)  # type: ignore[arg-type]
-    return {"ok": True, "data": learning_object_node_to_dto(n)}
+@router.get("/subjects/{subjectId}/projects/{projectId}/learning-objects/{nodeId}")
+def get_learning_object_node(nodeId: str, project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
+    n = api.get_learning_object_node(project.internal_project_id, nodeId)  # type: ignore[arg-type]
+    return {"ok": True, "data": learning_object_node_to_dto(n, public_project_id=project.project_id)}
 
 
-@router.get("/projects/{projectId}/learning-object-nodes")
-def list_learning_object_nodes(projectId: str, api: SystemAPI = Depends(get_api)) -> dict:
-    items = [learning_object_node_to_dto(n) for n in api.list_learning_object_nodes(projectId)]  # type: ignore[arg-type]
+@router.get("/subjects/{subjectId}/projects/{projectId}/learning-object-nodes")
+def list_learning_object_nodes(project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
+    items = [learning_object_node_to_dto(n, public_project_id=project.project_id) for n in api.list_learning_object_nodes(project.internal_project_id)]  # type: ignore[arg-type]
     return {"ok": True, "data": items}
 
 
-@router.get("/projects/{projectId}/learning-objects/{nodeId}/recall-points")
-def list_recall_points_by_learning_object_node(projectId: str, nodeId: str, api: SystemAPI = Depends(get_api)) -> dict:
-    items = [recall_point_to_dto(rp) for rp in api.list_recall_points_by_learning_object_node(projectId, nodeId)]  # type: ignore[arg-type]
+@router.get("/subjects/{subjectId}/projects/{projectId}/learning-objects/{nodeId}/recall-points")
+def list_recall_points_by_learning_object_node(nodeId: str, project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
+    items = [recall_point_to_dto(rp, public_project_id=project.project_id) for rp in api.list_recall_points_by_learning_object_node(project.internal_project_id, nodeId)]  # type: ignore[arg-type]
     return {"ok": True, "data": items}
 
 
-@router.get("/projects/{projectId}/learning-objects/{nodeId}/exports/recall-points")
-def export_recall_points_by_learning_object_node(projectId: str, nodeId: str, api: SystemAPI = Depends(get_api)) -> dict:
-    items = [recall_point_to_dto(rp) for rp in api.export_recall_points_by_learning_object_node(projectId, nodeId)]  # type: ignore[arg-type]
+@router.get("/subjects/{subjectId}/projects/{projectId}/learning-objects/{nodeId}/exports/recall-points")
+def export_recall_points_by_learning_object_node(nodeId: str, project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
+    items = [recall_point_to_dto(rp, public_project_id=project.project_id) for rp in api.export_recall_points_by_learning_object_node(project.internal_project_id, nodeId)]  # type: ignore[arg-type]
     return {"ok": True, "data": items}
 
 
-@router.get("/projects/{projectId}/learning-objects/{nodeId}/exports/asr")
-def export_asr_by_learning_object_node(projectId: str, nodeId: str, api: SystemAPI = Depends(get_api)) -> dict:
-    items = [asr_artifact_to_dto(art) for art in api.export_asr_by_learning_object_node(projectId, nodeId)]  # type: ignore[arg-type]
+@router.get("/subjects/{subjectId}/projects/{projectId}/learning-objects/{nodeId}/exports/asr")
+def export_asr_by_learning_object_node(nodeId: str, project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
+    items = [asr_artifact_to_dto(art, public_project_id=project.project_id) for art in api.export_asr_by_learning_object_node(project.internal_project_id, nodeId)]  # type: ignore[arg-type]
     return {"ok": True, "data": items}
 
 
-@router.get("/projects/{projectId}/learning-object-roots")
-def list_learning_object_roots(projectId: str, api: SystemAPI = Depends(get_api)) -> dict:
-    ids = api.list_learning_object_roots(projectId)  # type: ignore[arg-type]
+@router.get("/subjects/{subjectId}/projects/{projectId}/learning-object-roots")
+def list_learning_object_roots(project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
+    ids = api.list_learning_object_roots(project.internal_project_id)  # type: ignore[arg-type]
     return {"ok": True, "data": {"rootLearningObjectNodeIds": [str(x) for x in ids]}}

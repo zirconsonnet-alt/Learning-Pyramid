@@ -4,6 +4,7 @@ import { Copy, Send, Sparkles, Square } from "lucide-react"
 import type { Instance } from "@/ui/api/instances"
 import type { MaterialSourceKind } from "@/ui/api/projects"
 import { ApiError } from "@/ui/api/http"
+import type { ProjectScope } from "@/ui/api/projectScope"
 import { askProjectLlmStream } from "@/ui/api/system"
 import { MarkdownRichText } from "@/ui/components/MarkdownRichText"
 import { Button } from "@/ui/components/ui/button"
@@ -28,6 +29,7 @@ type WorkbenchPetAssistantTurn = {
 }
 
 type WorkbenchPetAssistantProps = {
+  subjectId: string
   projectId: string
   instance: Instance | null
   currentMs: number
@@ -122,6 +124,7 @@ async function copyText(text: string) {
 }
 
 export function WorkbenchPetAssistant({
+  subjectId,
   projectId,
   instance,
   currentMs,
@@ -130,6 +133,7 @@ export function WorkbenchPetAssistant({
   onAssistantStateChange,
   onOpenEvidence,
 }: WorkbenchPetAssistantProps) {
+  const projectScope: ProjectScope = { subjectId, projectId }
   const [composer, setComposer] = useState("")
   const [turns, setTurns] = useState<WorkbenchPetAssistantTurn[]>([])
   const [status, setStatus] = useState<string | null>(null)
@@ -141,7 +145,7 @@ export function WorkbenchPetAssistant({
   const capabilitiesQ = useSystemCapabilities()
   const authEnabled = capabilitiesQ.data?.authEnabled ?? false
   const membershipQ = useMembershipSummary(authEnabled)
-  const materialSourceBindingQ = useProjectMaterialSourceBinding(projectId)
+  const materialSourceBindingQ = useProjectMaterialSourceBinding(projectScope)
   const directoryBinding = useProjectDirectoryBinding(projectId)
 
   const sourceKind = (instance?.mediaSourceKind ?? materialSourceBindingQ.data?.sourceKind ?? null) as MaterialSourceKind | null
@@ -179,7 +183,7 @@ export function WorkbenchPetAssistant({
     if (!canUseCourseAgent || !instance || !sourceKind) return null
     try {
       const document = await loadSubtitleDocumentForInstance({
-        projectId,
+        scope: projectScope,
         instance,
         sourceKind,
       })
@@ -213,7 +217,7 @@ export function WorkbenchPetAssistant({
       .join("\n\n")
 
     const result = await askProjectLlmStream(
-      projectId,
+      projectScope,
       {
         prompt: buildConversationPrompt(params.historyMessages, params.prompt),
         systemPrompt: buildWorkbenchSystemPrompt(nodeLabel),
@@ -270,6 +274,7 @@ export function WorkbenchPetAssistant({
         try {
           setStatus("正在检索当前内容字幕...")
           const result = await askCourseAgent({
+            subjectId,
             projectId,
             instance,
             sourceKind,

@@ -72,6 +72,7 @@ from backend.models.types import (
 )
 from backend.system.persistence_json import (
     SCHEMA_VERSION,
+    decode_project_material_source_binding_payload,
     decode_project_config_payload,
     decode_project_storage_config_payload,
 )
@@ -254,9 +255,8 @@ class JsonSnapshotStore:
 
 
 class SQLiteSnapshotStore:
-    def __init__(self, path: str | Path, *, legacy_json_path: str | Path | None = None) -> None:
+    def __init__(self, path: str | Path) -> None:
         self._path = Path(path).expanduser().resolve()
-        self._legacy_json_path = None if legacy_json_path is None else Path(legacy_json_path).expanduser().resolve()
         self._lock = threading.RLock()
         self._init_db()
 
@@ -323,7 +323,9 @@ class SQLiteSnapshotStore:
                         project_state TEXT NOT NULL,
                         created_at_ms INTEGER NOT NULL,
                         deleted_at_ms INTEGER NULL,
-                        snapshot_json TEXT NOT NULL,
+                        subject_id TEXT NULL,
+                        scoped_project_id TEXT NULL,
+                        project_sequence INTEGER NOT NULL DEFAULT 0,
                         updated_at TEXT NOT NULL
                     )
                     """
@@ -341,6 +343,17 @@ class SQLiteSnapshotStore:
                         project_root TEXT NOT NULL,
                         learning_object_root TEXT NOT NULL,
                         fs_sync_policy TEXT NOT NULL,
+                        updated_at_ms INTEGER NOT NULL,
+                        FOREIGN KEY(project_id) REFERENCES project_snapshots(project_id) ON DELETE CASCADE
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS project_material_source_binding_index (
+                        project_id TEXT PRIMARY KEY,
+                        source_kind TEXT NOT NULL,
+                        source_root_label TEXT NULL,
                         updated_at_ms INTEGER NOT NULL,
                         FOREIGN KEY(project_id) REFERENCES project_snapshots(project_id) ON DELETE CASCADE
                     )
@@ -524,12 +537,6 @@ class SQLiteSnapshotStore:
                     CREATE INDEX IF NOT EXISTS idx_entry_registration_index_review_chain
                     ON entry_registration_index (project_id, review_chain_id)
                     """
-                )
-                self._ensure_column(
-                    conn,
-                    "entry_registration_index",
-                    "registration_seq",
-                    "INTEGER NOT NULL DEFAULT 0",
                 )
                 conn.execute(
                     """
@@ -776,67 +783,99 @@ class SQLiteSnapshotStore:
                     ON recall_point_review_record_index (project_id, occurred_at_ms, record_id)
                     """
                 )
-                conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS snapshot_state (
-                        slot INTEGER PRIMARY KEY CHECK (slot = 1),
-                        snapshot_json TEXT NOT NULL,
-                        updated_at TEXT NOT NULL
-                    )
-                    """
-                )
-                self._ensure_column(conn, "recall_point_index", "payload_json", "TEXT NULL")
-                self._ensure_column(conn, "layer_state_index", "aggregation_k_node", "INTEGER NOT NULL DEFAULT 8")
-                self._ensure_column(conn, "layer_state_index", "aggregation_k_point", "INTEGER NOT NULL DEFAULT 64")
-                self._ensure_column(
-                    conn,
-                    "learning_task_node_index",
-                    "node_origin",
-                    "TEXT NOT NULL DEFAULT 'AGGREGATION'",
-                )
-                self._ensure_column(conn, "learning_task_node_index", "bound_learning_object_node_id", "TEXT NULL")
-                self._ensure_column(conn, "learning_task_node_index", "object_mirror_status", "TEXT NULL")
-                self._ensure_column(
-                    conn,
-                    "layer_state_index",
-                    "aggregation_cycle_state",
-                    "TEXT NOT NULL DEFAULT 'DONE'",
-                )
-                self._ensure_column(conn, "layer_state_index", "pending_roll_up_parent_node_id", "TEXT NULL")
-                self._ensure_column(
-                    conn,
-                    "layer_state_index",
-                    "normal_tick_quota_remaining",
-                    "INTEGER NOT NULL DEFAULT 1",
-                )
+                self._validate_current_store_schema(conn)
                 conn.commit()
             finally:
                 conn.close()
 
     @staticmethod
-    def _ensure_column(conn: sqlite3.Connection, table_name: str, column_name: str, column_sql: str) -> None:
+    def _validate_required_columns(conn: sqlite3.Connection, table_name: str, required_columns: set[str]) -> None:
         rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
         existing = {str(row["name"]) for row in rows}
-        if column_name in existing:
-            return
-        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}")
+        missing = sorted(required_columns - existing)
+        if missing:
+            raise RuntimeError(f"{table_name} schema is not current; missing columns: {', '.join(missing)}")
+
+    @classmethod
+    def _validate_current_store_schema(cls, conn: sqlite3.Connection) -> None:
+        cls._validate_required_columns(
+            conn,
+            "project_snapshots",
+            {
+                "project_id",
+                "project_title",
+                "project_state",
+                "created_at_ms",
+                "deleted_at_ms",
+                "subject_id",
+                "scoped_project_id",
+                "project_sequence",
+                "updated_at",
+            },
+        )
+        cls._validate_required_columns(
+            conn,
+            "project_material_source_binding_index",
+            {"project_id", "source_kind", "source_root_label", "updated_at_ms"},
+        )
+        cls._validate_required_columns(
+            conn,
+            "recall_point_index",
+            {
+                "project_id",
+                "recall_point_id",
+                "created_at_ms",
+                "anchor_instance_id",
+                "anchor_position",
+                "question_plain_text",
+                "answer_plain_text",
+                "insights_count",
+                "payload_json",
+            },
+        )
+        cls._validate_required_columns(
+            conn,
+            "entry_registration_index",
+            {"project_id", "entry_node", "target_layer_index", "review_chain_id", "registration_seq"},
+        )
+        cls._validate_required_columns(
+            conn,
+            "learning_task_node_index",
+            {
+                "project_id",
+                "node_id",
+                "node_kind",
+                "parent_id",
+                "bound_learning_task_id",
+                "node_origin",
+                "bound_learning_object_node_id",
+                "object_mirror_status",
+                "title",
+                "child_count",
+                "children_json",
+            },
+        )
+        cls._validate_required_columns(
+            conn,
+            "layer_state_index",
+            {
+                "project_id",
+                "layer_id",
+                "layer_index",
+                "layer_mode",
+                "orchestrator_managed_review_chain_ids_json",
+                "aggregation_k_node",
+                "aggregation_k_point",
+                "aggregation_cycle_state",
+                "pending_roll_up_parent_node_id",
+                "normal_tick_quota_remaining",
+            },
+        )
 
     @staticmethod
     def _material_display_name(material_id: str) -> str:
         path = PurePosixPath(str(material_id or "").strip())
         return path.name or path.as_posix()
-
-    @staticmethod
-    def _decode_audit_event_kind(raw: object) -> AuditEventKind:
-        value = str(raw)
-        legacy_map = {
-            "CREATE_LLM_SESSION": AuditEventKind.EDIT_PROJECT_CONFIG,
-            "LLM_CHAT_TURN": AuditEventKind.EDIT_PROJECT_CONFIG,
-            "CLOSE_LLM_SESSION": AuditEventKind.EDIT_PROJECT_CONFIG,
-        }
-        if value in legacy_map:
-            return legacy_map[value]
-        return AuditEventKind(value)
 
     @staticmethod
     def _rich_content_to_plain_text(raw: object) -> str:
@@ -917,6 +956,7 @@ class SQLiteSnapshotStore:
         project_payload: dict[str, Any],
     ) -> None:
         conn.execute("DELETE FROM project_storage_config_index WHERE project_id = ?", (project_id,))
+        conn.execute("DELETE FROM project_material_source_binding_index WHERE project_id = ?", (project_id,))
         conn.execute("DELETE FROM project_config_index WHERE project_id = ?", (project_id,))
         conn.execute("DELETE FROM instance_index WHERE project_id = ?", (project_id,))
         conn.execute("DELETE FROM instance_media_binding_index WHERE project_id = ?", (project_id,))
@@ -958,6 +998,28 @@ class SQLiteSnapshotStore:
                     str(storage_config.get("learningObjectRoot", "learning_objects")),
                     str(storage_config.get("fsSyncPolicy", "")),
                     int(storage_config.get("updatedAtMs", 0)),
+                ),
+            )
+
+        material_source_binding = project_payload.get("projectMaterialSourceBinding")
+        if isinstance(material_source_binding, dict):
+            conn.execute(
+                """
+                INSERT INTO project_material_source_binding_index (
+                    project_id,
+                    source_kind,
+                    source_root_label,
+                    updated_at_ms
+                )
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    project_id,
+                    str(material_source_binding.get("sourceKind", "")),
+                    None
+                    if material_source_binding.get("sourceRootLabel") is None
+                    else str(material_source_binding.get("sourceRootLabel")),
+                    int(material_source_binding.get("updatedAtMs", 0)),
                 ),
             )
 
@@ -1533,127 +1595,19 @@ class SQLiteSnapshotStore:
                 ),
             )
 
-    @staticmethod
-    def _strip_externalized_project_payload(project_payload: dict[str, Any]) -> dict[str, Any]:
-        # `project_snapshots.snapshot_json` is kept only as a compatibility/export shell.
-        # The authoritative project facts now live in normalized index tables.
-        raw = dict(project_payload)
-        raw.pop("instances", None)
-        raw.pop("instanceMediaBindings", None)
-        raw.pop("learningObjectNodes", None)
-        raw.pop("recallPoints", None)
-        raw.pop("learningTasks", None)
-        raw.pop("learningTaskNodes", None)
-        raw.pop("entryRegs", None)
-        raw.pop("rangeSnapshots", None)
-        raw.pop("reviewTasks", None)
-        raw.pop("convergences", None)
-        raw.pop("reviewChains", None)
-        raw.pop("reviewTaskQueue", None)
-        raw.pop("layers", None)
-        raw.pop("layersByIndex", None)
-        raw.pop("auditLogEvents", None)
-        raw.pop("asrArtifacts", None)
-        raw.pop("aggregationQueues", None)
-        raw.pop("aggregationEvents", None)
-        raw.pop("materialAllowlist", None)
-        raw.pop("mediaAssets", None)
-        raw.pop("recallPointReviewRecords", None)
-        raw.pop("aggregationKNode", None)
-        raw.pop("aggregationKPoint", None)
-        raw.pop("aggregationCycleState", None)
-        raw.pop("pendingRollUpParentNodeId", None)
-        raw.pop("normalTickQuotaRemaining", None)
-        return raw
-
-    @staticmethod
-    def _project_payload_uses_externalized_fields(project_payload: dict[str, Any]) -> bool:
-        if dict(project_payload.get("instances", {})):
-            return True
-        if dict(project_payload.get("learningObjectNodes", {})):
-            return True
-        if dict(project_payload.get("recallPoints", {})):
-            return True
-        if dict(project_payload.get("learningTasks", {})):
-            return True
-        if dict(project_payload.get("learningTaskNodes", {})):
-            return True
-        if dict(project_payload.get("entryRegs", {})):
-            return True
-        if dict(project_payload.get("rangeSnapshots", {})):
-            return True
-        if dict(project_payload.get("reviewTasks", {})):
-            return True
-        if dict(project_payload.get("convergences", {})):
-            return True
-        if dict(project_payload.get("reviewChains", {})):
-            return True
-        if project_payload.get("reviewTaskQueue") is not None:
-            return True
-        if dict(project_payload.get("layers", {})):
-            return True
-        if dict(project_payload.get("layersByIndex", {})):
-            return True
-        if dict(project_payload.get("auditLogEvents", {})):
-            return True
-        if dict(project_payload.get("asrArtifacts", {})):
-            return True
-        if dict(project_payload.get("aggregationQueues", {})):
-            return True
-        if dict(project_payload.get("aggregationEvents", {})):
-            return True
-        if project_payload.get("materialAllowlist") is not None:
-            return True
-        if dict(project_payload.get("mediaAssets", {})):
-            return True
-        if dict(project_payload.get("recallPointReviewRecords", {})):
-            return True
-        if dict(project_payload.get("aggregationKNode", {})):
-            return True
-        if dict(project_payload.get("aggregationKPoint", {})):
-            return True
-        if dict(project_payload.get("aggregationCycleState", {})):
-            return True
-        if dict(project_payload.get("pendingRollUpParentNodeId", {})):
-            return True
-        if dict(project_payload.get("normalTickQuotaRemaining", {})):
-            return True
-        return False
-
     def _recall_point_payload_from_index_row(
         self,
         *,
         project_id: str,
         row: sqlite3.Row,
-        legacy_payloads: dict[str, Any],
     ) -> dict[str, Any]:
         raw_payload = row["payload_json"] if "payload_json" in row.keys() else None
-        if raw_payload is not None:
-            payload = json.loads(str(raw_payload))
-            if isinstance(payload, dict):
-                return payload
-
-        legacy_payload = legacy_payloads.get(str(row["recall_point_id"]))
-        if isinstance(legacy_payload, dict):
-            return dict(legacy_payload)
-
-        return {
-            "projectId": str(project_id),
-            "recallPointId": str(row["recall_point_id"]),
-            "createdAtMs": int(row["created_at_ms"]),
-            "state": RecallPointState.ACTIVE.value,
-            "deletedAtMs": None,
-            "question": [{"kind": "TEXT", "text": str(row["question_plain_text"])}],
-            "answer": [{"kind": "TEXT", "text": str(row["answer_plain_text"])}],
-            "anchor": None
-            if not str(row["anchor_instance_id"] or "").strip() and not str(row["anchor_position"] or "").strip()
-            else {
-                "instanceId": str(row["anchor_instance_id"]),
-                "position": str(row["anchor_position"]),
-            },
-            "references": [],
-            "insights": [],
-        }
+        if raw_payload is None or not str(raw_payload).strip():
+            raise RuntimeError(f"recall_point_index.payload_json is required for {project_id}:{row['recall_point_id']}")
+        payload = json.loads(str(raw_payload))
+        if not isinstance(payload, dict):
+            raise ValueError("RecallPoint payload must be a JSON object")
+        return payload
 
     @staticmethod
     def _learning_task_payload_from_index_row(*, project_id: str, row: sqlite3.Row) -> dict[str, Any]:
@@ -1983,7 +1937,7 @@ class SQLiteSnapshotStore:
             project_id=ProjectId(str(project_id)),
             event_id=str(payload["eventId"]),
             occurred_at=cls._ms_to_ts(int(payload["occurredAtMs"])),
-            kind=cls._decode_audit_event_kind(payload["kind"]),
+            kind=AuditEventKind(str(payload["kind"])),
             api_name=str(payload["apiName"]),
             result=AuditResultCode(str(payload["result"])),
             payload=str(payload["payload"]),
@@ -2083,14 +2037,34 @@ class SQLiteSnapshotStore:
             """,
             (str(project_id),),
         ).fetchone()
-        if storage_row is not None:
-            hydrated["projectStorageConfig"] = {
-                "projectId": str(project_id),
-                "projectRoot": str(storage_row["project_root"]),
-                "learningObjectRoot": str(storage_row["learning_object_root"]),
-                "fsSyncPolicy": str(storage_row["fs_sync_policy"]),
-                "updatedAtMs": int(storage_row["updated_at_ms"]),
-            }
+        if storage_row is None:
+            raise RuntimeError(f"project_storage_config_index row is required for active project {project_id}")
+        hydrated["projectStorageConfig"] = {
+            "projectId": str(project_id),
+            "projectRoot": str(storage_row["project_root"]),
+            "learningObjectRoot": str(storage_row["learning_object_root"]),
+            "fsSyncPolicy": str(storage_row["fs_sync_policy"]),
+            "updatedAtMs": int(storage_row["updated_at_ms"]),
+        }
+
+        material_source_binding_row = conn.execute(
+            """
+            SELECT source_kind, source_root_label, updated_at_ms
+            FROM project_material_source_binding_index
+            WHERE project_id = ?
+            """,
+            (str(project_id),),
+        ).fetchone()
+        if material_source_binding_row is None:
+            raise RuntimeError(f"project_material_source_binding_index row is required for active project {project_id}")
+        hydrated["projectMaterialSourceBinding"] = {
+            "projectId": str(project_id),
+            "sourceKind": str(material_source_binding_row["source_kind"]),
+            "sourceRootLabel": None
+            if material_source_binding_row["source_root_label"] is None
+            else str(material_source_binding_row["source_root_label"]),
+            "updatedAtMs": int(material_source_binding_row["updated_at_ms"]),
+        }
 
         config_row = conn.execute(
             """
@@ -2100,11 +2074,12 @@ class SQLiteSnapshotStore:
             """,
             (str(project_id),),
         ).fetchone()
-        if config_row is not None:
-            config_payload = json.loads(str(config_row["config_json"]))
-            if not isinstance(config_payload, dict):
-                raise ValueError("ProjectConfig payload must be a JSON object")
-            hydrated["projectConfig"] = config_payload
+        if config_row is None:
+            raise RuntimeError(f"project_config_index row is required for active project {project_id}")
+        config_payload = json.loads(str(config_row["config_json"]))
+        if not isinstance(config_payload, dict):
+            raise ValueError("ProjectConfig payload must be a JSON object")
+        hydrated["projectConfig"] = config_payload
 
         instance_rows = conn.execute(
             """
@@ -2183,10 +2158,6 @@ class SQLiteSnapshotStore:
             nodes[str(row["node_id"])] = payload
         hydrated["learningObjectNodes"] = nodes
 
-        # Normalized index tables are authoritative. Do not merge shell-only externalized rows
-        # back into the hydrated payload, otherwise stale compatibility-shell data could be
-        # resurrected during compaction.
-        legacy_recall_points = dict(project_payload.get("recallPoints", {}))
         recall_point_rows = conn.execute(
             """
             SELECT recall_point_id, created_at_ms, anchor_instance_id, anchor_position, question_plain_text,
@@ -2201,7 +2172,6 @@ class SQLiteSnapshotStore:
             str(row["recall_point_id"]): self._recall_point_payload_from_index_row(
                 project_id=str(project_id),
                 row=row,
-                legacy_payloads=legacy_recall_points,
             )
             for row in recall_point_rows
         }
@@ -2470,21 +2440,8 @@ class SQLiteSnapshotStore:
         return hydrated
 
     @staticmethod
-    def _decode_compat_snapshot_payload(raw_snapshot: object) -> dict[str, Any]:
-        if raw_snapshot is None:
-            return {}
-        text = str(raw_snapshot).strip()
-        if not text:
-            return {}
-        payload = json.loads(text)
-        if not isinstance(payload, dict):
-            raise ValueError("Project snapshot must be a JSON object")
-        return payload
-
-    @staticmethod
-    def _project_payload_from_snapshot_row(row: sqlite3.Row, existing_project_payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _project_payload_from_snapshot_row(row: sqlite3.Row) -> dict[str, Any]:
         deleted_at_ms_raw = row["deleted_at_ms"]
-        existing = dict(existing_project_payload or {})
         return {
             "project": {
                 "projectId": str(row["project_id"]),
@@ -2492,10 +2449,9 @@ class SQLiteSnapshotStore:
                 "state": str(row["project_state"]),
                 "createdAtMs": int(row["created_at_ms"]),
                 "deletedAtMs": None if deleted_at_ms_raw is None else int(deleted_at_ms_raw),
-                "subjectId": existing.get("subjectId"),
-                "scopedProjectId": existing.get("scopedProjectId"),
-                "legacyGlobalProjectId": existing.get("legacyGlobalProjectId"),
-                "projectSequence": int(existing.get("projectSequence") or 0),
+                "subjectId": None if row["subject_id"] is None else str(row["subject_id"]),
+                "scopedProjectId": None if row["scoped_project_id"] is None else str(row["scoped_project_id"]),
+                "projectSequence": int(row["project_sequence"] or 0),
             }
         }
 
@@ -2531,20 +2487,14 @@ class SQLiteSnapshotStore:
             ),
         )
 
-    def _hydrate_project_payload_from_row(self, conn: sqlite3.Connection, *, row: sqlite3.Row) -> tuple[dict[str, Any], bool]:
-        compat_payload = self._decode_compat_snapshot_payload(row["snapshot_json"])
-        project_payload = dict(compat_payload)
-        project_payload["project"] = self._project_payload_from_snapshot_row(
-            row,
-            existing_project_payload=dict(project_payload.get("project") or {}),
-        )["project"]
-        return (
-            self._hydrate_project_payload(
-                conn,
-                project_id=str(row["project_id"]),
-                project_payload=project_payload,
-            ),
-            self._project_payload_uses_externalized_fields(compat_payload),
+    def _hydrate_project_payload_from_row(self, conn: sqlite3.Connection, *, row: sqlite3.Row) -> dict[str, Any]:
+        project_payload = self._project_payload_from_snapshot_row(row)
+        if str(row["project_state"]) == ProjectState.DELETED.value:
+            return project_payload
+        return self._hydrate_project_payload(
+            conn,
+            project_id=str(row["project_id"]),
+            project_payload=project_payload,
         )
 
     @staticmethod
@@ -2564,21 +2514,22 @@ class SQLiteSnapshotStore:
     def begin_unit_of_work(self, *, project_id: str | None = None) -> SqlUnitOfWork:
         return SQLitePersistenceUnitOfWork(connect=self._connect, lock=self._lock, project_id=project_id)
 
-    def _load_from_sharded_tables(self, conn: sqlite3.Connection) -> tuple[dict[str, Any] | None, bool]:
+    def _load_from_sharded_tables(self, conn: sqlite3.Connection) -> dict[str, Any] | None:
         system_row = conn.execute(
             "SELECT schema_version, idgen_counters_json FROM system_state WHERE slot = 1"
         ).fetchone()
         global_llm_settings = self._load_global_llm_settings_payload(conn)
         project_rows = conn.execute(
             """
-            SELECT project_id, project_title, project_state, created_at_ms, deleted_at_ms, snapshot_json
+            SELECT project_id, project_title, project_state, created_at_ms, deleted_at_ms,
+                   subject_id, scoped_project_id, project_sequence
             FROM project_snapshots
             ORDER BY project_id ASC
             """
         ).fetchall()
 
         if system_row is None and global_llm_settings is None and not project_rows:
-            return None, False
+            return None
 
         if system_row is None:
             schema_version = 1
@@ -2590,64 +2541,15 @@ class SQLiteSnapshotStore:
             idgen_counters = dict(loaded_counters) if isinstance(loaded_counters, dict) else {}
 
         projects: dict[str, Any] = {}
-        needs_compaction = False
         for row in project_rows:
-            hydrated_payload, row_needs_compaction = self._hydrate_project_payload_from_row(conn, row=row)
-            if row_needs_compaction:
-                needs_compaction = True
-            projects[str(row["project_id"])] = hydrated_payload
+            projects[str(row["project_id"])] = self._hydrate_project_payload_from_row(conn, row=row)
 
-        return (
-            {
-                "schemaVersion": schema_version,
-                "idgenCounters": idgen_counters,
-                "globalLlmSettings": global_llm_settings,
-                "projects": projects,
-            },
-            needs_compaction,
-        )
-
-    def _needs_project_config_index_backfill(self, conn: sqlite3.Connection) -> bool:
-        try:
-            row = conn.execute(
-                """
-                SELECT 1
-                FROM project_snapshots ps
-                LEFT JOIN project_storage_config_index sci ON sci.project_id = ps.project_id
-                LEFT JOIN project_config_index pci ON pci.project_id = ps.project_id
-                WHERE sci.project_id IS NULL OR pci.project_id IS NULL
-                LIMIT 1
-                """
-            ).fetchone()
-        except sqlite3.OperationalError:
-            return True
-        return row is not None
-
-    def _needs_recall_point_payload_backfill(self, conn: sqlite3.Connection) -> bool:
-        try:
-            row = conn.execute(
-                """
-                SELECT 1
-                FROM recall_point_index
-                WHERE payload_json IS NULL OR payload_json = ''
-                LIMIT 1
-                """
-            ).fetchone()
-        except sqlite3.OperationalError:
-            return True
-        return row is not None
-
-    def _read_legacy_sqlite_snapshot(self, conn: sqlite3.Connection) -> dict[str, Any] | None:
-        try:
-            row = conn.execute("SELECT snapshot_json FROM snapshot_state WHERE slot = 1").fetchone()
-        except sqlite3.OperationalError:
-            return None
-        if row is None:
-            return None
-        data = json.loads(str(row["snapshot_json"]))
-        if not isinstance(data, dict):
-            raise ValueError("Legacy SQLite snapshot must be a JSON object")
-        return self._normalize_snapshot(data)
+        return {
+            "schemaVersion": schema_version,
+            "idgenCounters": idgen_counters,
+            "globalLlmSettings": global_llm_settings,
+            "projects": projects,
+        }
 
     @staticmethod
     def _project_snapshot_record(
@@ -2664,7 +2566,11 @@ class SQLiteSnapshotStore:
             project_state=str(project_meta.get("state", "")),
             created_at_ms=int(project_meta.get("createdAtMs", 0)),
             deleted_at_ms=None if deleted_at_ms_raw is None else int(deleted_at_ms_raw),
-            snapshot=SQLiteSnapshotStore._strip_externalized_project_payload(project_payload),
+            subject_id=None if project_meta.get("subjectId") is None else str(project_meta.get("subjectId")),
+            scoped_project_id=None
+            if project_meta.get("scopedProjectId") is None
+            else str(project_meta.get("scopedProjectId")),
+            project_sequence=int(project_meta.get("projectSequence") or 0),
             updated_at=updated_at,
         )
 
@@ -2696,32 +2602,6 @@ class SQLiteSnapshotStore:
                 ),
             )
             self._refresh_project_entity_indexes(uow.connection, project_id=str(project_id), project_payload=payload)
-            uow.connection.execute("DELETE FROM snapshot_state WHERE slot = 1")
-
-    def _read_legacy_snapshot(self) -> dict[str, Any] | None:
-        legacy = self._legacy_json_path
-        if legacy is None or legacy == self._path or not legacy.exists():
-            return None
-        raw = legacy.read_text(encoding="utf-8").strip()
-        if not raw:
-            return None
-        data = json.loads(raw)
-        if not isinstance(data, dict):
-            raise ValueError("Legacy snapshot must be a JSON object")
-        return data
-
-    def _archive_legacy_snapshot(self) -> None:
-        legacy = self._legacy_json_path
-        if legacy is None or legacy == self._path or not legacy.exists():
-            return
-        target = legacy.with_name(f"{legacy.name}.imported.bak")
-        if target.exists():
-            stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-            target = legacy.with_name(f"{legacy.name}.imported-{stamp}.bak")
-        try:
-            os.replace(legacy, target)
-        except OSError:
-            return
 
     @staticmethod
     def _ms_to_ts(ms: int | None) -> datetime | None:
@@ -2733,33 +2613,14 @@ class SQLiteSnapshotStore:
         with self._lock:
             conn = self._connect()
             try:
-                sharded, needs_compaction = self._load_from_sharded_tables(conn)
-                if sharded is not None:
-                    needs_backfill = self._needs_project_config_index_backfill(conn)
-                    needs_recall_point_backfill = self._needs_recall_point_payload_backfill(conn)
-                else:
-                    needs_backfill = False
-                    needs_recall_point_backfill = False
-                legacy_sqlite = self._read_legacy_sqlite_snapshot(conn)
+                sharded = self._load_from_sharded_tables(conn)
             finally:
                 conn.close()
 
             if sharded is not None:
-                if needs_backfill or needs_compaction or needs_recall_point_backfill:
-                    self.save_snapshot(sharded)
-                self._archive_legacy_snapshot()
                 return sharded
 
-            if legacy_sqlite is not None:
-                self.save_snapshot(legacy_sqlite)
-                return self._normalize_snapshot(legacy_sqlite)
-
-            legacy_data = self._read_legacy_snapshot()
-            if legacy_data is None:
-                return None
-            self.save_snapshot(legacy_data)
-            self._archive_legacy_snapshot()
-            return self._normalize_snapshot(legacy_data)
+            return None
 
     def save_snapshot(self, snapshot: dict[str, Any]) -> None:
         normalized = self._normalize_snapshot(snapshot)
@@ -2796,11 +2657,11 @@ class SQLiteSnapshotStore:
                     project_id=str(project_id),
                     project_payload=project_payload,
                 )
-            uow.connection.execute("DELETE FROM snapshot_state WHERE slot = 1")
 
     def list_projects_metadata(self, *, active_only: bool = True) -> tuple[Project, ...]:
         query = """
-            SELECT project_id, project_title, project_state, created_at_ms, deleted_at_ms
+            SELECT project_id, project_title, project_state, created_at_ms, deleted_at_ms,
+                   subject_id, scoped_project_id, project_sequence
             FROM project_snapshots
         """
         params: tuple[object, ...] = tuple()
@@ -2822,6 +2683,9 @@ class SQLiteSnapshotStore:
                 state=ProjectState(str(row["project_state"])),
                 created_at=self._ms_to_ts(int(row["created_at_ms"])),
                 deleted_at=self._ms_to_ts(None if row["deleted_at_ms"] is None else int(row["deleted_at_ms"])),
+                subject_id=None if row["subject_id"] is None else ProjectId(str(row["subject_id"])),
+                scoped_project_id=None if row["scoped_project_id"] is None else ProjectId(str(row["scoped_project_id"])),
+                project_sequence=int(row["project_sequence"] or 0),
             )
             for row in rows
         )
@@ -3005,7 +2869,7 @@ class SQLiteSnapshotStore:
             conn.close()
         out: list[RecallPointId] = []
         for row in rows:
-            raw = self._recall_point_payload_from_index_row(project_id=str(project_id), row=row, legacy_payloads={})
+            raw = self._recall_point_payload_from_index_row(project_id=str(project_id), row=row)
             rp = self._decode_recall_point(project_id=str(project_id), raw=raw)
             if rp.state == RecallPointState.ACTIVE:
                 out.append(rp.recall_point_id)
@@ -3027,7 +2891,7 @@ class SQLiteSnapshotStore:
             conn.close()
         if row is None:
             return None
-        raw = self._recall_point_payload_from_index_row(project_id=str(project_id), row=row, legacy_payloads={})
+        raw = self._recall_point_payload_from_index_row(project_id=str(project_id), row=row)
         return self._decode_recall_point(project_id=str(project_id), raw=raw)
 
     def list_recall_points(self, project_id: str) -> tuple[RecallPoint, ...]:
@@ -3048,7 +2912,7 @@ class SQLiteSnapshotStore:
         return tuple(
             self._decode_recall_point(
                 project_id=str(project_id),
-                raw=self._recall_point_payload_from_index_row(project_id=str(project_id), row=row, legacy_payloads={}),
+                raw=self._recall_point_payload_from_index_row(project_id=str(project_id), row=row),
             )
             for row in rows
         )
@@ -3084,7 +2948,7 @@ class SQLiteSnapshotStore:
         for row in rows:
             item = self._decode_recall_point(
                 project_id=str(project_id),
-                raw=self._recall_point_payload_from_index_row(project_id=str(project_id), row=row, legacy_payloads={}),
+                raw=self._recall_point_payload_from_index_row(project_id=str(project_id), row=row),
             )
             if item.state != RecallPointState.ACTIVE:
                 continue
@@ -3161,7 +3025,7 @@ class SQLiteSnapshotStore:
 
         items: list[RecallPoint] = []
         for row in rows:
-            raw = self._recall_point_payload_from_index_row(project_id=str(project_id), row=row, legacy_payloads={})
+            raw = self._recall_point_payload_from_index_row(project_id=str(project_id), row=row)
             rp = self._decode_recall_point(project_id=str(project_id), raw=raw)
             if rp.state == RecallPointState.ACTIVE:
                 items.append(rp)
@@ -3454,7 +3318,7 @@ class SQLiteSnapshotStore:
         recall_point_map = {
             str(row["recall_point_id"]): self._decode_recall_point(
                 project_id=str(project_id),
-                raw=self._recall_point_payload_from_index_row(project_id=str(project_id), row=row, legacy_payloads={}),
+                raw=self._recall_point_payload_from_index_row(project_id=str(project_id), row=row),
             )
             for row in recall_point_rows
         }

@@ -10,6 +10,7 @@ from backend.models.errors import NotFound, PreconditionFailure
 from backend.models.layer import Layer
 from backend.models.project import Project
 from backend.models.project_config import ProjectConfig
+from backend.models.project_material_source_binding import ProjectMaterialSourceBinding
 from backend.models.project_storage_config import ProjectStorageConfig
 from backend.models.review_task_queue import ReviewTaskQueue
 from backend.repositories.persistence_interfaces import (
@@ -22,6 +23,7 @@ from backend.repositories.persistence_interfaces import (
 )
 from backend.system.persistence_json import (
     encode_project_config_payload,
+    encode_project_material_source_binding_payload,
     encode_project_storage_config_payload,
     encode_timestamp_ms,
 )
@@ -87,7 +89,8 @@ class SQLiteProjectSnapshotRepository(SqlProjectSnapshotRepository):
     def get(self, session: SQLitePersistenceSession, project_id: str) -> ProjectSnapshotRecord | None:
         row = session.raw_connection.execute(
             """
-            SELECT project_id, project_title, project_state, created_at_ms, deleted_at_ms, snapshot_json, updated_at
+            SELECT project_id, project_title, project_state, created_at_ms, deleted_at_ms,
+                   subject_id, scoped_project_id, project_sequence, updated_at
             FROM project_snapshots
             WHERE project_id = ?
             """,
@@ -100,7 +103,8 @@ class SQLiteProjectSnapshotRepository(SqlProjectSnapshotRepository):
     def all(self, session: SQLitePersistenceSession) -> tuple[ProjectSnapshotRecord, ...]:
         rows = session.raw_connection.execute(
             """
-            SELECT project_id, project_title, project_state, created_at_ms, deleted_at_ms, snapshot_json, updated_at
+            SELECT project_id, project_title, project_state, created_at_ms, deleted_at_ms,
+                   subject_id, scoped_project_id, project_sequence, updated_at
             FROM project_snapshots
             ORDER BY project_id ASC
             """
@@ -116,16 +120,20 @@ class SQLiteProjectSnapshotRepository(SqlProjectSnapshotRepository):
                 project_state,
                 created_at_ms,
                 deleted_at_ms,
-                snapshot_json,
+                subject_id,
+                scoped_project_id,
+                project_sequence,
                 updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(project_id) DO UPDATE SET
                 project_title = excluded.project_title,
                 project_state = excluded.project_state,
                 created_at_ms = excluded.created_at_ms,
                 deleted_at_ms = excluded.deleted_at_ms,
-                snapshot_json = excluded.snapshot_json,
+                subject_id = excluded.subject_id,
+                scoped_project_id = excluded.scoped_project_id,
+                project_sequence = excluded.project_sequence,
                 updated_at = excluded.updated_at
             """,
             (
@@ -134,7 +142,9 @@ class SQLiteProjectSnapshotRepository(SqlProjectSnapshotRepository):
                 str(record.project_state),
                 int(record.created_at_ms),
                 None if record.deleted_at_ms is None else int(record.deleted_at_ms),
-                json.dumps(record.snapshot, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
+                None if record.subject_id is None else str(record.subject_id),
+                None if record.scoped_project_id is None else str(record.scoped_project_id),
+                int(record.project_sequence),
                 str(record.updated_at),
             ),
         )
@@ -152,16 +162,15 @@ class SQLiteProjectSnapshotRepository(SqlProjectSnapshotRepository):
 
     @staticmethod
     def _row_to_record(row: sqlite3.Row) -> ProjectSnapshotRecord:
-        snapshot = json.loads(str(row["snapshot_json"]))
-        if not isinstance(snapshot, dict):
-            raise ValueError("Project snapshot must be a JSON object")
         return ProjectSnapshotRecord(
             project_id=str(row["project_id"]),
             project_title=str(row["project_title"]),
             project_state=str(row["project_state"]),
             created_at_ms=int(row["created_at_ms"]),
             deleted_at_ms=None if row["deleted_at_ms"] is None else int(row["deleted_at_ms"]),
-            snapshot=snapshot,
+            subject_id=None if row["subject_id"] is None else str(row["subject_id"]),
+            scoped_project_id=None if row["scoped_project_id"] is None else str(row["scoped_project_id"]),
+            project_sequence=int(row["project_sequence"] or 0),
             updated_at=str(row["updated_at"]),
         )
 
@@ -169,6 +178,7 @@ class SQLiteProjectSnapshotRepository(SqlProjectSnapshotRepository):
 class SQLiteProjectLifecycleRepository(SqlLifecycleRepository):
     _PROJECT_SCOPED_TABLES: tuple[str, ...] = (
         "project_storage_config_index",
+        "project_material_source_binding_index",
         "project_config_index",
         "instance_index",
         "instance_media_binding_index",
@@ -199,6 +209,7 @@ class SQLiteProjectLifecycleRepository(SqlLifecycleRepository):
         project: Project,
         project_snapshot: dict[str, object],
         project_storage_config: ProjectStorageConfig,
+        project_material_source_binding: ProjectMaterialSourceBinding,
         project_config: ProjectConfig,
         review_task_queue: ReviewTaskQueue,
         layers: Sequence[Layer],
@@ -219,7 +230,12 @@ class SQLiteProjectLifecycleRepository(SqlLifecycleRepository):
             project_snapshot=project_snapshot,
             updated_at=updated_at,
         )
-        self._replace_project_config(session, project_storage_config=project_storage_config, project_config=project_config)
+        self._replace_project_config(
+            session,
+            project_storage_config=project_storage_config,
+            project_material_source_binding=project_material_source_binding,
+            project_config=project_config,
+        )
         self._replace_review_task_queue(session, review_task_queue)
         self._replace_layers(session, layers=layers)
         self._replace_aggregation_queues(session, aggregation_queues=aggregation_queues)
@@ -270,7 +286,9 @@ class SQLiteProjectLifecycleRepository(SqlLifecycleRepository):
             project_state=str(project.state.value),
             created_at_ms=encode_timestamp_ms(project.created_at),
             deleted_at_ms=None if project.deleted_at is None else encode_timestamp_ms(project.deleted_at),
-            snapshot=dict(project_snapshot),
+            subject_id=None if project.subject_id is None else str(project.subject_id),
+            scoped_project_id=None if project.scoped_project_id is None else str(project.scoped_project_id),
+            project_sequence=int(project.project_sequence),
             updated_at=str(updated_at),
         )
         SQLiteProjectSnapshotRepository().upsert(session, snapshot_record)
@@ -280,10 +298,12 @@ class SQLiteProjectLifecycleRepository(SqlLifecycleRepository):
         session: SQLitePersistenceSession,
         *,
         project_storage_config: ProjectStorageConfig,
+        project_material_source_binding: ProjectMaterialSourceBinding,
         project_config: ProjectConfig,
     ) -> None:
         project_id = str(project_storage_config.project_id)
         session.raw_connection.execute("DELETE FROM project_storage_config_index WHERE project_id = ?", (project_id,))
+        session.raw_connection.execute("DELETE FROM project_material_source_binding_index WHERE project_id = ?", (project_id,))
         session.raw_connection.execute("DELETE FROM project_config_index WHERE project_id = ?", (project_id,))
 
         storage_payload = encode_project_storage_config_payload(project_storage_config)
@@ -304,6 +324,25 @@ class SQLiteProjectLifecycleRepository(SqlLifecycleRepository):
                 str(storage_payload["learningObjectRoot"]),
                 str(storage_payload["fsSyncPolicy"]),
                 int(storage_payload["updatedAtMs"]),
+            ),
+        )
+
+        binding_payload = encode_project_material_source_binding_payload(project_material_source_binding)
+        session.raw_connection.execute(
+            """
+            INSERT INTO project_material_source_binding_index (
+                project_id,
+                source_kind,
+                source_root_label,
+                updated_at_ms
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                project_id,
+                str(binding_payload["sourceKind"]),
+                None if binding_payload["sourceRootLabel"] is None else str(binding_payload["sourceRootLabel"]),
+                int(binding_payload["updatedAtMs"]),
             ),
         )
 

@@ -1,27 +1,31 @@
 import { useQuery } from "@tanstack/react-query"
 
+import type { ProjectScope } from "@/ui/api/projectScope"
 import { getRecallPointReviewProjection, listAllReviewRecommendations, listReviewRecommendations } from "@/ui/api/review"
 
-export function useReviewRecommendations(projectId: string, params?: { offset?: number; limit?: number }) {
+export function useReviewRecommendations(scope: ProjectScope | null, params?: { offset?: number; limit?: number }) {
+  const projectId = scope?.projectId ?? ""
   return useQuery({
-    queryKey: ["reviewRecommendations", projectId, params?.offset ?? 0, params?.limit ?? null],
-    queryFn: () => listReviewRecommendations(projectId, params),
-    enabled: !!projectId,
+    queryKey: ["reviewRecommendations", scope?.subjectId ?? "", projectId, params?.offset ?? 0, params?.limit ?? null],
+    queryFn: () => listReviewRecommendations(scope as ProjectScope, params),
+    enabled: !!scope?.subjectId && !!projectId,
   })
 }
 
-export function useAllReviewRecommendations(projectId: string) {
+export function useAllReviewRecommendations(scope: ProjectScope | null) {
+  const projectId = scope?.projectId ?? ""
   return useQuery({
-    queryKey: ["allReviewRecommendations", projectId],
-    queryFn: () => listAllReviewRecommendations(projectId),
-    enabled: !!projectId,
+    queryKey: ["allReviewRecommendations", scope?.subjectId ?? "", projectId],
+    queryFn: () => listAllReviewRecommendations(scope as ProjectScope),
+    enabled: !!scope?.subjectId && !!projectId,
   })
 }
 
-export function useRecallPointReviewProjection(projectId: string, recallPointId: string) {
+export function useRecallPointReviewProjection(scope: ProjectScope | null, recallPointId: string) {
+  const projectId = scope?.projectId ?? ""
   return useQuery({
-    queryKey: ["recallPointReviewProjection", projectId, recallPointId],
-    queryFn: () => getRecallPointReviewProjection(projectId, recallPointId),
-    enabled: !!projectId && !!recallPointId,
+    queryKey: ["recallPointReviewProjection", scope?.subjectId ?? "", projectId, recallPointId],
+    queryFn: () => getRecallPointReviewProjection(scope as ProjectScope, recallPointId),
+    enabled: !!scope?.subjectId && !!projectId && !!recallPointId,
   })
 }

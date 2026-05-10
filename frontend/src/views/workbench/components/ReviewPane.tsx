@@ -12,6 +12,7 @@ import {
 import { Link } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
+import type { ProjectScope } from "@/ui/api/projectScope"
 import type { RecallPoint } from "@/ui/api/review"
 import {
   appendImageBlock,
@@ -24,7 +25,7 @@ import {
 import type { Instance } from "@/ui/api/instances"
 import { RichContentEditor } from "@/ui/components/RichContentEditor"
 import { RichContentRenderer } from "@/ui/components/RichContentRenderer"
-import { buildCurrentProjectPath } from "@/ui/projectPaths"
+import { buildScopedProjectPath } from "@/ui/projectPaths"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import { formatInstanceReference } from "@/ui/displayIdentifiers"
@@ -85,18 +86,21 @@ function isRecallPoint(value: RecallPoint | undefined): value is RecallPoint {
 }
 
 export function ReviewPane({
+  subjectId,
   projectId,
   headId,
   instances,
   onOpenAnchor,
 }: {
+  subjectId: string
   projectId: string
   headId: string
   instances: Instance[]
   onOpenAnchor?: (a: { instanceId: string; position: string }) => void
 }) {
-  const { reviewTaskQ, rangeQ, recallPointQs } = useReviewBundle(projectId, headId)
-  const commit = useCommitReviewTask(projectId)
+  const projectScope: ProjectScope = { subjectId, projectId }
+  const { reviewTaskQ, rangeQ, recallPointQs } = useReviewBundle(projectScope, headId)
+  const commit = useCommitReviewTask(projectScope)
 
   const touchReviewActivity = useCallback(() => {
     touchDailyStudyActivity(projectId, "review", REVIEW_ACTIVITY_WINDOW_MS)
@@ -480,12 +484,12 @@ export function ReviewPane({
                           </div>
 
                           <Link
-                            to={buildCurrentProjectPath(projectId, `/recall-points/${rpId}`)}
+                            to={buildScopedProjectPath(subjectId, projectId, `/recall-points/${rpId}`)}
                             className="group mt-2 block rounded-2xl px-2 py-1 -mx-2 -my-1 transition hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                             title="打开复述点详情"
                           >
                             <div className="text-[15px] font-semibold leading-6 text-foreground transition group-hover:text-primary">
-                              <RichContentRenderer projectId={projectId} value={activeRecallPoint.question} />
+                              <RichContentRenderer subjectId={subjectId} projectId={projectId} value={activeRecallPoint.question} />
                             </div>
                             <div className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary/85">
                               查看复述点详情
@@ -496,7 +500,7 @@ export function ReviewPane({
                           <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                             {activeAnchor ? (
                               <Link
-                                to={buildCurrentProjectPath(projectId, `/instances/${activeAnchor.instanceId}`)}
+                                to={buildScopedProjectPath(subjectId, projectId, `/instances/${activeAnchor.instanceId}`)}
                                 className="theme-pill-default rounded-full px-2.5 py-1 font-medium transition hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                                 title="打开视频实例详情"
                               >
@@ -542,6 +546,7 @@ export function ReviewPane({
                       <div className="mt-4">
                         <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">你的答案</div>
                         <RichContentEditor
+                          subjectId={subjectId}
                           projectId={projectId}
                           field="answer"
                           value={writtenAnswerDraft}
@@ -595,7 +600,7 @@ export function ReviewPane({
                       {answerVisible ? (
                         <div className="theme-canvas mt-3 rounded-2xl border border-[color:var(--theme-soft-border)] p-3 text-sm">
                           <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">答案</div>
-                          <RichContentRenderer projectId={projectId} value={activeRecallPoint.answer} />
+                          <RichContentRenderer subjectId={subjectId} projectId={projectId} value={activeRecallPoint.answer} />
                         </div>
                       ) : null}
 

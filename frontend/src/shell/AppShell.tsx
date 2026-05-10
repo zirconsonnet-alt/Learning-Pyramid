@@ -9,11 +9,11 @@ import { PomodoroPreTransitionNotice, PomodoroTransitionEffect } from "@/shell/P
 import { ApiError } from "@/ui/api/http"
 import { useBootstrapGlobalSettings } from "@/ui/globalSettingsSync"
 import { useLearningPlanRemoteSync } from "@/ui/learningPlans/learningPlanRemoteSync"
-import { useScopedSubjectContext, useSubjectContext, useSubjects } from "@/ui/queries/subjects"
+import { useScopedSubjectContext, useSubjectContext, useSubjectProjectCatalog, useSubjects } from "@/ui/queries/subjects"
 import { ErrorNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { useCurrentUser, useLogout } from "@/ui/queries/auth"
-import { useProject, useProjects } from "@/ui/queries/projects"
+import { useProject } from "@/ui/queries/projects"
 import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
 import { useSystemCapabilities } from "@/ui/queries/system"
 import { usePomodoroPreTransitionSpeech, usePomodoroTransitionSound } from "@/ui/pomodoroAudio"
@@ -59,7 +59,7 @@ function describeArea(
     }
   }
 
-  if (pathname.startsWith("/projects")) {
+  if (pathname.startsWith("/subjects") && !pathname.match(/^\/subjects\/[^/]+/)) {
     return {
       title: "学科中心",
       context: "浏览与切换学科",
@@ -319,13 +319,14 @@ export function AppShell() {
     [routeSubjectId, subjectsQ.data],
   )
   const effectiveProjectId = pid
+  const routeProjectScope = routeSubjectId && pid ? { subjectId: routeSubjectId, projectId: pid } : null
   const isVirtualStudyReviewProject = isVirtualStudyReviewProjectId(effectiveProjectId)
   const isSubjectDashboardScope = Boolean(routeSubjectId) && !pid
-  const subjectContextQ = useSubjectContext(effectiveProjectId, canAccessApp && Boolean(effectiveProjectId) && !isSubjectDashboardScope && !routeSubjectId)
+  const subjectContextQ = useSubjectContext(routeProjectScope, canAccessApp && Boolean(effectiveProjectId) && !isSubjectDashboardScope)
   const scopedSubjectContextQ = useScopedSubjectContext(routeSubjectId ?? "", pid, canAccessApp && Boolean(routeSubjectId) && Boolean(pid) && !isSubjectDashboardScope)
   const subjectContext = scopedSubjectContextQ.data ?? subjectContextQ.data
-  const { projectTitle } = useProject(effectiveProjectId, { enabled: canAccessApp && Boolean(effectiveProjectId) && !isVirtualStudyReviewProject, subjectId: routeSubjectId })
-  const projectsQ = useProjects(canAccessApp && !isVirtualStudyReviewProject)
+  const { projectTitle } = useProject(routeProjectScope, { enabled: canAccessApp && Boolean(effectiveProjectId) && !isVirtualStudyReviewProject })
+  const subjectProjectCatalog = useSubjectProjectCatalog(canAccessApp && !isVirtualStudyReviewProject)
   const logout = useLogout()
   const pomodoroEnabled = usePomodoroStore((state) => state.enabled)
   const pomodoroWeeklySchedule = usePomodoroStore((state) => state.weeklySchedule)
@@ -361,6 +362,7 @@ export function AppShell() {
   const accountMenuButtonRef = useRef<HTMLButtonElement | null>(null)
   const completedPomodoroSegmentKeyRef = useRef("")
   const previousPomodoroSnapshotRef = useRef<typeof pomodoroSnapshot | null>(null)
+  const lastPomodoroAutoNavigationKeyRef = useRef("")
   const previousLocationRef = useRef(locationToken)
   const subjectNavItems = useMemo(
     () => getSubjectNavItems(resolvedSubjectId),
@@ -373,7 +375,7 @@ export function AppShell() {
   const projectNavItems = useMemo(
     () =>
       hasProjectContext
-        ? getProjectNavItems(currentMaterialProjectId, {
+        ? getProjectNavItems(resolvedSubjectId, currentMaterialProjectId, {
             settingsLabel: "项目设置",
             settingsTo: currentProjectSettingsPath,
           })
@@ -399,27 +401,25 @@ export function AppShell() {
       isVirtualStudyReviewProject
         ? [
             {
+              subjectId: effectiveProjectId,
               projectId: effectiveProjectId,
               title: "学习复习引导示范项目",
-              state: "ACTIVE",
-              createdAt: new Date().toISOString(),
-              deletedAt: null,
             },
           ]
-        : projectsQ.data ?? [],
-    [effectiveProjectId, isVirtualStudyReviewProject, projectsQ.data],
+        : subjectProjectCatalog.projects,
+    [effectiveProjectId, isVirtualStudyReviewProject, subjectProjectCatalog.projects],
   )
-  const pomodoroProjectCatalogReady = !projectsQ.isLoading
+  const pomodoroProjectCatalogReady = !subjectProjectCatalog.isLoading
   const accessibleProjectRefs = useMemo(
     () =>
       new Set(
-        (projectsQ.data ?? [])
+        pomodoroAccessibleProjects
           .map((project) =>
             project.subjectId ? pomodoroProjectRefKey({ subjectId: project.subjectId, projectId: project.projectId }) : "",
           )
           .filter(Boolean),
       ),
-    [projectsQ.data],
+    [pomodoroAccessibleProjects],
   )
   const hasAccessiblePomodoroProjectRef = (projectRef: typeof pomodoroSnapshot.currentProjectRef) =>
     Boolean(projectRef && accessibleProjectRefs.has(pomodoroProjectRefKey(projectRef)))
@@ -439,7 +439,7 @@ export function AppShell() {
   const pomodoroFocusWorkbenchPath =
     pomodoroFocusProjectRef && pomodoroFocusProjectId
       ? `/subjects/${encodeURIComponent(pomodoroFocusProjectRef.subjectId)}/projects/${encodeURIComponent(pomodoroFocusProjectRef.projectId)}/workbench`
-      : "/projects"
+      : "/subjects"
   const upcomingJumpProjectId =
     pomodoroUpcomingSegment?.phase === "focus" &&
     pomodoroUpcomingSegment.projectRef &&
@@ -475,6 +475,43 @@ export function AppShell() {
       pomodoroSnapshot.status === "running" && pomodoroSnapshot.phase === "break",
     )
   }, [pomodoroSnapshot.phase, pomodoroSnapshot.status])
+  useEffect(() => {
+    if (
+      pomodoroSnapshot.status !== "running" ||
+      pomodoroSnapshot.phase !== "focus" ||
+      !pomodoroSnapshot.currentProjectRef ||
+      !pomodoroSnapshot.currentPlan ||
+      !pomodoroSnapshot.segment ||
+      !pomodoroFocusProjectId ||
+      !pomodoroFocusWorkbenchPath ||
+      location.pathname === pomodoroFocusWorkbenchPath
+    ) {
+      return
+    }
+    const autoNavigationKey = [
+      pomodoroSnapshot.currentPlan.id,
+      pomodoroSnapshot.currentPlanIndex,
+      pomodoroSnapshot.segment.pomodoroIndex,
+      pomodoroSnapshot.startAtMs ?? "",
+      pomodoroSnapshot.currentProjectRef.subjectId,
+      pomodoroSnapshot.currentProjectRef.projectId,
+    ].join(":")
+    if (lastPomodoroAutoNavigationKeyRef.current === autoNavigationKey) return
+    lastPomodoroAutoNavigationKeyRef.current = autoNavigationKey
+    nav(pomodoroFocusWorkbenchPath, { replace: location.pathname.startsWith("/pomodoro") })
+  }, [
+    location.pathname,
+    nav,
+    pomodoroFocusProjectId,
+    pomodoroFocusWorkbenchPath,
+    pomodoroSnapshot.currentPlan,
+    pomodoroSnapshot.currentPlanIndex,
+    pomodoroSnapshot.currentProjectRef,
+    pomodoroSnapshot.phase,
+    pomodoroSnapshot.segment,
+    pomodoroSnapshot.startAtMs,
+    pomodoroSnapshot.status,
+  ])
   useEffect(() => {
     const previousSnapshot = previousPomodoroSnapshotRef.current
     previousPomodoroSnapshotRef.current = pomodoroSnapshot

@@ -73,34 +73,34 @@ class PasswordResetDeliveryConfig:
 
 
 def current_password_reset_delivery_config() -> PasswordResetDeliveryConfig:
-    smtp_use_ssl = _env_bool("PLM_SMTP_USE_SSL", False)
+    smtp_use_ssl = _env_bool("LEARNINGPYRAMID_SMTP_USE_SSL", False)
     default_port = 465 if smtp_use_ssl else 587
-    smtp_port = _env_int("PLM_SMTP_PORT", default_port, minimum=1)
-    smtp_username = _env_text("PLM_SMTP_USERNAME")
-    smtp_password = _env_text("PLM_SMTP_PASSWORD")
+    smtp_port = _env_int("LEARNINGPYRAMID_SMTP_PORT", default_port, minimum=1)
+    smtp_username = _env_text("LEARNINGPYRAMID_SMTP_USERNAME")
+    smtp_password = _env_text("LEARNINGPYRAMID_SMTP_PASSWORD")
     credentials_ready = (smtp_username is None and smtp_password is None) or (
         smtp_username is not None and smtp_password is not None
     )
-    public_origin = _normalized_origin(_env_text("PLM_PUBLIC_ORIGIN"))
+    public_origin = _normalized_origin(_env_text("LEARNINGPYRAMID_PUBLIC_ORIGIN"))
     auth_enabled = current_runtime_features().auth_enabled
-    requested = _env_bool("PLM_ENABLE_PASSWORD_RESET", False)
-    smtp_host = _env_text("PLM_SMTP_HOST")
-    from_email = _env_text("PLM_SMTP_FROM_EMAIL")
+    requested = _env_bool("LEARNINGPYRAMID_ENABLE_PASSWORD_RESET", False)
+    smtp_host = _env_text("LEARNINGPYRAMID_SMTP_HOST")
+    from_email = _env_text("LEARNINGPYRAMID_SMTP_FROM_EMAIL")
     delivery_ready = bool(public_origin and smtp_host and from_email and credentials_ready)
     return PasswordResetDeliveryConfig(
         requested=requested,
         auth_enabled=auth_enabled,
-        token_ttl_minutes=_env_int("PLM_PASSWORD_RESET_TOKEN_TTL_MINUTES", 30, minimum=5),
+        token_ttl_minutes=_env_int("LEARNINGPYRAMID_PASSWORD_RESET_TOKEN_TTL_MINUTES", 30, minimum=5),
         public_origin=public_origin,
         smtp_host=smtp_host,
         smtp_port=smtp_port,
         smtp_username=smtp_username,
         smtp_password=smtp_password,
         smtp_use_ssl=smtp_use_ssl,
-        smtp_use_starttls=_env_bool("PLM_SMTP_USE_STARTTLS", not smtp_use_ssl),
-        smtp_timeout_seconds=_env_int("PLM_SMTP_TIMEOUT_SECONDS", 10, minimum=1),
+        smtp_use_starttls=_env_bool("LEARNINGPYRAMID_SMTP_USE_STARTTLS", not smtp_use_ssl),
+        smtp_timeout_seconds=_env_int("LEARNINGPYRAMID_SMTP_TIMEOUT_SECONDS", 10, minimum=1),
         from_email=from_email,
-        from_name=_env_text("PLM_SMTP_FROM_NAME"),
+        from_name=_env_text("LEARNINGPYRAMID_SMTP_FROM_NAME"),
         credentials_ready=credentials_ready,
         delivery_ready=delivery_ready,
     )

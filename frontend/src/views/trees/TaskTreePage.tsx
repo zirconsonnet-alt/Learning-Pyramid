@@ -6,8 +6,9 @@ import { useNavigate, useParams } from "react-router-dom"
 import { ApiError } from "@/ui/api/http"
 import { listAggregationEvents, type AggregationEvent } from "@/ui/api/layers"
 import { listLearningTaskNodes, type LearningTaskNode } from "@/ui/api/learningTaskNodes"
+import type { ProjectScope } from "@/ui/api/projectScope"
 import { ContentEmptyState, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
-import { buildCurrentProjectPath } from "@/ui/projectPaths"
+import { buildScopedProjectPath } from "@/ui/projectPaths"
 import { formatLearningTaskNodeDisplayTitle, isDefaultAggregationTitle } from "@/views/learningTasks/displayTitle"
 import { type LearningTaskTreeNode, LearningTaskTreeCanvas } from "@/views/trees/components/LearningTaskTreeCanvas"
 import { TreeCanvasZoomControl } from "@/views/trees/components/TreeCanvasViewport"
@@ -94,22 +95,23 @@ function classifyTaskNode(node: LearningTaskNode, event: AggregationEvent | unde
 }
 
 export function TaskTreePage() {
-  const { projectId } = useParams()
+  const { subjectId = "", projectId } = useParams()
   const pid = projectId ?? ""
+  const projectScope: ProjectScope | null = subjectId && pid ? { subjectId, projectId: pid } : null
   const nav = useNavigate()
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null)
   const [zoomPercent, setZoomPercent] = useState(100)
 
   const q = useQuery({
-    queryKey: ["learningTaskNodes", pid],
-    queryFn: () => listLearningTaskNodes(pid),
-    enabled: !!pid,
+    queryKey: ["learningTaskNodes", subjectId, pid],
+    queryFn: () => listLearningTaskNodes(projectScope as ProjectScope),
+    enabled: !!projectScope,
   })
 
   const eventsQ = useQuery({
-    queryKey: ["aggregationEvents", pid],
-    queryFn: () => listAggregationEvents(pid),
-    enabled: !!pid,
+    queryKey: ["aggregationEvents", subjectId, pid],
+    queryFn: () => listAggregationEvents(projectScope as ProjectScope),
+    enabled: !!projectScope,
   })
 
   const {
@@ -244,7 +246,7 @@ export function TaskTreePage() {
             zoomPercent={zoomPercent}
             focusNodeId={hoveredNodeId}
             onNodeHover={setHoveredNodeId}
-            onNodeSelect={(node) => nav(buildCurrentProjectPath(pid, `/learning-task-nodes/${node.nodeId}`))}
+            onNodeSelect={(node) => nav(buildScopedProjectPath(subjectId, pid, `/learning-task-nodes/${node.nodeId}`))}
           />
         ) : null}
       </div>

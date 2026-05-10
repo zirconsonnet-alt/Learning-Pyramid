@@ -89,8 +89,8 @@ def _normalize_email(email: str) -> str:
 
 def _configured_bootstrap_super_admin_emails() -> tuple[str, ...]:
     raw_values = (
-        os.getenv("PLM_BOOTSTRAP_SUPER_ADMIN_EMAILS"),
-        os.getenv("PLM_BOOTSTRAP_SUPER_ADMIN_EMAIL"),
+        os.getenv("LEARNINGPYRAMID_BOOTSTRAP_SUPER_ADMIN_EMAILS"),
+        os.getenv("LEARNINGPYRAMID_BOOTSTRAP_SUPER_ADMIN_EMAIL"),
     )
     items: list[str] = []
     seen: set[str] = set()
@@ -137,36 +137,33 @@ def _session_token_lookup_candidates(session_token: Any) -> tuple[str, ...]:
     token = str(session_token or "").strip()
     if not token:
         return ()
-    stored_value = _stored_session_token_value(token)
-    if stored_value == token:
-        return (stored_value,)
-    return (stored_value, token)
+    return (_stored_session_token_value(token),)
 
 
 def _session_ttl_days() -> int:
-    raw = (os.getenv("PLM_SESSION_TTL_DAYS") or "30").strip()
+    raw = (os.getenv("LEARNINGPYRAMID_SESSION_TTL_DAYS") or "30").strip()
     try:
         value = int(raw)
     except Exception as exc:
-        raise PreconditionFailure("PLM_SESSION_TTL_DAYS must be an integer") from exc
+        raise PreconditionFailure("LEARNINGPYRAMID_SESSION_TTL_DAYS must be an integer") from exc
     return max(1, value)
 
 
 def _password_reset_token_ttl_minutes() -> int:
-    raw = (os.getenv("PLM_PASSWORD_RESET_TOKEN_TTL_MINUTES") or "30").strip()
+    raw = (os.getenv("LEARNINGPYRAMID_PASSWORD_RESET_TOKEN_TTL_MINUTES") or "30").strip()
     try:
         value = int(raw)
     except Exception as exc:
-        raise PreconditionFailure("PLM_PASSWORD_RESET_TOKEN_TTL_MINUTES must be an integer") from exc
+        raise PreconditionFailure("LEARNINGPYRAMID_PASSWORD_RESET_TOKEN_TTL_MINUTES must be an integer") from exc
     return max(5, value)
 
 
 def _email_verification_token_ttl_minutes() -> int:
-    raw = (os.getenv("PLM_EMAIL_VERIFICATION_TOKEN_TTL_MINUTES") or "1440").strip()
+    raw = (os.getenv("LEARNINGPYRAMID_EMAIL_VERIFICATION_TOKEN_TTL_MINUTES") or "1440").strip()
     try:
         value = int(raw)
     except Exception as exc:
-        raise PreconditionFailure("PLM_EMAIL_VERIFICATION_TOKEN_TTL_MINUTES must be an integer") from exc
+        raise PreconditionFailure("LEARNINGPYRAMID_EMAIL_VERIFICATION_TOKEN_TTL_MINUTES must be an integer") from exc
     return max(10, value)
 
 
@@ -704,30 +701,8 @@ def _normalize_pomodoro_focus_prompts(
 
 def _normalize_pomodoro_weekly_schedule(
     raw_schedule: Any,
-    *,
-    legacy_focus_minutes: int | float | str | None = DEFAULT_POMODORO_FOCUS_MINUTES,
-    legacy_break_minutes: int | float | str | None = DEFAULT_POMODORO_BREAK_MINUTES,
-    legacy_pomodoro_count: int | float | str | None = DEFAULT_POMODORO_COUNT,
 ) -> tuple["PomodoroScheduleDay", ...]:
     payload = raw_schedule if isinstance(raw_schedule, dict) else {}
-    normalized_focus_minutes = _clamp_int(
-        legacy_focus_minutes,
-        minimum=1,
-        maximum=180,
-        field_name="pomodoro focus minutes",
-    )
-    normalized_break_minutes = _clamp_int(
-        legacy_break_minutes,
-        minimum=1,
-        maximum=60,
-        field_name="pomodoro break minutes",
-    )
-    normalized_pomodoro_count = _clamp_int(
-        legacy_pomodoro_count,
-        minimum=1,
-        maximum=12,
-        field_name="pomodoro count",
-    )
     items: list["PomodoroScheduleDay"] = []
     for day_key in POMODORO_WEEKDAY_KEYS:
         day_payload = payload.get(day_key)
@@ -749,9 +724,9 @@ def _normalize_pomodoro_weekly_schedule(
                     plan_index=plan_index,
                     enabled=bool(plan_payload.get("enabled", True if is_plan_list else False)),
                     start_time=str(plan_payload.get("startTime", DEFAULT_POMODORO_START_TIME)),
-                    focus_minutes=plan_payload.get("focusMinutes", normalized_focus_minutes),
-                    break_minutes=plan_payload.get("breakMinutes", normalized_break_minutes),
-                    pomodoro_count=plan_payload.get("pomodoroCount", normalized_pomodoro_count),
+                    focus_minutes=plan_payload.get("focusMinutes", DEFAULT_POMODORO_FOCUS_MINUTES),
+                    break_minutes=plan_payload.get("breakMinutes", DEFAULT_POMODORO_BREAK_MINUTES),
+                    pomodoro_count=plan_payload.get("pomodoroCount", DEFAULT_POMODORO_COUNT),
                     project_refs=plan_payload.get("projectRefs"),
                     break_prompt=plan_payload.get("breakPrompt"),
                     focus_prompts=plan_payload.get("focusPrompts"),
@@ -860,9 +835,9 @@ def _normalize_cloud_account_meta(meta: dict[str, Any] | None) -> dict[str, Any]
 
 
 def _token_encryption_key() -> bytes:
-    raw = str(os.getenv("PLM_TOKEN_ENCRYPTION_KEY") or "").strip()
+    raw = str(os.getenv("LEARNINGPYRAMID_TOKEN_ENCRYPTION_KEY") or "").strip()
     if not raw:
-        raise PreconditionFailure("PLM_TOKEN_ENCRYPTION_KEY must be configured")
+        raise PreconditionFailure("LEARNINGPYRAMID_TOKEN_ENCRYPTION_KEY must be configured")
     return hashlib.sha256(raw.encode("utf-8")).digest()
 
 
@@ -871,7 +846,7 @@ def encrypt_secret_value(plain_text: str) -> str:
     if not text:
         raise PreconditionFailure("secret value must be non-empty")
     nonce = os.urandom(12)
-    ciphertext = AESGCM(_token_encryption_key()).encrypt(nonce, text.encode("utf-8"), b"plm:secret:v1")
+    ciphertext = AESGCM(_token_encryption_key()).encrypt(nonce, text.encode("utf-8"), b"learningpyramid:secret:v1")
     payload = base64.urlsafe_b64encode(nonce + ciphertext).decode("ascii")
     return f"aesgcm:v1:{payload}"
 
@@ -892,7 +867,7 @@ def decrypt_secret_value(ciphertext: str) -> str:
     nonce = blob[:12]
     encrypted = blob[12:]
     try:
-        plain = AESGCM(_token_encryption_key()).decrypt(nonce, encrypted, b"plm:secret:v1")
+        plain = AESGCM(_token_encryption_key()).decrypt(nonce, encrypted, b"learningpyramid:secret:v1")
     except Exception as exc:
         raise PreconditionFailure("secret ciphertext cannot be decrypted") from exc
     return plain.decode("utf-8")
@@ -1267,21 +1242,6 @@ class _AuthStoreImpl:
             payload = {}
         normalized_template = _normalize_review_chain_template(payload.get("defaultProjectReviewTemplate", ()))
         pomodoro_payload = payload.get("pomodoro")
-        legacy_focus_minutes = (
-            pomodoro_payload.get("focusMinutes", DEFAULT_POMODORO_FOCUS_MINUTES)
-            if isinstance(pomodoro_payload, dict)
-            else DEFAULT_POMODORO_FOCUS_MINUTES
-        )
-        legacy_break_minutes = (
-            pomodoro_payload.get("breakMinutes", DEFAULT_POMODORO_BREAK_MINUTES)
-            if isinstance(pomodoro_payload, dict)
-            else DEFAULT_POMODORO_BREAK_MINUTES
-        )
-        legacy_pomodoro_count = (
-            pomodoro_payload.get("pomodoroCount", DEFAULT_POMODORO_COUNT)
-            if isinstance(pomodoro_payload, dict)
-            else DEFAULT_POMODORO_COUNT
-        )
         return UserGlobalSettings(
             user_id=str(row["user_id"]),
             theme=_normalize_user_theme(payload.get("theme")),
@@ -1304,9 +1264,6 @@ class _AuthStoreImpl:
             ),
             pomodoro_weekly_schedule=_normalize_pomodoro_weekly_schedule(
                 pomodoro_payload.get("weeklySchedule") if isinstance(pomodoro_payload, dict) else {},
-                legacy_focus_minutes=legacy_focus_minutes,
-                legacy_break_minutes=legacy_break_minutes,
-                legacy_pomodoro_count=legacy_pomodoro_count,
             ),
             default_project_review_template=tuple(
                 ReviewChainTemplateStep(kind=kind, count=count) for kind, count in normalized_template
@@ -1499,35 +1456,6 @@ class SQLiteAuthStore(_AuthStoreImpl):
                 return candidate
             candidate = _random_public_uid()
 
-    def _backfill_user_profiles(self, conn: sqlite3.Connection) -> None:
-        rows = conn.execute(
-            """
-            SELECT u.user_id, u.email, u.created_at
-            FROM users u
-            LEFT JOIN user_profiles p ON p.user_id = u.user_id
-            WHERE p.user_id IS NULL
-            ORDER BY u.created_at ASC, u.user_id ASC
-            """
-        ).fetchall()
-        for row in rows:
-            email = str(row["email"])
-            created_at = str(row["created_at"])
-            conn.execute(
-                """
-                INSERT INTO user_profiles (
-                    user_id, public_uid, nickname, bio, avatar_key, status, updated_at, password_changed_at
-                )
-                VALUES (?, ?, ?, '', NULL, 'active', ?, ?)
-                """,
-                (
-                    str(row["user_id"]),
-                    self._ensure_unique_public_uid(conn, str(row["user_id"])),
-                    _default_nickname_for_email(email),
-                    created_at,
-                    created_at,
-                ),
-            )
-
     def _bootstrap_configured_super_admins_sqlite(self, conn: sqlite3.Connection) -> None:
         configured_emails = _configured_bootstrap_super_admin_emails()
         if not configured_emails:
@@ -1566,107 +1494,65 @@ class SQLiteAuthStore(_AuthStoreImpl):
         return {key: tuple(value) for key, value in payload.items()}
 
     @staticmethod
-    def _ensure_user_service_prompt_assembly_mode_column(conn: sqlite3.Connection) -> None:
-        columns = {
-            str(row["name"])
-            for row in conn.execute("PRAGMA table_info(user_service_configs)").fetchall()
-        }
-        if "prompt_assembly_mode" in columns:
-            return
-        conn.execute(
-            """
-            ALTER TABLE user_service_configs
-            ADD COLUMN prompt_assembly_mode TEXT NOT NULL DEFAULT 'system'
-            """
+    def _validate_sqlite_table_columns(conn: sqlite3.Connection, table_name: str, required_columns: set[str]) -> None:
+        rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        existing = {str(row["name"]) for row in rows}
+        missing = sorted(required_columns - existing)
+        if missing:
+            raise RuntimeError(f"{table_name} schema is not current; missing columns: {', '.join(missing)}")
+
+    @classmethod
+    def _validate_current_sqlite_schema(cls, conn: sqlite3.Connection) -> None:
+        cls._validate_sqlite_table_columns(
+            conn,
+            "users",
+            {"user_id", "email", "password_hash", "created_at", "email_verified_at"},
         )
-
-    @staticmethod
-    def _ensure_users_email_verified_column(conn: sqlite3.Connection) -> bool:
-        columns = {
-            str(row["name"])
-            for row in conn.execute("PRAGMA table_info(users)").fetchall()
-        }
-        if "email_verified_at" in columns:
-            return False
-        conn.execute(
-            """
-            ALTER TABLE users
-            ADD COLUMN email_verified_at TEXT
-            """
+        cls._validate_sqlite_table_columns(
+            conn,
+            "user_profiles",
+            {"user_id", "public_uid", "nickname", "bio", "avatar_key", "status", "updated_at", "password_changed_at"},
         )
-        return True
-
-    @staticmethod
-    def _ensure_user_project_daily_study_stats_metric_columns(conn: sqlite3.Connection) -> None:
-        columns = {
-            str(row["name"])
-            for row in conn.execute("PRAGMA table_info(user_project_daily_study_stats)").fetchall()
-        }
-        definitions = {
-            "schema_version": "INTEGER NOT NULL DEFAULT 1",
-            "web_presence_ms": "INTEGER NOT NULL DEFAULT 0",
-            "video_ms": "INTEGER NOT NULL DEFAULT 0",
-            "recall_entry_ms": "INTEGER NOT NULL DEFAULT 0",
-            "ai_qa_ms": "INTEGER NOT NULL DEFAULT 0",
-            "distraction_ms": "INTEGER NOT NULL DEFAULT 0",
-            "presence_ranges_json": "TEXT NOT NULL DEFAULT '[]'",
-            "video_ranges_json": "TEXT NOT NULL DEFAULT '[]'",
-            "recall_entry_ranges_json": "TEXT NOT NULL DEFAULT '[]'",
-            "ai_qa_ranges_json": "TEXT NOT NULL DEFAULT '[]'",
-            "is_partition_complete": "INTEGER NOT NULL DEFAULT 0",
-        }
-        for column_name, definition in definitions.items():
-            if column_name in columns:
-                continue
-            conn.execute(f"ALTER TABLE user_project_daily_study_stats ADD COLUMN {column_name} {definition}")
-
-    @staticmethod
-    def _ensure_email_verification_tokens_table(conn: sqlite3.Connection) -> None:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS email_verification_tokens (
-                token_hash TEXT PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                expires_at TEXT NOT NULL,
-                FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE
-            )
-            """
+        cls._validate_sqlite_table_columns(
+            conn,
+            "user_service_configs",
+            {"user_id", "service_kind", "base_url", "model_name", "api_key", "prompt_assembly_mode", "updated_at"},
         )
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_user_expires
-            ON email_verification_tokens (user_id, expires_at DESC)
-            """
+        cls._validate_sqlite_table_columns(
+            conn,
+            "email_verification_tokens",
+            {"token_hash", "user_id", "created_at", "expires_at"},
         )
-
-    @staticmethod
-    def _backfill_hashed_session_tokens_sqlite(conn: sqlite3.Connection) -> None:
-        rows = conn.execute(
-            """
-            SELECT session_token
-            FROM sessions
-            WHERE session_token IS NOT NULL
-              AND session_token <> ''
-              AND session_token NOT LIKE 'sha256:%'
-            ORDER BY created_at ASC, session_token ASC
-            """
-        ).fetchall()
-        for row in rows:
-            legacy_token = str(row["session_token"])
-            conn.execute(
-                "UPDATE sessions SET session_token = ? WHERE session_token = ?",
-                (_hash_session_token(legacy_token), legacy_token),
-            )
-
-    @staticmethod
-    def _backfill_existing_users_as_verified_sqlite(conn: sqlite3.Connection) -> None:
-        conn.execute(
-            """
-            UPDATE users
-            SET email_verified_at = created_at
-            WHERE email_verified_at IS NULL OR TRIM(email_verified_at) = ''
-            """
+        cls._validate_sqlite_table_columns(
+            conn,
+            "user_project_daily_study_stats",
+            {
+                "user_id",
+                "project_id",
+                "date_key",
+                "schema_version",
+                "web_presence_ms",
+                "video_ms",
+                "recall_entry_ms",
+                "ai_qa_ms",
+                "distraction_ms",
+                "presence_ranges_json",
+                "video_ranges_json",
+                "recall_entry_ranges_json",
+                "ai_qa_ranges_json",
+                "is_partition_complete",
+                "effective_ms",
+                "watch_ms",
+                "compose_ms",
+                "review_ms",
+                "qa_ms",
+                "effective_ranges_json",
+                "watch_ranges_json",
+                "compose_ranges_json",
+                "review_ranges_json",
+                "qa_ranges_json",
+                "updated_at",
+            },
         )
 
     def _init_db(self) -> None:
@@ -1868,25 +1754,7 @@ class SQLiteAuthStore(_AuthStoreImpl):
                     ON user_project_daily_study_stats (user_id, date_key DESC);
                     """
                 )
-                conn.executescript(
-                    """
-                    DROP TABLE IF EXISTS study_group_post_comments;
-                    DROP TABLE IF EXISTS study_group_join_requests;
-                    DROP TABLE IF EXISTS study_group_posts;
-                    DROP TABLE IF EXISTS study_group_members;
-                    DROP TABLE IF EXISTS study_groups;
-                    """
-                )
-                # Older hosted auth databases may still carry the deprecated study-group tables.
-                # Drop them eagerly so upgraded installs converge on the friend-only schema.
-                self._ensure_user_service_prompt_assembly_mode_column(conn)
-                self._ensure_user_project_daily_study_stats_metric_columns(conn)
-                added_email_verified_column = self._ensure_users_email_verified_column(conn)
-                self._ensure_email_verification_tokens_table(conn)
-                if added_email_verified_column:
-                    self._backfill_existing_users_as_verified_sqlite(conn)
-                self._backfill_user_profiles(conn)
-                self._backfill_hashed_session_tokens_sqlite(conn)
+                self._validate_current_sqlite_schema(conn)
                 self._bootstrap_configured_super_admins_sqlite(conn)
                 conn.commit()
             finally:
@@ -3844,8 +3712,6 @@ class SQLiteAuthStore(_AuthStoreImpl):
                             str(row.get("passwordChangedAt", row.get("updatedAt", ""))),
                         ),
                     )
-                if not profiles:
-                    self._backfill_user_profiles(conn)
                 for item in user_service_configs:
                     row = dict(item)
                     conn.execute(
@@ -4086,25 +3952,6 @@ class PostgresAuthStore(_AuthStoreImpl):
                 (str(row["user_id"]), str(row["user_id"]), str(row["created_at"])),
             )
 
-    @staticmethod
-    def _backfill_hashed_session_tokens_postgres(conn) -> None:
-        rows = conn.execute(
-            """
-            SELECT session_token
-            FROM sessions
-            WHERE session_token IS NOT NULL
-              AND session_token <> ''
-              AND session_token NOT LIKE 'sha256:%'
-            ORDER BY created_at ASC, session_token ASC
-            """
-        ).fetchall()
-        for row in rows:
-            legacy_token = str(row["session_token"])
-            conn.execute(
-                "UPDATE sessions SET session_token = %s WHERE session_token = %s",
-                (_hash_session_token(legacy_token), legacy_token),
-            )
-
     def _roles_by_user_id(self, conn, user_ids: Iterable[str]) -> dict[str, tuple[str, ...]]:
         ids = tuple(str(user_id) for user_id in user_ids)
         if not ids:
@@ -4124,7 +3971,6 @@ class PostgresAuthStore(_AuthStoreImpl):
             conn = self._pool.acquire()
             try:
                 apply_postgres_migrations(conn, target="auth")
-                self._backfill_hashed_session_tokens_postgres(conn)
                 conn.commit()
             finally:
                 self._pool.release(conn)

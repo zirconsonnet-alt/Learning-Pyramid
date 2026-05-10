@@ -4,6 +4,7 @@ import {
   syncVideoWatchProgressRange as syncRemoteVideoWatchProgressRange,
   type VideoWatchProgress,
 } from "@/ui/api/instances"
+import type { ProjectScope } from "@/ui/api/projectScope"
 import { loadVideoWatchCoverageMap, recordVideoWatchCoverageRange } from "@/ui/store/videoWatchCoverage"
 
 export type VideoWatchProgressMap = Record<string, VideoWatchProgress>
@@ -26,12 +27,18 @@ export function loadVideoWatchProgressMap(
   return out
 }
 
-export async function fetchPersistentVideoWatchProgressMap(projectId: string, instanceIds: string[], signal?: AbortSignal) {
+export async function fetchPersistentVideoWatchProgressMap(
+  scope: ProjectScope,
+  projectId: string,
+  instanceIds: string[],
+  signal?: AbortSignal,
+) {
   if (!projectId || instanceIds.length === 0) return {} as VideoWatchProgressMap
-  return fetchVideoWatchProgressMap(projectId, instanceIds, { signal, timeoutMs: 90_000 })
+  return fetchVideoWatchProgressMap(scope, instanceIds, { signal, timeoutMs: 90_000 })
 }
 
 export function syncVideoWatchProgressRange(
+  scope: ProjectScope,
   projectId: string,
   instanceId: string,
   startMs: number,
@@ -39,14 +46,14 @@ export function syncVideoWatchProgressRange(
   durationMs?: number | null,
 ) {
   const watchedMs = recordVideoWatchCoverageRange(projectId, instanceId, startMs, endMs, durationMs)
-  void syncRemoteVideoWatchProgressRange(projectId, instanceId, { startMs, endMs, durationMs }).catch(() => undefined)
+  void syncRemoteVideoWatchProgressRange(scope, instanceId, { startMs, endMs, durationMs }).catch(() => undefined)
   return watchedMs
 }
 
-export function markVideoWatchProgressCompleted(projectId: string, instanceId: string, durationMs: number) {
+export function markVideoWatchProgressCompleted(scope: ProjectScope, projectId: string, instanceId: string, durationMs: number) {
   const safeDurationMs = Math.max(0, Math.floor(durationMs))
   if (safeDurationMs <= 0) return 0
   const watchedMs = recordVideoWatchCoverageRange(projectId, instanceId, 0, safeDurationMs, safeDurationMs)
-  void markRemoteVideoWatchProgressCompleted(projectId, instanceId, { durationMs: safeDurationMs }).catch(() => undefined)
+  void markRemoteVideoWatchProgressCompleted(scope, instanceId, { durationMs: safeDurationMs }).catch(() => undefined)
   return watchedMs
 }

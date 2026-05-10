@@ -1,8 +1,8 @@
 services:
   app:
     environment:
-      PLM_SQL_BACKEND: postgres
-      PLM_POSTGRES_DSN: ${PLM_POSTGRES_DSN:-postgresql://learningpyramid:learningpyramid@postgres:5432/learningpyramid}
+      LEARNINGPYRAMID_SQL_BACKEND: postgres
+      LEARNINGPYRAMID_POSTGRES_DSN: ${LEARNINGPYRAMID_POSTGRES_DSN:-postgresql://learningpyramid:learningpyramid@postgres:5432/learningpyramid}
     depends_on:
       postgres:
         condition: service_healthy
@@ -10,11 +10,11 @@ services:
   postgres:
     image: postgres:16
     environment:
-      POSTGRES_DB: ${PLM_POSTGRES_DB:-learningpyramid}
-      POSTGRES_USER: ${PLM_POSTGRES_USER:-learningpyramid}
-      POSTGRES_PASSWORD: ${PLM_POSTGRES_PASSWORD:-learningpyramid}
+      POSTGRES_DB: ${LEARNINGPYRAMID_POSTGRES_DB:-learningpyramid}
+      POSTGRES_USER: ${LEARNINGPYRAMID_POSTGRES_USER:-learningpyramid}
+      POSTGRES_PASSWORD: ${LEARNINGPYRAMID_POSTGRES_PASSWORD:-learningpyramid}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${PLM_POSTGRES_USER:-learningpyramid} -d ${PLM_POSTGRES_DB:-learningpyramid}"]
+      test: ["CMD-SHELL", "pg_isready -U ${LEARNINGPYRAMID_POSTGRES_USER:-learningpyramid} -d ${LEARNINGPYRAMID_POSTGRES_DB:-learningpyramid}"]
       interval: 5s
       timeout: 5s
       retries: 20

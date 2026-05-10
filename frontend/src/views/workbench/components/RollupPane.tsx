@@ -6,10 +6,11 @@ import { Link } from "react-router-dom"
 import { getAggregationQueue, type Layer } from "@/ui/api/layers"
 import { ApiError } from "@/ui/api/http"
 import type { LearningTaskNode } from "@/ui/api/learningTaskNodes"
+import type { ProjectScope } from "@/ui/api/projectScope"
 import { ContentEmptyState } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
-import { buildCurrentProjectPath } from "@/ui/projectPaths"
+import { buildScopedProjectPath } from "@/ui/projectPaths"
 import { cn } from "@/ui/utils"
 import { formatLearningTaskNodeDisplayTitle } from "@/views/learningTasks/displayTitle"
 
@@ -20,11 +21,13 @@ function formatApiError(err: unknown) {
 }
 
 function RollupTaskListItem({
+  subjectId,
   projectId,
   node,
   index,
   sourceLayerIndex,
 }: {
+  subjectId: string
   projectId: string
   node: LearningTaskNode
   index: number
@@ -32,7 +35,7 @@ function RollupTaskListItem({
 }) {
   return (
     <Link
-      to={buildCurrentProjectPath(projectId, `/learning-task-nodes/${node.nodeId}`)}
+      to={buildScopedProjectPath(subjectId, projectId, `/learning-task-nodes/${node.nodeId}`)}
       className="group flex items-start gap-3 px-4 py-3 text-left transition-colors hover:[background:var(--theme-subtle-bg)]"
     >
       <span className="theme-icon-surface h-10 w-10 shrink-0 text-sm font-semibold">
@@ -49,6 +52,7 @@ function RollupTaskListItem({
 }
 
 export function RollupPane({
+  subjectId,
   projectId,
   layers,
   layersLoading,
@@ -66,6 +70,7 @@ export function RollupPane({
   rollUpError,
   thresholdRollUpEnabledByLayerIndex,
 }: {
+  subjectId: string
   projectId: string
   layers: Layer[]
   layersLoading: boolean
@@ -83,12 +88,13 @@ export function RollupPane({
   rollUpError: unknown
   thresholdRollUpEnabledByLayerIndex: Record<number, boolean>
 }) {
+  const projectScope: ProjectScope = { subjectId, projectId }
   const [selectedLayerIndex, setSelectedLayerIndex] = useState<number | null>(null)
 
   const aggregationQueueQs = useQueries({
     queries: layers.map((layer) => ({
-      queryKey: ["aggQueue", projectId, layer.layerIndex],
-      queryFn: () => getAggregationQueue(projectId, layer.layerIndex),
+      queryKey: ["aggQueue", subjectId, projectId, layer.layerIndex],
+      queryFn: () => getAggregationQueue(projectScope, layer.layerIndex),
       enabled: !!projectId && Number.isFinite(layer.layerIndex),
       refetchInterval: 3000,
     })),
@@ -291,6 +297,7 @@ export function RollupPane({
                       return (
                         <RollupTaskListItem
                           key={nodeId}
+                          subjectId={subjectId}
                           projectId={projectId}
                           node={node}
                           index={index + 1}

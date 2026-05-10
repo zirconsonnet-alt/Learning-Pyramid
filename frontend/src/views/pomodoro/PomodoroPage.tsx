@@ -25,7 +25,6 @@ import {
 import { readPomodoroWallpaperBlob } from "@/ui/pomodoroWallpaper"
 import { useCurrentUser } from "@/ui/queries/auth"
 import { useMembershipSummary } from "@/ui/queries/membership"
-import { useProjects } from "@/ui/queries/projects"
 import { useUpdateMyGlobalSettings } from "@/ui/queries/profile"
 import { useSubjects } from "@/ui/queries/subjects"
 import { useSystemCapabilities } from "@/ui/queries/system"
@@ -760,7 +759,6 @@ export function PomodoroPage() {
   const nav = useNavigate()
   const { planId: routePlanId } = useParams()
   const activePlanId = routePlanId ? decodeURIComponent(routePlanId) : null
-  const projectsQ = useProjects(true)
   const subjectsQ = useSubjects(true)
   const selectedTheme = useThemeStore((state) => state.theme)
   const enabled = usePomodoroStore((state) => state.enabled)
@@ -801,18 +799,7 @@ export function PomodoroPage() {
   const shouldSyncRemotely = authEnabled && Boolean(currentUserQ.data?.userId)
   const membershipQ = useMembershipSummary(authEnabled)
   const pomodoroMemberBlocked = authEnabled && (membershipQ.isLoading || Boolean(membershipQ.error) || !membershipQ.data?.isActive)
-  const projectTitleByRef = useMemo(
-    () =>
-      new Map(
-        (projectsQ.data ?? [])
-          .map((project) => [
-            project.subjectId ? pomodoroProjectRefKey({ subjectId: project.subjectId, projectId: project.projectId }) : "",
-            project.title,
-          ] as const)
-          .filter(([key]) => Boolean(key)),
-      ),
-    [projectsQ.data],
-  )
+  const projectTitleByRef = useMemo(() => new Map<string, string>(), [])
   const subjectMaterialQs = useQueries({
     queries: (subjectsQ.data ?? []).map((subject) => ({
       queryKey: ["subjectMaterials", subject.subjectId],
@@ -848,7 +835,6 @@ export function PomodoroPage() {
   )
   const pomodoroProjectOptionsLoading =
     subjectsQ.isLoading ||
-    projectsQ.isLoading ||
     subjectMaterialQs.some((query) => query.isLoading)
   const defaultPrompts = useMemo(
     () => ({ focusPrompt: defaultFocusPrompt, breakPrompt: defaultBreakPrompt }),

@@ -81,14 +81,14 @@ class AuthRateLimitDecision:
 def current_auth_rate_limit_config() -> AuthRateLimitConfig:
     hosted = current_runtime_features().app_mode == "hosted"
     return AuthRateLimitConfig(
-        enabled=_env_bool("PLM_ENABLE_AUTH_RATE_LIMITS", hosted),
-        login_window_seconds=_env_int("PLM_AUTH_LOGIN_WINDOW_SECONDS", 600, minimum=1),
-        login_max_failures_per_ip=_env_int("PLM_AUTH_LOGIN_MAX_FAILURES_PER_IP", 20, minimum=0),
-        login_max_failures_per_email=_env_int("PLM_AUTH_LOGIN_MAX_FAILURES_PER_EMAIL", 8, minimum=0),
-        signup_window_seconds=_env_int("PLM_AUTH_SIGNUP_WINDOW_SECONDS", 3600, minimum=1),
-        signup_max_attempts_per_ip=_env_int("PLM_AUTH_SIGNUP_MAX_ATTEMPTS_PER_IP", 8, minimum=0),
-        signup_max_attempts_per_email=_env_int("PLM_AUTH_SIGNUP_MAX_ATTEMPTS_PER_EMAIL", 3, minimum=0),
-        retention_seconds=_env_int("PLM_AUTH_RATE_LIMIT_RETENTION_SECONDS", 86400, minimum=60),
+        enabled=_env_bool("LEARNINGPYRAMID_ENABLE_AUTH_RATE_LIMITS", hosted),
+        login_window_seconds=_env_int("LEARNINGPYRAMID_AUTH_LOGIN_WINDOW_SECONDS", 600, minimum=1),
+        login_max_failures_per_ip=_env_int("LEARNINGPYRAMID_AUTH_LOGIN_MAX_FAILURES_PER_IP", 20, minimum=0),
+        login_max_failures_per_email=_env_int("LEARNINGPYRAMID_AUTH_LOGIN_MAX_FAILURES_PER_EMAIL", 8, minimum=0),
+        signup_window_seconds=_env_int("LEARNINGPYRAMID_AUTH_SIGNUP_WINDOW_SECONDS", 3600, minimum=1),
+        signup_max_attempts_per_ip=_env_int("LEARNINGPYRAMID_AUTH_SIGNUP_MAX_ATTEMPTS_PER_IP", 8, minimum=0),
+        signup_max_attempts_per_email=_env_int("LEARNINGPYRAMID_AUTH_SIGNUP_MAX_ATTEMPTS_PER_EMAIL", 3, minimum=0),
+        retention_seconds=_env_int("LEARNINGPYRAMID_AUTH_RATE_LIMIT_RETENTION_SECONDS", 86400, minimum=60),
     )
 
 

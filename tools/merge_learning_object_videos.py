@@ -10,8 +10,8 @@ LearningObject forests (roots titled "videos"). This script:
   - Deletes now-unreferenced duplicate Instances and LearningObjectNodes
 
 Usage (PowerShell):
-  python tools/merge_learning_object_videos.py --store .plm_store.json --project proj_000014
-  python tools/merge_learning_object_videos.py --store .plm_store.json --project proj_000014 --dry-run
+  python tools/merge_learning_object_videos.py --store learningpyramid_store.json --project proj_000014
+  python tools/merge_learning_object_videos.py --store learningpyramid_store.json --project proj_000014 --dry-run
 """
 
 import argparse
@@ -380,7 +380,7 @@ def merge_project(
 
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--store", default=".plm_store.json", help="path to store JSON (default: .plm_store.json)")
+    ap.add_argument("--store", default="learningpyramid_store.json", help="path to store JSON (default: learningpyramid_store.json)")
     ap.add_argument("--project", default="", help="project id to operate on (default: all projects)")
     ap.add_argument("--root-title", default="videos", help="root container title to merge (default: videos)")
     ap.add_argument("--dry-run", action="store_true", help="validate and print report, but do not write changes")

@@ -6,6 +6,7 @@ import { Link, useNavigate, useParams } from "react-router-dom"
 import { ApiError } from "@/ui/api/http"
 import { listInstances, listRecallPointsByInstance } from "@/ui/api/instances"
 import { listLearningObjectNodes } from "@/ui/api/learningObjects"
+import type { ProjectScope } from "@/ui/api/projectScope"
 import { getRecallPoint, type RecallPoint } from "@/ui/api/review"
 import { ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
@@ -33,30 +34,31 @@ export function InstancePage() {
   const navigate = useNavigate()
   const pid = projectId ?? ""
   const iid = instanceId ?? ""
+  const projectScope: ProjectScope | null = subjectId && pid ? { subjectId, projectId: pid } : null
   const setCurrentMs = useCallback(() => undefined, [])
 
   const instancesQ = useQuery({
-    queryKey: ["instances", pid],
-    queryFn: () => listInstances(pid),
-    enabled: !!pid,
+    queryKey: ["instances", subjectId, pid],
+    queryFn: () => listInstances(projectScope as ProjectScope),
+    enabled: !!projectScope,
   })
 
   const objectNodesQ = useQuery({
-    queryKey: ["learningObjectNodes", pid],
-    queryFn: () => listLearningObjectNodes(pid),
-    enabled: !!pid,
+    queryKey: ["learningObjectNodes", subjectId, pid],
+    queryFn: () => listLearningObjectNodes(projectScope as ProjectScope),
+    enabled: !!projectScope,
   })
 
   const recallPointIdsQ = useQuery({
-    queryKey: ["recallPointsByInstance", pid, iid],
-    queryFn: () => listRecallPointsByInstance(pid, iid),
-    enabled: !!pid && !!iid,
+    queryKey: ["recallPointsByInstance", subjectId, pid, iid],
+    queryFn: () => listRecallPointsByInstance(projectScope as ProjectScope, iid),
+    enabled: !!projectScope && !!iid,
   })
   const recallPointQs = useQueries({
     queries: (recallPointIdsQ.data?.recallPointIds ?? []).map((recallPointId) => ({
-      queryKey: ["recallPoint", pid, recallPointId],
-      queryFn: () => getRecallPoint(pid, recallPointId),
-      enabled: !!pid && !!recallPointId,
+      queryKey: ["recallPoint", subjectId, pid, recallPointId],
+      queryFn: () => getRecallPoint(projectScope as ProjectScope, recallPointId),
+      enabled: !!projectScope && !!recallPointId,
     })),
   })
 
@@ -127,7 +129,7 @@ export function InstancePage() {
         <ContentNotice
           title="当前页面缺少实例上下文"
           message="当前链接缺少实例信息。请先返回项目列表，再从对象树或实例入口重新进入。"
-          action={<Button onClick={() => navigate("/projects")}>返回项目列表</Button>}
+          action={<Button onClick={() => navigate("/subjects")}>返回学科中心</Button>}
         />
       </div>
     )
@@ -166,6 +168,7 @@ export function InstancePage() {
               allowCaptureDrafts={false}
             />
             <RecallPointListCard
+              subjectId={subjectId}
               projectId={pid}
               items={recallPoints}
               instanceTitleById={instanceTitleById}

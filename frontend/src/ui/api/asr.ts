@@ -1,6 +1,7 @@
 import { z } from "zod"
 
 import { apiRequest } from "@/ui/api/http"
+import { projectApiPath, type ProjectScope } from "@/ui/api/projectScope"
 
 const AUDIO_PAYLOAD_TOO_LARGE_MESSAGE =
   "上传的音频片段过大，服务器或网关拒绝了这次请求。请稍后重试；如果问题持续出现，需要调大站点上传限制。"
@@ -51,7 +52,7 @@ export const InstanceAsrTranscriptResultSchema = z.object({
 export type InstanceAsrTranscriptResult = z.infer<typeof InstanceAsrTranscriptResultSchema>
 
 export function requestAsr(
-  projectId: string,
+  scope: ProjectScope,
   p: {
     recallPointId: string
     centerMs: number
@@ -66,7 +67,7 @@ export function requestAsr(
   },
 ) {
   return apiRequest({
-    path: `/projects/${projectId}/asr`,
+    path: projectApiPath(scope, "/asr"),
     method: "POST",
     body: p,
     responseSchema: AsrTranscriptResultSchema,
@@ -75,7 +76,7 @@ export function requestAsr(
 }
 
 export function requestAsrFromAudioClip(
-  projectId: string,
+  scope: ProjectScope,
   p: {
     recallPointId: string
     centerMs: number
@@ -101,7 +102,7 @@ export function requestAsrFromAudioClip(
   if (p.serviceConfig?.modelName) body.set("serviceModelName", p.serviceConfig.modelName)
   if (p.serviceConfig?.apiKey) body.set("serviceApiKey", p.serviceConfig.apiKey)
   return apiRequest({
-    path: `/projects/${projectId}/asr/audio`,
+    path: projectApiPath(scope, "/asr/audio"),
     method: "POST",
     body,
     responseSchema: AsrTranscriptResultSchema,
@@ -111,7 +112,7 @@ export function requestAsrFromAudioClip(
 }
 
 export function requestInstanceAsr(
-  projectId: string,
+  scope: ProjectScope,
   instanceId: string,
   p: {
     startMs: number
@@ -125,7 +126,7 @@ export function requestInstanceAsr(
   },
 ) {
   return apiRequest({
-    path: `/projects/${projectId}/instances/${instanceId}/asr`,
+    path: projectApiPath(scope, `/instances/${instanceId}/asr`),
     method: "POST",
     body: p,
     responseSchema: InstanceAsrTranscriptResultSchema,
@@ -134,7 +135,7 @@ export function requestInstanceAsr(
 }
 
 export function requestInstanceAsrFromAudioClip(
-  projectId: string,
+  scope: ProjectScope,
   instanceId: string,
   p: {
     startMs: number
@@ -157,7 +158,7 @@ export function requestInstanceAsrFromAudioClip(
   if (p.serviceConfig?.modelName) body.set("serviceModelName", p.serviceConfig.modelName)
   if (p.serviceConfig?.apiKey) body.set("serviceApiKey", p.serviceConfig.apiKey)
   return apiRequest({
-    path: `/projects/${projectId}/instances/${instanceId}/asr/audio`,
+    path: projectApiPath(scope, `/instances/${instanceId}/asr/audio`),
     method: "POST",
     body,
     responseSchema: InstanceAsrTranscriptResultSchema,
@@ -166,9 +167,9 @@ export function requestInstanceAsrFromAudioClip(
   })
 }
 
-export function getAsrArtifact(projectId: string, asrArtifactId: string) {
+export function getAsrArtifact(scope: ProjectScope, asrArtifactId: string) {
   return apiRequest({
-    path: `/projects/${projectId}/asr-artifacts/${asrArtifactId}`,
+    path: projectApiPath(scope, `/asr-artifacts/${asrArtifactId}`),
     responseSchema: AsrArtifactSchema,
   })
 }

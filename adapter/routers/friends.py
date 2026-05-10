@@ -123,8 +123,8 @@ def _build_learning_stats_for_user(user_id: str, *, auth_store: AuthStore, api: 
                 study_days_from_audit.add(occurred_at[:10])
 
     # Prefer synced day buckets for user-facing day counts because date_key follows
-    # the frontend's local-day semantics; audit timestamps are kept as a fallback for
-    # historical records that predate study-metrics sync.
+    # the frontend's local-day semantics; audit timestamps cover historical records
+    # that predate study-metrics sync.
     study_days = study_days_from_metrics or study_days_from_audit
 
     return {

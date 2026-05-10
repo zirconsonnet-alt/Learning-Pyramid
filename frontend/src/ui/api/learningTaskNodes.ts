@@ -2,6 +2,7 @@ import { z } from "zod"
 
 import { AsrArtifactSchema } from "@/ui/api/asr"
 import { apiRequest, type ApiRequestExecutionOptions } from "@/ui/api/http"
+import { projectApiPath, type ProjectScope } from "@/ui/api/projectScope"
 import { RecallPointSchema } from "@/ui/api/review"
 import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
 import { getVirtualStudyReviewRecallPointsForTaskNode } from "@/ui/guideWalkthrough/virtualStudyReviewProject"
@@ -46,58 +47,58 @@ export const LearningTaskNodeBindingSchema = z.object({
 })
 export type LearningTaskNodeBinding = z.infer<typeof LearningTaskNodeBindingSchema>
 
-export function getLearningTaskNode(projectId: string, nodeId: string) {
+export function getLearningTaskNode(scope: ProjectScope, nodeId: string) {
   return apiRequest({
-    path: `/projects/${projectId}/learning-task-nodes/${nodeId}`,
+    path: projectApiPath(scope, `/learning-task-nodes/${nodeId}`),
     responseSchema: LearningTaskNodeSchema,
   })
 }
 
-export function listLearningTaskNodes(projectId: string, options?: ApiRequestExecutionOptions) {
+export function listLearningTaskNodes(scope: ProjectScope, options?: ApiRequestExecutionOptions) {
   return apiRequest({
-    path: `/projects/${projectId}/learning-task-nodes`,
+    path: projectApiPath(scope, "/learning-task-nodes"),
     responseSchema: z.array(LearningTaskNodeSchema),
     signal: options?.signal,
     timeoutMs: options?.timeoutMs,
   })
 }
 
-export function getLearningTaskNodeBinding(projectId: string, nodeId: string) {
+export function getLearningTaskNodeBinding(scope: ProjectScope, nodeId: string) {
   return apiRequest({
-    path: `/projects/${projectId}/learning-task-nodes/${nodeId}/binding`,
+    path: projectApiPath(scope, `/learning-task-nodes/${nodeId}/binding`),
     responseSchema: LearningTaskNodeBindingSchema,
   })
 }
 
-export function editLearningTaskNode(projectId: string, nodeId: string, title: string) {
+export function editLearningTaskNode(scope: ProjectScope, nodeId: string, title: string) {
   return apiRequest({
-    path: `/projects/${projectId}/learning-task-nodes/${nodeId}`,
+    path: projectApiPath(scope, `/learning-task-nodes/${nodeId}`),
     method: "PATCH",
     body: { title },
     responseSchema: z.null(),
   })
 }
 
-export function listRecallPointsByLearningTaskNode(projectId: string, nodeId: string) {
-  if (isVirtualStudyReviewProjectId(projectId)) {
+export function listRecallPointsByLearningTaskNode(scope: ProjectScope, nodeId: string) {
+  if (isVirtualStudyReviewProjectId(scope.projectId)) {
     return Promise.resolve(getVirtualStudyReviewRecallPointsForTaskNode(nodeId))
   }
   return apiRequest({
-    path: `/projects/${projectId}/learning-task-nodes/${nodeId}/recall-points`,
+    path: projectApiPath(scope, `/learning-task-nodes/${nodeId}/recall-points`),
     responseSchema: z.array(RecallPointSchema),
   })
 }
 
-export function exportRecallPointsByLearningTaskNode(projectId: string, nodeId: string) {
+export function exportRecallPointsByLearningTaskNode(scope: ProjectScope, nodeId: string) {
   return apiRequest({
-    path: `/projects/${projectId}/learning-task-nodes/${nodeId}/exports/recall-points`,
+    path: projectApiPath(scope, `/learning-task-nodes/${nodeId}/exports/recall-points`),
     responseSchema: z.array(RecallPointSchema),
   })
 }
 
-export function exportAsrByLearningTaskNode(projectId: string, nodeId: string) {
+export function exportAsrByLearningTaskNode(scope: ProjectScope, nodeId: string) {
   return apiRequest({
-    path: `/projects/${projectId}/learning-task-nodes/${nodeId}/exports/asr`,
+    path: projectApiPath(scope, `/learning-task-nodes/${nodeId}/exports/asr`),
     responseSchema: z.array(AsrArtifactSchema),
   })
 }

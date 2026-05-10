@@ -323,9 +323,9 @@ def _public_origin_from_request(request: Request | None = None) -> str:
 
 def _transfer_confirmation_secret() -> str:
     return str(
-        os.getenv("PLM_WECHAT_PAY_TRANSFER_CONFIRMATION_SECRET")
-        or os.getenv("PLM_MEDIA_ACCESS_TOKEN_SECRET")
-        or os.getenv("PLM_TOKEN_ENCRYPTION_KEY")
+        os.getenv("LEARNINGPYRAMID_WECHAT_PAY_TRANSFER_CONFIRMATION_SECRET")
+        or os.getenv("LEARNINGPYRAMID_MEDIA_ACCESS_TOKEN_SECRET")
+        or os.getenv("LEARNINGPYRAMID_TOKEN_ENCRYPTION_KEY")
         or ""
     ).strip()
 

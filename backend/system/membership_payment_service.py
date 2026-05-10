@@ -29,20 +29,11 @@ PAYOUT_STATUS_SUCCEEDED = "succeeded"
 PAYOUT_STATUS_FAILED = "failed"
 PAYOUT_STATUS_CANCELED = "canceled"
 PAYOUT_STATUS_NEEDS_ATTENTION = "needs_attention"
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
 logger = logging.getLogger("learningpyramid.wechatpay")
 
 
 def _env_text(name: str) -> str:
     return str(os.getenv(name) or "").strip()
-
-
-def _wechat_env_text(*names: str) -> str:
-    for name in names:
-        value = _env_text(name)
-        if value:
-            return value
-    return ""
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -70,7 +61,7 @@ def _env_int(name: str, default: int, *, min_value: int, max_value: int) -> int:
 
 def manual_test_payment_enabled() -> bool:
     features = current_runtime_features()
-    return _env_bool("PLM_ENABLE_MANUAL_TEST_PAYMENT", features.app_mode != "hosted")
+    return _env_bool("LEARNINGPYRAMID_ENABLE_MANUAL_TEST_PAYMENT", features.app_mode != "hosted")
 
 
 def _normalize_provider(provider: str) -> str:
@@ -107,16 +98,12 @@ def _provider_label(provider: str) -> str:
     return normalized
 
 
-def _safe_path(raw_path: str, *, fallback_candidates: tuple[str, ...] = ()) -> Path | None:
+def _safe_path(raw_path: str) -> Path | None:
     text = str(raw_path or "").strip()
     if text:
         resolved = Path(text).expanduser().resolve()
         if resolved.exists():
             return resolved
-    for candidate in fallback_candidates:
-        path = Path(candidate).expanduser().resolve()
-        if path.exists():
-            return path
     return None
 
 
@@ -138,10 +125,10 @@ def _wechat_out_trade_no(order_id: str) -> str:
     raise PreconditionFailure("membership order id cannot be represented as a valid wechat out_trade_no")
 
 
-def _local_order_id_from_wechat_out_trade_no(out_trade_no: str, fallback_order_id: str = "") -> str:
+def _local_order_id_from_wechat_out_trade_no(out_trade_no: str) -> str:
     normalized_out_trade_no = str(out_trade_no or "").strip()
     if not normalized_out_trade_no:
-        return str(fallback_order_id or "").strip()
+        raise PreconditionFailure("wechat out_trade_no must be non-empty")
     if _looks_like_uuid_hex(normalized_out_trade_no):
         return f"mord_{normalized_out_trade_no}"
     return normalized_out_trade_no
@@ -201,48 +188,34 @@ class WeChatPayoutConfig:
 
 
 def current_wechat_native_payment_config() -> WeChatNativePaymentConfig:
-    api_base_url = _env_text("PLM_WECHAT_PAY_API_BASE_URL") or "https://api.mch.weixin.qq.com"
-    raw_timeout = _env_text("PLM_WECHAT_PAY_TIMEOUT_SECONDS") or "10"
+    api_base_url = _env_text("LEARNINGPYRAMID_WECHAT_PAY_API_BASE_URL") or "https://api.mch.weixin.qq.com"
+    raw_timeout = _env_text("LEARNINGPYRAMID_WECHAT_PAY_TIMEOUT_SECONDS") or "10"
     try:
         timeout_seconds = max(3.0, float(raw_timeout))
     except Exception:
         timeout_seconds = 10.0
     return WeChatNativePaymentConfig(
-        app_id=_wechat_env_text("PLM_WECHAT_PAY_APP_ID", "appid", "APPID"),
-        mch_id=_env_text("PLM_WECHAT_PAY_MCH_ID"),
-        cert_serial_no=_env_text("PLM_WECHAT_PAY_CERT_SERIAL_NO"),
-        api_v3_key=_env_text("PLM_WECHAT_PAY_API_V3_KEY"),
-        private_key_pem_path=_safe_path(
-            _env_text("PLM_WECHAT_PAY_PRIVATE_KEY_PEM_PATH"),
-            fallback_candidates=(
-                "/app/certs/apiclient_key.pem",
-                str(PROJECT_ROOT / "certs" / "apiclient_key.pem"),
-            ),
-        ),
-        wechatpay_public_key_id=_env_text("PLM_WECHAT_PAY_PUBLIC_KEY_ID"),
-        wechatpay_public_key_pem_path=_safe_path(
-            _env_text("PLM_WECHAT_PAY_PUBLIC_KEY_PEM_PATH"),
-            fallback_candidates=(
-                "/app/certs/wechatpay_public_key.pem",
-                "/app/certs/pub_key.pem",
-                str(PROJECT_ROOT / "certs" / "wechatpay_public_key.pem"),
-                str(PROJECT_ROOT / "certs" / "pub_key.pem"),
-            ),
-        ),
+        app_id=_env_text("LEARNINGPYRAMID_WECHAT_PAY_APP_ID"),
+        mch_id=_env_text("LEARNINGPYRAMID_WECHAT_PAY_MCH_ID"),
+        cert_serial_no=_env_text("LEARNINGPYRAMID_WECHAT_PAY_CERT_SERIAL_NO"),
+        api_v3_key=_env_text("LEARNINGPYRAMID_WECHAT_PAY_API_V3_KEY"),
+        private_key_pem_path=_safe_path(_env_text("LEARNINGPYRAMID_WECHAT_PAY_PRIVATE_KEY_PEM_PATH")),
+        wechatpay_public_key_id=_env_text("LEARNINGPYRAMID_WECHAT_PAY_PUBLIC_KEY_ID"),
+        wechatpay_public_key_pem_path=_safe_path(_env_text("LEARNINGPYRAMID_WECHAT_PAY_PUBLIC_KEY_PEM_PATH")),
         api_base_url=api_base_url.rstrip("/"),
-        notify_url=_env_text("PLM_WECHAT_PAY_NOTIFY_URL") or None,
-        refund_notify_url=_env_text("PLM_WECHAT_PAY_REFUND_NOTIFY_URL") or None,
+        notify_url=_env_text("LEARNINGPYRAMID_WECHAT_PAY_NOTIFY_URL") or None,
+        refund_notify_url=_env_text("LEARNINGPYRAMID_WECHAT_PAY_REFUND_NOTIFY_URL") or None,
         timeout_seconds=timeout_seconds,
-        description_prefix=_env_text("PLM_WECHAT_PAY_DESCRIPTION_PREFIX") or "LearningPyramid 月会员",
+        description_prefix=_env_text("LEARNINGPYRAMID_WECHAT_PAY_DESCRIPTION_PREFIX") or "LearningPyramid 月会员",
     )
 
 
 def current_wechat_payout_config() -> WeChatPayoutConfig:
     native = current_wechat_native_payment_config()
-    provider_mode = _env_text("PLM_WECHAT_PAY_PAYOUT_PROVIDER_MODE") or PAYMENT_PROVIDER_WECHAT_NATIVE
+    provider_mode = _env_text("LEARNINGPYRAMID_WECHAT_PAY_PAYOUT_PROVIDER_MODE") or PAYMENT_PROVIDER_WECHAT_NATIVE
     if provider_mode not in {PAYMENT_PROVIDER_WECHAT_NATIVE, PAYMENT_PROVIDER_MANUAL_TEST, "disabled"}:
         provider_mode = PAYMENT_PROVIDER_WECHAT_NATIVE
-    raw_scene_infos = _env_text("PLM_WECHAT_PAY_TRANSFER_SCENE_REPORT_INFOS_JSON")
+    raw_scene_infos = _env_text("LEARNINGPYRAMID_WECHAT_PAY_TRANSFER_SCENE_REPORT_INFOS_JSON")
     scene_infos: tuple[dict[str, str], ...] = (
         {"info_type": "岗位类型", "info_content": "推广员"},
         {"info_type": "报酬说明", "info_content": "会员邀请佣金"},
@@ -264,16 +237,16 @@ def current_wechat_payout_config() -> WeChatPayoutConfig:
     return WeChatPayoutConfig(
         app_id=native.app_id,
         mch_id=native.mch_id,
-        app_secret=_env_text("PLM_WECHAT_PAY_APP_SECRET"),
+        app_secret=_env_text("LEARNINGPYRAMID_WECHAT_PAY_APP_SECRET"),
         api_base_url=native.api_base_url,
-        transfer_scene_id=_env_text("PLM_WECHAT_PAY_TRANSFER_SCENE_ID"),
-        transfer_remark=_env_text("PLM_WECHAT_PAY_TRANSFER_REMARK") or "会员邀请佣金提现",
-        user_recv_perception=_env_text("PLM_WECHAT_PAY_USER_RECV_PERCEPTION"),
-        notify_url=_env_text("PLM_WECHAT_PAY_TRANSFER_NOTIFY_URL") or None,
-        oauth_authorize_url=_env_text("PLM_WECHAT_PAY_OAUTH_AUTHORIZE_URL") or "https://open.weixin.qq.com/connect/oauth2/authorize",
-        oauth_token_url=_env_text("PLM_WECHAT_PAY_OAUTH_TOKEN_URL") or "https://api.weixin.qq.com/sns/oauth2/access_token",
+        transfer_scene_id=_env_text("LEARNINGPYRAMID_WECHAT_PAY_TRANSFER_SCENE_ID"),
+        transfer_remark=_env_text("LEARNINGPYRAMID_WECHAT_PAY_TRANSFER_REMARK") or "会员邀请佣金提现",
+        user_recv_perception=_env_text("LEARNINGPYRAMID_WECHAT_PAY_USER_RECV_PERCEPTION"),
+        notify_url=_env_text("LEARNINGPYRAMID_WECHAT_PAY_TRANSFER_NOTIFY_URL") or None,
+        oauth_authorize_url=_env_text("LEARNINGPYRAMID_WECHAT_PAY_OAUTH_AUTHORIZE_URL") or "https://open.weixin.qq.com/connect/oauth2/authorize",
+        oauth_token_url=_env_text("LEARNINGPYRAMID_WECHAT_PAY_OAUTH_TOKEN_URL") or "https://api.weixin.qq.com/sns/oauth2/access_token",
         scene_report_infos=tuple(item for item in scene_infos if item["info_type"] and item["info_content"]),
-        binding_qr_ttl_minutes=_env_int("PLM_WECHAT_PAY_BINDING_QR_TTL_MINUTES", 10, min_value=1, max_value=60),
+        binding_qr_ttl_minutes=_env_int("LEARNINGPYRAMID_WECHAT_PAY_BINDING_QR_TTL_MINUTES", 10, min_value=1, max_value=60),
         provider_mode=provider_mode,
     )
 
@@ -602,10 +575,7 @@ class MembershipPaymentService:
         payer = response_body.get("payer") if isinstance(response_body.get("payer"), dict) else {}
         return MembershipRemotePaymentStatus(
             provider=PAYMENT_PROVIDER_WECHAT_NATIVE,
-            order_id=_local_order_id_from_wechat_out_trade_no(
-                str(response_body.get("out_trade_no") or ""),
-                fallback_order_id=str(order.order_id),
-            ),
+            order_id=_local_order_id_from_wechat_out_trade_no(str(response_body.get("out_trade_no") or "")),
             provider_trade_no=transaction_id,
             remote_status=self._map_wechat_trade_state(trade_state),
             paid_at=_parse_iso_datetime(response_body.get("success_time")),
@@ -684,10 +654,7 @@ class MembershipPaymentService:
             request_body["out_trade_no"] = _wechat_out_trade_no(str(order.order_id))
         response_body = self._wechat_request_json("POST", "/v3/refund/domestic/refunds", request_body)
         return self._wechat_refund_status_from_payload(
-            order_id=_local_order_id_from_wechat_out_trade_no(
-                str(response_body.get("out_trade_no") or ""),
-                fallback_order_id=str(order.order_id),
-            ),
+            order_id=_local_order_id_from_wechat_out_trade_no(str(response_body.get("out_trade_no") or "")),
             refund_out_trade_no=str(response_body.get("out_refund_no") or refund_out_trade_no),
             payload=response_body,
         )
@@ -713,7 +680,6 @@ class MembershipPaymentService:
         response_body = self._wechat_request_json("POST", "/v3/fund-app/mch-transfer/transfer-bills", request_body)
         return self._wechat_transfer_status_from_payload(
             withdrawal_id=str(withdrawal.withdrawal_id),
-            fallback_out_bill_no=str(withdrawal.out_bill_no),
             payload=response_body,
         )
 
@@ -728,7 +694,6 @@ class MembershipPaymentService:
         response_body = self._wechat_request_json("GET", uri)
         return self._wechat_transfer_status_from_payload(
             withdrawal_id=str(withdrawal_id or ""),
-            fallback_out_bill_no=normalized_out_bill_no,
             payload=response_body,
         )
 
@@ -757,7 +722,7 @@ class MembershipPaymentService:
             separators=(",", ":"),
             sort_keys=True,
         )
-        return self._wechat_transfer_status_from_payload(withdrawal_id="", fallback_out_bill_no="", payload=payload)
+        return self._wechat_transfer_status_from_payload(withdrawal_id="", payload=payload)
 
     def _query_wechat_refund(
         self,
@@ -773,10 +738,7 @@ class MembershipPaymentService:
         uri = f"/v3/refund/domestic/refunds/{quote(refund_out_trade_no, safe='')}"
         response_body = self._wechat_request_json("GET", uri)
         return self._wechat_refund_status_from_payload(
-            order_id=_local_order_id_from_wechat_out_trade_no(
-                str(response_body.get("out_trade_no") or ""),
-                fallback_order_id=str(order.order_id),
-            ),
+            order_id=_local_order_id_from_wechat_out_trade_no(str(response_body.get("out_trade_no") or "")),
             refund_out_trade_no=str(response_body.get("out_refund_no") or refund_out_trade_no),
             payload=response_body,
         )
@@ -823,13 +785,13 @@ class MembershipPaymentService:
             if parsed.scheme and parsed.netloc:
                 return urlunsplit((parsed.scheme, parsed.netloc, "/api/payments/wechat/refund-notify", "", ""))
         raise PreconditionFailure(
-            "PLM_PUBLIC_ORIGIN, PLM_WECHAT_PAY_REFUND_NOTIFY_URL, or a valid PLM_WECHAT_PAY_NOTIFY_URL must be set before using wechat_native refunds"
+            "LEARNINGPYRAMID_PUBLIC_ORIGIN, LEARNINGPYRAMID_WECHAT_PAY_REFUND_NOTIFY_URL, or a valid LEARNINGPYRAMID_WECHAT_PAY_NOTIFY_URL must be set before using wechat_native refunds"
         )
 
     def _build_default_wechat_notify_url(self, public_origin: str | None) -> str:
         origin = str(public_origin or "").strip().rstrip("/")
         if not origin:
-            raise PreconditionFailure("PLM_PUBLIC_ORIGIN or PLM_WECHAT_PAY_NOTIFY_URL must be set before using wechat_native")
+            raise PreconditionFailure("LEARNINGPYRAMID_PUBLIC_ORIGIN or LEARNINGPYRAMID_WECHAT_PAY_NOTIFY_URL must be set before using wechat_native")
         return f"{origin}/api/payments/wechat/notify"
 
     def _wechat_request_json(self, method: str, uri: str, body: dict[str, object] | None = None) -> dict[str, object]:
@@ -978,7 +940,7 @@ class MembershipPaymentService:
             return self._private_key
         config = current_wechat_native_payment_config()
         if config.private_key_pem_path is None or not config.private_key_pem_path.exists():
-            raise PreconditionFailure("PLM_WECHAT_PAY_PRIVATE_KEY_PEM_PATH does not point to an existing PEM file")
+            raise PreconditionFailure("LEARNINGPYRAMID_WECHAT_PAY_PRIVATE_KEY_PEM_PATH does not point to an existing PEM file")
         self._private_key = serialization.load_pem_private_key(
             config.private_key_pem_path.read_bytes(),
             password=None,
@@ -990,7 +952,7 @@ class MembershipPaymentService:
             return self._wechat_public_key_cache
         config = current_wechat_native_payment_config()
         if config.wechatpay_public_key_pem_path is None or not config.wechatpay_public_key_pem_path.exists():
-            raise PreconditionFailure("PLM_WECHAT_PAY_PUBLIC_KEY_PEM_PATH does not point to an existing PEM file")
+            raise PreconditionFailure("LEARNINGPYRAMID_WECHAT_PAY_PUBLIC_KEY_PEM_PATH does not point to an existing PEM file")
         self._wechat_public_key_cache = serialization.load_pem_public_key(config.wechatpay_public_key_pem_path.read_bytes())
         return self._wechat_public_key_cache
 
@@ -1072,13 +1034,14 @@ class MembershipPaymentService:
     def _wechat_transfer_status_from_payload(
         *,
         withdrawal_id: str,
-        fallback_out_bill_no: str,
         payload: Mapping[str, object],
     ) -> CommissionPayoutStatus:
         state = str(payload.get("state") or payload.get("transfer_state") or payload.get("status") or "PROCESSING").strip().upper()
         mapped = MembershipPaymentService._map_wechat_transfer_state(state)
         transfer_bill_no = str(payload.get("transfer_bill_no") or payload.get("transfer_bill_no") or "").strip()
-        out_bill_no = str(payload.get("out_bill_no") or fallback_out_bill_no).strip()
+        out_bill_no = str(payload.get("out_bill_no") or "").strip()
+        if not out_bill_no:
+            raise PreconditionFailure("wechat transfer out_bill_no must be non-empty")
         package_info = str(payload.get("package_info") or "").strip() or None
         raw_payload_json = str(payload.get("_raw_payload_json") or "")
         if not raw_payload_json:

@@ -2,7 +2,6 @@ import json
 import os
 import sqlite3
 import threading
-import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -42,7 +41,7 @@ PAYOUT_IDENTITY_STATUS_REPLACED = "replaced"
 COMMISSION_THRESHOLD_AMOUNT_CENT = 1500
 COMMISSION_SETTLED_AMOUNT_CENT = 500
 COMMISSION_REFUND_WINDOW_HOURS = 24
-COMMISSION_REFUND_WINDOW_ENV = "PLM_MEMBERSHIP_COMMISSION_REFUND_WINDOW_MINUTES"
+COMMISSION_REFUND_WINDOW_ENV = "LEARNINGPYRAMID_MEMBERSHIP_COMMISSION_REFUND_WINDOW_MINUTES"
 
 
 def _utc_now() -> datetime:
@@ -284,100 +283,113 @@ class MembershipCommissionStore:
         return row is not None
 
     @classmethod
-    def _ensure_columns(cls, conn: sqlite3.Connection, table: str, columns: dict[str, str]) -> None:
+    def _validate_columns(cls, conn: sqlite3.Connection, table: str, columns: tuple[str, ...]) -> None:
         existing = cls._table_columns(conn, table)
-        for name, ddl in columns.items():
-            if name not in existing:
-                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+        missing = tuple(name for name in columns if name not in existing)
+        if missing:
+            raise RuntimeError(f"{table} schema is missing required columns: {', '.join(missing)}")
 
     @classmethod
-    def _ensure_withdrawal_status_schema(cls, conn: sqlite3.Connection) -> None:
+    def _validate_withdrawal_request_schema(cls, conn: sqlite3.Connection) -> None:
         row = conn.execute(
             "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'commission_withdrawal_requests' LIMIT 1"
         ).fetchone()
         table_sql = "" if row is None or row["sql"] is None else str(row["sql"]).lower()
         if not table_sql:
             return
-        has_legacy_check = "check" in table_sql and "status" in table_sql and "'pending'" in table_sql
-        has_legacy_pending_rows = (
-            conn.execute("SELECT 1 FROM commission_withdrawal_requests WHERE status = 'pending' LIMIT 1").fetchone() is not None
+        if "check" in table_sql and "status" in table_sql and "'pending'" in table_sql:
+            raise RuntimeError("commission_withdrawal_requests schema is not current")
+        required_columns = (
+            "withdrawal_id",
+            "user_id",
+            "amount_cent",
+            "target_type",
+            "wechat_open_id",
+            "status",
+            "provider_transfer_no",
+            "failure_reason",
+            "created_at",
+            "submitted_at",
+            "completed_at",
+            "identity_id",
+            "identity_masked_label",
+            "out_bill_no",
+            "transfer_bill_no",
+            "package_info",
+            "provider_state",
+            "reserved_at",
+            "confirmation_requested_at",
         )
-        if not has_legacy_check:
-            if has_legacy_pending_rows:
-                conn.execute("UPDATE commission_withdrawal_requests SET status = ? WHERE status = 'pending'", (WITHDRAWAL_STATUS_CREATED,))
-            return
+        missing = tuple(name for name in required_columns if name not in cls._table_columns(conn, "commission_withdrawal_requests"))
+        if missing:
+            raise RuntimeError("commission_withdrawal_requests schema is missing required columns: " + ", ".join(missing))
 
-        legacy_table = f"commission_withdrawal_requests_legacy_{uuid.uuid4().hex}"
-        for index_name in (
-            "idx_commission_withdrawal_user",
-            "idx_commission_withdrawal_status",
-            "idx_commission_withdrawal_out_bill_no",
-        ):
-            conn.execute(f"DROP INDEX IF EXISTS {index_name}")
-        conn.execute(f"ALTER TABLE commission_withdrawal_requests RENAME TO {legacy_table}")
-        conn.execute(
-            """
-            CREATE TABLE commission_withdrawal_requests (
-                withdrawal_id TEXT PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                amount_cent INTEGER NOT NULL,
-                target_type TEXT NOT NULL,
-                wechat_open_id TEXT NOT NULL DEFAULT '',
-                status TEXT NOT NULL,
-                provider_transfer_no TEXT,
-                failure_reason TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL,
-                submitted_at TEXT,
-                completed_at TEXT,
-                identity_id TEXT,
-                identity_masked_label TEXT NOT NULL DEFAULT '',
-                out_bill_no TEXT NOT NULL DEFAULT '',
-                transfer_bill_no TEXT,
-                package_info TEXT,
-                provider_state TEXT NOT NULL DEFAULT '',
-                reserved_at TEXT,
-                confirmation_requested_at TEXT
-            )
-            """
+    @classmethod
+    def _validate_current_schema(cls, conn: sqlite3.Connection) -> None:
+        cls._validate_columns(
+            conn,
+            "commission_records",
+            (
+                "commission_id",
+                "inviter_user_id",
+                "invitee_user_id",
+                "source_order_id",
+                "source_payment_amount_cent",
+                "threshold_amount_cent",
+                "commission_amount_cent",
+                "refund_window_ends_at",
+                "status",
+                "created_at",
+                "settled_at",
+                "canceled_at",
+                "cancel_reason",
+                "settlement_mode",
+                "last_settlement_checked_at",
+                "settlement_run_id",
+                "settlement_failure_reason",
+            ),
         )
-        conn.execute(
-            f"""
-            INSERT INTO commission_withdrawal_requests (
-                withdrawal_id, user_id, amount_cent, target_type, wechat_open_id, status,
-                provider_transfer_no, failure_reason, created_at, submitted_at, completed_at,
-                identity_id, identity_masked_label, out_bill_no, transfer_bill_no, package_info,
-                provider_state, reserved_at, confirmation_requested_at
-            )
-            SELECT
-                withdrawal_id,
-                user_id,
-                amount_cent,
-                target_type,
-                COALESCE(wechat_open_id, ''),
-                CASE status WHEN 'pending' THEN ? ELSE status END,
-                provider_transfer_no,
-                COALESCE(failure_reason, ''),
-                created_at,
-                submitted_at,
-                completed_at,
-                identity_id,
-                COALESCE(identity_masked_label, ''),
-                COALESCE(out_bill_no, ''),
-                transfer_bill_no,
-                package_info,
-                COALESCE(provider_state, ''),
-                reserved_at,
-                confirmation_requested_at
-            FROM {legacy_table}
-            """,
-            (WITHDRAWAL_STATUS_CREATED,),
+        cls._validate_withdrawal_request_schema(conn)
+        cls._validate_columns(
+            conn,
+            "payout_binding_attempts",
+            (
+                "binding_attempt_id",
+                "user_id",
+                "provider",
+                "channel",
+                "state",
+                "status",
+                "desktop_return_url",
+                "mobile_binding_url",
+                "qr_expires_at",
+                "scanned_at",
+                "confirmed_at",
+                "authorization_code_hash",
+                "resolved_openid",
+                "identity_id",
+                "amount_cent",
+                "withdrawal_id",
+                "failure_reason",
+                "created_at",
+                "authorized_at",
+                "completed_at",
+                "expires_at",
+            ),
         )
-        conn.execute(f"DROP TABLE {legacy_table}")
+
+    @classmethod
+    def _validate_existing_current_schema(cls, conn: sqlite3.Connection) -> None:
+        for table_name in ("commission_records", "commission_withdrawal_requests", "payout_binding_attempts"):
+            if cls._table_exists(conn, table_name):
+                cls._validate_current_schema(conn)
+                return
 
     def _init_db(self) -> None:
         with self._lock:
             conn = self._connect()
             try:
+                self._validate_existing_current_schema(conn)
                 conn.executescript(
                     """
                     CREATE TABLE IF NOT EXISTS commission_records (
@@ -393,7 +405,11 @@ class MembershipCommissionStore:
                         created_at TEXT NOT NULL,
                         settled_at TEXT,
                         canceled_at TEXT,
-                        cancel_reason TEXT NOT NULL DEFAULT ''
+                        cancel_reason TEXT NOT NULL DEFAULT '',
+                        settlement_mode TEXT NOT NULL DEFAULT '',
+                        last_settlement_checked_at TEXT,
+                        settlement_run_id TEXT,
+                        settlement_failure_reason TEXT NOT NULL DEFAULT ''
                     );
 
                     CREATE INDEX IF NOT EXISTS idx_commission_records_inviter
@@ -413,7 +429,15 @@ class MembershipCommissionStore:
                         failure_reason TEXT NOT NULL DEFAULT '',
                         created_at TEXT NOT NULL,
                         submitted_at TEXT,
-                        completed_at TEXT
+                        completed_at TEXT,
+                        identity_id TEXT,
+                        identity_masked_label TEXT NOT NULL DEFAULT '',
+                        out_bill_no TEXT NOT NULL DEFAULT '',
+                        transfer_bill_no TEXT,
+                        package_info TEXT,
+                        provider_state TEXT NOT NULL DEFAULT '',
+                        reserved_at TEXT,
+                        confirmation_requested_at TEXT
                     );
 
                     CREATE INDEX IF NOT EXISTS idx_commission_withdrawal_user
@@ -514,31 +538,8 @@ class MembershipCommissionStore:
                     );
                     """
                 )
-                self._ensure_columns(
-                    conn,
-                    "commission_records",
-                    {
-                        "settlement_mode": "TEXT NOT NULL DEFAULT ''",
-                        "last_settlement_checked_at": "TEXT",
-                        "settlement_run_id": "TEXT",
-                        "settlement_failure_reason": "TEXT NOT NULL DEFAULT ''",
-                    },
-                )
-                self._ensure_columns(
-                    conn,
-                    "commission_withdrawal_requests",
-                    {
-                        "identity_id": "TEXT",
-                        "identity_masked_label": "TEXT NOT NULL DEFAULT ''",
-                        "out_bill_no": "TEXT NOT NULL DEFAULT ''",
-                        "transfer_bill_no": "TEXT",
-                        "package_info": "TEXT",
-                        "provider_state": "TEXT NOT NULL DEFAULT ''",
-                        "reserved_at": "TEXT",
-                        "confirmation_requested_at": "TEXT",
-                    },
-                )
-                self._ensure_withdrawal_status_schema(conn)
+                self._validate_current_schema(conn)
+                self._validate_withdrawal_request_schema(conn)
                 conn.execute(
                     """
                     CREATE INDEX IF NOT EXISTS idx_commission_withdrawal_user
@@ -550,19 +551,6 @@ class MembershipCommissionStore:
                     CREATE INDEX IF NOT EXISTS idx_commission_withdrawal_status
                     ON commission_withdrawal_requests (status, created_at DESC)
                     """
-                )
-                self._ensure_columns(
-                    conn,
-                    "payout_binding_attempts",
-                    {
-                        "desktop_return_url": "TEXT NOT NULL DEFAULT ''",
-                        "mobile_binding_url": "TEXT NOT NULL DEFAULT ''",
-                        "qr_expires_at": "TEXT",
-                        "scanned_at": "TEXT",
-                        "confirmed_at": "TEXT",
-                        "amount_cent": "INTEGER NOT NULL DEFAULT 0",
-                        "withdrawal_id": "TEXT",
-                    },
                 )
                 conn.execute(
                     "CREATE UNIQUE INDEX IF NOT EXISTS idx_commission_withdrawal_out_bill_no ON commission_withdrawal_requests (out_bill_no) WHERE out_bill_no != ''"
@@ -1458,12 +1446,12 @@ class MembershipCommissionStore:
         identity = self.get_payout_identity(identity_id) if identity_id else self.get_active_payout_identity(user_id)
         normalized_open_id = str(wechat_open_id or "").strip()
         if identity is None:
-            if normalized_open_id and str(os.getenv("PLM_ENABLE_MANUAL_TEST_PAYMENT") or "").lower() in {"1", "true", "yes", "on"}:
+            if normalized_open_id and str(os.getenv("LEARNINGPYRAMID_ENABLE_MANUAL_TEST_PAYMENT") or "").lower() in {"1", "true", "yes", "on"}:
                 identity = PayoutIdentity(
                     identity_id="",
                     user_id=str(user_id),
                     provider=PAYOUT_PROVIDER_WECHAT_PAY,
-                    appid=str(os.getenv("PLM_WECHAT_PAY_APP_ID") or "manual_test"),
+                    appid=str(os.getenv("LEARNINGPYRAMID_WECHAT_PAY_APP_ID") or "manual_test"),
                     openid=normalized_open_id,
                     masked_openid=_mask_openid(normalized_open_id),
                     status=PAYOUT_IDENTITY_STATUS_ACTIVE,

@@ -13,6 +13,7 @@ import {
 import { Link, useParams } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
+import type { ProjectScope } from "@/ui/api/projectScope"
 import { type RecallPoint, type ReviewRecommendationItem } from "@/ui/api/review"
 import { normalizeRichContent, richContentHasMeaning, setRichContentText, type RichContent } from "@/ui/api/richContent"
 import { RichContentRenderer } from "@/ui/components/RichContentRenderer"
@@ -23,7 +24,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/car
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/ui/components/ui/dialog"
 import { Input } from "@/ui/components/ui/input"
 import { formatInstanceReference } from "@/ui/displayIdentifiers"
-import { buildCurrentProjectPath } from "@/ui/projectPaths"
+import { buildScopedProjectPath } from "@/ui/projectPaths"
 import { useProject } from "@/ui/queries/projects"
 import { useAllReviewRecommendations } from "@/ui/queries/reviewRecommendations"
 import { cn } from "@/ui/utils"
@@ -83,8 +84,9 @@ function StatBlock({ label, value, detail }: { label: string; value: string; det
 }
 
 export function ReviewRecommendationsPage() {
-  const { projectId } = useParams()
+  const { subjectId = "", projectId } = useParams()
   const pid = projectId ?? ""
+  const projectScope: ProjectScope | null = subjectId && pid ? { subjectId, projectId: pid } : null
   const [selectedRecallPointId, setSelectedRecallPointId] = useState<string | null>(null)
   const [revealedAnswerIds, setRevealedAnswerIds] = useState<Record<string, boolean>>({})
   const [sessionAnswers, setSessionAnswers] = useState<Record<string, SessionAnswer>>({})
@@ -96,8 +98,8 @@ export function ReviewRecommendationsPage() {
   const [recommendationThresholdPercent, setRecommendationThresholdPercent] = useState(70)
   const [thresholdDraft, setThresholdDraft] = useState("70")
   const [thresholdDialogOpen, setThresholdDialogOpen] = useState(false)
-  const allReviewRecommendationsQ = useAllReviewRecommendations(pid)
-  const { projectTitle } = useProject(pid)
+  const allReviewRecommendationsQ = useAllReviewRecommendations(projectScope)
+  const { projectTitle } = useProject(projectScope)
   const workspaceRecommendations = useMemo(
     () => workspaceRecommendationsByProjectId[pid] ?? [],
     [pid, workspaceRecommendationsByProjectId],
@@ -136,7 +138,7 @@ export function ReviewRecommendationsPage() {
   const answeredCount = reviewWorkspaceEntries.filter((entry) => sessionAnswers[entry.recallPoint.recallPointId] !== undefined).length
   const completionPercent = reviewWorkspaceEntries.length > 0 ? Math.round((answeredCount / reviewWorkspaceEntries.length) * 100) : 0
 
-  if (!pid) {
+  if (!subjectId || !pid) {
     return (
       <div className="space-y-4">
         <ContentNotice
@@ -144,7 +146,7 @@ export function ReviewRecommendationsPage() {
           message="当前链接缺少项目信息。请先返回项目列表，再重新进入推荐复习。"
           action={
             <Button asChild>
-              <Link to="/projects">返回项目列表</Link>
+              <Link to="/subjects">返回学科中心</Link>
             </Button>
           }
         />
@@ -240,7 +242,7 @@ export function ReviewRecommendationsPage() {
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" asChild>
-            <Link to={buildCurrentProjectPath(pid, "/workbench")}>返回工作台</Link>
+            <Link to={buildScopedProjectPath(subjectId, pid, "/workbench")}>返回工作台</Link>
           </Button>
           <Button variant="outline" onClick={() => setThresholdDialogOpen(true)} disabled={allReviewRecommendationsQ.isFetching}>
             <SlidersHorizontal className="h-4 w-4" />
@@ -367,12 +369,12 @@ export function ReviewRecommendationsPage() {
                           </div>
 
                           <Link
-                            to={buildCurrentProjectPath(pid, `/recall-points/${rpId}`)}
+                            to={buildScopedProjectPath(subjectId, pid, `/recall-points/${rpId}`)}
                             className="-mx-2 -my-1 mt-2 block rounded-2xl px-2 py-1 transition hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                             title="打开复述点详情"
                           >
                             <div className="text-[15px] font-semibold leading-6 text-foreground transition hover:text-primary">
-                              <RichContentRenderer projectId={pid} value={activeEntry.recallPoint.question} />
+                              <RichContentRenderer subjectId={subjectId} projectId={pid} value={activeEntry.recallPoint.question} />
                             </div>
                             <div className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary/85">
                               查看复述点详情
@@ -398,7 +400,7 @@ export function ReviewRecommendationsPage() {
                       <div className="mt-3 flex flex-wrap gap-2">
                         {activeEntry.recallPoint.anchor ? (
                           <Button variant="outline" size="sm" className="rounded-full" asChild>
-                            <Link to={buildCurrentProjectPath(pid, `/instances/${activeEntry.recallPoint.anchor.instanceId}`)}>
+                            <Link to={buildScopedProjectPath(subjectId, pid, `/instances/${activeEntry.recallPoint.anchor.instanceId}`)}>
                               <PlayCircle className="h-4 w-4" />
                               回到锚点
                             </Link>
@@ -413,6 +415,7 @@ export function ReviewRecommendationsPage() {
                       <div className="mt-4">
                         <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">你的答案</div>
                         <RichContentEditor
+                          subjectId={subjectId}
                           projectId={pid}
                           field="answer"
                           value={writtenAnswerDraft}
@@ -450,7 +453,7 @@ export function ReviewRecommendationsPage() {
                       {answerVisible ? (
                         <div className="theme-canvas mt-3 rounded-2xl border border-[color:var(--theme-soft-border)] p-3 text-sm">
                           <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">答案</div>
-                          <RichContentRenderer projectId={pid} value={activeEntry.recallPoint.answer} />
+                          <RichContentRenderer subjectId={subjectId} projectId={pid} value={activeEntry.recallPoint.answer} />
                         </div>
                       ) : null}
 

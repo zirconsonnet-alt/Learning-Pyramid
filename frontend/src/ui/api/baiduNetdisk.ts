@@ -1,6 +1,7 @@
 import { z } from "zod"
 
 import { apiRequest, type ApiRequestExecutionOptions } from "@/ui/api/http"
+import { projectApiPath, type ProjectScope } from "@/ui/api/projectScope"
 
 export const BaiduNetdiskFileItemSchema = z.object({
   fileId: z.string(),
@@ -25,7 +26,7 @@ export const BaiduNetdiskFileListSchema = z.object({
 export type BaiduNetdiskFileList = z.infer<typeof BaiduNetdiskFileListSchema>
 
 export function listProjectBaiduNetdiskFiles(
-  projectId: string,
+  scope: ProjectScope,
   params: {
     accountId: string
     dirPath?: string
@@ -41,7 +42,7 @@ export function listProjectBaiduNetdiskFiles(
     limit: String(params.limit ?? 200),
   })
   return apiRequest({
-    path: `/projects/${projectId}/baidu-netdisk/files?${query.toString()}`,
+    path: projectApiPath(scope, `/baidu-netdisk/files?${query.toString()}`),
     responseSchema: BaiduNetdiskFileListSchema,
     signal: options?.signal,
     timeoutMs: options?.timeoutMs,

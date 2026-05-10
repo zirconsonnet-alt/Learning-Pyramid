@@ -1,6 +1,7 @@
 import { z } from "zod"
 
 import { apiRequest, type ApiRequestExecutionOptions } from "@/ui/api/http"
+import { projectApiPath, type ProjectScope } from "@/ui/api/projectScope"
 import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
 import {
   getVirtualStudyReviewRecallPointIdsByInstance,
@@ -47,30 +48,30 @@ const VideoWatchProgressSchema = z.object({
 const VideoWatchProgressMapSchema = z.record(z.string(), VideoWatchProgressSchema)
 export type VideoWatchProgress = z.infer<typeof VideoWatchProgressSchema>
 
-export function listInstances(projectId: string, options?: ApiRequestExecutionOptions) {
+export function listInstances(scope: ProjectScope, options?: ApiRequestExecutionOptions) {
   return apiRequest({
-    path: `/projects/${projectId}/instances`,
+    path: projectApiPath(scope, "/instances"),
     responseSchema: InstanceListSchema,
     signal: options?.signal,
     timeoutMs: options?.timeoutMs,
   })
 }
 
-export function listMissingInstances(projectId: string, options?: ApiRequestExecutionOptions) {
+export function listMissingInstances(scope: ProjectScope, options?: ApiRequestExecutionOptions) {
   return apiRequest({
-    path: `/projects/${projectId}/missing-instances`,
+    path: projectApiPath(scope, "/missing-instances"),
     responseSchema: MissingInstancesSchema,
     signal: options?.signal,
     timeoutMs: options?.timeoutMs,
   })
 }
 
-export function listRecallPointsByInstance(projectId: string, instanceId: string, options?: ApiRequestExecutionOptions) {
-  if (isVirtualStudyReviewProjectId(projectId)) {
+export function listRecallPointsByInstance(scope: ProjectScope, instanceId: string, options?: ApiRequestExecutionOptions) {
+  if (isVirtualStudyReviewProjectId(scope.projectId)) {
     return Promise.resolve(getVirtualStudyReviewRecallPointIdsByInstance(instanceId))
   }
   return apiRequest({
-    path: `/projects/${projectId}/instances/${instanceId}/recall-points`,
+    path: projectApiPath(scope, `/instances/${instanceId}/recall-points`),
     responseSchema: RecallPointIdsByInstanceSchema,
     signal: options?.signal,
     timeoutMs: options?.timeoutMs,
@@ -78,18 +79,18 @@ export function listRecallPointsByInstance(projectId: string, instanceId: string
 }
 
 export function fetchVideoWatchProgressMap(
-  projectId: string,
+  scope: ProjectScope,
   instanceIds: string[],
   options?: ApiRequestExecutionOptions,
 ) {
-  if (isVirtualStudyReviewProjectId(projectId)) {
+  if (isVirtualStudyReviewProjectId(scope.projectId)) {
     return Promise.resolve(getVirtualStudyReviewRemoteVideoWatchProgress(instanceIds))
   }
   const params = new URLSearchParams()
   for (const instanceId of instanceIds) params.append("instanceIds", instanceId)
   const query = params.toString()
   return apiRequest({
-    path: `/projects/${projectId}/video-watch-progress${query ? `?${query}` : ""}`,
+    path: projectApiPath(scope, `/video-watch-progress${query ? `?${query}` : ""}`),
     responseSchema: VideoWatchProgressMapSchema,
     signal: options?.signal,
     timeoutMs: options?.timeoutMs,
@@ -97,11 +98,11 @@ export function fetchVideoWatchProgressMap(
 }
 
 export function syncVideoWatchProgressRange(
-  projectId: string,
+  scope: ProjectScope,
   instanceId: string,
   params: { startMs: number; endMs: number; durationMs?: number | null },
 ) {
-  if (isVirtualStudyReviewProjectId(projectId)) {
+  if (isVirtualStudyReviewProjectId(scope.projectId)) {
     setVirtualStudyReviewVideoWatchProgress(instanceId, {
       watchedMs: Math.max(0, params.endMs),
       durationMs: params.durationMs,
@@ -109,7 +110,7 @@ export function syncVideoWatchProgressRange(
     return Promise.resolve(getVirtualStudyReviewRemoteVideoWatchProgress([instanceId])[instanceId])
   }
   return apiRequest({
-    path: `/projects/${projectId}/instances/${instanceId}/video-watch-progress/ranges`,
+    path: projectApiPath(scope, `/instances/${instanceId}/video-watch-progress/ranges`),
     method: "POST",
     body: params,
     responseSchema: VideoWatchProgressSchema,
@@ -117,11 +118,11 @@ export function syncVideoWatchProgressRange(
 }
 
 export function markVideoWatchProgressCompleted(
-  projectId: string,
+  scope: ProjectScope,
   instanceId: string,
   params: { durationMs: number },
 ) {
-  if (isVirtualStudyReviewProjectId(projectId)) {
+  if (isVirtualStudyReviewProjectId(scope.projectId)) {
     setVirtualStudyReviewVideoWatchProgress(instanceId, {
       watchedMs: params.durationMs,
       durationMs: params.durationMs,
@@ -130,7 +131,7 @@ export function markVideoWatchProgressCompleted(
     return Promise.resolve(getVirtualStudyReviewRemoteVideoWatchProgress([instanceId])[instanceId])
   }
   return apiRequest({
-    path: `/projects/${projectId}/instances/${instanceId}/video-watch-progress/completed`,
+    path: projectApiPath(scope, `/instances/${instanceId}/video-watch-progress/completed`),
     method: "POST",
     body: params,
     responseSchema: VideoWatchProgressSchema,
@@ -138,11 +139,11 @@ export function markVideoWatchProgressCompleted(
 }
 
 export function bulkRemapRecallPointsInstance(
-  projectId: string,
+  scope: ProjectScope,
   params: { fromInstanceId: string; toInstanceId: string; recallPointIds?: string[] },
 ) {
   return apiRequest({
-    path: `/projects/${projectId}/instances/remap-recall-points`,
+    path: projectApiPath(scope, "/instances/remap-recall-points"),
     method: "POST",
     body: {
       fromInstanceId: params.fromInstanceId,
@@ -153,9 +154,9 @@ export function bulkRemapRecallPointsInstance(
   })
 }
 
-export function addInstance(projectId: string, materialId: string) {
+export function addInstance(scope: ProjectScope, materialId: string) {
   return apiRequest({
-    path: `/projects/${projectId}/instances`,
+    path: projectApiPath(scope, "/instances"),
     method: "POST",
     body: { materialId },
     responseSchema: AddInstanceResultSchema,

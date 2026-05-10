@@ -29,7 +29,7 @@ def _require_psycopg():
 
 
 def _default_postgres_dsn() -> str | None:
-    for env_name in ("PLM_POSTGRES_DSN", "PLM_STORE_POSTGRES_DSN", "PLM_AUTH_POSTGRES_DSN"):
+    for env_name in ("LEARNINGPYRAMID_POSTGRES_DSN", "LEARNINGPYRAMID_STORE_POSTGRES_DSN", "LEARNINGPYRAMID_AUTH_POSTGRES_DSN"):
         value = os.getenv(env_name, "").strip()
         if value:
             return value
@@ -49,7 +49,7 @@ def main() -> int:
     args = _parse_args()
     validate_postgres_migration_plan()
     if not args.postgres_dsn:
-        raise ValueError("--postgres-dsn is required unless a PLM_*POSTGRES_DSN environment variable is set")
+        raise ValueError("--postgres-dsn is required unless a LEARNINGPYRAMID_*POSTGRES_DSN environment variable is set")
 
     lib = _require_psycopg()
     conn = lib.connect(str(args.postgres_dsn))

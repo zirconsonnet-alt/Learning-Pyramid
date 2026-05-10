@@ -82,7 +82,7 @@ APP_TITLE = "LearningPyramid 字幕生成工具"
 TOOL_ID = "subtitle-generator-windows-x64"
 TOOL_EXE_BASENAME = "LearningPyramid-SubtitleTool"
 DEFAULT_MODEL_FILE = "ggml-base.bin"
-DEFAULT_UPDATE_BASE_URL = "https://plm.xuebao.chat"
+DEFAULT_UPDATE_BASE_URL = ""
 BUILD_INFO_FILE = "build-info.json"
 UPDATE_CONFIG_FILE = "update-config.json"
 UPDATE_DOWNLOAD_CHUNK_SIZE = 1024 * 1024
@@ -371,6 +371,8 @@ def load_update_config() -> UpdateConfig:
     if env_catalog_url:
         catalog_url = env_catalog_url
     if not catalog_url:
+        if not base_url:
+            return UpdateConfig(base_url="", catalog_url="", tool_id=str(payload.get("toolId") or "").strip() or TOOL_ID)
         catalog_url = urljoin(f"{base_url}/", "/api/system/public-downloads")
 
     tool_id = str(payload.get("toolId") or "").strip() or TOOL_ID
@@ -381,6 +383,8 @@ def load_update_config() -> UpdateConfig:
 
 
 def fetch_latest_release(config: UpdateConfig) -> UpdateRelease | None:
+    if not config.catalog_url:
+        return None
     request = urllib.request.Request(
         config.catalog_url,
         headers={

@@ -3,7 +3,7 @@ import { useQueries } from "@tanstack/react-query"
 import { ArrowLeft, ArrowRight, ArrowUpDown, BookOpenText, ChevronDown, Lightbulb, Plus, Settings2, Trash2, Video } from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 
-import { listScopedAuditLogEvents, type AuditLogEvent } from "@/ui/api/auditLog"
+import { listAuditLogEvents, type AuditLogEvent } from "@/ui/api/auditLog"
 import type { StudyMaterial, StudyMaterialType } from "@/ui/api/subjects"
 import { ApiError } from "@/ui/api/http"
 import { ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
@@ -125,7 +125,7 @@ export function SubjectDashboardPage() {
   const materialActivityQs = useQueries({
     queries: materials.map((material) => ({
       queryKey: ["auditLogEvents", subjectId, material.projectId ?? material.materialId],
-      queryFn: () => listScopedAuditLogEvents(subjectId, material.projectId ?? ""),
+      queryFn: () => listAuditLogEvents({ subjectId, projectId: material.projectId ?? "" }),
       enabled: Boolean(material.projectId) && !materialsQ.isLoading && !materialsQ.error,
       staleTime: 60_000,
       refetchInterval: 60_000,
@@ -255,7 +255,7 @@ export function SubjectDashboardPage() {
         message="当前链接没有携带学科标识。请先回到学科中心，再选择一个学科进入。"
         action={
           <Button asChild>
-            <Link to="/projects">返回学科中心</Link>
+            <Link to="/subjects">返回学科中心</Link>
           </Button>
         }
       />
@@ -275,7 +275,7 @@ export function SubjectDashboardPage() {
               <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-muted-foreground">
                 <ArrowLeft className="h-4 w-4" />
               </div>
-              <Link to="/projects" className="theme-select inline-flex h-11 items-center rounded-2xl pl-10 pr-4 font-medium">
+              <Link to="/subjects" className="theme-select inline-flex h-11 items-center rounded-2xl pl-10 pr-4 font-medium">
                 学科中心
               </Link>
             </div>

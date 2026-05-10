@@ -4,6 +4,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 import { Link, useNavigate, useParams } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
+import type { ProjectScope } from "@/ui/api/projectScope"
 import {
   appendImageBlock,
   removeImageBlockAt,
@@ -19,7 +20,7 @@ import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
-import { buildCurrentProjectPath } from "@/ui/projectPaths"
+import { buildScopedProjectPath } from "@/ui/projectPaths"
 import { projectTypeRequiresAnchor } from "@/ui/projectTypes"
 import { useInstances, useProjectConfig } from "@/ui/queries/workbench"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
@@ -79,34 +80,35 @@ function formatAnchorPosition(position: string | null | undefined) {
   return ms === null ? normalized : msToClock(ms)
 }
 
-function buildRecallPointDetailPath(projectId: string, recallPointId: string) {
-  return buildCurrentProjectPath(projectId, `/recall-points/${recallPointId}`)
+function buildRecallPointDetailPath(subjectId: string, projectId: string, recallPointId: string) {
+  return buildScopedProjectPath(subjectId, projectId, `/recall-points/${recallPointId}`)
 }
 
-function renderRichContentPreview(projectId: string, value: RichContent, emptyText: string) {
+function renderRichContentPreview(subjectId: string, projectId: string, value: RichContent, emptyText: string) {
   return richContentHasMeaning(value) ? (
-    <RichContentRenderer projectId={projectId} value={value} />
+    <RichContentRenderer subjectId={subjectId} projectId={projectId} value={value} />
   ) : (
     <div className="text-sm leading-6 text-muted-foreground">{emptyText}</div>
   )
 }
 
 export function RecallPointPage() {
-  const { projectId, recallPointId } = useParams()
+  const { subjectId = "", projectId, recallPointId } = useParams()
   const pid = projectId ?? ""
   const rpid = recallPointId ?? ""
+  const projectScope = subjectId && pid ? { subjectId, projectId: pid } : null
   const navigate = useNavigate()
 
-  const qKey = useMemo(() => ["recallPoint", pid, rpid], [pid, rpid])
+  const qKey = useMemo(() => ["recallPoint", subjectId, pid, rpid], [subjectId, pid, rpid])
   const q = useQuery({
     queryKey: qKey,
-    queryFn: () => getRecallPoint(pid, rpid),
-    enabled: !!pid && !!rpid,
+    queryFn: () => getRecallPoint(projectScope as ProjectScope, rpid),
+    enabled: !!projectScope && !!rpid,
   })
 
   const recallPoint = q.data ?? null
 
-  if (!pid || !rpid) {
+  if (!subjectId || !pid || !rpid) {
     return (
       <div className="space-y-4">
         <ContentNotice
@@ -137,7 +139,9 @@ export function RecallPointPage() {
       {recallPoint ? (
         <RecallPointDetailLayout
           key={`${recallPoint.recallPointId}:${q.dataUpdatedAt}`}
+          subjectId={subjectId}
           projectId={pid}
+          projectScope={projectScope as ProjectScope}
           recallPointId={rpid}
           qKey={qKey}
           recallPoint={recallPoint}
@@ -148,20 +152,24 @@ export function RecallPointPage() {
 }
 
 function RecallPointDetailLayout({
+  subjectId,
   projectId,
+  projectScope,
   recallPointId,
   qKey,
   recallPoint,
 }: {
+  subjectId: string
   projectId: string
+  projectScope: ProjectScope
   recallPointId: string
   qKey: readonly string[]
   recallPoint: RecallPoint
 }) {
   const navigate = useNavigate()
   const qc = useQueryClient()
-  const projectConfigQ = useProjectConfig(projectId)
-  const instancesQ = useInstances(projectId)
+  const projectConfigQ = useProjectConfig(projectScope)
+  const instancesQ = useInstances(projectScope)
   const projectType = projectConfigQ.data?.projectType ?? "COURSE"
   const requiresAnchor = projectTypeRequiresAnchor(projectType)
   const [question, setQuestion] = useState<RichContent>(() => recallPoint.question)
@@ -172,8 +180,8 @@ function RecallPointDetailLayout({
   const [editingContent, setEditingContent] = useState(false)
   const referenceRecallPointQs = useQueries({
     queries: recallPoint.references.map((referenceId) => ({
-      queryKey: ["recallPoint", projectId, referenceId],
-      queryFn: () => getRecallPoint(projectId, referenceId),
+      queryKey: ["recallPoint", subjectId, projectId, referenceId],
+      queryFn: () => getRecallPoint(projectScope, referenceId),
       enabled: !!projectId,
     })),
   })
@@ -183,17 +191,17 @@ function RecallPointDetailLayout({
   )
 
   const deleteM = useMutation({
-    mutationFn: () => deleteRecallPoint(projectId, recallPointId),
+    mutationFn: () => deleteRecallPoint(projectScope, recallPointId),
     onSuccess: async () => {
       await Promise.all([
-        qc.invalidateQueries({ queryKey: ["recallPoint", projectId] }),
-        qc.invalidateQueries({ queryKey: ["recallPoints", projectId] }),
-        qc.invalidateQueries({ queryKey: ["recallPointSearch", projectId] }),
-        qc.invalidateQueries({ queryKey: ["recallPointsByInstance", projectId] }),
-        qc.invalidateQueries({ queryKey: ["recallPointsByTaskNode", projectId] }),
-        qc.invalidateQueries({ queryKey: ["recallPointsByObjectNode", projectId] }),
-        qc.invalidateQueries({ queryKey: ["reviewRecommendations", projectId] }),
-        qc.invalidateQueries({ queryKey: ["recallPointReviewProjection", projectId] }),
+        qc.invalidateQueries({ queryKey: ["recallPoint", subjectId, projectId] }),
+        qc.invalidateQueries({ queryKey: ["recallPoints", subjectId, projectId] }),
+        qc.invalidateQueries({ queryKey: ["recallPointSearch", subjectId, projectId] }),
+        qc.invalidateQueries({ queryKey: ["recallPointsByInstance", subjectId, projectId] }),
+        qc.invalidateQueries({ queryKey: ["recallPointsByTaskNode", subjectId, projectId] }),
+        qc.invalidateQueries({ queryKey: ["recallPointsByObjectNode", subjectId, projectId] }),
+        qc.invalidateQueries({ queryKey: ["reviewRecommendations", subjectId, projectId] }),
+        qc.invalidateQueries({ queryKey: ["recallPointReviewProjection", subjectId, projectId] }),
       ])
       showSuccessFeedback("复述点已删除", "这条复述点已被标记为墓碑，并从当前内容视图中移除。")
       navigate(-1)
@@ -208,7 +216,7 @@ function RecallPointDetailLayout({
       const pos = normalizeAnchorInputToPosition(editingAnchor ? anchorDraft : positionText)
       if (!richContentHasMeaning(question) || !richContentHasMeaning(answer)) return
       if (requiresAnchor && (!recallPoint.anchor || !pos)) return
-      await editRecallPoint(projectId, recallPointId, {
+      await editRecallPoint(projectScope, recallPointId, {
         question,
         answer,
         anchor: requiresAnchor && recallPoint.anchor ? { instanceId: recallPoint.anchor.instanceId, position: pos } : null,
@@ -217,9 +225,9 @@ function RecallPointDetailLayout({
     onSuccess: async () => {
       await Promise.all([
         qc.invalidateQueries({ queryKey: qKey }),
-        qc.invalidateQueries({ queryKey: ["recallPoints", projectId] }),
-        qc.invalidateQueries({ queryKey: ["recallPointSearch", projectId] }),
-        qc.invalidateQueries({ queryKey: ["reviewRecommendations", projectId] }),
+        qc.invalidateQueries({ queryKey: ["recallPoints", subjectId, projectId] }),
+        qc.invalidateQueries({ queryKey: ["recallPointSearch", subjectId, projectId] }),
+        qc.invalidateQueries({ queryKey: ["reviewRecommendations", subjectId, projectId] }),
       ])
       showSuccessFeedback("复述点已保存", "复述点内容已经更新。")
     },
@@ -239,7 +247,7 @@ function RecallPointDetailLayout({
     [instancesQ.data, recallPoint.anchor],
   )
   const anchorInstanceValue = recallPoint.anchor ? (
-    <Link className="text-primary underline-offset-4 hover:underline" to={buildCurrentProjectPath(projectId, `/instances/${recallPoint.anchor.instanceId}`)}>
+    <Link className="text-primary underline-offset-4 hover:underline" to={buildScopedProjectPath(subjectId, projectId, `/instances/${recallPoint.anchor.instanceId}`)}>
       {anchorInstance?.materialDisplayName ?? (instancesQ.isLoading ? "读取中..." : "未找到内容实例")}
     </Link>
   ) : (
@@ -352,7 +360,7 @@ function RecallPointDetailLayout({
           ) : null}
 
           <Button variant="outline" asChild className="w-full rounded-full">
-            <Link to={buildAiChatPath(projectId, { kind: "recall", nodeId: recallPointId })}>
+            <Link to={buildAiChatPath(subjectId, projectId, { kind: "recall", nodeId: recallPointId })}>
               <Sparkles className="h-4 w-4" />
               AI问答
             </Link>
@@ -376,6 +384,7 @@ function RecallPointDetailLayout({
 
       <section className="space-y-5 xl:min-w-0">
         <RecallPointContentCard
+          subjectId={subjectId}
           canEdit={canEdit}
           canSave={canSave}
           editError={editM.error}
@@ -396,7 +405,7 @@ function RecallPointDetailLayout({
           onSetQuestionText={(text) => setQuestion((prev) => setRichContentText(prev, text))}
         />
 
-        <ReviewProjectionCard projectId={projectId} recallPointId={recallPointId} />
+        <ReviewProjectionCard subjectId={subjectId} projectId={projectId} recallPointId={recallPointId} />
 
         <Card>
           <CardHeader className="pb-3">
@@ -409,7 +418,7 @@ function RecallPointDetailLayout({
               recallPoint.insights.map((item, index) => (
                 <div key={index} className="rounded-[1rem] border border-[#dbe4ee] bg-[#fbfdff] p-4">
                   <div className="text-xs text-muted-foreground">#{index + 1}</div>
-                  <RichContentRenderer projectId={projectId} value={item} className="mt-2 text-sm leading-6" />
+                  <RichContentRenderer subjectId={subjectId} projectId={projectId} value={item} className="mt-2 text-sm leading-6" />
                 </div>
               ))
             )}
@@ -476,6 +485,7 @@ function RecallPointContentCard({
   projectId,
   question,
   referenceRecallPoints,
+  subjectId,
 }: {
   answer: RichContent
   canEdit: boolean
@@ -495,6 +505,7 @@ function RecallPointContentCard({
   projectId: string
   question: RichContent
   referenceRecallPoints: Array<{ referenceId: string; recallPoint: RecallPoint | null }>
+  subjectId: string
 }) {
   const referencesCount = referenceRecallPoints.length
 
@@ -518,11 +529,11 @@ function RecallPointContentCard({
           <div className="space-y-5">
             <div className="space-y-3">
               <Label className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">题面</Label>
-              <RichContentEditor projectId={projectId} field="question" value={question} disabled={!canEdit} placeholder="输入问题/提示语" className="space-y-3" textareaClassName="min-h-[120px] rounded-[1rem] border-[#dbe4ee] bg-[#fbfdff] px-4 py-3 text-sm leading-6 text-foreground placeholder:text-muted-foreground" imageClassName="h-24 w-24 rounded-[0.95rem] border-[#dbe4ee] bg-[#fbfdff]" onTextChange={onSetQuestionText} onAppendImage={onAppendQuestionImage} onRemoveImage={onRemoveQuestionImage} />
+              <RichContentEditor subjectId={subjectId} projectId={projectId} field="question" value={question} disabled={!canEdit} placeholder="输入问题/提示语" className="space-y-3" textareaClassName="min-h-[120px] rounded-[1rem] border-[#dbe4ee] bg-[#fbfdff] px-4 py-3 text-sm leading-6 text-foreground placeholder:text-muted-foreground" imageClassName="h-24 w-24 rounded-[0.95rem] border-[#dbe4ee] bg-[#fbfdff]" onTextChange={onSetQuestionText} onAppendImage={onAppendQuestionImage} onRemoveImage={onRemoveQuestionImage} />
             </div>
             <div className="space-y-3">
               <Label className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">答案</Label>
-              <RichContentEditor projectId={projectId} field="answer" value={answer} disabled={!canEdit} placeholder="输入答案/复述内容" className="space-y-3" textareaClassName="min-h-[160px] rounded-[1rem] border-[#dbe4ee] bg-[#fbfdff] px-4 py-3 text-sm leading-6 text-foreground placeholder:text-muted-foreground" imageClassName="h-24 w-24 rounded-[0.95rem] border-[#dbe4ee] bg-[#fbfdff]" onTextChange={onSetAnswerText} onAppendImage={onAppendAnswerImage} onRemoveImage={onRemoveAnswerImage} />
+              <RichContentEditor subjectId={subjectId} projectId={projectId} field="answer" value={answer} disabled={!canEdit} placeholder="输入答案/复述内容" className="space-y-3" textareaClassName="min-h-[160px] rounded-[1rem] border-[#dbe4ee] bg-[#fbfdff] px-4 py-3 text-sm leading-6 text-foreground placeholder:text-muted-foreground" imageClassName="h-24 w-24 rounded-[0.95rem] border-[#dbe4ee] bg-[#fbfdff]" onTextChange={onSetAnswerText} onAppendImage={onAppendAnswerImage} onRemoveImage={onRemoveAnswerImage} />
             </div>
             <div className="flex flex-wrap gap-2">
               <Button onClick={() => void onSaveChanges()} disabled={!canSave || isSaving}>
@@ -542,7 +553,7 @@ function RecallPointContentCard({
                 <span>题面</span>
               </div>
               <div className="mt-3 text-[15px] font-semibold leading-7 text-foreground">
-                {renderRichContentPreview(projectId, question, "题面为空。")}
+                {renderRichContentPreview(subjectId, projectId, question, "题面为空。")}
               </div>
             </div>
 
@@ -556,7 +567,7 @@ function RecallPointContentCard({
                 ) : null}
               </div>
               <div className="mt-3 text-sm leading-6 text-foreground">
-                {renderRichContentPreview(projectId, answer, "答案为空。")}
+                {renderRichContentPreview(subjectId, projectId, answer, "答案为空。")}
               </div>
             </div>
 
@@ -569,7 +580,7 @@ function RecallPointContentCard({
                   {referenceRecallPoints.map((item, index) => (
                     <Link
                       key={item.referenceId}
-                      to={buildRecallPointDetailPath(projectId, item.referenceId)}
+                      to={buildRecallPointDetailPath(subjectId, projectId, item.referenceId)}
                       className="rounded-full border border-[#dbe4ee] bg-white px-3 py-1.5 text-sm font-medium text-slate-900 transition hover:bg-primary/5 hover:text-primary"
                     >
                       引用 {index + 1}

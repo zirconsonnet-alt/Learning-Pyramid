@@ -7,7 +7,7 @@ from urllib.parse import quote
 from backend.system.runtime_env import executable_dir, resource_root
 
 
-PUBLIC_DOWNLOADS_ENV = "PLM_PUBLIC_DOWNLOADS_DIR"
+PUBLIC_DOWNLOADS_ENV = "LEARNINGPYRAMID_PUBLIC_DOWNLOADS_DIR"
 PUBLIC_DOWNLOADS_CATALOG = "catalog.json"
 
 

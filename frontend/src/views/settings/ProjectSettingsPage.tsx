@@ -6,6 +6,7 @@ import { useNavigate, useParams } from "react-router-dom"
 
 import { listRecallPointsByInstance, type Instance } from "@/ui/api/instances"
 import { ApiError } from "@/ui/api/http"
+import type { ProjectScope } from "@/ui/api/projectScope"
 import type { ReviewChainTemplateItem, RollUpStrategy } from "@/ui/api/projectConfig"
 import type { ProjectType } from "@/ui/api/projects"
 import type { StudyMaterial } from "@/ui/api/subjects"
@@ -189,8 +190,9 @@ export function ProjectSettingsPage() {
   const navigate = useNavigate()
   const pid = projectId ?? ""
   const isSubjectSettingsScope = Boolean(subjectId && !pid)
-  const projectQ = useProject(pid, { enabled: !!pid && !isSubjectSettingsScope })
-  const subjectContextQ = useSubjectContext(pid, !!pid && !isSubjectSettingsScope && !subjectId)
+  const projectScope: ProjectScope | null = subjectId && pid ? { subjectId, projectId: pid } : null
+  const projectQ = useProject(projectScope, { enabled: !!projectScope && !isSubjectSettingsScope })
+  const subjectContextQ = useSubjectContext(projectScope, !!projectScope && !isSubjectSettingsScope)
   const scopedSubjectContextQ = useScopedSubjectContext(subjectId ?? "", pid, !!pid && !!subjectId && !isSubjectSettingsScope)
   const subjectsQ = useSubjects(isSubjectSettingsScope)
   const editSubjectM = useEditSubject()
@@ -201,15 +203,15 @@ export function ProjectSettingsPage() {
   const browserLocalMediaEnabled = capabilitiesQ.data?.browserLocalMediaEnabled ?? false
   const baiduNetdiskEnabled = capabilitiesQ.data?.baiduNetdiskEnabled ?? false
 
-  const layersQ = useLayers(pid)
-  const projectConfigQ = useProjectConfig(pid)
-  const instancesQ = useInstances(pid)
-  const importLearningObjectsM = useImportLearningObjectsFromBrowser(pid)
-  const initializeBookLearningObjectsM = useInitializeBookLearningObjects(pid)
-  const initializeBookFromMaterialM = useInitializeBookLearningObjectsFromSubjectMaterial(pid)
-  const setLayerConfigM = useSetLayerConfig(pid)
-  const setProjectRollUpStrategyM = useSetProjectRollUpStrategy(pid)
-  const bulkRemapM = useBulkRemapRecallPointsInstance(pid)
+  const layersQ = useLayers(projectScope)
+  const projectConfigQ = useProjectConfig(projectScope)
+  const instancesQ = useInstances(projectScope)
+  const importLearningObjectsM = useImportLearningObjectsFromBrowser(projectScope)
+  const initializeBookLearningObjectsM = useInitializeBookLearningObjects(projectScope)
+  const initializeBookFromMaterialM = useInitializeBookLearningObjectsFromSubjectMaterial(projectScope)
+  const setLayerConfigM = useSetLayerConfig(projectScope)
+  const setProjectRollUpStrategyM = useSetProjectRollUpStrategy(projectScope)
+  const bulkRemapM = useBulkRemapRecallPointsInstance(projectScope)
   const projectType = projectConfigQ.data?.projectType ?? "COURSE"
   const currentRollUpStrategy = projectConfigQ.data?.rollUpStrategy ?? "THRESHOLD_AUTO"
   const subjectContext = scopedSubjectContextQ.data ?? subjectContextQ.data
@@ -270,9 +272,9 @@ export function ProjectSettingsPage() {
 
   const missingRecallPointQs = useQueries({
     queries: missingInstances.map((instance) => ({
-      queryKey: ["recallPointsByInstance", pid, instance.instanceId],
-      queryFn: () => listRecallPointsByInstance(pid, instance.instanceId),
-      enabled: !!pid,
+      queryKey: ["recallPointsByInstance", subjectId ?? "", pid, instance.instanceId],
+      queryFn: () => listRecallPointsByInstance(projectScope as ProjectScope, instance.instanceId),
+      enabled: !!projectScope,
     })),
   })
 
@@ -492,7 +494,7 @@ export function ProjectSettingsPage() {
         <ContentNotice
           title="当前页面缺少学科上下文"
           message="当前链接缺少学科信息。请先返回学科列表，再重新进入学科设置。"
-          action={<Button onClick={() => navigate("/projects")}>返回学科列表</Button>}
+          action={<Button onClick={() => navigate("/subjects")}>返回学科中心</Button>}
         />
       </div>
     )
@@ -669,6 +671,7 @@ export function ProjectSettingsPage() {
 
           {!isSubjectSettingsScope ? (
             <BaiduNetdiskImportDialog
+              subjectId={subjectId ?? ""}
               projectId={pid}
               open={isBaiduImportDialogOpen}
               onOpenChange={setIsBaiduImportDialogOpen}

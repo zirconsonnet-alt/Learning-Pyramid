@@ -6,6 +6,7 @@ import { ApiError } from "@/ui/api/http"
 import type { ProjectType } from "@/ui/api/projects"
 import { ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { listLearningObjectNodes, type LearningObjectNode } from "@/ui/api/learningObjects"
+import type { ProjectScope } from "@/ui/api/projectScope"
 import { completeGuideWalkthroughStep } from "@/ui/guideWalkthrough/guideWalkthroughController"
 import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
 import { getVirtualStudyReviewLearningObjectNodes } from "@/ui/guideWalkthrough/virtualStudyReviewProject"
@@ -155,23 +156,26 @@ function TreeNode({
 }
 
 export function LearningObjectTree({
+  subjectId,
   projectId,
   projectType,
   selectedInstanceId,
   onSelectInstance,
 }: {
+  subjectId: string
   projectId: string
   projectType: ProjectType
   selectedInstanceId: string | null
   onSelectInstance: (instanceId: string) => void
 }) {
+  const projectScope: ProjectScope = { subjectId, projectId }
   const directoryBinding = useProjectDirectoryBinding(projectId)
   const q = useQuery({
-    queryKey: ["learningObjectNodes", projectId],
+    queryKey: ["learningObjectNodes", subjectId, projectId],
     queryFn: ({ signal }) =>
       isVirtualStudyReviewProjectId(projectId)
         ? getVirtualStudyReviewLearningObjectNodes()
-        : listLearningObjectNodes(projectId, { signal, timeoutMs: LEARNING_OBJECT_TREE_QUERY_TIMEOUT_MS }),
+        : listLearningObjectNodes(projectScope, { signal, timeoutMs: LEARNING_OBJECT_TREE_QUERY_TIMEOUT_MS }),
     enabled: !!projectId,
   })
 

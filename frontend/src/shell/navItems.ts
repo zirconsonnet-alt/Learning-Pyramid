@@ -2,7 +2,7 @@ import type { LucideIcon } from "lucide-react"
 import { BookOpenText, Bot, Clock3, FolderKanban, LayoutDashboard, PanelsTopLeft, Settings2, Shield, Workflow } from "lucide-react"
 
 import { buildGlobalSettingsPath } from "@/views/settings/globalSettingsRouting"
-import { buildCurrentProjectPath } from "@/ui/projectPaths"
+import { buildScopedProjectPath } from "@/ui/projectPaths"
 
 export type NavItem = {
   to: string
@@ -12,7 +12,7 @@ export type NavItem = {
 }
 
 const BASE_GLOBAL_NAV_ITEMS: NavItem[] = [
-  { to: "/projects", label: "学科中心", icon: FolderKanban },
+  { to: "/subjects", label: "学科中心", icon: FolderKanban },
   { to: "/guide", label: "用户指南", icon: BookOpenText },
   { to: buildGlobalSettingsPath(), label: "全局设置", icon: Settings2 },
 ]
@@ -33,13 +33,13 @@ export function getSubjectNavItems(subjectId: string) {
   ] satisfies NavItem[]
 }
 
-export function getProjectNavItems(pid: string, options?: { settingsLabel?: string; settingsTo?: string }): NavItem[] {
-  if (!pid) return []
+export function getProjectNavItems(subjectId: string, pid: string, options?: { settingsLabel?: string; settingsTo?: string }): NavItem[] {
+  if (!subjectId || !pid) return []
   return [
-    { to: buildCurrentProjectPath(pid, "/workbench"), label: "工作台", icon: PanelsTopLeft, guideTourAnchor: "workbench-nav" },
-    { to: buildCurrentProjectPath(pid, "/ai-chat"), label: "AI问答", icon: Bot },
-    { to: buildCurrentProjectPath(pid, "/recommended-reviews"), label: "推荐复习", icon: Clock3 },
-    { to: buildCurrentProjectPath(pid, "/structure-view"), label: "结构视图", icon: Workflow },
-    { to: options?.settingsTo ?? buildCurrentProjectPath(pid, "/settings"), label: options?.settingsLabel ?? "项目设置", icon: Settings2, guideTourAnchor: "project-settings-nav" },
+    { to: buildScopedProjectPath(subjectId, pid, "/workbench"), label: "工作台", icon: PanelsTopLeft, guideTourAnchor: "workbench-nav" },
+    { to: buildScopedProjectPath(subjectId, pid, "/ai-chat"), label: "AI问答", icon: Bot },
+    { to: buildScopedProjectPath(subjectId, pid, "/recommended-reviews"), label: "推荐复习", icon: Clock3 },
+    { to: buildScopedProjectPath(subjectId, pid, "/structure-view"), label: "结构视图", icon: Workflow },
+    { to: options?.settingsTo ?? buildScopedProjectPath(subjectId, pid, "/settings"), label: options?.settingsLabel ?? "项目设置", icon: Settings2, guideTourAnchor: "project-settings-nav" },
   ]
 }

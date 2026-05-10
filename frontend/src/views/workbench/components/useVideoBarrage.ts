@@ -3,7 +3,7 @@ import Danmaku from "danmaku"
 import { useNavigate } from "react-router-dom"
 
 import type { RecallPoint } from "@/ui/api/review"
-import { buildCurrentProjectPath } from "@/ui/projectPaths"
+import { buildScopedProjectPath } from "@/ui/projectPaths"
 import {
   richContentHasMeaning,
   richContentToPlainText,
@@ -51,6 +51,7 @@ type DanmakuPrivate = Danmaku & {
 }
 
 type UseVideoBarrageOptions = {
+  subjectId: string
   projectId: string
   instanceId: string | null
   recallPoints: RecallPoint[]
@@ -215,6 +216,7 @@ function createBarrageBubble(params: {
 }
 
 export function useVideoBarrage({
+  subjectId,
   projectId,
   instanceId,
   recallPoints,
@@ -252,9 +254,9 @@ export function useVideoBarrage({
 
   const openBarrageRecallPoint = useCallback(
     (recallPointId: string) => {
-      navigate(buildCurrentProjectPath(projectId, `/recall-points/${recallPointId}`))
+      navigate(buildScopedProjectPath(subjectId, projectId, `/recall-points/${recallPointId}`))
     },
-    [navigate, projectId],
+    [navigate, projectId, subjectId],
   )
 
   const handleBarragePointerEnter = useCallback(

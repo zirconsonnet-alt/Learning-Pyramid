@@ -157,11 +157,8 @@ class MembershipMarketingStore:
         return row is not None
 
     @staticmethod
-    def _ensure_column(conn: sqlite3.Connection, table_name: str, column_name: str, column_sql: str) -> None:
-        columns = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
-        if any(str(row["name"]) == str(column_name) for row in columns):
-            return
-        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_sql}")
+    def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
+        return {str(row["name"]) for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
 
     @staticmethod
     def _table_sql(conn: sqlite3.Connection, table_name: str) -> str:
@@ -171,7 +168,13 @@ class MembershipMarketingStore:
         ).fetchone()
         return "" if row is None or row["sql"] is None else str(row["sql"])
 
-    def _ensure_invite_binding_constraints(self, conn: sqlite3.Connection) -> None:
+    @classmethod
+    def _validate_table_columns(cls, conn: sqlite3.Connection, table_name: str, required_columns: set[str]) -> None:
+        missing = sorted(required_columns - cls._table_columns(conn, table_name))
+        if missing:
+            raise RuntimeError(f"{table_name} schema is not current; missing columns: {', '.join(missing)}")
+
+    def _validate_invite_binding_constraints(self, conn: sqlite3.Connection) -> None:
         schema_sql = self._table_sql(conn, "invite_bindings")
         required_statuses = {
             INVITE_BINDING_STATUS_BOUND,
@@ -181,158 +184,86 @@ class MembershipMarketingStore:
             INVITE_BINDING_STATUS_REWARDED,
         }
         present_statuses = {required_status for required_status in required_statuses if required_status in schema_sql}
-        if schema_sql and required_statuses <= present_statuses:
-            return
+        if schema_sql and not required_statuses <= present_statuses:
+            raise RuntimeError("invite_bindings schema is not current")
 
-        conn.executescript(
-            f"""
-            DROP TABLE IF EXISTS invite_bindings_next;
-
-            CREATE TABLE invite_bindings_next (
-                invitee_user_id TEXT PRIMARY KEY,
-                inviter_user_id TEXT NOT NULL,
-                invite_code_snapshot TEXT NOT NULL,
-                status TEXT NOT NULL,
-                bound_at TEXT NOT NULL,
-                rewarded_at TEXT,
-                reward_trigger_order_id TEXT,
-                reward_coupon_id TEXT,
-                discount_coupon_id TEXT,
-                CHECK (status IN ('{INVITE_BINDING_STATUS_BOUND}', '{INVITE_BINDING_STATUS_DISCOUNT_ISSUED}', '{INVITE_BINDING_STATUS_COMMISSION_PENDING}', '{INVITE_BINDING_STATUS_COMMISSION_SETTLED}', '{INVITE_BINDING_STATUS_REWARDED}'))
-            );
-            """
-        )
-        conn.execute(
-            f"""
-            INSERT INTO invite_bindings_next (
-                invitee_user_id,
-                inviter_user_id,
-                invite_code_snapshot,
-                status,
-                bound_at,
-                rewarded_at,
-                reward_trigger_order_id,
-                reward_coupon_id,
-                discount_coupon_id
-            )
-            SELECT
-                invitee_user_id,
-                inviter_user_id,
-                invite_code_snapshot,
-                CASE
-                    WHEN status IN (?, ?, ?, ?, ?) THEN status
-                    ELSE ?
-                END,
-                bound_at,
-                rewarded_at,
-                reward_trigger_order_id,
-                reward_coupon_id,
-                discount_coupon_id
-            FROM invite_bindings
-            """,
-            (
-                INVITE_BINDING_STATUS_BOUND,
-                INVITE_BINDING_STATUS_DISCOUNT_ISSUED,
-                INVITE_BINDING_STATUS_COMMISSION_PENDING,
-                INVITE_BINDING_STATUS_COMMISSION_SETTLED,
-                INVITE_BINDING_STATUS_REWARDED,
-                INVITE_BINDING_STATUS_BOUND,
-            ),
-        )
-        conn.execute("DROP TABLE invite_bindings")
-        conn.execute("ALTER TABLE invite_bindings_next RENAME TO invite_bindings")
-
-    def _ensure_coupon_constraints(self, conn: sqlite3.Connection) -> None:
+    def _validate_coupon_constraints(self, conn: sqlite3.Connection) -> None:
         schema_sql = self._table_sql(conn, "coupons")
-        if "amount_cent >= 0" in schema_sql and COUPON_TYPE_PERCENT in schema_sql:
-            return
+        required_statuses = {COUPON_STATUS_AVAILABLE, COUPON_STATUS_USED, COUPON_STATUS_REVOKED, COUPON_STATUS_EXPIRED}
+        present_statuses = {status for status in required_statuses if status in schema_sql}
+        if schema_sql and (
+            "amount_cent >= 0" not in schema_sql
+            or COUPON_TYPE_PERCENT not in schema_sql
+            or not required_statuses <= present_statuses
+        ):
+            raise RuntimeError("coupons schema is not current")
 
-        conn.executescript(
-            f"""
-            DROP TABLE IF EXISTS coupons_next;
+    def _validate_current_schema(self, conn: sqlite3.Connection) -> None:
+        self._validate_table_columns(
+            conn,
+            "invite_bindings",
+            {
+                "invitee_user_id",
+                "inviter_user_id",
+                "invite_code_snapshot",
+                "status",
+                "bound_at",
+                "rewarded_at",
+                "reward_trigger_order_id",
+                "reward_coupon_id",
+                "discount_coupon_id",
+            },
+        )
+        self._validate_invite_binding_constraints(conn)
+        self._validate_table_columns(
+            conn,
+            "coupons",
+            {
+                "coupon_id",
+                "user_id",
+                "title",
+                "coupon_type",
+                "discount_rate",
+                "amount_cent",
+                "min_spend_cent",
+                "source",
+                "status",
+                "source_invitee_user_id",
+                "created_at",
+                "expires_at",
+                "used_at",
+                "used_order_id",
+                "revoked_at",
+                "revoke_reason",
+            },
+        )
+        self._validate_coupon_constraints(conn)
+        self._validate_table_columns(
+            conn,
+            "invite_reward_records",
+            {
+                "reward_id",
+                "inviter_user_id",
+                "invitee_user_id",
+                "trigger_order_id",
+                "coupon_id",
+                "status",
+                "created_at",
+                "revoked_at",
+            },
+        )
 
-            CREATE TABLE coupons_next (
-                coupon_id TEXT PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                title TEXT NOT NULL DEFAULT '',
-                coupon_type TEXT NOT NULL DEFAULT '{COUPON_TYPE_CASH}',
-                discount_rate INTEGER,
-                amount_cent INTEGER NOT NULL,
-                min_spend_cent INTEGER NOT NULL,
-                source TEXT NOT NULL,
-                status TEXT NOT NULL,
-                source_invitee_user_id TEXT,
-                created_at TEXT NOT NULL,
-                expires_at TEXT,
-                used_at TEXT,
-                used_order_id TEXT,
-                revoked_at TEXT,
-                revoke_reason TEXT NOT NULL DEFAULT '',
-                CHECK (amount_cent >= 0),
-                CHECK (coupon_type IN ('{COUPON_TYPE_CASH}', '{COUPON_TYPE_PERCENT}')),
-                CHECK (discount_rate IS NULL OR (discount_rate > 0 AND discount_rate <= 100)),
-                CHECK (min_spend_cent >= 0),
-                CHECK (status IN ('{COUPON_STATUS_AVAILABLE}', '{COUPON_STATUS_USED}', '{COUPON_STATUS_REVOKED}', '{COUPON_STATUS_EXPIRED}'))
-            );
-            """
-        )
-        conn.execute(
-            f"""
-            INSERT INTO coupons_next (
-                coupon_id,
-                user_id,
-                title,
-                coupon_type,
-                discount_rate,
-                amount_cent,
-                min_spend_cent,
-                source,
-                status,
-                source_invitee_user_id,
-                created_at,
-                expires_at,
-                used_at,
-                used_order_id,
-                revoked_at,
-                revoke_reason
-            )
-            SELECT
-                coupon_id,
-                user_id,
-                COALESCE(title, ''),
-                CASE WHEN coupon_type IN (?, ?) THEN coupon_type ELSE ? END,
-                discount_rate,
-                amount_cent,
-                min_spend_cent,
-                source,
-                CASE WHEN status IN (?, ?, ?, ?) THEN status ELSE ? END,
-                source_invitee_user_id,
-                created_at,
-                expires_at,
-                used_at,
-                used_order_id,
-                revoked_at,
-                COALESCE(revoke_reason, '')
-            FROM coupons
-            """,
-            (
-                COUPON_TYPE_CASH,
-                COUPON_TYPE_PERCENT,
-                COUPON_TYPE_CASH,
-                COUPON_STATUS_AVAILABLE,
-                COUPON_STATUS_USED,
-                COUPON_STATUS_REVOKED,
-                COUPON_STATUS_EXPIRED,
-                COUPON_STATUS_AVAILABLE,
-            ),
-        )
-        conn.execute("DROP TABLE coupons")
-        conn.execute("ALTER TABLE coupons_next RENAME TO coupons")
+    def _validate_existing_current_schema(self, conn: sqlite3.Connection) -> None:
+        for table_name in ("invite_bindings", "coupons", "invite_reward_records"):
+            if self._table_exists(conn, table_name):
+                self._validate_current_schema(conn)
+                return
 
     def _init_db(self) -> None:
         with self._lock:
             conn = self._connect()
             try:
+                self._validate_existing_current_schema(conn)
                 conn.executescript(
                     f"""
                     CREATE TABLE IF NOT EXISTS invite_bindings (
@@ -394,50 +325,7 @@ class MembershipMarketingStore:
                     ON invite_reward_records (inviter_user_id, created_at DESC);
                     """
                 )
-                self._ensure_column(
-                    conn,
-                    "coupons",
-                    "title",
-                    "title TEXT NOT NULL DEFAULT ''",
-                )
-                self._ensure_column(
-                    conn,
-                    "coupons",
-                    "coupon_type",
-                    f"coupon_type TEXT NOT NULL DEFAULT '{COUPON_TYPE_CASH}'",
-                )
-                self._ensure_column(
-                    conn,
-                    "coupons",
-                    "discount_rate",
-                    "discount_rate INTEGER",
-                )
-                self._ensure_column(
-                    conn,
-                    "invite_bindings",
-                    "discount_coupon_id",
-                    "discount_coupon_id TEXT",
-                )
-                self._ensure_column(
-                    conn,
-                    "coupons",
-                    "source_invitee_user_id",
-                    "source_invitee_user_id TEXT",
-                )
-                self._ensure_column(
-                    conn,
-                    "coupons",
-                    "revoked_at",
-                    "revoked_at TEXT",
-                )
-                self._ensure_column(
-                    conn,
-                    "coupons",
-                    "revoke_reason",
-                    "revoke_reason TEXT NOT NULL DEFAULT ''",
-                )
-                self._ensure_invite_binding_constraints(conn)
-                self._ensure_coupon_constraints(conn)
+                self._validate_current_schema(conn)
                 conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_invite_bindings_inviter ON invite_bindings (inviter_user_id, bound_at DESC)"
                 )

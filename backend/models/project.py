@@ -15,7 +15,6 @@ class Project:
     deleted_at: Optional[Timestamp] = None
     subject_id: Optional[ProjectId] = None
     scoped_project_id: Optional[ProjectId] = None
-    legacy_global_project_id: Optional[ProjectId] = None
     project_sequence: int = 0
 
     def validate_write_time(self) -> None:

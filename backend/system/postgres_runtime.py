@@ -44,18 +44,18 @@ class PostgresConnectionConfig:
 
 
 def current_postgres_connection_config(dsn: str) -> PostgresConnectionConfig:
-    min_pool_size = _env_int("PLM_POSTGRES_POOL_MIN_SIZE", 1, minimum=1)
-    max_pool_size = _env_int("PLM_POSTGRES_POOL_MAX_SIZE", 8, minimum=min_pool_size)
+    min_pool_size = _env_int("LEARNINGPYRAMID_POSTGRES_POOL_MIN_SIZE", 1, minimum=1)
+    max_pool_size = _env_int("LEARNINGPYRAMID_POSTGRES_POOL_MAX_SIZE", 8, minimum=min_pool_size)
     return PostgresConnectionConfig(
         dsn=str(dsn).strip(),
-        connect_timeout_seconds=_env_int("PLM_POSTGRES_CONNECT_TIMEOUT", 5, minimum=1),
-        acquire_timeout_seconds=_env_int("PLM_POSTGRES_POOL_ACQUIRE_TIMEOUT", 10, minimum=1),
+        connect_timeout_seconds=_env_int("LEARNINGPYRAMID_POSTGRES_CONNECT_TIMEOUT", 5, minimum=1),
+        acquire_timeout_seconds=_env_int("LEARNINGPYRAMID_POSTGRES_POOL_ACQUIRE_TIMEOUT", 10, minimum=1),
         min_pool_size=min_pool_size,
         max_pool_size=max_pool_size,
-        statement_timeout_ms=_env_int("PLM_POSTGRES_STATEMENT_TIMEOUT_MS", 30000, minimum=1),
-        lock_timeout_ms=_env_int("PLM_POSTGRES_LOCK_TIMEOUT_MS", 5000, minimum=1),
-        idle_in_transaction_timeout_ms=_env_int("PLM_POSTGRES_IDLE_IN_TX_TIMEOUT_MS", 30000, minimum=1),
-        application_name=(os.getenv("PLM_POSTGRES_APPLICATION_NAME") or "learningpyramid").strip() or "learningpyramid",
+        statement_timeout_ms=_env_int("LEARNINGPYRAMID_POSTGRES_STATEMENT_TIMEOUT_MS", 30000, minimum=1),
+        lock_timeout_ms=_env_int("LEARNINGPYRAMID_POSTGRES_LOCK_TIMEOUT_MS", 5000, minimum=1),
+        idle_in_transaction_timeout_ms=_env_int("LEARNINGPYRAMID_POSTGRES_IDLE_IN_TX_TIMEOUT_MS", 30000, minimum=1),
+        application_name=(os.getenv("LEARNINGPYRAMID_POSTGRES_APPLICATION_NAME") or "learningpyramid").strip() or "learningpyramid",
     )
 
 

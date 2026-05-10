@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 
 import type { Instance } from "@/ui/api/instances"
+import type { ProjectScope } from "@/ui/api/projectScope"
 import type { MaterialSourceKind } from "@/ui/api/projects"
 import {
   clearSubtitleDocumentCache,
@@ -11,6 +12,7 @@ import {
 } from "@/ui/subtitles/subtitleSupport"
 
 type UseVideoSubtitlesParams = {
+  subjectId: string
   projectId: string
   instance: Instance | null
   playbackMs: number
@@ -28,7 +30,8 @@ type SubtitleLoadState = {
 }
 
 export function useVideoSubtitles(params: UseVideoSubtitlesParams) {
-  const { projectId, instance, playbackMs, subtitlesEnabled, detectionEnabled, sourceKind, subtitleDelayMs } = params
+  const { subjectId, projectId, instance, playbackMs, subtitlesEnabled, detectionEnabled, sourceKind, subtitleDelayMs } = params
+  const projectScope: ProjectScope = useMemo(() => ({ subjectId, projectId }), [projectId, subjectId])
   const [loadState, setLoadState] = useState<SubtitleLoadState>({
     document: null,
     isLoading: false,
@@ -61,7 +64,7 @@ export function useVideoSubtitles(params: UseVideoSubtitlesParams) {
       errorText: null,
     }))
 
-    void loadSubtitleDocumentForInstance({ projectId, instance, sourceKind })
+    void loadSubtitleDocumentForInstance({ scope: projectScope, instance, sourceKind })
       .then((nextDocument) => {
         if (cancelled) return
         setLoadState({
@@ -84,7 +87,7 @@ export function useVideoSubtitles(params: UseVideoSubtitlesParams) {
     return () => {
       cancelled = true
     }
-  }, [detectionEnabled, instance, projectId, retryNonce, sourceKind])
+  }, [detectionEnabled, instance, projectScope, retryNonce, sourceKind])
 
   const text = useMemo(() => {
     if (!subtitlesEnabled || !document) return null

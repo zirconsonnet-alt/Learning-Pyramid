@@ -8,11 +8,12 @@ import {
   exportRecallPointsByLearningTaskNode,
   listRecallPointsByLearningTaskNode,
 } from "@/ui/api/learningTaskNodes"
+import type { ProjectScope } from "@/ui/api/projectScope"
 import { ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader } from "@/ui/components/ui/card"
 import { Input } from "@/ui/components/ui/input"
-import { buildCurrentProjectPath } from "@/ui/projectPaths"
+import { buildScopedProjectPath } from "@/ui/projectPaths"
 import { useEditLearningTask, useEditLearningTaskNode, useLearningTask, useLearningTaskNode, useLearningTaskNodeBinding } from "@/ui/queries/learningTasks"
 import { useInstances } from "@/ui/queries/workbench"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
@@ -33,21 +34,22 @@ function getLearningTaskNodeDisplayChildIds(node: LearningTaskNode | undefined) 
 }
 
 export function LearningTaskNodePage() {
-  const { projectId, nodeId } = useParams()
+  const { subjectId = "", projectId, nodeId } = useParams()
   const navigate = useNavigate()
   const pid = projectId ?? ""
   const nid = nodeId ?? ""
+  const projectScope: ProjectScope | null = subjectId && pid ? { subjectId, projectId: pid } : null
 
-  const nodeQ = useLearningTaskNode(pid, nid)
-  const bindingQ = useLearningTaskNodeBinding(pid, nid)
-  const instancesQ = useInstances(pid)
+  const nodeQ = useLearningTaskNode(projectScope, nid)
+  const bindingQ = useLearningTaskNodeBinding(projectScope, nid)
+  const instancesQ = useInstances(projectScope)
   const recallPointsQ = useQuery({
-    queryKey: ["recallPointsByTaskNode", pid, nid],
-    queryFn: () => listRecallPointsByLearningTaskNode(pid, nid),
-    enabled: !!pid && !!nid,
+    queryKey: ["recallPointsByTaskNode", subjectId, pid, nid],
+    queryFn: () => listRecallPointsByLearningTaskNode(projectScope as ProjectScope, nid),
+    enabled: !!projectScope && !!nid,
   })
   const learningTaskId = nodeQ.data?.kind === "leaf" ? nodeQ.data.boundLearningTaskId : ""
-  const learningTaskQ = useLearningTask(pid, learningTaskId)
+  const learningTaskQ = useLearningTask(projectScope, learningTaskId)
 
   if (!pid || !nid) {
     return (
@@ -55,7 +57,7 @@ export function LearningTaskNodePage() {
         <ContentNotice
           title="当前页面缺少任务节点上下文"
           message="当前链接缺少任务节点信息。请先返回项目列表，再从学习任务树重新进入。"
-          action={<Button onClick={() => navigate("/projects")}>返回项目列表</Button>}
+          action={<Button onClick={() => navigate("/subjects")}>返回学科中心</Button>}
         />
       </div>
     )
@@ -82,7 +84,7 @@ export function LearningTaskNodePage() {
       className="-ml-2 h-8 rounded-full px-2 text-[#60748c] hover:bg-[#f3f7fb] hover:text-foreground"
       asChild
     >
-      <Link to={buildCurrentProjectPath(pid, "/structure-view?view=task")}>
+      <Link to={buildScopedProjectPath(subjectId, pid, "/structure-view?view=task")}>
         <ChevronLeft className="h-4 w-4" />
         返回学习任务树
       </Link>
@@ -96,6 +98,7 @@ export function LearningTaskNodePage() {
           header={
             <LearningTaskNodeTitleHeaderEditor
               projectId={pid}
+              subjectId={subjectId}
               nodeId={nid}
               displayTitle={title}
               nodeTitle={nodeQ.data.title}
@@ -107,7 +110,7 @@ export function LearningTaskNodePage() {
             {
               label: "复习关系",
               value: bindingQ.data?.reviewChainId ? (
-                <Link className="text-primary underline-offset-4 hover:underline" to={buildCurrentProjectPath(pid, `/review-chains/${bindingQ.data.reviewChainId}`)}>
+                <Link className="text-primary underline-offset-4 hover:underline" to={buildScopedProjectPath(subjectId, pid, `/review-chains/${bindingQ.data.reviewChainId}`)}>
                   查看复习链
                 </Link>
               ) : (
@@ -119,6 +122,7 @@ export function LearningTaskNodePage() {
       ) : learningTaskId ? (
         <LeafLearningTaskCard
           projectId={pid}
+          subjectId={subjectId}
           learningTaskId={learningTaskId}
           learningTaskQ={learningTaskQ}
           displayTitle={title}
@@ -128,7 +132,7 @@ export function LearningTaskNodePage() {
         />
       ) : null}
       <Button asChild className="w-full">
-        <Link to={buildCurrentProjectPath(pid, "/ai-chat")}>
+        <Link to={buildScopedProjectPath(subjectId, pid, "/ai-chat")}>
           <Sparkles className="h-4 w-4" />
           AI问答
         </Link>
@@ -150,7 +154,7 @@ export function LearningTaskNodePage() {
           message="这个任务节点可能已经被重建或移除。你可以返回学习任务树重新选择。"
           action={
             <Button variant="outline" asChild>
-              <Link to={buildCurrentProjectPath(pid, "/structure-view?view=task")}>返回学习任务树</Link>
+              <Link to={buildScopedProjectPath(subjectId, pid, "/structure-view?view=task")}>返回学习任务树</Link>
             </Button>
           }
         />
@@ -161,6 +165,7 @@ export function LearningTaskNodePage() {
           {summaryPanel ? <aside className="xl:sticky xl:top-28 xl:self-start">{summaryPanel}</aside> : <div />}
           <div className="min-w-0">
             <RecallPointListCard
+              subjectId={subjectId}
               projectId={pid}
               items={recallPointsQ.data ?? []}
               instanceTitleById={instanceTitleById}
@@ -172,7 +177,7 @@ export function LearningTaskNodePage() {
                   projectId={pid}
                   nodeTitle={title}
                   recallPoints={recallPointsQ.data ?? []}
-                  exportRecallPoints={() => exportRecallPointsByLearningTaskNode(pid, nid)}
+                  exportRecallPoints={() => exportRecallPointsByLearningTaskNode(projectScope as ProjectScope, nid)}
                 />
               }
             />
@@ -184,6 +189,7 @@ export function LearningTaskNodePage() {
 }
 
 function LeafLearningTaskCard(props: {
+  subjectId: string
   projectId: string
   learningTaskId: string
   learningTaskQ: ReturnType<typeof useLearningTask>
@@ -192,14 +198,14 @@ function LeafLearningTaskCard(props: {
   reviewChainId: string | null
   topAction?: ReactNode
 }) {
-  const { projectId, learningTaskId, learningTaskQ, displayTitle, relatedInstanceLabel, reviewChainId, topAction } = props
-
+  const { subjectId, projectId, learningTaskId, learningTaskQ, displayTitle, relatedInstanceLabel, reviewChainId, topAction } = props
   return (
     <LearningTaskSummaryCard
       topAction={topAction}
       header={
         learningTaskQ.data ? (
           <LearningTaskTitleHeaderEditor
+            subjectId={subjectId}
             projectId={projectId}
             learningTaskId={learningTaskId}
             displayTitle={displayTitle}
@@ -219,7 +225,7 @@ function LeafLearningTaskCard(props: {
         {
           label: "复习关系",
           value: reviewChainId ? (
-            <Link className="text-primary underline-offset-4 hover:underline" to={buildCurrentProjectPath(projectId, `/review-chains/${reviewChainId}`)}>
+            <Link className="text-primary underline-offset-4 hover:underline" to={buildScopedProjectPath(subjectId, projectId, `/review-chains/${reviewChainId}`)}>
               查看复习链
             </Link>
           ) : (
@@ -272,17 +278,19 @@ function LearningTaskSummaryCard({
 }
 
 function LearningTaskTitleHeaderEditor({
+  subjectId,
   projectId,
   learningTaskId,
   displayTitle,
   taskTitle,
 }: {
+  subjectId: string
   projectId: string
   learningTaskId: string
   displayTitle: string
   taskTitle: string
 }) {
-  const editTaskM = useEditLearningTask(projectId, learningTaskId)
+  const editTaskM = useEditLearningTask({ subjectId, projectId }, learningTaskId)
   return (
     <TitleHeaderEditor
       id={`learningTaskTitle-${learningTaskId}`}
@@ -305,17 +313,19 @@ function LearningTaskTitleHeaderEditor({
 }
 
 function LearningTaskNodeTitleHeaderEditor({
+  subjectId,
   projectId,
   nodeId,
   displayTitle,
   nodeTitle,
 }: {
+  subjectId: string
   projectId: string
   nodeId: string
   displayTitle: string
   nodeTitle: string
 }) {
-  const editNodeM = useEditLearningTaskNode(projectId, nodeId)
+  const editNodeM = useEditLearningTaskNode({ subjectId, projectId }, nodeId)
   return (
     <TitleHeaderEditor
       id={`learningTaskNodeTitle-${nodeId}`}

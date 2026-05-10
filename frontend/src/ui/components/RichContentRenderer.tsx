@@ -3,12 +3,14 @@ import { mediaAssetUrl } from "@/ui/api/mediaAssets"
 import { MarkdownRichText } from "@/ui/components/MarkdownRichText"
 
 export function RichContentRenderer({
+  subjectId,
   projectId,
   value,
   className = "",
   textClassName = "whitespace-pre-wrap leading-6 text-foreground",
   imageClassName = "max-h-72 rounded-xl border border-border/70 bg-muted/20 object-contain",
 }: {
+  subjectId: string
   projectId: string
   value: RichContent
   className?: string
@@ -31,7 +33,7 @@ export function RichContentRenderer({
         return (
           <img
             key={`image-${index}-${block.assetId}`}
-            src={mediaAssetUrl(projectId, block.assetId)}
+            src={mediaAssetUrl({ subjectId, projectId }, block.assetId)}
             alt={`复述点图片 ${index + 1}`}
             className={imageClassName}
             loading="lazy"

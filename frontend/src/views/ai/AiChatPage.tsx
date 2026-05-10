@@ -26,6 +26,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { ApiError } from "@/ui/api/http"
 import type { Instance } from "@/ui/api/instances"
 import { listLearningObjectNodes, listRecallPointsByLearningObjectNode, type LearningObjectNode } from "@/ui/api/learningObjects"
+import type { ProjectScope } from "@/ui/api/projectScope"
 import { richContentToPlainText } from "@/ui/api/richContent"
 import { getRecallPoint, type RecallPoint } from "@/ui/api/review"
 import type { MaterialSourceKind } from "@/ui/api/projects"
@@ -45,7 +46,7 @@ import { useInstances } from "@/ui/queries/workbench"
 import { completeGuideWalkthroughStep } from "@/ui/guideWalkthrough/guideWalkthroughController"
 import { isSyntheticFilesContainer, sortLearningObjectNodeIdsForDisplay } from "@/ui/learningObjectDisplayOrder"
 import { type AiChatConversation, type AiChatCourseEvidence, type AiChatMessage, useAiChatStore } from "@/ui/store/aiChatStore"
-import { buildCurrentProjectPath } from "@/ui/projectPaths"
+import { buildScopedProjectPath } from "@/ui/projectPaths"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { createStudyPresenceTracker } from "@/ui/store/studyPresenceStore"
 import { getLocalDateKey, touchDailyStudyActivity } from "@/ui/store/workbenchDailyStats"
@@ -934,10 +935,11 @@ function ChatMessageRow(props: {
 }
 
 export function AiChatPage() {
-  const { projectId } = useParams()
+  const { subjectId = "", projectId } = useParams()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const pid = projectId ?? ""
+  const projectScope: ProjectScope | null = subjectId && pid ? { subjectId, projectId: pid } : null
   const globalSettingsPath = buildGlobalSettingsPath()
 
   const touchQaActivity = useCallback(() => {
@@ -975,18 +977,18 @@ export function AiChatPage() {
   const capabilitiesQ = useSystemCapabilities()
   const authEnabled = capabilitiesQ.data?.authEnabled ?? false
   const membershipQ = useMembershipSummary(authEnabled)
-  const materialSourceBindingQ = useProjectMaterialSourceBinding(pid)
+  const materialSourceBindingQ = useProjectMaterialSourceBinding(projectScope)
   const directoryBinding = useProjectDirectoryBinding(pid)
-  const instancesQ = useInstances(pid)
+  const instancesQ = useInstances(projectScope)
   const objectNodesQ = useQuery({
-    queryKey: ["learningObjectNodes", pid],
-    queryFn: () => listLearningObjectNodes(pid),
-    enabled: !!pid,
+    queryKey: ["learningObjectNodes", subjectId, pid],
+    queryFn: () => listLearningObjectNodes(projectScope as ProjectScope),
+    enabled: !!projectScope,
   })
   const recallPointQ = useQuery({
-    queryKey: ["recallPoint", pid, nodeIdParam],
-    queryFn: () => getRecallPoint(pid, nodeIdParam),
-    enabled: !!pid && isAiChatContextKind(kindParam) && kindParam === "recall" && !!nodeIdParam && !conversationIdParam,
+    queryKey: ["recallPoint", subjectId, pid, nodeIdParam],
+    queryFn: () => getRecallPoint(projectScope as ProjectScope, nodeIdParam),
+    enabled: !!projectScope && isAiChatContextKind(kindParam) && kindParam === "recall" && !!nodeIdParam && !conversationIdParam,
   })
 
   const projectConversations = useMemo(
@@ -1009,15 +1011,15 @@ export function AiChatPage() {
   const activeTree = activeKind === "object" ? objectTree : null
   const activeNodeId = selectedConversation?.nodeId ?? (kindParam === "task" ? null : nodeIdParam || null)
   const selectedRecallPointQ = useQuery({
-    queryKey: ["recallPoint", pid, activeNodeId],
-    queryFn: () => getRecallPoint(pid, activeNodeId ?? ""),
-    enabled: !!pid && activeKind === "recall" && !!activeNodeId,
+    queryKey: ["recallPoint", subjectId, pid, activeNodeId],
+    queryFn: () => getRecallPoint(projectScope as ProjectScope, activeNodeId ?? ""),
+    enabled: !!projectScope && activeKind === "recall" && !!activeNodeId,
   })
   const activeRecallPoint = activeKind === "recall" ? selectedRecallPointQ.data ?? (selectedConversation ? null : recallPointQ.data ?? null) : null
   const activeObjectRecallPointsQ = useQuery({
-    queryKey: ["aiChatObjectRecallPoints", pid, activeNodeId],
-    queryFn: () => listRecallPointsByLearningObjectNode(pid, activeNodeId ?? ""),
-    enabled: !!pid && activeKind === "object" && !!activeNodeId,
+    queryKey: ["aiChatObjectRecallPoints", subjectId, pid, activeNodeId],
+    queryFn: () => listRecallPointsByLearningObjectNode(projectScope as ProjectScope, activeNodeId ?? ""),
+    enabled: !!projectScope && activeKind === "object" && !!activeNodeId,
   })
   const activeNodeLabel =
     activeKind === "object" ? getNodeLabel(objectTree, activeNodeId) : describeRecallPointTitle(activeRecallPoint, activeNodeId)
@@ -1118,11 +1120,11 @@ export function AiChatPage() {
     if (selectedConversation) return
     if (!pid) return
     if (activeNodeId && isAiChatContextKind(kindParam)) {
-      navigate(buildAiChatPath(pid, { kind: kindParam, nodeId: activeNodeId }), { replace: true })
+      navigate(buildAiChatPath(subjectId, pid, { kind: kindParam, nodeId: activeNodeId }), { replace: true })
       return
     }
-    navigate(buildCurrentProjectPath(pid, "/ai-chat"), { replace: true })
-  }, [activeNodeId, conversationIdParam, kindParam, navigate, pid, selectedConversation])
+    navigate(buildScopedProjectPath(subjectId, pid, "/ai-chat"), { replace: true })
+  }, [activeNodeId, conversationIdParam, kindParam, navigate, pid, selectedConversation, subjectId])
 
   useEffect(() => {
     if (!scrollRef.current) return
@@ -1192,7 +1194,7 @@ export function AiChatPage() {
 
     try {
       const document = await loadSubtitleDocumentForInstance({
-        projectId: pid,
+        scope: projectScope as ProjectScope,
         instance: courseContext.instance,
         sourceKind: courseContext.sourceKind,
       })
@@ -1229,6 +1231,7 @@ export function AiChatPage() {
     if (courseContext) {
       try {
         const result = await askCourseAgent({
+          subjectId,
           projectId: pid,
           instance: courseContext.instance,
           sourceKind: courseContext.sourceKind,
@@ -1280,7 +1283,7 @@ export function AiChatPage() {
 
     const resolvedSupplementalContext = supplementalContext === undefined ? await loadActiveSupplementalContext() : supplementalContext
     const result = await askProjectLlmStream(
-      pid,
+      projectScope as ProjectScope,
       {
         prompt: buildConversationPrompt(baseMessages, latestUserInput),
         systemPrompt,
@@ -1319,7 +1322,7 @@ export function AiChatPage() {
 
   function navigateToContext(params: { kind: AiChatContextKind; nodeId: string; conversationId?: string | null }) {
     if (!pid) return
-    navigate(buildAiChatPath(pid, params))
+    navigate(buildAiChatPath(subjectId, pid, params))
   }
 
   function handleJumpToEvidence(evidence: AiChatCourseEvidence) {
@@ -1328,7 +1331,7 @@ export function AiChatPage() {
     const search = new URLSearchParams()
     search.set("instanceId", evidence.instanceId)
     search.set("position", `t=${Math.max(0, Math.floor((evidence.startMs + evidence.endMs) / 2))}`)
-    navigate(buildCurrentProjectPath(pid, `/workbench?${search.toString()}`))
+    navigate(buildScopedProjectPath(subjectId, pid, `/workbench?${search.toString()}`))
   }
 
   function resetStreamingState() {
@@ -1591,7 +1594,7 @@ export function AiChatPage() {
         message="AI 问答需要绑定到具体项目。请先回到项目内的学习任务节点或学习对象节点，再从详情页进入。"
         action={
           <Button asChild>
-            <Link to="/projects">返回项目中心</Link>
+            <Link to="/subjects">返回学科中心</Link>
           </Button>
         }
       />

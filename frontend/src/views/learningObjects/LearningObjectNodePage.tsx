@@ -11,10 +11,11 @@ import {
   listLearningObjectNodes,
   listRecallPointsByLearningObjectNode,
 } from "@/ui/api/learningObjects"
+import type { ProjectScope } from "@/ui/api/projectScope"
 import { ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader } from "@/ui/components/ui/card"
-import { buildCurrentProjectPath } from "@/ui/projectPaths"
+import { buildScopedProjectPath } from "@/ui/projectPaths"
 import { buildAiChatPath } from "@/views/ai/chatRouting"
 import { RecallPointListCard } from "@/views/recallPoints/components/RecallPointListCard"
 import { NodeExportCard } from "@/views/shared/NodeExportCard"
@@ -32,32 +33,33 @@ function formatNodeType(kind: "leaf" | "container", depth: number) {
 }
 
 export function LearningObjectNodePage() {
-  const { projectId, nodeId } = useParams()
+  const { subjectId = "", projectId, nodeId } = useParams()
   const navigate = useNavigate()
   const pid = projectId ?? ""
   const nid = nodeId ?? ""
+  const projectScope: ProjectScope | null = subjectId && pid ? { subjectId, projectId: pid } : null
 
   const nodeQ = useQuery({
-    queryKey: ["learningObjectNode", pid, nid],
-    queryFn: () => getLearningObjectNode(pid, nid),
-    enabled: !!pid && !!nid,
+    queryKey: ["learningObjectNode", subjectId, pid, nid],
+    queryFn: () => getLearningObjectNode(projectScope as ProjectScope, nid),
+    enabled: !!projectScope && !!nid,
   })
 
   const nodesQ = useQuery({
-    queryKey: ["learningObjectNodes", pid],
-    queryFn: () => listLearningObjectNodes(pid),
-    enabled: !!pid,
+    queryKey: ["learningObjectNodes", subjectId, pid],
+    queryFn: () => listLearningObjectNodes(projectScope as ProjectScope),
+    enabled: !!projectScope,
   })
 
   const instancesQ = useQuery({
-    queryKey: ["instances", pid],
-    queryFn: () => listInstances(pid),
-    enabled: !!pid,
+    queryKey: ["instances", subjectId, pid],
+    queryFn: () => listInstances(projectScope as ProjectScope),
+    enabled: !!projectScope,
   })
   const recallPointsQ = useQuery({
-    queryKey: ["recallPointsByObjectNode", pid, nid],
-    queryFn: () => listRecallPointsByLearningObjectNode(pid, nid),
-    enabled: !!pid && !!nid,
+    queryKey: ["recallPointsByObjectNode", subjectId, pid, nid],
+    queryFn: () => listRecallPointsByLearningObjectNode(projectScope as ProjectScope, nid),
+    enabled: !!projectScope && !!nid,
   })
 
   const depth = useMemo(() => {
@@ -94,7 +96,7 @@ export function LearningObjectNodePage() {
         <ContentNotice
           title="当前页面缺少对象节点上下文"
           message="当前链接缺少对象节点评息。请先返回项目列表，再从学习对象树重新进入。"
-          action={<Button onClick={() => navigate("/projects")}>返回项目列表</Button>}
+          action={<Button onClick={() => navigate("/subjects")}>返回学科中心</Button>}
         />
       </div>
     )
@@ -108,7 +110,7 @@ export function LearningObjectNodePage() {
       className="-ml-2 h-8 rounded-full px-2 text-[#60748c] hover:bg-[#f3f7fb] hover:text-foreground"
       asChild
     >
-      <Link to={buildCurrentProjectPath(pid, "/structure-view?view=object")}>
+      <Link to={buildScopedProjectPath(subjectId, pid, "/structure-view?view=object")}>
         <ChevronLeft className="h-4 w-4" />
         返回学习对象树
       </Link>
@@ -128,7 +130,7 @@ export function LearningObjectNodePage() {
           {
             label: "实例入口",
             value: boundInstance ? (
-              <Link className="text-primary underline-offset-4 hover:underline" to={buildCurrentProjectPath(pid, `/instances/${boundInstance.instanceId}`)}>
+              <Link className="text-primary underline-offset-4 hover:underline" to={buildScopedProjectPath(subjectId, pid, `/instances/${boundInstance.instanceId}`)}>
                 查看实例
               </Link>
             ) : (
@@ -146,7 +148,7 @@ export function LearningObjectNodePage() {
       />
 
       <Button asChild className="w-full">
-        <Link to={buildAiChatPath(pid, { kind: "object", nodeId: nid })}>
+        <Link to={buildAiChatPath(subjectId, pid, { kind: "object", nodeId: nid })}>
           <Sparkles className="h-4 w-4" />
           AI问答
         </Link>
@@ -166,7 +168,7 @@ export function LearningObjectNodePage() {
           message="这个对象节点可能已经被重建或移除。你可以返回学习对象树重新选择。"
           action={
             <Button variant="outline" asChild>
-              <Link to={buildCurrentProjectPath(pid, "/structure-view?view=object")}>返回学习对象树</Link>
+              <Link to={buildScopedProjectPath(subjectId, pid, "/structure-view?view=object")}>返回学习对象树</Link>
             </Button>
           }
         />
@@ -177,6 +179,7 @@ export function LearningObjectNodePage() {
           {summaryPanel ? <aside className="xl:sticky xl:top-28 xl:self-start">{summaryPanel}</aside> : <div />}
           <div className="min-w-0">
             <RecallPointListCard
+              subjectId={subjectId}
               projectId={pid}
               items={recallPointsQ.data ?? []}
               instanceTitleById={instanceTitleById}
@@ -188,7 +191,7 @@ export function LearningObjectNodePage() {
                   projectId={pid}
                   nodeTitle={title}
                   recallPoints={recallPointsQ.data ?? []}
-                  exportRecallPoints={() => exportRecallPointsByLearningObjectNode(pid, nid)}
+                  exportRecallPoints={() => exportRecallPointsByLearningObjectNode(projectScope as ProjectScope, nid)}
                 />
               }
             />

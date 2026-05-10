@@ -5,6 +5,7 @@ import { BookPlus, ChevronLeft, ChevronRight } from "lucide-react"
 import { ApiError } from "@/ui/api/http"
 import { listRecallPointsByLearningTaskNode } from "@/ui/api/learningTaskNodes"
 import type { Instance } from "@/ui/api/instances"
+import type { ProjectScope } from "@/ui/api/projectScope"
 import type { ProjectType } from "@/ui/api/projects"
 import { searchRecallPoints, type RecallPoint } from "@/ui/api/review"
 import { richContentHasMeaning, richContentToPlainText, richText } from "@/ui/api/richContent"
@@ -114,6 +115,7 @@ type ReferenceCandidate = {
 }
 
 export function ComposePane({
+  subjectId,
   projectId,
   projectType,
   selectedInstanceId,
@@ -123,6 +125,7 @@ export function ComposePane({
   actionableMissingGate,
   actionableMissingInstanceCount,
 }: {
+  subjectId: string
   projectId: string
   projectType: ProjectType
   selectedInstanceId: string | null
@@ -132,6 +135,7 @@ export function ComposePane({
   actionableMissingGate: boolean
   actionableMissingInstanceCount: number
 }) {
+  const projectScope: ProjectScope = { subjectId, projectId }
   const ps = useWorkbenchStore((s) => s.byProjectId[projectId])
   const addDraft = useWorkbenchStore((s) => s.addDraft)
   const updateDraftPosition = useWorkbenchStore((s) => s.updateDraftPosition)
@@ -155,8 +159,8 @@ export function ComposePane({
     highlightedIndex: number
   } | null>(null)
 
-  const submit = useSubmitLearningTask(projectId)
-  const learningTaskNodesQ = useLearningTaskNodes(projectId)
+  const submit = useSubmitLearningTask(projectScope)
+  const learningTaskNodesQ = useLearningTaskNodes(projectScope)
   const requiresLearningObjectTree = projectTypeRequiresLearningObjectTree(projectType)
   const requiresAnchor = projectTypeRequiresAnchor(projectType)
   const usesResolvableCourseAnchor = projectTypeUsesResolvableCourseAnchor(projectType)
@@ -174,8 +178,8 @@ export function ComposePane({
   )
   const learningTaskRecallPointQs = useQueries({
     queries: leafNodeIds.map((nodeId) => ({
-      queryKey: ["recallPointsByTaskNode", projectId, nodeId],
-      queryFn: () => listRecallPointsByLearningTaskNode(projectId, nodeId),
+      queryKey: ["recallPointsByTaskNode", subjectId, projectId, nodeId],
+      queryFn: () => listRecallPointsByLearningTaskNode(projectScope, nodeId),
       enabled: !!projectId && requiresLearningObjectTree && !!selectedInstanceId,
     })),
   })
@@ -285,10 +289,10 @@ export function ComposePane({
   const effectiveReferencePicker = referencePicker?.draftId === resolvedActiveDraftId ? referencePicker : null
   const deferredReferenceQuery = useDeferredValue(effectiveReferencePicker?.query.trim() ?? "")
   const referenceSearchQ = useQuery({
-    queryKey: ["recallPointSearch", projectId, deferredReferenceQuery],
+    queryKey: ["recallPointSearch", subjectId, projectId, deferredReferenceQuery],
     queryFn: ({ signal }) =>
       searchRecallPoints(
-        projectId,
+        projectScope,
         { q: deferredReferenceQuery || undefined, limit: MAX_REFERENCE_PICKER_ITEMS * 4 },
         { signal },
       ),
@@ -583,6 +587,7 @@ export function ComposePane({
                   <div className="space-y-2" data-guide-tour="recall-question-editor">
                     <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">问题</div>
                     <RichContentEditor
+                      subjectId={subjectId}
                       projectId={projectId}
                       field="question"
                       value={activeDraft.question}
@@ -637,6 +642,7 @@ export function ComposePane({
                   <div className="space-y-2" data-guide-tour="recall-answer-editor">
                     <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">答案</div>
                     <RichContentEditor
+                      subjectId={subjectId}
                       projectId={projectId}
                       field="answer"
                       value={activeDraft.answer}

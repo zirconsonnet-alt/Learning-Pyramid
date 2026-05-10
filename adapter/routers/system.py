@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from adapter.auth import get_request_auth_user
 from adapter.deps import get_api, get_auth_store, get_membership_store, require_active_membership
+from adapter.scoped_projects import ScopedProject, resolve_scoped_project
 from adapter.schemas import (
     AskLlmRequest,
     AskProjectLlmRawChatCompletionRequest,
@@ -185,11 +186,11 @@ def ask_llm(
     return {"ok": True, "data": {"content": content}}
 
 
-@router.post("/projects/{projectId}/llm/ask")
+@router.post("/subjects/{subjectId}/projects/{projectId}/llm/ask")
 def ask_project_llm(
-    projectId: str,
     req: AskProjectLlmRequest,
     request: Request,
+    project: ScopedProject = Depends(resolve_scoped_project),
     api: SystemAPI = Depends(get_api),
     auth_store: AuthStore = Depends(get_auth_store),
     membership_store: MembershipStore = Depends(get_membership_store),
@@ -198,7 +199,7 @@ def ask_project_llm(
         require_active_membership(request, membership_store)
     current_user = get_request_auth_user(request)
     content = api.request_project_llm_text(
-        project_id=projectId,  # type: ignore[arg-type]
+        project_id=project.internal_project_id,  # type: ignore[arg-type]
         user_prompt=req.prompt,
         system_prompt=req.systemPrompt,
         supplemental_context=req.supplementalContext,
@@ -213,46 +214,35 @@ def ask_project_llm(
     return {"ok": True, "data": {"content": content}}
 
 
-@router.post("/projects/{projectId}/llm/chat-completions")
+def reject_scoped_raw_llm_chat() -> None:
+    raise PreconditionFailure("scoped raw LLM chat completions are not supported; use project LLM ask endpoints")
+
+
+@router.post("/subjects/{subjectId}/projects/{projectId}/llm/chat-completions")
 def ask_project_llm_chat_completions(
-    projectId: str,
     req: AskProjectLlmRawChatCompletionRequest,
     request: Request,
+    project: ScopedProject = Depends(resolve_scoped_project),
     api: SystemAPI = Depends(get_api),
     auth_store: AuthStore = Depends(get_auth_store),
     membership_store: MembershipStore = Depends(get_membership_store),
 ) -> dict:
-    if current_runtime_features().auth_enabled:
-        require_active_membership(request, membership_store)
-    current_user = get_request_auth_user(request)
-    data = api.request_llm_chat_completion_raw(
-        messages=req.messages,
-        tools=req.tools,
-        tool_choice=req.toolChoice,
-        parallel_tool_calls=req.parallelToolCalls,
-        response_format=req.responseFormat,
-        model_name=req.modelName,
-        temperature=req.temperature,
-        timeout_sec=90.0,
-        auth_store=auth_store,
-        user_id=None if current_user is None else current_user.user_id,
-    )
-    return {"ok": True, "data": data}
+    reject_scoped_raw_llm_chat()
 
 
-@router.get("/projects/{projectId}/llm/debug/latest")
+@router.get("/subjects/{subjectId}/projects/{projectId}/llm/debug/latest")
 def get_latest_project_llm_debug(
-    projectId: str,
+    project: ScopedProject = Depends(resolve_scoped_project),
     api: SystemAPI = Depends(get_api),
 ) -> dict:
-    return {"ok": True, "data": api.get_latest_project_llm_debug(projectId)}  # type: ignore[arg-type]
+    return {"ok": True, "data": api.get_latest_project_llm_debug(project.internal_project_id)}  # type: ignore[arg-type]
 
 
-@router.post("/projects/{projectId}/llm/ask/stream")
+@router.post("/subjects/{subjectId}/projects/{projectId}/llm/ask/stream")
 def ask_project_llm_stream(
-    projectId: str,
     req: AskProjectLlmRequest,
     request: Request,
+    project: ScopedProject = Depends(resolve_scoped_project),
     api: SystemAPI = Depends(get_api),
     auth_store: AuthStore = Depends(get_auth_store),
     membership_store: MembershipStore = Depends(get_membership_store),
@@ -265,7 +255,7 @@ def ask_project_llm_stream(
                 require_active_membership(request, membership_store)
             yield _sse_event("start", {"ok": True})
             for chunk in api.request_project_llm_text_stream(
-                project_id=projectId,  # type: ignore[arg-type]
+                project_id=project.internal_project_id,  # type: ignore[arg-type]
                 user_prompt=req.prompt,
                 system_prompt=req.systemPrompt,
                 supplemental_context=req.supplementalContext,

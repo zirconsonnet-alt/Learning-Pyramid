@@ -17,7 +17,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from backend.system.runtime_env import executable_dir, is_frozen, resource_root
 from backend.system.app_paths import logs_dir, runtime_dir
-from backend.system.version import APP_NAME, LEGACY_APP_IDS, SERVER_EXE_BASENAME
+from backend.system.version import APP_NAME, SERVER_EXE_BASENAME
 
 
 def _runtime_meta_path(host: str, port: int) -> Path:
@@ -106,8 +106,7 @@ def _is_expected_runtime_process(pid: int, runtime_token: str) -> bool:
     if not cmdline:
         return False
     text = cmdline.lower()
-    server_markers = ["run_server.py", SERVER_EXE_BASENAME.lower(), "plm-server"]
-    server_markers.extend(app_id.lower() for app_id in LEGACY_APP_IDS)
+    server_markers = ["run_server.py", SERVER_EXE_BASENAME.lower()]
     return runtime_token.lower() in text and any(marker in text for marker in server_markers)
 
 

@@ -27,11 +27,13 @@ export function VideoBarrageLayer({
 }
 
 export function VideoBarrageDetailCard({
+  subjectId,
   projectId,
   hoveredBarrage,
   isEnabled,
   isCapturePanelOpen,
 }: {
+  subjectId: string
   projectId: string
   hoveredBarrage: HoveredBarrage | null
   isEnabled: boolean
@@ -63,6 +65,7 @@ export function VideoBarrageDetailCard({
         <div className="text-[11px] uppercase tracking-[0.18em] text-cyan-100/68">复述点答案</div>
         <div className="mt-1 text-sm font-medium text-white/86">{hoveredBarrage.text}</div>
         <RichContentRenderer
+          subjectId={subjectId}
           projectId={projectId}
           value={hoveredBarrage.answerContent}
           className="mt-2"

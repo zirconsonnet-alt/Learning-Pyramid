@@ -273,73 +273,105 @@ class MembershipStore:
         return row is not None
 
     @staticmethod
-    def _ensure_column(conn: sqlite3.Connection, table_name: str, column_name: str, column_sql: str) -> None:
-        columns = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
-        if any(str(row["name"]) == str(column_name) for row in columns):
-            return
-        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_sql}")
+    def _table_columns(conn: sqlite3.Connection, table_name: str) -> dict[str, sqlite3.Row]:
+        return {str(row["name"]): row for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
 
     @staticmethod
-    def _ensure_nullable_entitlement_source_order(conn: sqlite3.Connection) -> None:
-        columns = {str(row["name"]): row for row in conn.execute("PRAGMA table_info(membership_entitlements)").fetchall()}
-        source_order = columns.get("source_order_id")
-        if source_order is None or int(source_order["notnull"] or 0) == 0:
-            return
-        temp_table = f"membership_entitlements_migration_{uuid.uuid4().hex[:8]}"
-        conn.execute(f"ALTER TABLE membership_entitlements RENAME TO {temp_table}")
-        conn.executescript(
-            f"""
-            CREATE TABLE membership_entitlements (
-                entitlement_id TEXT PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                source_order_id TEXT,
-                source_kind TEXT NOT NULL DEFAULT 'order',
-                start_at TEXT NOT NULL,
-                end_at TEXT NOT NULL,
-                granted_days INTEGER NOT NULL,
-                status TEXT NOT NULL,
-                granted_at TEXT NOT NULL,
-                revoked_at TEXT,
-                revoke_reason TEXT NOT NULL DEFAULT '',
-                CHECK (granted_days > 0),
-                CHECK (status IN ('active', 'expired', 'revoked'))
-            );
+    def _validate_table_columns(
+        conn: sqlite3.Connection,
+        table_name: str,
+        required_columns: set[str],
+    ) -> dict[str, sqlite3.Row]:
+        columns = MembershipStore._table_columns(conn, table_name)
+        missing = sorted(required_columns - set(columns))
+        if missing:
+            raise RuntimeError(f"{table_name} schema is not current; missing columns: {', '.join(missing)}")
+        return columns
 
-            INSERT INTO membership_entitlements (
-                entitlement_id,
-                user_id,
-                source_order_id,
-                source_kind,
-                start_at,
-                end_at,
-                granted_days,
-                status,
-                granted_at,
-                revoked_at,
-                revoke_reason
-            )
-            SELECT
-                entitlement_id,
-                user_id,
-                source_order_id,
-                'order',
-                start_at,
-                end_at,
-                granted_days,
-                status,
-                granted_at,
-                revoked_at,
-                revoke_reason
-            FROM {temp_table};
-
-            DROP TABLE {temp_table};
-            """
+    @classmethod
+    def _validate_current_schema(cls, conn: sqlite3.Connection) -> None:
+        cls._validate_table_columns(
+            conn,
+            "membership_orders",
+            {
+                "order_id",
+                "user_id",
+                "plan_id",
+                "order_type",
+                "pricing_version",
+                "period_days",
+                "list_amount_cent",
+                "first_order_discount_cent",
+                "coupon_discount_cent",
+                "payable_amount_cent",
+                "coupon_id",
+                "provider",
+                "status",
+                "provider_trade_no",
+                "client_ip",
+                "client_version",
+                "created_at",
+                "paid_at",
+                "closed_at",
+                "refunded_at",
+                "expired_at",
+                "entitlement_id",
+                "remark",
+            },
         )
+        cls._validate_table_columns(
+            conn,
+            "membership_payments",
+            {
+                "payment_id",
+                "order_id",
+                "provider",
+                "provider_trade_no",
+                "provider_buyer_id",
+                "amount_cent",
+                "status",
+                "callback_payload_json",
+                "created_at",
+                "confirmed_at",
+                "refund_out_refund_no",
+                "refund_callback_payload_json",
+                "refund_requested_at",
+                "refunded_at",
+            },
+        )
+        entitlement_columns = cls._validate_table_columns(
+            conn,
+            "membership_entitlements",
+            {
+                "entitlement_id",
+                "user_id",
+                "source_order_id",
+                "source_kind",
+                "start_at",
+                "end_at",
+                "granted_days",
+                "status",
+                "granted_at",
+                "revoked_at",
+                "revoke_reason",
+            },
+        )
+        source_order = entitlement_columns["source_order_id"]
+        if int(source_order["notnull"] or 0) != 0:
+            raise RuntimeError("membership_entitlements schema is not current; source_order_id must be nullable")
+
+    @classmethod
+    def _validate_existing_current_schema(cls, conn: sqlite3.Connection) -> None:
+        for table_name in ("membership_orders", "membership_payments", "membership_entitlements"):
+            if cls._table_exists(conn, table_name):
+                cls._validate_current_schema(conn)
+                return
 
     def _init_db(self) -> None:
         with self._lock:
             conn = self._connect()
             try:
+                self._validate_existing_current_schema(conn)
                 conn.executescript(
                     """
                     CREATE TABLE IF NOT EXISTS membership_orders (
@@ -437,91 +469,7 @@ class MembershipStore:
                     ON membership_entitlements (user_id, end_at DESC);
                     """
                 )
-                self._ensure_column(
-                    conn,
-                    "membership_orders",
-                    "plan_id",
-                    "plan_id TEXT NOT NULL DEFAULT 'monthly'",
-                )
-                self._ensure_column(
-                    conn,
-                    "membership_orders",
-                    "coupon_discount_cent",
-                    "coupon_discount_cent INTEGER NOT NULL DEFAULT 0",
-                )
-                self._ensure_column(
-                    conn,
-                    "membership_orders",
-                    "coupon_id",
-                    "coupon_id TEXT",
-                )
-                self._ensure_column(
-                    conn,
-                    "membership_orders",
-                    "closed_at",
-                    "closed_at TEXT",
-                )
-                self._ensure_column(
-                    conn,
-                    "membership_orders",
-                    "refunded_at",
-                    "refunded_at TEXT",
-                )
-                self._ensure_column(
-                    conn,
-                    "membership_orders",
-                    "remark",
-                    "remark TEXT NOT NULL DEFAULT ''",
-                )
-                self._ensure_column(
-                    conn,
-                    "membership_entitlements",
-                    "source_kind",
-                    "source_kind TEXT NOT NULL DEFAULT 'order'",
-                )
-                self._ensure_nullable_entitlement_source_order(conn)
-                conn.execute(
-                    """
-                    CREATE UNIQUE INDEX IF NOT EXISTS idx_membership_entitlements_source_order
-                    ON membership_entitlements (source_order_id);
-                    """
-                )
-                conn.execute(
-                    """
-                    CREATE INDEX IF NOT EXISTS idx_membership_entitlements_user_end
-                    ON membership_entitlements (user_id, end_at DESC);
-                    """
-                )
-                self._ensure_column(
-                    conn,
-                    "membership_payments",
-                    "provider_buyer_id",
-                    "provider_buyer_id TEXT NOT NULL DEFAULT ''",
-                )
-                self._ensure_column(
-                    conn,
-                    "membership_payments",
-                    "refund_out_refund_no",
-                    "refund_out_refund_no TEXT",
-                )
-                self._ensure_column(
-                    conn,
-                    "membership_payments",
-                    "refund_callback_payload_json",
-                    "refund_callback_payload_json TEXT NOT NULL DEFAULT ''",
-                )
-                self._ensure_column(
-                    conn,
-                    "membership_payments",
-                    "refund_requested_at",
-                    "refund_requested_at TEXT",
-                )
-                self._ensure_column(
-                    conn,
-                    "membership_payments",
-                    "refunded_at",
-                    "refunded_at TEXT",
-                )
+                self._validate_current_schema(conn)
                 conn.commit()
             finally:
                 conn.close()

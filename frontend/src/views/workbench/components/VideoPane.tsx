@@ -25,6 +25,7 @@ import { ApiError } from "@/ui/api/http"
 import { uploadMediaAsset } from "@/ui/api/mediaAssets"
 import { resolvePlaybackDescriptorUrl } from "@/ui/api/media"
 import { apiUrl } from "@/ui/api/http"
+import { projectApiPath, type ProjectScope } from "@/ui/api/projectScope"
 import { getRecallPoint, searchRecallPoints, type RecallPoint } from "@/ui/api/review"
 import {
   appendImageBlock,
@@ -43,7 +44,7 @@ import { askCourseAgent } from "@/ui/llm/courseAgent"
 import { resolveProjectFile, useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
 import { playPomodoroMicroBreakReminderSound } from "@/ui/pomodoroAudio"
 import { useMembershipSummary } from "@/ui/queries/membership"
-import { useProjectMaterialSourceBinding, useProjects } from "@/ui/queries/projects"
+import { useProjectMaterialSourceBinding } from "@/ui/queries/projects"
 import { useSystemCapabilities } from "@/ui/queries/system"
 import type { AiChatCourseEvidence } from "@/ui/store/aiChatStore"
 import { formatPomodoroCountdown, getPomodoroSnapshot, getPomodoroUpcomingSegmentPreview, isQuickPomodoroSessionActive, usePomodoroNow, usePomodoroStore } from "@/ui/store/pomodoroStore"
@@ -327,6 +328,7 @@ export function VideoPane({
   queueHasGate: boolean
   allowCaptureDrafts?: boolean
 }) {
+  const projectScope: ProjectScope = { subjectId, projectId }
   const playerShellRef = useRef<HTMLDivElement | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const barrageLayerRef = useRef<HTMLDivElement | null>(null)
@@ -393,14 +395,13 @@ export function VideoPane({
   const pomodoroMicroBreaks = usePomodoroStore((state) => state.microBreaks)
   const pomodoroQuickClockActive = isQuickPomodoroSessionActive(pomodoroQuickPomodoro)
   const pomodoroNow = usePomodoroNow(pomodoroEnabled || pomodoroQuickClockActive)
-  const projectsQ = useProjects(true)
 
   const instanceId = instance?.instanceId ?? null
   const capabilitiesQ = useSystemCapabilities()
   const authEnabled = capabilitiesQ.data?.authEnabled ?? false
   const membershipQ = useMembershipSummary(authEnabled)
-  const materialSourceBindingQ = useProjectMaterialSourceBinding(projectId)
-  const playbackDescriptorQ = useInstancePlaybackDescriptor(projectId, instanceId ?? "", !!instanceId)
+  const materialSourceBindingQ = useProjectMaterialSourceBinding(projectScope)
+  const playbackDescriptorQ = useInstancePlaybackDescriptor(projectScope, instanceId ?? "", !!instanceId)
   const directoryBinding = useProjectDirectoryBinding(projectId)
   const serverMediaStreamEnabled = capabilitiesQ.data?.serverMediaStreamEnabled ?? false
   const browserLocalMediaEnabled = capabilitiesQ.data?.browserLocalMediaEnabled ?? false
@@ -420,11 +421,11 @@ export function VideoPane({
   const durationLabel = durationMs > 0 ? formatPlaybackClock(durationMs) : "--:--"
   const chromeVisible = isChromeAwake || !isPlaying || isCapturePanelOpen
   const playbackRateLabel = `${Number.isInteger(playbackRate) ? playbackRate.toFixed(0) : playbackRate.toFixed(2).replace(/0$/, "")}x`
-  const recallPointIdsQ = useRecallPointsByInstance(projectId, instanceId ?? "")
+  const recallPointIdsQ = useRecallPointsByInstance(projectScope, instanceId ?? "")
   const recallPointQs = useQueries({
     queries: (recallPointIdsQ.data?.recallPointIds ?? []).map((recallPointId) => ({
-      queryKey: ["recallPoint", projectId, recallPointId],
-      queryFn: () => getRecallPoint(projectId, recallPointId),
+      queryKey: ["recallPoint", subjectId, projectId, recallPointId],
+      queryFn: () => getRecallPoint(projectScope, recallPointId),
       enabled: !!projectId && !!instanceId && !!recallPointId,
       staleTime: 30_000,
     })),
@@ -439,6 +440,7 @@ export function VideoPane({
     !!subtitleSourceKind &&
     (subtitleSourceKind !== "BROWSER_LOCAL" || directoryBinding.permission === "granted")
   const subtitleState = useVideoSubtitles({
+    subjectId,
     projectId,
     instance,
     playbackMs: displayPlaybackMs,
@@ -465,10 +467,10 @@ export function VideoPane({
     (subtitleSourceKind !== "BROWSER_LOCAL" || directoryBinding.permission === "granted")
   const deferredCaptureReferenceQuery = useDeferredValue(captureReferencePicker?.query.trim() ?? "")
   const captureReferenceSearchQ = useQuery({
-    queryKey: ["recallPointSearch", projectId, deferredCaptureReferenceQuery],
+    queryKey: ["recallPointSearch", subjectId, projectId, deferredCaptureReferenceQuery],
     queryFn: ({ signal }) =>
       searchRecallPoints(
-        projectId,
+        projectScope,
         { q: deferredCaptureReferenceQuery || undefined, limit: MAX_CAPTURE_REFERENCE_PICKER_ITEMS * 4 },
         { signal },
       ),
@@ -574,7 +576,7 @@ export function VideoPane({
       const maxExpectedAdvanceMs = Math.max(2_500, wallDeltaMs * playbackRate * 2.25 + 1_500)
       if (playbackDeltaMs > maxExpectedAdvanceMs) return
 
-      syncVideoWatchProgressRange(projectId, instanceId, previousPlaybackMs, nextPlaybackMs, durationMs > 0 ? durationMs : null)
+      syncVideoWatchProgressRange(projectScope, projectId, instanceId, previousPlaybackMs, nextPlaybackMs, durationMs > 0 ? durationMs : null)
     },
     [durationMs, instanceId, projectId],
   )
@@ -965,6 +967,7 @@ export function VideoPane({
       setAssistantStatus("正在检索相关字幕...")
 
       const result = await askCourseAgent({
+        subjectId,
         projectId,
         instance,
         sourceKind: subtitleSourceKind,
@@ -1015,6 +1018,7 @@ export function VideoPane({
     llmConfigured,
     playerAiMemberBlocked,
     projectId,
+    subjectId,
     subtitleSourceKind,
     touchQaActivity,
   ])
@@ -1033,7 +1037,7 @@ export function VideoPane({
     try {
       const currentMs = clampPlaybackMs(video, Math.floor(video.currentTime * 1000))
       const captured = await captureDisplayedVideoFrameFile(video, currentMs)
-      const uploaded = await uploadMediaAsset(projectId, captured.file)
+      const uploaded = await uploadMediaAsset(projectScope, captured.file)
       setAnswerContent((prev) => appendImageBlock(prev, uploaded.assetId))
       showInfoFeedback("已插入视频帧", `来自 ${formatPlaybackClock(captured.timeMs)} 的当前画面。`)
     } catch (error) {
@@ -1041,7 +1045,7 @@ export function VideoPane({
     } finally {
       setIsFrameCaptureUploading(false)
     }
-  }, [allowCaptureDrafts, capturePanelMode, isCapturePanelOpen, isFrameCaptureUploading, projectId, touchComposeActivity])
+  }, [allowCaptureDrafts, capturePanelMode, isCapturePanelOpen, isFrameCaptureUploading, projectId, projectScope, touchComposeActivity])
 
   const saveCaptureDraft = useCallback(() => {
     if (!allowCaptureDrafts) {
@@ -1373,10 +1377,10 @@ export function VideoPane({
       return playbackDescriptorUrl
     }
     if (serverMediaStreamEnabled && playbackKind === "FILE") {
-      return resolvePlaybackDescriptorUrl(apiUrl(`/projects/${projectId}/media/instances/${instance.instanceId}`))
+      return resolvePlaybackDescriptorUrl(apiUrl(projectApiPath(projectScope, `/media/instances/${instance.instanceId}`)))
     }
     return null
-  }, [effectiveSourceKind, instance, localSrc, playbackDescriptorUrl, playbackKind, projectId, serverMediaStreamEnabled])
+  }, [effectiveSourceKind, instance, localSrc, playbackDescriptorUrl, playbackKind, projectId, projectScope, serverMediaStreamEnabled])
 
   useEffect(() => {
     let cancelled = false
@@ -1457,6 +1461,7 @@ export function VideoPane({
   }, [playbackKind, src])
 
   const { hoveredBarrage } = useVideoBarrage({
+    subjectId,
     projectId,
     instanceId,
     recallPoints,
@@ -1560,7 +1565,7 @@ export function VideoPane({
     const video = videoRef.current
     const completedDurationMs = durationMs > 0 ? durationMs : video ? readDurationMs(video) : 0
     if (completedDurationMs > 0) {
-      markVideoWatchProgressCompleted(projectId, instanceId, completedDurationMs)
+      markVideoWatchProgressCompleted(projectScope, projectId, instanceId, completedDurationMs)
     }
     clearPlaybackResumeMs(projectId, instanceId)
     lastPersistedPlaybackSecondRef.current = null
@@ -1930,11 +1935,7 @@ export function VideoPane({
       getPomodoroUpcomingSegmentPreview({ enabled: pomodoroEnabled, weeklySchedule: pomodoroWeeklySchedule, quickPomodoro: pomodoroQuickPomodoro }, pomodoroNow),
     [pomodoroEnabled, pomodoroNow, pomodoroQuickPomodoro, pomodoroWeeklySchedule],
   )
-  const fullscreenUpcomingProjectTitle = useMemo(() => {
-    const upcomingProjectId = pomodoroUpcomingSegment?.projectRef?.projectId ?? ""
-    if (!upcomingProjectId) return ""
-    return projectsQ.data?.find((project) => project.projectId === upcomingProjectId)?.title ?? ""
-  }, [pomodoroUpcomingSegment?.projectRef?.projectId, projectsQ.data])
+  const fullscreenUpcomingProjectTitle = ""
   const upcomingProjectRef = pomodoroUpcomingSegment?.projectRef ?? null
   const showFullscreenFocusPreview =
     !showMicroBreakOverlay &&
@@ -2090,6 +2091,7 @@ export function VideoPane({
               isCapturePanelOpen={isCapturePanelOpen}
             />
             <VideoBarrageDetailCard
+              subjectId={subjectId}
               projectId={projectId}
               hoveredBarrage={hoveredBarrage}
               isEnabled={isBarrageEnabled}
@@ -2577,6 +2579,7 @@ export function VideoPane({
                         <label className="block">
                           <div className="mb-1 text-xs text-white/62">问题</div>
                           <RichContentEditor
+                            subjectId={subjectId}
                             projectId={projectId}
                             field="question"
                             value={questionContent}
@@ -2647,6 +2650,7 @@ export function VideoPane({
                         <label className="block">
                           <div className="mb-1 text-xs text-white/62">答案</div>
                           <RichContentEditor
+                            subjectId={subjectId}
                             projectId={projectId}
                             field="answer"
                             value={answerContent}

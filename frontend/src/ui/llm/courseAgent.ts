@@ -1,6 +1,7 @@
 import type { Instance } from "@/ui/api/instances"
 import type { MaterialSourceKind } from "@/ui/api/projects"
 import { ApiError, apiUrl } from "@/ui/api/http"
+import { projectApiPath } from "@/ui/api/projectScope"
 import { askProjectLlmChatCompletion, type RawChatCompletionResponse } from "@/ui/api/system"
 import { resolveProjectFile } from "@/ui/localMedia/projectDirectory"
 import type { AiChatCourseEvidence } from "@/ui/store/aiChatStore"
@@ -17,6 +18,7 @@ type CourseAgentInitialFrame = {
 }
 
 type AskCourseAgentParams = {
+  subjectId: string
   projectId: string
   instance: Pick<Instance, "instanceId" | "materialId">
   sourceKind: MaterialSourceKind
@@ -91,8 +93,9 @@ const toolSupportCache = new Map<string, boolean>()
 const visionSupportCache = new Map<string, boolean>()
 
 export async function askCourseAgent(params: AskCourseAgentParams): Promise<{ content: string; evidence: AiChatCourseEvidence[] }> {
+  const scope = { subjectId: params.subjectId, projectId: params.projectId }
   const document = await loadSubtitleDocumentForInstance({
-    projectId: params.projectId,
+    scope,
     instance: params.instance,
     sourceKind: params.sourceKind,
   })
@@ -155,7 +158,7 @@ export async function askCourseAgent(params: AskCourseAgentParams): Promise<{ co
       params.onStatus?.(round === 0 ? "正在检索相关字幕..." : "正在补充上下文...")
 
       const response = await askProjectLlmChatCompletion(
-        params.projectId,
+        scope,
         {
           messages,
           tools,
@@ -313,7 +316,7 @@ async function answerWithCompatibilityMode(params: {
 
   params.params.onStatus?.(params.hasTranscriptContext ? "正在基于相关字幕生成回答..." : "正在基于当前画面生成回答...")
   const response = await askProjectLlmChatCompletion(
-    params.params.projectId,
+    { subjectId: params.params.subjectId, projectId: params.params.projectId },
     {
       messages,
       modelName: params.params.modelName,
@@ -1115,7 +1118,7 @@ function normalizePreviewText(text: string, maxChars = 140) {
 }
 
 function buildCapabilityCacheKey(params: AskCourseAgentParams) {
-  return [params.projectId, params.modelName?.trim() || "__default__"].join(":")
+  return [params.subjectId, params.projectId, params.modelName?.trim() || "__default__"].join(":")
 }
 
 function windowsOverlap(left: { startMs: number; endMs: number }, right: { startMs: number; endMs: number }) {
@@ -1230,7 +1233,7 @@ async function resolveVideoSource(params: AskCourseAgentParams): Promise<{ src: 
   }
 
   return {
-    src: apiUrl(`/projects/${params.projectId}/media/instances/${params.instance.instanceId}`),
+    src: apiUrl(projectApiPath({ subjectId: params.subjectId, projectId: params.projectId }, `/media/instances/${params.instance.instanceId}`)),
   }
 }
 
@@ -1355,7 +1358,7 @@ async function requestSlideTextExtraction(
   options: { useResponseFormat: boolean },
 ) {
   return await askProjectLlmChatCompletion(
-    params.projectId,
+    { subjectId: params.subjectId, projectId: params.projectId },
     {
       modelName: params.modelName,
       temperature: 0,

@@ -98,15 +98,6 @@ def main() -> int:
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
 
-    # Keep legacy launcher names only when they still exist in the workspace.
-    for rel_file in ("PLM.bat", "PLM-stop.bat"):
-        src = PROJECT_ROOT / rel_file
-        if not src.exists():
-            continue
-        dst = bundle_dir / rel_file
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dst)
-
     _write_release_readme(bundle_dir)
     if zip_path.exists():
         zip_path.unlink()

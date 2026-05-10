@@ -1,6 +1,7 @@
 import { z } from "zod"
 
 import { apiRequest, type ApiRequestExecutionOptions } from "@/ui/api/http"
+import { projectApiPath, type ProjectScope } from "@/ui/api/projectScope"
 import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
 import { getVirtualStudyReviewLayers } from "@/ui/guideWalkthrough/virtualStudyReviewProject"
 
@@ -32,38 +33,38 @@ export type AggregationEvent = z.infer<typeof AggregationEventSchema>
 
 export const ManualRollUpResultSchema = z.object({ parentNodeId: z.string().nullable() })
 
-export function listLayers(projectId: string, options?: ApiRequestExecutionOptions) {
-  if (isVirtualStudyReviewProjectId(projectId)) {
+export function listLayers(scope: ProjectScope, options?: ApiRequestExecutionOptions) {
+  if (isVirtualStudyReviewProjectId(scope.projectId)) {
     return Promise.resolve(getVirtualStudyReviewLayers())
   }
   return apiRequest({
-    path: `/projects/${projectId}/layers`,
+    path: projectApiPath(scope, "/layers"),
     responseSchema: LayersSchema,
     signal: options?.signal,
     timeoutMs: options?.timeoutMs,
   })
 }
 
-export function getAggregationQueue(projectId: string, layerIndex: number) {
-  if (isVirtualStudyReviewProjectId(projectId)) {
+export function getAggregationQueue(scope: ProjectScope, layerIndex: number) {
+  if (isVirtualStudyReviewProjectId(scope.projectId)) {
     return Promise.resolve({ currentNodeIds: [] })
   }
-  return apiRequest({ path: `/projects/${projectId}/aggregation-queue/${layerIndex}`, responseSchema: AggQueueSchema })
+  return apiRequest({ path: projectApiPath(scope, `/aggregation-queue/${layerIndex}`), responseSchema: AggQueueSchema })
 }
 
-export function listAggregationEvents(projectId: string) {
-  if (isVirtualStudyReviewProjectId(projectId)) {
+export function listAggregationEvents(scope: ProjectScope) {
+  if (isVirtualStudyReviewProjectId(scope.projectId)) {
     return Promise.resolve([])
   }
-  return apiRequest({ path: `/projects/${projectId}/aggregation-events`, responseSchema: AggregationEventsSchema })
+  return apiRequest({ path: projectApiPath(scope, "/aggregation-events"), responseSchema: AggregationEventsSchema })
 }
 
-export function manualRollUp(projectId: string, layerIndex: number, title?: string) {
-  if (isVirtualStudyReviewProjectId(projectId)) {
+export function manualRollUp(scope: ProjectScope, layerIndex: number, title?: string) {
+  if (isVirtualStudyReviewProjectId(scope.projectId)) {
     return Promise.resolve({ parentNodeId: null })
   }
   return apiRequest({
-    path: `/projects/${projectId}/layers/${layerIndex}/roll-up`,
+    path: projectApiPath(scope, `/layers/${layerIndex}/roll-up`),
     method: "POST",
     body: title === undefined ? {} : { title },
     responseSchema: ManualRollUpResultSchema,

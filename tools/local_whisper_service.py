@@ -91,7 +91,7 @@ def _transcribe(req: dict[str, object]) -> dict[str, object]:
         raise RuntimeError("ffmpeg not found in PATH")
 
     start_ms = max(center_ms - pre_ms, 0)
-    with tempfile.TemporaryDirectory(prefix="plm3-whisper-") as tmpdir:
+    with tempfile.TemporaryDirectory(prefix="learningpyramid-whisper-") as tmpdir:
         audio_path = Path(tmpdir) / "clip.wav"
         _extract_audio_clip(
             ffmpeg_bin=ffmpeg_bin,

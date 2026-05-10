@@ -155,8 +155,8 @@ export function ProjectsPage() {
   }, [subjectMaterialQs, subjects])
   const projectActivityQs = useQueries({
     queries: subjectMaterialProjectRefs.map((item) => ({
-      queryKey: ["auditLogEvents", item.projectId],
-      queryFn: () => listAuditLogEvents(item.projectId),
+      queryKey: ["auditLogEvents", item.subjectId, item.projectId],
+      queryFn: () => listAuditLogEvents(item),
       enabled: !isLoading && !error,
       staleTime: 60_000,
       refetchInterval: 60_000,

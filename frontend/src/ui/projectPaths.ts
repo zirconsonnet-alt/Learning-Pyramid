@@ -7,20 +7,6 @@ export function buildScopedProjectPath(subjectId: string, projectId: string, suf
   return subjectId && projectId ? `/subjects/${encodeURIComponent(subjectId)}/projects/${encodeURIComponent(projectId)}${normalizedSuffix}` : ""
 }
 
-function currentSubjectIdForProject(projectId: string) {
-  if (typeof window !== "undefined") {
-    const match = window.location.pathname.match(/^\/subjects\/([^/]+)\/projects\/([^/]+)/)
-    const subjectId = decodeURIComponent(match?.[1] ?? "")
-    const currentProjectId = decodeURIComponent(match?.[2] ?? "")
-    if (subjectId && currentProjectId === projectId) return subjectId
-  }
-  return ""
-}
-
-export function buildCurrentProjectPath(projectId: string, suffix: string) {
-  return buildScopedProjectPath(currentSubjectIdForProject(projectId), projectId, suffix)
-}
-
 export function buildProjectSettingsPath(subjectId: string, projectId: string) {
   return buildScopedProjectPath(subjectId, projectId, "/settings")
 }

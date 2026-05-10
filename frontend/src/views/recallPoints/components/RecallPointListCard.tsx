@@ -7,7 +7,7 @@ import { richContentImageAssetIds, richContentToPlainText } from "@/ui/api/richC
 import { ContentEmptyState, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
-import { buildCurrentProjectPath } from "@/ui/projectPaths"
+import { buildScopedProjectPath } from "@/ui/projectPaths"
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -21,9 +21,9 @@ function formatInstanceLabel(instanceId: string | null | undefined, instanceTitl
   return title || "关联内容"
 }
 
-function buildWorkbenchHref(projectId: string, instanceId: string, position: string) {
+function buildWorkbenchHref(subjectId: string, projectId: string, instanceId: string, position: string) {
   const params = new URLSearchParams({ instanceId, position })
-  return buildCurrentProjectPath(projectId, `/workbench?${params.toString()}`)
+  return buildScopedProjectPath(subjectId, projectId, `/workbench?${params.toString()}`)
 }
 
 export function RecallPointListCard({
@@ -33,6 +33,7 @@ export function RecallPointListCard({
   isLoading,
   items,
   instanceTitleById,
+  subjectId,
   projectId,
   title = "复述点",
 }: {
@@ -42,6 +43,7 @@ export function RecallPointListCard({
   isLoading?: boolean
   items: RecallPoint[]
   instanceTitleById?: Record<string, string>
+  subjectId: string
   projectId: string
   title?: string
 }) {
@@ -108,13 +110,13 @@ export function RecallPointListCard({
 
                   <div className="flex shrink-0 flex-wrap gap-2 md:w-[11rem] md:flex-col md:items-stretch">
                     <Button size="sm" className="rounded-full md:w-full" asChild>
-                      <Link to={buildCurrentProjectPath(projectId, `/recall-points/${rp.recallPointId}`)}>
+                      <Link to={buildScopedProjectPath(subjectId, projectId, `/recall-points/${rp.recallPointId}`)}>
                         查看详情
                       </Link>
                     </Button>
                     {rp.anchor ? (
                       <Button variant="outline" size="sm" className="rounded-full md:w-full" asChild>
-                        <Link to={buildWorkbenchHref(projectId, rp.anchor.instanceId, rp.anchor.position)}>
+                        <Link to={buildWorkbenchHref(subjectId, projectId, rp.anchor.instanceId, rp.anchor.position)}>
                           <PlayCircle className="h-4 w-4" />
                           打开工作台
                         </Link>

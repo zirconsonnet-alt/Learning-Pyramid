@@ -2,6 +2,7 @@ import { z } from "zod"
 
 import { AsrArtifactSchema } from "@/ui/api/asr"
 import { apiRequest, type ApiRequestExecutionOptions } from "@/ui/api/http"
+import { projectApiPath, type ProjectScope } from "@/ui/api/projectScope"
 import { RecallPointSchema } from "@/ui/api/review"
 
 export const LearningObjectLeafSchema = z.object({
@@ -65,11 +66,11 @@ const ImportLearningObjectsFromBaiduNetdiskResultSchema = z.object({
 })
 
 export function addLearningObjectLeaf(
-  projectId: string,
+  scope: ProjectScope,
   params: { parentId?: string | null; instanceId: string; title: string },
 ) {
   return apiRequest({
-    path: `/projects/${projectId}/learning-objects/leaf`,
+    path: projectApiPath(scope, "/learning-objects/leaf"),
     method: "POST",
     body: { parentId: params.parentId ?? null, instanceId: params.instanceId, title: params.title },
     responseSchema: AddLearningObjectResultSchema,
@@ -77,52 +78,52 @@ export function addLearningObjectLeaf(
 }
 
 export function addLearningObjectContainer(
-  projectId: string,
+  scope: ProjectScope,
   params: { parentId?: string | null; children: string[]; title: string },
 ) {
   return apiRequest({
-    path: `/projects/${projectId}/learning-objects/container`,
+    path: projectApiPath(scope, "/learning-objects/container"),
     method: "POST",
     body: { parentId: params.parentId ?? null, children: params.children, title: params.title },
     responseSchema: AddLearningObjectResultSchema,
   })
 }
 
-export function initializeBookLearningObjects(projectId: string, params: { items: { depth: number; title: string }[] }) {
+export function initializeBookLearningObjects(scope: ProjectScope, params: { items: { depth: number; title: string }[] }) {
   return apiRequest({
-    path: `/projects/${projectId}/initialize-book-learning-objects`,
+    path: projectApiPath(scope, "/initialize-book-learning-objects"),
     method: "POST",
     body: { items: params.items },
     responseSchema: InitializeBookLearningObjectsResultSchema,
   })
 }
 
-export function initializeBookLearningObjectsFromSubjectMaterial(projectId: string, params: { sourceMaterialId: string }) {
+export function initializeBookLearningObjectsFromSubjectMaterial(scope: ProjectScope, params: { sourceMaterialId: string }) {
   return apiRequest({
-    path: `/projects/${projectId}/initialize-book-learning-objects-from-material`,
+    path: projectApiPath(scope, "/initialize-book-learning-objects-from-material"),
     method: "POST",
     body: { sourceMaterialId: params.sourceMaterialId },
     responseSchema: InitializeBookLearningObjectsResultSchema,
   })
 }
 
-export function getLearningObjectNode(projectId: string, nodeId: string) {
+export function getLearningObjectNode(scope: ProjectScope, nodeId: string) {
   return apiRequest({
-    path: `/projects/${projectId}/learning-objects/${nodeId}`,
+    path: projectApiPath(scope, `/learning-objects/${nodeId}`),
     responseSchema: LearningObjectNodeSchema,
   })
 }
 
-export function listLearningObjectRoots(projectId: string) {
+export function listLearningObjectRoots(scope: ProjectScope) {
   return apiRequest({
-    path: `/projects/${projectId}/learning-object-roots`,
+    path: projectApiPath(scope, "/learning-object-roots"),
     responseSchema: LearningObjectRootsSchema,
   })
 }
 
-export function listLearningObjectNodes(projectId: string, options?: ApiRequestExecutionOptions) {
+export function listLearningObjectNodes(scope: ProjectScope, options?: ApiRequestExecutionOptions) {
   return apiRequest({
-    path: `/projects/${projectId}/learning-object-nodes`,
+    path: projectApiPath(scope, "/learning-object-nodes"),
     responseSchema: z.array(LearningObjectNodeSchema),
     signal: options?.signal,
     timeoutMs: options?.timeoutMs,
@@ -130,11 +131,11 @@ export function listLearningObjectNodes(projectId: string, options?: ApiRequestE
 }
 
 export function importLearningObjectsFromBrowser(
-  projectId: string,
+  scope: ProjectScope,
   params: { rootTitle?: string; relativeFilePaths: string[] },
 ) {
   return apiRequest({
-    path: `/projects/${projectId}/import-learning-objects-from-browser`,
+    path: projectApiPath(scope, "/import-learning-objects-from-browser"),
     method: "POST",
     body: {
       rootTitle: params.rootTitle,
@@ -145,14 +146,14 @@ export function importLearningObjectsFromBrowser(
 }
 
 export function importLearningObjectsFromBaiduNetdisk(
-  projectId: string,
+  scope: ProjectScope,
   params: {
     accountId: string
     items: Array<z.input<typeof BaiduNetdiskImportItemSchema>>
   },
 ) {
   return apiRequest({
-    path: `/projects/${projectId}/import-learning-objects-from-baidu-netdisk`,
+    path: projectApiPath(scope, "/import-learning-objects-from-baidu-netdisk"),
     method: "POST",
     body: {
       accountId: params.accountId,
@@ -162,23 +163,23 @@ export function importLearningObjectsFromBaiduNetdisk(
   })
 }
 
-export function listRecallPointsByLearningObjectNode(projectId: string, nodeId: string) {
+export function listRecallPointsByLearningObjectNode(scope: ProjectScope, nodeId: string) {
   return apiRequest({
-    path: `/projects/${projectId}/learning-objects/${nodeId}/recall-points`,
+    path: projectApiPath(scope, `/learning-objects/${nodeId}/recall-points`),
     responseSchema: z.array(RecallPointSchema),
   })
 }
 
-export function exportRecallPointsByLearningObjectNode(projectId: string, nodeId: string) {
+export function exportRecallPointsByLearningObjectNode(scope: ProjectScope, nodeId: string) {
   return apiRequest({
-    path: `/projects/${projectId}/learning-objects/${nodeId}/exports/recall-points`,
+    path: projectApiPath(scope, `/learning-objects/${nodeId}/exports/recall-points`),
     responseSchema: z.array(RecallPointSchema),
   })
 }
 
-export function exportAsrByLearningObjectNode(projectId: string, nodeId: string) {
+export function exportAsrByLearningObjectNode(scope: ProjectScope, nodeId: string) {
   return apiRequest({
-    path: `/projects/${projectId}/learning-objects/${nodeId}/exports/asr`,
+    path: projectApiPath(scope, `/learning-objects/${nodeId}/exports/asr`),
     responseSchema: z.array(AsrArtifactSchema),
   })
 }

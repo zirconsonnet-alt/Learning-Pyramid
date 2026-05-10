@@ -3,14 +3,14 @@ import { useQueries } from "@tanstack/react-query"
 import { Activity, ArrowRight, Camera, ChevronDown, KeyRound, Mail, Save } from "lucide-react"
 import { Link } from "react-router-dom"
 
-import { type AuditLogEvent, listAuditLogEvents, listScopedAuditLogEvents } from "@/ui/api/auditLog"
+import { type AuditLogEvent, listAuditLogEvents } from "@/ui/api/auditLog"
 import { ApiError } from "@/ui/api/http"
 import { ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
-import { useProjects } from "@/ui/queries/projects"
 import { useChangeMyPassword, useMyProfile, useUpdateMyProfile, useUploadMyAvatar } from "@/ui/queries/profile"
+import { useSubjectProjectCatalog } from "@/ui/queries/subjects"
 import { useSystemCapabilities } from "@/ui/queries/system"
 import { getLocalDateKey, loadDailyStudyTotalsByDate } from "@/ui/store/workbenchDailyStats"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
@@ -352,7 +352,7 @@ function LearningCurve(props: {
 export function ProfilePage() {
   const avatarInputRef = useRef<HTMLInputElement | null>(null)
   const profileQ = useMyProfile()
-  const projectsQ = useProjects()
+  const projectCatalog = useSubjectProjectCatalog()
   const capabilitiesQ = useSystemCapabilities()
   const updateProfile = useUpdateMyProfile()
   const changePassword = useChangeMyPassword()
@@ -369,15 +369,12 @@ export function ProfilePage() {
   const [studyMetricSyncRevision, setStudyMetricSyncRevision] = useState(0)
 
   const profile = profileQ.data ?? null
-  const activeProjects = useMemo(() => (projectsQ.data ?? []).filter((project) => project.state !== "DELETED"), [projectsQ.data])
+  const activeProjects = projectCatalog.projects
   const auditLogQs = useQueries({
     queries: activeProjects.map((project) => ({
-      queryKey: project.subjectId ? ["auditLogEvents", project.subjectId, project.projectId] : ["auditLogEvents", project.projectId],
-      queryFn: () =>
-        project.subjectId
-          ? listScopedAuditLogEvents(project.subjectId, project.projectId)
-          : listAuditLogEvents(project.projectId),
-      enabled: !projectsQ.isLoading && !projectsQ.error,
+      queryKey: ["auditLogEvents", project.subjectId, project.projectId],
+      queryFn: () => listAuditLogEvents({ subjectId: project.subjectId, projectId: project.projectId }),
+      enabled: !projectCatalog.isLoading && !projectCatalog.error,
       staleTime: 60_000,
       refetchOnWindowFocus: false,
     })),
@@ -515,8 +512,8 @@ export function ProfilePage() {
     [selectedActionCountsByDate, selectedStudyTotalsByDate, visibleDateKeys],
   )
 
-  const learningViewLoading = projectsQ.isLoading || auditLogQs.some((query) => query.isLoading)
-  const learningViewError = projectsQ.error ?? auditLogQs.find((query) => query.error)?.error ?? null
+  const learningViewLoading = projectCatalog.isLoading || auditLogQs.some((query) => query.isLoading)
+  const learningViewError = projectCatalog.error ?? auditLogQs.find((query) => query.error)?.error ?? null
 
   function openProfileEditor() {
     if (!profile) return

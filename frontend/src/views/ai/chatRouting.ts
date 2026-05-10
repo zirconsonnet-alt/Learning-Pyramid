@@ -1,4 +1,4 @@
-import { buildCurrentProjectPath } from "@/ui/projectPaths"
+import { buildScopedProjectPath } from "@/ui/projectPaths"
 
 export type AiChatContextKind = "task" | "object" | "recall"
 
@@ -13,6 +13,7 @@ export function describeAiChatContextKind(kind: AiChatContextKind) {
 }
 
 export function buildAiChatPath(
+  subjectId: string,
   projectId: string,
   params: { kind: AiChatContextKind; nodeId: string; conversationId?: string | null },
 ) {
@@ -20,5 +21,5 @@ export function buildAiChatPath(
   searchParams.set("kind", params.kind)
   searchParams.set("nodeId", params.nodeId)
   if (params.conversationId) searchParams.set("conversation", params.conversationId)
-  return `${buildCurrentProjectPath(projectId, "/ai-chat")}?${searchParams.toString()}`
+  return `${buildScopedProjectPath(subjectId, projectId, "/ai-chat")}?${searchParams.toString()}`
 }

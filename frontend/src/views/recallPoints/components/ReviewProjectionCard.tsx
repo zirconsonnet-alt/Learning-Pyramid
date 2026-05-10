@@ -1,6 +1,7 @@
 import { useMemo } from "react"
 
 import { ApiError } from "@/ui/api/http"
+import type { ProjectScope } from "@/ui/api/projectScope"
 import { ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import { useRecallPointReviewProjection } from "@/ui/queries/reviewRecommendations"
@@ -250,9 +251,10 @@ function ReviewCurveChart(props: {
   )
 }
 
-export function ReviewProjectionCard(props: { projectId: string; recallPointId: string }) {
-  const { projectId, recallPointId } = props
-  const projectionQ = useRecallPointReviewProjection(projectId, recallPointId)
+export function ReviewProjectionCard(props: { subjectId: string; projectId: string; recallPointId: string }) {
+  const { subjectId, projectId, recallPointId } = props
+  const projectScope: ProjectScope | null = subjectId && projectId ? { subjectId, projectId } : null
+  const projectionQ = useRecallPointReviewProjection(projectScope, recallPointId)
   const projection = projectionQ.data
 
   return (

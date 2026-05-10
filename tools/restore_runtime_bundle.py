@@ -67,7 +67,7 @@ def restore_runtime_bundle(
     if not confirm_replace:
         raise ValueError("Restore can replace protected runtime data; rerun with --confirm-replace to continue.")
 
-    store = create_persist_store(legacy_root=REPO_ROOT)
+    store = create_persist_store()
     auth = AuthStore()
     if restore_runtime_data:
         store.save_snapshot({} if store_snapshot is None else dict(store_snapshot))

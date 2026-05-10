@@ -29,10 +29,9 @@ def is_builtin_whisper_base_url(base_url: str | None) -> bool:
 @lru_cache(maxsize=1)
 def find_local_whisper_python() -> Path | None:
     candidates: list[Path] = []
-    for key in ("PLM3_WHISPER_PYTHON", "WHISPER_PYTHON"):
-        raw = (os.getenv(key) or "").strip()
-        if raw:
-            candidates.append(Path(raw))
+    raw_env_path = (os.getenv("WHISPER_PYTHON") or "").strip()
+    if raw_env_path:
+        candidates.append(Path(raw_env_path))
 
     if importlib.util.find_spec("whisper") is not None:
         candidates.append(Path(sys.executable))
@@ -85,7 +84,7 @@ def ensure_local_whisper_runtime() -> str:
         python_exe = find_local_whisper_python()
         if python_exe is None:
             raise PreconditionFailure(
-                "Local Whisper not found. Install it under H:\\whisper or set PLM3_WHISPER_PYTHON."
+                "Local Whisper not found. Install it under H:\\whisper or set WHISPER_PYTHON."
             )
 
         script_path = resource_root() / "tools" / "local_whisper_service.py"

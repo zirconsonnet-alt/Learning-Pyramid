@@ -122,7 +122,7 @@ export const router = createBrowserRouter([
       { path: "/guide/demo/study-review", element: lazyElement(<StudyReviewDemoWorkbenchPage />) },
       { path: "/guide/demo/ai-chat", element: lazyElement(<AiChatGuideDemoPage />) },
       { path: "/guide/demo/pomodoro", element: lazyElement(<PomodoroGuideDemoPage />) },
-      { path: "/projects", element: lazyElement(<ProjectsPage />) },
+      { path: "/subjects", element: lazyElement(<ProjectsPage />) },
       { path: "/subjects/:subjectId", element: lazyElement(<SubjectDashboardPage />) },
       { path: "/subjects/:subjectId/settings", element: lazyElement(<ProjectSettingsPage />) },
       { path: "/subjects/:subjectId/projects/:projectId/workbench", element: <PomodoroWorkbenchGate>{lazyElement(<WorkbenchPage />)}</PomodoroWorkbenchGate> },

@@ -54,29 +54,6 @@ class ProjectStorageConfig:
         cfg.validate_write_time()
         return cfg
 
-    @staticmethod
-    def from_legacy_scan_root(
-        project_id: ProjectId,
-        scan_root: str | PurePath,
-        *,
-        updated_at: Timestamp | None = None,
-    ) -> "ProjectStorageConfig":
-        root = normalize_material_id_to_purepath(scan_root)
-        relative_root = root.name
-        if relative_root:
-            project_root = root.parent
-            learning_object_root = relative_root
-        else:
-            project_root = root
-            learning_object_root = "learning_objects"
-        return ProjectStorageConfig.create(
-            project_id,
-            project_root,
-            learning_object_root=learning_object_root,
-            fs_sync_policy=FsSyncPolicy.STARTUP_SYNC,
-            updated_at=updated_at,
-        )
-
     def validate_write_time(self) -> None:
         if not str(self.project_id):
             raise PreconditionFailure("ProjectStorageConfig.project_id must be non-empty")

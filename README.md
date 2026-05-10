@@ -94,17 +94,17 @@ docker compose \
   up --build
 ```
 
-See [docs/self-host.md](docs/self-host.md) for the runtime shape and deployment notes.
+See [docs/deployment.md](docs/deployment.md) for the backend runtime shape and deployment notes.
 
 ### Membership WeChat payouts
 
 The membership invite commission flow now supports unattended refund-window settlement and WeChat Pay merchant transfer reconciliation. Production payout setup requires:
 
 - WeChat Pay native payment credentials plus merchant transfer capability.
-- `PLM_PUBLIC_ORIGIN` and public HTTPS callbacks for `/api/payments/wechat/notify`, `/api/payments/wechat/refund-notify`, and `/api/payments/wechat/transfer-notify`.
-- `PLM_WECHAT_PAY_TRANSFER_SCENE_ID` and, when required by the transfer scene, `PLM_WECHAT_PAY_TRANSFER_SCENE_REPORT_INFOS_JSON`.
-- `PLM_WECHAT_PAY_APP_SECRET` for the mobile WeChat authorization step used by the desktop QR receiving identity binding flow.
-- A real WeChat receiving identity binding flow with public HTTPS access to `/membership/wechat-payout-bind`; local tests can use `manual_test` when `PLM_ENABLE_MANUAL_TEST_PAYMENT=true`.
+- `LEARNINGPYRAMID_PUBLIC_ORIGIN` and public HTTPS callbacks for `/api/payments/wechat/notify`, `/api/payments/wechat/refund-notify`, and `/api/payments/wechat/transfer-notify`.
+- `LEARNINGPYRAMID_WECHAT_PAY_TRANSFER_SCENE_ID` and, when required by the transfer scene, `LEARNINGPYRAMID_WECHAT_PAY_TRANSFER_SCENE_REPORT_INFOS_JSON`.
+- `LEARNINGPYRAMID_WECHAT_PAY_APP_SECRET` for the mobile WeChat authorization step used by the desktop QR receiving identity binding flow.
+- A real WeChat receiving identity binding flow with public HTTPS access to `/membership/wechat-payout-bind`; local tests can use `manual_test` when `LEARNINGPYRAMID_ENABLE_MANUAL_TEST_PAYMENT=true`.
 
 Run these scheduler jobs every few minutes in self-hosted production:
 
@@ -119,7 +119,7 @@ See [docs/membership-selfhost-launch-checklist.md](docs/membership-selfhost-laun
 If you need a simple local fallback or a compatibility path, SQLite is still supported:
 
 ```bash
-PLM_SQL_BACKEND=sqlite
+LEARNINGPYRAMID_SQL_BACKEND=sqlite
 docker compose -f docker-compose.selfhost.yml --env-file .env up --build
 ```
 
@@ -136,7 +136,7 @@ docker compose \
   up --build
 ```
 
-The hosted stack now expects `PLM_MEDIA_ACCESS_TOKEN_SECRET` to be set to a real secret in `.env`. Hosted runtime defaults to `PLM_ALLOW_SIGNUP=false`, `PLM_REQUIRE_SIGNUP_INVITE=true`, and the shipped self-host example also defaults to `PLM_SECURE_COOKIES=true`; if you intentionally enable sign-up, fresh deployments should set `PLM_BOOTSTRAP_SUPER_ADMIN_EMAILS` first so the initial admin can register without an invite, clear that allowlist afterward if you do not want it to remain a break-glass `super_admin` mapping, and truly free public registration should also turn on `PLM_ENABLE_PASSWORD_RESET=true`, `PLM_ENABLE_EMAIL_VERIFICATION=true`, and `PLM_ENABLE_SIGNUP_HUMAN_CHECK=true` with `PLM_SMTP_*`, `PLM_PUBLIC_ORIGIN`, and `PLM_ALTCHA_HMAC_SECRET` configured.
+The hosted stack now expects `LEARNINGPYRAMID_MEDIA_ACCESS_TOKEN_SECRET` to be set to a real secret in `.env`. Hosted runtime defaults to `LEARNINGPYRAMID_ALLOW_SIGNUP=false`, `LEARNINGPYRAMID_REQUIRE_SIGNUP_INVITE=true`, and the shipped self-host example also defaults to `LEARNINGPYRAMID_SECURE_COOKIES=true`; if you intentionally enable sign-up, fresh deployments should set `LEARNINGPYRAMID_BOOTSTRAP_SUPER_ADMIN_EMAILS` first so the initial admin can register without an invite, clear that allowlist afterward if you do not want it to remain a break-glass `super_admin` mapping, and truly free public registration should also turn on `LEARNINGPYRAMID_ENABLE_PASSWORD_RESET=true`, `LEARNINGPYRAMID_ENABLE_EMAIL_VERIFICATION=true`, and `LEARNINGPYRAMID_ENABLE_SIGNUP_HUMAN_CHECK=true` with `LEARNINGPYRAMID_SMTP_*`, `LEARNINGPYRAMID_PUBLIC_ORIGIN`, and `LEARNINGPYRAMID_ALTCHA_HMAC_SECRET` configured.
 
 For Windows server sync, the normal helper flow is just:
 
@@ -179,54 +179,50 @@ The existing `tests/test_frontend_*.py` checks remain supplemental static guards
 
 By default, user data is stored under:
 
-- Windows: `%LOCALAPPDATA%\LearningPyramid\plm_store.sqlite3`
-- macOS: `~/Library/Application Support/LearningPyramid/plm_store.sqlite3`
-- Linux: `~/.local/share/learningpyramid/plm_store.sqlite3`
+- Windows: `%LOCALAPPDATA%\LearningPyramid\learningpyramid_store.sqlite3`
+- macOS: `~/Library/Application Support/LearningPyramid/learningpyramid_store.sqlite3`
+- Linux: `~/.local/share/learningpyramid/learningpyramid_store.sqlite3`
 
 Overrides:
 
-- `PLM_SQL_BACKEND`: `sqlite` or `postgres`
-- `PLM_STORE_DB_PATH`: full path to the SQLite store file
-- `PLM_AUTH_DB_PATH`: full path to the SQLite auth file
-- `PLM_REQUIRE_SIGNUP_INVITE`: keep hosted sign-up invite-only unless you intentionally want free public registration
-- `PLM_BOOTSTRAP_SUPER_ADMIN_EMAILS`: comma-separated bootstrap admin emails that may register without an invite code and will retain `super_admin` on startup while listed
-- `PLM_ENABLE_PASSWORD_RESET`: enables SMTP-backed password recovery for hosted auth
-- `PLM_PASSWORD_RESET_TOKEN_TTL_MINUTES`: password reset link lifetime in minutes
-- `PLM_ENABLE_EMAIL_VERIFICATION`: sends a verification email after sign-up and blocks login until the mailbox is confirmed
-- `PLM_EMAIL_VERIFICATION_TOKEN_TTL_MINUTES`: email verification link lifetime in minutes
-- `PLM_ENABLE_SIGNUP_HUMAN_CHECK`: requires an ALTCHA proof-of-work challenge before hosted sign-up
-- `PLM_ALTCHA_HMAC_SECRET`: server-side secret used to sign and validate ALTCHA sign-up challenges
-- `PLM_ALTCHA_CHALLENGE_URL`: optional public challenge endpoint URL; defaults to `/api/auth/human-check/challenge`
-- `PLM_ALTCHA_ALGORITHM`: optional ALTCHA algorithm override; defaults to `SHA-256`
-- `PLM_ALTCHA_COST`: optional proof-of-work cost; defaults to `1000`
-- `PLM_ALTCHA_CHALLENGE_TTL_SECONDS`: optional challenge lifetime in seconds; defaults to `600`
-- `PLM_SMTP_HOST`: SMTP host used for password reset and email verification mail
-- `PLM_SMTP_PORT`: SMTP port used for password reset mail
-- `PLM_SMTP_USERNAME`: optional SMTP username
-- `PLM_SMTP_PASSWORD`: optional SMTP password
-- `PLM_SMTP_USE_SSL`: connect with implicit SSL
-- `PLM_SMTP_USE_STARTTLS`: upgrade plaintext SMTP with STARTTLS
-- `PLM_SMTP_FROM_EMAIL`: sender address for password reset and email verification mail
-- `PLM_SMTP_FROM_NAME`: optional sender display name for password reset and email verification mail
-- `PLM_SMTP_TIMEOUT_SECONDS`: SMTP connect/send timeout in seconds
-- `PLM_POSTGRES_DSN`: PostgreSQL DSN used when `PLM_SQL_BACKEND=postgres`
-- `PLM_STORE_POSTGRES_DSN`: optional override for the core store DSN
-- `PLM_AUTH_POSTGRES_DSN`: optional override for the auth store DSN
-- `PLM_LOG_LEVEL`: application log level, default `INFO`
-- `PLM_POSTGRES_CONNECT_TIMEOUT`: connect timeout in seconds
-- `PLM_POSTGRES_POOL_ACQUIRE_TIMEOUT`: pool acquire timeout in seconds
-- `PLM_POSTGRES_POOL_MIN_SIZE`: pool warm size
-- `PLM_POSTGRES_POOL_MAX_SIZE`: pool max size
-- `PLM_POSTGRES_STATEMENT_TIMEOUT_MS`: PostgreSQL statement timeout
-- `PLM_POSTGRES_LOCK_TIMEOUT_MS`: PostgreSQL lock timeout
-- `PLM_POSTGRES_IDLE_IN_TX_TIMEOUT_MS`: PostgreSQL idle-in-transaction timeout
-- `PLM_LEGACY_STORE_PATH`: optional legacy JSON import source; `PLM_STORE_PATH` is still accepted as a legacy alias
-- `PLM_DATA_DIR`: base directory for LearningPyramid runtime data
-- `PLM_PROJECTS_ROOT`: root directory used when creating new projects; default is `LearningPyramid/data`
+- `LEARNINGPYRAMID_SQL_BACKEND`: `sqlite` or `postgres`
+- `LEARNINGPYRAMID_STORE_DB_PATH`: full path to the SQLite store file
+- `LEARNINGPYRAMID_AUTH_DB_PATH`: full path to the SQLite auth file
+- `LEARNINGPYRAMID_REQUIRE_SIGNUP_INVITE`: keep hosted sign-up invite-only unless you intentionally want free public registration
+- `LEARNINGPYRAMID_BOOTSTRAP_SUPER_ADMIN_EMAILS`: comma-separated bootstrap admin emails that may register without an invite code and will retain `super_admin` on startup while listed
+- `LEARNINGPYRAMID_ENABLE_PASSWORD_RESET`: enables SMTP-backed password recovery for hosted auth
+- `LEARNINGPYRAMID_PASSWORD_RESET_TOKEN_TTL_MINUTES`: password reset link lifetime in minutes
+- `LEARNINGPYRAMID_ENABLE_EMAIL_VERIFICATION`: sends a verification email after sign-up and blocks login until the mailbox is confirmed
+- `LEARNINGPYRAMID_EMAIL_VERIFICATION_TOKEN_TTL_MINUTES`: email verification link lifetime in minutes
+- `LEARNINGPYRAMID_ENABLE_SIGNUP_HUMAN_CHECK`: requires an ALTCHA proof-of-work challenge before hosted sign-up
+- `LEARNINGPYRAMID_ALTCHA_HMAC_SECRET`: server-side secret used to sign and validate ALTCHA sign-up challenges
+- `LEARNINGPYRAMID_ALTCHA_CHALLENGE_URL`: optional public challenge endpoint URL; defaults to `/api/auth/human-check/challenge`
+- `LEARNINGPYRAMID_ALTCHA_ALGORITHM`: optional ALTCHA algorithm override; defaults to `SHA-256`
+- `LEARNINGPYRAMID_ALTCHA_COST`: optional proof-of-work cost; defaults to `1000`
+- `LEARNINGPYRAMID_ALTCHA_CHALLENGE_TTL_SECONDS`: optional challenge lifetime in seconds; defaults to `600`
+- `LEARNINGPYRAMID_SMTP_HOST`: SMTP host used for password reset and email verification mail
+- `LEARNINGPYRAMID_SMTP_PORT`: SMTP port used for password reset mail
+- `LEARNINGPYRAMID_SMTP_USERNAME`: optional SMTP username
+- `LEARNINGPYRAMID_SMTP_PASSWORD`: optional SMTP password
+- `LEARNINGPYRAMID_SMTP_USE_SSL`: connect with implicit SSL
+- `LEARNINGPYRAMID_SMTP_USE_STARTTLS`: upgrade plaintext SMTP with STARTTLS
+- `LEARNINGPYRAMID_SMTP_FROM_EMAIL`: sender address for password reset and email verification mail
+- `LEARNINGPYRAMID_SMTP_FROM_NAME`: optional sender display name for password reset and email verification mail
+- `LEARNINGPYRAMID_SMTP_TIMEOUT_SECONDS`: SMTP connect/send timeout in seconds
+- `LEARNINGPYRAMID_POSTGRES_DSN`: PostgreSQL DSN used when `LEARNINGPYRAMID_SQL_BACKEND=postgres`
+- `LEARNINGPYRAMID_STORE_POSTGRES_DSN`: optional override for the core store DSN
+- `LEARNINGPYRAMID_AUTH_POSTGRES_DSN`: optional override for the auth store DSN
+- `LEARNINGPYRAMID_LOG_LEVEL`: application log level, default `INFO`
+- `LEARNINGPYRAMID_POSTGRES_CONNECT_TIMEOUT`: connect timeout in seconds
+- `LEARNINGPYRAMID_POSTGRES_POOL_ACQUIRE_TIMEOUT`: pool acquire timeout in seconds
+- `LEARNINGPYRAMID_POSTGRES_POOL_MIN_SIZE`: pool warm size
+- `LEARNINGPYRAMID_POSTGRES_POOL_MAX_SIZE`: pool max size
+- `LEARNINGPYRAMID_POSTGRES_STATEMENT_TIMEOUT_MS`: PostgreSQL statement timeout
+- `LEARNINGPYRAMID_POSTGRES_LOCK_TIMEOUT_MS`: PostgreSQL lock timeout
+- `LEARNINGPYRAMID_POSTGRES_IDLE_IN_TX_TIMEOUT_MS`: PostgreSQL idle-in-transaction timeout
+- `LEARNINGPYRAMID_DATA_DIR`: base directory for LearningPyramid runtime data
+- `LEARNINGPYRAMID_PROJECTS_ROOT`: root directory used when creating new projects; default is `LearningPyramid/data`
 - Self-host compose mounts `./data/selfhost` at both `/data` and `/app/data` so runtime databases, existing project roots, and uploaded recall-point images stay persistent across container rebuilds.
-- `PLM3_WHISPER_PYTHON`: legacy override for the Python interpreter used by the local Whisper runtime
-
-When `PLM_SQL_BACKEND=sqlite`, an older repo-local `.plm_store.json`, `%LOCALAPPDATA%\LearningPyramid\plm_store.json`, `%LOCALAPPDATA%\PLM3\plm_store.json`, or `%LOCALAPPDATA%\学习金字塔\plm_store.json` is imported on first start and then archived as `*.imported.bak`. The same legacy import path also works when the runtime backend is PostgreSQL.
 
 If you need to seed PostgreSQL from the current SQLite runtime store, you can export a runtime-compatible SQL script with:
 
@@ -260,11 +256,11 @@ python tools/export_sqlite_to_postgres.py --schema-only --output learningpyramid
 python tools/export_sqlite_to_postgres.py --data-only --output learningpyramid-data.sql
 ```
 
-For PostgreSQL integration tests, start a disposable database and point `PLM_TEST_POSTGRES_DSN` at it:
+For PostgreSQL integration tests, start a disposable database and point `LEARNINGPYRAMID_TEST_POSTGRES_DSN` at it:
 
 ```bash
 docker compose -f docker-compose.postgres.yml --env-file .env up -d
-PLM_TEST_POSTGRES_DSN=postgresql://learningpyramid:learningpyramid@127.0.0.1:15432/learningpyramid_test python -m pytest tests/test_postgres_runtime.py tests/test_postgres_hosted_api.py -q
+LEARNINGPYRAMID_TEST_POSTGRES_DSN=postgresql://learningpyramid:learningpyramid@127.0.0.1:15432/learningpyramid_test python -m pytest tests/test_postgres_runtime.py tests/test_postgres_hosted_api.py -q
 ```
 
 ## Runtime health and observability
@@ -273,7 +269,7 @@ Hosted mode now exposes:
 
 - `GET /api/health/live`: liveness probe, only checks the process is serving HTTP
 - `GET /api/health`: readiness probe, checks runtime mode, SQL backend, store health, auth health, and returns `503` when degraded
-- `GET /api/system/runtime`: structured runtime status for backend/auth/pool inspection; requires authentication when `PLM_ENABLE_AUTH=true`
+- `GET /api/system/runtime`: structured runtime status for backend/auth/pool inspection; requires authentication when `LEARNINGPYRAMID_ENABLE_AUTH=true`
 
 Every API response now includes `X-Request-ID`, and request logs include request path, status, and latency.
 
@@ -296,7 +292,7 @@ Recommended rollback flow:
 
 1. Create a runtime backup bundle from the current source runtime.
 2. Run `tools/migrate_sqlite_to_postgres.py` against an empty PostgreSQL database.
-3. Start the app with `PLM_SQL_BACKEND=postgres` and verify `/api/health`, login, and project access.
+3. Start the app with `LEARNINGPYRAMID_SQL_BACKEND=postgres` and verify `/api/health`, login, and project access.
 4. If verification fails, point the app back to the previous runtime or restore the backup bundle into a clean target runtime.
 
 ## Subtitle Files
@@ -327,7 +323,7 @@ python tools/build_subtitle_tool_windows.py --bootstrap-packaging-venv
 
 公网版首页会通过 `GET /api/system/public-downloads` 读取这份清单，并把 ZIP 暴露到 `/downloads/...`。默认服务端会优先查找：
 
-- `PLM_PUBLIC_DOWNLOADS_DIR`
+- `LEARNINGPYRAMID_PUBLIC_DOWNLOADS_DIR`
 - `public-downloads/`
 - `release/public-downloads/`
 

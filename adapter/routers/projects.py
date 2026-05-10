@@ -7,25 +7,23 @@ from adapter.mappers import (
     project_config_to_dto,
     project_material_source_binding_to_dto,
     project_storage_config_to_dto,
-    project_to_dto,
     study_material_to_dto,
     subject_context_to_dto,
     subject_to_dto,
     with_project_reference,
 )
+from adapter.scoped_projects import ScopedProject, resolve_scoped_project
 from adapter.schemas import (
-    CreateProjectRequest,
     CreateStudyMaterialRequest,
     CreateSubjectRequest,
     EditStudyMaterialRequest,
     EditSubjectRequest,
-    EditProjectRequest,
     SetProjectRollUpStrategyRequest,
     SetReviewRecommendationConfigRequest,
     SetProjectMaterialSourceBindingRequest,
 )
 from backend.models.enums import MaterialSourceKind, ProjectType, RollUpStrategy
-from backend.models.errors import NotFound, PreconditionFailure
+from backend.models.errors import PreconditionFailure
 from backend.models.study_material import StudyMaterialType
 from backend.system.api import SystemAPI
 from backend.system.auth_store import AuthStore
@@ -49,76 +47,6 @@ def _ensure_auth_subject_access(subject_id: str, request: Request, auth_store: A
     user = require_request_auth_user(request)
     if str(subject_id) not in set(auth_store.list_project_ids_for_user(user.user_id)):
         raise PreconditionFailure("subject is not accessible for current user")
-
-
-def _ensure_auth_project_access(project_id: str, request: Request, auth_store: AuthStore) -> None:
-    if not current_runtime_features().auth_enabled:
-        return
-    user = require_request_auth_user(request)
-    if str(project_id) not in set(auth_store.list_project_ids_for_user(user.user_id)):
-        raise PreconditionFailure("project is not accessible for current user")
-
-
-def _ensure_auth_material_project_ownership(request: Request, auth_store: AuthStore, materials: list | tuple) -> None:
-    if not current_runtime_features().auth_enabled:
-        return
-    user = require_request_auth_user(request)
-    allowed = set(auth_store.list_project_ids_for_user(user.user_id))
-    for item in materials:
-        project_id = getattr(item, "internal_project_key", None) or getattr(item, "project_id", None)
-        if project_id is None:
-            continue
-        normalized_project_id = str(project_id)
-        if normalized_project_id in allowed:
-            continue
-        auth_store.add_project_owner(normalized_project_id, user.user_id)
-        allowed.add(normalized_project_id)
-
-
-def _load_authorized_subject_context(
-    project_id: str,
-    request: Request,
-    api: SystemAPI,
-    auth_store: AuthStore,
-) -> dict:
-    if not current_runtime_features().auth_enabled:
-        return api.get_subject_context(project_id)  # type: ignore[arg-type]
-
-    user = require_request_auth_user(request)
-    allowed = set(auth_store.list_project_ids_for_user(user.user_id))
-    if str(project_id) in allowed:
-        payload = api.get_subject_context(project_id)  # type: ignore[arg-type]
-        _ensure_auth_material_project_ownership(request, auth_store, tuple(payload["materials"]))
-        return payload
-
-    try:
-        payload = api.get_subject_context(project_id)  # type: ignore[arg-type]
-    except NotFound as exc:
-        raise PreconditionFailure("project is not accessible for current user") from exc
-
-    subject_id = str(getattr(payload["subject"], "project_id"))
-    if subject_id not in allowed:
-        raise PreconditionFailure("project is not accessible for current user")
-
-    auth_store.add_project_owner(project_id, user.user_id)
-    _ensure_auth_material_project_ownership(request, auth_store, tuple(payload["materials"]))
-    return payload
-
-
-def _legacy_project_route_disabled() -> None:
-    raise PreconditionFailure("旧项目链接已失效，请从学科中心重新进入项目")
-
-
-def _current_scoped_project_ref(request: Request) -> tuple[str, str] | None:
-    subject_id = getattr(request.state, "scoped_subject_id", None)
-    project_id = getattr(request.state, "scoped_project_id", None)
-    if subject_id is None or project_id is None:
-        return None
-    return str(subject_id), str(project_id)
-
-
-def _resolve_scoped_project_id(subject_id: str, project_id: str, api: SystemAPI) -> str:
-    return str(api.resolve_scoped_project_internal_key(subject_id, project_id))  # type: ignore[arg-type]
 
 
 def _parse_material_source_kind(raw: str | None) -> MaterialSourceKind:
@@ -153,13 +81,6 @@ def _parse_study_material_type(raw: str | None) -> StudyMaterialType:
         raise PreconditionFailure("materialType must be one of COURSE, BOOK, LOOSE_POINTS") from exc
 
 
-@router.get("/projects")
-def list_projects(request: Request, api: SystemAPI = Depends(get_api), auth_store: AuthStore = Depends(get_auth_store)) -> dict:
-    items = _filter_auth_visible_projects(request, auth_store, list(api.list_projects()))
-    items = [project_to_dto(p) for p in items]
-    return {"ok": True, "data": items}
-
-
 @router.get("/subjects")
 def list_subjects(request: Request, api: SystemAPI = Depends(get_api), auth_store: AuthStore = Depends(get_auth_store)) -> dict:
     items = _filter_auth_visible_projects(request, auth_store, list(api.list_subjects()))
@@ -177,7 +98,6 @@ def create_subject(
     if current_runtime_features().auth_enabled:
         user = require_request_auth_user(request)
         auth_store.add_project_owner(pid, user.user_id)
-        _ensure_auth_material_project_ownership(request, auth_store, api.list_subject_materials(pid))
     return {"ok": True, "data": {"subjectId": str(pid)}}
 
 
@@ -219,7 +139,6 @@ def list_subject_materials(
 ) -> dict:
     _ensure_auth_subject_access(subjectId, request, auth_store)
     items = api.list_subject_materials(subjectId)  # type: ignore[arg-type]
-    _ensure_auth_material_project_ownership(request, auth_store, items)
     return {"ok": True, "data": [study_material_to_dto(item) for item in items]}
 
 
@@ -237,7 +156,6 @@ def create_subject_material(
         material_type=_parse_study_material_type(req.materialType),
         title=req.title,
     )
-    _ensure_auth_material_project_ownership(request, auth_store, (item,))
     return {"ok": True, "data": study_material_to_dto(item)}
 
 
@@ -278,85 +196,39 @@ def delete_subject_material(
     return {"ok": True, "data": None}
 
 
-@router.get("/projects/{projectId}/subject-context")
-def get_project_subject_context(
-    projectId: str,
-    request: Request,
-    api: SystemAPI = Depends(get_api),
-    auth_store: AuthStore = Depends(get_auth_store),
-) -> dict:
-    scoped_ref = _current_scoped_project_ref(request)
-    if scoped_ref is None:
-        _legacy_project_route_disabled()
-    payload = _load_authorized_subject_context(projectId, request, api, auth_store)
-    payload["current_project_id"] = scoped_ref[1]
-    return {"ok": True, "data": subject_context_to_dto(payload)}
-
-
 @router.get("/subjects/{subjectId}/projects/{projectId}/subject-context")
 def get_scoped_project_subject_context(
-    subjectId: str,
-    projectId: str,
-    request: Request,
+    project: ScopedProject = Depends(resolve_scoped_project),
     api: SystemAPI = Depends(get_api),
-    auth_store: AuthStore = Depends(get_auth_store),
 ) -> dict:
-    _ensure_auth_subject_access(subjectId, request, auth_store)
-    payload = api.get_scoped_subject_context(subjectId, projectId)  # type: ignore[arg-type]
+    payload = api.get_scoped_subject_context_for_project(project.internal_project_id, public_project_id=project.project_id)  # type: ignore[arg-type]
     return {"ok": True, "data": subject_context_to_dto(payload)}
-
-
-@router.post("/projects")
-def create_project(
-    req: CreateProjectRequest,
-    request: Request,
-    api: SystemAPI = Depends(get_api),
-    auth_store: AuthStore = Depends(get_auth_store),
-) -> dict:
-    _legacy_project_route_disabled()
 
 
 @router.get("/subjects/{subjectId}/projects/{projectId}/project-config")
-def get_scoped_project_config(subjectId: str, projectId: str, api: SystemAPI = Depends(get_api)) -> dict:
-    internal_project_id = _resolve_scoped_project_id(subjectId, projectId, api)
-    cfg = api.get_project_config(internal_project_id)  # type: ignore[arg-type]
-    return {"ok": True, "data": with_project_reference(project_config_to_dto(cfg), subject_id=subjectId, project_id=projectId)}
+def get_project_config(project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
+    cfg = api.get_project_config(project.internal_project_id)  # type: ignore[arg-type]
+    return {"ok": True, "data": with_project_reference(project_config_to_dto(cfg), subject_id=project.subject_id, project_id=project.project_id)}
 
 
-@router.delete("/projects/{projectId}")
-def delete_project(projectId: str, api: SystemAPI = Depends(get_api), auth_store: AuthStore = Depends(get_auth_store)) -> dict:
-    _legacy_project_route_disabled()
-
-
-@router.patch("/projects/{projectId}")
-def edit_project(projectId: str, req: EditProjectRequest, api: SystemAPI = Depends(get_api)) -> dict:
-    _legacy_project_route_disabled()
-
-
-@router.get("/projects/{projectId}/project-config")
-def get_project_config(projectId: str, api: SystemAPI = Depends(get_api)) -> dict:
-    cfg = api.get_project_config(projectId)  # type: ignore[arg-type]
-    return {"ok": True, "data": project_config_to_dto(cfg)}
-
-
-@router.post("/projects/{projectId}/roll-up-strategy")
+@router.post("/subjects/{subjectId}/projects/{projectId}/roll-up-strategy")
 def set_project_roll_up_strategy(
-    projectId: str,
     req: SetProjectRollUpStrategyRequest,
+    project: ScopedProject = Depends(resolve_scoped_project),
     api: SystemAPI = Depends(get_api),
 ) -> dict:
-    api.set_project_roll_up_strategy(projectId, _parse_roll_up_strategy(req.rollUpStrategy))  # type: ignore[arg-type]
+    api.set_project_roll_up_strategy(project.internal_project_id, _parse_roll_up_strategy(req.rollUpStrategy))  # type: ignore[arg-type]
     return {"ok": True, "data": None}
 
 
-@router.post("/projects/{projectId}/review-recommendation-config")
+@router.post("/subjects/{subjectId}/projects/{projectId}/review-recommendation-config")
 def set_review_recommendation_config(
-    projectId: str,
     req: SetReviewRecommendationConfigRequest,
+    project: ScopedProject = Depends(resolve_scoped_project),
     api: SystemAPI = Depends(get_api),
 ) -> dict:
     api.set_review_recommendation_config(  # type: ignore[arg-type]
-        projectId,
+        project.internal_project_id,
         min_recall_points_to_enable=req.minRecallPointsToEnable,
         max_history_len=req.maxHistoryLen,
         recommended_batch_size=req.recommendedBatchSize,
@@ -365,33 +237,33 @@ def set_review_recommendation_config(
     return {"ok": True, "data": None}
 
 
-@router.get("/projects/{projectId}/project-storage-config")
-def get_project_storage_config(projectId: str, api: SystemAPI = Depends(get_api)) -> dict:
-    cfg = api.get_project_storage_config(projectId)  # type: ignore[arg-type]
-    return {"ok": True, "data": project_storage_config_to_dto(cfg)}
+@router.get("/subjects/{subjectId}/projects/{projectId}/project-storage-config")
+def get_project_storage_config(project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
+    cfg = api.get_project_storage_config(project.internal_project_id)  # type: ignore[arg-type]
+    return {"ok": True, "data": with_project_reference(project_storage_config_to_dto(cfg), subject_id=project.subject_id, project_id=project.project_id)}
 
 
-@router.get("/projects/{projectId}/material-source-binding")
-def get_project_material_source_binding(projectId: str, api: SystemAPI = Depends(get_api)) -> dict:
-    binding = api.get_project_material_source_binding(projectId)  # type: ignore[arg-type]
-    return {"ok": True, "data": project_material_source_binding_to_dto(binding)}
+@router.get("/subjects/{subjectId}/projects/{projectId}/material-source-binding")
+def get_project_material_source_binding(project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
+    binding = api.get_project_material_source_binding(project.internal_project_id)  # type: ignore[arg-type]
+    return {"ok": True, "data": with_project_reference(project_material_source_binding_to_dto(binding), subject_id=project.subject_id, project_id=project.project_id)}
 
 
-@router.post("/projects/{projectId}/material-source-binding")
+@router.post("/subjects/{subjectId}/projects/{projectId}/material-source-binding")
 def set_project_material_source_binding(
-    projectId: str,
     req: SetProjectMaterialSourceBindingRequest,
+    project: ScopedProject = Depends(resolve_scoped_project),
     api: SystemAPI = Depends(get_api),
 ) -> dict:
     api.set_project_material_source_binding(  # type: ignore[arg-type]
-        projectId,
+        project.internal_project_id,
         source_kind=_parse_material_source_kind(req.sourceKind),
         source_root_label=req.sourceRootLabel,
     )
     return {"ok": True, "data": None}
 
 
-@router.get("/projects/{projectId}/audit-log-events")
-def list_audit_log_events(projectId: str, api: SystemAPI = Depends(get_api)) -> dict:
-    items = [audit_log_event_to_dto(ev) for ev in api.list_audit_log_events(projectId)]  # type: ignore[arg-type]
+@router.get("/subjects/{subjectId}/projects/{projectId}/audit-log-events")
+def list_audit_log_events(project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
+    items = [audit_log_event_to_dto(ev, public_project_id=project.project_id) for ev in api.list_audit_log_events(project.internal_project_id)]  # type: ignore[arg-type]
     return {"ok": True, "data": items}

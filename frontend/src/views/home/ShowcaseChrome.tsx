@@ -48,9 +48,9 @@ export function useShowcaseEntryPaths() {
   const currentUserQ = useCurrentUser(authKnown && authEnabled)
   const isLoggedIn = Boolean(currentUserQ.data)
 
-  const navActionHref = isLoggedIn || !authEnabled ? "/projects" : allowSignup ? "/login?mode=register" : "/login"
+  const navActionHref = isLoggedIn || !authEnabled ? "/subjects" : allowSignup ? "/login?mode=register" : "/login"
   const navActionLabel = isLoggedIn || !authEnabled ? "进入项目" : allowSignup ? "登录/注册" : "登录"
-  const registerHref = isLoggedIn || !authEnabled ? "/projects" : allowSignup ? "/login?mode=register" : "/login"
+  const registerHref = isLoggedIn || !authEnabled ? "/subjects" : allowSignup ? "/login?mode=register" : "/login"
   const registerLabel = isLoggedIn || !authEnabled ? "进入项目" : allowSignup ? "立即注册" : "去登录"
 
   return {

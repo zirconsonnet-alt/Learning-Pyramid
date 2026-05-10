@@ -61,9 +61,9 @@ class EmailVerificationDeliveryConfig:
 def current_email_verification_delivery_config() -> EmailVerificationDeliveryConfig:
     mail_cfg = current_password_reset_delivery_config()
     return EmailVerificationDeliveryConfig(
-        requested=_env_bool("PLM_ENABLE_EMAIL_VERIFICATION", False),
+        requested=_env_bool("LEARNINGPYRAMID_ENABLE_EMAIL_VERIFICATION", False),
         auth_enabled=mail_cfg.auth_enabled,
-        token_ttl_minutes=_env_int("PLM_EMAIL_VERIFICATION_TOKEN_TTL_MINUTES", 1440, minimum=10),
+        token_ttl_minutes=_env_int("LEARNINGPYRAMID_EMAIL_VERIFICATION_TOKEN_TTL_MINUTES", 1440, minimum=10),
         public_origin=mail_cfg.public_origin,
         smtp_host=mail_cfg.smtp_host,
         smtp_port=mail_cfg.smtp_port,

@@ -2,8 +2,8 @@ import path from "node:path"
 import { defineConfig } from "vite"
 import react from "@vitejs/plugin-react"
 
-const backendHost = process.env.PLM_BACKEND_HOST ?? "127.0.0.1"
-const backendPort = process.env.PLM_BACKEND_PORT ?? "8001"
+const backendHost = process.env.LEARNINGPYRAMID_BACKEND_HOST ?? "127.0.0.1"
+const backendPort = process.env.LEARNINGPYRAMID_BACKEND_PORT ?? "8001"
 
 // https://vite.dev/config/
 export default defineConfig({

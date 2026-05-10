@@ -1,6 +1,7 @@
 import { z } from "zod"
 
 import { apiRequest } from "@/ui/api/http"
+import { projectApiPath, type ProjectScope } from "@/ui/api/projectScope"
 import { ProjectTypeSchema } from "@/ui/api/projects"
 
 export const ReviewChainTemplateItemSchema = z.object({
@@ -38,12 +39,12 @@ export const ProjectConfigSchema = z.object({
 })
 export type ProjectConfig = z.infer<typeof ProjectConfigSchema>
 
-export function getProjectConfig(projectId: string) {
-  return apiRequest({ path: `/projects/${projectId}/project-config`, responseSchema: ProjectConfigSchema })
+export function getProjectConfig(scope: ProjectScope) {
+  return apiRequest({ path: projectApiPath(scope, "/project-config"), responseSchema: ProjectConfigSchema })
 }
 
 export function setReviewRecommendationConfig(
-  projectId: string,
+  scope: ProjectScope,
   params: {
     minRecallPointsToEnable?: number
     maxHistoryLen?: number
@@ -57,7 +58,7 @@ export function setReviewRecommendationConfig(
   if (params.recommendedBatchSize !== undefined) body.recommendedBatchSize = params.recommendedBatchSize
   if (params.forgettingCurveDecayPerDay !== undefined) body.forgettingCurveDecayPerDay = params.forgettingCurveDecayPerDay
   return apiRequest({
-    path: `/projects/${projectId}/review-recommendation-config`,
+    path: projectApiPath(scope, "/review-recommendation-config"),
     method: "POST",
     body,
     responseSchema: z.null(),
@@ -65,7 +66,7 @@ export function setReviewRecommendationConfig(
 }
 
 export function setLayerConfig(
-  projectId: string,
+  scope: ProjectScope,
   layerIndex: number,
   p: { reviewChainTemplate?: ReviewChainTemplateItem[]; kNode?: number; kPoint?: number; thresholdRollUpEnabled?: boolean },
 ) {
@@ -75,16 +76,16 @@ export function setLayerConfig(
   if (p.kPoint !== undefined) body.kPoint = p.kPoint
   if (p.thresholdRollUpEnabled !== undefined) body.thresholdRollUpEnabled = p.thresholdRollUpEnabled
   return apiRequest({
-    path: `/projects/${projectId}/layers/${layerIndex}/config`,
+    path: projectApiPath(scope, `/layers/${layerIndex}/config`),
     method: "POST",
     body,
     responseSchema: z.null(),
   })
 }
 
-export function setProjectRollUpStrategy(projectId: string, rollUpStrategy: RollUpStrategy) {
+export function setProjectRollUpStrategy(scope: ProjectScope, rollUpStrategy: RollUpStrategy) {
   return apiRequest({
-    path: `/projects/${projectId}/roll-up-strategy`,
+    path: projectApiPath(scope, "/roll-up-strategy"),
     method: "POST",
     body: { rollUpStrategy },
     responseSchema: z.null(),

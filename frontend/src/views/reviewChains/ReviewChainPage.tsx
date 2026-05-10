@@ -4,6 +4,7 @@ import { ChevronLeft, RefreshCw } from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
+import type { ProjectScope } from "@/ui/api/projectScope"
 import type { Convergence, ReviewTask } from "@/ui/api/review"
 import { getConvergence, getReviewTask } from "@/ui/api/review"
 import { ContentEmptyState, ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
@@ -14,7 +15,7 @@ import {
   formatRangeReference,
   formatReviewTaskReference,
 } from "@/ui/displayIdentifiers"
-import { buildCurrentProjectPath } from "@/ui/projectPaths"
+import { buildScopedProjectPath } from "@/ui/projectPaths"
 import { useProject } from "@/ui/queries/projects"
 import { useReviewChain, useReviewChainBinding } from "@/ui/queries/reviewChains"
 import { cn } from "@/ui/utils"
@@ -58,47 +59,48 @@ function formatQueueItemReference(kind: "CONVERGENCE" | "REVIEW_TASK", id: strin
   return kind === "REVIEW_TASK" ? formatReviewTaskReference(id) : formatConvergenceReference(id)
 }
 
-function reviewTaskDetailPath(projectId: string, reviewTaskId: string) {
-  return buildCurrentProjectPath(projectId, `/review-tasks/${reviewTaskId}`)
+function reviewTaskDetailPath(subjectId: string, projectId: string, reviewTaskId: string) {
+  return buildScopedProjectPath(subjectId, projectId, `/review-tasks/${reviewTaskId}`)
 }
 
-function convergenceDetailPath(projectId: string, convergenceId: string) {
-  return buildCurrentProjectPath(projectId, `/convergences/${convergenceId}`)
+function convergenceDetailPath(subjectId: string, projectId: string, convergenceId: string) {
+  return buildScopedProjectPath(subjectId, projectId, `/convergences/${convergenceId}`)
 }
 
 export function ReviewChainPage() {
-  const { projectId, reviewChainId } = useParams()
+  const { subjectId = "", projectId, reviewChainId } = useParams()
   const navigate = useNavigate()
   const pid = projectId ?? ""
   const chainId = reviewChainId ?? ""
-  const { projectTitle } = useProject(pid)
-  const chainQ = useReviewChain(pid, chainId)
-  const bindingQ = useReviewChainBinding(pid, chainId)
+  const projectScope: ProjectScope | null = subjectId && pid ? { subjectId, projectId: pid } : null
+  const { projectTitle } = useProject(projectScope)
+  const chainQ = useReviewChain(projectScope, chainId)
+  const bindingQ = useReviewChainBinding(projectScope, chainId)
 
   const itemDetails = useQueries({
     queries:
       chainQ.data?.queue.map((item) =>
         item.kind === "REVIEW_TASK"
           ? {
-              queryKey: ["reviewTask", pid, item.id],
-              queryFn: () => getReviewTask(pid, item.id),
-              enabled: !!pid,
+              queryKey: ["reviewTask", subjectId, pid, item.id],
+              queryFn: () => getReviewTask(projectScope as ProjectScope, item.id),
+              enabled: !!projectScope,
             }
           : {
-              queryKey: ["convergence", pid, item.id],
-              queryFn: () => getConvergence(pid, item.id),
-              enabled: !!pid,
+              queryKey: ["convergence", subjectId, pid, item.id],
+              queryFn: () => getConvergence(projectScope as ProjectScope, item.id),
+              enabled: !!projectScope,
             },
       ) ?? [],
   })
 
-  if (!pid || !chainId) {
+  if (!subjectId || !pid || !chainId) {
     return (
       <div className="space-y-4">
         <ContentNotice
           title="当前页面缺少复习链上下文"
           message="当前链接缺少复习链信息。请先返回项目列表，再从任务树或工作台重新进入。"
-          action={<Button onClick={() => navigate("/projects")}>返回项目列表</Button>}
+          action={<Button onClick={() => navigate("/subjects")}>返回学科中心</Button>}
         />
       </div>
     )
@@ -106,8 +108,8 @@ export function ReviewChainPage() {
 
   const queue = chainQ.data?.queue ?? []
   const headItem = chainQ.data && chainQ.data.headIndex < queue.length ? queue[chainQ.data.headIndex] : null
-  const headReviewTaskPath = headItem?.kind === "REVIEW_TASK" ? reviewTaskDetailPath(pid, headItem.id) : null
-  const headConvergencePath = headItem?.kind === "CONVERGENCE" ? convergenceDetailPath(pid, headItem.id) : null
+  const headReviewTaskPath = headItem?.kind === "REVIEW_TASK" ? reviewTaskDetailPath(subjectId, pid, headItem.id) : null
+  const headConvergencePath = headItem?.kind === "CONVERGENCE" ? convergenceDetailPath(subjectId, pid, headItem.id) : null
   const headLabel = headItem ? `${describeQueueItemKind(headItem.kind)} · ${formatQueueItemReference(headItem.kind, headItem.id)}` : "已完成"
   const headValue = headItem ? (
     headReviewTaskPath ? (
@@ -127,7 +129,7 @@ export function ReviewChainPage() {
   const entryValue = bindingQ.data ? (
     <Link
       className="text-primary underline-offset-4 hover:underline"
-      to={buildCurrentProjectPath(pid, `/learning-task-nodes/${bindingQ.data.entryNodeId}`)}
+      to={buildScopedProjectPath(subjectId, pid, `/learning-task-nodes/${bindingQ.data.entryNodeId}`)}
     >
       {bindingQ.data.entryNodeTitle}
     </Link>
@@ -144,7 +146,7 @@ export function ReviewChainPage() {
       className="-ml-2 h-8 rounded-full px-2 text-[#60748c] hover:bg-[#f3f7fb] hover:text-foreground"
       asChild
     >
-      <Link to={buildCurrentProjectPath(pid, "/workbench")}>
+      <Link to={buildScopedProjectPath(subjectId, pid, "/workbench")}>
         <ChevronLeft className="h-4 w-4" />
         返回工作台
       </Link>
@@ -189,7 +191,7 @@ export function ReviewChainPage() {
           message="这条复习链可能已经被清理，或当前入口已失效。请返回工作台继续处理当前项目。"
           action={
             <Button variant="outline" asChild>
-              <Link to={buildCurrentProjectPath(pid, "/workbench")}>返回工作台</Link>
+              <Link to={buildScopedProjectPath(subjectId, pid, "/workbench")}>返回工作台</Link>
             </Button>
           }
         />
@@ -207,7 +209,7 @@ export function ReviewChainPage() {
                 const reviewTask = item.kind === "REVIEW_TASK" ? (detailQ?.data as ReviewTask | undefined) : undefined
                 const convergence = item.kind === "CONVERGENCE" ? (detailQ?.data as Convergence | undefined) : undefined
                 const detailPath =
-                  item.kind === "REVIEW_TASK" ? reviewTaskDetailPath(pid, item.id) : convergenceDetailPath(pid, item.id)
+                  item.kind === "REVIEW_TASK" ? reviewTaskDetailPath(subjectId, pid, item.id) : convergenceDetailPath(subjectId, pid, item.id)
 
                 return (
                   <div

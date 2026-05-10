@@ -1,27 +1,31 @@
 import { useQuery } from "@tanstack/react-query"
 
+import type { ProjectScope } from "@/ui/api/projectScope"
 import { getConvergence, getReviewChain, getReviewChainBinding } from "@/ui/api/review"
 
-export function useReviewChain(projectId: string, reviewChainId: string) {
+export function useReviewChain(scope: ProjectScope | null, reviewChainId: string) {
+  const projectId = scope?.projectId ?? ""
   return useQuery({
-    queryKey: ["reviewChain", projectId, reviewChainId],
-    queryFn: () => getReviewChain(projectId, reviewChainId),
-    enabled: !!projectId && !!reviewChainId,
+    queryKey: ["reviewChain", scope?.subjectId ?? "", projectId, reviewChainId],
+    queryFn: () => getReviewChain(scope as ProjectScope, reviewChainId),
+    enabled: !!scope?.subjectId && !!projectId && !!reviewChainId,
   })
 }
 
-export function useReviewChainBinding(projectId: string, reviewChainId: string) {
+export function useReviewChainBinding(scope: ProjectScope | null, reviewChainId: string) {
+  const projectId = scope?.projectId ?? ""
   return useQuery({
-    queryKey: ["reviewChainBinding", projectId, reviewChainId],
-    queryFn: () => getReviewChainBinding(projectId, reviewChainId),
-    enabled: !!projectId && !!reviewChainId,
+    queryKey: ["reviewChainBinding", scope?.subjectId ?? "", projectId, reviewChainId],
+    queryFn: () => getReviewChainBinding(scope as ProjectScope, reviewChainId),
+    enabled: !!scope?.subjectId && !!projectId && !!reviewChainId,
   })
 }
 
-export function useConvergence(projectId: string, convergenceId: string) {
+export function useConvergence(scope: ProjectScope | null, convergenceId: string) {
+  const projectId = scope?.projectId ?? ""
   return useQuery({
-    queryKey: ["convergence", projectId, convergenceId],
-    queryFn: () => getConvergence(projectId, convergenceId),
-    enabled: !!projectId && !!convergenceId,
+    queryKey: ["convergence", scope?.subjectId ?? "", projectId, convergenceId],
+    queryFn: () => getConvergence(scope as ProjectScope, convergenceId),
+    enabled: !!scope?.subjectId && !!projectId && !!convergenceId,
   })
 }

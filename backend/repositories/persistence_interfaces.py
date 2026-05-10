@@ -6,6 +6,7 @@ from backend.models.audit_log_event import AuditLogEvent
 from backend.models.layer import Layer
 from backend.models.project import Project
 from backend.models.project_config import ProjectConfig
+from backend.models.project_material_source_binding import ProjectMaterialSourceBinding
 from backend.models.project_storage_config import ProjectStorageConfig
 from backend.models.review_task_queue import ReviewTaskQueue
 
@@ -24,7 +25,9 @@ class ProjectSnapshotRecord:
     project_state: str
     created_at_ms: int
     deleted_at_ms: int | None
-    snapshot: dict[str, Any]
+    subject_id: str | None
+    scoped_project_id: str | None
+    project_sequence: int
     updated_at: str
 
 
@@ -61,6 +64,7 @@ class SqlLifecycleRepository(Protocol):
         project: Project,
         project_snapshot: dict[str, Any],
         project_storage_config: ProjectStorageConfig,
+        project_material_source_binding: ProjectMaterialSourceBinding,
         project_config: ProjectConfig,
         review_task_queue: ReviewTaskQueue,
         layers: Sequence[Layer],

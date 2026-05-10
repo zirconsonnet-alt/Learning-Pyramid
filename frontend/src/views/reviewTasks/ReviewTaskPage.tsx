@@ -3,6 +3,7 @@ import { ChevronLeft, RefreshCw } from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
+import type { ProjectScope } from "@/ui/api/projectScope"
 import { RichContentRenderer } from "@/ui/components/RichContentRenderer"
 import { ContentEmptyState, ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
@@ -13,7 +14,7 @@ import {
   formatRecallPointReference,
   formatReviewTaskReference,
 } from "@/ui/displayIdentifiers"
-import { buildCurrentProjectPath } from "@/ui/projectPaths"
+import { buildScopedProjectPath } from "@/ui/projectPaths"
 import { useProject } from "@/ui/queries/projects"
 import { useReviewTaskDetails } from "@/ui/queries/reviewTasks"
 
@@ -56,14 +57,15 @@ function firstError(items: unknown[]) {
 }
 
 export function ReviewTaskPage() {
-  const { projectId, reviewTaskId } = useParams()
+  const { subjectId = "", projectId, reviewTaskId } = useParams()
   const navigate = useNavigate()
   const pid = projectId ?? ""
   const rtid = reviewTaskId ?? ""
-  const { projectTitle } = useProject(pid)
-  const { reviewTaskQ, inputRangeQ, resultRangeQ, recallPointQs } = useReviewTaskDetails(pid, rtid)
+  const projectScope: ProjectScope | null = subjectId && pid ? { subjectId, projectId: pid } : null
+  const { projectTitle } = useProject(projectScope)
+  const { reviewTaskQ, inputRangeQ, resultRangeQ, recallPointQs } = useReviewTaskDetails(projectScope, rtid)
 
-  if (!pid || !rtid) {
+  if (!subjectId || !pid || !rtid) {
     return (
       <div className="space-y-4">
         <ContentNotice
@@ -222,18 +224,18 @@ export function ReviewTaskPage() {
                             <div className="grid gap-4 lg:grid-cols-2">
                               <div className="space-y-2 rounded-xl border border-[#dbe4ee] bg-[#f8fafc] p-3">
                                 <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#64748b]">问题</div>
-                                <RichContentRenderer projectId={pid} value={recallPoint.question} />
+                                <RichContentRenderer subjectId={subjectId} projectId={pid} value={recallPoint.question} />
                               </div>
                               <div className="space-y-2 rounded-xl border border-[#dbe4ee] bg-[#f8fafc] p-3">
                                 <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#64748b]">答案</div>
-                                <RichContentRenderer projectId={pid} value={recallPoint.answer} />
+                                <RichContentRenderer subjectId={subjectId} projectId={pid} value={recallPoint.answer} />
                               </div>
                             </div>
                           </div>
 
                           <div className="flex shrink-0 flex-wrap gap-2 md:w-[11rem] md:flex-col md:items-stretch">
                             <Button size="sm" className="rounded-full md:w-full" asChild>
-                              <Link to={buildCurrentProjectPath(pid, `/recall-points/${recallPointId}`)}>查看详情</Link>
+                              <Link to={buildScopedProjectPath(subjectId, pid, `/recall-points/${recallPointId}`)}>查看详情</Link>
                             </Button>
                           </div>
                         </div>

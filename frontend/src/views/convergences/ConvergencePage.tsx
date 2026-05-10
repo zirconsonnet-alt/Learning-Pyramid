@@ -4,6 +4,7 @@ import { ChevronLeft, RefreshCw } from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
+import type { ProjectScope } from "@/ui/api/projectScope"
 import type { ReviewTask } from "@/ui/api/review"
 import { getRangeSnapshot, getReviewTask } from "@/ui/api/review"
 import { ContentEmptyState, ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
@@ -14,7 +15,7 @@ import {
   formatRangeReference,
   formatReviewTaskReference,
 } from "@/ui/displayIdentifiers"
-import { buildCurrentProjectPath } from "@/ui/projectPaths"
+import { buildScopedProjectPath } from "@/ui/projectPaths"
 import { useProject } from "@/ui/queries/projects"
 import { useConvergence } from "@/ui/queries/reviewChains"
 import { cn } from "@/ui/utils"
@@ -53,28 +54,29 @@ type ConvergenceRoundEntry = {
 }
 
 export function ConvergencePage() {
-  const { projectId, convergenceId } = useParams()
+  const { subjectId = "", projectId, convergenceId } = useParams()
   const navigate = useNavigate()
   const pid = projectId ?? ""
   const cid = convergenceId ?? ""
-  const { projectTitle } = useProject(pid)
-  const convergenceQ = useConvergence(pid, cid)
+  const projectScope: ProjectScope | null = subjectId && pid ? { subjectId, projectId: pid } : null
+  const { projectTitle } = useProject(projectScope)
+  const convergenceQ = useConvergence(projectScope, cid)
 
   const reviewTaskQs = useQueries({
     queries:
       convergenceQ.data?.reviewTaskIds.map((reviewTaskId) => ({
-        queryKey: ["reviewTask", pid, reviewTaskId],
-        queryFn: () => getReviewTask(pid, reviewTaskId),
-        enabled: !!pid,
+        queryKey: ["reviewTask", subjectId, pid, reviewTaskId],
+        queryFn: () => getReviewTask(projectScope as ProjectScope, reviewTaskId),
+        enabled: !!projectScope,
       })) ?? [],
   })
   const inputRangeQs = useQueries({
     queries: reviewTaskQs.map((query) => {
       const inputRangeId = query.data?.inputRangeId ?? ""
       return {
-        queryKey: ["range", pid, inputRangeId],
-        queryFn: () => getRangeSnapshot(pid, inputRangeId),
-        enabled: !!pid && !!inputRangeId,
+        queryKey: ["range", subjectId, pid, inputRangeId],
+        queryFn: () => getRangeSnapshot(projectScope as ProjectScope, inputRangeId),
+        enabled: !!projectScope && !!inputRangeId,
       }
     }),
   })
@@ -82,9 +84,9 @@ export function ConvergencePage() {
     queries: reviewTaskQs.map((query) => {
       const resultRangeId = query.data?.resultRangeId ?? ""
       return {
-        queryKey: ["range", pid, resultRangeId],
-        queryFn: () => getRangeSnapshot(pid, resultRangeId),
-        enabled: !!pid && !!resultRangeId,
+        queryKey: ["range", subjectId, pid, resultRangeId],
+        queryFn: () => getRangeSnapshot(projectScope as ProjectScope, resultRangeId),
+        enabled: !!projectScope && !!resultRangeId,
       }
     }),
   })
@@ -188,6 +190,7 @@ export function ConvergencePage() {
                 ) : null
               }
               entries={roundEntries}
+              subjectId={subjectId}
               projectId={pid}
             />
           </div>
@@ -244,6 +247,7 @@ function ConvergenceRoundListCard({
   error,
   isLoading,
   projectId,
+  subjectId,
   title,
 }: {
   description?: string
@@ -252,6 +256,7 @@ function ConvergenceRoundListCard({
   error?: unknown
   isLoading?: boolean
   projectId: string
+  subjectId: string
   title: string
 }) {
   return (
@@ -309,7 +314,7 @@ function ConvergenceRoundListCard({
                   </div>
                   <div className="flex shrink-0 flex-wrap gap-2 md:w-[11rem] md:flex-col md:items-stretch">
                     <Button size="sm" className="rounded-full md:w-full" asChild>
-                      <Link to={buildCurrentProjectPath(projectId, `/review-tasks/${entry.reviewTaskId}`)}>查看复习任务</Link>
+                      <Link to={buildScopedProjectPath(subjectId, projectId, `/review-tasks/${entry.reviewTaskId}`)}>查看复习任务</Link>
                     </Button>
                   </div>
                 </div>

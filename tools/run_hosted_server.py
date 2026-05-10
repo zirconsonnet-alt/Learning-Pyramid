@@ -18,10 +18,10 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 def main() -> int:
-    host = (os.getenv("PLM_BIND_HOST") or "0.0.0.0").strip() or "0.0.0.0"
-    port = int((os.getenv("PLM_PORT") or "8001").strip() or "8001")
-    proxy_headers = _env_bool("PLM_PROXY_HEADERS", True)
-    forwarded_allow_ips = (os.getenv("PLM_FORWARDED_ALLOW_IPS") or "127.0.0.1").strip() or "127.0.0.1"
+    host = (os.getenv("LEARNINGPYRAMID_BIND_HOST") or "0.0.0.0").strip() or "0.0.0.0"
+    port = int((os.getenv("LEARNINGPYRAMID_PORT") or "8001").strip() or "8001")
+    proxy_headers = _env_bool("LEARNINGPYRAMID_PROXY_HEADERS", True)
+    forwarded_allow_ips = (os.getenv("LEARNINGPYRAMID_FORWARDED_ALLOW_IPS") or "127.0.0.1").strip() or "127.0.0.1"
 
     uvicorn.run(
         "adapter.main:app",

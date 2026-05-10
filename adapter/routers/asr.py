@@ -4,13 +4,34 @@ from fastapi.responses import FileResponse
 from adapter.auth import get_request_auth_user
 from adapter.deps import get_api, get_auth_store
 from adapter.mappers import asr_artifact_to_dto, asr_transcript_result_to_dto, instance_asr_transcript_result_to_dto
+from adapter.scoped_projects import ScopedProject, resolve_scoped_project
 from adapter.schemas import RequestAsrRequest, RequestInstanceAsrRequest
 from backend.system.api import SystemAPI
+from backend.system.api import MAX_ASR_UPLOAD_BYTES
 from backend.system.auth_store import AuthStore
 from backend.system.runtime_features import require_asr_enabled
+from backend.models.errors import PreconditionFailure
 
 
 router = APIRouter()
+
+
+def content_length_or_none(request: Request) -> int | None:
+    raw = str(request.headers.get("content-length", "")).strip()
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise PreconditionFailure("Content-Length must be an integer") from exc
+    if value < 0:
+        raise PreconditionFailure("Content-Length must be non-negative")
+    return value
+
+
+def reject_oversized_asr_upload(content_length: int | None) -> None:
+    if content_length is not None and content_length > MAX_ASR_UPLOAD_BYTES:
+        raise PreconditionFailure(f"ASR audio upload is too large (max {MAX_ASR_UPLOAD_BYTES} bytes)")
 
 
 def _service_config_dict(*, base_url: str | None = None, model_name: str | None = None, api_key: str | None = None) -> dict[str, str | None] | None:
@@ -36,11 +57,11 @@ def get_public_asr_bridge_asset(token: str, fileName: str, api: SystemAPI = Depe
     )
 
 
-@router.post("/projects/{projectId}/asr")
+@router.post("/subjects/{subjectId}/projects/{projectId}/asr")
 def request_asr(
-    projectId: str,
     req: RequestAsrRequest,
     request: Request,
+    project: ScopedProject = Depends(resolve_scoped_project),
     api: SystemAPI = Depends(get_api),
     auth_store: AuthStore = Depends(get_auth_store),
 ) -> dict:
@@ -48,7 +69,7 @@ def request_asr(
     provider = req.provider or "WHISPER"
     current_user = get_request_auth_user(request)
     result = api.request_asr(  # type: ignore[arg-type]
-        projectId,
+        project.internal_project_id,
         req.recallPointId,
         req.centerMs,
         req.preMs,
@@ -62,12 +83,11 @@ def request_asr(
         auth_store=auth_store,
         user_id=None if current_user is None else current_user.user_id,
     )
-    return {"ok": True, "data": asr_transcript_result_to_dto(result)}
+    return {"ok": True, "data": asr_transcript_result_to_dto(result, public_project_id=project.project_id)}
 
 
-@router.post("/projects/{projectId}/asr/audio")
+@router.post("/subjects/{subjectId}/projects/{projectId}/asr/audio")
 async def request_asr_audio(
-    projectId: str,
     request: Request,
     recallPointId: str = Form(...),
     centerMs: int = Form(...),
@@ -78,14 +98,16 @@ async def request_asr_audio(
     serviceModelName: str | None = Form(None),
     serviceApiKey: str | None = Form(None),
     file: UploadFile = File(...),
+    project: ScopedProject = Depends(resolve_scoped_project),
     api: SystemAPI = Depends(get_api),
     auth_store: AuthStore = Depends(get_auth_store),
 ) -> dict:
     require_asr_enabled()
     current_user = get_request_auth_user(request)
+    reject_oversized_asr_upload(content_length_or_none(request))
     payload = await file.read()
     result = api.request_asr_from_audio_upload(  # type: ignore[arg-type]
-        projectId,
+        project.internal_project_id,
         recallPointId,
         centerMs,
         preMs,
@@ -102,15 +124,15 @@ async def request_asr_audio(
         auth_store=auth_store,
         user_id=None if current_user is None else current_user.user_id,
     )
-    return {"ok": True, "data": asr_transcript_result_to_dto(result)}
+    return {"ok": True, "data": asr_transcript_result_to_dto(result, public_project_id=project.project_id)}
 
 
-@router.post("/projects/{projectId}/instances/{instanceId}/asr")
+@router.post("/subjects/{subjectId}/projects/{projectId}/instances/{instanceId}/asr")
 def request_instance_asr(
-    projectId: str,
     instanceId: str,
     req: RequestInstanceAsrRequest,
     request: Request,
+    project: ScopedProject = Depends(resolve_scoped_project),
     api: SystemAPI = Depends(get_api),
     auth_store: AuthStore = Depends(get_auth_store),
 ) -> dict:
@@ -118,7 +140,7 @@ def request_instance_asr(
     provider = req.provider or "WHISPER"
     current_user = get_request_auth_user(request)
     result = api.request_instance_asr(  # type: ignore[arg-type]
-        projectId,
+        project.internal_project_id,
         instanceId,
         req.startMs,
         req.endMs,
@@ -131,12 +153,11 @@ def request_instance_asr(
         auth_store=auth_store,
         user_id=None if current_user is None else current_user.user_id,
     )
-    return {"ok": True, "data": instance_asr_transcript_result_to_dto(result)}
+    return {"ok": True, "data": instance_asr_transcript_result_to_dto(result, public_project_id=project.project_id)}
 
 
-@router.post("/projects/{projectId}/instances/{instanceId}/asr/audio")
+@router.post("/subjects/{subjectId}/projects/{projectId}/instances/{instanceId}/asr/audio")
 async def request_instance_asr_audio(
-    projectId: str,
     instanceId: str,
     request: Request,
     startMs: int = Form(...),
@@ -146,14 +167,16 @@ async def request_instance_asr_audio(
     serviceModelName: str | None = Form(None),
     serviceApiKey: str | None = Form(None),
     file: UploadFile = File(...),
+    project: ScopedProject = Depends(resolve_scoped_project),
     api: SystemAPI = Depends(get_api),
     auth_store: AuthStore = Depends(get_auth_store),
 ) -> dict:
     require_asr_enabled()
     current_user = get_request_auth_user(request)
+    reject_oversized_asr_upload(content_length_or_none(request))
     payload = await file.read()
     result = api.request_instance_asr_from_audio_upload(  # type: ignore[arg-type]
-        projectId,
+        project.internal_project_id,
         instanceId,
         startMs,
         endMs,
@@ -169,11 +192,11 @@ async def request_instance_asr_audio(
         auth_store=auth_store,
         user_id=None if current_user is None else current_user.user_id,
     )
-    return {"ok": True, "data": instance_asr_transcript_result_to_dto(result)}
+    return {"ok": True, "data": instance_asr_transcript_result_to_dto(result, public_project_id=project.project_id)}
 
 
-@router.get("/projects/{projectId}/asr-artifacts/{asrArtifactId}")
-def get_asr_artifact(projectId: str, asrArtifactId: str, api: SystemAPI = Depends(get_api)) -> dict:
+@router.get("/subjects/{subjectId}/projects/{projectId}/asr-artifacts/{asrArtifactId}")
+def get_asr_artifact(asrArtifactId: str, project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
     require_asr_enabled()
-    art = api.get_asr_artifact(projectId, asrArtifactId)  # type: ignore[arg-type]
-    return {"ok": True, "data": asr_artifact_to_dto(art)}
+    art = api.get_asr_artifact(project.internal_project_id, asrArtifactId)  # type: ignore[arg-type]
+    return {"ok": True, "data": asr_artifact_to_dto(art, public_project_id=project.project_id)}

@@ -149,6 +149,7 @@ export async function installMockApi(page: Page, options: { authState?: MockAuth
     }
     const path = url.pathname.replace(/^\/api/, "") || "/"
     const method = request.method()
+    const scopedProjectPath = `/subjects/${subject.subjectId}/projects/${project.projectId}`
 
     if (path === "/system/capabilities") {
       await fulfill(route, {
@@ -227,12 +228,7 @@ export async function installMockApi(page: Page, options: { authState?: MockAuth
       return
     }
 
-    if (path === "/projects") {
-      await fulfill(route, [project])
-      return
-    }
-
-    if (path === `/projects/${project.projectId}/subject-context`) {
+    if (path === `${scopedProjectPath}/subject-context`) {
       await fulfill(route, {
         subject,
         currentMaterial: material,
@@ -242,22 +238,12 @@ export async function installMockApi(page: Page, options: { authState?: MockAuth
       return
     }
 
-    if (path === `/subjects/${subject.subjectId}/projects/${project.projectId}/subject-context`) {
-      await fulfill(route, {
-        subject,
-        currentMaterial: material,
-        materials: [material],
-        currentProjectId: project.projectId,
-      })
-      return
-    }
-
-    if (path === `/projects/${project.projectId}/material-source-binding`) {
+    if (path === `${scopedProjectPath}/material-source-binding`) {
       await fulfill(route, { projectId: project.projectId, sourceKind: "MANUAL", sourceRootLabel: null, updatedAt: nowIso })
       return
     }
 
-    if (path === `/projects/${project.projectId}/project-config`) {
+    if (path === `${scopedProjectPath}/project-config`) {
       await fulfill(route, {
         projectId: project.projectId,
         projectType: "COURSE",
@@ -273,67 +259,62 @@ export async function installMockApi(page: Page, options: { authState?: MockAuth
       return
     }
 
-    if (path === `/projects/${project.projectId}/instances`) {
+    if (path === `${scopedProjectPath}/instances`) {
       await fulfill(route, contentState === "empty" ? [] : [instance])
       return
     }
 
-    if (path === `/projects/${project.projectId}/missing-instances`) {
+    if (path === `${scopedProjectPath}/missing-instances`) {
       await fulfill(route, { instanceIds: [] })
       return
     }
 
-    if (path === `/projects/${project.projectId}/instances/${instance.instanceId}/recall-points`) {
+    if (path === `${scopedProjectPath}/instances/${instance.instanceId}/recall-points`) {
       await fulfill(route, { recallPointIds: [recallPoint.recallPointId] })
       return
     }
 
-    if (path === `/projects/${project.projectId}/video-watch-progress`) {
+    if (path === `${scopedProjectPath}/video-watch-progress`) {
       await fulfill(route, {})
       return
     }
 
-    if (path === `/projects/${project.projectId}/queue`) {
+    if (path === `${scopedProjectPath}/queue`) {
       await fulfill(route, { headId: null, ids: [] })
       return
     }
 
-    if (path === `/projects/${project.projectId}/layers`) {
+    if (path === `${scopedProjectPath}/layers`) {
       await fulfill(route, [])
       return
     }
 
-    if (path === `/projects/${project.projectId}/learning-task-nodes`) {
+    if (path === `${scopedProjectPath}/learning-task-nodes`) {
       await fulfill(route, [])
       return
     }
 
-    if (path === `/projects/${project.projectId}/learning-object-roots`) {
+    if (path === `${scopedProjectPath}/learning-object-roots`) {
       await fulfill(route, { rootLearningObjectNodeIds: contentState === "empty" ? [] : [learningObjectNode.nodeId] })
       return
     }
 
-    if (path === `/projects/${project.projectId}/learning-object-nodes`) {
+    if (path === `${scopedProjectPath}/learning-object-nodes`) {
       await fulfill(route, contentState === "empty" ? [] : [learningObjectNode])
       return
     }
 
-    if (path === `/projects/${project.projectId}/learning-objects/${learningObjectNode.nodeId}/recall-points`) {
+    if (path === `${scopedProjectPath}/learning-objects/${learningObjectNode.nodeId}/recall-points`) {
       await fulfill(route, [recallPoint])
       return
     }
 
-    if (path === `/projects/${project.projectId}/audit-log-events`) {
+    if (path === `${scopedProjectPath}/audit-log-events`) {
       await fulfill(route, [])
       return
     }
 
-    if (path === `/subjects/${subject.subjectId}/projects/${project.projectId}/audit-log-events`) {
-      await fulfill(route, [])
-      return
-    }
-
-    if (path === `/projects/${project.projectId}/review-recommendations`) {
+    if (path === `${scopedProjectPath}/review-recommendations`) {
       await fulfill(route, {
         items: [{
           recallPoint,
@@ -352,41 +333,22 @@ export async function installMockApi(page: Page, options: { authState?: MockAuth
       return
     }
 
-    if (path === `/subjects/${subject.subjectId}/projects/${project.projectId}/review-recommendations`) {
-      await fulfill(route, {
-        items: [{
-          recallPoint,
-          reviewRecommendationIndex: 1,
-          estimatedMemoryStrength: 0.5,
-          weightedSuccessRatio: 0.5,
-          lastReviewedAt: null,
-          lastReviewResult: null,
-          reviewCount: 0,
-        }],
-        totalCount: 1,
-        offset: 0,
-        limit: 500,
-        nextOffset: null,
-      })
-      return
-    }
-
-    if (path === `/projects/${project.projectId}/review-tasks/${reviewTask.reviewTaskId}`) {
+    if (path === `${scopedProjectPath}/review-tasks/${reviewTask.reviewTaskId}`) {
       await fulfill(route, reviewTask)
       return
     }
 
-    if (path === `/projects/${project.projectId}/ranges/range_e2e`) {
+    if (path === `${scopedProjectPath}/ranges/range_e2e`) {
       await fulfill(route, { projectId: project.projectId, rangeId: "range_e2e", recallPointIds: [recallPoint.recallPointId] })
       return
     }
 
-    if (path === `/projects/${project.projectId}/recall-points/${recallPoint.recallPointId}`) {
+    if (path === `${scopedProjectPath}/recall-points/${recallPoint.recallPointId}`) {
       await fulfill(route, recallPoint)
       return
     }
 
-    if (path === `/projects/${project.projectId}/llm/ask/stream`) {
+    if (path === `${scopedProjectPath}/llm/ask/stream`) {
       await route.fulfill({
         status: 200,
         contentType: "text/event-stream; charset=utf-8",

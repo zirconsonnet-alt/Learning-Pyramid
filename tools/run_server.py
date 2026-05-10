@@ -21,8 +21,8 @@ def main() -> int:
     parser.add_argument("--runtime-mode", default="release")
     args = parser.parse_args()
 
-    os.environ["PLM_RUNTIME_TOKEN"] = args.runtime_token
-    os.environ["PLM_RUNTIME_MODE"] = args.runtime_mode
+    os.environ["LEARNINGPYRAMID_RUNTIME_TOKEN"] = args.runtime_token
+    os.environ["LEARNINGPYRAMID_RUNTIME_MODE"] = args.runtime_mode
 
     uvicorn.run(
         app,

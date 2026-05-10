@@ -5,11 +5,6 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterator
 
-try:
-    import psycopg
-except ImportError:  # pragma: no cover - exercised in environments without psycopg installed
-    psycopg = None
-
 from backend.models.aggregation_event import AggregationEvent
 from backend.models.asr_artifact import AsrArtifact
 from backend.models.audit_log_event import AuditLogEvent
@@ -62,40 +57,12 @@ from backend.system.postgres_schema import (
 from backend.system.persistence_store import SQLiteSnapshotStore
 
 
-def _is_missing_optional_table_error(exc: Exception) -> bool:
-    return bool(psycopg is not None and isinstance(exc, psycopg.errors.UndefinedTable))
-
-
-class _SkippedPostgresCursor:
-    def fetchone(self) -> None:
-        return None
-
-    def fetchall(self) -> list[Any]:
-        return []
-
-
-class _OptionalTableCompatConnection:
-    def __init__(self, delegate: Any, *, skipped_tables: set[str] | tuple[str, ...]) -> None:
-        self._delegate = delegate
-        self._skipped_tables = tuple(str(name).strip().lower() for name in skipped_tables if str(name).strip())
-
-    def execute(self, sql: str, params: tuple[Any, ...] = ()) -> Any:
-        normalized_sql = " ".join(str(sql).lower().split())
-        if any(table_name in normalized_sql for table_name in self._skipped_tables):
-            return _SkippedPostgresCursor()
-        return self._delegate.execute(sql, params)
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._delegate, name)
-
-
 class PostgresStore(SQLiteSnapshotStore):
-    def __init__(self, dsn: str, *, legacy_json_path: str | Path | None = None) -> None:
+    def __init__(self, dsn: str) -> None:
         self._dsn = str(dsn).strip()
         if not self._dsn:
             raise ValueError("PostgreSQL DSN must be non-empty")
         self._path = Path("__postgres_store__")
-        self._legacy_json_path = None if legacy_json_path is None else Path(legacy_json_path).expanduser().resolve()
         self._lock = threading.RLock()
         self._init_db()
 
@@ -125,19 +92,14 @@ class PostgresStore(SQLiteSnapshotStore):
         return ", ".join("%s" for _ in values)
 
     def _load_global_llm_settings_payload(self, conn) -> dict[str, Any] | None:
-        try:
-            row = conn.execute(
-                """
-                SELECT payload_json
-                FROM global_settings_index
-                WHERE settings_key = %s
-                """,
-                ("global_llm",),
-            ).fetchone()
-        except Exception as exc:
-            if _is_missing_optional_table_error(exc):
-                return None
-            raise
+        row = conn.execute(
+            """
+            SELECT payload_json
+            FROM global_settings_index
+            WHERE settings_key = %s
+            """,
+            ("global_llm",),
+        ).fetchone()
         if row is None:
             return None
         payload = json.loads(str(row["payload_json"]))
@@ -146,30 +108,20 @@ class PostgresStore(SQLiteSnapshotStore):
         return payload
 
     def _replace_global_llm_settings_payload(self, conn, payload: dict[str, Any] | None, *, updated_at: str) -> None:
-        try:
-            conn.execute("DELETE FROM global_settings_index WHERE settings_key = %s", ("global_llm",))
-        except Exception as exc:
-            if _is_missing_optional_table_error(exc):
-                return
-            raise
+        conn.execute("DELETE FROM global_settings_index WHERE settings_key = %s", ("global_llm",))
         if payload is None:
             return
-        try:
-            conn.execute(
-                """
-                INSERT INTO global_settings_index (settings_key, payload_json, updated_at)
-                VALUES (%s, %s, %s)
-                """,
-                (
-                    "global_llm",
-                    json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
-                    str(updated_at),
-                ),
-            )
-        except Exception as exc:
-            if _is_missing_optional_table_error(exc):
-                return
-            raise
+        conn.execute(
+            """
+            INSERT INTO global_settings_index (settings_key, payload_json, updated_at)
+            VALUES (%s, %s, %s)
+            """,
+            (
+                "global_llm",
+                json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
+                str(updated_at),
+            ),
+        )
 
     @staticmethod
     def _table_exists(conn, table_name: str) -> bool:
@@ -242,90 +194,20 @@ class PostgresStore(SQLiteSnapshotStore):
     def begin_unit_of_work(self, *, project_id: str | None = None) -> SqlUnitOfWork:
         return PostgresPersistenceUnitOfWork(connect=self._connect, project_id=project_id)
 
-    def _needs_project_config_index_backfill(self, conn) -> bool:
-        try:
-            row = conn.execute(
-                """
-                SELECT 1
-                FROM project_snapshots ps
-                LEFT JOIN project_storage_config_index sci ON sci.project_id = ps.project_id
-                LEFT JOIN project_config_index pci ON pci.project_id = ps.project_id
-                WHERE sci.project_id IS NULL OR pci.project_id IS NULL
-                LIMIT 1
-                """
-            ).fetchone()
-        except Exception:
-            return True
-        return row is not None
-
-    def _needs_recall_point_payload_backfill(self, conn) -> bool:
-        try:
-            row = conn.execute(
-                """
-                SELECT 1
-                FROM recall_point_index
-                WHERE payload_json IS NULL OR payload_json = ''
-                LIMIT 1
-                """
-            ).fetchone()
-        except Exception:
-            return True
-        return row is not None
-
-    def _read_legacy_sqlite_snapshot(self, conn) -> dict[str, Any] | None:
-        try:
-            row = conn.execute("SELECT snapshot_json FROM snapshot_state WHERE slot = 1").fetchone()
-        except Exception:
-            return None
-        if row is None:
-            return None
-        data = json.loads(str(row["snapshot_json"]))
-        if not isinstance(data, dict):
-            raise ValueError("Legacy SQL snapshot must be a JSON object")
-        return self._normalize_snapshot(data)
-
     def load_snapshot(self) -> dict[str, Any] | None:
         with self._lock:
             with self._pool_connection() as conn:
-                sharded, needs_compaction = self._load_from_sharded_tables_native(conn)
-                if sharded is not None:
-                    needs_backfill = self._needs_project_config_index_backfill(conn)
-                    needs_recall_point_backfill = self._needs_recall_point_payload_backfill(conn)
-                else:
-                    needs_backfill = False
-                    needs_recall_point_backfill = False
-                legacy_sql = self._read_legacy_sqlite_snapshot(conn)
+                sharded = self._load_from_sharded_tables_native(conn)
 
             if sharded is not None:
-                if needs_backfill or needs_compaction or needs_recall_point_backfill:
-                    self.save_snapshot(sharded)
-                self._archive_legacy_snapshot()
                 return sharded
 
-            if legacy_sql is not None:
-                self.save_snapshot(legacy_sql)
-                return self._normalize_snapshot(legacy_sql)
-
-            legacy_data = self._read_legacy_snapshot()
-            if legacy_data is None:
-                return None
-            self.save_snapshot(legacy_data)
-            self._archive_legacy_snapshot()
-            return self._normalize_snapshot(legacy_data)
+            return None
 
     def save_snapshot(self, snapshot: dict[str, Any]) -> None:
         normalized = self._normalize_snapshot(snapshot)
         updated_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
         with self.begin_unit_of_work() as uow:
-            missing_optional_tables = {
-                table_name
-                for table_name in ("global_settings_index", "instance_media_binding_index")
-                if not self._table_exists(uow.connection, table_name)
-            }
-            compat_connection = _OptionalTableCompatConnection(
-                uow.connection,
-                skipped_tables=missing_optional_tables,
-            )
             uow.system_state.upsert(
                 uow.session,
                 SystemStateRecord(
@@ -335,7 +217,7 @@ class PostgresStore(SQLiteSnapshotStore):
                 ),
             )
             self._replace_global_llm_settings_payload(
-                compat_connection,
+                uow.connection,
                 normalized.get("globalLlmSettings"),
                 updated_at=updated_at,
             )
@@ -353,26 +235,26 @@ class PostgresStore(SQLiteSnapshotStore):
                     ),
                 )
                 self._refresh_project_entity_indexes(
-                    compat_connection,
+                    uow.connection,
                     project_id=str(project_id),
                     project_payload=project_payload,
                 )
-            compat_connection.execute("DELETE FROM snapshot_state WHERE slot = 1")
 
-    def _load_from_sharded_tables_native(self, conn) -> tuple[dict[str, Any] | None, bool]:
+    def _load_from_sharded_tables_native(self, conn) -> dict[str, Any] | None:
         system_row = conn.execute(
             "SELECT schema_version, idgen_counters_json FROM system_state WHERE slot = 1"
         ).fetchone()
         global_llm_settings = self._load_global_llm_settings_payload(conn)
         project_rows = conn.execute(
             """
-            SELECT project_id, project_title, project_state, created_at_ms, deleted_at_ms, snapshot_json
+            SELECT project_id, project_title, project_state, created_at_ms, deleted_at_ms,
+                   subject_id, scoped_project_id, project_sequence
             FROM project_snapshots
             ORDER BY project_id ASC
             """
         ).fetchall()
         if system_row is None and global_llm_settings is None and not project_rows:
-            return None, False
+            return None
 
         if system_row is None:
             schema_version = 1
@@ -384,31 +266,21 @@ class PostgresStore(SQLiteSnapshotStore):
             idgen_counters = dict(loaded_counters) if isinstance(loaded_counters, dict) else {}
 
         projects: dict[str, Any] = {}
-        needs_compaction = False
         for row in project_rows:
-            hydrated_payload, row_needs_compaction = self._hydrate_project_payload_from_row_native(conn, row=row)
-            if row_needs_compaction:
-                needs_compaction = True
-            projects[str(row["project_id"])] = hydrated_payload
+            projects[str(row["project_id"])] = self._hydrate_project_payload_from_row_native(conn, row=row)
 
-        return (
-            {
-                "schemaVersion": schema_version,
-                "idgenCounters": idgen_counters,
-                "globalLlmSettings": global_llm_settings,
-                "projects": projects,
-            },
-            needs_compaction,
-        )
+        return {
+            "schemaVersion": schema_version,
+            "idgenCounters": idgen_counters,
+            "globalLlmSettings": global_llm_settings,
+            "projects": projects,
+        }
 
-    def _hydrate_project_payload_from_row_native(self, conn, *, row: Any) -> tuple[dict[str, Any], bool]:
-        compat_payload = self._decode_compat_snapshot_payload(row["snapshot_json"])
-        project_payload = dict(compat_payload)
-        project_payload["project"] = self._project_payload_from_snapshot_row(row)["project"]
-        return (
-            self._hydrate_project_payload_native(conn, project_id=str(row["project_id"]), project_payload=project_payload),
-            self._project_payload_uses_externalized_fields(compat_payload),
-        )
+    def _hydrate_project_payload_from_row_native(self, conn, *, row: Any) -> dict[str, Any]:
+        project_payload = self._project_payload_from_snapshot_row(row)
+        if str(row["project_state"]) == ProjectState.DELETED.value:
+            return project_payload
+        return self._hydrate_project_payload_native(conn, project_id=str(row["project_id"]), project_payload=project_payload)
 
     def _hydrate_project_payload_native(self, conn, *, project_id: str, project_payload: dict[str, Any]) -> dict[str, Any]:
         hydrated = dict(project_payload)
@@ -421,14 +293,34 @@ class PostgresStore(SQLiteSnapshotStore):
             """,
             (str(project_id),),
         ).fetchone()
-        if storage_row is not None:
-            hydrated["projectStorageConfig"] = {
-                "projectId": str(project_id),
-                "projectRoot": str(storage_row["project_root"]),
-                "learningObjectRoot": str(storage_row["learning_object_root"]),
-                "fsSyncPolicy": str(storage_row["fs_sync_policy"]),
-                "updatedAtMs": int(storage_row["updated_at_ms"]),
-            }
+        if storage_row is None:
+            raise RuntimeError(f"project_storage_config_index row is required for active project {project_id}")
+        hydrated["projectStorageConfig"] = {
+            "projectId": str(project_id),
+            "projectRoot": str(storage_row["project_root"]),
+            "learningObjectRoot": str(storage_row["learning_object_root"]),
+            "fsSyncPolicy": str(storage_row["fs_sync_policy"]),
+            "updatedAtMs": int(storage_row["updated_at_ms"]),
+        }
+
+        material_source_binding_row = conn.execute(
+            """
+            SELECT source_kind, source_root_label, updated_at_ms
+            FROM project_material_source_binding_index
+            WHERE project_id = %s
+            """,
+            (str(project_id),),
+        ).fetchone()
+        if material_source_binding_row is None:
+            raise RuntimeError(f"project_material_source_binding_index row is required for active project {project_id}")
+        hydrated["projectMaterialSourceBinding"] = {
+            "projectId": str(project_id),
+            "sourceKind": str(material_source_binding_row["source_kind"]),
+            "sourceRootLabel": None
+            if material_source_binding_row["source_root_label"] is None
+            else str(material_source_binding_row["source_root_label"]),
+            "updatedAtMs": int(material_source_binding_row["updated_at_ms"]),
+        }
 
         config_row = conn.execute(
             """
@@ -438,11 +330,12 @@ class PostgresStore(SQLiteSnapshotStore):
             """,
             (str(project_id),),
         ).fetchone()
-        if config_row is not None:
-            config_payload = json.loads(str(config_row["config_json"]))
-            if not isinstance(config_payload, dict):
-                raise ValueError("ProjectConfig payload must be a JSON object")
-            hydrated["projectConfig"] = config_payload
+        if config_row is None:
+            raise RuntimeError(f"project_config_index row is required for active project {project_id}")
+        config_payload = json.loads(str(config_row["config_json"]))
+        if not isinstance(config_payload, dict):
+            raise ValueError("ProjectConfig payload must be a JSON object")
+        hydrated["projectConfig"] = config_payload
 
         instance_rows = conn.execute(
             """
@@ -464,22 +357,16 @@ class PostgresStore(SQLiteSnapshotStore):
             for row in instance_rows
         }
 
-        try:
-            instance_media_binding_rows = conn.execute(
-                """
-                SELECT instance_id, source_kind, playback_kind, account_id, remote_file_id, remote_path,
-                       mime_type, size_bytes, duration_ms, source_payload_json, updated_at_ms
-                FROM instance_media_binding_index
-                WHERE project_id = %s
-                ORDER BY instance_id ASC
-                """,
-                (str(project_id),),
-            ).fetchall()
-        except Exception as exc:
-            if _is_missing_optional_table_error(exc):
-                instance_media_binding_rows = []
-            else:
-                raise
+        instance_media_binding_rows = conn.execute(
+            """
+            SELECT instance_id, source_kind, playback_kind, account_id, remote_file_id, remote_path,
+                   mime_type, size_bytes, duration_ms, source_payload_json, updated_at_ms
+            FROM instance_media_binding_index
+            WHERE project_id = %s
+            ORDER BY instance_id ASC
+            """,
+            (str(project_id),),
+        ).fetchall()
         hydrated["instanceMediaBindings"] = {
             str(row["instance_id"]): {
                 "projectId": str(project_id),
@@ -526,10 +413,6 @@ class PostgresStore(SQLiteSnapshotStore):
             nodes[str(row["node_id"])] = payload
         hydrated["learningObjectNodes"] = nodes
 
-        # Normalized index tables are authoritative. Do not merge shell-only externalized rows
-        # back into the hydrated payload, otherwise stale compatibility-shell data could be
-        # resurrected during compaction.
-        legacy_recall_points = dict(project_payload.get("recallPoints", {}))
         recall_point_rows = conn.execute(
             """
             SELECT recall_point_id, created_at_ms, anchor_instance_id, anchor_position, question_plain_text,
@@ -544,7 +427,6 @@ class PostgresStore(SQLiteSnapshotStore):
             str(row["recall_point_id"]): self._recall_point_payload_from_index_row(
                 project_id=str(project_id),
                 row=row,
-                legacy_payloads=legacy_recall_points,
             )
             for row in recall_point_rows
         }
@@ -802,7 +684,8 @@ class PostgresStore(SQLiteSnapshotStore):
 
     def list_projects_metadata(self, *, active_only: bool = True) -> tuple[Project, ...]:
         query = """
-            SELECT project_id, project_title, project_state, created_at_ms, deleted_at_ms, snapshot_json
+            SELECT project_id, project_title, project_state, created_at_ms, deleted_at_ms,
+                   subject_id, scoped_project_id, project_sequence
             FROM project_snapshots
         """
         params: tuple[Any, ...] = tuple()
@@ -813,20 +696,15 @@ class PostgresStore(SQLiteSnapshotStore):
         rows = self._fetchall(query, params)
         projects: list[Project] = []
         for row in rows:
-            snapshot = json.loads(str(row["snapshot_json"]))
-            project_payload = dict(snapshot.get("project") or {}) if isinstance(snapshot, dict) else {}
             projects.append(Project(
                 project_id=ProjectId(str(row["project_id"])),
                 title=str(row["project_title"]),
                 state=ProjectState(str(row["project_state"])),
                 created_at=self._ms_to_ts(int(row["created_at_ms"])),
                 deleted_at=self._ms_to_ts(None if row["deleted_at_ms"] is None else int(row["deleted_at_ms"])),
-                subject_id=None if project_payload.get("subjectId") is None else ProjectId(str(project_payload.get("subjectId"))),
-                scoped_project_id=None if project_payload.get("scopedProjectId") is None else ProjectId(str(project_payload.get("scopedProjectId"))),
-                legacy_global_project_id=None
-                if project_payload.get("legacyGlobalProjectId") is None
-                else ProjectId(str(project_payload.get("legacyGlobalProjectId"))),
-                project_sequence=int(project_payload.get("projectSequence") or 0),
+                subject_id=None if row["subject_id"] is None else ProjectId(str(row["subject_id"])),
+                scoped_project_id=None if row["scoped_project_id"] is None else ProjectId(str(row["scoped_project_id"])),
+                project_sequence=int(row["project_sequence"] or 0),
             ))
         return tuple(projects)
 
@@ -920,38 +798,28 @@ class PostgresStore(SQLiteSnapshotStore):
         )
 
     def list_instance_media_bindings(self, project_id: str) -> tuple[InstanceMediaBinding, ...]:
-        try:
-            rows = self._fetchall(
-                """
-                SELECT instance_id, source_kind, playback_kind, account_id, remote_file_id, remote_path,
-                       mime_type, size_bytes, duration_ms, source_payload_json, updated_at_ms
-                FROM instance_media_binding_index
-                WHERE project_id = %s
-                ORDER BY instance_id ASC
-                """,
-                (str(project_id),),
-            )
-        except Exception as exc:
-            if _is_missing_optional_table_error(exc):
-                return tuple()
-            raise
+        rows = self._fetchall(
+            """
+            SELECT instance_id, source_kind, playback_kind, account_id, remote_file_id, remote_path,
+                   mime_type, size_bytes, duration_ms, source_payload_json, updated_at_ms
+            FROM instance_media_binding_index
+            WHERE project_id = %s
+            ORDER BY instance_id ASC
+            """,
+            (str(project_id),),
+        )
         return tuple(self._decode_instance_media_binding(project_id=str(project_id), row=row) for row in rows)
 
     def get_instance_media_binding(self, project_id: str, instance_id: str) -> InstanceMediaBinding | None:
-        try:
-            row = self._fetchone(
-                """
-                SELECT instance_id, source_kind, playback_kind, account_id, remote_file_id, remote_path,
-                       mime_type, size_bytes, duration_ms, source_payload_json, updated_at_ms
-                FROM instance_media_binding_index
-                WHERE project_id = %s AND instance_id = %s
-                """,
-                (str(project_id), str(instance_id)),
-            )
-        except Exception as exc:
-            if _is_missing_optional_table_error(exc):
-                return None
-            raise
+        row = self._fetchone(
+            """
+            SELECT instance_id, source_kind, playback_kind, account_id, remote_file_id, remote_path,
+                   mime_type, size_bytes, duration_ms, source_payload_json, updated_at_ms
+            FROM instance_media_binding_index
+            WHERE project_id = %s AND instance_id = %s
+            """,
+            (str(project_id), str(instance_id)),
+        )
         if row is None:
             return None
         return self._decode_instance_media_binding(project_id=str(project_id), row=row)
@@ -981,7 +849,7 @@ class PostgresStore(SQLiteSnapshotStore):
         )
         out: list[RecallPointId] = []
         for row in rows:
-            raw = self._recall_point_payload_from_index_row(project_id=str(project_id), row=row, legacy_payloads={})
+            raw = self._recall_point_payload_from_index_row(project_id=str(project_id), row=row)
             rp = self._decode_recall_point(project_id=str(project_id), raw=raw)
             if rp.state == RecallPointState.ACTIVE:
                 out.append(rp.recall_point_id)
@@ -999,7 +867,7 @@ class PostgresStore(SQLiteSnapshotStore):
         )
         if row is None:
             return None
-        raw = self._recall_point_payload_from_index_row(project_id=str(project_id), row=row, legacy_payloads={})
+        raw = self._recall_point_payload_from_index_row(project_id=str(project_id), row=row)
         return self._decode_recall_point(project_id=str(project_id), raw=raw)
 
     def list_recall_points(self, project_id: str) -> tuple[RecallPoint, ...]:
@@ -1016,7 +884,7 @@ class PostgresStore(SQLiteSnapshotStore):
         return tuple(
             self._decode_recall_point(
                 project_id=str(project_id),
-                raw=self._recall_point_payload_from_index_row(project_id=str(project_id), row=row, legacy_payloads={}),
+                raw=self._recall_point_payload_from_index_row(project_id=str(project_id), row=row),
             )
             for row in rows
         )
@@ -1048,7 +916,7 @@ class PostgresStore(SQLiteSnapshotStore):
         for row in rows:
             item = self._decode_recall_point(
                 project_id=str(project_id),
-                raw=self._recall_point_payload_from_index_row(project_id=str(project_id), row=row, legacy_payloads={}),
+                raw=self._recall_point_payload_from_index_row(project_id=str(project_id), row=row),
             )
             if item.state != RecallPointState.ACTIVE:
                 continue
@@ -1111,7 +979,7 @@ class PostgresStore(SQLiteSnapshotStore):
         )
         items: list[RecallPoint] = []
         for row in rows:
-            raw = self._recall_point_payload_from_index_row(project_id=str(project_id), row=row, legacy_payloads={})
+            raw = self._recall_point_payload_from_index_row(project_id=str(project_id), row=row)
             rp = self._decode_recall_point(project_id=str(project_id), raw=raw)
             if rp.state == RecallPointState.ACTIVE:
                 items.append(rp)
@@ -1356,7 +1224,7 @@ class PostgresStore(SQLiteSnapshotStore):
         recall_point_map = {
             str(row["recall_point_id"]): self._decode_recall_point(
                 project_id=str(project_id),
-                raw=self._recall_point_payload_from_index_row(project_id=str(project_id), row=row, legacy_payloads={}),
+                raw=self._recall_point_payload_from_index_row(project_id=str(project_id), row=row),
             )
             for row in recall_point_rows
         }

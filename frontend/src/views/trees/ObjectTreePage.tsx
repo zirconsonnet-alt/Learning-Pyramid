@@ -6,12 +6,13 @@ import { useNavigate, useParams } from "react-router-dom"
 import { ApiError } from "@/ui/api/http"
 import { listInstances, type Instance } from "@/ui/api/instances"
 import { listLearningObjectNodes, type LearningObjectNode } from "@/ui/api/learningObjects"
+import type { ProjectScope } from "@/ui/api/projectScope"
 import { ContentEmptyState, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import {
   isSyntheticFilesContainer,
   sortLearningObjectNodeIdsForDisplay,
 } from "@/ui/learningObjectDisplayOrder"
-import { buildCurrentProjectPath } from "@/ui/projectPaths"
+import { buildScopedProjectPath } from "@/ui/projectPaths"
 import { projectTypeRequiresLearningObjectTree } from "@/ui/projectTypes"
 import { useProjectConfig } from "@/ui/queries/workbench"
 import {
@@ -42,25 +43,26 @@ function classifyObjectNode(node: LearningObjectNode, depth: number): ObjectTree
 }
 
 export function ObjectTreePage() {
-  const { projectId } = useParams()
+  const { subjectId = "", projectId } = useParams()
   const pid = projectId ?? ""
+  const projectScope: ProjectScope | null = subjectId && pid ? { subjectId, projectId: pid } : null
   const nav = useNavigate()
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null)
   const [zoomPercent, setZoomPercent] = useState(100)
-  const projectConfigQ = useProjectConfig(pid)
+  const projectConfigQ = useProjectConfig(projectScope)
   const projectType = projectConfigQ.data?.projectType ?? "COURSE"
   const usesLearningObjectTree = projectTypeRequiresLearningObjectTree(projectType)
 
   const nodesQ = useQuery({
-    queryKey: ["learningObjectNodes", pid],
-    queryFn: () => listLearningObjectNodes(pid),
-    enabled: !!pid,
+    queryKey: ["learningObjectNodes", subjectId, pid],
+    queryFn: () => listLearningObjectNodes(projectScope as ProjectScope),
+    enabled: !!projectScope,
   })
 
   const instancesQ = useQuery({
-    queryKey: ["instances", pid],
-    queryFn: () => listInstances(pid),
-    enabled: !!pid,
+    queryKey: ["instances", subjectId, pid],
+    queryFn: () => listInstances(projectScope as ProjectScope),
+    enabled: !!projectScope,
   })
 
   const {
@@ -239,7 +241,7 @@ export function ObjectTreePage() {
             zoomPercent={zoomPercent}
             focusNodeId={hoveredNodeId}
             onNodeHover={setHoveredNodeId}
-            onNodeSelect={(node) => nav(buildCurrentProjectPath(pid, `/learning-object-nodes/${node.nodeId}`))}
+            onNodeSelect={(node) => nav(buildScopedProjectPath(subjectId, pid, `/learning-object-nodes/${node.nodeId}`))}
           />
         ) : null}
       </div>

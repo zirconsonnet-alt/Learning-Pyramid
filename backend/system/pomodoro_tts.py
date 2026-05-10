@@ -21,7 +21,7 @@ def normalize_pomodoro_tts_text(value: str | None) -> str:
 
 
 def _pomodoro_tts_voice() -> str:
-    text = str(os.getenv("PLM_POMODORO_TTS_VOICE") or "").strip()
+    text = str(os.getenv("LEARNINGPYRAMID_POMODORO_TTS_VOICE") or "").strip()
     return text or DEFAULT_POMODORO_TTS_VOICE
 
 

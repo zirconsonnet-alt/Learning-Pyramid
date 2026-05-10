@@ -47,28 +47,9 @@ export function getBaseUrl() {
   return v && v.trim() ? v.trim().replace(/\/$/, "") : "/api"
 }
 
-function currentScopedProjectPathPrefix(projectId: string) {
-  if (typeof window === "undefined") return null
-  const match = window.location.pathname.match(/^\/subjects\/([^/]+)\/projects\/([^/]+)/)
-  if (!match) return null
-  const subjectId = decodeURIComponent(match[1] ?? "")
-  const currentProjectId = decodeURIComponent(match[2] ?? "")
-  if (!subjectId || currentProjectId !== projectId) return null
-  return `/subjects/${encodeURIComponent(subjectId)}/projects/${encodeURIComponent(projectId)}`
-}
-
-export function scopedApiPath(path: string) {
-  const normalized = path.startsWith("/") ? path : `/${path}`
-  const match = normalized.match(/^\/projects\/([^/?#]+)(.*)$/)
-  if (!match) return normalized
-  const projectId = decodeURIComponent(match[1] ?? "")
-  const suffix = match[2] ?? ""
-  const scopedPrefix = currentScopedProjectPathPrefix(projectId)
-  return scopedPrefix ? `${scopedPrefix}${suffix}` : normalized
-}
-
 export function apiUrl(path: string) {
-  return `${getBaseUrl()}${scopedApiPath(path)}`
+  const normalized = path.startsWith("/") ? path : `/${path}`
+  return `${getBaseUrl()}${normalized}`
 }
 
 function resolveTimeoutMs(method: ApiRequestMethod, timeoutMs?: number) {

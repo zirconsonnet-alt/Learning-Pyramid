@@ -1,6 +1,7 @@
 import { z } from "zod"
 
 import { apiRequest } from "@/ui/api/http"
+import { projectApiPath, type ProjectScope } from "@/ui/api/projectScope"
 
 export const SubjectSchema = z.object({
   subjectId: z.string(),
@@ -101,16 +102,9 @@ export function deleteSubjectMaterial(subjectId: string, materialId: string) {
   })
 }
 
-export function getProjectSubjectContext(projectId: string) {
+export function getProjectSubjectContext(scope: ProjectScope) {
   return apiRequest({
-    path: `/projects/${projectId}/subject-context`,
-    responseSchema: SubjectContextSchema,
-  })
-}
-
-export function getScopedProjectSubjectContext(subjectId: string, projectId: string) {
-  return apiRequest({
-    path: `/subjects/${subjectId}/projects/${projectId}/subject-context`,
+    path: projectApiPath(scope, "/subject-context"),
     responseSchema: SubjectContextSchema,
   })
 }

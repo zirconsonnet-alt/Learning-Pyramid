@@ -151,11 +151,11 @@ def _error_from_response(response: requests.Response, *, default_message: str) -
 
 class BaiduNetdiskClient:
     def __init__(self) -> None:
-        self.enabled = _env_bool("PLM_ENABLE_BAIDU_NETDISK", False)
-        self.client_id = _env_text("PLM_BAIDU_NETDISK_CLIENT_ID")
-        self.client_secret = _env_text("PLM_BAIDU_NETDISK_CLIENT_SECRET")
-        self.redirect_uri = _env_text("PLM_BAIDU_NETDISK_REDIRECT_URI")
-        self.scope = _env_text("PLM_BAIDU_NETDISK_SCOPE") or DEFAULT_BAIDU_NETDISK_SCOPE
+        self.enabled = _env_bool("LEARNINGPYRAMID_ENABLE_BAIDU_NETDISK", False)
+        self.client_id = _env_text("LEARNINGPYRAMID_BAIDU_NETDISK_CLIENT_ID")
+        self.client_secret = _env_text("LEARNINGPYRAMID_BAIDU_NETDISK_CLIENT_SECRET")
+        self.redirect_uri = _env_text("LEARNINGPYRAMID_BAIDU_NETDISK_REDIRECT_URI")
+        self.scope = _env_text("LEARNINGPYRAMID_BAIDU_NETDISK_SCOPE") or DEFAULT_BAIDU_NETDISK_SCOPE
         self.timeout_sec = 30
 
     def require_enabled(self) -> None:

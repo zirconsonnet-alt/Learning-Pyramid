@@ -1,5 +1,5 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useParams } from "react-router-dom"
+import { useMemo } from "react"
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import {
   createSubject,
@@ -9,11 +9,11 @@ import {
   editSubject,
   editSubjectMaterial,
   getProjectSubjectContext,
-  getScopedProjectSubjectContext,
   listSubjectMaterials,
   listSubjects,
   type StudyMaterialType,
 } from "@/ui/api/subjects"
+import type { ProjectScope } from "@/ui/api/projectScope"
 import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
 import {
   getVirtualStudyReviewSubjectContext,
@@ -21,6 +21,53 @@ import {
 
 export function useSubjects(enabled = true) {
   return useQuery({ queryKey: ["subjects"], queryFn: listSubjects, enabled })
+}
+
+export type SubjectProjectCatalogItem = {
+  subjectId: string
+  subjectTitle: string
+  projectId: string
+  title: string
+  materialId: string
+  materialType: StudyMaterialType
+  createdAt: string
+}
+
+export function useSubjectProjectCatalog(enabled = true) {
+  const subjectsQ = useSubjects(enabled)
+  const materialQs = useQueries({
+    queries: (subjectsQ.data ?? []).map((subject) => ({
+      queryKey: ["subjectMaterials", subject.subjectId],
+      queryFn: () => listSubjectMaterials(subject.subjectId),
+      enabled: enabled && !subjectsQ.isLoading && !subjectsQ.error,
+      staleTime: 60_000,
+    })),
+  })
+  const projects = useMemo<SubjectProjectCatalogItem[]>(
+    () =>
+      (subjectsQ.data ?? []).flatMap((subject, index) =>
+        (materialQs[index]?.data ?? [])
+          .filter((material) => Boolean(material.projectId))
+          .map((material) => ({
+            subjectId: subject.subjectId,
+            subjectTitle: subject.title,
+            projectId: material.projectId as string,
+            title: material.title,
+            materialId: material.materialId,
+            materialType: material.materialType,
+            createdAt: material.createdAt,
+          })),
+      ),
+    [materialQs, subjectsQ.data],
+  )
+
+  return {
+    subjectsQ,
+    materialQs,
+    projects,
+    isLoading: subjectsQ.isLoading || materialQs.some((query) => query.isLoading),
+    error: subjectsQ.error ?? materialQs.find((query) => query.error)?.error ?? null,
+  }
 }
 
 export function useCreateSubject() {
@@ -73,29 +120,28 @@ export function useSubjectMaterials(subjectId: string) {
   })
 }
 
-export function useSubjectContext(projectId: string, enabled = true) {
-  const { subjectId = "" } = useParams()
+export function useSubjectContext(scope: ProjectScope | null, enabled = true) {
+  const projectId = scope?.projectId ?? ""
   return useQuery({
-    queryKey: subjectId ? ["subjectContext", subjectId, projectId] : ["subjectContext", projectId],
+    queryKey: ["subjectContext", scope?.subjectId ?? "", projectId],
     queryFn: () =>
       isVirtualStudyReviewProjectId(projectId)
         ? getVirtualStudyReviewSubjectContext()
-        : subjectId
-          ? getScopedProjectSubjectContext(subjectId, projectId)
-          : getProjectSubjectContext(projectId),
-    enabled: enabled && !!projectId,
+        : getProjectSubjectContext(scope as ProjectScope),
+    enabled: enabled && !!scope?.subjectId && !!projectId,
     staleTime: 30_000,
   })
 }
 
 export function useScopedSubjectContext(subjectId: string, projectId: string, enabled = true) {
+  const scope = subjectId && projectId ? { subjectId, projectId } : null
   return useQuery({
     queryKey: ["subjectContext", subjectId, projectId],
     queryFn: () =>
       isVirtualStudyReviewProjectId(projectId)
         ? getVirtualStudyReviewSubjectContext()
-        : getScopedProjectSubjectContext(subjectId, projectId),
-    enabled: enabled && !!subjectId && !!projectId,
+        : getProjectSubjectContext(scope as ProjectScope),
+    enabled: enabled && !!scope,
     staleTime: 30_000,
   })
 }

@@ -1,6 +1,4 @@
 from functools import lru_cache
-from pathlib import Path
-
 from fastapi import Request
 
 from adapter.auth import require_request_auth_user
@@ -18,8 +16,7 @@ from backend.system.sql_backend import create_persist_store
 
 @lru_cache(maxsize=1)
 def get_api() -> SystemAPI:
-    project_root = Path(__file__).resolve().parent.parent
-    persist_store = create_persist_store(legacy_root=project_root)
+    persist_store = create_persist_store()
     sys = InMemorySystem(persist_store=persist_store)
     return SystemAPI(sys)
 

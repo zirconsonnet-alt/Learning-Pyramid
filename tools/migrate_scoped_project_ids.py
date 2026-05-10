@@ -81,7 +81,7 @@ def build_migration_report(store_path: str | Path, *, mode: str = "dry-run") -> 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--store", default=".plm_store.json")
+    parser.add_argument("--store", default="learningpyramid_store.json")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--report", required=True)

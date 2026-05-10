@@ -44,7 +44,7 @@ def _err(
 
 
 def _expose_internal_error_details() -> bool:
-    return (os.getenv("PLM_DEBUG_ERRORS") or "").strip().lower() in {"1", "true", "yes", "on"}
+    return (os.getenv("LEARNINGPYRAMID_DEBUG_ERRORS") or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _http_error_code(status_code: int) -> str:
@@ -119,8 +119,8 @@ def register_exception_handlers(app: FastAPI) -> None:
     app.add_exception_handler(DirectoryStructureCorruptedError, _plm_handler("DIRECTORY_STRUCTURE_CORRUPTED"))
 
     @app.exception_handler(PLMError)
-    async def _handle_plm_fallback(request: Request, exc: PLMError) -> JSONResponse:
-        return _err(code="PLM_ERROR", message=str(exc), status_code=400, request_id=_request_id(request))
+    async def _handle_plm_error(request: Request, exc: PLMError) -> JSONResponse:
+        return _err(code="LEARNINGPYRAMID_ERROR", message=str(exc), status_code=400, request_id=_request_id(request))
 
     @app.exception_handler(Exception)
     async def _handle_unknown(request: Request, exc: Exception) -> JSONResponse:

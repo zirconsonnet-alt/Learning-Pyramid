@@ -46,10 +46,10 @@ set -euo pipefail
 cd $remoteAppDir
 chmod +x tools/apply_postgres_optional_tables_hotfix.sh
 
-if grep -q '^PLM_ENABLE_BAIDU_NETDISK=' .env; then
-  sed -i 's/^PLM_ENABLE_BAIDU_NETDISK=.*/PLM_ENABLE_BAIDU_NETDISK=false/' .env
+if grep -q '^LEARNINGPYRAMID_ENABLE_BAIDU_NETDISK=' .env; then
+  sed -i 's/^LEARNINGPYRAMID_ENABLE_BAIDU_NETDISK=.*/LEARNINGPYRAMID_ENABLE_BAIDU_NETDISK=false/' .env
 else
-  printf '\nPLM_ENABLE_BAIDU_NETDISK=false\n' >> .env
+  printf '\nLEARNINGPYRAMID_ENABLE_BAIDU_NETDISK=false\n' >> .env
 fi
 
 ./tools/apply_postgres_optional_tables_hotfix.sh

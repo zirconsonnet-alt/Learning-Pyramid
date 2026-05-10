@@ -12,7 +12,7 @@ import urllib.error
 import urllib.request
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterator, Optional, Sequence, Tuple
@@ -105,6 +105,7 @@ from backend.models.types import (
     RecallPointId,
     ReviewChainId,
     ReviewTaskId,
+    Timestamp,
     id_canonical_text,
     id_from_rel_path,
     normalize_material_id_to_purepath,
@@ -143,8 +144,10 @@ from backend.system.data_safety import collect_data_safety_status, collect_post_
 from backend.system.inmemory_system import (
     DEFAULT_AGGREGATION_K_NODE,
     DEFAULT_AGGREGATION_K_POINT,
+    ConcurrencyConflictError,
     InMemorySystem,
     MutationSession,
+    ProjectStore,
     SessionState,
 )
 
@@ -167,13 +170,13 @@ def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
         return max(int(default), minimum)
 
 
-MAX_ASR_UPLOAD_BYTES: int = _env_int("PLM_ASR_UPLOAD_MAX_BYTES", 25 * 1024 * 1024)
-ASR_SERVER_FFMPEG_MAX_CONCURRENCY: int = _env_int("PLM_ASR_SERVER_FFMPEG_MAX_CONCURRENCY", 2)
-ASR_SERVER_FFMPEG_ACQUIRE_TIMEOUT_SEC: int = _env_int("PLM_ASR_SERVER_FFMPEG_ACQUIRE_TIMEOUT_SEC", 15)
-ASR_SERVER_FFMPEG_EXEC_TIMEOUT_SEC: int = _env_int("PLM_ASR_SERVER_FFMPEG_EXEC_TIMEOUT_SEC", 120)
-ASR_PUBLIC_BRIDGE_TTL_SEC: int = _env_int("PLM_ASR_PUBLIC_BRIDGE_TTL_SEC", 15 * 60)
-DASHSCOPE_ASR_TASK_TIMEOUT_SEC: int = _env_int("PLM_DASHSCOPE_ASR_TASK_TIMEOUT_SEC", 10 * 60)
-DASHSCOPE_ASR_TASK_POLL_INTERVAL_SEC: int = _env_int("PLM_DASHSCOPE_ASR_TASK_POLL_INTERVAL_SEC", 2)
+MAX_ASR_UPLOAD_BYTES: int = _env_int("LEARNINGPYRAMID_ASR_UPLOAD_MAX_BYTES", 25 * 1024 * 1024)
+ASR_SERVER_FFMPEG_MAX_CONCURRENCY: int = _env_int("LEARNINGPYRAMID_ASR_SERVER_FFMPEG_MAX_CONCURRENCY", 2)
+ASR_SERVER_FFMPEG_ACQUIRE_TIMEOUT_SEC: int = _env_int("LEARNINGPYRAMID_ASR_SERVER_FFMPEG_ACQUIRE_TIMEOUT_SEC", 15)
+ASR_SERVER_FFMPEG_EXEC_TIMEOUT_SEC: int = _env_int("LEARNINGPYRAMID_ASR_SERVER_FFMPEG_EXEC_TIMEOUT_SEC", 120)
+ASR_PUBLIC_BRIDGE_TTL_SEC: int = _env_int("LEARNINGPYRAMID_ASR_PUBLIC_BRIDGE_TTL_SEC", 15 * 60)
+DASHSCOPE_ASR_TASK_TIMEOUT_SEC: int = _env_int("LEARNINGPYRAMID_DASHSCOPE_ASR_TASK_TIMEOUT_SEC", 10 * 60)
+DASHSCOPE_ASR_TASK_POLL_INTERVAL_SEC: int = _env_int("LEARNINGPYRAMID_DASHSCOPE_ASR_TASK_POLL_INTERVAL_SEC", 2)
 _ASR_SERVER_FFMPEG_SEMAPHORE = threading.BoundedSemaphore(ASR_SERVER_FFMPEG_MAX_CONCURRENCY)
 
 _MEMORY_MASTERY_FLOOR = 0.03
@@ -187,6 +190,14 @@ _MEMORY_MIN_HALFLIFE_DAYS = 0.1
 _MEMORY_MAX_HALFLIFE_DAYS = 365.0
 _MEMORY_INITIAL_MASTERY = 0.55
 _MEMORY_INITIAL_HALFLIFE_DAYS = 1.0
+
+
+@dataclass(frozen=True, slots=True)
+class InstanceMediaSummary:
+    instance: Instance
+    media_source_kind: str
+    playback_kind: str
+    duration_ms: int | None
 
 
 def _is_resolvable_course_anchor_position(position: str) -> bool:
@@ -230,6 +241,12 @@ class SystemAPI:
         store = getattr(self.sys, "_persist_store", None)
         return store if isinstance(store, SqlStore) else None
 
+    def get_store_health(self) -> dict[str, object]:
+        store = getattr(self.sys, "_persist_store", None)
+        if store is None or not hasattr(store, "healthcheck"):
+            return {"ok": False, "error": "Persistence store is not initialized"}
+        return dict(store.healthcheck())
+
     def _instance_media_service(self) -> InstanceMediaService:
         return InstanceMediaService(
             sys=self.sys,
@@ -240,7 +257,6 @@ class SystemAPI:
     def _reload_sql_state(self) -> None:
         self.sys.g.projects.clear()
         self.sys._load_persisted()
-        self.sys._ensure_system_project_id_seq()
 
     def get_data_safety_status(self) -> dict[str, object]:
         return collect_data_safety_status(environment=current_runtime_features().app_mode).to_api_dict()
@@ -359,12 +375,80 @@ class SystemAPI:
         initial_project_type: ProjectType,
         project_id: ProjectId | None = None,
     ) -> ProjectId:
+        pid, project_store = self._build_project_store_for_create_project(
+            title,
+            project_root,
+            initial_source_kind=initial_source_kind,
+            initial_project_type=initial_project_type,
+            project_id=project_id,
+        )
+        project = project_store.project
+        storage_config = project_store.project_storage_config
+        material_source_binding = project_store.project_material_source_binding
+        project_config = project_store.project_config
+        review_task_queue = project_store.review_task_queue
+        if (
+            project is None
+            or storage_config is None
+            or material_source_binding is None
+            or project_config is None
+            or review_task_queue is None
+        ):
+            raise PreconditionFailure("project bootstrap incomplete")
+
+        updated_at = self._sql_updated_at_text()
+        with sql_store.begin_unit_of_work(project_id=str(pid)) as uow:
+            uow.system_state.upsert(
+                uow.session,
+                SystemStateRecord(
+                    schema_version=SCHEMA_VERSION,
+                    idgen_counters=dict(self.idgen._counters),
+                    updated_at=updated_at,
+                ),
+            )
+            uow.project_lifecycle.create_bootstrap(
+                uow.session,
+                project=project,
+                project_snapshot=encode_project_shell_payload(
+                    project=project,
+                    project_storage_config=storage_config,
+                    project_material_source_binding=material_source_binding,
+                    project_config=project_config,
+                ),
+                project_storage_config=storage_config,
+                project_material_source_binding=material_source_binding,
+                project_config=project_config,
+                review_task_queue=review_task_queue,
+                layers=tuple(project_store.layers.values()),
+                aggregation_queues=tuple(project_store.aggregation_queues.values()),
+                audit_events=tuple(project_store.audit_log_events.values()),
+                updated_at=updated_at,
+            )
+
+        self._reload_sql_state()
+        return pid
+
+    def _build_project_store_for_create_project(
+        self,
+        title: str,
+        project_root: str | None,
+        *,
+        initial_source_kind: MaterialSourceKind,
+        initial_project_type: ProjectType,
+        project_id: ProjectId | None = None,
+        subject_id: ProjectId | None = None,
+        scoped_project_id: ProjectId | None = None,
+        subject_material_link: SubjectMaterialLink | None = None,
+    ) -> tuple[ProjectId, ProjectStore]:
         if not isinstance(initial_source_kind, MaterialSourceKind):
             raise PreconditionFailure("create_project.initial_source_kind must be MaterialSourceKind")
         if not isinstance(initial_project_type, ProjectType):
             raise PreconditionFailure("create_project.initial_project_type must be ProjectType")
         if initial_project_type in {ProjectType.BOOK, ProjectType.LOOSE_POINTS} and initial_source_kind != MaterialSourceKind.MANUAL:
             raise PreconditionFailure("create_project for BOOK/LOOSE_POINTS must use MANUAL source kind")
+        if (subject_id is None) != (scoped_project_id is None):
+            raise PreconditionFailure("scoped project identity requires both subject_id and scoped_project_id")
+
         pid = project_id or self.idgen.new_project_id()
         resolved_project_root = project_root
         if resolved_project_root is None:
@@ -377,12 +461,14 @@ class SystemAPI:
             state=ProjectState.ACTIVE,
             created_at=now_utc_ms(),
             deleted_at=None,
+            subject_id=subject_id,
+            scoped_project_id=scoped_project_id,
         )
         project.validate_write_time()
 
         review_task_queue = ReviewTaskQueue(
             project_id=pid,
-            queue_id="GLOBAL_QUEUE",
+            queue_id=GLOBAL_QUEUE,
             review_task_ids=tuple(),
             head_index=0,
         )
@@ -432,36 +518,17 @@ class SystemAPI:
         )
         audit_event.validate_write_time()
 
-        updated_at = self._sql_updated_at_text()
-        with sql_store.begin_unit_of_work(project_id=str(pid)) as uow:
-            uow.system_state.upsert(
-                uow.session,
-                SystemStateRecord(
-                    schema_version=SCHEMA_VERSION,
-                    idgen_counters=dict(self.idgen._counters),
-                    updated_at=updated_at,
-                ),
-            )
-            uow.project_lifecycle.create_bootstrap(
-                uow.session,
-                project=project,
-                project_snapshot=encode_project_shell_payload(
-                    project=project,
-                    project_storage_config=storage_config,
-                    project_material_source_binding=material_source_binding,
-                    project_config=project_config,
-                ),
-                project_storage_config=storage_config,
-                project_config=project_config,
-                review_task_queue=review_task_queue,
-                layers=(layer0,),
-                aggregation_queues=(aggregation_queue,),
-                audit_events=(audit_event,),
-                updated_at=updated_at,
-            )
-
-        self._reload_sql_state()
-        return pid
+        project_store = ProjectStore(project=project)
+        project_store.project_storage_config = storage_config
+        project_store.project_material_source_binding = material_source_binding
+        project_store.project_config = project_config
+        project_store.subject_material_link = subject_material_link
+        project_store.review_task_queue = review_task_queue
+        project_store.layers = {id_canonical_text(layer0.layer_id): layer0}
+        project_store.layers_by_index = {0: id_canonical_text(layer0.layer_id)}
+        project_store.aggregation_queues = {0: aggregation_queue}
+        project_store.audit_log_events = {id_canonical_text(audit_event.event_id): audit_event}
+        return pid, project_store
 
     def _delete_project_sql_direct(self, sql_store: SqlStore, project_id: ProjectId) -> None:
         project_store = self.sys.g.projects.get(str(project_id))
@@ -479,7 +546,6 @@ class SystemAPI:
             deleted_at=deleted_at,
             subject_id=project_store.project.subject_id,
             scoped_project_id=project_store.project.scoped_project_id,
-            legacy_global_project_id=project_store.project.legacy_global_project_id,
             project_sequence=project_store.project.project_sequence,
         )
         deleted_project.validate_write_time()
@@ -541,7 +607,9 @@ class SystemAPI:
                     project_state=str(project.state.value),
                     created_at_ms=encode_timestamp_ms(project.created_at),
                     deleted_at_ms=None if project.deleted_at is None else encode_timestamp_ms(project.deleted_at),
-                    snapshot=payload,
+                    subject_id=None if project.subject_id is None else str(project.subject_id),
+                    scoped_project_id=None if project.scoped_project_id is None else str(project.scoped_project_id),
+                    project_sequence=int(project.project_sequence),
                     updated_at=updated_at,
                 ),
             )
@@ -549,164 +617,6 @@ class SystemAPI:
             if refresh_project_indexes is None:
                 raise RuntimeError("SQL store does not support project entity index refresh")
             refresh_project_indexes(uow.connection, project_id=str(project_id), project_payload=payload)
-
-    @staticmethod
-    def _retarget_project_id(value: object, project_id: ProjectId) -> object:
-        if hasattr(value, "project_id"):
-            return replace(value, project_id=project_id)
-        return value
-
-    def _replace_project_scoped_ids(self, items: dict[str, object], project_id: ProjectId) -> dict[str, object]:
-        return {key: self._retarget_project_id(value, project_id) for key, value in items.items()}
-
-    def _retarget_subject_activity_audit_events(
-        self,
-        items: dict[str, AuditLogEvent],
-        project_id: ProjectId,
-    ) -> dict[str, AuditLogEvent]:
-        return {
-            key: replace(value, project_id=project_id)
-            for key, value in items.items()
-            if value.kind not in {AuditEventKind.PROJECT_CREATED, AuditEventKind.PROJECT_DELETED}
-        }
-
-    @staticmethod
-    def _keep_subject_lifecycle_audit_events(items: dict[str, AuditLogEvent]) -> dict[str, AuditLogEvent]:
-        return {
-            key: value
-            for key, value in items.items()
-            if value.kind in {AuditEventKind.PROJECT_CREATED, AuditEventKind.PROJECT_DELETED}
-        }
-
-    @staticmethod
-    def _has_non_bootstrap_audit_events(project_store: object) -> bool:
-        for event in getattr(project_store, "audit_log_events", {}).values():
-            if getattr(event, "kind", None) not in {AuditEventKind.PROJECT_CREATED, AuditEventKind.PROJECT_DELETED}:
-                return True
-        return False
-
-    @staticmethod
-    def _has_migratable_project_content(project_store: object) -> bool:
-        content_fields = (
-            "material_allowlist",
-            "media_assets",
-            "instances",
-            "instance_media_bindings",
-            "video_watch_progress",
-            "learning_object_nodes",
-            "recall_points",
-            "recall_point_review_records",
-            "learning_tasks",
-            "learning_task_nodes",
-            "range_snapshots",
-            "asr_artifacts",
-            "review_tasks",
-            "convergences",
-            "review_chains",
-            "entry_regs",
-            "aggregation_events",
-        )
-        for field_name in content_fields:
-            value = getattr(project_store, field_name, None)
-            if isinstance(value, dict) and value:
-                return True
-            if value is not None and not isinstance(value, dict):
-                return True
-        return SystemAPI._has_non_bootstrap_audit_events(project_store)
-
-    def _is_legacy_bare_subject_project(self, project_id: ProjectId) -> bool:
-        project_store = self._get_project_store(project_id)
-        project = project_store.project
-        if project is None or project.state != ProjectState.ACTIVE:
-            return False
-        if self._get_subject_material_link(project_id) is not None:
-            return False
-        if getattr(project_store, "study_materials_initialized", False):
-            return False
-        if getattr(project_store, "study_materials", {}):
-            return False
-        return self._has_migratable_project_content(project_store)
-
-    def _move_legacy_subject_root_content_to_material_project(
-        self,
-        *,
-        subject_id: ProjectId,
-        material_project_id: ProjectId,
-    ) -> None:
-        subject_store = self._get_project_store(subject_id)
-        child_store = self._get_project_store(material_project_id)
-
-        if subject_store.project_storage_config is not None:
-            child_store.project_storage_config = replace(subject_store.project_storage_config, project_id=material_project_id)
-        if subject_store.project_material_source_binding is not None:
-            child_store.project_material_source_binding = replace(
-                subject_store.project_material_source_binding,
-                project_id=material_project_id,
-            )
-        if subject_store.project_config is not None:
-            child_store.project_config = replace(subject_store.project_config, project_id=material_project_id)
-
-        child_store.material_allowlist = (
-            None if subject_store.material_allowlist is None else replace(subject_store.material_allowlist, project_id=material_project_id)
-        )
-        child_store.audit_log_events.update(self._retarget_subject_activity_audit_events(subject_store.audit_log_events, material_project_id))
-        child_store.media_assets = self._replace_project_scoped_ids(subject_store.media_assets, material_project_id)  # type: ignore[assignment]
-        child_store.instances = self._replace_project_scoped_ids(subject_store.instances, material_project_id)  # type: ignore[assignment]
-        child_store.instance_media_bindings = self._replace_project_scoped_ids(subject_store.instance_media_bindings, material_project_id)  # type: ignore[assignment]
-        child_store.video_watch_progress = self._replace_project_scoped_ids(subject_store.video_watch_progress, material_project_id)  # type: ignore[assignment]
-        child_store.learning_object_nodes = self._replace_project_scoped_ids(subject_store.learning_object_nodes, material_project_id)  # type: ignore[assignment]
-        child_store.recall_points = self._replace_project_scoped_ids(subject_store.recall_points, material_project_id)  # type: ignore[assignment]
-        child_store.recall_point_review_records = self._replace_project_scoped_ids(subject_store.recall_point_review_records, material_project_id)  # type: ignore[assignment]
-        child_store.learning_tasks = self._replace_project_scoped_ids(subject_store.learning_tasks, material_project_id)  # type: ignore[assignment]
-        child_store.learning_task_nodes = self._replace_project_scoped_ids(subject_store.learning_task_nodes, material_project_id)  # type: ignore[assignment]
-        child_store.range_snapshots = self._replace_project_scoped_ids(subject_store.range_snapshots, material_project_id)  # type: ignore[assignment]
-        child_store.asr_artifacts = self._replace_project_scoped_ids(subject_store.asr_artifacts, material_project_id)  # type: ignore[assignment]
-        child_store.review_tasks = self._replace_project_scoped_ids(subject_store.review_tasks, material_project_id)  # type: ignore[assignment]
-        child_store.convergences = self._replace_project_scoped_ids(subject_store.convergences, material_project_id)  # type: ignore[assignment]
-        child_store.review_chains = self._replace_project_scoped_ids(subject_store.review_chains, material_project_id)  # type: ignore[assignment]
-        child_store.review_task_queue = (
-            None if subject_store.review_task_queue is None else replace(subject_store.review_task_queue, project_id=material_project_id)
-        )
-        child_store.layers = self._replace_project_scoped_ids(subject_store.layers, material_project_id)  # type: ignore[assignment]
-        child_store.layers_by_index = dict(subject_store.layers_by_index)
-        child_store.entry_regs = self._replace_project_scoped_ids(subject_store.entry_regs, material_project_id)  # type: ignore[assignment]
-        child_store.aggregation_queues = self._replace_project_scoped_ids(subject_store.aggregation_queues, material_project_id)  # type: ignore[assignment]
-        child_store.aggregation_events = self._replace_project_scoped_ids(subject_store.aggregation_events, material_project_id)  # type: ignore[assignment]
-
-        subject_store.material_allowlist = None
-        subject_store.audit_log_events = self._keep_subject_lifecycle_audit_events(subject_store.audit_log_events)
-        subject_store.media_assets = {}
-        subject_store.instances = {}
-        subject_store.instance_media_bindings = {}
-        subject_store.video_watch_progress = {}
-        subject_store.learning_object_nodes = {}
-        subject_store.recall_points = {}
-        subject_store.recall_point_review_records = {}
-        subject_store.learning_tasks = {}
-        subject_store.learning_task_nodes = {}
-        subject_store.range_snapshots = {}
-        subject_store.asr_artifacts = {}
-        subject_store.review_tasks = {}
-        subject_store.convergences = {}
-        subject_store.review_chains = {}
-        subject_store.review_task_queue = ReviewTaskQueue(
-            project_id=subject_id,
-            queue_id=GLOBAL_QUEUE,
-            review_task_ids=tuple(),
-            head_index=0,
-        )
-        subject_store.layers = {
-            layer_key: replace(layer, orchestrator_managed_review_chain_ids=tuple(), pending_roll_up_parent_node_id=None)
-            for layer_key, layer in subject_store.layers.items()
-        }
-        subject_store.entry_regs = {}
-        subject_store.aggregation_queues = {
-            layer_index: replace(queue, node_ids=tuple(), head_index=0)
-            for layer_index, queue in subject_store.aggregation_queues.items()
-        }
-        subject_store.aggregation_events = {}
-        self._startup_fs_sync_done.discard(id_canonical_text(subject_id))
-        self._startup_fs_sync_done.discard(id_canonical_text(material_project_id))
 
     def _append_audit_event(
         self,
@@ -809,7 +719,7 @@ class SystemAPI:
         http_cfg = current_http_runtime_config()
         public_origin = str(http_cfg.public_origin or "").strip().rstrip("/")
         if not public_origin:
-            raise PreconditionFailure("DashScope native ASR requires PLM_PUBLIC_ORIGIN to point to the external site origin")
+            raise PreconditionFailure("DashScope native ASR requires LEARNINGPYRAMID_PUBLIC_ORIGIN to point to the external site origin")
         if not file_path.exists() or not file_path.is_file():
             raise PreconditionFailure("DashScope native ASR bridge file is unavailable")
 
@@ -1610,12 +1520,12 @@ class SystemAPI:
 
     @staticmethod
     def _default_global_llm_base_url() -> str:
-        value = str(os.getenv("PLM_DEFAULT_LLM_BASE_URL") or DEFAULT_GLOBAL_LLM_BASE_URL).strip()
+        value = str(os.getenv("LEARNINGPYRAMID_DEFAULT_LLM_BASE_URL") or DEFAULT_GLOBAL_LLM_BASE_URL).strip()
         return value or DEFAULT_GLOBAL_LLM_BASE_URL
 
     @staticmethod
     def _default_global_llm_model_name() -> str:
-        value = str(os.getenv("PLM_DEFAULT_LLM_MODEL") or DEFAULT_GLOBAL_LLM_MODEL_NAME).strip()
+        value = str(os.getenv("LEARNINGPYRAMID_DEFAULT_LLM_MODEL") or DEFAULT_GLOBAL_LLM_MODEL_NAME).strip()
         return value or DEFAULT_GLOBAL_LLM_MODEL_NAME
 
     @staticmethod
@@ -2115,6 +2025,80 @@ class SystemAPI:
             raise NotFound(project_id)
         return project_store
 
+    @staticmethod
+    def _copy_project_store(project_store: ProjectStore) -> ProjectStore:
+        copied = ProjectStore(project=project_store.project)
+        copied.project_storage_config = project_store.project_storage_config
+        copied.project_material_source_binding = project_store.project_material_source_binding
+        copied.project_config = project_store.project_config
+        copied.material_allowlist = project_store.material_allowlist
+        copied.study_materials = dict(project_store.study_materials)
+        copied.study_materials_initialized = bool(project_store.study_materials_initialized)
+        copied.subject_material_link = project_store.subject_material_link
+        copied.media_assets = dict(project_store.media_assets)
+        copied.audit_log_events = dict(project_store.audit_log_events)
+        copied.instances = dict(project_store.instances)
+        copied.instance_media_bindings = dict(project_store.instance_media_bindings)
+        copied.video_watch_progress = dict(project_store.video_watch_progress)
+        copied.learning_object_nodes = dict(project_store.learning_object_nodes)
+        copied.recall_points = dict(project_store.recall_points)
+        copied.recall_point_review_records = dict(project_store.recall_point_review_records)
+        copied.learning_tasks = dict(project_store.learning_tasks)
+        copied.learning_task_nodes = dict(project_store.learning_task_nodes)
+        copied.range_snapshots = dict(project_store.range_snapshots)
+        copied.asr_artifacts = dict(project_store.asr_artifacts)
+        copied.review_tasks = dict(project_store.review_tasks)
+        copied.convergences = dict(project_store.convergences)
+        copied.review_chains = dict(project_store.review_chains)
+        copied.review_task_queue = project_store.review_task_queue
+        copied.layers = dict(project_store.layers)
+        copied.layers_by_index = dict(project_store.layers_by_index)
+        copied.entry_regs = dict(project_store.entry_regs)
+        copied.aggregation_queues = dict(project_store.aggregation_queues)
+        copied.aggregation_events = dict(project_store.aggregation_events)
+        return copied
+
+    def _new_audit_event(
+        self,
+        project_id: ProjectId,
+        *,
+        kind: AuditEventKind,
+        api_name: str,
+        payload: dict[str, object],
+        occurred_at: Timestamp | None = None,
+    ) -> AuditLogEvent:
+        event = AuditLogEvent(
+            project_id=project_id,
+            event_id=self.idgen.new_audit_event_id(project_id),
+            occurred_at=occurred_at or now_utc_ms(),
+            kind=kind,
+            api_name=api_name,
+            result=AuditResultCode.OK,
+            payload=json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
+        )
+        event.validate_write_time()
+        return event
+
+    def _deleted_project_store(self, project_store: ProjectStore) -> ProjectStore:
+        project = project_store.project
+        if project is None:
+            raise NotFound("project")
+        if project.state != ProjectState.ACTIVE:
+            raise PreconditionFailure("Project must be ACTIVE to delete")
+        deleted_at = now_utc_ms()
+        deleted_project = replace(project, state=ProjectState.DELETED, deleted_at=deleted_at)
+        deleted_project.validate_write_time()
+        next_store = ProjectStore(project=deleted_project)
+        event = self._new_audit_event(
+            project.project_id,
+            kind=AuditEventKind.PROJECT_DELETED,
+            api_name="delete_project",
+            payload={"projectId": str(project.project_id)},
+            occurred_at=deleted_at,
+        )
+        next_store.audit_log_events = {id_canonical_text(event.event_id): event}
+        return next_store
+
     def _get_subject_material_link(self, project_id: ProjectId) -> SubjectMaterialLink | None:
         project_store = self._get_project_store(project_id)
         return getattr(project_store, "subject_material_link", None)
@@ -2144,11 +2128,8 @@ class SystemAPI:
         return self._scoped_project_id_for_sequence(next_sequence), next_sequence
 
     def resolve_scoped_project_internal_key(self, subject_id: ProjectId, project_id: ProjectId) -> ProjectId:
-        resolved_subject_id = self._resolve_subject_id(subject_id)
-        if id_canonical_text(resolved_subject_id) != id_canonical_text(subject_id):
-            raise PreconditionFailure("subject id is not a subject")
-        self._get_active_project_metadata(resolved_subject_id)
-        for material in self._list_subject_materials_from_store(resolved_subject_id):
+        self._require_subject_root_project(subject_id)
+        for material in self._list_subject_materials_from_store(subject_id):
             if material.project_id is None:
                 continue
             if id_canonical_text(material.project_id) != id_canonical_text(project_id):
@@ -2159,11 +2140,10 @@ class SystemAPI:
             return internal_key
         raise NotFound(project_id)
 
-    def get_scoped_subject_context(self, subject_id: ProjectId, project_id: ProjectId) -> dict[str, object]:
-        internal_project_key = self.resolve_scoped_project_internal_key(subject_id, project_id)
-        payload = self.get_subject_context(internal_project_key)
-        payload["current_project_id"] = project_id
-        payload["current_internal_project_key"] = internal_project_key
+    def get_scoped_subject_context_for_project(self, project_id: ProjectId, *, public_project_id: ProjectId) -> dict[str, object]:
+        payload = self.get_subject_context(project_id)
+        payload["current_project_id"] = public_project_id
+        payload["current_internal_project_key"] = project_id
         return payload
 
     def _resolve_subject_id(self, project_id: ProjectId) -> ProjectId:
@@ -2187,23 +2167,10 @@ class SystemAPI:
         if self.is_subject_root_project(project_id):
             raise PreconditionFailure("subject id is not a project id")
 
-    def migrate_all_subject_material_projects(self) -> Tuple[ProjectId, ...]:
-        sql_store = self._sql_store()
-        if sql_store is not None:
-            candidates = tuple(sql_store.list_projects_metadata(active_only=True))
-        else:
-            candidates = tuple(
-                ps.project
-                for ps in self.sys.g.projects.values()
-                if ps.project is not None and ps.project.state == ProjectState.ACTIVE
-            )
-        migrated_subject_ids: list[ProjectId] = []
-        for project in candidates:
-            if not self.is_subject_root_project(project.project_id) and not self._is_legacy_bare_subject_project(project.project_id):
-                continue
-            self._ensure_subject_materials_are_independent(project.project_id)
-            migrated_subject_ids.append(project.project_id)
-        return tuple(migrated_subject_ids)
+    def _require_subject_root_project(self, project_id: ProjectId) -> None:
+        self._get_active_project_metadata(project_id)
+        if not self.is_subject_root_project(project_id):
+            raise PreconditionFailure("project id is not a subject")
 
     def _list_subject_materials_from_store(self, subject_id: ProjectId) -> Tuple[StudyMaterial, ...]:
         project_store = self._get_project_store(subject_id)
@@ -2220,113 +2187,6 @@ class SystemAPI:
             )
         return tuple()
 
-    def _legacy_subject_root_materials(self, subject_id: ProjectId) -> tuple[StudyMaterial, ...]:
-        project_store = self._get_project_store(subject_id)
-        study_materials = tuple(getattr(project_store, "study_materials", {}).values())
-        if (
-            not study_materials
-            and not getattr(project_store, "study_materials_initialized", False)
-            and self._is_legacy_bare_subject_project(subject_id)
-        ):
-            project = self._get_active_project_metadata(subject_id)
-            return (
-                StudyMaterial(
-                    subject_id=subject_id,
-                    material_id="legacy_main",
-                    material_type=StudyMaterialType.COURSE,
-                    title=project.title,
-                    created_at=project.created_at,
-                    project_id=subject_id,
-                ),
-            )
-        return tuple(
-            item
-            for item in study_materials
-            if item.project_id is not None and id_canonical_text(item.project_id) == id_canonical_text(subject_id)
-        )
-
-    def _ensure_subject_materials_are_independent(self, subject_id: ProjectId) -> None:
-        subject_store = self._get_project_store(subject_id)
-        legacy_materials = self._legacy_subject_root_materials(subject_id)
-        if not legacy_materials:
-            return
-
-        next_materials = {
-            item.material_id: item
-            for item in getattr(subject_store, "study_materials", {}).values()
-            if item.project_id is None or id_canonical_text(item.project_id) != id_canonical_text(subject_id)
-        }
-        created_project_ids: list[ProjectId] = []
-        try:
-            for legacy_material in legacy_materials:
-                source_kind, project_type = self._project_options_for_material_type(legacy_material.material_type)
-                material_project_id = self.create_project(
-                    legacy_material.title,
-                    initial_source_kind=source_kind,
-                    initial_project_type=project_type,
-                )
-                created_project_ids.append(material_project_id)
-                subject = subject_store.project
-                if subject is None:
-                    raise NotFound(subject_id)
-                scoped_project_id, next_sequence = self._next_scoped_project_id(subject, tuple(next_materials.values()))
-                material_id = self._new_study_material_id(legacy_material.material_type)
-                while material_id in next_materials:
-                    material_id = self._new_study_material_id(legacy_material.material_type)
-                migrated = StudyMaterial(
-                    subject_id=subject_id,
-                    material_id=material_id,
-                    material_type=legacy_material.material_type,
-                    title=legacy_material.title,
-                    created_at=legacy_material.created_at,
-                    project_id=scoped_project_id,
-                    internal_project_key=material_project_id,
-                )
-                self._move_legacy_subject_root_content_to_material_project(
-                    subject_id=subject_id,
-                    material_project_id=material_project_id,
-                )
-                child_store = self._get_project_store(material_project_id)
-                if child_store.project is not None:
-                    child_store.project = replace(
-                        child_store.project,
-                        subject_id=subject_id,
-                        scoped_project_id=scoped_project_id,
-                        legacy_global_project_id=material_project_id,
-                    )
-                child_store.subject_material_link = SubjectMaterialLink(
-                    subject_id=subject_id,
-                    material_id=migrated.material_id,
-                    material_type=migrated.material_type,
-                    project_id=scoped_project_id,
-                )
-                next_materials[migrated.material_id] = migrated
-                if subject_store.project is not None:
-                    subject_store.project = replace(subject_store.project, project_sequence=next_sequence)
-
-            subject_store = self._get_project_store(subject_id)
-            subject_store.study_materials = next_materials
-            subject_store.study_materials_initialized = True
-
-            sql_store = self._sql_store()
-            if sql_store is not None:
-                self._persist_project_store_sql_direct(sql_store, subject_id)
-                for material_project_id in created_project_ids:
-                    self._persist_project_store_sql_direct(sql_store, material_project_id)
-                self._reload_sql_state()
-                return
-
-            self.sys._persist_project_to_disk(subject_id, subject_store)
-            for material_project_id in created_project_ids:
-                self.sys._persist_project_to_disk(material_project_id, self._get_project_store(material_project_id))
-        except Exception:
-            for material_project_id in created_project_ids:
-                try:
-                    self.delete_project(material_project_id)
-                except Exception:
-                    pass
-            raise
-
     def _find_subject_material(self, subject_id: ProjectId, material_id: str) -> StudyMaterial:
         normalized_material_id = str(material_id or "").strip()
         if not normalized_material_id:
@@ -2338,19 +2198,11 @@ class SystemAPI:
 
     def _resolve_current_material_for_project(self, project_id: ProjectId, subject_id: ProjectId) -> StudyMaterial:
         material_link = self._get_subject_material_link(project_id)
-        materials = self._list_subject_materials_from_store(subject_id)
-        if material_link is not None:
-            for item in materials:
-                if item.material_id == material_link.material_id:
-                    return item
-        for item in materials:
-            if item.project_id is not None and id_canonical_text(item.project_id) == id_canonical_text(project_id):
+        if material_link is None:
+            raise PreconditionFailure("project id is not a subject material project")
+        for item in self._list_subject_materials_from_store(subject_id):
+            if item.material_id == material_link.material_id:
                 return item
-        for item in materials:
-            if item.project_id is not None and id_canonical_text(item.project_id) == id_canonical_text(subject_id):
-                return item
-        if materials:
-            return materials[0]
         raise NotFound("subject material")
 
     @staticmethod
@@ -3289,8 +3141,12 @@ class SystemAPI:
                 self.sys.rollback(s)
             raise
 
-    def get_instance_playback_descriptor(self, project_id: ProjectId, instance_id: InstanceId) -> dict[str, Any]:
-        return self._instance_media_service().build_playback_descriptor(str(project_id), str(instance_id)).to_dict()
+    def get_instance_playback_descriptor(self, project_id: ProjectId, instance_id: InstanceId, *, media_base_path: str) -> dict[str, Any]:
+        return self._instance_media_service().build_playback_descriptor(
+            str(project_id),
+            str(instance_id),
+            media_base_path=media_base_path,
+        ).to_dict()
 
     def get_instance_hls_playlist(
         self,
@@ -3298,12 +3154,14 @@ class SystemAPI:
         instance_id: InstanceId,
         *,
         auth_store: AuthStore,
+        media_base_path: str,
     ) -> str:
         try:
             return self._instance_media_service().build_baidu_hls_playlist(
                 str(project_id),
                 str(instance_id),
                 auth_store=auth_store,
+                media_base_path=media_base_path,
             )
         except BaiduNetdiskApiError as exc:
             self._raise_baidu_netdisk_error(exc)
@@ -4219,48 +4077,76 @@ class SystemAPI:
         )
 
     def create_subject(self, title: str) -> ProjectId:
+        if self.sys.g._write_lock_held:
+            raise ConcurrencyConflictError("Another READ_WRITE session is OPEN")
+        idgen_counters_before = dict(self.idgen._counters)
         subject_id = ProjectId(str(self.idgen.new_subject_id()))
-        subject_id = self.create_project(
-            title,
-            initial_source_kind=MaterialSourceKind.SERVER_FS,
-            initial_project_type=ProjectType.COURSE,
-            project_id=subject_id,
-        )
-        material: StudyMaterial | None = None
+        self.sys.g._write_lock_held = True
         try:
-            s = self.sys.begin_session(subject_id, SessionMode.READ_WRITE)
-            try:
-                s._staged.study_materials = {}
-                s._staged.study_materials_replaced = True
-                self.sys.commit(s)
-            except Exception:
-                if s.state == SessionState.OPEN:
-                    self.sys.rollback(s)
-                raise
-            material = self.create_subject_material(
-                subject_id,
-                material_type=StudyMaterialType.COURSE,
-                title="网课材料",
+            subject_id, subject_store = self._build_project_store_for_create_project(
+                title,
+                None,
+                initial_source_kind=MaterialSourceKind.SERVER_FS,
+                initial_project_type=ProjectType.COURSE,
+                project_id=subject_id,
             )
+            subject = subject_store.project
+            if subject is None:
+                raise PreconditionFailure("subject bootstrap incomplete")
+
+            material_type = StudyMaterialType.COURSE
+            material_title = "网课材料"
+            material_id = self._new_study_material_id(material_type)
+            scoped_project_id, next_sequence = self._next_scoped_project_id(subject, tuple())
+            source_kind, project_type = self._project_options_for_material_type(material_type)
+            material_project_id, material_store = self._build_project_store_for_create_project(
+                material_title,
+                None,
+                initial_source_kind=source_kind,
+                initial_project_type=project_type,
+                subject_id=subject_id,
+                scoped_project_id=scoped_project_id,
+                subject_material_link=SubjectMaterialLink(
+                    subject_id=subject_id,
+                    material_id=material_id,
+                    material_type=material_type,
+                    project_id=scoped_project_id,
+                ),
+            )
+            material = StudyMaterial(
+                subject_id=subject_id,
+                material_id=material_id,
+                material_type=material_type,
+                title=material_title,
+                created_at=now_utc_ms(),
+                project_id=scoped_project_id,
+                internal_project_key=material_project_id,
+            )
+            subject_store.project = replace(subject, project_sequence=next_sequence)
+            subject_store.study_materials = {material.material_id: material}
+            subject_store.study_materials_initialized = True
+
+            next_projects = dict(self.sys.g.projects)
+            subject_key = id_canonical_text(subject_id)
+            material_key = id_canonical_text(material_project_id)
+            if subject_key in next_projects or material_key in next_projects:
+                raise PreconditionFailure("project_id already exists")
+            next_projects[subject_key] = subject_store
+            next_projects[material_key] = material_store
+            self.sys._persist_to_disk(projects_override=next_projects)
+            self.sys.g.projects = next_projects
+            return subject_id
         except Exception:
-            material_project_id = None if material is None else self._material_internal_project_key(material)
-            if material_project_id is not None:
-                try:
-                    self.delete_project(material_project_id)
-                except Exception:
-                    pass
-            try:
-                self.delete_project(subject_id)
-            except Exception:
-                pass
+            self.idgen._counters = idgen_counters_before
             raise
-        return subject_id
+        finally:
+            self.sys.g._write_lock_held = False
 
     def get_subject_context(self, project_id: ProjectId) -> dict[str, object]:
         if self.is_subject_root_project(project_id):
             raise PreconditionFailure("subject id is not a project id")
         resolved_subject_id = self._resolve_subject_id(project_id)
-        self._ensure_subject_materials_are_independent(resolved_subject_id)
+        self._require_subject_root_project(resolved_subject_id)
         subject = self._get_active_project_metadata(resolved_subject_id)
         materials = self._list_subject_materials_from_store(resolved_subject_id)
         current_material = self._resolve_current_material_for_project(project_id, resolved_subject_id)
@@ -4272,10 +4158,40 @@ class SystemAPI:
         }
 
     def edit_subject(self, subject_id: ProjectId, title: str) -> None:
-        self.edit_project(self._resolve_subject_id(subject_id), title)
+        self._require_subject_root_project(subject_id)
+        self.edit_project(subject_id, title)
 
     def delete_subject(self, subject_id: ProjectId) -> None:
-        self.delete_project(self._resolve_subject_id(subject_id))
+        self._delete_subject_project_atomically(subject_id)
+
+    def _delete_subject_project_atomically(self, subject_id: ProjectId) -> None:
+        resolved_subject_id = subject_id
+        self._require_subject_root_project(resolved_subject_id)
+        if self.sys.g._write_lock_held:
+            raise ConcurrencyConflictError("Another READ_WRITE session is OPEN")
+        idgen_counters_before = dict(self.idgen._counters)
+        self.sys.g._write_lock_held = True
+        try:
+            related_project_ids = [resolved_subject_id]
+            for material in self._list_subject_materials_from_store(resolved_subject_id):
+                internal_key = self._material_internal_project_key(material)
+                if internal_key is not None and id_canonical_text(internal_key) != id_canonical_text(resolved_subject_id):
+                    related_project_ids.append(internal_key)
+
+            next_projects = dict(self.sys.g.projects)
+            for related_project_id in related_project_ids:
+                project_store = self._get_project_store(related_project_id)
+                next_projects[id_canonical_text(related_project_id)] = self._deleted_project_store(project_store)
+
+            self.sys._persist_to_disk(projects_override=next_projects)
+            self.sys.g.projects = next_projects
+            for related_project_id in related_project_ids:
+                self._startup_fs_sync_done.discard(id_canonical_text(related_project_id))
+        except Exception:
+            self.idgen._counters = idgen_counters_before
+            raise
+        finally:
+            self.sys.g._write_lock_held = False
 
     def list_projects(self) -> Tuple:
         sql_store = self._sql_store()
@@ -4292,7 +4208,6 @@ class SystemAPI:
         return tuple(projects)
 
     def list_subjects(self) -> Tuple[Project, ...]:
-        self.migrate_all_subject_material_projects()
         sql_store = self._sql_store()
         if sql_store is not None:
             return tuple(
@@ -4305,14 +4220,12 @@ class SystemAPI:
             for ps in self.sys.g.projects.values()
             if ps.project is not None
             and ps.project.state == ProjectState.ACTIVE
-            and (self.is_subject_root_project(ps.project.project_id) or self._is_legacy_bare_subject_project(ps.project.project_id))
+            and self.is_subject_root_project(ps.project.project_id)
         )
 
     def list_subject_materials(self, subject_id: ProjectId) -> Tuple[StudyMaterial, ...]:
-        resolved_subject_id = self._resolve_subject_id(subject_id)
-        self._get_active_project_metadata(resolved_subject_id)
-        self._ensure_subject_materials_are_independent(resolved_subject_id)
-        return self._list_subject_materials_from_store(resolved_subject_id)
+        self._require_subject_root_project(subject_id)
+        return self._list_subject_materials_from_store(subject_id)
 
     def create_subject_material(
         self,
@@ -4321,122 +4234,168 @@ class SystemAPI:
         material_type: StudyMaterialType,
         title: str | None = None,
     ) -> StudyMaterial:
-        resolved_subject_id = self._resolve_subject_id(subject_id)
-        self._ensure_subject_materials_are_independent(resolved_subject_id)
-        subject = self._get_active_project_metadata(resolved_subject_id)
-        normalized_title = str(title or "").strip() or self._default_material_title_for_type(material_type)
-        material_id = self._new_study_material_id(material_type)
-        source_kind, project_type = self._project_options_for_material_type(material_type)
-        material_project_id = self.create_project(
-            normalized_title if normalized_title else f"{subject.title}·{self._default_material_title_for_type(material_type)}",
-            initial_source_kind=source_kind,
-            initial_project_type=project_type,
-        )
-        existing_materials = self._list_subject_materials_from_store(resolved_subject_id)
-        scoped_project_id, next_sequence = self._next_scoped_project_id(subject, existing_materials)
-        material = StudyMaterial(
-            subject_id=subject.project_id,
-            material_id=material_id,
-            material_type=material_type,
-            title=normalized_title,
-            created_at=now_utc_ms(),
-            project_id=scoped_project_id,
-            internal_project_key=material_project_id,
-        )
+        resolved_subject_id = subject_id
+        self._require_subject_root_project(resolved_subject_id)
+        if self.sys.g._write_lock_held:
+            raise ConcurrencyConflictError("Another READ_WRITE session is OPEN")
+        idgen_counters_before = dict(self.idgen._counters)
+        self.sys.g._write_lock_held = True
         try:
-            subject_session = self.sys.begin_session(resolved_subject_id, SessionMode.READ_WRITE)
-            try:
-                next_materials = {item.material_id: item for item in self._list_subject_materials_from_store(resolved_subject_id)}
-                next_materials[material.material_id] = material
-                subject_session._staged.project = replace(subject, project_sequence=next_sequence)
-                subject_session._staged.study_materials = next_materials
-                subject_session._staged.study_materials_replaced = True
-                self.sys.commit(subject_session)
-            except Exception:
-                if subject_session.state == SessionState.OPEN:
-                    self.sys.rollback(subject_session)
-                raise
-
-            child_session = self.sys.begin_session(material_project_id, SessionMode.READ_WRITE)
-            try:
-                child_session._staged.subject_material_link = SubjectMaterialLink(
+            subject_store = self._get_project_store(resolved_subject_id)
+            subject = subject_store.project
+            if subject is None or subject.state != ProjectState.ACTIVE:
+                raise NotFound(resolved_subject_id)
+            normalized_title = str(title or "").strip() or self._default_material_title_for_type(material_type)
+            material_id = self._new_study_material_id(material_type)
+            source_kind, project_type = self._project_options_for_material_type(material_type)
+            existing_materials = self._list_subject_materials_from_store(resolved_subject_id)
+            scoped_project_id, next_sequence = self._next_scoped_project_id(subject, existing_materials)
+            material_project_id, child_store = self._build_project_store_for_create_project(
+                normalized_title if normalized_title else f"{subject.title}·{self._default_material_title_for_type(material_type)}",
+                None,
+                initial_source_kind=source_kind,
+                initial_project_type=project_type,
+                subject_id=resolved_subject_id,
+                scoped_project_id=scoped_project_id,
+                subject_material_link=SubjectMaterialLink(
                     subject_id=resolved_subject_id,
-                    material_id=material.material_id,
-                    material_type=material.material_type,
+                    material_id=material_id,
+                    material_type=material_type,
                     project_id=scoped_project_id,
-                )
-                child_project = self.sys.project_repo.get(child_session, material_project_id)
-                child_session._staged.project = replace(
-                    child_project,
-                    subject_id=resolved_subject_id,
-                    scoped_project_id=scoped_project_id,
-                    legacy_global_project_id=material_project_id,
-                )
-                child_session._staged.subject_material_link_replaced = True
-                self.sys.commit(child_session)
-            except Exception:
-                if child_session.state == SessionState.OPEN:
-                    self.sys.rollback(child_session)
-                raise
+                ),
+            )
+            material = StudyMaterial(
+                subject_id=subject.project_id,
+                material_id=material_id,
+                material_type=material_type,
+                title=normalized_title,
+                created_at=now_utc_ms(),
+                project_id=scoped_project_id,
+                internal_project_key=material_project_id,
+            )
+            if id_canonical_text(material_project_id) in self.sys.g.projects:
+                raise PreconditionFailure("project_id already exists")
+
+            next_subject_store = self._copy_project_store(subject_store)
+            next_subject_store.project = replace(subject, project_sequence=next_sequence)
+            next_subject_store.study_materials = {item.material_id: item for item in existing_materials}
+            next_subject_store.study_materials[material.material_id] = material
+            next_subject_store.study_materials_initialized = True
+
+            next_projects = dict(self.sys.g.projects)
+            next_projects[id_canonical_text(resolved_subject_id)] = next_subject_store
+            next_projects[id_canonical_text(material_project_id)] = child_store
+            self.sys._persist_to_disk(projects_override=next_projects)
+            self.sys.g.projects = next_projects
+            return material
         except Exception:
-            try:
-                self.delete_project(material_project_id)
-            except Exception:
-                pass
+            self.idgen._counters = idgen_counters_before
             raise
-        return material
+        finally:
+            self.sys.g._write_lock_held = False
 
     def edit_subject_material(self, subject_id: ProjectId, material_id: str, *, title: str) -> StudyMaterial:
-        resolved_subject_id = self._resolve_subject_id(subject_id)
-        self._ensure_subject_materials_are_independent(resolved_subject_id)
+        resolved_subject_id = subject_id
+        self._require_subject_root_project(resolved_subject_id)
         material = self._find_subject_material(resolved_subject_id, material_id)
+        return self._edit_subject_material_atomically(resolved_subject_id, material, title=title)
+
+    def _edit_subject_material_atomically(
+        self,
+        subject_id: ProjectId,
+        material: StudyMaterial,
+        *,
+        title: str,
+    ) -> StudyMaterial:
+        resolved_subject_id = subject_id
         material_project_id = self._material_internal_project_key(material)
         if material_project_id is None:
             raise PreconditionFailure("当前项目缺少可重命名的项目标识")
-        if id_canonical_text(material_project_id) == id_canonical_text(resolved_subject_id):
-            updated = replace(material, title=title)
-            s = self.sys.begin_session(resolved_subject_id, SessionMode.READ_WRITE)
-            try:
-                materials = dict((item.material_id, item) for item in self._list_subject_materials_from_store(resolved_subject_id))
-                materials[material.material_id] = updated
-                s._staged.study_materials = materials
-                s._staged.study_materials_replaced = True
-                self.sys.commit(s)
-            except Exception:
-                if s.state == SessionState.OPEN:
-                    self.sys.rollback(s)
-                raise
-            return updated
-        self.edit_project(material_project_id, title)
-        return self._find_subject_material(resolved_subject_id, material_id)
+        normalized_title = str(title or "").strip()
+        if not normalized_title:
+            raise PreconditionFailure("edit_project.title must be non-empty")
+        if self.sys.g._write_lock_held:
+            raise ConcurrencyConflictError("Another READ_WRITE session is OPEN")
+        idgen_counters_before = dict(self.idgen._counters)
+        self.sys.g._write_lock_held = True
+        try:
+            subject_store = self._get_project_store(resolved_subject_id)
+            material_store = self._get_project_store(material_project_id)
+            material_project = material_store.project
+            if material_project is None or material_project.state != ProjectState.ACTIVE:
+                raise NotFound(material_project_id)
+            updated_material = replace(material, title=normalized_title)
+            next_subject_store = self._copy_project_store(subject_store)
+            next_materials = {item.material_id: item for item in self._list_subject_materials_from_store(resolved_subject_id)}
+            next_materials[material.material_id] = updated_material
+            next_subject_store.study_materials = next_materials
+            next_subject_store.study_materials_initialized = True
+
+            next_projects = dict(self.sys.g.projects)
+            next_projects[id_canonical_text(resolved_subject_id)] = next_subject_store
+            if id_canonical_text(material_project_id) != id_canonical_text(resolved_subject_id):
+                next_material_store = self._copy_project_store(material_store)
+                next_material_store.project = replace(material_project, title=normalized_title)
+                next_material_store.project.validate_write_time()
+                event = self._new_audit_event(
+                    material_project_id,
+                    kind=AuditEventKind.EDIT_PROJECT,
+                    api_name="edit_project",
+                    payload={"projectId": str(material_project_id)},
+                )
+                next_material_store.audit_log_events[id_canonical_text(event.event_id)] = event
+                next_projects[id_canonical_text(material_project_id)] = next_material_store
+            self.sys._persist_to_disk(projects_override=next_projects)
+            self.sys.g.projects = next_projects
+            return updated_material
+        except Exception:
+            self.idgen._counters = idgen_counters_before
+            raise
+        finally:
+            self.sys.g._write_lock_held = False
 
     def delete_subject_material(self, subject_id: ProjectId, material_id: str) -> None:
-        resolved_subject_id = self._resolve_subject_id(subject_id)
-        self._ensure_subject_materials_are_independent(resolved_subject_id)
+        resolved_subject_id = subject_id
+        self._require_subject_root_project(resolved_subject_id)
         material = self._find_subject_material(resolved_subject_id, material_id)
+        self._delete_subject_material_atomically(resolved_subject_id, material)
+
+    def _delete_subject_material_atomically(self, subject_id: ProjectId, material: StudyMaterial) -> None:
+        resolved_subject_id = subject_id
         material_project_id = self._material_internal_project_key(material)
         if material_project_id is None:
             raise PreconditionFailure("当前项目缺少可删除的项目标识")
-        if id_canonical_text(material_project_id) == id_canonical_text(resolved_subject_id):
-            s = self.sys.begin_session(resolved_subject_id, SessionMode.READ_WRITE)
-            try:
-                materials = dict((item.material_id, item) for item in self._list_subject_materials_from_store(resolved_subject_id))
-                materials.pop(material.material_id, None)
-                s._staged.study_materials = materials
-                s._staged.study_materials_replaced = True
-                self.sys.commit(s)
-            except Exception:
-                if s.state == SessionState.OPEN:
-                    self.sys.rollback(s)
-                raise
-            return
-        self.delete_project(material_project_id)
+        if self.sys.g._write_lock_held:
+            raise ConcurrencyConflictError("Another READ_WRITE session is OPEN")
+        idgen_counters_before = dict(self.idgen._counters)
+        self.sys.g._write_lock_held = True
+        try:
+            subject_store = self._get_project_store(resolved_subject_id)
+            material_store = self._get_project_store(material_project_id)
+            next_subject_store = self._copy_project_store(subject_store)
+            next_materials = {item.material_id: item for item in self._list_subject_materials_from_store(resolved_subject_id)}
+            next_materials.pop(material.material_id, None)
+            next_subject_store.study_materials = next_materials
+            next_subject_store.study_materials_initialized = True
+
+            next_projects = dict(self.sys.g.projects)
+            next_projects[id_canonical_text(resolved_subject_id)] = next_subject_store
+            if id_canonical_text(material_project_id) == id_canonical_text(resolved_subject_id):
+                next_projects[id_canonical_text(material_project_id)] = next_subject_store
+            else:
+                next_projects[id_canonical_text(material_project_id)] = self._deleted_project_store(material_store)
+            self.sys._persist_to_disk(projects_override=next_projects)
+            self.sys.g.projects = next_projects
+        except Exception:
+            self.idgen._counters = idgen_counters_before
+            raise
+        finally:
+            self.sys.g._write_lock_held = False
 
     def list_membership_cleanup_project_ids(self, project_id: ProjectId) -> Tuple[ProjectId, ...]:
         material_link = self._get_subject_material_link(project_id)
         if material_link is not None:
             return (project_id,)
-        self._ensure_subject_materials_are_independent(project_id)
         related_project_ids = {id_canonical_text(project_id): project_id}
         for material in self._list_subject_materials_from_store(project_id):
             if material.project_id is None:
@@ -4447,8 +4406,13 @@ class SystemAPI:
         return tuple(related_project_ids[key] for key in sorted(related_project_ids.keys()))
 
     def edit_project(self, project_id: ProjectId, title: str) -> None:
-        self._ensure_startup_fs_sync_done(project_id)
         material_link = self._get_subject_material_link(project_id)
+        if material_link is not None:
+            self._require_subject_root_project(material_link.subject_id)
+            material = self._find_subject_material(material_link.subject_id, material_link.material_id)
+            self._edit_subject_material_atomically(material_link.subject_id, material, title=title)
+            return
+        self._ensure_startup_fs_sync_done(project_id)
         s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
         try:
             if title is None or not str(title).strip():
@@ -4463,7 +4427,6 @@ class SystemAPI:
                 deleted_at=project.deleted_at,
                 subject_id=project.subject_id,
                 scoped_project_id=project.scoped_project_id,
-                legacy_global_project_id=project.legacy_global_project_id,
                 project_sequence=project.project_sequence,
             )
             updated_project.validate_write_time()
@@ -4479,56 +4442,17 @@ class SystemAPI:
             if s.state == SessionState.OPEN:
                 self.sys.rollback(s)
             raise
-        if material_link is not None:
-            subject_session = self.sys.begin_session(material_link.subject_id, SessionMode.READ_WRITE)
-            try:
-                next_materials = {
-                    item.material_id: item for item in self._list_subject_materials_from_store(material_link.subject_id)
-                }
-                current = next_materials.get(material_link.material_id)
-                if current is not None:
-                    next_materials[material_link.material_id] = StudyMaterial(
-                        subject_id=current.subject_id,
-                        material_id=current.material_id,
-                        material_type=current.material_type,
-                        title=str(title).strip(),
-                        created_at=current.created_at,
-                        project_id=current.project_id,
-                        internal_project_key=current.internal_project_key,
-                    )
-                    subject_session._staged.study_materials = next_materials
-                    subject_session._staged.study_materials_replaced = True
-                    self.sys.commit(subject_session)
-                else:
-                    self.sys.rollback(subject_session)
-            except Exception:
-                if subject_session.state == SessionState.OPEN:
-                    self.sys.rollback(subject_session)
-                raise
 
     def delete_project(self, project_id: ProjectId) -> None:
         material_link = self._get_subject_material_link(project_id)
         if material_link is not None:
-            subject_session = self.sys.begin_session(material_link.subject_id, SessionMode.READ_WRITE)
-            try:
-                next_materials = {
-                    item.material_id: item for item in self._list_subject_materials_from_store(material_link.subject_id)
-                }
-                next_materials.pop(material_link.material_id, None)
-                subject_session._staged.study_materials = next_materials
-                subject_session._staged.study_materials_replaced = True
-                self.sys.commit(subject_session)
-            except Exception:
-                if subject_session.state == SessionState.OPEN:
-                    self.sys.rollback(subject_session)
-                raise
-        else:
-            self._ensure_subject_materials_are_independent(project_id)
-            for material in self._list_subject_materials_from_store(project_id):
-                material_project_id = material.project_id
-                if material_project_id is None or id_canonical_text(material_project_id) == id_canonical_text(project_id):
-                    continue
-                self.delete_project(material_project_id)
+            self._require_subject_root_project(material_link.subject_id)
+            material = self._find_subject_material(material_link.subject_id, material_link.material_id)
+            self._delete_subject_material_atomically(material_link.subject_id, material)
+            return
+        if self.is_subject_root_project(project_id):
+            self._delete_subject_project_atomically(project_id)
+            return
         sql_store = self._sql_store()
         if sql_store is not None:
             self._delete_project_sql_direct(sql_store, project_id)
@@ -4587,6 +4511,24 @@ class SystemAPI:
             return self.sys.project_material_source_binding_repo.get(s)
         finally:
             self.sys.rollback(s)
+
+    def list_instances_with_media_summary(self, project_id: ProjectId) -> Tuple[InstanceMediaSummary, ...]:
+        self._ensure_startup_fs_sync_done(project_id)
+        project_binding = self.get_project_material_source_binding(project_id)
+        media_service = self._instance_media_service()
+        items: list[InstanceMediaSummary] = []
+        for instance in self.list_instances(project_id):
+            media_binding = media_service.get_instance_media_binding(str(project_id), str(instance.instance_id))
+            source_kind = media_binding.source_kind if media_binding is not None else project_binding.source_kind
+            items.append(
+                InstanceMediaSummary(
+                    instance=instance,
+                    media_source_kind=source_kind.value,
+                    playback_kind="FILE" if media_binding is None else media_binding.playback_kind,
+                    duration_ms=None if media_binding is None else media_binding.duration_ms,
+                )
+            )
+        return tuple(items)
 
     def list_audit_log_events(self, project_id: ProjectId) -> Tuple[AuditLogEvent, ...]:
         sql_store = self._sql_store()
@@ -4699,6 +4641,16 @@ class SystemAPI:
             return self.sys.instance_repo.get(s, instance_id)
         finally:
             self.sys.rollback(s)
+
+    def resolve_instance_media_file_path(self, project_id: ProjectId, instance_id: InstanceId) -> Path:
+        self._ensure_startup_fs_sync_done(project_id)
+        source_kind = self._instance_media_service().get_effective_source_kind(str(project_id), str(instance_id))
+        if source_kind == MaterialSourceKind.BAIDU_NETDISK:
+            raise PreconditionFailure("Baidu Netdisk instances must be played via the playback descriptor")
+        instance = self.get_instance(project_id, instance_id)
+        if getattr(instance, "presence", None) == InstancePresence.MISSING:
+            raise PreconditionFailure("material is MISSING")
+        return self._instance_media_service().resolve_local_material_path(str(project_id), str(instance_id))
 
     def get_instance_subtitle_file(self, project_id: ProjectId, instance_id: InstanceId) -> dict[str, object]:
         return self.get_instance_subtitle_file_for_user(project_id, instance_id, auth_store=None)
@@ -5400,7 +5352,6 @@ class SystemAPI:
                 self.sys.rollback(s)
             raise
 
-    # Deprecated (disabled): sync_material_tree
     def sync_material_tree(
         self,
         project_id: ProjectId,
@@ -5408,296 +5359,7 @@ class SystemAPI:
         allow_empty: bool = False,
         instance_id_remap: Optional[Tuple[Tuple[InstanceId, InstanceId], ...]] = None,
     ) -> None:
-        """
-        Deprecated / disabled.
-
-        原 sync_material_tree 不在最新 spec 的 4.5 白名单内（且会产生持久化变更），因此下架。
-        请使用：add_instance / add_learning_object_leaf / add_learning_object_container。
-        """
         raise PreconditionFailure("sync_material_tree is disabled (not in spec whitelist)")
-
-        # ---------- Phase 0: READ_ONLY plan inputs ----------
-        s_ro = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
-        try:
-            try:
-                scan_root = self.sys.project_scan_config_repo.get(s_ro).scan_root
-            except NotFound:
-                raise PreconditionFailure("ProjectScanConfig not found (project bootstrap incomplete)")
-            cur_instances = self.sys.instance_repo.all(s_ro)
-            cur_recall_points = self.sys.recall_point_repo.all(s_ro)
-        finally:
-            self.sys.rollback(s_ro)
-
-        # ---------- Phase 1: DirSnapshot scan (explicit I/O; no repo writes) ----------
-        try:
-            root_fs = Path(str(scan_root))
-            if not root_fs.exists():
-                raise PreconditionFailure(f"scan_root not found: {scan_root}")
-            if not root_fs.is_dir():
-                raise PreconditionFailure(f"scan_root is not a directory: {scan_root}")
-        except PreconditionFailure:
-            raise
-        except Exception as e:
-            raise PreconditionFailure(f"scan_root scan failed: {e}")
-
-        exts_set = set(media_exts)
-        rel_files: list[PurePosixPath] = []
-        try:
-            # Scanning policy: recursive scan (write it down to avoid implementation divergence).
-            for p in root_fs.rglob("*"):
-                if not p.is_file():
-                    continue
-                suffix = p.suffix[1:] if p.suffix.startswith(".") else p.suffix
-                if suffix not in exts_set:
-                    continue
-                rel = p.relative_to(root_fs)
-                rel_files.append(PurePosixPath(rel.as_posix()))
-        except Exception as e:
-            raise PreconditionFailure(f"scan_root scan failed: {e}")
-
-        # Canonical leaf material set (dedup + sort by Unicode code point lexicographic order)
-        rel_files = sorted(set(rel_files), key=lambda rp: rp.as_posix())
-        target_material_ids: Tuple[PurePosixPath, ...] = tuple(scan_root / rf for rf in rel_files)
-
-        if len(target_material_ids) == 0 and not allow_empty:
-            raise PreconditionFailure("No matching media files found under scan_root")
-
-        # Tree shape (for rebuild); if empty, we intentionally replace to an empty forest.
-        dirs: set[PurePosixPath] = set()
-        children_dirs: dict[PurePosixPath, list[PurePosixPath]] = defaultdict(list)
-        files_in_dir: dict[PurePosixPath, list[PurePosixPath]] = defaultdict(list)
-        if rel_files:
-            dirs.add(PurePosixPath("."))
-            for rf in rel_files:
-                parent = rf.parent
-                while True:
-                    dirs.add(parent)
-                    if parent == PurePosixPath("."):
-                        break
-                    parent = parent.parent
-            dir_list = sorted(dirs, key=lambda d: d.as_posix())
-
-            for d in dir_list:
-                if d == PurePosixPath("."):
-                    continue
-                children_dirs[d.parent].append(d)
-            for k in list(children_dirs.keys()):
-                children_dirs[k].sort(key=lambda d: d.as_posix())
-
-            for rf in rel_files:
-                files_in_dir[rf.parent].append(rf)
-            for k in list(files_in_dir.keys()):
-                files_in_dir[k].sort(key=lambda rp: rp.as_posix())
-        else:
-            dir_list = []
-
-        # ---------- Phase 2: Plan computation (pure; deterministic) ----------
-        existing_by_material: dict[str, InstanceId] = {}
-        for inst in cur_instances:
-            mk = inst.material_id.as_posix()
-            if mk in existing_by_material and id_canonical_text(existing_by_material[mk]) != id_canonical_text(inst.instance_id):
-                raise PreconditionFailure("Instance.material_id uniqueness violated in current state")
-            existing_by_material[mk] = inst.instance_id
-
-        target_set = {mid.as_posix() for mid in target_material_ids}
-
-        to_remove_instance_ids: list[InstanceId] = []
-        for inst in cur_instances:
-            if inst.material_id.as_posix() not in target_set:
-                to_remove_instance_ids.append(inst.instance_id)
-        to_remove_instance_ids.sort(key=lambda x: id_canonical_text(x))
-
-        def stable_new_instance_id(material_id: PurePosixPath) -> InstanceId:
-            # Deterministic, stable across calls (needed for NEEDS_MAPPING -> APPLY).
-            seed = f"{id_canonical_text(project_id)}:{material_id.as_posix()}".encode("utf-8")
-            h = hashlib.sha256(seed).hexdigest()[:32]
-            return InstanceId(f"instm_{h}")
-
-        target_instance_id_by_material: list[Tuple[PurePosixPath, InstanceId]] = []
-        to_add_instances: list[Tuple[InstanceId, PurePosixPath]] = []
-        for mid in target_material_ids:
-            mk = mid.as_posix()
-            if mk in existing_by_material:
-                iid = existing_by_material[mk]
-            else:
-                iid = stable_new_instance_id(mid)
-                to_add_instances.append((iid, mid))
-            target_instance_id_by_material.append((mid, iid))
-
-        target_instance_ids = sorted({id_canonical_text(iid) for _, iid in target_instance_id_by_material})
-
-        plan = MaterialTreeSyncPlan(
-            scan_root=PurePosixPath(scan_root.as_posix()),
-            target_material_ids=tuple(target_material_ids),
-            target_instance_id_by_material_id=tuple(target_instance_id_by_material),
-            to_remove_instance_ids=tuple(to_remove_instance_ids),
-            to_add_instances=tuple(to_add_instances),
-            target_instance_ids=tuple(InstanceId(x) for x in target_instance_ids),
-        )
-
-        # blocked = to_remove instances referenced by any RecallPoint.anchor.instance_id
-        to_remove_keys = {id_canonical_text(x) for x in plan.to_remove_instance_ids}
-        blocked_keys: set[str] = set()
-        affected_rp_ids: set[str] = set()
-        for rp in cur_recall_points:
-            if rp.anchor is None:
-                continue
-            ik = id_canonical_text(rp.anchor.instance_id)
-            if ik in to_remove_keys:
-                blocked_keys.add(ik)
-                affected_rp_ids.add(id_canonical_text(rp.recall_point_id))
-
-        blocked_instance_ids = tuple(InstanceId(x) for x in sorted(blocked_keys))
-        affected_recall_point_ids = tuple(RecallPointId(x) for x in sorted(affected_rp_ids))
-
-        # ---------- Phase 3: Mapping gate ----------
-        remap_dict: dict[str, str] = {}
-        if blocked_instance_ids:
-            target_instance_id_set = {id_canonical_text(x) for x in plan.target_instance_ids}
-            blocked_old_set = {id_canonical_text(x) for x in blocked_instance_ids}
-
-            mapping_ok = instance_id_remap is not None and len(instance_id_remap) > 0
-            if mapping_ok and instance_id_remap is not None:
-                seen_old: set[str] = set()
-                for old, new in instance_id_remap:
-                    ok_old = id_canonical_text(old)
-                    ok_new = id_canonical_text(new)
-                    if ok_old not in blocked_old_set:
-                        mapping_ok = False
-                        break
-                    if ok_old in seen_old:
-                        mapping_ok = False
-                        break
-                    if ok_new not in target_instance_id_set:
-                        mapping_ok = False
-                        break
-                    seen_old.add(ok_old)
-                    remap_dict[ok_old] = ok_new
-
-            if mapping_ok:
-                for ok_old in blocked_old_set:
-                    if ok_old not in remap_dict:
-                        mapping_ok = False
-                        break
-
-            if not mapping_ok:
-                return MaterialTreeSyncResult(
-                    kind=MaterialTreeSyncResultKind.SYNC_PLAN_NEEDS_MAPPING,
-                    plan=plan,
-                    blocked_instance_ids=blocked_instance_ids,
-                    affected_recall_point_ids=affected_recall_point_ids,
-                )
-
-        # ---------- Phase 4: Apply (READ_WRITE; one transaction) ----------
-        s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
-        try:
-            # (1) Add missing instances
-            for iid, mid in plan.to_add_instances:
-                inst = Instance.create(project_id, iid, mid)
-                self.sys.instance_repo.add(s, inst)
-
-            # (2) Migrate RecallPoints (user mapping)
-            if remap_dict:
-                for rp in self.sys.recall_point_repo.all(s):
-                    if rp.state != RecallPointState.ACTIVE or rp.anchor is None:
-                        continue
-                    old_key = id_canonical_text(rp.anchor.instance_id)
-                    new_key = remap_dict.get(old_key)
-                    if new_key is None:
-                        continue
-                    updated = RecallPoint(
-                        project_id=rp.project_id,
-                        recall_point_id=rp.recall_point_id,
-                        created_at=rp.created_at,
-                        question=rp.question,
-                        answer=rp.answer,
-                        anchor=Anchor(instance_id=InstanceId(new_key), position=rp.anchor.position),
-                        references=tuple(rp.references),
-                        insights=tuple(rp.insights),
-                        state=rp.state,
-                        deleted_at=rp.deleted_at,
-                    )
-                    self.sys.recall_point_repo.update(s, updated)
-
-            # (3) Replace LearningObject forest (directory authoritative)
-            nodes_out: list[LearningObjectContainer | LearningObjectLeaf] = []
-
-            # material_id (absolute) -> instance_id
-            iid_by_material: dict[str, InstanceId] = {mid.as_posix(): iid for mid, iid in plan.target_instance_id_by_material_id}
-
-            def node_id(kind: str, rel_path: PurePosixPath) -> LearningObjectNodeId:
-                seed = f"{id_canonical_text(project_id)}:{kind}:{rel_path.as_posix()}".encode("utf-8")
-                h = hashlib.sha256(seed).hexdigest()[:32]
-                return LearningObjectNodeId(f"lonm_{kind.lower()}_{h}")
-
-            if rel_files:
-                dir_node_id: dict[PurePosixPath, LearningObjectNodeId] = {d: node_id("DIR", d) for d in dir_list}
-                files_node_id: dict[PurePosixPath, LearningObjectNodeId] = {d: node_id("FILES", d) for d in dir_list}
-                leaf_node_id: dict[PurePosixPath, LearningObjectNodeId] = {rf: node_id("LEAF", rf) for rf in rel_files}
-
-                # Files(D)
-                for d in dir_list:
-                    children_leaf_ids = tuple(leaf_node_id[rf] for rf in files_in_dir.get(d, []))
-                    nodes_out.append(
-                        LearningObjectContainer(
-                            project_id=project_id,
-                            node_id=files_node_id[d],
-                            parent_id=dir_node_id[d],
-                            children=children_leaf_ids,
-                            title="Files",
-                        )
-                    )
-
-                # Dir(D)
-                for d in dir_list:
-                    sub_dir_ids = tuple(dir_node_id[ch] for ch in children_dirs.get(d, []))
-                    children = tuple(list(sub_dir_ids) + [files_node_id[d]])
-
-                    if d == PurePosixPath("."):
-                        dir_title = scan_root.name if scan_root.name else scan_root.as_posix()
-                        parent_id = None
-                    else:
-                        dir_title = d.name
-                        parent_id = dir_node_id[d.parent]
-
-                    nodes_out.append(
-                        LearningObjectContainer(
-                            project_id=project_id,
-                            node_id=dir_node_id[d],
-                            parent_id=parent_id,
-                            children=children,
-                            title=dir_title,
-                        )
-                    )
-
-                # Leaves (parent is Files(D))
-                for rf in rel_files:
-                    mid = (scan_root / rf).as_posix()
-                    nodes_out.append(
-                        LearningObjectLeaf(
-                            project_id=project_id,
-                            node_id=leaf_node_id[rf],
-                            parent_id=files_node_id[rf.parent],
-                            instance_id=iid_by_material[mid],
-                            title=rf.name,
-                        )
-                    )
-
-            self.sys.learning_object_repo.replace_forest(s, tuple(nodes_out))
-
-            # (4) Update MaterialAllowlist (in same transaction)
-            self.sys.material_allowlist_repo.replace(s, plan.target_material_ids)
-
-            # (5) Physical delete old Instances (must happen after anchor migration)
-            for iid in plan.to_remove_instance_ids:
-                self.sys.instance_repo.delete(s, iid)
-
-            self.sys.commit(s)
-            return MaterialTreeSyncResult(kind=MaterialTreeSyncResultKind.SYNC_PLAN_OK, plan=plan)
-        except Exception:
-            if s.state == SessionState.OPEN:
-                self.sys.rollback(s)
-            raise
 
     # -------------------------
     # Internal protocols (4.3.x)
@@ -7230,7 +6892,7 @@ class SystemAPI:
             raise PreconditionFailure("request_asr precondition failed: ffmpeg not found in PATH")
 
         with _asr_server_ffmpeg_slot():
-            with tempfile.TemporaryDirectory(prefix="plm-asr-") as tmpdir:
+            with tempfile.TemporaryDirectory(prefix="learningpyramid-asr-") as tmpdir:
                 audio_path = Path(tmpdir) / "clip.wav"
                 try:
                     self._extract_audio_clip(
@@ -7326,7 +6988,7 @@ class SystemAPI:
         content_type = str(audio_content_type or "application/octet-stream").strip() or "application/octet-stream"
         suffix = Path(safe_name).suffix or ".bin"
 
-        with tempfile.TemporaryDirectory(prefix="plm-asr-upload-") as tmpdir:
+        with tempfile.TemporaryDirectory(prefix="learningpyramid-asr-upload-") as tmpdir:
             audio_path = Path(tmpdir) / f"upload{suffix}"
             audio_path.write_bytes(payload)
             segments = self._request_asr_segments_from_audio_file(
@@ -7450,7 +7112,7 @@ class SystemAPI:
             raise PreconditionFailure("request_instance_asr precondition failed: ffmpeg not found in PATH")
 
         with _asr_server_ffmpeg_slot("request_instance_asr"):
-            with tempfile.TemporaryDirectory(prefix="plm-instance-asr-") as tmpdir:
+            with tempfile.TemporaryDirectory(prefix="learningpyramid-instance-asr-") as tmpdir:
                 audio_path = Path(tmpdir) / "clip.wav"
                 try:
                     self._extract_audio_clip(
@@ -7547,7 +7209,7 @@ class SystemAPI:
         content_type = str(audio_content_type or "application/octet-stream").strip() or "application/octet-stream"
         suffix = Path(safe_name).suffix or ".bin"
 
-        with tempfile.TemporaryDirectory(prefix="plm-instance-asr-upload-") as tmpdir:
+        with tempfile.TemporaryDirectory(prefix="learningpyramid-instance-asr-upload-") as tmpdir:
             audio_path = Path(tmpdir) / f"upload{suffix}"
             audio_path.write_bytes(payload)
             segments = self._request_asr_segments_from_audio_file(

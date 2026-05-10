@@ -33,9 +33,9 @@ function formatApiError(err: unknown) {
 }
 
 function resolveReturnTo(state: unknown): string {
-  if (!state || typeof state !== "object") return "/projects"
+  if (!state || typeof state !== "object") return "/subjects"
   const value = (state as Record<string, unknown>).from
-  return typeof value === "string" && value.trim() ? value : "/projects"
+  return typeof value === "string" && value.trim() ? value : "/subjects"
 }
 
 export function AuthPage() {
@@ -184,7 +184,7 @@ export function AuthPage() {
   }
 
   if (!authEnabled) {
-    return <Navigate to="/projects" replace />
+    return <Navigate to="/subjects" replace />
   }
 
   if (currentUserQ.data && effectiveMode !== "reset" && (effectiveMode !== "verify" || !verifyTokenPresent)) {

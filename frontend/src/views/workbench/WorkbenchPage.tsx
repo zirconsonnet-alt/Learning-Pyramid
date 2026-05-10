@@ -8,6 +8,7 @@ import { ApiError } from "@/ui/api/http"
 import { fetchVideoWatchProgressMap, listRecallPointsByInstance, type VideoWatchProgress } from "@/ui/api/instances"
 import type { Instance } from "@/ui/api/instances"
 import { getInstancePlaybackDescriptor } from "@/ui/api/media"
+import { projectApiPath, type ProjectScope } from "@/ui/api/projectScope"
 import type { LearningTaskNode } from "@/ui/api/learningTaskNodes"
 import type { ProjectType } from "@/ui/api/projects"
 import { ContentNotice } from "@/ui/components/contentEmptyState"
@@ -127,25 +128,27 @@ function readMediaDurationMs(src: string) {
 }
 
 async function resolveInstanceDurationMs(params: {
+  subjectId: string
   projectId: string
   instance: Instance
   serverMediaStreamEnabled: boolean
   browserLocalMediaEnabled: boolean
   directoryPermission: "unsupported" | "missing" | "prompt" | "granted" | "denied"
 }) {
-  const { projectId, instance, serverMediaStreamEnabled, browserLocalMediaEnabled, directoryPermission } = params
+  const { subjectId, projectId, instance, serverMediaStreamEnabled, browserLocalMediaEnabled, directoryPermission } = params
+  const scope = { subjectId, projectId }
   if (typeof instance.durationMs === "number" && instance.durationMs > 0) {
     return instance.durationMs
   }
   if (instance.playbackKind === "HLS" || instance.mediaSourceKind === "BAIDU_NETDISK") {
-    const playback = await getInstancePlaybackDescriptor(projectId, instance.instanceId, { timeoutMs: 90_000 })
+    const playback = await getInstancePlaybackDescriptor(scope, instance.instanceId, { timeoutMs: 90_000 })
     if (typeof playback.durationMs === "number" && playback.durationMs > 0) {
       return playback.durationMs
     }
     return null
   }
   if (serverMediaStreamEnabled) {
-    return await readMediaDurationMs(apiUrl(`/projects/${projectId}/media/instances/${instance.instanceId}`))
+    return await readMediaDurationMs(apiUrl(projectApiPath(scope, `/media/instances/${instance.instanceId}`)))
   }
   if (!browserLocalMediaEnabled || directoryPermission !== "granted") return null
   if (!isRelativeMaterialId(instance.materialId)) return null
@@ -214,6 +217,7 @@ export function WorkbenchPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const pid = projectId ?? ""
+  const projectScope: ProjectScope | null = subjectId && pid ? { subjectId, projectId: pid } : null
   const isVirtualStudyReviewProject = isVirtualStudyReviewProjectId(pid)
 
   const ensure = useWorkbenchStore((s) => s.ensure)
@@ -245,13 +249,13 @@ export function WorkbenchPage() {
     }
   }, [pid, selectedWorkbenchProjectId, selectedWorkbenchProjectRef?.projectId, selectedWorkbenchProjectRef?.subjectId, subjectId])
 
-  const instancesQ = useInstances(pid)
-  const learningTaskNodesQ = useLearningTaskNodes(pid)
-  const queueQ = useQueue(pid)
-  const layersQ = useLayers(pid)
-  const rollUpM = useManualRollUp(pid)
-  const projectConfigQ = useProjectConfig(pid)
-  const setLayerConfigM = useSetLayerConfig(pid)
+  const instancesQ = useInstances(projectScope)
+  const learningTaskNodesQ = useLearningTaskNodes(projectScope)
+  const queueQ = useQueue(projectScope)
+  const layersQ = useLayers(projectScope)
+  const rollUpM = useManualRollUp(projectScope)
+  const projectConfigQ = useProjectConfig(projectScope)
+  const setLayerConfigM = useSetLayerConfig(projectScope)
   const capabilitiesQ = useSystemCapabilities()
   const directoryBinding = useProjectDirectoryBinding(pid)
   const projectType = projectConfigQ.data?.projectType ?? "COURSE"
@@ -276,8 +280,8 @@ export function WorkbenchPage() {
   const missingRecallPointQs = useQueries({
     queries: missingInstances.map((item) => ({
       queryKey: ["recallPointsByInstance", pid, item.instanceId],
-      queryFn: () => listRecallPointsByInstance(pid, item.instanceId),
-      enabled: !!pid && !isVirtualStudyReviewProject,
+      queryFn: () => listRecallPointsByInstance(projectScope as ProjectScope, item.instanceId),
+      enabled: !!projectScope && !isVirtualStudyReviewProject,
     })),
   })
   const actionableMissingInstanceCount = useMemo(
@@ -310,7 +314,7 @@ export function WorkbenchPage() {
   const recallPointProbeSessionRef = useRef(0)
 
   useEffect(() => {
-    if (!pid) return
+    if (!projectScope) return
     setTodayStats(loadDailyWorkbenchStats(pid))
     const timer = window.setInterval(() => {
       setTodayStats(loadDailyWorkbenchStats(pid))
@@ -319,7 +323,8 @@ export function WorkbenchPage() {
   }, [pid])
 
   useEffect(() => {
-    if (!pid) return
+    const scope = projectScope
+    if (!pid || !scope) return
     const tracker = createStudyPresenceTracker(pid)
     const touch = () => tracker.touch()
     tracker.start()
@@ -466,7 +471,8 @@ export function WorkbenchPage() {
   }, [instancesQ.data, pid, remoteVideoWatchProgressByInstanceId, videoDurationByInstanceId])
 
   useEffect(() => {
-    if (!pid) return
+    const scope = projectScope
+    if (!pid || !scope) return
     const instanceIds = (instancesQ.data ?? []).map((item) => item.instanceId)
     if (instanceIds.length <= 0) {
       setRemoteVideoWatchProgressByInstanceId((current) => (Object.keys(current).length === 0 ? current : {}))
@@ -475,7 +481,7 @@ export function WorkbenchPage() {
     const controller = new AbortController()
     void (async () => {
       try {
-        const remoteProgress = await fetchVideoWatchProgressMap(pid, instanceIds, {
+        const remoteProgress = await fetchVideoWatchProgressMap(scope, instanceIds, {
           signal: controller.signal,
           timeoutMs: 90_000,
         })
@@ -492,7 +498,7 @@ export function WorkbenchPage() {
       }
     })()
     return () => controller.abort()
-  }, [instancesQ.data, pid, videoDurationByInstanceId])
+  }, [instancesQ.data, pid, projectScope, videoDurationByInstanceId])
 
   useEffect(() => {
     setDurationProbeAttemptedByInstanceId({})
@@ -566,6 +572,7 @@ export function WorkbenchPage() {
       void (async () => {
         try {
           const durationMs = await resolveInstanceDurationMs({
+            subjectId,
             projectId: pid,
             instance: targetInstance,
             serverMediaStreamEnabled,
@@ -591,7 +598,7 @@ export function WorkbenchPage() {
         }
       })()
     }
-  }, [browserLocalMediaEnabled, directoryBinding.permission, pendingDurationProbeInstances, pid, serverMediaStreamEnabled])
+  }, [browserLocalMediaEnabled, directoryBinding.permission, pendingDurationProbeInstances, pid, serverMediaStreamEnabled, subjectId])
 
   useEffect(() => {
     if (!pid || pendingRecallPointProbeInstances.length <= 0) return
@@ -612,7 +619,7 @@ export function WorkbenchPage() {
     for (const targetInstance of pendingRecallPointProbeInstances) {
       void (async () => {
         try {
-          const result = await listRecallPointsByInstance(pid, targetInstance.instanceId, { timeoutMs: 90_000 })
+          const result = await listRecallPointsByInstance(projectScope as ProjectScope, targetInstance.instanceId, { timeoutMs: 90_000 })
           if (recallPointProbeSessionRef.current !== probeSession) return
           setRecallPointCountByInstanceId((current) => ({
             ...current,
@@ -644,7 +651,7 @@ export function WorkbenchPage() {
         }
       })()
     }
-  }, [pendingRecallPointProbeInstances, pid])
+  }, [pendingRecallPointProbeInstances, pid, projectScope])
 
   const thresholdRollUpEnabledByLayerIndex = useMemo(
     () =>
@@ -794,7 +801,7 @@ export function WorkbenchPage() {
         <ContentNotice
           title="当前工作台缺少项目上下文"
           message="当前链接缺少项目信息。请先返回项目列表，再重新进入工作台。"
-          action={<Button onClick={() => navigate("/projects")}>返回项目列表</Button>}
+          action={<Button onClick={() => navigate("/subjects")}>返回学科中心</Button>}
         />
       </div>
     )
@@ -878,6 +885,7 @@ export function WorkbenchPage() {
               </CardHeader>
               <CardContent className="pt-2 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:overscroll-contain xl:pr-3">
                 <LearningObjectTree
+                  subjectId={subjectId}
                   projectId={pid}
                   projectType={projectType}
                   selectedInstanceId={selectedInstanceId}
@@ -947,6 +955,7 @@ export function WorkbenchPage() {
             <div id={queueQ.data?.headId ? "workbench-review-pane" : "workbench-compose-pane"} className="shrink-0">
               {queueQ.data?.headId ? (
                 <ReviewPane
+                  subjectId={subjectId}
                   key={queueQ.data.headId}
                   projectId={pid}
                   headId={queueQ.data.headId}
@@ -955,6 +964,7 @@ export function WorkbenchPage() {
                 />
               ) : (
                 <ComposePane
+                  subjectId={subjectId}
                   projectId={pid}
                   projectType={projectType}
                   selectedInstanceId={selectedInstanceId}
@@ -968,6 +978,7 @@ export function WorkbenchPage() {
             </div>
           ) : (
             <RollupPane
+              subjectId={subjectId}
               projectId={pid}
               layers={layersQ.data ?? []}
               layersLoading={layersQ.isLoading}
@@ -1062,6 +1073,7 @@ export function WorkbenchPage() {
           </Card>
           <DesktopPet page="workbench" assistantState={petAssistantState}>
             <WorkbenchPetAssistant
+              subjectId={subjectId}
               projectId={pid}
               instance={instance}
               currentMs={currentMs}

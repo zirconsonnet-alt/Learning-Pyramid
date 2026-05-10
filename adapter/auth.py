@@ -18,7 +18,7 @@ PENDING_EMAIL_VERIFICATION_COOKIE_NAME = "plm_pending_email_verification"
 
 
 def _session_ttl_seconds() -> int:
-    raw = (os.getenv("PLM_SESSION_TTL_DAYS") or "30").strip()
+    raw = (os.getenv("LEARNINGPYRAMID_SESSION_TTL_DAYS") or "30").strip()
     try:
         days = int(raw)
     except Exception:
@@ -27,7 +27,7 @@ def _session_ttl_seconds() -> int:
 
 
 def _pending_email_verification_ttl_seconds() -> int:
-    raw = (os.getenv("PLM_PENDING_EMAIL_VERIFICATION_TTL_SECONDS") or "3600").strip()
+    raw = (os.getenv("LEARNINGPYRAMID_PENDING_EMAIL_VERIFICATION_TTL_SECONDS") or "3600").strip()
     try:
         seconds = int(raw)
     except Exception:
@@ -37,15 +37,15 @@ def _pending_email_verification_ttl_seconds() -> int:
 
 def _pending_email_verification_secret() -> str:
     return (
-        os.getenv("PLM_PENDING_EMAIL_VERIFICATION_SECRET")
-        or os.getenv("PLM_MEDIA_ACCESS_TOKEN_SECRET")
-        or os.getenv("PLM_ALTCHA_HMAC_SECRET")
+        os.getenv("LEARNINGPYRAMID_PENDING_EMAIL_VERIFICATION_SECRET")
+        or os.getenv("LEARNINGPYRAMID_MEDIA_ACCESS_TOKEN_SECRET")
+        or os.getenv("LEARNINGPYRAMID_ALTCHA_HMAC_SECRET")
         or "learningpyramid-local-pending-email-verification"
     )
 
 
 def _secure_cookies_enabled() -> bool:
-    return (os.getenv("PLM_SECURE_COOKIES") or "").strip().lower() in {"1", "true", "yes", "on"}
+    return (os.getenv("LEARNINGPYRAMID_SECURE_COOKIES") or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _base64url_encode(raw: bytes) -> str:

@@ -23,7 +23,7 @@ TOOL_LABEL = "LearningPyramid 字幕生成工具"
 TOOL_EXE_BASENAME = "LearningPyramid-SubtitleTool"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "public-downloads"
 DEFAULT_PACKAGING_VENV = PROJECT_ROOT / "build" / "packaging-venv"
-DEFAULT_UPDATE_BASE_URL = "https://plm.xuebao.chat"
+DEFAULT_UPDATE_BASE_URL = ""
 VISUAL_STUDIO_GENERATOR = "Visual Studio 17 2022"
 
 WHISPER_CPP_VERSION = "v1.8.4"

@@ -1,6 +1,7 @@
 import { z } from "zod"
 
 import { apiRequest, type ApiRequestExecutionOptions } from "@/ui/api/http"
+import { projectApiPath, type ProjectScope } from "@/ui/api/projectScope"
 
 export const AuditLogEventSchema = z.object({
   projectId: z.string(),
@@ -13,18 +14,9 @@ export const AuditLogEventSchema = z.object({
 })
 export type AuditLogEvent = z.infer<typeof AuditLogEventSchema>
 
-export function listAuditLogEvents(projectId: string, options?: ApiRequestExecutionOptions) {
+export function listAuditLogEvents(scope: ProjectScope, options?: ApiRequestExecutionOptions) {
   return apiRequest({
-    path: `/projects/${projectId}/audit-log-events`,
-    responseSchema: z.array(AuditLogEventSchema),
-    signal: options?.signal,
-    timeoutMs: options?.timeoutMs,
-  })
-}
-
-export function listScopedAuditLogEvents(subjectId: string, projectId: string, options?: ApiRequestExecutionOptions) {
-  return apiRequest({
-    path: `/subjects/${subjectId}/projects/${projectId}/audit-log-events`,
+    path: projectApiPath(scope, "/audit-log-events"),
     responseSchema: z.array(AuditLogEventSchema),
     signal: options?.signal,
     timeoutMs: options?.timeoutMs,

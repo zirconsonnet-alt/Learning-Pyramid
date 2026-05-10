@@ -33,7 +33,7 @@ _WINDOWS_RESERVED_NAMES = {
 
 
 def default_projects_root() -> Path:
-    override = os.getenv("PLM_PROJECTS_ROOT", "").strip()
+    override = os.getenv("LEARNINGPYRAMID_PROJECTS_ROOT", "").strip()
     if override:
         return Path(override).expanduser()
     base = executable_dir() if is_frozen() else source_root()

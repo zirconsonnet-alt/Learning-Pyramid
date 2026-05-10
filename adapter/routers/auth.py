@@ -509,7 +509,7 @@ def complete_baidu_netdisk_connect(
         )
         return _cloud_callback_html(
             {
-                "type": "plm:baidu-netdisk-connect",
+                "type": "learningpyramid:baidu-netdisk-connect",
                 "ok": True,
                 "account": account,
             }
@@ -520,7 +520,7 @@ def complete_baidu_netdisk_connect(
             message = str(exc.detail) if exc.detail else message
         return _cloud_callback_html(
             {
-                "type": "plm:baidu-netdisk-connect",
+                "type": "learningpyramid:baidu-netdisk-connect",
                 "ok": False,
                 "message": message,
             },

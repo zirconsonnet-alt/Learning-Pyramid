@@ -106,6 +106,10 @@ def with_project_reference(dto: Dict[str, Any], *, subject_id: str, project_id: 
     return out
 
 
+def _project_id(value: Any, public_project_id: str | None = None) -> str:
+    return str(public_project_id if public_project_id is not None else value)
+
+
 def project_storage_config_to_dto(c: ProjectStorageConfig) -> Dict[str, Any]:
     return {
         "projectId": str(c.project_id),
@@ -144,9 +148,9 @@ def instance_to_dto(
     }
 
 
-def video_watch_progress_to_dto(item: VideoWatchProgress) -> Dict[str, Any]:
+def video_watch_progress_to_dto(item: VideoWatchProgress, *, public_project_id: str | None = None) -> Dict[str, Any]:
     return {
-        "projectId": str(item.project_id),
+        "projectId": _project_id(item.project_id, public_project_id),
         "instanceId": str(item.instance_id),
         "durationMs": item.duration_ms,
         "watchedMs": item.watched_ms,
@@ -169,9 +173,9 @@ def _rich_content_to_dto(rc: RichContent) -> list[Dict[str, Any]]:
     return [_content_block_to_dto(b) for b in rc]
 
 
-def recall_point_to_dto(rp: RecallPoint) -> Dict[str, Any]:
+def recall_point_to_dto(rp: RecallPoint, *, public_project_id: str | None = None) -> Dict[str, Any]:
     return {
-        "projectId": str(rp.project_id),
+        "projectId": _project_id(rp.project_id, public_project_id),
         "recallPointId": str(rp.recall_point_id),
         "createdAt": _jsonable(rp.created_at),
         "state": _jsonable(rp.state),
@@ -184,9 +188,9 @@ def recall_point_to_dto(rp: RecallPoint) -> Dict[str, Any]:
     }
 
 
-def review_recommendation_to_dto(item: RecallPointReviewRecommendation) -> Dict[str, Any]:
+def review_recommendation_to_dto(item: RecallPointReviewRecommendation, *, public_project_id: str | None = None) -> Dict[str, Any]:
     return {
-        "recallPoint": recall_point_to_dto(item.recall_point),
+        "recallPoint": recall_point_to_dto(item.recall_point, public_project_id=public_project_id),
         "reviewRecommendationIndex": float(item.review_recommendation_index),
         "estimatedMemoryStrength": float(item.estimated_memory_strength),
         "weightedSuccessRatio": float(item.weighted_success_ratio),
@@ -196,9 +200,9 @@ def review_recommendation_to_dto(item: RecallPointReviewRecommendation) -> Dict[
     }
 
 
-def review_recommendation_page_to_dto(page: RecallPointReviewRecommendationPage) -> Dict[str, Any]:
+def review_recommendation_page_to_dto(page: RecallPointReviewRecommendationPage, *, public_project_id: str | None = None) -> Dict[str, Any]:
     return {
-        "items": [review_recommendation_to_dto(item) for item in page.items],
+        "items": [review_recommendation_to_dto(item, public_project_id=public_project_id) for item in page.items],
         "totalCount": int(page.total_count),
         "offset": int(page.offset),
         "limit": int(page.limit),
@@ -229,17 +233,17 @@ def recall_point_review_projection_to_dto(item: RecallPointReviewProjection) -> 
     }
 
 
-def range_snapshot_to_dto(snap: RangeSnapshot) -> Dict[str, Any]:
+def range_snapshot_to_dto(snap: RangeSnapshot, *, public_project_id: str | None = None) -> Dict[str, Any]:
     return {
-        "projectId": str(snap.project_id),
+        "projectId": _project_id(snap.project_id, public_project_id),
         "rangeId": str(snap.range_id),
         "recallPointIds": [str(x) for x in snap.recall_point_ids],
     }
 
 
-def review_task_to_dto(rt: ReviewTask) -> Dict[str, Any]:
+def review_task_to_dto(rt: ReviewTask, *, public_project_id: str | None = None) -> Dict[str, Any]:
     return {
-        "projectId": str(rt.project_id),
+        "projectId": _project_id(rt.project_id, public_project_id),
         "reviewTaskId": str(rt.review_task_id),
         "inputRangeId": str(rt.input_range_id),
         "createdAt": _jsonable(rt.created_at),
@@ -249,9 +253,9 @@ def review_task_to_dto(rt: ReviewTask) -> Dict[str, Any]:
     }
 
 
-def convergence_to_dto(c: Convergence) -> Dict[str, Any]:
+def convergence_to_dto(c: Convergence, *, public_project_id: str | None = None) -> Dict[str, Any]:
     return {
-        "projectId": str(c.project_id),
+        "projectId": _project_id(c.project_id, public_project_id),
         "convergenceId": str(c.convergence_id),
         "seedRangeId": str(c.seed_range_id),
         "ruleId": str(c.rule_id),
@@ -261,9 +265,9 @@ def convergence_to_dto(c: Convergence) -> Dict[str, Any]:
     }
 
 
-def review_chain_to_dto(c: ReviewChain) -> Dict[str, Any]:
+def review_chain_to_dto(c: ReviewChain, *, public_project_id: str | None = None) -> Dict[str, Any]:
     return {
-        "projectId": str(c.project_id),
+        "projectId": _project_id(c.project_id, public_project_id),
         "reviewChainId": str(c.review_chain_id),
         "headIndex": int(c.head_index),
         "state": _jsonable(c.state),
@@ -271,9 +275,9 @@ def review_chain_to_dto(c: ReviewChain) -> Dict[str, Any]:
     }
 
 
-def layer_to_dto(l: Layer) -> Dict[str, Any]:
+def layer_to_dto(l: Layer, *, public_project_id: str | None = None) -> Dict[str, Any]:
     return {
-        "projectId": str(l.project_id),
+        "projectId": _project_id(l.project_id, public_project_id),
         "layerId": str(l.layer_id),
         "layerIndex": l.layer_index,
         "layerMode": _jsonable(l.layer_mode),
@@ -316,9 +320,9 @@ def project_config_to_dto(c: ProjectConfig) -> Dict[str, Any]:
     }
 
 
-def aggregation_event_to_dto(ev: AggregationEvent) -> Dict[str, Any]:
+def aggregation_event_to_dto(ev: AggregationEvent, *, public_project_id: str | None = None) -> Dict[str, Any]:
     return {
-        "projectId": str(ev.project_id),
+        "projectId": _project_id(ev.project_id, public_project_id),
         "eventId": str(ev.event_id),
         "createdAt": _jsonable(ev.created_at),
         "layerIndex": ev.layer_index,
@@ -329,9 +333,9 @@ def aggregation_event_to_dto(ev: AggregationEvent) -> Dict[str, Any]:
     }
 
 
-def audit_log_event_to_dto(ev: AuditLogEvent) -> Dict[str, Any]:
+def audit_log_event_to_dto(ev: AuditLogEvent, *, public_project_id: str | None = None) -> Dict[str, Any]:
     return {
-        "projectId": str(ev.project_id),
+        "projectId": _project_id(ev.project_id, public_project_id),
         "eventId": str(ev.event_id),
         "occurredAt": _jsonable(ev.occurred_at),
         "kind": _jsonable(ev.kind),
@@ -341,11 +345,11 @@ def audit_log_event_to_dto(ev: AuditLogEvent) -> Dict[str, Any]:
     }
 
 
-def learning_object_node_to_dto(n: LearningObjectNode) -> Dict[str, Any]:
+def learning_object_node_to_dto(n: LearningObjectNode, *, public_project_id: str | None = None) -> Dict[str, Any]:
     if isinstance(n, LearningObjectLeaf):
         return {
             "kind": "leaf",
-            "projectId": str(n.project_id),
+            "projectId": _project_id(n.project_id, public_project_id),
             "nodeId": str(n.node_id),
             "relativePath": _jsonable(n.relative_path),
             "source": _jsonable(getattr(n, "source", None)),
@@ -356,7 +360,7 @@ def learning_object_node_to_dto(n: LearningObjectNode) -> Dict[str, Any]:
     if isinstance(n, LearningObjectContainer):
         return {
             "kind": "container",
-            "projectId": str(n.project_id),
+            "projectId": _project_id(n.project_id, public_project_id),
             "nodeId": str(n.node_id),
             "relativePath": _jsonable(n.relative_path),
             "source": _jsonable(getattr(n, "source", None)),
@@ -371,11 +375,12 @@ def learning_task_node_to_dto(
     n: LearningTaskNode,
     *,
     target_layer_index: int | None = None,
+    public_project_id: str | None = None,
 ) -> Dict[str, Any]:
     if isinstance(n, LearningTaskLeaf):
         return {
             "kind": "leaf",
-            "projectId": str(n.project_id),
+            "projectId": _project_id(n.project_id, public_project_id),
             "nodeId": str(n.node_id),
             "parentId": None if n.parent_id is None else str(n.parent_id),
             "boundLearningTaskId": str(n.bound_learning_task_id),
@@ -385,7 +390,7 @@ def learning_task_node_to_dto(
     if isinstance(n, LearningTaskContainer):
         return {
             "kind": "container",
-            "projectId": str(n.project_id),
+            "projectId": _project_id(n.project_id, public_project_id),
             "nodeId": str(n.node_id),
             "parentId": None if n.parent_id is None else str(n.parent_id),
             "children": [str(x) for x in n.children],
@@ -403,9 +408,10 @@ def learning_task_to_dto(
     entry_node_title: str | None = None,
     review_chain_id: str | None = None,
     target_layer_index: int | None = None,
+    public_project_id: str | None = None,
 ) -> Dict[str, Any]:
     return {
-        "projectId": str(t.project_id),
+        "projectId": _project_id(t.project_id, public_project_id),
         "learningTaskId": str(t.learning_task_id),
         "title": t.title,
         "recallPointIds": [str(x) for x in t.recall_point_ids],
@@ -446,9 +452,9 @@ def asr_segment_to_dto(s: AsrSegment) -> Dict[str, Any]:
     }
 
 
-def asr_artifact_to_dto(a: AsrArtifact) -> Dict[str, Any]:
+def asr_artifact_to_dto(a: AsrArtifact, *, public_project_id: str | None = None) -> Dict[str, Any]:
     return {
-        "projectId": str(a.project_id),
+        "projectId": _project_id(a.project_id, public_project_id),
         "asrArtifactId": str(a.asr_artifact_id),
         "createdAt": _jsonable(a.created_at),
         "provider": _jsonable(a.provider),
@@ -462,9 +468,9 @@ def asr_artifact_to_dto(a: AsrArtifact) -> Dict[str, Any]:
     }
 
 
-def asr_transcript_result_to_dto(result: AsrTranscriptResult) -> Dict[str, Any]:
+def asr_transcript_result_to_dto(result: AsrTranscriptResult, *, public_project_id: str | None = None) -> Dict[str, Any]:
     return {
-        "projectId": str(result.project_id),
+        "projectId": _project_id(result.project_id, public_project_id),
         "provider": _jsonable(result.provider),
         "recallPointId": str(result.recall_point_id),
         "sourceInstanceId": str(result.source_instance_id),
@@ -475,9 +481,9 @@ def asr_transcript_result_to_dto(result: AsrTranscriptResult) -> Dict[str, Any]:
     }
 
 
-def instance_asr_transcript_result_to_dto(result: InstanceAsrTranscriptResult) -> Dict[str, Any]:
+def instance_asr_transcript_result_to_dto(result: InstanceAsrTranscriptResult, *, public_project_id: str | None = None) -> Dict[str, Any]:
     return {
-        "projectId": str(result.project_id),
+        "projectId": _project_id(result.project_id, public_project_id),
         "provider": _jsonable(result.provider),
         "sourceInstanceId": str(result.source_instance_id),
         "startMs": int(result.start_ms),

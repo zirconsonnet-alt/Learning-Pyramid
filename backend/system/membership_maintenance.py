@@ -154,8 +154,8 @@ class CommissionWithdrawalReconcileSummary:
 
 def current_membership_pending_payment_reconcile_config() -> MembershipPendingPaymentReconcileConfig:
     return MembershipPendingPaymentReconcileConfig(
-        min_age_minutes=_env_int("PLM_MEMBERSHIP_PENDING_PAYMENT_RECONCILE_MIN_AGE_MINUTES", 5, minimum=0, maximum=24 * 60),
-        limit=_env_int("PLM_MEMBERSHIP_PENDING_PAYMENT_RECONCILE_LIMIT", 100, minimum=1, maximum=500),
+        min_age_minutes=_env_int("LEARNINGPYRAMID_MEMBERSHIP_PENDING_PAYMENT_RECONCILE_MIN_AGE_MINUTES", 5, minimum=0, maximum=24 * 60),
+        limit=_env_int("LEARNINGPYRAMID_MEMBERSHIP_PENDING_PAYMENT_RECONCILE_LIMIT", 100, minimum=1, maximum=500),
     )
 
 

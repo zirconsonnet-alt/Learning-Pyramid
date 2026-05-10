@@ -2307,7 +2307,6 @@ class InMemorySystem:
         needs_persist_after_load = False
         if self._persist_store is not None:
             needs_persist_after_load = self._load_persisted()
-        self._ensure_system_project_id_seq()
         if needs_persist_after_load:
             self._persist_to_disk()
 
@@ -2364,44 +2363,14 @@ class InMemorySystem:
             _baseline=ps,
         )
 
-    def _ensure_system_project_id_seq(self) -> None:
-        """
-        Backward compatible bootstrap for 0a.11:
-        older snapshots may not have a persisted system-wide project id counter.
-        """
+    def _require_system_project_id_seq(self) -> None:
+        counters = self.g.idgen._counters
+        if "__system__:proj" not in counters:
+            raise PreconditionFailure("idgenCounters.__system__:proj is required")
+        if "__system__:subj" not in counters:
+            raise PreconditionFailure("idgenCounters.__system__:subj is required")
 
-        def parse_seq_num(s: str, prefix: str) -> Optional[int]:
-            if not s.startswith(prefix):
-                return None
-            suffix = s.split("_", 1)[1]
-            return int(suffix) if suffix.isdigit() else None
-
-        max_project_n = 0
-        max_subject_n = 0
-
-        for pid in self.g.projects.keys():
-            n = parse_seq_num(pid, "proj_")
-            if n is not None:
-                max_project_n = max(max_project_n, n)
-            n = parse_seq_num(pid, "subj_")
-            if n is not None:
-                max_subject_n = max(max_subject_n, n)
-
-        for k in self.g.idgen._counters.keys():
-            if k.startswith("__system__:"):
-                continue
-            project_part = k.split(":", 1)[0]
-            n = parse_seq_num(project_part, "proj_")
-            if n is not None:
-                max_project_n = max(max_project_n, n)
-            n = parse_seq_num(project_part, "subj_")
-            if n is not None:
-                max_subject_n = max(max_subject_n, n)
-
-        self.g.idgen.ensure_project_id_seq_at_least(max_project_n)
-        self.g.idgen.ensure_subject_id_seq_at_least(max_subject_n)
-
-    def _ensure_project_audit_event_seq(self) -> bool:
+    def _require_project_audit_event_seq(self) -> None:
         def parse_seq_num(s: str, prefix: str) -> Optional[int]:
             marker = f"{prefix}_"
             if not s.startswith(marker):
@@ -2409,7 +2378,6 @@ class InMemorySystem:
             suffix = s.removeprefix(marker)
             return int(suffix) if suffix.isdigit() else None
 
-        updated = False
         for project_id, project_store in self.g.projects.items():
             max_audit_n = 0
             for item in getattr(project_store, "audit_log_events", {}).values():
@@ -2417,11 +2385,9 @@ class InMemorySystem:
                 if n is not None and n > max_audit_n:
                     max_audit_n = n
             if max_audit_n > 0:
-                before = int(self.g.idgen._counters.get(f"{project_id}:audit", 0))
-                self.g.idgen.ensure_project_scoped_seq_at_least(ProjectId(project_id), "audit", max_audit_n)
-                after = int(self.g.idgen._counters.get(f"{project_id}:audit", 0))
-                updated = updated or after != before
-        return updated
+                counter = int(self.g.idgen._counters.get(f"{project_id}:audit", 0))
+                if counter < max_audit_n:
+                    raise PreconditionFailure(f"idgenCounters.{project_id}:audit is required")
 
     def _load_persisted(self) -> bool:
         if self._persist_store is None:
@@ -2432,7 +2398,7 @@ class InMemorySystem:
         projects_data, idgen_counters, global_llm_settings = decode_snapshot(data)
         self.g.global_llm_settings = global_llm_settings
         self.g.idgen._counters = dict(idgen_counters)
-        needs_persist = False
+        self._require_system_project_id_seq()
 
         for pid, d in projects_data.items():
             ps = ProjectStore(project=d["project"])
@@ -2469,69 +2435,8 @@ class InMemorySystem:
                 ps.aggregation_events = d["aggregation_events"]
                 self.g.projects[str(ProjectId(pid))] = ps
                 continue
-            # Backward compatibility: older snapshots used ProjectScanConfig (scan_root) and some snapshots
-            # did not persist ProjectStorageConfig at all.
-            raw_cfg = d.get("project_storage_config") or d.get("project_scan_config")
-
-            def _migrated_project_storage_config_default() -> ProjectStorageConfig:
-                # Use the store folder as a reasonable default root. We default to DISABLED to preserve
-                # legacy manual material_id semantics (many existing stores use absolute file paths).
-                root_dir = (self._persist_path.parent if self._persist_path is not None else Path.cwd()).resolve()
-                return ProjectStorageConfig.create(
-                    ps.project.project_id,  # type: ignore[union-attr]
-                    root_dir.as_posix(),
-                    learning_object_root="learning_objects",
-                    fs_sync_policy=FsSyncPolicy.DISABLED,
-                    updated_at=now_utc_ms(),
-                )
-
-            if raw_cfg is None:
-                ps.project_storage_config = _migrated_project_storage_config_default()
-                needs_persist = True
-            elif hasattr(raw_cfg, "project_root"):
-                cfg = raw_cfg
-                if (
-                    cfg.fs_sync_policy != FsSyncPolicy.DISABLED
-                    and cfg.learning_object_root.as_posix() == "."
-                ):
-                    cfg = ProjectStorageConfig.from_legacy_scan_root(
-                        cfg.project_id,
-                        cfg.project_root,
-                        updated_at=cfg.updated_at,
-                    )
-                    needs_persist = True
-                ps.project_storage_config = cfg
-            else:
-                ps.project_storage_config = ProjectStorageConfig.from_legacy_scan_root(
-                    raw_cfg.project_id,
-                    raw_cfg.scan_root,
-                    updated_at=raw_cfg.updated_at,
-                )
-                needs_persist = True
-
-            try:
-                if ps.project is None:
-                    raise PreconditionFailure("Project missing during ProjectStorageConfig migration")
-                if ps.project_storage_config is None:
-                    raise PreconditionFailure("ProjectStorageConfig migration produced None")
-                if ps.project_storage_config.project_id != ps.project.project_id:
-                    raise PreconditionFailure("ProjectStorageConfig.project_id mismatch")
-                ps.project_storage_config.validate_write_time()
-            except Exception:
-                ps.project_storage_config = _migrated_project_storage_config_default()
-                needs_persist = True
-
-            # ProjectConfig may be missing in older snapshots; migrate after layer hydration to avoid
-            # creating a config view that disagrees with existing Layer control fields.
-            raw_binding = d.get("project_material_source_binding")
-            if raw_binding is None and ps.project is not None:
-                ps.project_material_source_binding = ProjectMaterialSourceBinding.create(
-                    ps.project.project_id,
-                    source_kind=MaterialSourceKind.SERVER_FS,
-                )
-                needs_persist = True
-            else:
-                ps.project_material_source_binding = raw_binding
+            ps.project_storage_config = d.get("project_storage_config")
+            ps.project_material_source_binding = d.get("project_material_source_binding")
             ps.project_config = d.get("project_config")
             ps.material_allowlist = d.get("material_allowlist")
             ps.study_materials = d.get("study_materials", {})
@@ -2559,82 +2464,18 @@ class InMemorySystem:
             ps.aggregation_queues = d["aggregation_queues"]
             ps.aggregation_events = d["aggregation_events"]
 
-            def _infer_legacy_startup_sync_config() -> Optional[ProjectStorageConfig]:
-                cfg = ps.project_storage_config
-                if cfg is None or ps.project is None:
-                    return None
-
-                root_dir = (self._persist_path.parent if self._persist_path is not None else Path.cwd()).resolve().as_posix()
-                if (
-                    cfg.fs_sync_policy != FsSyncPolicy.DISABLED
-                    or cfg.learning_object_root.as_posix() != "learning_objects"
-                    or cfg.project_root.as_posix() != root_dir
-                ):
-                    return None
-
-                instances_by_id = {id_canonical_text(inst.instance_id): inst for inst in ps.instances.values()}
-                file_dirs: list[str] = []
-
-                for node in ps.learning_object_nodes.values():
-                    if not isinstance(node, LearningObjectLeaf):
-                        continue
-                    if str(getattr(node, "source", "")) != "FILESYSTEM":
-                        continue
-                    inst = instances_by_id.get(id_canonical_text(node.instance_id))
-                    if inst is None or not Path(inst.material_id.as_posix()).is_absolute():
-                        continue
-                    suffix = Path(inst.material_id.as_posix()).suffix.lower()
-                    if not suffix:
-                        continue
-                    file_dirs.append(Path(inst.material_id.as_posix()).parent.as_posix())
-
-                if not file_dirs:
-                    for inst in instances_by_id.values():
-                        if not Path(inst.material_id.as_posix()).is_absolute():
-                            continue
-                        suffix = Path(inst.material_id.as_posix()).suffix.lower()
-                        if not suffix:
-                            continue
-                        file_dirs.append(Path(inst.material_id.as_posix()).parent.as_posix())
-
-                if not file_dirs:
-                    return None
-
-                common_dir = os.path.commonpath(file_dirs)
-                if not common_dir or common_dir in ("", "."):
-                    return None
-
-                return ProjectStorageConfig.from_legacy_scan_root(
-                    ps.project.project_id,
-                    Path(common_dir).as_posix(),
-                    updated_at=cfg.updated_at,
-                )
-
-            inferred_cfg = _infer_legacy_startup_sync_config()
-            if inferred_cfg is not None:
-                ps.project_storage_config = inferred_cfg
-                needs_persist = True
-
-            try:
-                if ps.project is None:
-                    raise PreconditionFailure("Project missing during ProjectStorageConfig migration")
-                if ps.project_storage_config is None:
-                    raise PreconditionFailure("ProjectStorageConfig migration produced None")
-                if ps.project_storage_config.project_id != ps.project.project_id:
-                    raise PreconditionFailure("ProjectStorageConfig.project_id mismatch")
-                ps.project_storage_config.validate_write_time()
-                if ps.project_material_source_binding is None:
-                    raise PreconditionFailure("ProjectMaterialSourceBinding migration produced None")
-                if ps.project_material_source_binding.project_id != ps.project.project_id:
-                    raise PreconditionFailure("ProjectMaterialSourceBinding.project_id mismatch")
-                ps.project_material_source_binding.validate_write_time()
-            except Exception:
-                ps.project_storage_config = _migrated_project_storage_config_default()
-                ps.project_material_source_binding = ProjectMaterialSourceBinding.create(
-                    ps.project.project_id,  # type: ignore[union-attr]
-                    source_kind=MaterialSourceKind.SERVER_FS,
-                )
-                needs_persist = True
+            if ps.project is None:
+                raise PreconditionFailure("Project missing")
+            if ps.project_storage_config is None:
+                raise PreconditionFailure("ProjectStorageConfig missing")
+            if ps.project_storage_config.project_id != ps.project.project_id:
+                raise PreconditionFailure("ProjectStorageConfig.project_id mismatch")
+            ps.project_storage_config.validate_write_time()
+            if ps.project_material_source_binding is None:
+                raise PreconditionFailure("ProjectMaterialSourceBinding missing")
+            if ps.project_material_source_binding.project_id != ps.project.project_id:
+                raise PreconditionFailure("ProjectMaterialSourceBinding.project_id mismatch")
+            ps.project_material_source_binding.validate_write_time()
 
             # The persisted snapshot format stores per-layer control fields as layer_index-keyed maps,
             # while the domain model stores them on Layer. Hydrate the model from that persisted shape.
@@ -2691,45 +2532,12 @@ class InMemorySystem:
                 hydrated_layers[lid] = updated
             ps.layers = hydrated_layers
 
-            def _migrated_project_config_from_layer0() -> ProjectConfig:
-                base = default_layer_config()
-                k_node = int(base.aggregation_k_node)
-                k_point = int(base.aggregation_k_point)
-
-                lid0 = ps.layers_by_index.get(0)
-                if lid0 is not None:
-                    layer0 = ps.layers.get(lid0)
-                    if layer0 is not None:
-                        k_node = int(layer0.aggregation_k_node)
-                        k_point = int(layer0.aggregation_k_point)
-
-                cfg0 = LayerConfig(
-                    review_chain_template=base.review_chain_template,
-                    aggregation_k_node=k_node,
-                    aggregation_k_point=k_point,
-                )
-                cfg0.validate_write_time()
-                pcfg = ProjectConfig(
-                    project_id=ps.project.project_id,
-                    project_type=ProjectType.COURSE,
-                    layer_configs={0: cfg0},
-                    push_config=default_push_config(),
-                    updated_at=now_utc_ms(),
-                )
-                pcfg.validate_write_time()
-                return pcfg
-
             if ps.project_config is None:
-                ps.project_config = _migrated_project_config_from_layer0()
-                needs_persist = True
+                raise PreconditionFailure("ProjectConfig missing")
             else:
-                try:
-                    if ps.project_config.project_id != ps.project.project_id:
-                        raise PreconditionFailure("ProjectConfig.project_id mismatch")
-                    ps.project_config.validate_write_time()
-                except Exception:
-                    ps.project_config = _migrated_project_config_from_layer0()
-                    needs_persist = True
+                if ps.project_config.project_id != ps.project.project_id:
+                    raise PreconditionFailure("ProjectConfig.project_id mismatch")
+                ps.project_config.validate_write_time()
 
             st = ProjectStaged()
             _validate_learning_object_tree_consistency(ps, st)
@@ -2741,10 +2549,8 @@ class InMemorySystem:
 
             self.g.projects[str(ProjectId(pid))] = ps
 
-        if self._ensure_project_audit_event_seq():
-            needs_persist = True
-
-        return needs_persist
+        self._require_project_audit_event_seq()
+        return False
 
     def _persist_to_disk(self, projects_override: Optional[Dict[str, ProjectStore]] = None) -> None:
         if self._persist_store is None:

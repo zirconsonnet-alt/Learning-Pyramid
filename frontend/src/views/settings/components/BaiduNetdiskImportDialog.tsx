@@ -5,6 +5,7 @@ import { Link } from "react-router-dom"
 
 import { listProjectBaiduNetdiskFiles, type BaiduNetdiskFileItem } from "@/ui/api/baiduNetdisk"
 import { ApiError } from "@/ui/api/http"
+import type { ProjectScope } from "@/ui/api/projectScope"
 import { Button } from "@/ui/components/ui/button"
 import {
   Dialog,
@@ -73,16 +74,19 @@ function buildPathSegments(path: string) {
 }
 
 export function BaiduNetdiskImportDialog({
+  subjectId,
   projectId,
   open,
   onOpenChange,
 }: {
+  subjectId: string
   projectId: string
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
   const accountsQ = useBaiduNetdiskCloudAccounts(open)
-  const importMutation = useImportLearningObjectsFromBaiduNetdisk(projectId)
+  const projectScope: ProjectScope | null = subjectId && projectId ? { subjectId, projectId } : null
+  const importMutation = useImportLearningObjectsFromBaiduNetdisk(projectScope)
 
   const [selectedAccountId, setSelectedAccountId] = useState("")
   const [dirPath, setDirPath] = useState("/")
@@ -98,14 +102,14 @@ export function BaiduNetdiskImportDialog({
   )
 
   const filesQ = useQuery({
-    queryKey: ["baiduNetdiskFiles", projectId, accountId, dirPath],
+    queryKey: ["baiduNetdiskFiles", subjectId, projectId, accountId, dirPath],
     queryFn: ({ signal }) =>
       listProjectBaiduNetdiskFiles(
-        projectId,
+        projectScope as ProjectScope,
         { accountId, dirPath, page: 1, limit: 200 },
         { signal, timeoutMs: 90_000 },
       ),
-    enabled: open && !!projectId && !!accountId,
+    enabled: open && !!projectScope && !!accountId,
     staleTime: 10_000,
   })
 

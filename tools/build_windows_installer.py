@@ -192,8 +192,6 @@ Write-Host "{APP_NAME} removed."
 @echo off
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Uninstall-LearningPyramid.ps1" %*
 '@ | Set-Content -Path (Join-Path $InstallDir "Uninstall-LearningPyramid.bat") -Encoding ASCII
-    Copy-Item -Path $uninstallPs -Destination (Join-Path $InstallDir "Uninstall-PLM3.ps1") -Force
-    Copy-Item -Path (Join-Path $InstallDir "Uninstall-LearningPyramid.bat") -Destination (Join-Path $InstallDir "Uninstall-PLM3.bat") -Force
 
     $metadata = [ordered]@{{
         app = "{APP_NAME}"
@@ -319,8 +317,6 @@ def main() -> int:
     shutil.copy2(standalone_zip, payload_dir / standalone_zip.name)
     _write_install_script(installer_dir / "Install-LearningPyramid.ps1", standalone_zip.name)
     _write_batch_launcher(installer_dir / "Install-LearningPyramid.bat", "Install-LearningPyramid.ps1")
-    shutil.copy2(installer_dir / "Install-LearningPyramid.ps1", installer_dir / "Install-PLM3.ps1")
-    shutil.copy2(installer_dir / "Install-LearningPyramid.bat", installer_dir / "Install-PLM3.bat")
     _write_readme(installer_dir / "README.txt")
 
     inno_script_path = installer_dir / "LearningPyramid.iss"

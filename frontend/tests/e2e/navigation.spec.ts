@@ -11,7 +11,7 @@ test(journeyIds.mainNavigation, async ({ page }) => {
   await installMockApi(page)
 
   await recordJourney(journeyIds.mainNavigation, async () => {
-    await page.goto("/projects")
+    await page.goto("/subjects")
     await expect(page.getByRole("heading", { name: "所有学科" })).toBeVisible()
     await page.getByRole("button", { name: /全局/ }).click()
     await page.getByText("用户指南").click()

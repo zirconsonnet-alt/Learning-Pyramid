@@ -11,7 +11,7 @@ if not exist "%INSTALL_SCRIPT%" (
   exit /b 1
 )
 
-set "SERVER_HOST=plm.xuebao.chat"
+set "SERVER_HOST=learningpyramid.example.com"
 set "SERVER_USER=root"
 set "SSH_PORT=22"
 set "SSH_KEY_PATH=%USERPROFILE%\.ssh\learningpyramid_selfhost_ed25519"

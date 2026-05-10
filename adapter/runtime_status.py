@@ -38,12 +38,8 @@ def collect_runtime_status(*, user_id: str | None = None, auth_store: AuthStore 
     store_ready = False
     try:
         api = get_api()
-        store = getattr(api.sys, "_persist_store", None)
-        if store is None or not hasattr(store, "healthcheck"):
-            payload["store"] = {"ok": False, "error": "Persistence store is not initialized"}
-        else:
-            payload["store"] = store.healthcheck()
-            store_ready = bool(payload["store"].get("ok", False))
+        payload["store"] = api.get_store_health()
+        store_ready = bool(payload["store"].get("ok", False))
         llm_status = api.get_user_llm_status(auth_store=auth_store, user_id=user_id)
         payload["llmConfigured"] = bool(llm_status.get("llmConfigured", False))
         payload["storyGenerationConfigured"] = bool(llm_status.get("storyGenerationConfigured", False))

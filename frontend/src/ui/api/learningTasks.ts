@@ -1,6 +1,7 @@
 import { z } from "zod"
 
 import { apiRequest } from "@/ui/api/http"
+import { projectApiPath, type ProjectScope } from "@/ui/api/projectScope"
 import type { RichContent } from "@/ui/api/richContent"
 import { normalizeRichContent, RichContentSchema } from "@/ui/api/richContent"
 
@@ -26,12 +27,12 @@ export type SubmitLearningTaskItem = {
 }
 
 export function submitLearningTask(params: {
-  projectId: string
+  scope: ProjectScope
   title: string
   items: SubmitLearningTaskItem[]
 }) {
   return apiRequest({
-    path: `/projects/${params.projectId}/learning-tasks`,
+    path: projectApiPath(params.scope, "/learning-tasks"),
     method: "POST",
     body: {
       title: params.title,
@@ -46,16 +47,16 @@ export function submitLearningTask(params: {
   })
 }
 
-export function getLearningTask(projectId: string, learningTaskId: string) {
+export function getLearningTask(scope: ProjectScope, learningTaskId: string) {
   return apiRequest({
-    path: `/projects/${projectId}/learning-tasks/${learningTaskId}`,
+    path: projectApiPath(scope, `/learning-tasks/${learningTaskId}`),
     responseSchema: LearningTaskSchema,
   })
 }
 
-export function editLearningTask(projectId: string, learningTaskId: string, title: string) {
+export function editLearningTask(scope: ProjectScope, learningTaskId: string, title: string) {
   return apiRequest({
-    path: `/projects/${projectId}/learning-tasks/${learningTaskId}`,
+    path: projectApiPath(scope, `/learning-tasks/${learningTaskId}`),
     method: "PATCH",
     body: { title },
     responseSchema: z.null(),

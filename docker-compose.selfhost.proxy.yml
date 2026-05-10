@@ -1,14 +1,14 @@
 services:
   app:
     environment:
-      PLM_FORWARDED_ALLOW_IPS: "*"
+      LEARNINGPYRAMID_FORWARDED_ALLOW_IPS: "*"
 
   caddy:
     image: caddy:2.10-alpine
     depends_on:
       - app
     environment:
-      PLM_PUBLIC_HOST: ${PLM_PUBLIC_HOST:?set PLM_PUBLIC_HOST in .env}
+      LEARNINGPYRAMID_PUBLIC_HOST: ${LEARNINGPYRAMID_PUBLIC_HOST:?set LEARNINGPYRAMID_PUBLIC_HOST in .env}
     ports:
       - "80:80"
       - "443:443"

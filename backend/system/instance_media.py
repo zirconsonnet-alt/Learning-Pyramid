@@ -94,7 +94,10 @@ class InstanceMediaService:
             return binding.source_kind
         return self.get_project_binding(project_id).source_kind
 
-    def build_playback_descriptor(self, project_id: str, instance_id: str) -> PlaybackDescriptor:
+    def build_playback_descriptor(self, project_id: str, instance_id: str, *, media_base_path: str) -> PlaybackDescriptor:
+        base_path = str(media_base_path or "").rstrip("/")
+        if not base_path:
+            raise PreconditionFailure("media_base_path must be non-empty")
         instance = self.get_instance(project_id, instance_id)
         binding = self.get_instance_media_binding(project_id, instance_id)
         source_kind = binding.source_kind if binding is not None else self.get_project_binding(project_id).source_kind
@@ -103,7 +106,7 @@ class InstanceMediaService:
                 instance_id=str(instance.instance_id),
                 source_kind=source_kind.value,
                 playback_kind="HLS",
-                url=f"/api/projects/{project_id}/media/instances/{instance_id}/hls.m3u8",
+                url=f"{base_path}/hls.m3u8",
                 mime_type="application/vnd.apple.mpegurl",
                 duration_ms=None if binding is None else binding.duration_ms,
                 supports_frame_grab=False,
@@ -114,7 +117,7 @@ class InstanceMediaService:
             instance_id=str(instance.instance_id),
             source_kind=source_kind.value,
             playback_kind="FILE",
-            url=f"/api/projects/{project_id}/media/instances/{instance_id}",
+            url=base_path,
             mime_type=mime_type or "application/octet-stream",
             duration_ms=None if binding is None else binding.duration_ms,
             supports_frame_grab=True,
@@ -231,7 +234,11 @@ class InstanceMediaService:
         instance_id: str,
         *,
         auth_store: AuthStore,
+        media_base_path: str,
     ) -> str:
+        base_path = str(media_base_path or "").rstrip("/")
+        if not base_path:
+            raise PreconditionFailure("media_base_path must be non-empty")
         binding = self.get_instance_media_binding(project_id, instance_id)
         if binding is None or binding.source_kind != MaterialSourceKind.BAIDU_NETDISK:
             raise PreconditionFailure("当前实例不是百度网盘视频")
@@ -246,8 +253,7 @@ class InstanceMediaService:
             ),
         )
         return self._rewrite_hls_playlist(
-            project_id=project_id,
-            instance_id=instance_id,
+            media_base_path=base_path,
             upstream_url=playlist.upstream_url,
             text=playlist.text,
         )
@@ -271,7 +277,7 @@ class InstanceMediaService:
             lambda _account, access_token: self.baidu_client.stream_url(access_token, upstream_url),
         )
 
-    def _rewrite_hls_playlist(self, *, project_id: str, instance_id: str, upstream_url: str, text: str) -> str:
+    def _rewrite_hls_playlist(self, *, media_base_path: str, upstream_url: str, text: str) -> str:
         lines = []
         for raw_line in str(text or "").splitlines():
             line = raw_line.strip()
@@ -282,7 +288,7 @@ class InstanceMediaService:
             parsed = urlparse(target)
             segment_path = parsed.path.lstrip("/") or "segment"
             proxy_url = (
-                f"/api/projects/{project_id}/media/instances/{instance_id}/segments/{quote(segment_path, safe='/')}"
+                f"{media_base_path}/segments/{quote(segment_path, safe='/')}"
                 f"?{urlencode({'u': target})}"
             )
             lines.append(proxy_url)

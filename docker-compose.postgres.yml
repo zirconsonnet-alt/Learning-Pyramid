@@ -2,13 +2,13 @@ services:
   postgres:
     image: postgres:16
     ports:
-      - "${PLM_TEST_POSTGRES_PORT:-15432}:5432"
+      - "${LEARNINGPYRAMID_TEST_POSTGRES_PORT:-15432}:5432"
     environment:
-      POSTGRES_DB: ${PLM_POSTGRES_DB:-learningpyramid_test}
-      POSTGRES_USER: ${PLM_POSTGRES_USER:-learningpyramid}
-      POSTGRES_PASSWORD: ${PLM_POSTGRES_PASSWORD:-learningpyramid}
+      POSTGRES_DB: ${LEARNINGPYRAMID_POSTGRES_DB:-learningpyramid_test}
+      POSTGRES_USER: ${LEARNINGPYRAMID_POSTGRES_USER:-learningpyramid}
+      POSTGRES_PASSWORD: ${LEARNINGPYRAMID_POSTGRES_PASSWORD:-learningpyramid}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${PLM_POSTGRES_USER:-learningpyramid} -d ${PLM_POSTGRES_DB:-learningpyramid_test}"]
+      test: ["CMD-SHELL", "pg_isready -U ${LEARNINGPYRAMID_POSTGRES_USER:-learningpyramid} -d ${LEARNINGPYRAMID_POSTGRES_DB:-learningpyramid_test}"]
       interval: 5s
       timeout: 5s
       retries: 20

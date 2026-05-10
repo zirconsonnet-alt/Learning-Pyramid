@@ -5,17 +5,35 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
 
 from adapter.deps import get_api, get_auth_store
-from backend.models.enums import InstancePresence, MaterialSourceKind, SessionMode
+from adapter.scoped_projects import ScopedProject, resolve_scoped_project
 from backend.models.errors import PreconditionFailure
 from backend.models.types import MediaAssetId
 from backend.system.api import SystemAPI
 from backend.system.auth_store import AuthStore
-from backend.system.material_paths import resolve_material_file_path
 from backend.system.runtime_features import require_server_media_stream_enabled
 from backend.system.runtime_env import resource_root
 
 
 router = APIRouter()
+MAX_IMAGE_UPLOAD_BYTES = 10 * 1024 * 1024
+
+
+def _content_length_or_none(request: Request) -> int | None:
+    raw = str(request.headers.get("content-length", "")).strip()
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise PreconditionFailure("Content-Length must be an integer") from exc
+    if value < 0:
+        raise PreconditionFailure("Content-Length must be non-negative")
+    return value
+
+
+def reject_oversized_image_upload(content_length: int | None) -> None:
+    if content_length is not None and content_length > MAX_IMAGE_UPLOAD_BYTES:
+        raise PreconditionFailure(f"image upload is too large (max {MAX_IMAGE_UPLOAD_BYTES} bytes)")
 
 
 def _guide_demo_media_path(demo_id: str) -> Path:
@@ -45,15 +63,18 @@ def stream_guide_demo_media(demoId: str) -> FileResponse:
     )
 
 
-@router.post("/projects/{projectId}/media-assets")
-async def upload_media_asset(projectId: str, request: Request, api: SystemAPI = Depends(get_api)) -> dict:
+@router.post("/subjects/{subjectId}/projects/{projectId}/media-assets")
+async def upload_media_asset(request: Request, project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
     content_type = str(request.headers.get("content-type", "")).strip().lower()
     if not content_type.startswith("image/"):
         raise PreconditionFailure("Only image uploads are supported")
+    reject_oversized_image_upload(_content_length_or_none(request))
     content = await request.body()
+    if len(content) > MAX_IMAGE_UPLOAD_BYTES:
+        raise PreconditionFailure(f"image upload is too large (max {MAX_IMAGE_UPLOAD_BYTES} bytes)")
     filename = request.headers.get("x-filename")
     asset = api.create_media_asset(  # type: ignore[arg-type]
-        projectId,
+        project.internal_project_id,
         content=content,
         mime_type=content_type,
         filename=None if filename is None else filename,
@@ -63,15 +84,15 @@ async def upload_media_asset(projectId: str, request: Request, api: SystemAPI = 
         "data": {
             "assetId": str(asset.asset_id),
             "mimeType": asset.mime_type,
-            "url": f"/api/projects/{projectId}/media-assets/{asset.asset_id}",
+            "url": f"/api/subjects/{project.subject_id}/projects/{project.project_id}/media-assets/{asset.asset_id}",
         },
     }
 
 
-@router.get("/projects/{projectId}/media-assets/{assetId}")
-def stream_media_asset(projectId: str, assetId: str, api: SystemAPI = Depends(get_api)) -> FileResponse:
-    asset = api.get_media_asset(projectId, MediaAssetId(assetId))  # type: ignore[arg-type]
-    file_path = api.resolve_media_asset_file_path(projectId, MediaAssetId(assetId))  # type: ignore[arg-type]
+@router.get("/subjects/{subjectId}/projects/{projectId}/media-assets/{assetId}")
+def stream_media_asset(assetId: str, project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> FileResponse:
+    asset = api.get_media_asset(project.internal_project_id, MediaAssetId(assetId))  # type: ignore[arg-type]
+    file_path = api.resolve_media_asset_file_path(project.internal_project_id, MediaAssetId(assetId))  # type: ignore[arg-type]
     if not file_path.exists():
         raise PreconditionFailure(f"media asset file not found: {file_path}")
     if not file_path.is_file():
@@ -80,23 +101,10 @@ def stream_media_asset(projectId: str, assetId: str, api: SystemAPI = Depends(ge
     return FileResponse(path=str(file_path), media_type=asset.mime_type or media_type or "application/octet-stream", filename=file_path.name)
 
 
-@router.get("/projects/{projectId}/media/instances/{instanceId}")
-def stream_instance_media(projectId: str, instanceId: str, api: SystemAPI = Depends(get_api)) -> FileResponse:
+@router.get("/subjects/{subjectId}/projects/{projectId}/media/instances/{instanceId}")
+def stream_instance_media(instanceId: str, project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> FileResponse:
     require_server_media_stream_enabled()
-    source_kind = api._instance_media_service().get_effective_source_kind(projectId, instanceId)  # type: ignore[arg-type]
-    if source_kind == MaterialSourceKind.BAIDU_NETDISK:
-        raise PreconditionFailure("Baidu Netdisk instances must be played via the playback descriptor")
-    inst = api.get_instance(projectId, instanceId)  # type: ignore[arg-type]
-    if getattr(inst, "presence", None) == InstancePresence.MISSING:
-        raise PreconditionFailure("material is MISSING")
-
-    session = api.begin_session(projectId, SessionMode.READ_ONLY)  # type: ignore[arg-type]
-    try:
-        storage_cfg = api.sys.project_storage_config_repo.get(session)
-    finally:
-        api.sys.rollback(session)
-
-    file_path = resolve_material_file_path(storage_cfg, inst.material_id, source_kind=source_kind)
+    file_path = api.resolve_instance_media_file_path(project.internal_project_id, instanceId)  # type: ignore[arg-type]
     if not file_path.exists():
         raise PreconditionFailure(f"material file not found: {file_path}")
     if not file_path.is_file():
@@ -106,36 +114,38 @@ def stream_instance_media(projectId: str, instanceId: str, api: SystemAPI = Depe
     return FileResponse(path=str(file_path), media_type=media_type or "application/octet-stream", filename=file_path.name)
 
 
-@router.get("/projects/{projectId}/media/instances/{instanceId}/playback")
-def get_instance_playback(projectId: str, instanceId: str, api: SystemAPI = Depends(get_api)) -> dict:
+@router.get("/subjects/{subjectId}/projects/{projectId}/media/instances/{instanceId}/playback")
+def get_instance_playback(instanceId: str, project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
+    media_base_path = f"/api/subjects/{project.subject_id}/projects/{project.project_id}/media/instances/{instanceId}"
     return {
         "ok": True,
-        "data": api.get_instance_playback_descriptor(projectId, instanceId),  # type: ignore[arg-type]
+        "data": api.get_instance_playback_descriptor(project.internal_project_id, instanceId, media_base_path=media_base_path),  # type: ignore[arg-type]
     }
 
 
-@router.get("/projects/{projectId}/media/instances/{instanceId}/hls.m3u8")
+@router.get("/subjects/{subjectId}/projects/{projectId}/media/instances/{instanceId}/hls.m3u8")
 def get_instance_hls_playlist(
-    projectId: str,
     instanceId: str,
+    project: ScopedProject = Depends(resolve_scoped_project),
     api: SystemAPI = Depends(get_api),
     auth_store: AuthStore = Depends(get_auth_store),
 ) -> Response:
-    playlist = api.get_instance_hls_playlist(projectId, instanceId, auth_store=auth_store)  # type: ignore[arg-type]
+    media_base_path = f"/api/subjects/{project.subject_id}/projects/{project.project_id}/media/instances/{instanceId}"
+    playlist = api.get_instance_hls_playlist(project.internal_project_id, instanceId, auth_store=auth_store, media_base_path=media_base_path)  # type: ignore[arg-type]
     return Response(content=playlist, media_type="application/vnd.apple.mpegurl")
 
 
-@router.get("/projects/{projectId}/media/instances/{instanceId}/segments/{segmentPath:path}")
+@router.get("/subjects/{subjectId}/projects/{projectId}/media/instances/{instanceId}/segments/{segmentPath:path}")
 def get_instance_hls_segment(
-    projectId: str,
     instanceId: str,
     segmentPath: str,
     upstream_url: str = Query(alias="u"),
+    project: ScopedProject = Depends(resolve_scoped_project),
     api: SystemAPI = Depends(get_api),
     auth_store: AuthStore = Depends(get_auth_store),
 ) -> StreamingResponse:
     upstream_response = api.stream_instance_hls_segment(  # type: ignore[arg-type]
-        projectId,
+        project.internal_project_id,
         instanceId,
         auth_store=auth_store,
         upstream_url=upstream_url,
@@ -153,14 +163,14 @@ def get_instance_hls_segment(
     return StreamingResponse(_iter_bytes(), media_type=content_type)
 
 
-@router.get("/projects/{projectId}/instances/{instanceId}/subtitle-file")
+@router.get("/subjects/{subjectId}/projects/{projectId}/instances/{instanceId}/subtitle-file")
 def get_instance_subtitle_file(
-    projectId: str,
     instanceId: str,
+    project: ScopedProject = Depends(resolve_scoped_project),
     api: SystemAPI = Depends(get_api),
     auth_store: AuthStore = Depends(get_auth_store),
 ) -> dict:
     return {
         "ok": True,
-        "data": api.get_instance_subtitle_file_for_user(projectId, instanceId, auth_store=auth_store),  # type: ignore[arg-type]
+        "data": api.get_instance_subtitle_file_for_user(project.internal_project_id, instanceId, auth_store=auth_store),  # type: ignore[arg-type]
     }

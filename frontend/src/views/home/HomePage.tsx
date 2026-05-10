@@ -53,7 +53,7 @@ const onboardingSteps = [
     title: "创建学科项目",
     body: "从新建学科、进入项目，到绑定并导入本地学习材料。",
     label: "去管理专业课的学习",
-    to: "/projects?walkthrough=create-subject-project",
+    to: "/subjects?walkthrough=create-subject-project",
     access: "free",
   },
   {
@@ -61,7 +61,7 @@ const onboardingSteps = [
     title: "学习复习",
     body: "进入工作台后，录入复述点、提交学习并完成复习闭环。",
     label: "去体验自动复习推送",
-    to: "/projects?walkthrough=study-review",
+    to: "/subjects?walkthrough=study-review",
     access: "free",
   },
   {
@@ -69,7 +69,7 @@ const onboardingSteps = [
     title: "使用 AI 问答",
     body: "确认目录、学习对象树和第三方 LLM API 后，进入项目 AI 问答开始对话。",
     label: "去感受AI学习赋能",
-    to: "/projects?walkthrough=use-ai-chat",
+    to: "/subjects?walkthrough=use-ai-chat",
     access: "member",
   },
   {

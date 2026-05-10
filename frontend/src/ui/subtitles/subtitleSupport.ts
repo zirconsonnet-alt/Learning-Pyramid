@@ -1,5 +1,6 @@
 import type { Instance } from "@/ui/api/instances"
 import type { MaterialSourceKind } from "@/ui/api/projects"
+import type { ProjectScope } from "@/ui/api/projectScope"
 import { getInstanceSubtitleFile, type SubtitleSegment } from "@/ui/api/subtitles"
 import { resolveProjectSameStemSiblingFile } from "@/ui/localMedia/projectDirectory"
 
@@ -15,12 +16,12 @@ export type SubtitleDocument = {
 const subtitleDocumentCache = new Map<string, Promise<SubtitleDocument | null>>()
 
 export async function loadSubtitleDocumentForInstance(params: {
-  projectId: string
+  scope: ProjectScope
   instance: Pick<Instance, "instanceId" | "materialId">
   sourceKind: MaterialSourceKind | null | undefined
 }): Promise<SubtitleDocument | null> {
-  const { projectId, instance, sourceKind } = params
-  const cacheKey = `${projectId}:${instance.instanceId}:${instance.materialId}:${sourceKind ?? "unknown"}`
+  const { scope, instance, sourceKind } = params
+  const cacheKey = `${scope.subjectId}:${scope.projectId}:${instance.instanceId}:${instance.materialId}:${sourceKind ?? "unknown"}`
   const cached = subtitleDocumentCache.get(cacheKey)
   if (cached) return await cached
 
@@ -28,12 +29,12 @@ export async function loadSubtitleDocumentForInstance(params: {
     if (!sourceKind) return null
 
     if (sourceKind === "BROWSER_LOCAL") {
-      const file = await resolveProjectSameStemSiblingFile(projectId, instance.materialId, SUPPORTED_SUBTITLE_EXTENSIONS)
+      const file = await resolveProjectSameStemSiblingFile(scope.projectId, instance.materialId, SUPPORTED_SUBTITLE_EXTENSIONS)
       if (!file) return null
       return await parseLocalSubtitleFile(file)
     }
 
-    const remote = await getInstanceSubtitleFile(projectId, instance.instanceId, { timeoutMs: 90_000 })
+    const remote = await getInstanceSubtitleFile(scope, instance.instanceId, { timeoutMs: 90_000 })
     if (!remote.found) return null
     return {
       fileName: remote.fileName,

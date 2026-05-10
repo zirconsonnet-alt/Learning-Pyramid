@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from backend.system.app_paths import resolve_auth_db_path, resolve_legacy_store_path, resolve_store_db_path
+from backend.system.app_paths import resolve_auth_db_path, resolve_store_db_path
 from backend.system.persistence_store import SnapshotStore, SQLiteStore
 from backend.system.postgres_store import PostgresStore
 
@@ -16,7 +16,7 @@ def _normalize_backend(raw: str | None) -> SqlBackend:
         return "sqlite"
     if value in {"postgres", "postgresql"}:
         return "postgres"
-    raise ValueError("PLM_SQL_BACKEND must be either 'sqlite' or 'postgres'")
+    raise ValueError("LEARNINGPYRAMID_SQL_BACKEND must be either 'sqlite' or 'postgres'")
 
 
 def _resolve_postgres_dsn(*env_names: str) -> str | None:
@@ -37,7 +37,7 @@ class SqlRuntimeConfig:
 
 
 def current_sql_runtime_config() -> SqlRuntimeConfig:
-    backend = _normalize_backend(os.getenv("PLM_SQL_BACKEND"))
+    backend = _normalize_backend(os.getenv("LEARNINGPYRAMID_SQL_BACKEND"))
     if backend == "sqlite":
         return SqlRuntimeConfig(
             backend=backend,
@@ -47,12 +47,12 @@ def current_sql_runtime_config() -> SqlRuntimeConfig:
             auth_postgres_dsn=None,
         )
 
-    store_dsn = _resolve_postgres_dsn("PLM_STORE_POSTGRES_DSN", "PLM_POSTGRES_DSN")
-    auth_dsn = _resolve_postgres_dsn("PLM_AUTH_POSTGRES_DSN", "PLM_POSTGRES_DSN")
+    store_dsn = _resolve_postgres_dsn("LEARNINGPYRAMID_STORE_POSTGRES_DSN", "LEARNINGPYRAMID_POSTGRES_DSN")
+    auth_dsn = _resolve_postgres_dsn("LEARNINGPYRAMID_AUTH_POSTGRES_DSN", "LEARNINGPYRAMID_POSTGRES_DSN")
     if not store_dsn:
-        raise ValueError("PLM_SQL_BACKEND=postgres requires PLM_STORE_POSTGRES_DSN or PLM_POSTGRES_DSN")
+        raise ValueError("LEARNINGPYRAMID_SQL_BACKEND=postgres requires LEARNINGPYRAMID_STORE_POSTGRES_DSN or LEARNINGPYRAMID_POSTGRES_DSN")
     if not auth_dsn:
-        raise ValueError("PLM_SQL_BACKEND=postgres requires PLM_AUTH_POSTGRES_DSN or PLM_POSTGRES_DSN")
+        raise ValueError("LEARNINGPYRAMID_SQL_BACKEND=postgres requires LEARNINGPYRAMID_AUTH_POSTGRES_DSN or LEARNINGPYRAMID_POSTGRES_DSN")
     return SqlRuntimeConfig(
         backend=backend,
         store_db_path=None,
@@ -62,13 +62,12 @@ def current_sql_runtime_config() -> SqlRuntimeConfig:
     )
 
 
-def create_persist_store(*, legacy_root: Path | None = None) -> SnapshotStore:
+def create_persist_store() -> SnapshotStore:
     cfg = current_sql_runtime_config()
-    legacy_store_path = resolve_legacy_store_path(legacy_root=legacy_root)
     if cfg.backend == "postgres":
         if cfg.store_postgres_dsn is None:
             raise RuntimeError("PostgreSQL backend selected without a DSN")
-        return PostgresStore(cfg.store_postgres_dsn, legacy_json_path=legacy_store_path)
+        return PostgresStore(cfg.store_postgres_dsn)
     if cfg.store_db_path is None:
         raise RuntimeError("SQLite backend selected without a store path")
-    return SQLiteStore(cfg.store_db_path, legacy_json_path=legacy_store_path)
+    return SQLiteStore(cfg.store_db_path)

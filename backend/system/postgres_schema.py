@@ -13,6 +13,7 @@ STORE_TABLE_ORDER: tuple[str, ...] = (
     "global_settings_index",
     "project_snapshots",
     "project_storage_config_index",
+    "project_material_source_binding_index",
     "project_config_index",
     "instance_index",
     "instance_media_binding_index",
@@ -34,7 +35,6 @@ STORE_TABLE_ORDER: tuple[str, ...] = (
     "material_allowlist_index",
     "media_asset_index",
     "recall_point_review_record_index",
-    "snapshot_state",
 )
 
 AUTH_TABLE_ORDER: tuple[str, ...] = (
@@ -229,7 +229,7 @@ def _bootstrap_store_schema_sql() -> str:
         from backend.system.persistence_store import SQLiteSnapshotStore
 
         with tempfile.TemporaryDirectory(prefix="learningpyramid-store-schema-") as temp_dir:
-            store_db = Path(temp_dir) / "plm_store.sqlite3"
+            store_db = Path(temp_dir) / "learningpyramid_store.sqlite3"
             SQLiteSnapshotStore(store_db)
             conn = _connect_sqlite(store_db)
             try:
@@ -251,7 +251,7 @@ def _bootstrap_auth_schema_sql() -> str:
         from backend.system.auth_store import SQLiteAuthStore
 
         with tempfile.TemporaryDirectory(prefix="learningpyramid-auth-schema-") as temp_dir:
-            auth_db = Path(temp_dir) / "plm_auth.sqlite3"
+            auth_db = Path(temp_dir) / "learningpyramid_auth.sqlite3"
             SQLiteAuthStore(auth_db)
             conn = _connect_sqlite(auth_db)
             try:
@@ -357,13 +357,42 @@ def _store_instance_media_binding_index_sql() -> str:
 def _store_learning_task_node_object_mirror_sql() -> str:
     return "\n".join(
         (
-            "-- Add legacy learning task node metadata columns",
+            "-- Add learning task node mirror metadata columns",
             "ALTER TABLE learning_task_node_index",
             "ADD COLUMN IF NOT EXISTS node_origin TEXT NOT NULL DEFAULT 'AGGREGATION';",
             "ALTER TABLE learning_task_node_index",
             "ADD COLUMN IF NOT EXISTS bound_learning_object_node_id TEXT NULL;",
             "ALTER TABLE learning_task_node_index",
             "ADD COLUMN IF NOT EXISTS object_mirror_status TEXT NULL;",
+        )
+    )
+
+
+def _store_project_snapshot_scoped_identity_sql() -> str:
+    return "\n".join(
+        (
+            "-- Add current scoped project identity columns",
+            "ALTER TABLE project_snapshots",
+            "ADD COLUMN IF NOT EXISTS subject_id TEXT NULL;",
+            "ALTER TABLE project_snapshots",
+            "ADD COLUMN IF NOT EXISTS scoped_project_id TEXT NULL;",
+            "ALTER TABLE project_snapshots",
+            "ADD COLUMN IF NOT EXISTS project_sequence BIGINT NOT NULL DEFAULT 0;",
+        )
+    )
+
+
+def _store_project_material_source_binding_index_sql() -> str:
+    return "\n".join(
+        (
+            "-- Add explicit project material source binding index",
+            "CREATE TABLE IF NOT EXISTS project_material_source_binding_index (",
+            "    project_id TEXT PRIMARY KEY,",
+            "    source_kind TEXT NOT NULL,",
+            "    source_root_label TEXT NULL,",
+            "    updated_at_ms BIGINT NOT NULL,",
+            "    FOREIGN KEY(project_id) REFERENCES project_snapshots(project_id) ON DELETE CASCADE",
+            ");",
         )
     )
 
@@ -787,6 +816,18 @@ POSTGRES_MIGRATIONS: tuple[PostgresMigration, ...] = (
         name="learning_task_node_object_mirror",
         sql_factory=_store_learning_task_node_object_mirror_sql,
     ),
+    PostgresMigration(
+        scope="store",
+        version=7,
+        name="project_snapshot_scoped_identity",
+        sql_factory=_store_project_snapshot_scoped_identity_sql,
+    ),
+    PostgresMigration(
+        scope="store",
+        version=8,
+        name="project_material_source_binding_index",
+        sql_factory=_store_project_material_source_binding_index_sql,
+    ),
     PostgresMigration(scope="auth", version=1, name="initial_auth_schema", sql_factory=_bootstrap_auth_schema_sql),
     PostgresMigration(scope="auth", version=2, name="auth_user_profiles", sql_factory=_auth_user_profiles_sql),
     PostgresMigration(scope="auth", version=3, name="auth_roles_and_study_groups", sql_factory=_auth_roles_and_study_groups_sql),
@@ -1072,7 +1113,7 @@ def export_sqlite_to_postgres_sql(
 
     sql_lines: list[str] = [
         "-- LearningPyramid SQLite -> PostgreSQL export",
-        "-- Runtime-compatible PostgreSQL schema and seed data.",
+        "-- Runtime-ready PostgreSQL schema and seed data.",
         "BEGIN;",
         "",
     ]
