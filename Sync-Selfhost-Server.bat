@@ -11,7 +11,7 @@ if not exist "%SYNC_SCRIPT%" (
   exit /b 1
 )
 
-set "SERVER_HOST=learningpyramid.example.com"
+set "SERVER_HOST=plm.xuebao.chat"
 set "SERVER_USER=root"
 set "SSH_PORT=22"
 
