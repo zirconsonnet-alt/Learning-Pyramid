@@ -1,6 +1,6 @@
 # 后端部署与运行
 
-更新时间：2026-05-10
+更新时间：2026-05-11
 
 本文记录当前后端运行、部署、数据位置和运维入口。更细的命令示例仍可参考仓库根目录 `README.md`。
 
@@ -88,6 +88,8 @@ docker compose -f docker-compose.selfhost.yml --env-file .env up --build
 - `LEARNINGPYRAMID_PROXY_HEADERS`
 - `LEARNINGPYRAMID_FORWARDED_ALLOW_IPS`
 - `LEARNINGPYRAMID_ENABLE_API_DOCS`：生产默认关闭；设为 `true` 时暴露 `/api/docs`、`/api/openapi.json` 和 `/api/redoc`。
+- `LEARNINGPYRAMID_MEMBERSHIP_REFUND_WINDOW_MINUTES`：会员订单可发起退款窗口，默认 1440 分钟。
+- `LEARNINGPYRAMID_MEMBERSHIP_COMMISSION_REFUND_WINDOW_MINUTES`：邀请佣金退款等待窗口，默认 1440 分钟。
 
 健康检查：
 

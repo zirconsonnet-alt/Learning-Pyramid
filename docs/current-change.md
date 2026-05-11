@@ -11,6 +11,7 @@
 - `backend/system/membership_store.py`
 - `docker-compose.selfhost.yml`
 - `docs/current-change.md`
+- `docs/deployment.md`
 - `docs/guide-faq.md`
 - `frontend/src/views/home/HomePage.tsx`
 - `tests/test_backend_legacy_cleanup.py`
@@ -19,6 +20,7 @@
 
 - `backend/system/membership_store.py`：新增 `LEARNINGPYRAMID_MEMBERSHIP_REFUND_WINDOW_MINUTES`，让会员订单可退款窗口可按环境配置；默认仍为 1440 分钟。
 - `docker-compose.selfhost.yml`：把 `LEARNINGPYRAMID_MEMBERSHIP_REFUND_WINDOW_MINUTES` 传入自托管 app 容器。
+- `docs/deployment.md`：补充会员退款窗口和佣金等待窗口的长期部署变量说明。
 - `docs/guide-faq.md`、`frontend/src/views/home/HomePage.tsx`：移除写死的“3天退款期”文案，改为退款窗口语义。
 - `tests/test_backend_legacy_cleanup.py`：补充会员退款窗口读取当前环境变量的回归测试。
 - `docs/current-change.md`：记录本次变更边界、验证和风险。
@@ -68,7 +70,7 @@
 - 本机 `.env.selfhost.sync` 只读确认：`LEARNINGPYRAMID_MEMBERSHIP_REFUND_WINDOW_MINUTES=1`，`LEARNINGPYRAMID_MEMBERSHIP_COMMISSION_REFUND_WINDOW_MINUTES=1`。
 - `python -m unittest discover -s tests`：通过，78 tests。
 - `pnpm --dir frontend build`：通过；Vite 输出 chunk size warning。
-- 线上同步和线上健康检查：待执行。
+- `tools/sync_selfhost_server.ps1 -ServerHost plm.xuebao.chat -ServerUser root -SshPort 22`：通过；app 容器重建成功，`/api/system/capabilities` 和 `/api/system/public-downloads` smoke check 通过，server directory、running container、public site 前端 asset 均为 `index-D6IAXZ0E.js`。
 
 ## 11. 污染风险检查
 
