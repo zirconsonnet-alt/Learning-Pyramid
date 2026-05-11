@@ -776,10 +776,12 @@ merge_env_overlay() {
   awk '
     BEGIN { n = 0 }
     FNR == NR {
-      if (`$0 ~ /^[A-Za-z_][A-Za-z0-9_]*=/) {
-        key = `$0
+      line = `$0
+      sub(/\r$/, "", line)
+      if (line ~ /^[A-Za-z_][A-Za-z0-9_]*=/) {
+        key = line
         sub(/=.*/, "", key)
-        value = `$0
+        value = line
         sub(/^[^=]*=/, "", value)
         overlay[key] = value
         order[++n] = key
@@ -787,17 +789,19 @@ merge_env_overlay() {
       next
     }
     {
-      if (`$0 ~ /^[A-Za-z_][A-Za-z0-9_]*=/) {
-        key = `$0
+      line = `$0
+      sub(/\r$/, "", line)
+      if (line ~ /^[A-Za-z_][A-Za-z0-9_]*=/) {
+        key = line
         sub(/=.*/, "", key)
         if (key in overlay) {
           print key "=" overlay[key]
           seen[key] = 1
         } else {
-          print `$0
+          print line
         }
       } else {
-        print `$0
+        print line
       }
     }
     END {

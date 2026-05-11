@@ -6,6 +6,7 @@
 
 - 工作区全部提交。
 - 同步线上服务器。
+- 修复自托管同步时 Windows CRLF env overlay 污染远端 `.env` 的问题。
 
 ## 2. 本次实际修改文件
 
@@ -29,6 +30,7 @@
 - `frontend/tests/fixtures/mock-api.ts`
 - `tests/test_postgres_persistence_system_state.py`
 - `tests/test_repair_project_material_source_binding_index.py`
+- `tools/sync_selfhost_server.ps1`
 - `tools/repair_project_material_source_binding_index.py`
 
 ## 3. 每个文件为什么修改
@@ -39,10 +41,13 @@
 - `docs/*`：重组长期后端文档，新增认证权限、数据模型、领域模型、可观测性、状态机文档，删除独立 API 文档。
 - `frontend/*`：调整应用壳路由上下文、注册页辅助文案和 logo 加载属性，并同步 e2e mock 与断言。
 - `tests/*`、`tools/repair_project_material_source_binding_index.py`：补充 PostgreSQL normalized 数据修复入口和相关单元测试。
+- `tools/sync_selfhost_server.ps1`：合并远端 `.env` 与 `.env.selfhost.sync` 时去掉输入行尾 `\r`，防止 Windows CRLF 写入容器环境变量。
 
 ## 4. 行为语义是否变化
 
 是。PostgreSQL snapshot 写入会保留 `snapshot_json` 的最小非空壳；自托管 API docs 默认关闭但可用环境变量显式打开；注册页不再显示注册后的辅助说明文案。
+
+部署脚本行为也有变化：Windows CRLF 格式的 `.env.selfhost.sync` 不再把 `\r` 写入远端 `.env`。
 
 ## 5. 是否做了重构，以及为什么
 
@@ -53,12 +58,14 @@
 - 未新增 PostgreSQL schema migration：本次只修正 repository 写入旧列的值，不改变 schema。
 - 未改变公开 API 参数和返回结构：API 明细以运行时 OpenAPI 为准。
 - 未硬编码生产 API docs 开关：通过既有环境变量配置路径暴露。
+- 未手工绕过远端 `.env`：同步失败根因在脚本合并边界，修脚本后重新同步。
 
 ## 7. 是否影响 API、架构、部署、数据结构、UI、测试
 
 - API：无已知接口契约变更；API docs 暴露受配置影响。
 - 架构：文档边界更新，运行时模块边界不变。
 - 部署：自托管 compose 新增 `LEARNINGPYRAMID_ENABLE_API_DOCS` 传递。
+- 部署脚本：env overlay 合并会归一化 CRLF 行尾。
 - 数据结构：schema 不变；PostgreSQL 写入语义更新。
 - UI：注册页辅助文案减少，应用壳上下文匹配调整。
 - 测试：新增/更新后端单元测试和前端 e2e 断言。
@@ -67,6 +74,7 @@
 
 - 工作区包含较多已存在改动，本轮按用户要求全部提交。
 - 删除 `docs/api.md` 后，API 细节维护依赖运行时 OpenAPI；长期文档不再保存接口明细。
+- 已确认一次同步失败根因：CRLF overlay 经 `awk` 合并后污染远端 `.env`，导致 PostgreSQL 角色名带 `\r`。已按用户确认修脚本。
 
 ## 9. 仍需用户确认的问题
 
@@ -81,7 +89,13 @@
 - `python -m unittest discover -s tests`：通过，77 tests。
 - `pnpm --dir frontend test:e2e`：通过，26 tests。
 - `git diff --check`：通过；仅提示多个文件下次 Git 触碰时 LF 会替换为 CRLF。
-- 线上同步和健康检查：待执行。
+- 首次线上同步失败：远端 `psql` 报 `role "learningpyramid\r" does not exist`。
+- CRLF 修复验证：远端临时样本合并后 `cr_count=0`，输出变量无 `\r`。
+- `tools/sync_selfhost_server.ps1` PowerShell 解析：通过。
+- 修复后 `python tools/verify_backend_boundaries.py`：通过，输出 `backend boundary guards verified`。
+- 修复后 `git diff --check`：通过；仅提示换行符。
+- 修复后 `pnpm --dir frontend build`：通过；Vite 输出 chunk size warning。
+- 线上同步和健康检查：待重新执行。
 
 ## 11. 污染风险检查
 
