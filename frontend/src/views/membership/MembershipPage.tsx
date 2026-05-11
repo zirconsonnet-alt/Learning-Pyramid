@@ -1,4 +1,4 @@
-import { Copy, History, Ticket, Users } from "lucide-react"
+import { Copy, History, Sparkles, Ticket, Users } from "lucide-react"
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react"
 import { QRCodeSVG } from "qrcode.react"
 
@@ -51,6 +51,23 @@ function getMembershipState(summary: ReturnType<typeof useMembershipSummary>["da
 
 function getInviteDisplayName(invite: InviteReferral) {
   return invite.inviteeNickname?.trim() || invite.inviteePublicUid?.trim() || "未命名用户"
+}
+
+function CouponMetaLines(props: { coupon: CouponRecord; sourceInviteLabel: string | null }) {
+  const { coupon, sourceInviteLabel } = props
+
+  return (
+    <div className="mt-3 space-y-1.5 text-[13px] leading-5 text-[color:var(--theme-subtle-text)]">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span>满 {formatMembershipPrice(coupon.minSpendCent)} 可用</span>
+        <span>创建 {formatMembershipDateTime(coupon.createdAt)}</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span>来源 {describeMembershipCouponSource(coupon.source)}</span>
+        {sourceInviteLabel ? <span>邀请用户 {sourceInviteLabel}</span> : null}
+      </div>
+    </div>
+  )
 }
 
 type WechatMerchantTransferConfirmation = {
@@ -133,13 +150,7 @@ function CouponBagDialog(props: {
                           {describeMembershipCouponStatus(coupon.status)}
                         </StatusPill>
                       </div>
-                      <div className="mt-2 text-sm leading-6 text-muted-foreground">
-                        满 {formatMembershipPrice(coupon.minSpendCent)} 可用，创建于 {formatMembershipDateTime(coupon.createdAt)}。
-                      </div>
-                      <div className="mt-1 text-xs leading-6 text-[color:var(--theme-subtle-text)]">
-                        来源：{describeMembershipCouponSource(coupon.source)}
-                        {sourceInviteLabel ? ` · 邀请用户 ${sourceInviteLabel}` : ""}
-                      </div>
+                      <CouponMetaLines coupon={coupon} sourceInviteLabel={sourceInviteLabel ?? null} />
                     </div>
                     <div className="shrink-0 text-right">
                       <div className="text-2xl font-semibold tracking-tight text-foreground">{formatMembershipCouponValue(coupon)}</div>
@@ -765,29 +776,9 @@ export function MembershipPage() {
                     ) : null}
                   </MembershipPlanPriceBlock>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setSelectedPlanId("graduate_exam")}
-                  aria-pressed={effectiveSelectedPlanId === "graduate_exam"}
-                  className={cn(
-                    "group min-w-0 text-left transition",
-                    effectiveSelectedPlanId === "graduate_exam"
-                      ? "opacity-100"
-                      : "opacity-90 hover:opacity-100",
-                  )}
-                >
-                  <MembershipPlanPriceBlock title="考研套餐" price="¥15" unit="/ 月" note="有效期至12月21日" accent>
-                    {effectiveSelectedPlanId === "graduate_exam" ? (
-                      <div className="mt-2 text-xs text-[color:var(--theme-warm-text)]">
-                      {preview?.planId === "graduate_exam"
-                        ? `当前预估 ${formatMembershipPrice(preview.payableAmountCent)}`
-                        : previewQ.isLoading
-                          ? "正在计算当前价格"
-                          : "支付前自动计算实际价格"}
-                      </div>
-                    ) : null}
-                  </MembershipPlanPriceBlock>
-                </button>
+                <div className="min-w-0">
+                  <MembershipPlanPriceBlock title="考研套餐" price="¥15" unit="/ 月" note="有效期至12月21日" accent />
+                </div>
               </div>
             </div>
           </div>
@@ -935,7 +926,10 @@ export function MembershipPage() {
           <div className="space-y-6">
             <div className="theme-card-main overflow-hidden">
               <div className="border-b border-[color:var(--theme-soft-border)] px-6 py-5 sm:px-8">
-                <div className="text-sm font-semibold text-foreground">会员权益</div>
+                <div className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-primary" />
+                  <div className="text-sm font-semibold text-foreground">会员权益</div>
+                </div>
               </div>
               <div className="divide-y divide-[color:var(--theme-soft-border)] px-6 py-2 sm:px-8">
                 <div className="py-4">
@@ -995,13 +989,7 @@ export function MembershipPage() {
                                   {describeMembershipCouponStatus(coupon.status)}
                                 </StatusPill>
                               </div>
-                              <div className="mt-2 text-sm leading-6 text-muted-foreground">
-                                满 {formatMembershipPrice(coupon.minSpendCent)} 可用，创建于 {formatMembershipDateTime(coupon.createdAt)}。
-                              </div>
-                              <div className="mt-1 text-xs leading-6 text-[color:var(--theme-subtle-text)]">
-                                来源：{describeMembershipCouponSource(coupon.source)}
-                                {sourceInviteLabel ? ` · 邀请用户 ${sourceInviteLabel}` : ""}
-                              </div>
+                              <CouponMetaLines coupon={coupon} sourceInviteLabel={sourceInviteLabel ?? null} />
                             </div>
                             <div className="shrink-0 text-right text-xs leading-6 text-muted-foreground">
                               <div className="text-2xl font-semibold tracking-tight text-foreground">{formatMembershipCouponValue(coupon)}</div>
