@@ -1,4 +1,5 @@
 import json
+import os
 import sqlite3
 import threading
 import uuid
@@ -51,6 +52,7 @@ GRADUATE_EXAM_END_DAY = 21
 CHINA_TIMEZONE = timezone(timedelta(hours=8), "Asia/Shanghai")
 ORDER_TTL_MINUTES = 30
 REFUND_WINDOW_HOURS = 24
+REFUND_WINDOW_ENV = "LEARNINGPYRAMID_MEMBERSHIP_REFUND_WINDOW_MINUTES"
 REFUND_WINDOW_EXPIRED_MESSAGE = "Membership refund period has expired."
 
 
@@ -64,6 +66,17 @@ def _normalize_limit(limit: int, *, default: int = 20, maximum: int = 100) -> in
     except Exception:
         value = default
     return max(1, min(value, maximum))
+
+
+def membership_refund_window_minutes() -> int:
+    raw = str(os.getenv(REFUND_WINDOW_ENV) or "").strip()
+    if not raw:
+        return REFUND_WINDOW_HOURS * 60
+    try:
+        value = int(raw)
+    except Exception:
+        return REFUND_WINDOW_HOURS * 60
+    return max(1, min(value, 30 * 24 * 60))
 
 
 def _normalize_provider(provider: str) -> str:
@@ -572,7 +585,7 @@ class MembershipStore:
         if not order.paid_at:
             raise PreconditionFailure("membership order successful payment time is unavailable")
         paid_at = _parse_dt(order.paid_at)
-        if now > paid_at + timedelta(hours=REFUND_WINDOW_HOURS):
+        if now > paid_at + timedelta(minutes=membership_refund_window_minutes()):
             raise PreconditionFailure(REFUND_WINDOW_EXPIRED_MESSAGE)
 
     def ensure_refund_can_start(self, order: MembershipOrder, *, now: datetime | None = None) -> None:

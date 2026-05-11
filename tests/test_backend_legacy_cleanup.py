@@ -2,6 +2,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -21,7 +22,7 @@ from backend.system.auth_store import (
 from backend.system.inmemory_system import InMemorySystem
 from backend.system.membership_commission_store import MembershipCommissionStore
 from backend.system.membership_marketing_store import MembershipMarketingStore
-from backend.system.membership_store import MembershipStore
+from backend.system.membership_store import MembershipOrder, MembershipStore
 from backend.system.membership_payment_service import (
     MembershipPaymentService,
     _safe_path,
@@ -846,6 +847,44 @@ class BackendLegacyCleanupTest(unittest.TestCase):
 
             with self.assertRaises(RuntimeError):
                 MembershipStore(db_path)
+
+    def test_membership_refund_window_uses_current_env_minutes(self) -> None:
+        paid_at = "2026-05-11T00:00:00+00:00"
+        order = MembershipOrder(
+            order_id="order_1",
+            user_id="user_1",
+            plan_id="monthly",
+            plan_name="月会员",
+            order_type="first_purchase",
+            pricing_version="membership_plans_v2",
+            period_days=30,
+            list_amount_cent=2000,
+            first_order_discount_cent=0,
+            coupon_discount_cent=0,
+            payable_amount_cent=2000,
+            coupon_id=None,
+            provider="manual_test",
+            provider_trade_no="trade_1",
+            status="paid",
+            client_ip="",
+            client_version="",
+            created_at=paid_at,
+            paid_at=paid_at,
+            closed_at=None,
+            refunded_at=None,
+            expired_at=None,
+            entitlement_id="entitlement_1",
+            remark="",
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = MembershipStore(Path(tmp) / "membership.sqlite3")
+            with patch.dict(os.environ, {"LEARNINGPYRAMID_MEMBERSHIP_REFUND_WINDOW_MINUTES": "1"}):
+                with self.assertRaises(PreconditionFailure):
+                    store.ensure_refund_can_start(
+                        order,
+                        now=datetime.fromisoformat("2026-05-11T00:02:00+00:00"),
+                    )
 
     def test_membership_marketing_store_rejects_missing_current_coupon_columns(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
