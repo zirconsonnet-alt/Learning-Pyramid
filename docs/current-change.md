@@ -7,11 +7,14 @@
 - 工作区全部提交。
 - 同步线上服务器。
 - 修复自托管同步时 Windows CRLF env overlay 污染远端 `.env` 的问题。
+- 修复自托管 Docker 构建缓存边界，避免前端 fingerprint 变化触发 Python 依赖重装。
+- 修正本机部署 overlay 中 PyPI 包源变量命名，使用现行 `LEARNINGPYRAMID_PIP_*`。
 
 ## 2. 本次实际修改文件
 
 - `AGENTS.md`
 - `backend/repositories/postgres_persistence.py`
+- `Dockerfile.selfhost`
 - `docker-compose.selfhost.yml`
 - `docs/api.md`（删除）
 - `docs/auth-and-permissions.md`
@@ -38,6 +41,7 @@
 - `AGENTS.md`：明确 `docs/current-change.md` 是当前任务滚动工作单，移除对长期 `docs/api.md` 的硬性依赖。
 - `backend/repositories/postgres_persistence.py`：PostgreSQL project snapshot upsert 写入稳定空 JSON 壳，满足旧 `snapshot_json` 非空列。
 - `docker-compose.selfhost.yml`、`docs/deployment.md`：补充 `LEARNINGPYRAMID_ENABLE_API_DOCS` 自托管配置入口和说明。
+- `Dockerfile.selfhost`：把 `LEARNINGPYRAMID_FRONTEND_DIST_FINGERPRINT` build arg 移到 Python 依赖安装层之后，避免前端产物变化使依赖安装缓存失效。
 - `docs/*`：重组长期后端文档，新增认证权限、数据模型、领域模型、可观测性、状态机文档，删除独立 API 文档。
 - `frontend/*`：调整应用壳路由上下文、注册页辅助文案和 logo 加载属性，并同步 e2e mock 与断言。
 - `tests/*`、`tools/repair_project_material_source_binding_index.py`：补充 PostgreSQL normalized 数据修复入口和相关单元测试。
@@ -49,6 +53,10 @@
 
 部署脚本行为也有变化：Windows CRLF 格式的 `.env.selfhost.sync` 不再把 `\r` 写入远端 `.env`。
 
+Docker 构建缓存语义也有变化：前端 fingerprint 只影响最终前端 dist 层，不再影响 Python 依赖安装层。
+
+部署 overlay 使用现行 `LEARNINGPYRAMID_PIP_*` 后，Docker build 能收到配置的 PyPI 镜像参数；不在代码中新增 `PLM_*` 兼容路径。
+
 ## 5. 是否做了重构，以及为什么
 
 做了文档结构整理。原因是长期 API 明细改以运行时 OpenAPI 为准，仓库长期文档改为维护领域、数据、权限、状态机、部署与可观测性边界。
@@ -59,6 +67,8 @@
 - 未改变公开 API 参数和返回结构：API 明细以运行时 OpenAPI 为准。
 - 未硬编码生产 API docs 开关：通过既有环境变量配置路径暴露。
 - 未手工绕过远端 `.env`：同步失败根因在脚本合并边界，修脚本后重新同步。
+- 未修改 Python 依赖版本或使用临时包源：第二次同步失败根因是缓存边界错误叠加线上网络慢，修 Dockerfile 缓存边界。
+- 未提交 `.env.selfhost.sync`：该文件含生产密钥且被 `.gitignore` 忽略，只作为本机同步 overlay 使用。
 
 ## 7. 是否影响 API、架构、部署、数据结构、UI、测试
 
@@ -66,6 +76,8 @@
 - 架构：文档边界更新，运行时模块边界不变。
 - 部署：自托管 compose 新增 `LEARNINGPYRAMID_ENABLE_API_DOCS` 传递。
 - 部署脚本：env overlay 合并会归一化 CRLF 行尾。
+- Docker 构建：Python 依赖层不再受前端 fingerprint 影响。
+- 本机部署 overlay：使用 `LEARNINGPYRAMID_PIP_*` 变量把 PyPI 镜像传入 Docker build。
 - 数据结构：schema 不变；PostgreSQL 写入语义更新。
 - UI：注册页辅助文案减少，应用壳上下文匹配调整。
 - 测试：新增/更新后端单元测试和前端 e2e 断言。
@@ -75,6 +87,8 @@
 - 工作区包含较多已存在改动，本轮按用户要求全部提交。
 - 删除 `docs/api.md` 后，API 细节维护依赖运行时 OpenAPI；长期文档不再保存接口明细。
 - 已确认一次同步失败根因：CRLF overlay 经 `awk` 合并后污染远端 `.env`，导致 PostgreSQL 角色名带 `\r`。已按用户确认修脚本。
+- 已确认第二次同步失败根因：Dockerfile 中前端 fingerprint ARG 位于 pip 安装层之前，导致前端变动触发 Python 依赖重装；线上 PyPI 下载慢/不稳定时部署卡住。
+- 补充发现：远端 `.env` 里已有旧 `PLM_PIP_*` 包源配置，但 compose 只读取现行 `LEARNINGPYRAMID_PIP_*`；本机 overlay 已补现行变量，不新增旧命名兼容。
 
 ## 9. 仍需用户确认的问题
 
@@ -95,7 +109,14 @@
 - 修复后 `python tools/verify_backend_boundaries.py`：通过，输出 `backend boundary guards verified`。
 - 修复后 `git diff --check`：通过；仅提示换行符。
 - 修复后 `pnpm --dir frontend build`：通过；Vite 输出 chunk size warning。
-- 线上同步和健康检查：待重新执行。
+- 第二次线上同步失败：远端 Docker build 在 `pip install -r requirements.txt` 阶段失败/卡住；旧 app 容器仍健康运行。
+- Docker build 缓存边界修复验证和线上同步：待重新执行。
+- 本地 Docker build 未运行成功：Docker Desktop 未启动，无法连接 `dockerDesktopLinuxEngine`。
+- Dockerfile 修复后 `python tools/verify_backend_boundaries.py`：通过。
+- Dockerfile 修复后 `python -m unittest tests.test_backend_legacy_cleanup tests.test_postgres_persistence_system_state tests.test_repair_project_material_source_binding_index`：通过，43 tests。
+- Dockerfile 修复后 `git diff --check`：通过；仅提示换行符。
+- Dockerfile 修复后 `python -m unittest discover -s tests`：通过，77 tests。
+- Dockerfile 修复后 `pnpm --dir frontend build`：通过；Vite 输出 chunk size warning。
 
 ## 11. 污染风险检查
 
