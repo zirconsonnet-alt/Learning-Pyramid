@@ -318,7 +318,6 @@ export function MembershipPurchaseDialog(props: {
                   <div>会员时长：{preview?.periodDays ?? 30} 天</div>
                   <div>套餐类型：{preview?.planName ?? "月会员"}</div>
                   <div>支付方式：{selectedProvider ? describeMembershipPaymentProvider(selectedProvider) : "暂未开放"}</div>
-                  <div>当前价格：{formatMembershipPrice(preview?.payableAmountCent ?? summary?.currentPriceCent ?? 0)}</div>
                   <div>确认后会创建一笔新的待支付订单。</div>
                 </div>
               </div>
