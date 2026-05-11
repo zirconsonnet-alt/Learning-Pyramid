@@ -1,3 +1,4 @@
+import json
 import re
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -26,6 +27,10 @@ from backend.system.persistence_json import (
     encode_timestamp_ms,
 )
 from backend.system.postgres_runtime import get_postgres_pool
+
+
+def _json_dump(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
 
 
 def _translate_placeholders(sql: str) -> str:
@@ -206,17 +211,19 @@ class PostgresProjectSnapshotRepository(SqlProjectSnapshotRepository):
                 project_state,
                 created_at_ms,
                 deleted_at_ms,
+                snapshot_json,
                 subject_id,
                 scoped_project_id,
                 project_sequence,
                 updated_at
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT(project_id) DO UPDATE SET
                 project_title = EXCLUDED.project_title,
                 project_state = EXCLUDED.project_state,
                 created_at_ms = EXCLUDED.created_at_ms,
                 deleted_at_ms = EXCLUDED.deleted_at_ms,
+                snapshot_json = EXCLUDED.snapshot_json,
                 subject_id = EXCLUDED.subject_id,
                 scoped_project_id = EXCLUDED.scoped_project_id,
                 project_sequence = EXCLUDED.project_sequence,
@@ -228,6 +235,7 @@ class PostgresProjectSnapshotRepository(SqlProjectSnapshotRepository):
                 str(record.project_state),
                 int(record.created_at_ms),
                 None if record.deleted_at_ms is None else int(record.deleted_at_ms),
+                _json_dump({}),
                 None if record.subject_id is None else str(record.subject_id),
                 None if record.scoped_project_id is None else str(record.scoped_project_id),
                 int(record.project_sequence),

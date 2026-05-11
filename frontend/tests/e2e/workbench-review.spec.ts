@@ -5,7 +5,6 @@ import { installMockApi } from "../fixtures/mock-api"
 import { journeyIds } from "../fixtures/journeys"
 import { recordJourney } from "../fixtures/journey-result"
 import { gotoWorkbench, projectPath } from "../fixtures/page-objects"
-import { project } from "../fixtures/test-data"
 
 test(journeyIds.workbench, async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)

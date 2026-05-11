@@ -352,9 +352,7 @@ export function AuthPage() {
           : "欢迎回来"
   const description =
     effectiveMode === "register"
-      ? emailVerificationEnabled
-        ? "注册后需要先完成邮箱验证，再进入工作区。"
-        : "创建账号后即可进入工作区。"
+      ? ""
       : effectiveMode === "reset"
         ? resetTokenPresent
           ? "设置一个新的登录密码。"

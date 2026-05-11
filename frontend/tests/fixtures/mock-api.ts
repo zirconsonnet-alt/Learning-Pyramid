@@ -66,6 +66,24 @@ type MockMembershipOrder = ReturnType<typeof buildOrder>
 
 type MockAuthState = "signed-in" | "signed-out"
 type MockContentState = "ready" | "empty"
+type MockSystemCapabilities = {
+  appMode: "hosted"
+  asrEnabled: boolean
+  serverMediaStreamEnabled: boolean
+  browserLocalMediaEnabled: boolean
+  baiduNetdiskEnabled: boolean
+  authEnabled: boolean
+  allowSignup: boolean
+  signupInviteRequired: boolean
+  passwordResetEnabled: boolean
+  emailVerificationEnabled: boolean
+  signupHumanCheckEnabled: boolean
+  signupHumanCheckProvider: "altcha" | null
+  signupHumanCheckChallengeUrl: string | null
+  llmConfigured: boolean
+  storyGenerationConfigured: boolean
+  llmSource: string
+}
 type MockPomodoroWeekday = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun"
 type MockPomodoroPlan = {
   id: string
@@ -134,7 +152,15 @@ export function createMockGlobalSettings(overrides: Partial<MockGlobalSettings> 
   }
 }
 
-export async function installMockApi(page: Page, options: { authState?: MockAuthState; contentState?: MockContentState; globalSettings?: MockGlobalSettings } = {}) {
+export async function installMockApi(
+  page: Page,
+  options: {
+    authState?: MockAuthState
+    contentState?: MockContentState
+    globalSettings?: MockGlobalSettings
+    systemCapabilities?: Partial<MockSystemCapabilities>
+  } = {},
+) {
   const authState = options.authState ?? "signed-in"
   const contentState = options.contentState ?? "ready"
   let globalSettings = options.globalSettings ?? createMockGlobalSettings()
@@ -152,7 +178,7 @@ export async function installMockApi(page: Page, options: { authState?: MockAuth
     const scopedProjectPath = `/subjects/${subject.subjectId}/projects/${project.projectId}`
 
     if (path === "/system/capabilities") {
-      await fulfill(route, {
+      const systemCapabilities: MockSystemCapabilities = {
         appMode: "hosted",
         asrEnabled: false,
         serverMediaStreamEnabled: false,
@@ -169,7 +195,9 @@ export async function installMockApi(page: Page, options: { authState?: MockAuth
         llmConfigured: true,
         storyGenerationConfigured: true,
         llmSource: "env",
-      })
+        ...options.systemCapabilities,
+      }
+      await fulfill(route, systemCapabilities)
       return
     }
 

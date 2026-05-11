@@ -1,64 +1,89 @@
 # Current Change
 
-更新时间：2026-05-10
+更新时间：2026-05-11
 
-## 1. 本轮用户要求
+## 1. 当前用户要求
 
-- 建立后端对应的长期文档。
-- `README.md` 不再提到 `docs/self-host.md`。
+- 工作区全部提交。
+- 同步线上服务器。
 
-## 2. 实际修改文件
+## 2. 本次实际修改文件
 
-- `README.md`
-- `docs/architecture.md`
-- `docs/api.md`
-- `docs/deployment.md`
+- `AGENTS.md`
+- `backend/repositories/postgres_persistence.py`
+- `docker-compose.selfhost.yml`
+- `docs/api.md`（删除）
+- `docs/auth-and-permissions.md`
 - `docs/current-change.md`
+- `docs/data-model.md`
+- `docs/deployment.md`
+- `docs/domain-model.md`
+- `docs/observability.md`
+- `docs/state-machines.md`
+- `frontend/src/shell/AppShell.tsx`
+- `frontend/src/views/auth/AuthPage.tsx`
+- `frontend/src/views/home/ShowcaseChrome.tsx`
+- `frontend/tests/e2e/ai-chat.spec.ts`
+- `frontend/tests/e2e/auth-membership-admin.spec.ts`
+- `frontend/tests/e2e/workbench-review.spec.ts`
+- `frontend/tests/fixtures/mock-api.ts`
+- `tests/test_postgres_persistence_system_state.py`
+- `tests/test_repair_project_material_source_binding_index.py`
+- `tools/repair_project_material_source_binding_index.py`
 
 ## 3. 每个文件为什么修改
 
-- `README.md`：把不存在的 `docs/self-host.md` 链接改为新建的 `docs/deployment.md`。
-- `docs/architecture.md`：记录当前后端运行形态、模块职责、数据流、边界规则和已知边界风险。
-- `docs/api.md`：记录当前 API 根路径、认证公开路径、健康检查和主要路由分组索引。
-- `docs/deployment.md`：记录 release、dev、自托管 Docker、数据持久化、迁移、备份恢复和验证入口。
-- `docs/current-change.md`：记录本轮文档变更与污染风险检查。
+- `AGENTS.md`：明确 `docs/current-change.md` 是当前任务滚动工作单，移除对长期 `docs/api.md` 的硬性依赖。
+- `backend/repositories/postgres_persistence.py`：PostgreSQL project snapshot upsert 写入稳定空 JSON 壳，满足旧 `snapshot_json` 非空列。
+- `docker-compose.selfhost.yml`、`docs/deployment.md`：补充 `LEARNINGPYRAMID_ENABLE_API_DOCS` 自托管配置入口和说明。
+- `docs/*`：重组长期后端文档，新增认证权限、数据模型、领域模型、可观测性、状态机文档，删除独立 API 文档。
+- `frontend/*`：调整应用壳路由上下文、注册页辅助文案和 logo 加载属性，并同步 e2e mock 与断言。
+- `tests/*`、`tools/repair_project_material_source_binding_index.py`：补充 PostgreSQL normalized 数据修复入口和相关单元测试。
 
 ## 4. 行为语义是否变化
 
-否。只修改文档和 README 链接，不改变代码、API 行为、部署脚本或运行时配置。
+是。PostgreSQL snapshot 写入会保留 `snapshot_json` 的最小非空壳；自托管 API docs 默认关闭但可用环境变量显式打开；注册页不再显示注册后的辅助说明文案。
 
 ## 5. 是否做了重构，以及为什么
 
-否。没有代码重构，也没有移动、删除或改名现有模块。
+做了文档结构整理。原因是长期 API 明细改以运行时 OpenAPI 为准，仓库长期文档改为维护领域、数据、权限、状态机、部署与可观测性边界。
 
 ## 6. 未修改哪些相关内容，以及为什么
 
-- 未修改后端代码：本轮需求是建立文档和清理 README 失效链接。
-- 未创建 `docs/self-host.md`：用户明确要求 README 不再提到该文档，且新的部署说明已放入 `docs/deployment.md`。
-- 未补写 membership 或 frontend automation 长期文档：这两个 README 引用也指向当前不存在的文件，但不属于本轮明确要求，且需要单独确认文档范围。
+- 未新增 PostgreSQL schema migration：本次只修正 repository 写入旧列的值，不改变 schema。
+- 未改变公开 API 参数和返回结构：API 明细以运行时 OpenAPI 为准。
+- 未硬编码生产 API docs 开关：通过既有环境变量配置路径暴露。
 
 ## 7. 是否影响 API、架构、部署、数据结构、UI、测试
 
-- API：无行为影响；新增 `docs/api.md` 作为维护索引。
-- 架构：无行为影响；新增 `docs/architecture.md` 记录当前边界。
-- 部署：无行为影响；新增 `docs/deployment.md` 并让 README 指向它。
-- 数据结构：无影响。
-- UI：无影响。
-- 测试：无测试语义变化。
+- API：无已知接口契约变更；API docs 暴露受配置影响。
+- 架构：文档边界更新，运行时模块边界不变。
+- 部署：自托管 compose 新增 `LEARNINGPYRAMID_ENABLE_API_DOCS` 传递。
+- 数据结构：schema 不变；PostgreSQL 写入语义更新。
+- UI：注册页辅助文案减少，应用壳上下文匹配调整。
+- 测试：新增/更新后端单元测试和前端 e2e 断言。
 
-## 8. 风险点和不确定项
+## 8. 当前风险点和不确定项
 
-- `docs/api.md` 是维护索引，不替代运行时 OpenAPI schema。
-- 当前仓库已有大量未提交改动，本轮只触碰上述文档和 README 链接。
-- 现有 specs 记录了若干后端边界风险，本文没有把这些风险标记为已解决。
+- 工作区包含较多已存在改动，本轮按用户要求全部提交。
+- 删除 `docs/api.md` 后，API 细节维护依赖运行时 OpenAPI；长期文档不再保存接口明细。
 
-## 9. 需要用户确认的问题
+## 9. 仍需用户确认的问题
 
-无当前阻塞项。
+无。用户已明确要求全部提交并同步线上服务器。
 
-后续如需处理 README 中其它不存在的文档链接，应单独确认是否创建对应文档或移除链接。
+## 10. 验证结果
 
-## 10. 污染风险检查
+- `python tools/verify_backend_boundaries.py`：通过，输出 `backend boundary guards verified`。
+- `python -m compileall -q backend adapter tests tools`：通过。
+- `python -m unittest tests.test_postgres_persistence_system_state tests.test_repair_project_material_source_binding_index`：通过，9 tests。
+- `pnpm --dir frontend build`：通过；Vite 输出 chunk size warning。
+- `python -m unittest discover -s tests`：通过，77 tests。
+- `pnpm --dir frontend test:e2e`：通过，26 tests。
+- `git diff --check`：通过；仅提示多个文件下次 Git 触碰时 LF 会替换为 CRLF。
+- 线上同步和健康检查：待执行。
+
+## 11. 污染风险检查
 
 - 是否新增特殊分支：否
 - 是否新增隐式约定：否
@@ -67,13 +92,3 @@
 - 是否修改无关代码：否
 - 是否破坏现有抽象边界：否
 - 是否可能误导未来维护：否
-
-## 11. 部署目标修正
-
-2026-05-10 追加：
-
-- 问题：`Sync-Selfhost-Server.bat` 的 `SERVER_HOST` 在本轮提交中从既有可用目标 `plm.xuebao.chat` 变成了占位值 `learningpyramid.example.com`。
-- 根因：提交整个工作区时没有拦截这处部署目标漂移，导致同步脚本使用了不可解析的占位域名。
-- 修正：恢复 `SERVER_HOST=plm.xuebao.chat`。
-- 行为语义：恢复既有部署目标；不改变同步脚本流程、SSH 用户、端口或远端部署逻辑。
-- 风险：低。该改动只还原已知可用的线上目标。

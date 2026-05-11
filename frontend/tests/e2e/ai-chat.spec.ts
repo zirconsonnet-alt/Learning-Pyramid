@@ -5,7 +5,7 @@ import { installMockApi } from "../fixtures/mock-api"
 import { journeyIds } from "../fixtures/journeys"
 import { recordJourney } from "../fixtures/journey-result"
 import { projectPath } from "../fixtures/page-objects"
-import { learningObjectNode, project } from "../fixtures/test-data"
+import { learningObjectNode } from "../fixtures/test-data"
 
 test(journeyIds.aiChat, async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)

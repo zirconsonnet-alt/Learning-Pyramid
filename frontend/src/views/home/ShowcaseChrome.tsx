@@ -200,7 +200,6 @@ export function ShowcaseSiteHeader(props: { homeSectionPrefix?: string }) {
             alt="LearningPyramid logo"
             width="48"
             height="48"
-            fetchPriority="high"
             decoding="async"
           />
           <span>LearningPyramid</span>

@@ -87,6 +87,7 @@ docker compose -f docker-compose.selfhost.yml --env-file .env up --build
 - `LEARNINGPYRAMID_TRUSTED_HOSTS`
 - `LEARNINGPYRAMID_PROXY_HEADERS`
 - `LEARNINGPYRAMID_FORWARDED_ALLOW_IPS`
+- `LEARNINGPYRAMID_ENABLE_API_DOCS`：生产默认关闭；设为 `true` 时暴露 `/api/docs`、`/api/openapi.json` 和 `/api/redoc`。
 
 健康检查：
 

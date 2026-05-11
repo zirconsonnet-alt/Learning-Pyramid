@@ -66,13 +66,6 @@ function describeArea(
     }
   }
 
-  if (pathname.startsWith("/subjects/")) {
-    return {
-      title: "项目中心",
-      context: "创建和切换学科项目",
-    }
-  }
-
   if (pathname.startsWith("/pomodoro")) {
     return {
       title: "番茄钟",
@@ -149,6 +142,13 @@ function describeArea(
         title: "项目设置",
         context: `${subjectTitle} / ${materialTitle}`,
       }
+    }
+  }
+
+  if (pathname.startsWith("/subjects/")) {
+    return {
+      title: "项目中心",
+      context: "创建和切换学科项目",
     }
   }
 
@@ -380,7 +380,7 @@ export function AppShell() {
             settingsTo: currentProjectSettingsPath,
           })
         : [],
-    [currentMaterialProjectId, currentProjectSettingsPath, hasProjectContext],
+    [currentMaterialProjectId, currentProjectSettingsPath, hasProjectContext, resolvedSubjectId],
   )
   const isAdmin = Boolean(currentUserQ.data?.roles.some((role) => role === "super_admin" || role === "admin"))
   const globalNavItems = useMemo(() => getGlobalNavItems({ includeAdmin: isAdmin, includeMembership: authEnabled }), [authEnabled, isAdmin])

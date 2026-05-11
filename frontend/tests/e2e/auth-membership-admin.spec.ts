@@ -22,7 +22,11 @@ test(journeyIds.auth, async ({ page }) => {
 
 test("auth page removes secondary helper copy", async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
-  await installMockApi(page, { authState: "signed-out" })
+  await installMockApi(page, { authState: "signed-out", systemCapabilities: { emailVerificationEnabled: true } })
+
+  await page.goto("/login?mode=register")
+  await expect(page.getByRole("heading", { name: "创建账号" })).toBeVisible()
+  await expect(page.getByText("注册后需要先完成邮箱验证，再进入工作区。")).toHaveCount(0)
 
   await page.goto("/login")
   await expect(page.getByRole("heading", { name: "欢迎回来" })).toBeVisible()
