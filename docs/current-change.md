@@ -6,6 +6,7 @@
 
 - 工作区全部提交。
 - 同步线上服务器。
+- 删除或确认线上测试账号 `3873207721@qq.com` 不再占用注册邮箱。
 - 修复自托管同步时 Windows CRLF env overlay 污染远端 `.env` 的问题。
 - 修复自托管 Docker 构建缓存边界，避免前端 fingerprint 变化触发 Python 依赖重装。
 - 修正本机部署 overlay 中 PyPI 包源变量命名，使用现行 `LEARNINGPYRAMID_PIP_*`。
@@ -89,6 +90,7 @@ Docker 构建缓存语义也有变化：前端 fingerprint 只影响最终前端
 - 已确认一次同步失败根因：CRLF overlay 经 `awk` 合并后污染远端 `.env`，导致 PostgreSQL 角色名带 `\r`。已按用户确认修脚本。
 - 已确认第二次同步失败根因：Dockerfile 中前端 fingerprint ARG 位于 pip 安装层之前，导致前端变动触发 Python 依赖重装；线上 PyPI 下载慢/不稳定时部署卡住。
 - 补充发现：远端 `.env` 里已有旧 `PLM_PIP_*` 包源配置，但 compose 只读取现行 `LEARNINGPYRAMID_PIP_*`；本机 overlay 已补现行变量，不新增旧命名兼容。
+- `3873207721@qq.com` 在线上 `users` 表中计数为 0，未执行删除语句。
 
 ## 9. 仍需用户确认的问题
 
@@ -110,13 +112,17 @@ Docker 构建缓存语义也有变化：前端 fingerprint 只影响最终前端
 - 修复后 `git diff --check`：通过；仅提示换行符。
 - 修复后 `pnpm --dir frontend build`：通过；Vite 输出 chunk size warning。
 - 第二次线上同步失败：远端 Docker build 在 `pip install -r requirements.txt` 阶段失败/卡住；旧 app 容器仍健康运行。
-- Docker build 缓存边界修复验证和线上同步：待重新执行。
 - 本地 Docker build 未运行成功：Docker Desktop 未启动，无法连接 `dockerDesktopLinuxEngine`。
 - Dockerfile 修复后 `python tools/verify_backend_boundaries.py`：通过。
 - Dockerfile 修复后 `python -m unittest tests.test_backend_legacy_cleanup tests.test_postgres_persistence_system_state tests.test_repair_project_material_source_binding_index`：通过，43 tests。
 - Dockerfile 修复后 `git diff --check`：通过；仅提示换行符。
 - Dockerfile 修复后 `python -m unittest discover -s tests`：通过，77 tests。
 - Dockerfile 修复后 `pnpm --dir frontend build`：通过；Vite 输出 chunk size warning。
+- 第三次线上同步：通过；Docker build 收到 `LEARNINGPYRAMID_PIP_*` 参数并使用配置的 PyPI 镜像。
+- 同步脚本 smoke check：`/api/system/capabilities`、`/api/system/public-downloads`、服务器目录前端 asset、运行容器前端 asset、公开站点前端 asset 均通过。
+- 独立线上健康检查：`https://plm.xuebao.chat/api/health` 返回 `ok`。
+- 独立远端状态检查：远端 `.env` 的 `env_cr_count=0`，app 与 postgres 容器均为 `healthy`。
+- 线上测试账号确认：`users.email = '3873207721@qq.com'` 计数为 0，未执行删除。
 
 ## 11. 污染风险检查
 
