@@ -70,6 +70,7 @@ Docker 构建缓存语义也有变化：前端 fingerprint 只影响最终前端
 - 未手工绕过远端 `.env`：同步失败根因在脚本合并边界，修脚本后重新同步。
 - 未修改 Python 依赖版本或使用临时包源：第二次同步失败根因是缓存边界错误叠加线上网络慢，修 Dockerfile 缓存边界。
 - 未提交 `.env.selfhost.sync`：该文件含生产密钥且被 `.gitignore` 忽略，只作为本机同步 overlay 使用。
+- 未移除同步脚本里的 Docker `--no-cache`：这会改变自托管部署的强制干净构建策略，需要单独确认。
 
 ## 7. 是否影响 API、架构、部署、数据结构、UI、测试
 
@@ -91,6 +92,7 @@ Docker 构建缓存语义也有变化：前端 fingerprint 只影响最终前端
 - 已确认第二次同步失败根因：Dockerfile 中前端 fingerprint ARG 位于 pip 安装层之前，导致前端变动触发 Python 依赖重装；线上 PyPI 下载慢/不稳定时部署卡住。
 - 补充发现：远端 `.env` 里已有旧 `PLM_PIP_*` 包源配置，但 compose 只读取现行 `LEARNINGPYRAMID_PIP_*`；本机 overlay 已补现行变量，不新增旧命名兼容。
 - `3873207721@qq.com` 在线上 `users` 表中计数为 0，未执行删除语句。
+- 补充发现：`tools/sync_selfhost_server.ps1` 当前使用 `compose build --no-cache`，因此 Dockerfile 缓存层调整不会减少同步脚本路径下的 pip 安装次数；若要启用缓存，需要确认部署策略。
 
 ## 9. 仍需用户确认的问题
 
@@ -118,7 +120,8 @@ Docker 构建缓存语义也有变化：前端 fingerprint 只影响最终前端
 - Dockerfile 修复后 `git diff --check`：通过；仅提示换行符。
 - Dockerfile 修复后 `python -m unittest discover -s tests`：通过，77 tests。
 - Dockerfile 修复后 `pnpm --dir frontend build`：通过；Vite 输出 chunk size warning。
-- 第三次线上同步：通过；Docker build 收到 `LEARNINGPYRAMID_PIP_*` 参数并使用配置的 PyPI 镜像。
+- 线上同步：通过；Docker build 收到 `LEARNINGPYRAMID_PIP_*` 参数并使用配置的 PyPI 镜像。
+- 同步脚本当前仍使用 `--no-cache`，因此同步路径的远端 Docker build 仍会重新执行 pip 安装；是否改为缓存构建需单独确认。
 - 同步脚本 smoke check：`/api/system/capabilities`、`/api/system/public-downloads`、服务器目录前端 asset、运行容器前端 asset、公开站点前端 asset 均通过。
 - 独立线上健康检查：`https://plm.xuebao.chat/api/health` 返回 `ok`。
 - 独立远端状态检查：远端 `.env` 的 `env_cr_count=0`，app 与 postgres 容器均为 `healthy`。
