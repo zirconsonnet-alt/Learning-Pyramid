@@ -19,6 +19,7 @@ import {
   useMembershipOrderPreview,
   useMembershipOrders,
   useMembershipSummary,
+  useMarkCommissionWithdrawalWechatConfirmationStarted,
   usePayoutBindingAttempt,
   useRequestCommissionWithdrawal,
   useStartPayoutBindingAttempt,
@@ -41,6 +42,7 @@ import {
   formatMembershipPrice,
   StatusPill,
 } from "@/views/membership/membershipUi"
+import { readWithdrawalConfirmationToken, requestWechatMerchantTransfer, type WechatMerchantTransferConfirmation } from "@/views/membership/wechatTransfer"
 
 const DEFAULT_MEMBERSHIP_PLAN_ID = "monthly"
 
@@ -69,44 +71,6 @@ function CouponMetaLines(props: { coupon: CouponRecord; sourceInviteLabel: strin
       </div>
     </div>
   )
-}
-
-type WechatMerchantTransferConfirmation = {
-  mchId: string
-  appId: string
-  packageInfo: string
-}
-
-type WeixinBridge = {
-  invoke: (name: string, params: Record<string, string>, callback: () => void) => void
-}
-
-function getWeixinBridge() {
-  return typeof window !== "undefined"
-    ? (window as unknown as { WeixinJSBridge?: WeixinBridge }).WeixinJSBridge
-    : undefined
-}
-
-async function waitForWeixinBridge(timeoutMs = 1500) {
-  const existing = getWeixinBridge()
-  if (existing?.invoke || typeof window === "undefined" || typeof document === "undefined") {
-    return existing
-  }
-  return await new Promise<WeixinBridge | undefined>((resolve) => {
-    const onReady = () => {
-      cleanup()
-      resolve(getWeixinBridge())
-    }
-    const cleanup = () => {
-      window.clearTimeout(timer)
-      document.removeEventListener("WeixinJSBridgeReady", onReady)
-    }
-    const timer = window.setTimeout(() => {
-      cleanup()
-      resolve(getWeixinBridge())
-    }, timeoutMs)
-    document.addEventListener("WeixinJSBridgeReady", onReady, false)
-  })
 }
 
 function CouponBagDialog(props: {
@@ -389,6 +353,7 @@ export function MembershipPage() {
   const closeOrder = useCloseMembershipOrder()
   const requestWithdrawal = useRequestCommissionWithdrawal()
   const startPayoutBinding = useStartPayoutBindingAttempt()
+  const markConfirmationStarted = useMarkCommissionWithdrawalWechatConfirmationStarted()
 
   const coupons = useMemo(() => couponsQ.data ?? [], [couponsQ.data])
   const visibleCoupons = useMemo(() => coupons.filter((coupon) => coupon.status !== "used"), [coupons])
@@ -406,13 +371,13 @@ export function MembershipPage() {
     () => withdrawalsQ.data?.find((item) => item.withdrawalId === effectiveWithdrawalConfirmationId) ?? null,
     [withdrawalsQ.data, effectiveWithdrawalConfirmationId],
   )
-  const withdrawalConfirmationSubmitted = activeWithdrawalConfirmation?.status === "processing"
   const withdrawalConfirmationDialogOpen =
     Boolean(effectiveWithdrawalConfirmationId && effectiveWithdrawalConfirmationUrl) &&
     dismissedWithdrawalConfirmationId !== effectiveWithdrawalConfirmationId &&
     !(
       activeWithdrawalConfirmation &&
-      (activeWithdrawalConfirmation.status === "succeeded" ||
+      (activeWithdrawalConfirmation.status === "processing" ||
+        activeWithdrawalConfirmation.status === "succeeded" ||
         activeWithdrawalConfirmation.status === "failed" ||
         activeWithdrawalConfirmation.status === "canceled" ||
         activeWithdrawalConfirmation.status === "needs_attention")
@@ -479,16 +444,23 @@ export function MembershipPage() {
     }
     if (
       activeWithdrawalConfirmation.status === "created" ||
-      activeWithdrawalConfirmation.status === "awaiting_confirmation" ||
-      activeWithdrawalConfirmation.status === "processing"
+      activeWithdrawalConfirmation.status === "awaiting_confirmation"
     ) {
       return
     }
-    if (handledWithdrawalConfirmationIdRef.current === effectiveWithdrawalConfirmationId) {
+    const handledKey = `${effectiveWithdrawalConfirmationId}:${activeWithdrawalConfirmation.status}`
+    if (handledWithdrawalConfirmationIdRef.current === handledKey) {
       return
     }
-    handledWithdrawalConfirmationIdRef.current = effectiveWithdrawalConfirmationId
+    handledWithdrawalConfirmationIdRef.current = handledKey
     void queryClient.invalidateQueries({ queryKey: ["membership", "commissions"] })
+    if (activeWithdrawalConfirmation.status === "processing") {
+      showSuccessFeedback(
+        "微信确认已提交",
+        "电脑端已收到手机确认状态，后续到账会继续自动同步。",
+      )
+      return
+    }
     if (activeWithdrawalConfirmation.status === "succeeded") {
       showSuccessFeedback(
         "提现已到账",
@@ -693,7 +665,12 @@ export function MembershipPage() {
       })
       let confirmationInvoked = false
       if (result.confirmation?.mode === "wechat_jsapi_requestMerchantTransfer") {
-        confirmationInvoked = await requestMerchantTransfer(result.confirmation)
+        const invoked = await requestMerchantTransfer(result.confirmation)
+        if (invoked && result.confirmationUrl) {
+          confirmationInvoked = await markWithdrawalConfirmationStarted(result.withdrawalId, result.confirmationUrl)
+        } else {
+          confirmationInvoked = invoked
+        }
       }
       if (!confirmationInvoked && result.status === "awaiting_confirmation" && result.confirmationUrl) {
         openWithdrawalConfirmationDialog(result.withdrawalId, result.confirmationUrl)
@@ -717,23 +694,27 @@ export function MembershipPage() {
   }
 
   async function requestMerchantTransfer(confirmation: WechatMerchantTransferConfirmation) {
-    const bridge = await waitForWeixinBridge()
-    if (!bridge?.invoke) {
-      showErrorFeedback("需要在微信内确认", "当前浏览器不支持微信收款确认，请在微信客户端中打开后继续。")
+    const result = await requestWechatMerchantTransfer(confirmation)
+    if (!result.ok) {
+      showErrorFeedback("需要在微信内确认", result.message)
       return false
     }
-    await new Promise<void>((resolve) => {
-      bridge.invoke(
-        "requestMerchantTransfer",
-        {
-          mchId: confirmation.mchId,
-          appId: confirmation.appId,
-          package: confirmation.packageInfo,
-        },
-        () => resolve(),
-      )
-    })
     return true
+  }
+
+  async function markWithdrawalConfirmationStarted(withdrawalId: string, confirmationUrl: string | null | undefined) {
+    const token = readWithdrawalConfirmationToken(confirmationUrl)
+    if (!token) {
+      showErrorFeedback("同步确认状态失败", "缺少提现确认令牌，请刷新页面后重试。")
+      return false
+    }
+    try {
+      await markConfirmationStarted.mutateAsync({ withdrawalId, token })
+      return true
+    } catch (err) {
+      showErrorFeedback("同步确认状态失败", formatMembershipApiError(err))
+      return false
+    }
   }
 
   async function onResumeWithdrawalConfirmation(withdrawal: CommissionWithdrawal) {
@@ -748,6 +729,8 @@ export function MembershipPage() {
       return
     }
     if (invoked) {
+      const marked = await markWithdrawalConfirmationStarted(withdrawal.withdrawalId, withdrawal.confirmationUrl)
+      if (!marked) return
       showSuccessFeedback("已重新发起微信确认", "请在当前微信会话里完成收款确认，到账状态会自动刷新。")
     }
   }
@@ -821,21 +804,12 @@ export function MembershipPage() {
             <DialogDescription>请用收款微信扫描二维码，在手机微信里完成确认。确认后到账状态会自动同步。</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4">
-            {withdrawalConfirmationSubmitted ? (
-              <div className="rounded-lg border bg-muted/30 px-4 py-5 text-center">
-                <div className="text-base font-semibold text-foreground">已提交微信确认</div>
-                <div className="mt-2 text-sm leading-6 text-muted-foreground">正在同步到账状态，请不要重复扫码或再次确认。</div>
-              </div>
-            ) : (
-              <>
-                <div className="mx-auto rounded-lg border bg-white p-4">
-                  {effectiveWithdrawalConfirmationUrl ? (
-                    <QRCodeSVG value={effectiveWithdrawalConfirmationUrl} size={192} level="M" includeMargin role="img" aria-label="微信提现确认二维码" />
-                  ) : null}
-                </div>
-                <div className="break-all text-center text-xs leading-5 text-muted-foreground">{effectiveWithdrawalConfirmationUrl}</div>
-              </>
-            )}
+            <div className="mx-auto rounded-lg border bg-white p-4">
+              {effectiveWithdrawalConfirmationUrl ? (
+                <QRCodeSVG value={effectiveWithdrawalConfirmationUrl} size={192} level="M" includeMargin role="img" aria-label="微信提现确认二维码" />
+              ) : null}
+            </div>
+            <div className="break-all text-center text-xs leading-5 text-muted-foreground">{effectiveWithdrawalConfirmationUrl}</div>
             <div className="flex justify-end">
               <Button type="button" variant="outline" onClick={closeWithdrawalConfirmationDialog}>
                 稍后确认

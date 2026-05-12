@@ -4,41 +4,10 @@ import { Link, useSearchParams } from "react-router-dom"
 import { Button } from "@/ui/components/ui/button"
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
-import { useCompletePayoutBinding, useOpenMobilePayoutBinding } from "@/ui/queries/membership"
+import { useCompletePayoutBinding, useMarkCommissionWithdrawalWechatConfirmationStarted, useOpenMobilePayoutBinding } from "@/ui/queries/membership"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { formatMembershipApiError, formatMembershipPrice } from "@/views/membership/membershipUi"
-
-type WeixinBridge = {
-  invoke: (name: string, params: Record<string, string>, callback: () => void) => void
-}
-
-function getWeixinBridge() {
-  return typeof window !== "undefined"
-    ? (window as unknown as { WeixinJSBridge?: WeixinBridge }).WeixinJSBridge
-    : undefined
-}
-
-async function waitForWeixinBridge(timeoutMs = 1500) {
-  const existing = getWeixinBridge()
-  if (existing?.invoke || typeof window === "undefined" || typeof document === "undefined") {
-    return existing
-  }
-  return await new Promise<WeixinBridge | undefined>((resolve) => {
-    const onReady = () => {
-      cleanup()
-      resolve(getWeixinBridge())
-    }
-    const cleanup = () => {
-      window.clearTimeout(timer)
-      document.removeEventListener("WeixinJSBridgeReady", onReady)
-    }
-    const timer = window.setTimeout(() => {
-      cleanup()
-      resolve(getWeixinBridge())
-    }, timeoutMs)
-    document.addEventListener("WeixinJSBridgeReady", onReady, false)
-  })
-}
+import { readWithdrawalConfirmationToken, requestWechatMerchantTransfer, type WechatMerchantTransferConfirmation } from "@/views/membership/wechatTransfer"
 
 export function WechatPayoutBindingPage() {
   const [searchParams] = useSearchParams()
@@ -50,6 +19,7 @@ export function WechatPayoutBindingPage() {
 
   const openBinding = useOpenMobilePayoutBinding()
   const completeBinding = useCompletePayoutBinding()
+  const markConfirmationStarted = useMarkCommissionWithdrawalWechatConfirmationStarted()
 
   useEffect(() => {
     if (!bindingAttemptId || !state || openBinding.data || openBinding.isPending) return
@@ -63,23 +33,23 @@ export function WechatPayoutBindingPage() {
   const withdrawalAmountCent = payload?.amountCent ?? 0
   const isWithdrawalFlow = withdrawalAmountCent > 0
 
-  async function requestMerchantTransfer(confirmation: { mchId: string; appId: string; packageInfo: string }) {
-    const bridge = await waitForWeixinBridge()
-    if (!bridge?.invoke) {
-      showErrorFeedback("需要在微信内确认", "请使用手机微信打开这个页面，再继续确认收款。")
+  async function requestMerchantTransfer(confirmation: WechatMerchantTransferConfirmation, withdrawalId: string, confirmationUrl: string | null | undefined) {
+    const invokeResult = await requestWechatMerchantTransfer(confirmation)
+    if (!invokeResult.ok) {
+      showErrorFeedback("需要在微信内确认", invokeResult.message)
       return false
     }
-    await new Promise<void>((resolve) => {
-      bridge.invoke(
-        "requestMerchantTransfer",
-        {
-          mchId: confirmation.mchId,
-          appId: confirmation.appId,
-          package: confirmation.packageInfo,
-        },
-        () => resolve(),
-      )
-    })
+    const token = readWithdrawalConfirmationToken(confirmationUrl)
+    if (!token) {
+      showErrorFeedback("同步确认状态失败", "缺少提现确认令牌，请回到电脑端重新扫码。")
+      return false
+    }
+    try {
+      await markConfirmationStarted.mutateAsync({ withdrawalId, token })
+    } catch (err) {
+      showErrorFeedback("同步确认状态失败", formatMembershipApiError(err))
+      return false
+    }
     setWechatConfirmationStarted(true)
     showSuccessFeedback("已发起微信确认", "请在当前微信会话里完成收款确认，到账状态会自动刷新。")
     return true
@@ -100,7 +70,7 @@ export function WechatPayoutBindingPage() {
       if ("withdrawal" in result) {
         showSuccessFeedback("提现已创建", "正在拉起微信收款确认。")
         if (result.withdrawal.confirmation) {
-          await requestMerchantTransfer(result.withdrawal.confirmation)
+          await requestMerchantTransfer(result.withdrawal.confirmation, result.withdrawal.withdrawalId, result.withdrawal.confirmationUrl)
         }
         return
       }
@@ -152,8 +122,8 @@ export function WechatPayoutBindingPage() {
         ) : null}
 
         {wechatConfirmationStarted ? null : (
-          <Button type="button" onClick={() => void confirmBinding()} disabled={completeBinding.isPending || !payload}>
-            {completeBinding.isPending ? "处理中..." : isWithdrawalFlow ? "确认并提现" : "确认绑定"}
+          <Button type="button" onClick={() => void confirmBinding()} disabled={completeBinding.isPending || markConfirmationStarted.isPending || !payload}>
+            {completeBinding.isPending ? "处理中..." : markConfirmationStarted.isPending ? "同步中..." : isWithdrawalFlow ? "确认并提现" : "确认绑定"}
           </Button>
         )}
 

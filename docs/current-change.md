@@ -4,77 +4,65 @@
 
 ## 1. 当前用户要求
 
-- 全部提交本地工作区改动。
-- 同步上线服务器。
-- 给 `3125049051@qq.com` 账号准备 5 元可提现佣金用于测试提现体验。
+- 修复手机微信确认收款后，电脑端“微信扫码确认收款”弹窗仍停留在二维码页面的问题。
+- 复查线上提现单 `mwd_9993e4e1025b4d94a41bd2bec827ac7a` 的真实状态。
 
 ## 2. 本次实际修改文件
 
+- `adapter/main.py`
 - `adapter/routers/membership.py`
-- `backend/system/membership_commission_store.py`
-- `backend/system/membership_payment_service.py`
+- `docs/auth-and-permissions.md`
 - `docs/current-change.md`
-- `docs/deployment.md`
 - `frontend/src/ui/api/membership.ts`
 - `frontend/src/ui/queries/membership.ts`
 - `frontend/src/views/membership/MembershipPage.tsx`
 - `frontend/src/views/membership/WechatPayoutBindingPage.tsx`
 - `frontend/src/views/membership/WechatWithdrawalConfirmationPage.tsx`
-- `frontend/src/views/membership/components/MembershipPurchaseDialog.tsx`
-- `frontend/src/views/profile/ProfilePage.tsx`
-- `frontend/tests/e2e/app-load.spec.ts`
+- `frontend/src/views/membership/wechatTransfer.ts`
 - `frontend/tests/e2e/auth-membership-admin.spec.ts`
 - `frontend/tests/fixtures/mock-api.ts`
 - `tests/test_membership_commission_store.py`
-- `tests/test_membership_payment_service.py`
 
 ## 3. 每个文件为什么修改
 
-- `adapter/routers/membership.py`：微信提现绑定手机页返回可读账号标签，不再直接暴露不可读 user id。
-- `backend/system/membership_commission_store.py`：佣金记录和结算运行改用真实唯一 ID，并支持按分钟读取佣金退款等待窗口。
-- `backend/system/membership_payment_service.py`：微信支付提示移除手动同步文案，前端轮询间隔缩短为 2 秒。
-- `docs/deployment.md`：补充会员支付、佣金结算、微信提现对账调度说明。
-- `frontend/src/ui/api/membership.ts`、`frontend/src/ui/queries/membership.ts`：补齐前端需要的会员/提现字段与自动刷新参数。
-- `frontend/src/views/membership/MembershipPage.tsx`：移除手动“同步状态”按钮，改为支付/提现相关状态自动刷新；提现吗弹窗进入处理中后不再继续展示二维码和确认链接；会员权益与优惠券区域样式一致性调整；移除套餐卡片当前预估行。
-- `frontend/src/views/membership/WechatPayoutBindingPage.tsx`、`frontend/src/views/membership/WechatWithdrawalConfirmationPage.tsx`：手机端发起微信提现确认后切换为已提交状态，避免重复点击。
-- `frontend/src/views/membership/components/MembershipPurchaseDialog.tsx`：删除订单说明里的“当前价格”行。
-- `frontend/src/views/profile/ProfilePage.tsx`：删除个人中心账户卡片里的“进入会员中心”孤立入口。
-- `frontend/tests/e2e/app-load.spec.ts`、`frontend/tests/e2e/auth-membership-admin.spec.ts`、`frontend/tests/fixtures/mock-api.ts`：覆盖上述 UI 和状态刷新行为。
-- `tests/test_membership_commission_store.py`、`tests/test_membership_payment_service.py`：覆盖佣金退款窗口分钟配置和微信支付轮询/文案语义。
-- `docs/current-change.md`：记录本次提交与同步批次。
+- `adapter/routers/membership.py`：新增微信提现确认已发起回写接口，手机端微信 JSAPI 成功返回后可把提现从 `awaiting_confirmation` 推进到 `processing`。
+- `adapter/main.py`：把新增回写接口列为公开 API，保证微信内打开的手机页没有登录 cookie 时也能提交状态。
+- `docs/auth-and-permissions.md`：同步记录新增公开 API。
+- `frontend/src/ui/api/membership.ts`、`frontend/src/ui/queries/membership.ts`：新增前端回写 API 和 mutation。
+- `frontend/src/views/membership/wechatTransfer.ts`：抽出微信 `requestMerchantTransfer` 调用与结果判断，避免三个页面重复实现。
+- `frontend/src/views/membership/WechatPayoutBindingPage.tsx`、`frontend/src/views/membership/WechatWithdrawalConfirmationPage.tsx`：微信 JSAPI 返回成功后立即回写后端，回写成功后再进入“已提交微信确认”状态。
+- `frontend/src/views/membership/MembershipPage.tsx`：桌面端轮询到提现 `processing` 后关闭二维码弹窗，并提示微信确认已提交。
+- `frontend/tests/e2e/auth-membership-admin.spec.ts`、`frontend/tests/fixtures/mock-api.ts`：覆盖手机页回写请求和桌面弹窗关闭行为。
+- `tests/test_membership_commission_store.py`：覆盖提现从 `awaiting_confirmation` 推进到 `processing` 并记录 provider event。
+- `docs/current-change.md`：记录本次修复。
 
 ## 4. 行为语义是否变化
 
-变化：
-- 会员微信支付弹窗不再提供手动同步按钮，依赖自动轮询刷新。
-- 微信支付自动刷新间隔为 2 秒。
-- 微信提现确认进入处理中后，桌面弹窗不再继续展示二维码或确认链接；手机页提交确认后不再保留重复确认按钮。
-- 佣金退款等待窗口支持按分钟配置；线上测试可设为 1 分钟。
-- 个人中心不再提供“进入会员中心”按钮。
+变化：手机微信收款确认 JSAPI 成功返回后，系统会把对应提现单标记为 `processing`，电脑端会员页通过轮询看到该状态后自动关闭二维码确认弹窗。最终到账仍由微信通知或后台对账推进到 `succeeded`。
 
 ## 5. 是否做了重构，以及为什么
 
-未做跨模块重构。改动集中在会员支付/佣金/提现链路和对应 UI，保持现有 store、router、query、页面边界。
+做了局部前端去重：把三个页面共用的微信 JSAPI 调用抽到 `wechatTransfer.ts`，避免同一状态判断分散在多处。
 
 ## 6. 未修改哪些相关内容，以及为什么
 
-- 不新增后端推送通道：本批次仍使用已有查询接口和前端轮询。
-- 不改会员中心路由和全局导航：本次只删除个人中心孤立入口。
-- 不改数据库结构：5 元测试佣金通过现有 `commission_records` 语义写入线上数据。
+- 不新增 WebSocket / SSE：当前问题是手机确认后没有回写后端，现有轮询足够刷新桌面状态。
+- 不修改微信通知解析和对账逻辑：最终到账仍应以微信通知或对账为准。
+- 不修改提现数据结构：现有 `processing` 状态已经能表达“用户已确认，等待到账/对账”。
 
 ## 7. 是否影响 API、架构、部署、数据结构、UI、测试
 
-- API：会员/佣金 DTO 返回字段有补充。
-- 架构：无边界变化。
-- 部署：需要构建并同步到 self-host 服务器。
+- API：新增 `POST /api/commissions/withdrawals/{id}/wechat-confirmation/started`。
+- 架构：无跨层边界变化，仍由 router 调用 commission store。
+- 部署：需要重新构建并同步线上。
 - 数据结构：无 schema 变化。
-- UI：会员中心、购买弹窗、微信提现确认页、个人中心有变化。
-- 测试：新增/扩展后端单测和前端 e2e。
+- UI：桌面确认弹窗在 `processing` 后自动关闭；手机页只有回写成功后才显示已提交。
+- 测试：新增/调整 e2e 与后端单测。
 
 ## 8. 当前风险点和不确定项
 
-- 生产环境支付和提现最终状态仍依赖微信通知或后台对账任务；前端轮询只负责页面刷新。
-- 线上给 `3125049051@qq.com` 注入 5 元可提现佣金是测试数据操作，应只写入一条可识别的 settled 测试佣金。
+- 已打开的旧前端页面可能仍运行旧 JS，刷新页面后会加载新构建。
+- 如果微信 JSAPI 返回非成功结果，前端不会回写 `processing`，需要用户重新确认。
 
 ## 9. 仍需用户确认的问题
 
@@ -82,14 +70,15 @@
 
 ## 10. 验证结果
 
-- `python -m pytest tests/test_membership_commission_store.py tests/test_membership_payment_service.py`：通过 2 条。
-- `pnpm --dir frontend exec eslint src/ui/api/membership.ts src/ui/queries/membership.ts src/views/membership/MembershipPage.tsx src/views/membership/WechatPayoutBindingPage.tsx src/views/membership/WechatWithdrawalConfirmationPage.tsx src/views/membership/components/MembershipPurchaseDialog.tsx src/views/profile/ProfilePage.tsx tests/e2e/app-load.spec.ts tests/e2e/auth-membership-admin.spec.ts tests/fixtures/mock-api.ts`：通过。
-- `git diff --check`：通过；仅有工作区 LF/CRLF 提示。
-- `pnpm --dir frontend build`：通过；Vite 仍提示既有 chunk size warning。
-- `pnpm --dir frontend exec playwright test tests/e2e/app-load.spec.ts -g "profile learning view uses scoped audit log endpoint"`：通过 1 条。
-- `pnpm --dir frontend exec playwright test tests/e2e/auth-membership-admin.spec.ts -g "membership WeChat payment dialog relies on automatic status refresh|membership withdrawal confirmation dialog closes after payout becomes terminal|membership withdrawal confirmation dialog stops showing QR after WeChat confirmation starts|wechat payout binding page shows a readable account label|wechat payout binding page disables repeated withdrawal confirmation after invoking WeChat|wechat withdrawal confirmation page disables repeated confirmation after invoking WeChat"`：通过 6 条。
-- `python -m compileall -q backend adapter tests tools`：通过。
-- `python tools/verify_backend_boundaries.py --report-only`：通过，输出 `backend boundary guards verified`。
+- 已确认新增 e2e 在修复前失败：手机页没有发 `/wechat-confirmation/started` 请求，桌面弹窗不会关闭。
+- `python -m pytest tests/test_membership_commission_store.py tests/test_membership_payment_service.py`：通过 3 条。
+- `pnpm --dir frontend exec eslint src/views/membership/MembershipPage.tsx src/views/membership/WechatPayoutBindingPage.tsx src/views/membership/WechatWithdrawalConfirmationPage.tsx src/views/membership/wechatTransfer.ts src/ui/api/membership.ts src/ui/queries/membership.ts tests/e2e/auth-membership-admin.spec.ts tests/fixtures/mock-api.ts`：通过。
+- `python -m compileall -q adapter backend tests tools`：通过。
+- `pnpm --dir frontend exec playwright test tests/e2e/auth-membership-admin.spec.ts -g "wechat payout binding page disables repeated withdrawal confirmation after invoking WeChat|wechat withdrawal confirmation page disables repeated confirmation after invoking WeChat|membership withdrawal confirmation dialog closes after WeChat confirmation starts"`：通过 3 条。
+- `pnpm --dir frontend build`：通过，主入口产物为 `assets/index-DCd5aB7C.js`；Vite 仍有既有大 chunk warning。
+- `python tools/verify_backend_boundaries.py --report-only`：通过。
+- `git diff --check`：无空白错误；仅提示 Windows 工作区 LF/CRLF 转换。
+- 线上查询：`mwd_9993e4e1025b4d94a41bd2bec827ac7a` 当前为 `succeeded / SUCCESS`，金额 500 分。
 
 ## 11. 污染风险检查
 

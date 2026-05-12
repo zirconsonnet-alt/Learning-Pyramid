@@ -1135,6 +1135,27 @@ def get_wechat_transfer_confirmation(
     }
 
 
+@router.post("/commissions/withdrawals/{withdrawal_id}/wechat-confirmation/started")
+def mark_wechat_transfer_confirmation_started(
+    withdrawal_id: str,
+    token: str,
+    membership_commission_store: MembershipCommissionStore = Depends(get_membership_commission_store),
+) -> dict:
+    withdrawal = membership_commission_store.get_withdrawal_request(withdrawal_id)
+    if withdrawal is None or not _verify_transfer_confirmation_token(withdrawal, token):
+        raise NotFound("commission withdrawal")
+    if withdrawal.status == WITHDRAWAL_STATUS_AWAITING_CONFIRMATION:
+        if not _withdrawal_can_confirm(withdrawal):
+            raise PreconditionFailure("wechat transfer confirmation is unavailable")
+        withdrawal = membership_commission_store.mark_withdrawal_processing(
+            withdrawal.withdrawal_id,
+            provider_transfer_no=withdrawal.provider_transfer_no or withdrawal.transfer_bill_no,
+            provider_state="USER_CONFIRMED",
+            raw_payload_json='{"source":"wechat_jsapi_requestMerchantTransfer"}',
+        )
+    return {"ok": True, "data": _withdrawal_to_dto(withdrawal)}
+
+
 @router.post("/payments/wechat/transfer-notify")
 async def receive_wechat_transfer_notification(
     request: Request,

@@ -505,3 +505,11 @@ export function getCommissionWithdrawalWechatConfirmation(params: { withdrawalId
     responseSchema: CommissionWithdrawalConfirmationSchema,
   })
 }
+
+export function markCommissionWithdrawalWechatConfirmationStarted(params: { withdrawalId: string; token: string }) {
+  return apiRequest({
+    path: `/commissions/withdrawals/${encodeURIComponent(params.withdrawalId)}/wechat-confirmation/started?token=${encodeURIComponent(params.token)}`,
+    method: "POST",
+    responseSchema: CommissionWithdrawalSchema,
+  })
+}

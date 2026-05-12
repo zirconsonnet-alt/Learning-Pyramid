@@ -45,6 +45,7 @@
 - `/api/commissions/payout-identity/wechat/mobile-bind`
 - `/api/commissions/payout-identity/wechat/bind`
 - `/api/commissions/withdrawals/{id}/wechat-confirmation`
+- `/api/commissions/withdrawals/{id}/wechat-confirmation/started`
 - `/api/public/asr-bridge/...`
 - `/api/auth/...`
 

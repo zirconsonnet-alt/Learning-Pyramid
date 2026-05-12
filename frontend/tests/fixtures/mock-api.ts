@@ -173,6 +173,7 @@ export async function installMockApi(
   let membershipOrders: MockMembershipOrder[] = []
   let withdrawalRequested = false
   let withdrawalPollCount = 0
+  let withdrawalConfirmationStarted = false
   const withdrawalId = "mwd_e2e"
 
   function buildWithdrawal(status: "awaiting_confirmation" | "processing" | "succeeded") {
@@ -564,13 +565,19 @@ export async function installMockApi(
       return
     }
 
+    if (path === `/commissions/withdrawals/${withdrawalId}/wechat-confirmation/started` && method === "POST") {
+      withdrawalConfirmationStarted = true
+      await fulfill(route, buildWithdrawal("processing"))
+      return
+    }
+
     if (path === `/commissions/withdrawals/${withdrawalId}/wechat-confirmation`) {
       await fulfill(route, {
         withdrawalId,
         amountCent: 500,
         identityMaskedLabel: "oeUNQ3M***",
-        status: "awaiting_confirmation",
-        providerState: "WAIT_USER_CONFIRM",
+        status: withdrawalConfirmationStarted ? "processing" : "awaiting_confirmation",
+        providerState: withdrawalConfirmationStarted ? "PROCESSING" : "WAIT_USER_CONFIRM",
         confirmation: {
           mode: "wechat_jsapi_requestMerchantTransfer",
           mchId: "mch_e2e",
@@ -586,6 +593,10 @@ export async function installMockApi(
         withdrawalRequested = true
         withdrawalPollCount = 0
         await fulfill(route, buildWithdrawal("awaiting_confirmation"))
+        return
+      }
+      if (withdrawalConfirmationStarted) {
+        await fulfill(route, [buildWithdrawal("processing")])
         return
       }
       if (withdrawalScenario !== "none" && withdrawalRequested) {

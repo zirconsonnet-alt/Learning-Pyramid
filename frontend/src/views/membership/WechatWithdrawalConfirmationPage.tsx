@@ -2,47 +2,17 @@ import { useEffect, useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
 
 import { Button } from "@/ui/components/ui/button"
-import { useCommissionWithdrawalWechatConfirmation } from "@/ui/queries/membership"
+import { useCommissionWithdrawalWechatConfirmation, useMarkCommissionWithdrawalWechatConfirmationStarted } from "@/ui/queries/membership"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { formatMembershipApiError, formatMembershipPrice } from "@/views/membership/membershipUi"
-
-type WeixinBridge = {
-  invoke: (name: string, params: Record<string, string>, callback: () => void) => void
-}
-
-function getWeixinBridge() {
-  return typeof window !== "undefined"
-    ? (window as unknown as { WeixinJSBridge?: WeixinBridge }).WeixinJSBridge
-    : undefined
-}
-
-async function waitForWeixinBridge(timeoutMs = 1500) {
-  const existing = getWeixinBridge()
-  if (existing?.invoke || typeof window === "undefined" || typeof document === "undefined") {
-    return existing
-  }
-  return await new Promise<WeixinBridge | undefined>((resolve) => {
-    const onReady = () => {
-      cleanup()
-      resolve(getWeixinBridge())
-    }
-    const cleanup = () => {
-      window.clearTimeout(timer)
-      document.removeEventListener("WeixinJSBridgeReady", onReady)
-    }
-    const timer = window.setTimeout(() => {
-      cleanup()
-      resolve(getWeixinBridge())
-    }, timeoutMs)
-    document.addEventListener("WeixinJSBridgeReady", onReady, false)
-  })
-}
+import { requestWechatMerchantTransfer } from "@/views/membership/wechatTransfer"
 
 export function WechatWithdrawalConfirmationPage() {
   const [searchParams] = useSearchParams()
   const withdrawalId = searchParams.get("withdrawal") ?? ""
   const token = searchParams.get("token") ?? ""
   const confirmationQ = useCommissionWithdrawalWechatConfirmation()
+  const markConfirmationStarted = useMarkCommissionWithdrawalWechatConfirmationStarted()
   const [wechatConfirmationStarted, setWechatConfirmationStarted] = useState(false)
 
   useEffect(() => {
@@ -58,22 +28,17 @@ export function WechatWithdrawalConfirmationPage() {
       showErrorFeedback("继续确认失败", "当前提现单没有可用的微信确认参数，请回到电脑端重新申请提现。")
       return
     }
-    const bridge = await waitForWeixinBridge()
-    if (!bridge?.invoke) {
-      showErrorFeedback("需要在微信内确认", "请使用手机微信打开这个页面，再继续确认收款。")
+    const invokeResult = await requestWechatMerchantTransfer(confirmation)
+    if (!invokeResult.ok) {
+      showErrorFeedback("需要在微信内确认", invokeResult.message)
       return
     }
-    await new Promise<void>((resolve) => {
-      bridge.invoke(
-        "requestMerchantTransfer",
-        {
-          mchId: confirmation.mchId,
-          appId: confirmation.appId,
-          package: confirmation.packageInfo,
-        },
-        () => resolve(),
-      )
-    })
+    try {
+      await markConfirmationStarted.mutateAsync({ withdrawalId, token })
+    } catch (err) {
+      showErrorFeedback("同步确认状态失败", formatMembershipApiError(err))
+      return
+    }
     setWechatConfirmationStarted(true)
     showSuccessFeedback("已发起微信确认", "请在当前微信会话里完成收款确认，到账状态会自动刷新。")
   }
@@ -99,8 +64,8 @@ export function WechatWithdrawalConfirmationPage() {
         </div>
 
         {wechatConfirmationStarted ? null : (
-          <Button type="button" onClick={() => void requestMerchantTransfer()} disabled={confirmationQ.isPending || !payload?.confirmation}>
-            {confirmationQ.isPending ? "读取中..." : "继续微信确认"}
+          <Button type="button" onClick={() => void requestMerchantTransfer()} disabled={confirmationQ.isPending || markConfirmationStarted.isPending || !payload?.confirmation}>
+            {confirmationQ.isPending ? "读取中..." : markConfirmationStarted.isPending ? "同步中..." : "继续微信确认"}
           </Button>
         )}
 

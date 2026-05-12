@@ -14,6 +14,7 @@ import {
   listCommissionWithdrawals,
   listCoupons,
   listMembershipOrders,
+  markCommissionWithdrawalWechatConfirmationStarted,
   openMobilePayoutBinding,
   pollPayoutBindingAttempt,
   previewMembershipOrder,
@@ -187,6 +188,17 @@ export function useRequestCommissionWithdrawal() {
 export function useCommissionWithdrawalWechatConfirmation() {
   return useMutation({
     mutationFn: getCommissionWithdrawalWechatConfirmation,
+  })
+}
+
+export function useMarkCommissionWithdrawalWechatConfirmationStarted() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: markCommissionWithdrawalWechatConfirmationStarted,
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["membership", "withdrawals"] })
+      await qc.invalidateQueries({ queryKey: ["membership", "commissions"] })
+    },
   })
 }
 
