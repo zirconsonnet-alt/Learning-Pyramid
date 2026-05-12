@@ -23,6 +23,17 @@ test(journeyIds.workbench, async ({ page }) => {
   expectNoConsoleIssues(consoleIssues)
 })
 
+test("workbench video pane keeps the empty selection prompt to one line", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page)
+
+  await gotoWorkbench(page)
+  await expect(page.getByText("请先在左侧选择一个视频实例。")).toBeVisible()
+  await expect(page.getByText("当前视频还未进入可播放状态")).toHaveCount(0)
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
 test("workbench empty content tree avoids duplicate setup prompt", async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
   await installMockApi(page, { contentState: "empty" })

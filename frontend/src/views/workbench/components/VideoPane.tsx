@@ -2785,8 +2785,7 @@ export function VideoPane({
                 <VideoOff className="h-5 w-5" />
               </div>
               <div className="space-y-1.5">
-                <div className="text-sm font-medium text-foreground">当前视频还未进入可播放状态</div>
-                <div>
+                <div className="text-sm font-medium text-foreground">
                   {instance
                     ? playbackError ??
                       (isBaiduConnecting

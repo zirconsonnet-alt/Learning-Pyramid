@@ -1451,7 +1451,7 @@ function LayerConfigEditor({
                     <div className="text-sm font-medium text-foreground">{item.kind === "CONVERGENCE" ? "收敛" : "复习任务"}</div>
                     <div className="text-xs text-muted-foreground">
                       {item.kind === "CONVERGENCE"
-                        ? "完成一轮后决定是否继续生成复习任务。"
+                        ? "推送上次复习时不记得的重点"
                         : "在当前范围上直接生成待执行复习任务。"}
                     </div>
                   </div>
@@ -1480,9 +1480,7 @@ function LayerConfigEditor({
                         disabled={saving}
                       />
                     </div>
-                  ) : (
-                    <div className="text-xs text-muted-foreground">这个步骤没有额外参数</div>
-                  )}
+                  ) : null}
 
                   <Button
                     type="button"
