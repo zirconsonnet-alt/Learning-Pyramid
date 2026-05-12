@@ -46,6 +46,7 @@ export function WechatPayoutBindingPage() {
   const state = searchParams.get("state") ?? ""
   const codeFromWechat = searchParams.get("code") ?? searchParams.get("authorizationCode") ?? ""
   const [authorizationCode, setAuthorizationCode] = useState(codeFromWechat)
+  const [wechatConfirmationStarted, setWechatConfirmationStarted] = useState(false)
 
   const openBinding = useOpenMobilePayoutBinding()
   const completeBinding = useCompletePayoutBinding()
@@ -58,7 +59,7 @@ export function WechatPayoutBindingPage() {
   }, [bindingAttemptId, state, openBinding])
 
   const payload = openBinding.data
-  const accountLabel = useMemo(() => payload?.learningPyramidUserId ?? payload?.confirmedLearningPyramidUserId ?? "", [payload])
+  const accountLabel = useMemo(() => payload?.learningPyramidAccountLabel?.trim() || "当前 LearningPyramid 账号", [payload])
   const withdrawalAmountCent = payload?.amountCent ?? 0
   const isWithdrawalFlow = withdrawalAmountCent > 0
 
@@ -66,7 +67,7 @@ export function WechatPayoutBindingPage() {
     const bridge = await waitForWeixinBridge()
     if (!bridge?.invoke) {
       showErrorFeedback("需要在微信内确认", "请使用手机微信打开这个页面，再继续确认收款。")
-      return
+      return false
     }
     await new Promise<void>((resolve) => {
       bridge.invoke(
@@ -79,7 +80,9 @@ export function WechatPayoutBindingPage() {
         () => resolve(),
       )
     })
+    setWechatConfirmationStarted(true)
     showSuccessFeedback("已发起微信确认", "请在当前微信会话里完成收款确认，到账状态会自动刷新。")
+    return true
   }
 
   async function confirmBinding() {
@@ -92,7 +95,7 @@ export function WechatPayoutBindingPage() {
         bindingAttemptId,
         authorizationCode,
         state,
-        confirmedLearningPyramidUserId: payload?.confirmedLearningPyramidUserId ?? accountLabel,
+        confirmedLearningPyramidUserId: payload?.confirmedLearningPyramidUserId,
       })
       if ("withdrawal" in result) {
         showSuccessFeedback("提现已创建", "正在拉起微信收款确认。")
@@ -112,9 +115,15 @@ export function WechatPayoutBindingPage() {
       <section className="mx-auto grid max-w-md gap-6">
         <div>
           <div className="text-sm text-muted-foreground">LearningPyramid</div>
-          <h1 className="mt-2 text-2xl font-semibold tracking-tight">{isWithdrawalFlow ? "确认微信提现" : "绑定微信收款账号"}</h1>
+          <h1 className="mt-2 text-2xl font-semibold tracking-tight">
+            {wechatConfirmationStarted ? "已提交微信确认" : isWithdrawalFlow ? "确认微信提现" : "绑定微信收款账号"}
+          </h1>
           <p className="mt-3 text-sm leading-6 text-muted-foreground">
-            {isWithdrawalFlow ? "确认后会直接发起这笔佣金提现，并在当前微信里继续确认收款。" : "确认后，电脑端账号的邀请佣金会提现到当前微信。"}
+            {wechatConfirmationStarted
+              ? "请回到电脑端查看到账状态。"
+              : isWithdrawalFlow
+                ? "确认后会直接发起这笔佣金提现，并在当前微信里继续确认收款。"
+                : "确认后，电脑端账号的邀请佣金会提现到当前微信。"}
           </p>
         </div>
 
@@ -142,9 +151,11 @@ export function WechatPayoutBindingPage() {
           </div>
         ) : null}
 
-        <Button type="button" onClick={() => void confirmBinding()} disabled={completeBinding.isPending || !payload}>
-          {completeBinding.isPending ? "处理中..." : isWithdrawalFlow ? "确认并提现" : "确认绑定"}
-        </Button>
+        {wechatConfirmationStarted ? null : (
+          <Button type="button" onClick={() => void confirmBinding()} disabled={completeBinding.isPending || !payload}>
+            {completeBinding.isPending ? "处理中..." : isWithdrawalFlow ? "确认并提现" : "确认绑定"}
+          </Button>
+        )}
 
         <Link className="text-center text-sm text-muted-foreground hover:text-foreground" to="/membership">
           返回会员页面

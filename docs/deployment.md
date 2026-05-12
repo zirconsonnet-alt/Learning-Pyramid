@@ -118,6 +118,22 @@ SQLite 默认数据位置：
 
 self-host compose 当前把 `./data/selfhost` 同时挂载到 `/data` 和 `/app/data`，把 `./data/postgres` 挂载为 PostgreSQL 数据目录。
 
+## 会员支付、佣金与提现调度
+
+生产环境不能只依赖前端轮询刷新支付状态。会员资金链路需要后台调度任务持续推进：
+
+- `tools/reconcile_membership_payments.py`：对账待确认会员支付。
+- `tools/settle_membership_commissions.py`：佣金退款等待窗口结束后，把符合条件的邀请佣金从 `pending` 结算为 `settled`。
+- `tools/reconcile_commission_withdrawals.py`：对账微信提现中的转账状态。
+
+self-host 线上环境应通过 cron、systemd timer 或等价调度器定期运行：
+
+```bash
+python tools/reconcile_membership_payments.py --min-age-minutes 5 --limit 100
+python tools/settle_membership_commissions.py --limit 200
+python tools/reconcile_commission_withdrawals.py --min-age-minutes 2 --limit 100
+```
+
 ## 数据库迁移
 
 PostgreSQL schema 通过 `schema_migrations` 记录版本。

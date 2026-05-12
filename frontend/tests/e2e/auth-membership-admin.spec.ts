@@ -1,9 +1,18 @@
-import { expect, test } from "@playwright/test"
+import { expect, test, type Page } from "@playwright/test"
 
 import { collectConsoleIssues, expectNoConsoleIssues } from "../fixtures/app-checks"
 import { installMockApi } from "../fixtures/mock-api"
 import { journeyIds } from "../fixtures/journeys"
 import { recordJourney } from "../fixtures/journey-result"
+
+async function installWeixinBridge(page: Page) {
+  await page.addInitScript(() => {
+    const target = window as unknown as { WeixinJSBridge?: { invoke: (_name: string, _params: Record<string, string>, callback: () => void) => void } }
+    target.WeixinJSBridge = {
+      invoke: (_name: string, _params: Record<string, string>, callback: () => void) => callback(),
+    }
+  })
+}
 
 test(journeyIds.auth, async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
@@ -70,6 +79,91 @@ test("membership checkout opens a dedicated payment dialog after order creation"
   await expect(page.getByRole("heading", { name: "继续支付" })).toBeVisible()
   await expect(page.getByRole("heading", { name: "开通会员套餐" })).toHaveCount(0)
   await expect(page.getByText("待支付订单", { exact: true })).toBeVisible()
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
+test("membership WeChat payment dialog relies on automatic status refresh", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page, { membershipProvider: "wechat_native" })
+
+  await page.goto("/membership")
+  await page.getByRole("button", { name: "立即续费" }).click()
+  await page.getByRole("button", { name: "确认并继续" }).click()
+
+  await expect(page.getByRole("heading", { name: "继续支付" })).toBeVisible()
+  await expect(page.getByAltText("微信支付二维码")).toBeVisible()
+  await expect(page.getByText("支付成功后页面会自动刷新")).toBeVisible()
+  await expect(page.getByRole("button", { name: /同步/ })).toHaveCount(0)
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
+test("membership withdrawal confirmation dialog closes after payout becomes terminal", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page, { withdrawalScenario: "awaiting_then_succeeded" })
+
+  await page.goto("/membership")
+  await page.getByRole("button", { name: "申请提现" }).click()
+  await expect(page.getByRole("heading", { name: "微信扫码确认收款" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "微信扫码确认收款" })).toHaveCount(0, { timeout: 10_000 })
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
+test("membership withdrawal confirmation dialog stops showing QR after WeChat confirmation starts", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page, { withdrawalScenario: "awaiting_then_processing" })
+
+  await page.goto("/membership")
+  await page.getByRole("button", { name: "申请提现" }).click()
+  const dialog = page.getByRole("dialog", { name: "微信扫码确认收款" })
+  await expect(dialog).toBeVisible()
+  await expect(page.getByText("已提交微信确认")).toBeVisible({ timeout: 10_000 })
+  await expect(dialog.getByRole("img", { name: "微信提现确认二维码" })).toHaveCount(0)
+  await expect(dialog.getByText("https://example.test/membership/wechat-payout-confirm")).toHaveCount(0)
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
+test("wechat payout binding page shows a readable account label", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page)
+
+  await page.goto("/membership/wechat-payout-bind?attempt=bind_e2e&state=state_e2e&code=code_e2e")
+  await expect(page.getByRole("heading", { name: "确认微信提现" })).toBeVisible()
+  await expect(page.getByText("自动化测试账号（LP-E2E）")).toBeVisible()
+  await expect(page.getByText("user_e2e")).toHaveCount(0)
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
+test("wechat payout binding page disables repeated withdrawal confirmation after invoking WeChat", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page)
+  await installWeixinBridge(page)
+
+  await page.goto("/membership/wechat-payout-bind?attempt=bind_e2e&state=state_e2e&code=code_e2e")
+  await page.getByRole("button", { name: "确认并提现" }).click()
+
+  await expect(page.getByRole("heading", { name: "已提交微信确认" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "确认并提现" })).toHaveCount(0)
+  await expect(page.getByText("请回到电脑端查看到账状态。")).toBeVisible()
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
+test("wechat withdrawal confirmation page disables repeated confirmation after invoking WeChat", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page)
+  await installWeixinBridge(page)
+
+  await page.goto("/membership/wechat-payout-confirm?withdrawal=mwd_e2e&token=token_e2e")
+  await page.getByRole("button", { name: "继续微信确认" }).click()
+
+  await expect(page.getByRole("heading", { name: "已提交微信确认" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "继续微信确认" })).toHaveCount(0)
+  await expect(page.getByText("请回到电脑端查看到账状态。")).toBeVisible()
 
   expectNoConsoleIssues(consoleIssues)
 })

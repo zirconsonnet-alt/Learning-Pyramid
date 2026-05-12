@@ -1,4 +1,4 @@
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
 
 import { Button } from "@/ui/components/ui/button"
@@ -43,6 +43,7 @@ export function WechatWithdrawalConfirmationPage() {
   const withdrawalId = searchParams.get("withdrawal") ?? ""
   const token = searchParams.get("token") ?? ""
   const confirmationQ = useCommissionWithdrawalWechatConfirmation()
+  const [wechatConfirmationStarted, setWechatConfirmationStarted] = useState(false)
 
   useEffect(() => {
     if (!withdrawalId || !token || confirmationQ.data || confirmationQ.isPending) return
@@ -73,6 +74,7 @@ export function WechatWithdrawalConfirmationPage() {
         () => resolve(),
       )
     })
+    setWechatConfirmationStarted(true)
     showSuccessFeedback("已发起微信确认", "请在当前微信会话里完成收款确认，到账状态会自动刷新。")
   }
 
@@ -83,8 +85,10 @@ export function WechatWithdrawalConfirmationPage() {
       <section className="mx-auto grid max-w-md gap-6">
         <div>
           <div className="text-sm text-muted-foreground">LearningPyramid</div>
-          <h1 className="mt-2 text-2xl font-semibold tracking-tight">确认微信提现</h1>
-          <p className="mt-3 text-sm leading-6 text-muted-foreground">请在手机微信内继续确认收款，确认后到账状态会自动同步。</p>
+          <h1 className="mt-2 text-2xl font-semibold tracking-tight">{wechatConfirmationStarted ? "已提交微信确认" : "确认微信提现"}</h1>
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">
+            {wechatConfirmationStarted ? "请回到电脑端查看到账状态。" : "请在手机微信内继续确认收款，确认后到账状态会自动同步。"}
+          </p>
         </div>
 
         <div className="rounded-lg border bg-card p-5 shadow-sm">
@@ -94,9 +98,11 @@ export function WechatWithdrawalConfirmationPage() {
           <div className="mt-1 text-xl font-semibold">{payload ? formatMembershipPrice(payload.amountCent) : "--"}</div>
         </div>
 
-        <Button type="button" onClick={() => void requestMerchantTransfer()} disabled={confirmationQ.isPending || !payload?.confirmation}>
-          {confirmationQ.isPending ? "读取中..." : "继续微信确认"}
-        </Button>
+        {wechatConfirmationStarted ? null : (
+          <Button type="button" onClick={() => void requestMerchantTransfer()} disabled={confirmationQ.isPending || !payload?.confirmation}>
+            {confirmationQ.isPending ? "读取中..." : "继续微信确认"}
+          </Button>
+        )}
 
         <Link className="text-center text-sm text-muted-foreground hover:text-foreground" to="/membership">
           返回会员页面

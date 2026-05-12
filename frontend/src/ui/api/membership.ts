@@ -214,6 +214,7 @@ export const PayoutBindingAttemptSchema = z.object({
   scannedAt: z.string().nullable().optional(),
   confirmedAt: z.string().nullable().optional(),
   nextAction: z.string().optional(),
+  learningPyramidAccountLabel: z.string().optional(),
   learningPyramidUserId: z.string().optional(),
   confirmedLearningPyramidUserId: z.string().optional(),
   createdAt: z.string(),

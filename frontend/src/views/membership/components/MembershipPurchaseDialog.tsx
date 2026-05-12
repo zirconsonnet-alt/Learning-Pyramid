@@ -88,7 +88,6 @@ export function MembershipPaymentDialog(props: {
   closePending: boolean
   onResumePayment: () => void
   onConfirmPayment: (order: MembershipOrder) => void
-  onSyncPayment: (order: MembershipOrder) => void
   onCloseOrder: (order: MembershipOrder) => void
   onCopyPaymentLink: () => void
 }) {
@@ -103,7 +102,6 @@ export function MembershipPaymentDialog(props: {
     closePending,
     onResumePayment,
     onConfirmPayment,
-    onSyncPayment,
     onCloseOrder,
     onCopyPaymentLink,
   } = props
@@ -168,9 +166,6 @@ export function MembershipPaymentDialog(props: {
                             <CreditCard className="h-4 w-4" />
                             复制链接
                           </Button>
-                          <Button variant="outline" onClick={() => onSyncPayment(order)} disabled={syncPending || closePending}>
-                            {syncPending ? "同步中..." : "同步状态"}
-                          </Button>
                           <Button variant="outline" onClick={() => onCloseOrder(order)} disabled={closePending || syncPending}>
                             {closePending ? "关闭中..." : "关闭订单"}
                           </Button>
@@ -183,9 +178,6 @@ export function MembershipPaymentDialog(props: {
                       <div className="flex flex-wrap gap-2">
                         <Button onClick={onResumePayment} disabled={createPending || syncPending || closePending}>
                           {createPending ? "生成中..." : "继续支付"}
-                        </Button>
-                        <Button variant="outline" onClick={() => onSyncPayment(order)} disabled={syncPending || closePending || createPending}>
-                          {syncPending ? "同步中..." : "同步状态"}
                         </Button>
                         <Button variant="outline" onClick={() => onCloseOrder(order)} disabled={closePending || syncPending || createPending}>
                           {closePending ? "关闭中..." : "关闭订单"}

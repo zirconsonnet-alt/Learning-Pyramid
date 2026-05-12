@@ -1,5 +1,6 @@
 import { Copy, History, Sparkles, Ticket, Users } from "lucide-react"
-import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react"
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useQueryClient } from "@tanstack/react-query"
 import { QRCodeSVG } from "qrcode.react"
 
 import type { CommissionWithdrawal, CouponRecord, InviteReferral, MembershipCreateOrderResult, MembershipOrder } from "@/ui/api/membership"
@@ -301,9 +302,13 @@ export function MembershipPage() {
   const [withdrawAmountYuan, setWithdrawAmountYuan] = useState("5")
   const [activeBindingAttemptId, setActiveBindingAttemptId] = useState("")
   const [startedBindingQrPayload, setStartedBindingQrPayload] = useState("")
-  const [bindingDialogOpen, setBindingDialogOpen] = useState(false)
+  const [dismissedBindingAttemptId, setDismissedBindingAttemptId] = useState("")
   const [withdrawalConfirmationUrl, setWithdrawalConfirmationUrl] = useState("")
-  const [withdrawalConfirmationDialogOpen, setWithdrawalConfirmationDialogOpen] = useState(false)
+  const [withdrawalConfirmationWithdrawalId, setWithdrawalConfirmationWithdrawalId] = useState("")
+  const [dismissedWithdrawalConfirmationId, setDismissedWithdrawalConfirmationId] = useState("")
+  const queryClient = useQueryClient()
+  const handledBindingAttemptIdRef = useRef("")
+  const handledWithdrawalConfirmationIdRef = useRef("")
 
   const latestCheckout = Object.values(checkoutByOrderId).at(-1) ?? null
   const shouldAutoRefresh = latestCheckout?.order.provider === "wechat_native" && latestCheckout.order.status === "pending"
@@ -311,8 +316,67 @@ export function MembershipPage() {
   const couponsQ = useMembershipCoupons(20)
   const inviteSummaryQ = useInviteSummary()
   const commissionQ = useCommissionSummary()
-  const bindingAttemptQ = usePayoutBindingAttempt(activeBindingAttemptId, Boolean(activeBindingAttemptId), activeBindingAttemptId ? 2_000 : false)
-  const withdrawalsQ = useCommissionWithdrawals()
+  const bindingAttemptQ = usePayoutBindingAttempt(
+    activeBindingAttemptId,
+    Boolean(activeBindingAttemptId),
+    (query) => {
+      if (!activeBindingAttemptId) {
+        return false
+      }
+      if (dismissedBindingAttemptId === activeBindingAttemptId) {
+        return false
+      }
+      const attempt = query.state.data
+      if (
+        attempt &&
+        (attempt.status === "bound" ||
+          attempt.status === "failed" ||
+          attempt.status === "canceled" ||
+          attempt.status === "expired" ||
+          attempt.nextAction === "withdraw" ||
+          attempt.nextAction === "confirm_withdrawal")
+      ) {
+        return false
+      }
+      return 2_000
+    },
+  )
+  const bindingAttemptTerminal =
+    bindingAttemptQ.data?.status === "bound" ||
+    bindingAttemptQ.data?.status === "failed" ||
+    bindingAttemptQ.data?.status === "canceled" ||
+    bindingAttemptQ.data?.status === "expired" ||
+    bindingAttemptQ.data?.nextAction === "withdraw" ||
+    bindingAttemptQ.data?.nextAction === "confirm_withdrawal"
+  const activeBindingWithdrawalConfirmation =
+    bindingAttemptTerminal && bindingAttemptQ.data?.withdrawal?.confirmationUrl
+      ? {
+          withdrawalId: bindingAttemptQ.data.withdrawal.withdrawalId,
+          confirmationUrl: bindingAttemptQ.data.withdrawal.confirmationUrl,
+        }
+      : null
+  const effectiveWithdrawalConfirmationId = withdrawalConfirmationWithdrawalId || activeBindingWithdrawalConfirmation?.withdrawalId || ""
+  const effectiveWithdrawalConfirmationUrl = withdrawalConfirmationUrl || activeBindingWithdrawalConfirmation?.confirmationUrl || ""
+  const withdrawalsQ = useCommissionWithdrawals(
+    20,
+    true,
+    (query) => {
+      if (!effectiveWithdrawalConfirmationId || dismissedWithdrawalConfirmationId === effectiveWithdrawalConfirmationId) {
+        return false
+      }
+      const activeWithdrawal = query.state.data?.find((item) => item.withdrawalId === effectiveWithdrawalConfirmationId)
+      if (
+        activeWithdrawal &&
+        (activeWithdrawal.status === "succeeded" ||
+          activeWithdrawal.status === "failed" ||
+          activeWithdrawal.status === "canceled" ||
+          activeWithdrawal.status === "needs_attention")
+      ) {
+        return false
+      }
+      return 2_000
+    },
+  )
   const ordersQ = useMembershipOrders(20, true, shouldAutoRefresh ? 5_000 : false)
   const pendingOrder = (ordersQ.data ?? []).find((item) => item.status === "pending")
   const latestPendingCheckout = latestCheckout?.order.status === "pending" ? latestCheckout : null
@@ -337,6 +401,22 @@ export function MembershipPage() {
       : supportedProviders[0] ?? ""
   const activeCheckout = paymentOrder ? checkoutByOrderId[paymentOrder.orderId] ?? (latestPendingCheckout?.order.orderId === paymentOrder.orderId ? latestPendingCheckout : null) : null
   const activeBindingQrPayload = bindingAttemptQ.data?.qrCodePayload || startedBindingQrPayload
+  const effectiveBindingDialogOpen = Boolean(activeBindingAttemptId) && dismissedBindingAttemptId !== activeBindingAttemptId && !bindingAttemptTerminal
+  const activeWithdrawalConfirmation = useMemo(
+    () => withdrawalsQ.data?.find((item) => item.withdrawalId === effectiveWithdrawalConfirmationId) ?? null,
+    [withdrawalsQ.data, effectiveWithdrawalConfirmationId],
+  )
+  const withdrawalConfirmationSubmitted = activeWithdrawalConfirmation?.status === "processing"
+  const withdrawalConfirmationDialogOpen =
+    Boolean(effectiveWithdrawalConfirmationId && effectiveWithdrawalConfirmationUrl) &&
+    dismissedWithdrawalConfirmationId !== effectiveWithdrawalConfirmationId &&
+    !(
+      activeWithdrawalConfirmation &&
+      (activeWithdrawalConfirmation.status === "succeeded" ||
+        activeWithdrawalConfirmation.status === "failed" ||
+        activeWithdrawalConfirmation.status === "canceled" ||
+        activeWithdrawalConfirmation.status === "needs_attention")
+    )
   const selectedCoupon = useMemo(
     () => availableCoupons.find((item) => item.couponId === selectedCouponId) ?? null,
     [availableCoupons, selectedCouponId],
@@ -351,29 +431,82 @@ export function MembershipPage() {
       ),
     [recentInvites],
   )
-  const autoSyncIntervalMs = Math.max(3, activeCheckout?.paymentPayload.pollIntervalSeconds ?? 5) * 1_000
+  const autoSyncIntervalMs = Math.max(2, activeCheckout?.paymentPayload.pollIntervalSeconds ?? 2) * 1_000
+
+  const openWithdrawalConfirmationDialog = useCallback((withdrawalId: string, confirmationUrl: string) => {
+    setDismissedWithdrawalConfirmationId("")
+    setWithdrawalConfirmationWithdrawalId(withdrawalId)
+    setWithdrawalConfirmationUrl(confirmationUrl)
+  }, [])
+
+  const closeBindingDialog = useCallback(() => {
+    setDismissedBindingAttemptId(activeBindingAttemptId)
+  }, [activeBindingAttemptId])
+
+  const closeWithdrawalConfirmationDialog = useCallback(() => {
+    setDismissedWithdrawalConfirmationId(effectiveWithdrawalConfirmationId)
+    setWithdrawalConfirmationWithdrawalId("")
+    setWithdrawalConfirmationUrl("")
+  }, [effectiveWithdrawalConfirmationId])
 
   useEffect(() => {
     const attempt = bindingAttemptQ.data
     if (!attempt) return
-    if (attempt.status === "bound" || attempt.nextAction === "withdraw" || attempt.nextAction === "confirm_withdrawal") {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setBindingDialogOpen(false)
-      setActiveBindingAttemptId("")
-      setStartedBindingQrPayload("")
-      if (attempt.withdrawal?.confirmationUrl) {
-        setWithdrawalConfirmationUrl(attempt.withdrawal.confirmationUrl)
-        setWithdrawalConfirmationDialogOpen(true)
-      }
-      showSuccessFeedback(
-        attempt.withdrawal ? "提现等待微信确认" : "微信收款身份已绑定",
-        attempt.withdrawal ? "请用手机微信扫描弹窗二维码确认收款。" : "提现会使用已验证的微信收款身份，页面只显示脱敏标识。",
-      )
+    if (attempt.status !== "bound" && attempt.nextAction !== "withdraw" && attempt.nextAction !== "confirm_withdrawal") {
+      return
     }
-  }, [bindingAttemptQ.data])
+    if (handledBindingAttemptIdRef.current === attempt.bindingAttemptId) {
+      return
+    }
+    handledBindingAttemptIdRef.current = attempt.bindingAttemptId
+    void queryClient.invalidateQueries({ queryKey: ["membership", "commissions"] })
+    if (attempt.withdrawal?.confirmationUrl) {
+      showSuccessFeedback(
+        "提现等待微信确认",
+        "请用手机微信扫描弹窗二维码确认收款。",
+      )
+      return
+    }
+    showSuccessFeedback(
+      "微信收款身份已绑定",
+      "提现会使用已验证的微信收款身份，页面只显示脱敏标识。",
+    )
+  }, [bindingAttemptQ.data, queryClient])
 
-  const syncPaymentStatus = useCallback(async (order: MembershipOrder, options?: { manual?: boolean }) => {
-    const manual = options?.manual ?? true
+  useEffect(() => {
+    if (!effectiveWithdrawalConfirmationId || !activeWithdrawalConfirmation) {
+      return
+    }
+    if (
+      activeWithdrawalConfirmation.status === "created" ||
+      activeWithdrawalConfirmation.status === "awaiting_confirmation" ||
+      activeWithdrawalConfirmation.status === "processing"
+    ) {
+      return
+    }
+    if (handledWithdrawalConfirmationIdRef.current === effectiveWithdrawalConfirmationId) {
+      return
+    }
+    handledWithdrawalConfirmationIdRef.current = effectiveWithdrawalConfirmationId
+    void queryClient.invalidateQueries({ queryKey: ["membership", "commissions"] })
+    if (activeWithdrawalConfirmation.status === "succeeded") {
+      showSuccessFeedback(
+        "提现已到账",
+        `提现 ${formatMembershipPrice(activeWithdrawalConfirmation.amountCent)} 已完成，可在提现记录中查看。`,
+      )
+      return
+    }
+    showErrorFeedback(
+      "提现状态已更新",
+      `${describeWithdrawalStatus(activeWithdrawalConfirmation.status)}${activeWithdrawalConfirmation.failureReason ? `：${activeWithdrawalConfirmation.failureReason}` : ""}`,
+    )
+  }, [
+    activeWithdrawalConfirmation,
+    effectiveWithdrawalConfirmationId,
+    queryClient,
+  ])
+
+  const syncPaymentStatus = useCallback(async (order: MembershipOrder) => {
     try {
       const result = await syncPayment.mutateAsync({ orderId: order.orderId })
       if (result.confirmed) {
@@ -410,13 +543,8 @@ export function MembershipPage() {
         )
         return
       }
-      if (manual) {
-        showSuccessFeedback("支付状态已刷新", "这笔订单暂未支付成功，请稍后再试。")
-      }
-    } catch (err) {
-      if (manual) {
-        showErrorFeedback("同步支付状态失败", formatMembershipApiError(err))
-      }
+    } catch {
+      // Automatic polling should not interrupt the payment dialog; the next tick retries.
     }
   }, [syncPayment])
 
@@ -428,7 +556,7 @@ export function MembershipPage() {
       return
     }
     const timer = window.setInterval(() => {
-      void syncPaymentStatus(paymentOrder, { manual: false })
+      void syncPaymentStatus(paymentOrder)
     }, autoSyncIntervalMs)
     return () => window.clearInterval(timer)
   }, [
@@ -504,10 +632,6 @@ export function MembershipPage() {
     }
   }
 
-  async function onSyncPayment(order: MembershipOrder) {
-    await syncPaymentStatus(order, { manual: true })
-  }
-
   async function onCloseOrder(order: MembershipOrder) {
     if (typeof window !== "undefined" && !window.confirm("确认关闭这笔待支付订单吗？关闭后不会影响已生效会员权益。")) {
       return
@@ -572,8 +696,7 @@ export function MembershipPage() {
         confirmationInvoked = await requestMerchantTransfer(result.confirmation)
       }
       if (!confirmationInvoked && result.status === "awaiting_confirmation" && result.confirmationUrl) {
-        setWithdrawalConfirmationUrl(result.confirmationUrl)
-        setWithdrawalConfirmationDialogOpen(true)
+        openWithdrawalConfirmationDialog(result.withdrawalId, result.confirmationUrl)
       }
       showSuccessFeedback(
         result.status === "failed" ? "提现请求已退回" : result.status === "awaiting_confirmation" ? "提现等待微信确认" : "提现请求已提交",
@@ -620,8 +743,7 @@ export function MembershipPage() {
     }
     const invoked = await requestMerchantTransfer(withdrawal.confirmation)
     if (!invoked && withdrawal.confirmationUrl) {
-      setWithdrawalConfirmationUrl(withdrawal.confirmationUrl)
-      setWithdrawalConfirmationDialogOpen(true)
+      openWithdrawalConfirmationDialog(withdrawal.withdrawalId, withdrawal.confirmationUrl)
       showSuccessFeedback("请用微信扫码确认", "用手机微信扫描弹窗二维码后继续确认收款。")
       return
     }
@@ -637,9 +759,10 @@ export function MembershipPage() {
         returnUrl: typeof window !== "undefined" ? `${window.location.origin}/membership` : "/membership",
         amountCent,
       })
+      handledBindingAttemptIdRef.current = ""
       setActiveBindingAttemptId(result.bindingAttemptId)
       setStartedBindingQrPayload(result.qrCodePayload ?? result.mobileBindingUrl ?? "")
-      setBindingDialogOpen(true)
+      setDismissedBindingAttemptId("")
       showSuccessFeedback(
         amountCent > 0 ? "提现扫码已开始" : "微信收款身份绑定已开始",
         amountCent > 0 ? "请用本人微信扫描二维码，手机端会继续完成这笔提现。" : "请用本人微信扫描二维码完成收款账号绑定。",
@@ -683,19 +806,38 @@ export function MembershipPage() {
         onResumeWithdrawalConfirmation={(withdrawal) => void onResumeWithdrawalConfirmation(withdrawal)}
       />
 
-      <Dialog open={withdrawalConfirmationDialogOpen} onOpenChange={setWithdrawalConfirmationDialogOpen}>
+      <Dialog
+        open={withdrawalConfirmationDialogOpen}
+        onOpenChange={(open) => {
+          if (open) {
+            return
+          }
+          closeWithdrawalConfirmationDialog()
+        }}
+      >
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>微信扫码确认收款</DialogTitle>
             <DialogDescription>请用收款微信扫描二维码，在手机微信里完成确认。确认后到账状态会自动同步。</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4">
-            <div className="mx-auto rounded-lg border bg-white p-4">
-              {withdrawalConfirmationUrl ? <QRCodeSVG value={withdrawalConfirmationUrl} size={192} level="M" includeMargin /> : null}
-            </div>
-            <div className="break-all text-center text-xs leading-5 text-muted-foreground">{withdrawalConfirmationUrl}</div>
+            {withdrawalConfirmationSubmitted ? (
+              <div className="rounded-lg border bg-muted/30 px-4 py-5 text-center">
+                <div className="text-base font-semibold text-foreground">已提交微信确认</div>
+                <div className="mt-2 text-sm leading-6 text-muted-foreground">正在同步到账状态，请不要重复扫码或再次确认。</div>
+              </div>
+            ) : (
+              <>
+                <div className="mx-auto rounded-lg border bg-white p-4">
+                  {effectiveWithdrawalConfirmationUrl ? (
+                    <QRCodeSVG value={effectiveWithdrawalConfirmationUrl} size={192} level="M" includeMargin role="img" aria-label="微信提现确认二维码" />
+                  ) : null}
+                </div>
+                <div className="break-all text-center text-xs leading-5 text-muted-foreground">{effectiveWithdrawalConfirmationUrl}</div>
+              </>
+            )}
             <div className="flex justify-end">
-              <Button type="button" variant="outline" onClick={() => setWithdrawalConfirmationDialogOpen(false)}>
+              <Button type="button" variant="outline" onClick={closeWithdrawalConfirmationDialog}>
                 稍后确认
               </Button>
             </div>
@@ -733,7 +875,6 @@ export function MembershipPage() {
         closePending={closeOrder.isPending}
         onResumePayment={() => void onCreateOrder()}
         onConfirmPayment={(order) => void onConfirmPayment(order)}
-        onSyncPayment={(order) => void onSyncPayment(order)}
         onCloseOrder={(order) => void onCloseOrder(order)}
         onCopyPaymentLink={() => void onCopyPaymentLink()}
       />
@@ -1008,7 +1149,16 @@ export function MembershipPage() {
           </div>
         </div>
       </section>
-      <Dialog open={bindingDialogOpen} onOpenChange={setBindingDialogOpen}>
+      <Dialog
+        open={effectiveBindingDialogOpen}
+        onOpenChange={(open) => {
+          if (open) {
+            setDismissedBindingAttemptId("")
+            return
+          }
+          closeBindingDialog()
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>微信扫码确认提现</DialogTitle>
@@ -1027,7 +1177,7 @@ export function MembershipPage() {
             </div>
             {bindingAttemptQ.error ? <div className="text-sm text-destructive">{formatMembershipApiError(bindingAttemptQ.error)}</div> : null}
             <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => setBindingDialogOpen(false)}>
+              <Button type="button" variant="outline" onClick={closeBindingDialog}>
                 稍后再说
               </Button>
               <Button type="button" onClick={() => void onStartPayoutBinding()} disabled={startPayoutBinding.isPending}>

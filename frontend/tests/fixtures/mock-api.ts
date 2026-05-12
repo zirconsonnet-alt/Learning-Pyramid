@@ -115,6 +115,8 @@ type MockGlobalSettings = {
   learningPlans: { plans: unknown[]; progressSnapshots: unknown[] }
   updatedAt: string | null
 }
+type MockMembershipProvider = "manual_test" | "wechat_native"
+type MockWithdrawalScenario = "none" | "awaiting_then_succeeded" | "awaiting_then_processing"
 
 function createEmptyPomodoroSchedule(): MockGlobalSettings["pomodoro"]["weeklySchedule"] {
   return {
@@ -159,12 +161,51 @@ export async function installMockApi(
     contentState?: MockContentState
     globalSettings?: MockGlobalSettings
     systemCapabilities?: Partial<MockSystemCapabilities>
+    membershipProvider?: MockMembershipProvider
+    withdrawalScenario?: MockWithdrawalScenario
   } = {},
 ) {
   const authState = options.authState ?? "signed-in"
   const contentState = options.contentState ?? "ready"
+  const membershipProvider = options.membershipProvider ?? "manual_test"
+  const withdrawalScenario = options.withdrawalScenario ?? "none"
   let globalSettings = options.globalSettings ?? createMockGlobalSettings()
   let membershipOrders: MockMembershipOrder[] = []
+  let withdrawalRequested = false
+  let withdrawalPollCount = 0
+  const withdrawalId = "mwd_e2e"
+
+  function buildWithdrawal(status: "awaiting_confirmation" | "processing" | "succeeded") {
+    return {
+      withdrawalId,
+      userId: testUser.userId,
+      amountCent: 500,
+      targetType: "wechat_pay",
+      identityId: "wpid_e2e",
+      identityMaskedLabel: "oeUNQ3M***",
+      status,
+      providerTransferNo: status === "awaiting_confirmation" ? null : "transfer_e2e",
+      outBillNo: "LPWDE2E",
+      transferBillNo: status === "awaiting_confirmation" ? null : "transfer_e2e",
+      providerState: status === "succeeded" ? "SUCCESS" : status === "processing" ? "PROCESSING" : "WAIT_USER_CONFIRM",
+      confirmation:
+        status === "awaiting_confirmation"
+          ? {
+              mode: "wechat_jsapi_requestMerchantTransfer",
+              mchId: "mch_e2e",
+              appId: "app_e2e",
+              packageInfo: "package_e2e",
+            }
+          : null,
+      confirmationUrl: `https://example.test/membership/wechat-payout-confirm?withdrawal=${withdrawalId}&token=token_e2e`,
+      failureReason: "",
+      createdAt: nowIso,
+      reservedAt: nowIso,
+      submittedAt: nowIso,
+      confirmationRequestedAt: nowIso,
+      completedAt: status === "succeeded" ? nowIso : null,
+    }
+  }
 
   await page.route("**/*", async (route) => {
     const request = route.request()
@@ -392,21 +433,24 @@ export async function installMockApi(
 
     if (path === "/membership/orders") {
       if (method === "POST") {
-        const order = membershipOrders.find((item) => item.status === "pending") ?? buildOrder()
+        const order = {
+          ...(membershipOrders.find((item) => item.status === "pending") ?? buildOrder()),
+          provider: membershipProvider,
+        }
         membershipOrders = [order]
         await fulfill(route, {
           order,
           paymentPayload: {
-            mode: "manual",
-            provider: "manual_test",
-            providerLabel: "手动测试",
-            instruction: "自动化测试订单",
-            providerTradeNoHint: "manual_e2e",
+            mode: membershipProvider,
+            provider: membershipProvider,
+            providerLabel: membershipProvider === "wechat_native" ? "微信扫码支付" : "手动测试",
+            instruction: membershipProvider === "wechat_native" ? "请使用微信扫描二维码完成支付。支付成功后页面会自动刷新。" : "自动化测试订单",
+            providerTradeNoHint: membershipProvider === "wechat_native" ? "wechat_e2e" : "manual_e2e",
             expiresAt: null,
-            codeUrl: null,
-            qrImageDataUrl: null,
-            openUrl: null,
-            pollIntervalSeconds: null,
+            codeUrl: membershipProvider === "wechat_native" ? "weixin://wxpay/bizpayurl?pr=e2e" : null,
+            qrImageDataUrl: membershipProvider === "wechat_native" ? "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" : null,
+            openUrl: membershipProvider === "wechat_native" ? "weixin://wxpay/bizpayurl?pr=e2e" : null,
+            pollIntervalSeconds: membershipProvider === "wechat_native" ? 2 : null,
             statusCheckSupported: true,
           },
           reusedExistingOrder: false,
@@ -461,19 +505,98 @@ export async function installMockApi(
         account: {
           userId: testUser.userId,
           pendingCent: 0,
-          withdrawableCent: 0,
+          withdrawableCent: withdrawalScenario !== "none" ? 500 : 0,
           reservedCent: 0,
           paidOutCent: 0,
           canceledCent: 0,
           updatedAt: nowIso,
         },
-        payoutReadiness: { provider: "wechat", status: "unbound", identityId: null, maskedLabel: null, verifiedAt: null },
+        payoutReadiness:
+          withdrawalScenario !== "none"
+            ? { provider: "wechat_pay", status: "ready", identityId: "wpid_e2e", maskedLabel: "oeUNQ3M***", verifiedAt: nowIso }
+            : { provider: "wechat", status: "unbound", identityId: null, maskedLabel: null, verifiedAt: null },
         recentCommissions: [],
       })
       return
     }
 
+    if (path === "/commissions/payout-identity/wechat/mobile-bind") {
+      await fulfill(route, {
+        bindingAttemptId: url.searchParams.get("attempt") || "bind_e2e",
+        provider: "wechat_pay",
+        channel: "desktop_qr_official_account_h5",
+        status: "scanned",
+        amountCent: 500,
+        withdrawalId: null,
+        state: url.searchParams.get("state") || "state_e2e",
+        authorizationUrl: "",
+        desktopReturnUrl: "/membership",
+        mobileBindingUrl: "/membership/wechat-payout-bind",
+        qrCodePayload: "/membership/wechat-payout-bind",
+        pollAfterMs: 2000,
+        qrExpiresAt: null,
+        scannedAt: nowIso,
+        confirmedAt: null,
+        nextAction: "authorize_and_withdraw",
+        learningPyramidAccountLabel: "自动化测试账号（LP-E2E）",
+        learningPyramidUserId: testUser.userId,
+        confirmedLearningPyramidUserId: testUser.userId,
+        createdAt: nowIso,
+        completedAt: null,
+        expiresAt: nowIso,
+        failureReason: "",
+      })
+      return
+    }
+
+    if (path === "/commissions/payout-identity/wechat/bind" && method === "POST") {
+      await fulfill(route, {
+        identity: {
+          identityId: "wpid_e2e",
+          provider: "wechat_pay",
+          status: "ready",
+          maskedLabel: "oeUNQ3M***",
+          verifiedAt: nowIso,
+          failureReason: "",
+        },
+        withdrawal: buildWithdrawal("awaiting_confirmation"),
+      })
+      return
+    }
+
+    if (path === `/commissions/withdrawals/${withdrawalId}/wechat-confirmation`) {
+      await fulfill(route, {
+        withdrawalId,
+        amountCent: 500,
+        identityMaskedLabel: "oeUNQ3M***",
+        status: "awaiting_confirmation",
+        providerState: "WAIT_USER_CONFIRM",
+        confirmation: {
+          mode: "wechat_jsapi_requestMerchantTransfer",
+          mchId: "mch_e2e",
+          appId: "app_e2e",
+          packageInfo: "package_e2e",
+        },
+      })
+      return
+    }
+
     if (path === "/commissions/withdrawals") {
+      if (method === "POST" && withdrawalScenario !== "none") {
+        withdrawalRequested = true
+        withdrawalPollCount = 0
+        await fulfill(route, buildWithdrawal("awaiting_confirmation"))
+        return
+      }
+      if (withdrawalScenario !== "none" && withdrawalRequested) {
+        withdrawalPollCount += 1
+        const settledStatus =
+          withdrawalScenario === "awaiting_then_processing"
+            ? "processing"
+            : "succeeded"
+        await fulfill(route, [buildWithdrawal(withdrawalPollCount >= 2 ? settledStatus : "awaiting_confirmation")])
+        return
+      }
       await fulfill(route, [])
       return
     }

@@ -59,6 +59,8 @@ test("profile learning view uses scoped audit log endpoint", async ({ page }) =>
   await installMockApi(page)
 
   await page.goto("/profile")
+  await expect(page.getByText("账户信息", { exact: true })).toBeVisible()
+  await expect(page.getByText("进入会员中心")).toHaveCount(0)
   await expect(page.getByText("学习视图", { exact: true })).toBeVisible()
   await expect.poll(() => scopedAuditLogRequested).toBe(true)
   expect(oldAuditLogRequested).toBe(false)

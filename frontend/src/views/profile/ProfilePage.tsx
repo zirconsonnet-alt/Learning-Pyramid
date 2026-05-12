@@ -1,7 +1,6 @@
 import { type ChangeEvent, type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react"
 import { useQueries } from "@tanstack/react-query"
-import { Activity, ArrowRight, Camera, ChevronDown, KeyRound, Mail, Save } from "lucide-react"
-import { Link } from "react-router-dom"
+import { Activity, Camera, ChevronDown, KeyRound, Mail, Save } from "lucide-react"
 
 import { type AuditLogEvent, listAuditLogEvents } from "@/ui/api/auditLog"
 import { ApiError } from "@/ui/api/http"
@@ -768,14 +767,6 @@ export function ProfilePage() {
                         <div className="mt-2 font-mono text-sm font-medium text-[color:var(--theme-subtle-text)]">UID {profile.publicUid}</div>
                         <div className="mt-1 whitespace-nowrap text-sm leading-6 text-muted-foreground">
                           注册时间 {formatDateTimeLabel(profile.createdAt).split(" ")[0]}
-                        </div>
-                        <div className="mt-4">
-                          <Button asChild size="sm" className="w-fit">
-                            <Link to="/membership">
-                              进入会员中心
-                              <ArrowRight className="h-4 w-4" />
-                            </Link>
-                          </Button>
                         </div>
                       </div>
                       {!isProfileEditing ? (

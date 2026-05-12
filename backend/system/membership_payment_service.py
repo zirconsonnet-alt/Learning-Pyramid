@@ -552,13 +552,13 @@ class MembershipPaymentService:
             mode=PAYMENT_PROVIDER_WECHAT_NATIVE,
             provider=PAYMENT_PROVIDER_WECHAT_NATIVE,
             provider_label=_provider_label(PAYMENT_PROVIDER_WECHAT_NATIVE),
-            instruction="请使用微信扫描二维码完成支付。支付成功后页面会自动刷新，你也可以手动点击同步支付状态。",
+            instruction="请使用微信扫描二维码完成支付。支付成功后页面会自动刷新。",
             provider_trade_no_hint=wechat_out_trade_no,
             expires_at=order.expired_at,
             code_url=code_url,
             qr_image_data_url=self._build_qr_image_data_url(code_url),
             open_url=code_url,
-            poll_interval_seconds=5,
+            poll_interval_seconds=2,
             status_check_supported=True,
         )
 

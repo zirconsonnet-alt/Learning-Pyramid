@@ -312,6 +312,22 @@ def _mask_wechat_open_id(value: str) -> str:
     return f"{text[:7]}***"
 
 
+def _payout_binding_account_label(auth_store: AuthStore, user_id: str) -> str:
+    try:
+        user = auth_store.get_user_by_id(user_id)
+    except NotFound:
+        return "当前 LearningPyramid 账号"
+    nickname = str(getattr(user, "nickname", "") or "").strip()
+    public_uid = str(getattr(user, "public_uid", "") or "").strip()
+    if nickname and public_uid:
+        return f"{nickname}（{public_uid}）"
+    if nickname:
+        return nickname
+    if public_uid:
+        return public_uid
+    return "当前 LearningPyramid 账号"
+
+
 def _public_origin_from_request(request: Request | None = None) -> str:
     public_origin = (current_http_runtime_config().public_origin or "").rstrip("/")
     if public_origin:
@@ -919,14 +935,17 @@ def open_wechat_payout_mobile_binding(
     state: str,
     code: str | None = None,
     response: str | None = None,
+    auth_store: AuthStore = Depends(get_auth_store),
     membership_commission_store: MembershipCommissionStore = Depends(get_membership_commission_store),
     membership_payment_service: MembershipPaymentService = Depends(get_membership_payment_service),
 ):
     scanned = membership_commission_store.mark_payout_binding_attempt_scanned(attempt, state=state)
+    account_label = _payout_binding_account_label(auth_store, scanned.user_id)
     wants_json = str(response or "").strip().lower() == "json"
     if code:
         if wants_json:
             payload = _binding_attempt_to_dto(scanned)
+            payload["learningPyramidAccountLabel"] = account_label
             payload["learningPyramidUserId"] = scanned.user_id
             payload["confirmedLearningPyramidUserId"] = scanned.user_id
             return {"ok": True, "data": payload}
@@ -947,6 +966,7 @@ def open_wechat_payout_mobile_binding(
     if not wants_json and authorization_url.lower().startswith(("http://", "https://")):
         return RedirectResponse(authorization_url, status_code=302)
     payload = _binding_attempt_to_dto(scanned)
+    payload["learningPyramidAccountLabel"] = account_label
     payload["learningPyramidUserId"] = scanned.user_id
     payload["confirmedLearningPyramidUserId"] = scanned.user_id
     payload["authorizationUrl"] = authorization_url

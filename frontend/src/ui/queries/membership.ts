@@ -20,7 +20,14 @@ import {
   requestCommissionWithdrawal,
   startPayoutBindingAttempt,
   syncMembershipPayment,
+  type CommissionWithdrawal,
+  type PayoutBindingAttempt,
 } from "@/ui/api/membership"
+
+type QueryRefetchInterval<T> =
+  | number
+  | false
+  | ((query: { state: { data?: T } }) => number | false | undefined)
 
 export function useMembershipSummary(enabled = true, refetchInterval: number | false = false) {
   return useQuery({
@@ -135,12 +142,13 @@ export function usePayoutIdentity(enabled = true) {
   })
 }
 
-export function useCommissionWithdrawals(limit = 20, enabled = true) {
+export function useCommissionWithdrawals(limit = 20, enabled = true, refetchInterval: QueryRefetchInterval<CommissionWithdrawal[]> = false) {
   return useQuery({
     queryKey: ["membership", "withdrawals", limit],
     queryFn: () => listCommissionWithdrawals(limit),
     enabled,
     staleTime: 10_000,
+    refetchInterval,
   })
 }
 
@@ -182,7 +190,7 @@ export function useCommissionWithdrawalWechatConfirmation() {
   })
 }
 
-export function usePayoutBindingAttempt(bindingAttemptId: string, enabled = true, refetchInterval: number | false = false) {
+export function usePayoutBindingAttempt(bindingAttemptId: string, enabled = true, refetchInterval: QueryRefetchInterval<PayoutBindingAttempt> = false) {
   return useQuery({
     queryKey: ["membership", "payout-binding-attempt", bindingAttemptId],
     queryFn: () => pollPayoutBindingAttempt({ bindingAttemptId }),
