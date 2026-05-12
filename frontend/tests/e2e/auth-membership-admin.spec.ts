@@ -105,8 +105,10 @@ test("membership withdrawal confirmation dialog closes after payout becomes term
 
   await page.goto("/membership")
   await page.getByRole("button", { name: "申请提现" }).click()
-  await expect(page.getByRole("heading", { name: "微信扫码确认收款" })).toBeVisible()
-  await expect(page.getByRole("heading", { name: "微信扫码确认收款" })).toHaveCount(0, { timeout: 10_000 })
+  const dialog = page.getByRole("dialog", { name: "微信扫码确认收款" })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByText(/membership\/wechat-payout-confirm/)).toHaveCount(0)
+  await expect(dialog).toHaveCount(0, { timeout: 10_000 })
 
   expectNoConsoleIssues(consoleIssues)
 })
@@ -119,6 +121,7 @@ test("membership withdrawal confirmation dialog closes after WeChat confirmation
   await page.getByRole("button", { name: "申请提现" }).click()
   const dialog = page.getByRole("dialog", { name: "微信扫码确认收款" })
   await expect(dialog).toBeVisible()
+  await expect(dialog.getByText(/membership\/wechat-payout-confirm/)).toHaveCount(0)
   await expect(dialog).toHaveCount(0, { timeout: 10_000 })
 
   expectNoConsoleIssues(consoleIssues)

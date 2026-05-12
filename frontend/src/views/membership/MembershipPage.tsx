@@ -809,8 +809,7 @@ export function MembershipPage() {
                 <QRCodeSVG value={effectiveWithdrawalConfirmationUrl} size={192} level="M" includeMargin role="img" aria-label="微信提现确认二维码" />
               ) : null}
             </div>
-            <div className="break-all text-center text-xs leading-5 text-muted-foreground">{effectiveWithdrawalConfirmationUrl}</div>
-            <div className="flex justify-end">
+            <div className="flex justify-center">
               <Button type="button" variant="outline" onClick={closeWithdrawalConfirmationDialog}>
                 稍后确认
               </Button>
@@ -1039,19 +1038,25 @@ export function MembershipPage() {
           </div>
 
           <div className="space-y-6">
-            <div className="theme-card-main overflow-hidden">
-              <div className="border-b border-[color:var(--theme-soft-border)] px-6 py-5 sm:px-8">
-                <div className="flex items-center gap-2">
-                  <Sparkles className="h-4 w-4 text-primary" />
-                  <div className="text-sm font-semibold text-foreground">会员权益</div>
-                </div>
+            <div className="theme-card-main px-6 py-6 sm:px-8">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-primary" />
+                <div className="text-sm font-semibold text-foreground">会员权益</div>
               </div>
-              <div className="divide-y divide-[color:var(--theme-soft-border)] px-6 py-2 sm:px-8">
-                <div className="py-4">
-                  <div className="text-sm font-semibold text-foreground">番茄钟：学习规划与督促</div>
+              <div className="mt-5 grid gap-3 text-sm">
+                <div className="flex items-center gap-3">
+                  <span className="h-1.5 w-1.5 rounded-full bg-primary/70" aria-hidden="true" />
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                    <span className="font-semibold text-foreground">番茄钟</span>
+                    <span className="text-[color:var(--theme-subtle-text)]">学习规划与督促</span>
+                  </div>
                 </div>
-                <div className="py-4">
-                  <div className="text-sm font-semibold text-foreground">AI交互：你的助理及良师</div>
+                <div className="flex items-center gap-3">
+                  <span className="h-1.5 w-1.5 rounded-full bg-primary/70" aria-hidden="true" />
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                    <span className="font-semibold text-foreground">AI交互</span>
+                    <span className="text-[color:var(--theme-subtle-text)]">你的助理及良师</span>
+                  </div>
                 </div>
               </div>
             </div>
