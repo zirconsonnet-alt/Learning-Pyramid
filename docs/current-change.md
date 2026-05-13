@@ -4,34 +4,36 @@
 
 ## 1. 当前用户要求
 
-- 学科卡片前面也要像项目卡片一样有图标。
+- 统一学科卡片和项目卡片的标题字号、meta 样式和选中态。
 
 ## 2. 本次实际修改文件
 
 - `frontend/src/views/projects/ProjectsPage.tsx`
+- `frontend/src/views/subjects/SubjectDashboardPage.tsx`
 - `frontend/tests/e2e/subject-project.spec.ts`
 - `docs/current-change.md`
 
 ## 3. 每个文件为什么修改
 
-- `ProjectsPage.tsx`：给学科卡片头部补上语义图标，并加稳定测试钩子。
-- `subject-project.spec.ts`：新增回归断言，防止学科卡片头部图标再次缺失。
+- `ProjectsPage.tsx`：把学科卡片标题字号和项目数 meta 对齐，并补稳定测试钩子。
+- `SubjectDashboardPage.tsx`：把项目卡片的选中态对齐到学科卡片，并补稳定测试钩子。
+- `subject-project.spec.ts`：新增回归断言，防止标题字号、meta 和选中态再次分叉。
 - `docs/current-change.md`：覆盖为当前 UI 一致性修复的工作单。
 
 ## 4. 行为语义是否变化
 
 - 否。
-- 只是在学科卡片标题前补充了视觉图标，按钮、跳转、删除和数据流都不变。
+- 只统一卡片视觉样式和测试钩子，按钮、跳转、删除和数据流都不变。
 
 ## 5. 是否做了重构，以及为什么
 
 - 否。
-- 不抽公共卡片，不改项目卡片，不扩大到全局样式层。
+- 这次只做局部样式对齐，不抽公共卡片组件，不扩大作用域。
 
 ## 6. 未修改哪些相关内容，以及为什么
 
-- 未改项目卡片，因为项目卡片本来就有图标。
-- 未改删除弹窗、创建弹窗和其他页面，因为需求只针对学科卡片头部。
+- 未改删除弹窗、创建弹窗、排序和路由逻辑，因为需求只针对卡片头部和选中态。
+- 未给项目卡片新增“当前项目”文案，因为用户没有要求，只统一视觉状态。
 
 ## 7. 是否影响 API、架构、部署、数据结构、UI、测试
 
@@ -39,12 +41,12 @@
 - 架构：否。
 - 部署：否。
 - 数据结构：否。
-- UI：是，学科卡片现在与项目卡片在卡头层级上更一致。
+- UI：是，两个卡片现在在标题字号、meta 语义和 active 态上保持一致。
 - 测试：是，新增 e2e 回归断言。
 
 ## 8. 当前风险点和不确定项
 
-- 图标语义选择为 `BookOpen`，与现有“学科”示例保持一致。
+- 仅是视觉类名对齐，风险主要在样式回归；已用 e2e 兜住。
 
 ## 9. 仍需用户确认的问题
 
@@ -62,7 +64,7 @@
 
 ## 11. 验证状态
 
-- 已先跑红灯：`pnpm --dir frontend test:e2e -- subject-project.spec.ts -g "subject cards show a leading icon like project cards"`，当前因为学科卡片缺少图标而失败。
-- 修复后运行源码 dev server 版 e2e：`LEARNINGPYRAMID_FRONTEND_E2E_USE_DEV_SERVER=1 LEARNINGPYRAMID_FRONTEND_E2E_PORT=5177 pnpm --dir frontend test:e2e -- subject-project.spec.ts -g "subject cards show a leading icon like project cards"`，1 passed。
-- `pnpm --dir frontend build`：通过；仍有既有大 chunk warning。
-- `pnpm --dir frontend test:e2e -- subject-project.spec.ts`：4 passed。
+- 已先跑红灯：`pnpm --dir frontend test:e2e -- subject-project.spec.ts -g "subject and project cards share title meta and selected styles"`，当前因为学科卡片标题字号仍是 `text-xl` 而失败。
+- 已跑绿灯：`LEARNINGPYRAMID_FRONTEND_E2E_USE_DEV_SERVER=1 LEARNINGPYRAMID_FRONTEND_E2E_PORT=5177 pnpm --dir frontend test:e2e -- subject-project.spec.ts -g "subject and project cards share title meta and selected styles"`，1 passed。
+- `pnpm --dir frontend build`：通过；仍有既有 `hls` chunk 大于 500 kB 的 warning。
+- `pnpm --dir frontend test:e2e -- subject-project.spec.ts`：5 passed。

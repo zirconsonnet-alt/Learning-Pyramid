@@ -315,9 +315,10 @@ export function SubjectDashboardPage() {
             return (
               <Card
                 key={material.materialId}
+                data-testid={`project-card-${material.materialId}`}
                 className={cn(
                   "h-full border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] shadow-[var(--theme-soft-shadow)]",
-                  active && "border-primary/20 ring-1 ring-primary/10",
+                  active && "border-primary/20 shadow-[0_24px_60px_-38px_rgba(30,58,95,0.34)] ring-1 ring-primary/10",
                 )}
               >
                 <CardHeader className="space-y-4">
@@ -329,7 +330,9 @@ export function SubjectDashboardPage() {
                       <div className="min-w-0">
                         <CardTitle className="truncate text-lg">{material.title}</CardTitle>
                         <CardDescription className="mt-1 flex flex-wrap items-center gap-2 text-xs">
-                          <span className="theme-meta-strong">{formatStudyMaterialTypeLabel(material.materialType)}</span>
+                          <span className="theme-meta-strong" data-testid="project-card-type">
+                            {formatStudyMaterialTypeLabel(material.materialType)}
+                          </span>
                           <span className={cn("font-medium", materialActivityLoading ? "text-muted-foreground" : lastStudyDisplay.className)}>
                             {materialActivityLoading ? "学习记录载入中" : lastStudyDisplay.text}
                           </span>

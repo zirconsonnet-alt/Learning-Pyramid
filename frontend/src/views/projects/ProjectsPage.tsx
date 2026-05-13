@@ -331,9 +331,11 @@ export function ProjectsPage() {
                               <BookOpen className="h-5 w-5" />
                             </div>
                             <div className="min-w-0 space-y-2">
-                              <CardTitle className="truncate text-xl">{p.title}</CardTitle>
+                              <CardTitle className="truncate text-lg">{p.title}</CardTitle>
                               <CardDescription className="flex flex-wrap items-center gap-2 text-xs">
-                                <span className="font-medium text-[color:var(--theme-soft-text-strong)]">{subjectProjectCountText}</span>
+                                <span className="theme-meta-strong" data-testid="subject-card-project-count">
+                                  {subjectProjectCountText}
+                                </span>
                                 <span className={cn("font-medium", activityLoading ? "text-muted-foreground" : lastStudyDisplay.className)}>
                                   {activityLoading ? "学习记录载入中" : lastStudyDisplay.text}
                                 </span>

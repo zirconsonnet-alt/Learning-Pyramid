@@ -46,6 +46,47 @@ test("subject cards show a leading icon like project cards", async ({ page }) =>
   expectNoConsoleIssues(consoleIssues)
 })
 
+test("subject and project cards share title meta and selected styles", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page)
+  await page.addInitScript(({ subjectId, projectId }) => {
+    window.localStorage.setItem(
+      "plm-app",
+      JSON.stringify({
+        state: {
+          selectedSubjectId: subjectId,
+          selectedWorkbenchProjectId: projectId,
+          selectedWorkbenchProjectRef: { subjectId, scopedProjectId: projectId },
+          recentSubjectIds: [subjectId],
+          recentWorkbenchProjectIds: [projectId],
+          recentWorkbenchProjectRefs: [{ subjectId, scopedProjectId: projectId }],
+        },
+        version: 0,
+      }),
+    )
+  }, { subjectId: subject.subjectId, projectId: project.projectId })
+
+  const selectedShadowClass = /shadow-\[0_24px_60px_-38px_rgba\(30,58,95,0\.34\)\]/
+
+  await gotoProjects(page)
+  const subjectCard = page.getByTestId(`subject-card-${subject.subjectId}`)
+  await expect(subjectCard.getByRole("heading", { name: subject.title })).toHaveClass(/text-lg/)
+  await expect(subjectCard.getByTestId("subject-card-project-count")).toHaveClass(/theme-meta-strong/)
+  await expect(subjectCard).toHaveClass(/border-primary\/20/)
+  await expect(subjectCard).toHaveClass(selectedShadowClass)
+  await expect(subjectCard).toHaveClass(/ring-primary\/10/)
+
+  await page.goto(`/subjects/${subject.subjectId}`)
+  const projectCard = page.getByTestId(`project-card-${material.materialId}`)
+  await expect(projectCard.getByRole("heading", { name: project.title })).toHaveClass(/text-lg/)
+  await expect(projectCard.getByTestId("project-card-type")).toHaveClass(/theme-meta-strong/)
+  await expect(projectCard).toHaveClass(/border-primary\/20/)
+  await expect(projectCard).toHaveClass(selectedShadowClass)
+  await expect(projectCard).toHaveClass(/ring-primary\/10/)
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
 test("delete confirmation dialogs keep confirmation copy inside the input", async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
   await installMockApi(page)
