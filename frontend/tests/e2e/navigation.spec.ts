@@ -33,10 +33,10 @@ test("global pages do not reuse stale workbench project as current project", asy
         state: {
           selectedSubjectId: subjectId,
           selectedWorkbenchProjectId: projectId,
-          selectedWorkbenchProjectRef: { subjectId, projectId },
+          selectedWorkbenchProjectRef: { subjectId, scopedProjectId: projectId },
           recentSubjectIds: [subjectId],
           recentWorkbenchProjectIds: [projectId],
-          recentWorkbenchProjectRefs: [{ subjectId, projectId }],
+          recentWorkbenchProjectRefs: [{ subjectId, scopedProjectId: projectId }],
         },
         version: 0,
       }),

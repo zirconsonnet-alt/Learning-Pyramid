@@ -13,7 +13,7 @@ import {
   listSubjects,
   type StudyMaterialType,
 } from "@/ui/api/subjects"
-import type { ProjectScope } from "@/ui/api/projectScope"
+import type { ScopedProjectRef } from "@/ui/api/projectScope"
 import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
 import {
   getVirtualStudyReviewSubjectContext,
@@ -47,11 +47,11 @@ export function useSubjectProjectCatalog(enabled = true) {
     () =>
       (subjectsQ.data ?? []).flatMap((subject, index) =>
         (materialQs[index]?.data ?? [])
-          .filter((material) => Boolean(material.projectId))
+          .filter((material) => Boolean(material.scopedProjectId))
           .map((material) => ({
             subjectId: subject.subjectId,
             subjectTitle: subject.title,
-            projectId: material.projectId as string,
+            projectId: material.scopedProjectId as string,
             title: material.title,
             materialId: material.materialId,
             materialType: material.materialType,
@@ -120,27 +120,27 @@ export function useSubjectMaterials(subjectId: string) {
   })
 }
 
-export function useSubjectContext(scope: ProjectScope | null, enabled = true) {
-  const projectId = scope?.projectId ?? ""
+export function useSubjectContext(scope: ScopedProjectRef | null, enabled = true) {
+  const projectId = scope?.scopedProjectId ?? ""
   return useQuery({
     queryKey: ["subjectContext", scope?.subjectId ?? "", projectId],
     queryFn: () =>
       isVirtualStudyReviewProjectId(projectId)
         ? getVirtualStudyReviewSubjectContext()
-        : getProjectSubjectContext(scope as ProjectScope),
+        : getProjectSubjectContext(scope as ScopedProjectRef),
     enabled: enabled && !!scope?.subjectId && !!projectId,
     staleTime: 30_000,
   })
 }
 
 export function useScopedSubjectContext(subjectId: string, projectId: string, enabled = true) {
-  const scope = subjectId && projectId ? { subjectId, projectId } : null
+  const scope = subjectId && projectId ? { subjectId, scopedProjectId: projectId } : null
   return useQuery({
     queryKey: ["subjectContext", subjectId, projectId],
     queryFn: () =>
       isVirtualStudyReviewProjectId(projectId)
         ? getVirtualStudyReviewSubjectContext()
-        : getProjectSubjectContext(scope as ProjectScope),
+        : getProjectSubjectContext(scope as ScopedProjectRef),
     enabled: enabled && !!scope,
     staleTime: 30_000,
   })

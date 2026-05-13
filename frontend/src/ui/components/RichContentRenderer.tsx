@@ -33,7 +33,7 @@ export function RichContentRenderer({
         return (
           <img
             key={`image-${index}-${block.assetId}`}
-            src={mediaAssetUrl({ subjectId, projectId }, block.assetId)}
+            src={mediaAssetUrl({ subjectId, scopedProjectId: projectId }, block.assetId)}
             alt={`复述点图片 ${index + 1}`}
             className={imageClassName}
             loading="lazy"

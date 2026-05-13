@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 import { apiRequest, apiUrl } from "@/ui/api/http"
-import { projectApiPath, type ProjectScope } from "@/ui/api/projectScope"
+import { projectApiPath, type ScopedProjectRef } from "@/ui/api/projectScope"
 import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
 
 const IMAGE_UPLOAD_TARGET_BYTES = 900_000
@@ -100,8 +100,8 @@ export async function prepareImageFileForUpload(file: File): Promise<File> {
   return file
 }
 
-export async function uploadMediaAsset(scope: ProjectScope, file: File) {
-  if (isVirtualStudyReviewProjectId(scope.projectId)) {
+export async function uploadMediaAsset(scope: ScopedProjectRef, file: File) {
+  if (isVirtualStudyReviewProjectId(scope.scopedProjectId)) {
     return {
       assetId: `virtual-${Date.now()}`,
       mimeType: file.type || "image/jpeg",
@@ -122,8 +122,8 @@ export async function uploadMediaAsset(scope: ProjectScope, file: File) {
   })
 }
 
-export function mediaAssetUrl(scope: ProjectScope, assetId: string) {
-  if (isVirtualStudyReviewProjectId(scope.projectId)) {
+export function mediaAssetUrl(scope: ScopedProjectRef, assetId: string) {
+  if (isVirtualStudyReviewProjectId(scope.scopedProjectId)) {
     return ""
   }
   return apiUrl(projectApiPath(scope, `/media-assets/${assetId}`))

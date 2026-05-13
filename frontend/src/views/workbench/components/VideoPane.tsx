@@ -25,7 +25,7 @@ import { ApiError } from "@/ui/api/http"
 import { uploadMediaAsset } from "@/ui/api/mediaAssets"
 import { resolvePlaybackDescriptorUrl } from "@/ui/api/media"
 import { apiUrl } from "@/ui/api/http"
-import { projectApiPath, type ProjectScope } from "@/ui/api/projectScope"
+import { projectApiPath, type ScopedProjectRef } from "@/ui/api/projectScope"
 import { getRecallPoint, searchRecallPoints, type RecallPoint } from "@/ui/api/review"
 import {
   appendImageBlock,
@@ -328,7 +328,7 @@ export function VideoPane({
   queueHasGate: boolean
   allowCaptureDrafts?: boolean
 }) {
-  const projectScope: ProjectScope = { subjectId, projectId }
+  const projectScope: ScopedProjectRef = { subjectId, scopedProjectId: projectId }
   const playerShellRef = useRef<HTMLDivElement | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const barrageLayerRef = useRef<HTMLDivElement | null>(null)
@@ -1735,7 +1735,7 @@ export function VideoPane({
   }, [pomodoroSnapshot.segment, pomodoroSnapshot.startAtMs])
   const pomodoroMicroBreakProjectAllowed =
     !pomodoroSnapshot.currentProjectRef ||
-    (pomodoroSnapshot.currentProjectRef.subjectId === subjectId && pomodoroSnapshot.currentProjectRef.projectId === projectId)
+    (pomodoroSnapshot.currentProjectRef.subjectId === subjectId && pomodoroSnapshot.currentProjectRef.scopedProjectId === projectId)
   const pomodoroMicroBreakEligible =
     pomodoroMicroBreaks.enabled &&
     pomodoroSnapshot.status === "running" &&
@@ -1942,7 +1942,7 @@ export function VideoPane({
     isShellFullscreen &&
     pomodoroUpcomingSegment?.phase === "focus" &&
     Boolean(upcomingProjectRef) &&
-    (upcomingProjectRef?.subjectId !== subjectId || upcomingProjectRef?.projectId !== projectId) &&
+    (upcomingProjectRef?.subjectId !== subjectId || upcomingProjectRef?.scopedProjectId !== projectId) &&
     pomodoroUpcomingSegment.startsInMs > 0 &&
     pomodoroUpcomingSegment.startsInMs <= POMODORO_TRANSITION_PREVIEW_WINDOW_MS
   const showFullscreenBreakPreview =

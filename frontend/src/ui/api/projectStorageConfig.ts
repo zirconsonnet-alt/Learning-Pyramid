@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 import { apiRequest } from "@/ui/api/http"
-import { projectApiPath, type ProjectScope } from "@/ui/api/projectScope"
+import { projectApiPath, type ScopedProjectRef } from "@/ui/api/projectScope"
 
 export const ProjectStorageConfigSchema = z.object({
   projectId: z.string(),
@@ -12,7 +12,7 @@ export const ProjectStorageConfigSchema = z.object({
 })
 export type ProjectStorageConfig = z.infer<typeof ProjectStorageConfigSchema>
 
-export function getProjectStorageConfig(scope: ProjectScope) {
+export function getProjectStorageConfig(scope: ScopedProjectRef) {
   return apiRequest({
     path: projectApiPath(scope, "/project-storage-config"),
     responseSchema: ProjectStorageConfigSchema,

@@ -1,7 +1,10 @@
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from pydantic import ValidationError
 
+from adapter.schemas import StartWeChatWithdrawalConfirmationAttemptRequest
+from adapter.routers.membership import _desktop_withdrawal_confirmation_url
 from backend.system.membership_payment_service import MembershipPaymentService
 
 
@@ -35,6 +38,20 @@ class MembershipPaymentServiceTest(unittest.TestCase):
         self.assertEqual(payload.poll_interval_seconds, 2)
         self.assertIn("页面会自动刷新", payload.instruction)
         self.assertNotIn("手动点击同步支付状态", payload.instruction)
+
+    def test_desktop_wechat_payout_scan_url_uses_confirm_route(self) -> None:
+        url = _desktop_withdrawal_confirmation_url(
+            "https://plm.example.test/membership?from=desktop",
+            confirmation_attempt_id="confirm_1",
+            state="state_1",
+        )
+
+        self.assertEqual("https://plm.example.test/membership/wechat-payout-confirm?attempt=confirm_1&state=state_1", url)
+        self.assertNotIn("wechat-payout-bind", url)
+
+    def test_wechat_payout_scan_requires_positive_withdrawal_amount(self) -> None:
+        with self.assertRaises(ValidationError):
+            StartWeChatWithdrawalConfirmationAttemptRequest(returnUrl="/membership", amountCent=0)
 
 
 if __name__ == "__main__":

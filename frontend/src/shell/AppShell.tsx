@@ -299,7 +299,7 @@ export function AppShell() {
   const nav = useNavigate()
   const location = useLocation()
   useGuideWalkthroughController({ navigate: nav, pathname: location.pathname })
-  const { projectId, subjectId: routeSubjectId } = useParams()
+  const { scopedProjectId: projectId, subjectId: routeSubjectId } = useParams()
   const pid = projectId ?? ""
   const selectedWorkbenchProjectId = useAppStore((state) => state.selectedWorkbenchProjectId)
   const setSelectedWorkbenchProjectId = useAppStore((state) => state.setSelectedWorkbenchProjectId)
@@ -319,7 +319,7 @@ export function AppShell() {
     [routeSubjectId, subjectsQ.data],
   )
   const effectiveProjectId = pid
-  const routeProjectScope = routeSubjectId && pid ? { subjectId: routeSubjectId, projectId: pid } : null
+  const routeProjectScope = routeSubjectId && pid ? { subjectId: routeSubjectId, scopedProjectId: pid } : null
   const isVirtualStudyReviewProject = isVirtualStudyReviewProjectId(effectiveProjectId)
   const isSubjectDashboardScope = Boolean(routeSubjectId) && !pid
   const subjectContextQ = useSubjectContext(routeProjectScope, canAccessApp && Boolean(effectiveProjectId) && !isSubjectDashboardScope)
@@ -339,8 +339,8 @@ export function AppShell() {
   const subjectTitle = subjectContext?.subject.title ?? fallbackSubjectTitle
   const fallbackMaterialTitle = projectTitle || pid || "当前项目"
   const currentMaterialTitle = subjectContext?.currentMaterial.title ?? fallbackMaterialTitle
-  const currentProjectContextId = subjectContext?.currentProjectId ?? pid
-  const currentMaterialProjectId = subjectContext?.currentMaterial.projectId ?? currentProjectContextId
+  const currentProjectContextId = subjectContext?.currentScopedProjectId ?? pid
+  const currentMaterialProjectId = subjectContext?.currentMaterial.scopedProjectId ?? currentProjectContextId
   const hasSubjectContext = Boolean(resolvedSubjectId)
   const hasProjectContext = Boolean(hasSubjectContext && currentMaterialProjectId && !isSubjectDashboardScope)
   const area = describeArea(location.pathname, {
@@ -415,7 +415,7 @@ export function AppShell() {
       new Set(
         pomodoroAccessibleProjects
           .map((project) =>
-            project.subjectId ? pomodoroProjectRefKey({ subjectId: project.subjectId, projectId: project.projectId }) : "",
+            project.subjectId ? pomodoroProjectRefKey({ subjectId: project.subjectId, scopedProjectId: project.projectId }) : "",
           )
           .filter(Boolean),
       ),
@@ -426,26 +426,26 @@ export function AppShell() {
   const findPomodoroProject = (projectRef: typeof pomodoroSnapshot.currentProjectRef) =>
     projectRef
       ? pomodoroAccessibleProjects.find(
-          (project) => project.subjectId === projectRef.subjectId && project.projectId === projectRef.projectId,
+          (project) => project.subjectId === projectRef.subjectId && project.projectId === projectRef.scopedProjectId,
         ) ?? null
       : null
   const pomodoroFocusProjectRef = pomodoroSnapshot.currentProjectRef
   const pomodoroFocusProjectId =
     pomodoroProjectCatalogReady && pomodoroFocusProjectRef && hasAccessiblePomodoroProjectRef(pomodoroFocusProjectRef)
-      ? pomodoroFocusProjectRef.projectId
+      ? pomodoroFocusProjectRef.scopedProjectId
       : ""
   const focusProjectTitle =
     pomodoroFocusProjectId ? findPomodoroProject(pomodoroFocusProjectRef)?.title ?? "" : ""
   const pomodoroFocusWorkbenchPath =
     pomodoroFocusProjectRef && pomodoroFocusProjectId
-      ? `/subjects/${encodeURIComponent(pomodoroFocusProjectRef.subjectId)}/projects/${encodeURIComponent(pomodoroFocusProjectRef.projectId)}/workbench`
+      ? `/subjects/${encodeURIComponent(pomodoroFocusProjectRef.subjectId)}/projects/${encodeURIComponent(pomodoroFocusProjectRef.scopedProjectId)}/workbench`
       : "/subjects"
   const upcomingJumpProjectId =
     pomodoroUpcomingSegment?.phase === "focus" &&
     pomodoroUpcomingSegment.projectRef &&
     pomodoroProjectCatalogReady &&
     hasAccessiblePomodoroProjectRef(pomodoroUpcomingSegment.projectRef)
-      ? pomodoroUpcomingSegment.projectRef.projectId
+      ? pomodoroUpcomingSegment.projectRef.scopedProjectId
       : ""
   const upcomingJumpProjectTitle =
     upcomingJumpProjectId ? findPomodoroProject(pomodoroUpcomingSegment?.projectRef ?? null)?.title ?? "" : ""
@@ -494,7 +494,7 @@ export function AppShell() {
       pomodoroSnapshot.segment.pomodoroIndex,
       pomodoroSnapshot.startAtMs ?? "",
       pomodoroSnapshot.currentProjectRef.subjectId,
-      pomodoroSnapshot.currentProjectRef.projectId,
+      pomodoroSnapshot.currentProjectRef.scopedProjectId,
     ].join(":")
     if (lastPomodoroAutoNavigationKeyRef.current === autoNavigationKey) return
     lastPomodoroAutoNavigationKeyRef.current = autoNavigationKey

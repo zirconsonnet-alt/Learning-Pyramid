@@ -42,14 +42,14 @@
 - `/api/payments/wechat/notify`
 - `/api/payments/wechat/refund-notify`
 - `/api/payments/wechat/transfer-notify`
-- `/api/commissions/payout-identity/wechat/mobile-bind`
-- `/api/commissions/payout-identity/wechat/bind`
+- `/api/commissions/payout-identity/wechat/withdrawal-confirmation/mobile`
+- `/api/commissions/payout-identity/wechat/withdrawal-confirmation/complete`
 - `/api/commissions/withdrawals/{id}/wechat-confirmation`
 - `/api/commissions/withdrawals/{id}/wechat-confirmation/started`
 - `/api/public/asr-bridge/...`
 - `/api/auth/...`
 
-其中 `/api/system/capabilities` 与 `/api/commissions/payout-identity/wechat/bind` 支持可选认证：有合法 session 时会写入 `request.state.auth_user`，没有 session 时仍可继续处理。
+其中 `/api/system/capabilities` 与 `/api/commissions/payout-identity/wechat/withdrawal-confirmation/complete` 支持可选认证：有合法 session 时会写入 `request.state.auth_user`，没有 session 时仍可继续处理。
 
 ## 用户状态
 
@@ -84,7 +84,7 @@
 - 删除项目相关关系通过 `remove_project_memberships(project_id)` 清理。
 - 访问检查通过 `user_has_project_access(user_id, project_id)` 或项目列表过滤完成。
 
-scoped project 路由中，`resolve_scoped_project()` 在认证开启时先确认当前用户能访问 `subjectId`，再把公开 `{subjectId, projectId}` 解析为内部 project id。
+scoped project 路由中，`resolve_scoped_project()` 在认证开启时先确认当前用户能访问 `subjectId`，再把公开 `{subjectId, scopedProjectId}` 解析为内部 project id。
 
 权限边界：
 

@@ -36,7 +36,7 @@ export const material = {
   materialType: "COURSE",
   title: project.title,
   createdAt: nowIso,
-  projectId: project.projectId,
+  scopedProjectId: project.projectId,
 }
 
 export const instance = {

@@ -8,7 +8,7 @@ import {
   exportRecallPointsByLearningTaskNode,
   listRecallPointsByLearningTaskNode,
 } from "@/ui/api/learningTaskNodes"
-import type { ProjectScope } from "@/ui/api/projectScope"
+import type { ScopedProjectRef } from "@/ui/api/projectScope"
 import { ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader } from "@/ui/components/ui/card"
@@ -34,18 +34,18 @@ function getLearningTaskNodeDisplayChildIds(node: LearningTaskNode | undefined) 
 }
 
 export function LearningTaskNodePage() {
-  const { subjectId = "", projectId, nodeId } = useParams()
+  const { subjectId = "", scopedProjectId, nodeId } = useParams()
   const navigate = useNavigate()
-  const pid = projectId ?? ""
+  const pid = scopedProjectId ?? ""
   const nid = nodeId ?? ""
-  const projectScope: ProjectScope | null = subjectId && pid ? { subjectId, projectId: pid } : null
+  const projectScope: ScopedProjectRef | null = subjectId && pid ? { subjectId, scopedProjectId: pid } : null
 
   const nodeQ = useLearningTaskNode(projectScope, nid)
   const bindingQ = useLearningTaskNodeBinding(projectScope, nid)
   const instancesQ = useInstances(projectScope)
   const recallPointsQ = useQuery({
     queryKey: ["recallPointsByTaskNode", subjectId, pid, nid],
-    queryFn: () => listRecallPointsByLearningTaskNode(projectScope as ProjectScope, nid),
+    queryFn: () => listRecallPointsByLearningTaskNode(projectScope as ScopedProjectRef, nid),
     enabled: !!projectScope && !!nid,
   })
   const learningTaskId = nodeQ.data?.kind === "leaf" ? nodeQ.data.boundLearningTaskId : ""
@@ -177,7 +177,7 @@ export function LearningTaskNodePage() {
                   projectId={pid}
                   nodeTitle={title}
                   recallPoints={recallPointsQ.data ?? []}
-                  exportRecallPoints={() => exportRecallPointsByLearningTaskNode(projectScope as ProjectScope, nid)}
+                  exportRecallPoints={() => exportRecallPointsByLearningTaskNode(projectScope as ScopedProjectRef, nid)}
                 />
               }
             />
@@ -290,7 +290,7 @@ function LearningTaskTitleHeaderEditor({
   displayTitle: string
   taskTitle: string
 }) {
-  const editTaskM = useEditLearningTask({ subjectId, projectId }, learningTaskId)
+  const editTaskM = useEditLearningTask({ subjectId, scopedProjectId: projectId }, learningTaskId)
   return (
     <TitleHeaderEditor
       id={`learningTaskTitle-${learningTaskId}`}
@@ -325,7 +325,7 @@ function LearningTaskNodeTitleHeaderEditor({
   displayTitle: string
   nodeTitle: string
 }) {
-  const editNodeM = useEditLearningTaskNode({ subjectId, projectId }, nodeId)
+  const editNodeM = useEditLearningTaskNode({ subjectId, scopedProjectId: projectId }, nodeId)
   return (
     <TitleHeaderEditor
       id={`learningTaskNodeTitle-${nodeId}`}

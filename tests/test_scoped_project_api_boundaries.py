@@ -1,10 +1,16 @@
+import re
 import unittest
+import tempfile
+import inspect
 from dataclasses import dataclass
 from pathlib import Path
 
-from backend.models.errors import PreconditionFailure
+from backend.models.errors import NotFound, PreconditionFailure
 from backend.system.api import MAX_ASR_UPLOAD_BYTES
 from backend.system.auth_store import AuthUser
+from backend.system.api import SystemAPI
+from backend.system.inmemory_system import InMemorySystem
+from backend.system.persistence_store import SQLiteSnapshotStore
 from backend.system.runtime_features import RuntimeFeatures
 
 
@@ -90,6 +96,180 @@ def hosted_features() -> RuntimeFeatures:
 
 
 class ScopedAuthBoundaryTest(unittest.TestCase):
+    def test_scoped_project_dependency_uses_scoped_project_id_parameter_name(self) -> None:
+        from adapter.scoped_projects import resolve_scoped_project
+
+        params = inspect.signature(resolve_scoped_project).parameters
+
+        self.assertIn("scopedProjectId", params)
+        self.assertNotIn("projectId", params)
+
+    def test_scoped_router_paths_name_second_parameter_scoped_project_id(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        router_text = "\n".join(path.read_text(encoding="utf-8") for path in (root / "adapter" / "routers").glob("*.py"))
+
+        self.assertNotIn("/subjects/{subjectId}/projects/{projectId}", router_text)
+
+    def test_frontend_scoped_routes_name_second_parameter_scoped_project_id(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        router_text = "\n".join(
+            [
+                (root / "frontend" / "src" / "router.tsx").read_text(encoding="utf-8"),
+                (root / "frontend" / "src" / "ui" / "guideWalkthrough" / "guideWalkthroughSteps.ts").read_text(encoding="utf-8"),
+            ]
+        )
+
+        self.assertIn("/subjects/:subjectId/projects/:scopedProjectId", router_text)
+        self.assertNotIn("/subjects/:subjectId/projects/:projectId", router_text)
+
+    def test_frontend_router_does_not_keep_legacy_project_id_routes(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        router_text = (root / "frontend" / "src" / "router.tsx").read_text(encoding="utf-8")
+
+        self.assertNotIn("/p/:projectId", router_text)
+        self.assertNotIn("InvalidProjectLinkPage", router_text)
+
+    def test_frontend_router_does_not_keep_redirect_routes(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        router_text = (root / "frontend" / "src" / "router.tsx").read_text(encoding="utf-8")
+
+        self.assertNotIn('path: "/home"', router_text)
+        self.assertNotIn('path: "/docs"', router_text)
+        self.assertNotIn('path: "/groups"', router_text)
+        self.assertNotIn('path: "/groups/:groupId"', router_text)
+        self.assertNotIn('path: "/admin/groups"', router_text)
+        self.assertNotIn('path: "/admin/groups/:groupId"', router_text)
+
+    def test_frontend_router_only_keeps_wechat_payout_confirm_route(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        router_text = (root / "frontend" / "src" / "router.tsx").read_text(encoding="utf-8")
+
+        self.assertIn('path: "/membership/wechat-payout-confirm"', router_text)
+        self.assertNotIn("/membership/wechat-payout-bind", router_text)
+        self.assertNotIn("WechatPayoutBindingPage", router_text)
+
+    def test_docs_do_not_reference_wechat_payout_bind_route(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        offenders: list[str] = []
+        files = [root / "README.md", *(root / "docs").rglob("*.md")]
+        for path in files:
+            if path.name == "current-change.md":
+                continue
+            text = path.read_text(encoding="utf-8")
+            if "wechat-payout-bind" in text:
+                offenders.append(path.relative_to(root).as_posix())
+
+        self.assertEqual([], offenders)
+
+    def test_membership_withdrawal_confirmation_api_routes_do_not_use_binding_paths(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        files = [
+            "adapter/main.py",
+            "adapter/routers/membership.py",
+            "frontend/src/ui/api/membership.ts",
+            "docs/auth-and-permissions.md",
+        ]
+        offenders: list[str] = []
+        for relative_path in files:
+            text = (root / relative_path).read_text(encoding="utf-8")
+            old_paths = (
+                "/commissions/payout-identity/wechat/mobile-bind",
+                "/commissions/payout-identity/wechat/bind",
+                "/commissions/payout-identity/wechat/binding-attempts",
+            )
+            if any(old_path in text for old_path in old_paths):
+                offenders.append(relative_path)
+
+        self.assertEqual([], offenders)
+
+    def test_frontend_withdrawal_confirmation_request_body_uses_confirmation_attempt_id(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        text = (root / "frontend" / "src" / "ui" / "api" / "membership.ts").read_text(encoding="utf-8")
+
+        self.assertIn("withdrawalConfirmationAttemptId: params.withdrawalConfirmationAttemptId", text)
+        self.assertNotIn("bindingAttemptId: params.withdrawalConfirmationAttemptId", text)
+
+    def test_admin_payout_identity_contract_uses_withdrawal_confirmation_attempt_id(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        texts = "\n".join(
+            [
+                (root / "adapter" / "routers" / "admin.py").read_text(encoding="utf-8"),
+                (root / "frontend" / "src" / "ui" / "api" / "admin.ts").read_text(encoding="utf-8"),
+            ]
+        )
+
+        self.assertIn("latestWithdrawalConfirmationAttemptId", texts)
+        self.assertNotIn("latestBindingAttemptId", texts)
+
+    def test_docs_do_not_reference_legacy_project_id_routes(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        offenders: list[str] = []
+        for path in (root / "docs").rglob("*.md"):
+            if path.name == "current-change.md":
+                continue
+            text = path.read_text(encoding="utf-8")
+            if "/p/:projectId" in text or "/p/" in text:
+                offenders.append(path.relative_to(root).as_posix())
+
+        self.assertEqual([], offenders)
+
+    def test_frontend_scoped_route_entries_read_scoped_project_id_param(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        files = [
+            "frontend/src/shell/AppShell.tsx",
+            "frontend/src/views/ai/AiChatPage.tsx",
+            "frontend/src/views/convergences/ConvergencePage.tsx",
+            "frontend/src/views/instances/InstancePage.tsx",
+            "frontend/src/views/learningObjects/LearningObjectNodePage.tsx",
+            "frontend/src/views/learningTasks/LearningTaskNodePage.tsx",
+            "frontend/src/views/pomodoro/PomodoroWorkbenchGate.tsx",
+            "frontend/src/views/recallPoints/RecallPointPage.tsx",
+            "frontend/src/views/recommendations/ReviewRecommendationsPage.tsx",
+            "frontend/src/views/reviewChains/ReviewChainPage.tsx",
+            "frontend/src/views/reviewTasks/ReviewTaskPage.tsx",
+            "frontend/src/views/settings/ProjectSettingsPage.tsx",
+            "frontend/src/views/trees/ObjectTreePage.tsx",
+            "frontend/src/views/trees/TaskTreePage.tsx",
+            "frontend/src/views/workbench/WorkbenchPage.tsx",
+        ]
+        param_pattern = re.compile(r"const\s*\{(?P<body>[^}]*)\}\s*=\s*useParams\(\)")
+        old_param_pattern = re.compile(r"(^|,)\s*projectId(?:\s*=|\s*,|\s*$)")
+
+        offenders: list[str] = []
+        for relative_path in files:
+            text = (root / relative_path).read_text(encoding="utf-8")
+            for match in param_pattern.finditer(text):
+                if old_param_pattern.search(match.group("body")):
+                    offenders.append(relative_path)
+
+        self.assertEqual([], offenders)
+
+    def test_frontend_scoped_identity_helpers_do_not_use_current_project_id_alias(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        files = [
+            "frontend/src/ui/localMedia/projectDirectory.ts",
+            "frontend/src/ui/store/pomodoroStore.ts",
+        ]
+
+        offenders = [
+            relative_path
+            for relative_path in files
+            if "currentProjectId" in (root / relative_path).read_text(encoding="utf-8")
+        ]
+
+        self.assertEqual([], offenders)
+
+    def test_unknown_scoped_material_returns_not_found_after_sqlite_reload(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="lp-scoped-boundary-") as temp_dir:
+            store_path = Path(temp_dir) / "store.sqlite3"
+            api = SystemAPI(InMemorySystem(persist_store=SQLiteSnapshotStore(store_path)))
+            subject_id = api.create_subject("Subject")
+
+            reloaded = SystemAPI(InMemorySystem(persist_store=SQLiteSnapshotStore(store_path)))
+
+            with self.assertRaises(NotFound):
+                reloaded.resolve_scoped_project_internal_key(subject_id, "proj_999999")  # type: ignore[arg-type]
+
     def test_resolve_scoped_project_does_not_store_internal_project_ownership(self) -> None:
         from adapter import scoped_projects
 
@@ -109,6 +289,30 @@ class ScopedAuthBoundaryTest(unittest.TestCase):
 
         self.assertEqual("proj_internal_000001", project.internal_project_id)
         self.assertEqual([], auth_store.added)
+
+    def test_resolve_scoped_project_logs_canonical_identity_boundary(self) -> None:
+        from adapter import scoped_projects
+
+        original_features = scoped_projects.current_runtime_features
+        scoped_projects.current_runtime_features = hosted_features
+        try:
+            with self.assertLogs("learningpyramid.scoped_project", level="INFO") as logs:
+                scoped_projects.resolve_scoped_project(
+                    "subj_000001",
+                    "proj_000001",
+                    RequestWithUser(),  # type: ignore[arg-type]
+                    api=ApiWithScopedResolution(),  # type: ignore[arg-type]
+                    auth_store=AuthOwnershipStore(),  # type: ignore[arg-type]
+                )
+        finally:
+            scoped_projects.current_runtime_features = original_features
+
+        self.assertEqual(1, len(logs.output))
+        self.assertIn("scoped_project_resolved", logs.output[0])
+        self.assertIn("subjectId=subj_000001", logs.output[0])
+        self.assertIn("scopedProjectId=proj_000001", logs.output[0])
+        self.assertIn("internalProjectId=proj_internal_000001", logs.output[0])
+        self.assertNotIn("user@example.com", logs.output[0])
 
 
 class RawLlmScopedRouteTest(unittest.TestCase):
@@ -181,15 +385,15 @@ class ScopedSubjectContextApi:
             material_type=StudyMaterialType.COURSE,
             title="Material",
             created_at=created_at,
-            project_id=ProjectId(public_project_id),
-            internal_project_key=ProjectId(project_id),
+            scoped_project_id=ProjectId(public_project_id),
+            internal_project_id=ProjectId(project_id),
         )
         return {
             "subject": subject,
             "current_material": material,
             "materials": (material,),
-            "current_project_id": public_project_id,
-            "current_internal_project_key": project_id,
+            "current_scoped_project_id": public_project_id,
+            "current_internal_project_id": project_id,
         }
 
 
@@ -234,7 +438,8 @@ class RouterBoundaryTest(unittest.TestCase):
         response = get_scoped_project_subject_context(ScopedProject("subj_1", "proj_1", "internal_1"), api=api)  # type: ignore[arg-type]
 
         self.assertEqual("internal_1", api.requested_project_id)
-        self.assertEqual("proj_1", response["data"]["currentProjectId"])
+        self.assertEqual("proj_1", response["data"]["currentScopedProjectId"])
+        self.assertNotIn("currentProjectId", response["data"])
 
 
 if __name__ == "__main__":

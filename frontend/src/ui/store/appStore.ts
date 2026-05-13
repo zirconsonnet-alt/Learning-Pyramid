@@ -19,7 +19,7 @@ type AppState = {
 
 export type ProjectReference = {
   subjectId: string
-  projectId: string
+  scopedProjectId: string
 }
 
 const initialAppState = {
@@ -36,7 +36,7 @@ function touchRecentIds(recentIds: string[], id: string) {
 }
 
 function projectRefKey(projectRef: ProjectReference) {
-  return `${projectRef.subjectId}:${projectRef.projectId}`
+  return `${projectRef.subjectId}:${projectRef.scopedProjectId}`
 }
 
 function touchRecentProjectRefs(recentRefs: ProjectReference[], projectRef: ProjectReference) {
@@ -61,7 +61,7 @@ export const useAppStore = create<AppState>()(
       setSelectedWorkbenchProjectRef: (projectRef) =>
         set((state) => ({
           selectedSubjectId: projectRef?.subjectId ?? state.selectedSubjectId,
-          selectedWorkbenchProjectId: projectRef?.projectId ?? null,
+          selectedWorkbenchProjectId: projectRef?.scopedProjectId ?? null,
           selectedWorkbenchProjectRef: projectRef,
           recentSubjectIds: projectRef ? touchRecentIds(state.recentSubjectIds, projectRef.subjectId) : state.recentSubjectIds,
           recentWorkbenchProjectRefs: projectRef

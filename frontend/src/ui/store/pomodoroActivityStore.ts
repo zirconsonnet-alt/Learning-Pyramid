@@ -2,7 +2,7 @@ import { getLocalDateKey } from "@/ui/store/workbenchDailyStats"
 
 export type PomodoroActivityProjectReference = {
   subjectId: string
-  projectId: string
+  scopedProjectId: string
 }
 
 export type PomodoroActivityRecord = {
@@ -47,11 +47,11 @@ function normalizeRecord(raw: unknown): PomodoroActivityRecord | null {
     typeof input.projectRef === "object" &&
     typeof input.projectRef.subjectId === "string" &&
     input.projectRef.subjectId.trim() &&
-    typeof input.projectRef.projectId === "string" &&
-    input.projectRef.projectId.trim()
+    typeof input.projectRef.scopedProjectId === "string" &&
+    input.projectRef.scopedProjectId.trim()
       ? {
           subjectId: input.projectRef.subjectId.trim(),
-          projectId: input.projectRef.projectId.trim(),
+          scopedProjectId: input.projectRef.scopedProjectId.trim(),
         }
       : null
   return {
@@ -67,7 +67,7 @@ function normalizeRecord(raw: unknown): PomodoroActivityRecord | null {
       ? input.pomodoroLabel.trim()
       : `番茄 ${Math.max(1, Math.round(pomodoroIndex))}`,
     projectRef,
-    projectId: projectRef?.projectId ?? null,
+    projectId: projectRef?.scopedProjectId ?? null,
     startAtMs: Math.floor(startAtMs),
     endAtMs: Math.floor(endAtMs),
     durationMs: Math.max(0, Math.floor(endAtMs - startAtMs)),

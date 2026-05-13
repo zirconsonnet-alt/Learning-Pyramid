@@ -57,7 +57,7 @@ def get_public_asr_bridge_asset(token: str, fileName: str, api: SystemAPI = Depe
     )
 
 
-@router.post("/subjects/{subjectId}/projects/{projectId}/asr")
+@router.post("/subjects/{subjectId}/projects/{scopedProjectId}/asr")
 def request_asr(
     req: RequestAsrRequest,
     request: Request,
@@ -83,10 +83,10 @@ def request_asr(
         auth_store=auth_store,
         user_id=None if current_user is None else current_user.user_id,
     )
-    return {"ok": True, "data": asr_transcript_result_to_dto(result, public_project_id=project.project_id)}
+    return {"ok": True, "data": asr_transcript_result_to_dto(result, public_project_id=project.scoped_project_id)}
 
 
-@router.post("/subjects/{subjectId}/projects/{projectId}/asr/audio")
+@router.post("/subjects/{subjectId}/projects/{scopedProjectId}/asr/audio")
 async def request_asr_audio(
     request: Request,
     recallPointId: str = Form(...),
@@ -124,10 +124,10 @@ async def request_asr_audio(
         auth_store=auth_store,
         user_id=None if current_user is None else current_user.user_id,
     )
-    return {"ok": True, "data": asr_transcript_result_to_dto(result, public_project_id=project.project_id)}
+    return {"ok": True, "data": asr_transcript_result_to_dto(result, public_project_id=project.scoped_project_id)}
 
 
-@router.post("/subjects/{subjectId}/projects/{projectId}/instances/{instanceId}/asr")
+@router.post("/subjects/{subjectId}/projects/{scopedProjectId}/instances/{instanceId}/asr")
 def request_instance_asr(
     instanceId: str,
     req: RequestInstanceAsrRequest,
@@ -153,10 +153,10 @@ def request_instance_asr(
         auth_store=auth_store,
         user_id=None if current_user is None else current_user.user_id,
     )
-    return {"ok": True, "data": instance_asr_transcript_result_to_dto(result, public_project_id=project.project_id)}
+    return {"ok": True, "data": instance_asr_transcript_result_to_dto(result, public_project_id=project.scoped_project_id)}
 
 
-@router.post("/subjects/{subjectId}/projects/{projectId}/instances/{instanceId}/asr/audio")
+@router.post("/subjects/{subjectId}/projects/{scopedProjectId}/instances/{instanceId}/asr/audio")
 async def request_instance_asr_audio(
     instanceId: str,
     request: Request,
@@ -192,11 +192,11 @@ async def request_instance_asr_audio(
         auth_store=auth_store,
         user_id=None if current_user is None else current_user.user_id,
     )
-    return {"ok": True, "data": instance_asr_transcript_result_to_dto(result, public_project_id=project.project_id)}
+    return {"ok": True, "data": instance_asr_transcript_result_to_dto(result, public_project_id=project.scoped_project_id)}
 
 
-@router.get("/subjects/{subjectId}/projects/{projectId}/asr-artifacts/{asrArtifactId}")
+@router.get("/subjects/{subjectId}/projects/{scopedProjectId}/asr-artifacts/{asrArtifactId}")
 def get_asr_artifact(asrArtifactId: str, project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
     require_asr_enabled()
     art = api.get_asr_artifact(project.internal_project_id, asrArtifactId)  # type: ignore[arg-type]
-    return {"ok": True, "data": asr_artifact_to_dto(art, public_project_id=project.project_id)}
+    return {"ok": True, "data": asr_artifact_to_dto(art, public_project_id=project.scoped_project_id)}

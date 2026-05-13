@@ -97,7 +97,7 @@ export function RichContentEditor({
     setIsUploading(true)
     try {
       for (const file of imageFiles) {
-        const uploaded = await uploadMediaAsset({ subjectId, projectId }, file)
+        const uploaded = await uploadMediaAsset({ subjectId, scopedProjectId: projectId }, file)
         onAppendImage(uploaded.assetId)
       }
     } catch (error) {
@@ -222,7 +222,7 @@ export function RichContentEditor({
           {imageAssetIds.map((assetId, imageIndex) => (
             <div key={`${assetId}-${imageIndex}`} className="space-y-2">
               <img
-                src={mediaAssetUrl({ subjectId, projectId }, assetId)}
+                src={mediaAssetUrl({ subjectId, scopedProjectId: projectId }, assetId)}
                 alt={`${field}-${imageIndex + 1}`}
                 className={cn("h-28 w-28 rounded-xl border border-border/70 bg-muted/20 object-cover", imageClassName)}
                 loading="lazy"

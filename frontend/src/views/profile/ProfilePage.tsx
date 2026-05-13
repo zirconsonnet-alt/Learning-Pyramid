@@ -372,7 +372,7 @@ export function ProfilePage() {
   const auditLogQs = useQueries({
     queries: activeProjects.map((project) => ({
       queryKey: ["auditLogEvents", project.subjectId, project.projectId],
-      queryFn: () => listAuditLogEvents({ subjectId: project.subjectId, projectId: project.projectId }),
+      queryFn: () => listAuditLogEvents({ subjectId: project.subjectId, scopedProjectId: project.projectId }),
       enabled: !projectCatalog.isLoading && !projectCatalog.error,
       staleTime: 60_000,
       refetchOnWindowFocus: false,

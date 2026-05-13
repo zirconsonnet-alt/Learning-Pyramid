@@ -92,7 +92,7 @@ type MockPomodoroPlan = {
   focusMinutes: number
   breakMinutes: number
   pomodoroCount: number
-  projectRefs: Array<{ subjectId: string; projectId: string } | null>
+  projectRefs: Array<{ subjectId: string; scopedProjectId: string } | null>
   breakPrompt: string
   focusPrompts: string[]
 }
@@ -303,7 +303,8 @@ export async function installMockApi(
         subject,
         currentMaterial: material,
         materials: [material],
-        currentProjectId: project.projectId,
+        currentScopedProjectId: project.projectId,
+        currentInternalProjectId: project.projectId,
       })
       return
     }
@@ -521,7 +522,7 @@ export async function installMockApi(
       return
     }
 
-    if (path === "/commissions/payout-identity/wechat/mobile-bind") {
+    if (path === "/commissions/payout-identity/wechat/withdrawal-confirmation/mobile") {
       await fulfill(route, {
         bindingAttemptId: url.searchParams.get("attempt") || "bind_e2e",
         provider: "wechat_pay",
@@ -532,8 +533,8 @@ export async function installMockApi(
         state: url.searchParams.get("state") || "state_e2e",
         authorizationUrl: "",
         desktopReturnUrl: "/membership",
-        mobileBindingUrl: "/membership/wechat-payout-bind",
-        qrCodePayload: "/membership/wechat-payout-bind",
+        mobileConfirmationUrl: "/membership/wechat-payout-confirm",
+        qrCodePayload: "/membership/wechat-payout-confirm",
         pollAfterMs: 2000,
         qrExpiresAt: null,
         scannedAt: nowIso,
@@ -550,7 +551,7 @@ export async function installMockApi(
       return
     }
 
-    if (path === "/commissions/payout-identity/wechat/bind" && method === "POST") {
+    if (path === "/commissions/payout-identity/wechat/withdrawal-confirmation/complete" && method === "POST") {
       await fulfill(route, {
         identity: {
           identityId: "wpid_e2e",

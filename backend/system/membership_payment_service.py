@@ -466,7 +466,7 @@ class MembershipPaymentService:
 
     def build_wechat_payout_binding_authorization_url(self, *, state: str, return_url: str, channel: str) -> str:
         if str(channel or "").strip().lower() == PAYMENT_PROVIDER_MANUAL_TEST or manual_test_payment_enabled():
-            return f"manual_test://wechat-payout-bind?{urlencode({'state': state, 'returnUrl': return_url})}"
+            return f"manual_test://wechat-payout-confirm?{urlencode({'state': state, 'returnUrl': return_url})}"
         config = current_wechat_payout_config()
         if not config.app_id:
             raise PreconditionFailure("wechat payout appid is not configured in this deployment")

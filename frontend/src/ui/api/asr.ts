@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 import { apiRequest } from "@/ui/api/http"
-import { projectApiPath, type ProjectScope } from "@/ui/api/projectScope"
+import { projectApiPath, type ScopedProjectRef } from "@/ui/api/projectScope"
 
 const AUDIO_PAYLOAD_TOO_LARGE_MESSAGE =
   "上传的音频片段过大，服务器或网关拒绝了这次请求。请稍后重试；如果问题持续出现，需要调大站点上传限制。"
@@ -52,7 +52,7 @@ export const InstanceAsrTranscriptResultSchema = z.object({
 export type InstanceAsrTranscriptResult = z.infer<typeof InstanceAsrTranscriptResultSchema>
 
 export function requestAsr(
-  scope: ProjectScope,
+  scope: ScopedProjectRef,
   p: {
     recallPointId: string
     centerMs: number
@@ -76,7 +76,7 @@ export function requestAsr(
 }
 
 export function requestAsrFromAudioClip(
-  scope: ProjectScope,
+  scope: ScopedProjectRef,
   p: {
     recallPointId: string
     centerMs: number
@@ -112,7 +112,7 @@ export function requestAsrFromAudioClip(
 }
 
 export function requestInstanceAsr(
-  scope: ProjectScope,
+  scope: ScopedProjectRef,
   instanceId: string,
   p: {
     startMs: number
@@ -135,7 +135,7 @@ export function requestInstanceAsr(
 }
 
 export function requestInstanceAsrFromAudioClip(
-  scope: ProjectScope,
+  scope: ScopedProjectRef,
   instanceId: string,
   p: {
     startMs: number
@@ -167,7 +167,7 @@ export function requestInstanceAsrFromAudioClip(
   })
 }
 
-export function getAsrArtifact(scope: ProjectScope, asrArtifactId: string) {
+export function getAsrArtifact(scope: ScopedProjectRef, asrArtifactId: string) {
   return apiRequest({
     path: projectApiPath(scope, `/asr-artifacts/${asrArtifactId}`),
     responseSchema: AsrArtifactSchema,

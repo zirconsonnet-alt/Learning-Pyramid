@@ -12,6 +12,8 @@ STORE_TABLE_ORDER: tuple[str, ...] = (
     "system_state",
     "global_settings_index",
     "project_snapshots",
+    "subject_material_collection_index",
+    "subject_material_relationship_index",
     "project_storage_config_index",
     "project_material_source_binding_index",
     "project_config_index",
@@ -393,6 +395,136 @@ def _store_project_material_source_binding_index_sql() -> str:
             "    updated_at_ms BIGINT NOT NULL,",
             "    FOREIGN KEY(project_id) REFERENCES project_snapshots(project_id) ON DELETE CASCADE",
             ");",
+        )
+    )
+
+
+def _store_subject_material_relationship_index_sql() -> str:
+    return "\n".join(
+        (
+            "-- Add durable subject-material relationship indexes",
+            "CREATE TABLE IF NOT EXISTS subject_material_collection_index (",
+            "    subject_id TEXT PRIMARY KEY,",
+            "    initialized BOOLEAN NOT NULL,",
+            "    updated_at TEXT NOT NULL,",
+            "    FOREIGN KEY(subject_id) REFERENCES project_snapshots(project_id) ON DELETE CASCADE",
+            ");",
+            "CREATE TABLE IF NOT EXISTS subject_material_relationship_index (",
+            "    subject_id TEXT NOT NULL,",
+            "    material_id TEXT NOT NULL,",
+            "    material_type TEXT NOT NULL,",
+            "    title TEXT NOT NULL,",
+            "    created_at_ms BIGINT NOT NULL,",
+            "    scoped_project_id TEXT NOT NULL,",
+            "    internal_project_id TEXT NOT NULL,",
+            "    updated_at TEXT NOT NULL,",
+            "    PRIMARY KEY(subject_id, material_id),",
+            "    UNIQUE(subject_id, scoped_project_id),",
+            "    UNIQUE(internal_project_id),",
+            "    FOREIGN KEY(subject_id) REFERENCES project_snapshots(project_id) ON DELETE CASCADE,",
+            "    FOREIGN KEY(internal_project_id) REFERENCES project_snapshots(project_id) ON DELETE CASCADE",
+            ");",
+            "CREATE INDEX IF NOT EXISTS idx_subject_material_relationship_scoped",
+            "ON subject_material_relationship_index (subject_id, scoped_project_id);",
+            "CREATE INDEX IF NOT EXISTS idx_subject_material_relationship_internal",
+            "ON subject_material_relationship_index (internal_project_id);",
+        )
+    )
+
+
+def _store_project_snapshot_json_shell_sql() -> str:
+    return "\n".join(
+        (
+            "-- Keep the legacy project snapshot shell column required by the repository contract",
+            "ALTER TABLE project_snapshots",
+            "ADD COLUMN IF NOT EXISTS snapshot_json TEXT NOT NULL DEFAULT '{}';",
+        )
+    )
+
+
+def _store_subject_material_relationship_backfill_sql() -> str:
+    return "\n".join(
+        (
+            "-- Backfill recoverable historical subject-material relationships",
+            "ALTER TABLE subject_material_collection_index",
+            "ALTER COLUMN initialized TYPE BOOLEAN",
+            "USING CASE",
+            "    WHEN LOWER(initialized::TEXT) IN ('1', 'true', 't', 'yes', 'on') THEN TRUE",
+            "    ELSE FALSE",
+            "END;",
+            "INSERT INTO subject_material_collection_index (",
+            "    subject_id,",
+            "    initialized,",
+            "    updated_at",
+            ")",
+            "SELECT DISTINCT",
+            "    p.subject_id,",
+            "    TRUE,",
+            "    CURRENT_TIMESTAMP::TEXT",
+            "FROM project_snapshots p",
+            "JOIN project_snapshots subj",
+            "  ON subj.project_id = p.subject_id",
+            " AND subj.project_state = 'ACTIVE'",
+            "JOIN project_config_index c",
+            "  ON c.project_id = p.project_id",
+            "WHERE p.project_state = 'ACTIVE'",
+            "  AND p.subject_id IS NOT NULL",
+            "  AND p.scoped_project_id IS NOT NULL",
+            "  AND c.config_json::jsonb ->> 'projectType' IN ('COURSE', 'BOOK', 'LOOSE_POINTS')",
+            "ON CONFLICT(subject_id) DO UPDATE SET",
+            "    initialized = TRUE,",
+            "    updated_at = EXCLUDED.updated_at;",
+            "INSERT INTO subject_material_relationship_index (",
+            "    subject_id,",
+            "    material_id,",
+            "    material_type,",
+            "    title,",
+            "    created_at_ms,",
+            "    scoped_project_id,",
+            "    internal_project_id,",
+            "    updated_at",
+            ")",
+            "SELECT",
+            "    p.subject_id,",
+            "    'mat_recovered_' || p.project_id,",
+            "    c.config_json::jsonb ->> 'projectType',",
+            "    p.project_title,",
+            "    p.created_at_ms,",
+            "    p.scoped_project_id,",
+            "    p.project_id AS internal_project_id,",
+            "    CURRENT_TIMESTAMP::TEXT",
+            "FROM project_snapshots p",
+            "JOIN project_snapshots subj",
+            "  ON subj.project_id = p.subject_id",
+            " AND subj.project_state = 'ACTIVE'",
+            "JOIN project_config_index c",
+            "  ON c.project_id = p.project_id",
+            "LEFT JOIN subject_material_relationship_index existing_internal",
+            "  ON existing_internal.internal_project_id = p.project_id",
+            "LEFT JOIN subject_material_relationship_index existing_scoped",
+            "  ON existing_scoped.subject_id = p.subject_id",
+            " AND existing_scoped.scoped_project_id = p.scoped_project_id",
+            "WHERE p.project_state = 'ACTIVE'",
+            "  AND p.subject_id IS NOT NULL",
+            "  AND p.scoped_project_id IS NOT NULL",
+            "  AND c.config_json::jsonb ->> 'projectType' IN ('COURSE', 'BOOK', 'LOOSE_POINTS')",
+            "  AND existing_internal.internal_project_id IS NULL",
+            "  AND existing_scoped.subject_id IS NULL",
+            "ON CONFLICT DO NOTHING;",
+        )
+    )
+
+
+def _store_subject_material_collection_initialized_boolean_sql() -> str:
+    return "\n".join(
+        (
+            "-- Normalize subject-material collection initialization flag to boolean for already-migrated databases",
+            "ALTER TABLE subject_material_collection_index",
+            "ALTER COLUMN initialized TYPE BOOLEAN",
+            "USING CASE",
+            "    WHEN LOWER(initialized::TEXT) IN ('1', 'true', 't', 'yes', 'on') THEN TRUE",
+            "    ELSE FALSE",
+            "END;",
         )
     )
 
@@ -827,6 +959,25 @@ POSTGRES_MIGRATIONS: tuple[PostgresMigration, ...] = (
         version=8,
         name="project_material_source_binding_index",
         sql_factory=_store_project_material_source_binding_index_sql,
+    ),
+    PostgresMigration(
+        scope="store",
+        version=9,
+        name="subject_material_relationship_index",
+        sql_factory=_store_subject_material_relationship_index_sql,
+    ),
+    PostgresMigration(
+        scope="store",
+        version=10,
+        name="subject_material_relationship_backfill",
+        sql_factory=_store_subject_material_relationship_backfill_sql,
+    ),
+    PostgresMigration(scope="store", version=11, name="project_snapshot_json_shell", sql_factory=_store_project_snapshot_json_shell_sql),
+    PostgresMigration(
+        scope="store",
+        version=12,
+        name="subject_material_collection_initialized_boolean",
+        sql_factory=_store_subject_material_collection_initialized_boolean_sql,
     ),
     PostgresMigration(scope="auth", version=1, name="initial_auth_schema", sql_factory=_bootstrap_auth_schema_sql),
     PostgresMigration(scope="auth", version=2, name="auth_user_profiles", sql_factory=_auth_user_profiles_sql),

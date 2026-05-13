@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 import { apiRequest, type ApiRequestExecutionOptions } from "@/ui/api/http"
-import { projectApiPath, type ProjectScope } from "@/ui/api/projectScope"
+import { projectApiPath, type ScopedProjectRef } from "@/ui/api/projectScope"
 
 export const ProjectSchema = z.object({
   subjectId: z.string().nullable().optional(),
@@ -25,7 +25,7 @@ export const ProjectMaterialSourceBindingSchema = z.object({
 })
 export type ProjectMaterialSourceBinding = z.infer<typeof ProjectMaterialSourceBindingSchema>
 
-export function getProjectMaterialSourceBinding(scope: ProjectScope, options?: ApiRequestExecutionOptions) {
+export function getProjectMaterialSourceBinding(scope: ScopedProjectRef, options?: ApiRequestExecutionOptions) {
   return apiRequest({
     path: projectApiPath(scope, "/material-source-binding"),
     responseSchema: ProjectMaterialSourceBindingSchema,

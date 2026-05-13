@@ -12,9 +12,22 @@ def verify_report(report: dict[str, Any]) -> dict[str, Any]:
     for item in mappings:
         if not isinstance(item, dict):
             continue
-        key = (str(item.get("subjectId") or ""), str(item.get("projectId") or ""))
+        subject_id = str(item.get("subjectId") or "")
+        scoped_project_id = str(item.get("scopedProjectId") or "")
+        internal_project_id = str(item.get("internalProjectId") or "")
+        if not subject_id or not scoped_project_id or not internal_project_id:
+            blocking.append(
+                {
+                    "code": "INCOMPLETE_SCOPED_PROJECT_IDENTITY",
+                    "subjectId": subject_id,
+                    "scopedProjectId": scoped_project_id,
+                    "internalProjectId": internal_project_id,
+                }
+            )
+            continue
+        key = (subject_id, scoped_project_id)
         if key in seen:
-            duplicates.append({"subjectId": key[0], "projectId": key[1]})
+            duplicates.append({"subjectId": key[0], "scopedProjectId": key[1]})
         seen.add(key)
     return {
         "ok": not blocking and not duplicates,

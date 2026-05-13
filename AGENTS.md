@@ -1,5 +1,9 @@
 # Code & UI Collaboration Rules
 
+<!-- SPECKIT START -->
+Current Spec Kit plan: specs/016-backend-verification-gates/plan.md
+<!-- SPECKIT END -->
+
 你是我的代码与 UI 协作助手。
 
 必须始终用中文交流。代码标识符、库名、框架名、接口名保持原样。

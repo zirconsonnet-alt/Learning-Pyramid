@@ -5,7 +5,7 @@ import { BookPlus, ChevronLeft, ChevronRight } from "lucide-react"
 import { ApiError } from "@/ui/api/http"
 import { listRecallPointsByLearningTaskNode } from "@/ui/api/learningTaskNodes"
 import type { Instance } from "@/ui/api/instances"
-import type { ProjectScope } from "@/ui/api/projectScope"
+import type { ScopedProjectRef } from "@/ui/api/projectScope"
 import type { ProjectType } from "@/ui/api/projects"
 import { searchRecallPoints, type RecallPoint } from "@/ui/api/review"
 import { richContentHasMeaning, richContentToPlainText, richText } from "@/ui/api/richContent"
@@ -135,7 +135,7 @@ export function ComposePane({
   actionableMissingGate: boolean
   actionableMissingInstanceCount: number
 }) {
-  const projectScope: ProjectScope = { subjectId, projectId }
+  const projectScope: ScopedProjectRef = { subjectId, scopedProjectId: projectId }
   const ps = useWorkbenchStore((s) => s.byProjectId[projectId])
   const addDraft = useWorkbenchStore((s) => s.addDraft)
   const updateDraftPosition = useWorkbenchStore((s) => s.updateDraftPosition)

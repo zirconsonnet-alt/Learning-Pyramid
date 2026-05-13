@@ -2,7 +2,7 @@ import { z } from "zod"
 
 import { AsrArtifactSchema } from "@/ui/api/asr"
 import { apiRequest, type ApiRequestExecutionOptions } from "@/ui/api/http"
-import { projectApiPath, type ProjectScope } from "@/ui/api/projectScope"
+import { projectApiPath, type ScopedProjectRef } from "@/ui/api/projectScope"
 import { RecallPointSchema } from "@/ui/api/review"
 
 export const LearningObjectLeafSchema = z.object({
@@ -66,7 +66,7 @@ const ImportLearningObjectsFromBaiduNetdiskResultSchema = z.object({
 })
 
 export function addLearningObjectLeaf(
-  scope: ProjectScope,
+  scope: ScopedProjectRef,
   params: { parentId?: string | null; instanceId: string; title: string },
 ) {
   return apiRequest({
@@ -78,7 +78,7 @@ export function addLearningObjectLeaf(
 }
 
 export function addLearningObjectContainer(
-  scope: ProjectScope,
+  scope: ScopedProjectRef,
   params: { parentId?: string | null; children: string[]; title: string },
 ) {
   return apiRequest({
@@ -89,7 +89,7 @@ export function addLearningObjectContainer(
   })
 }
 
-export function initializeBookLearningObjects(scope: ProjectScope, params: { items: { depth: number; title: string }[] }) {
+export function initializeBookLearningObjects(scope: ScopedProjectRef, params: { items: { depth: number; title: string }[] }) {
   return apiRequest({
     path: projectApiPath(scope, "/initialize-book-learning-objects"),
     method: "POST",
@@ -98,7 +98,7 @@ export function initializeBookLearningObjects(scope: ProjectScope, params: { ite
   })
 }
 
-export function initializeBookLearningObjectsFromSubjectMaterial(scope: ProjectScope, params: { sourceMaterialId: string }) {
+export function initializeBookLearningObjectsFromSubjectMaterial(scope: ScopedProjectRef, params: { sourceMaterialId: string }) {
   return apiRequest({
     path: projectApiPath(scope, "/initialize-book-learning-objects-from-material"),
     method: "POST",
@@ -107,21 +107,21 @@ export function initializeBookLearningObjectsFromSubjectMaterial(scope: ProjectS
   })
 }
 
-export function getLearningObjectNode(scope: ProjectScope, nodeId: string) {
+export function getLearningObjectNode(scope: ScopedProjectRef, nodeId: string) {
   return apiRequest({
     path: projectApiPath(scope, `/learning-objects/${nodeId}`),
     responseSchema: LearningObjectNodeSchema,
   })
 }
 
-export function listLearningObjectRoots(scope: ProjectScope) {
+export function listLearningObjectRoots(scope: ScopedProjectRef) {
   return apiRequest({
     path: projectApiPath(scope, "/learning-object-roots"),
     responseSchema: LearningObjectRootsSchema,
   })
 }
 
-export function listLearningObjectNodes(scope: ProjectScope, options?: ApiRequestExecutionOptions) {
+export function listLearningObjectNodes(scope: ScopedProjectRef, options?: ApiRequestExecutionOptions) {
   return apiRequest({
     path: projectApiPath(scope, "/learning-object-nodes"),
     responseSchema: z.array(LearningObjectNodeSchema),
@@ -131,7 +131,7 @@ export function listLearningObjectNodes(scope: ProjectScope, options?: ApiReques
 }
 
 export function importLearningObjectsFromBrowser(
-  scope: ProjectScope,
+  scope: ScopedProjectRef,
   params: { rootTitle?: string; relativeFilePaths: string[] },
 ) {
   return apiRequest({
@@ -146,7 +146,7 @@ export function importLearningObjectsFromBrowser(
 }
 
 export function importLearningObjectsFromBaiduNetdisk(
-  scope: ProjectScope,
+  scope: ScopedProjectRef,
   params: {
     accountId: string
     items: Array<z.input<typeof BaiduNetdiskImportItemSchema>>
@@ -163,21 +163,21 @@ export function importLearningObjectsFromBaiduNetdisk(
   })
 }
 
-export function listRecallPointsByLearningObjectNode(scope: ProjectScope, nodeId: string) {
+export function listRecallPointsByLearningObjectNode(scope: ScopedProjectRef, nodeId: string) {
   return apiRequest({
     path: projectApiPath(scope, `/learning-objects/${nodeId}/recall-points`),
     responseSchema: z.array(RecallPointSchema),
   })
 }
 
-export function exportRecallPointsByLearningObjectNode(scope: ProjectScope, nodeId: string) {
+export function exportRecallPointsByLearningObjectNode(scope: ScopedProjectRef, nodeId: string) {
   return apiRequest({
     path: projectApiPath(scope, `/learning-objects/${nodeId}/exports/recall-points`),
     responseSchema: z.array(RecallPointSchema),
   })
 }
 
-export function exportAsrByLearningObjectNode(scope: ProjectScope, nodeId: string) {
+export function exportAsrByLearningObjectNode(scope: ScopedProjectRef, nodeId: string) {
   return apiRequest({
     path: projectApiPath(scope, `/learning-objects/${nodeId}/exports/asr`),
     responseSchema: z.array(AsrArtifactSchema),

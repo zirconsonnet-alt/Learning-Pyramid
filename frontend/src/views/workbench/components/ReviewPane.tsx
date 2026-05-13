@@ -12,7 +12,7 @@ import {
 import { Link } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
-import type { ProjectScope } from "@/ui/api/projectScope"
+import type { ScopedProjectRef } from "@/ui/api/projectScope"
 import type { RecallPoint } from "@/ui/api/review"
 import {
   appendImageBlock,
@@ -98,7 +98,7 @@ export function ReviewPane({
   instances: Instance[]
   onOpenAnchor?: (a: { instanceId: string; position: string }) => void
 }) {
-  const projectScope: ProjectScope = { subjectId, projectId }
+  const projectScope: ScopedProjectRef = { subjectId, scopedProjectId: projectId }
   const { reviewTaskQ, rangeQ, recallPointQs } = useReviewBundle(projectScope, headId)
   const commit = useCommitReviewTask(projectScope)
 

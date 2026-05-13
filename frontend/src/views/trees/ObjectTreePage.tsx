@@ -6,7 +6,7 @@ import { useNavigate, useParams } from "react-router-dom"
 import { ApiError } from "@/ui/api/http"
 import { listInstances, type Instance } from "@/ui/api/instances"
 import { listLearningObjectNodes, type LearningObjectNode } from "@/ui/api/learningObjects"
-import type { ProjectScope } from "@/ui/api/projectScope"
+import type { ScopedProjectRef } from "@/ui/api/projectScope"
 import { ContentEmptyState, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import {
   isSyntheticFilesContainer,
@@ -43,9 +43,9 @@ function classifyObjectNode(node: LearningObjectNode, depth: number): ObjectTree
 }
 
 export function ObjectTreePage() {
-  const { subjectId = "", projectId } = useParams()
-  const pid = projectId ?? ""
-  const projectScope: ProjectScope | null = subjectId && pid ? { subjectId, projectId: pid } : null
+  const { subjectId = "", scopedProjectId } = useParams()
+  const pid = scopedProjectId ?? ""
+  const projectScope: ScopedProjectRef | null = subjectId && pid ? { subjectId, scopedProjectId: pid } : null
   const nav = useNavigate()
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null)
   const [zoomPercent, setZoomPercent] = useState(100)
@@ -55,13 +55,13 @@ export function ObjectTreePage() {
 
   const nodesQ = useQuery({
     queryKey: ["learningObjectNodes", subjectId, pid],
-    queryFn: () => listLearningObjectNodes(projectScope as ProjectScope),
+    queryFn: () => listLearningObjectNodes(projectScope as ScopedProjectRef),
     enabled: !!projectScope,
   })
 
   const instancesQ = useQuery({
     queryKey: ["instances", subjectId, pid],
-    queryFn: () => listInstances(projectScope as ProjectScope),
+    queryFn: () => listInstances(projectScope as ScopedProjectRef),
     enabled: !!projectScope,
   })
 

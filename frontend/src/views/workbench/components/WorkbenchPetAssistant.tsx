@@ -4,7 +4,7 @@ import { Copy, Send, Sparkles, Square } from "lucide-react"
 import type { Instance } from "@/ui/api/instances"
 import type { MaterialSourceKind } from "@/ui/api/projects"
 import { ApiError } from "@/ui/api/http"
-import type { ProjectScope } from "@/ui/api/projectScope"
+import type { ScopedProjectRef } from "@/ui/api/projectScope"
 import { askProjectLlmStream } from "@/ui/api/system"
 import { MarkdownRichText } from "@/ui/components/MarkdownRichText"
 import { Button } from "@/ui/components/ui/button"
@@ -133,7 +133,7 @@ export function WorkbenchPetAssistant({
   onAssistantStateChange,
   onOpenEvidence,
 }: WorkbenchPetAssistantProps) {
-  const projectScope: ProjectScope = { subjectId, projectId }
+  const projectScope: ScopedProjectRef = { subjectId, scopedProjectId: projectId }
   const [composer, setComposer] = useState("")
   const [turns, setTurns] = useState<WorkbenchPetAssistantTurn[]>([])
   const [status, setStatus] = useState<string | null>(null)

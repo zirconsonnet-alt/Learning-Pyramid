@@ -6,7 +6,7 @@ import { useNavigate, useParams } from "react-router-dom"
 
 import { listRecallPointsByInstance, type Instance } from "@/ui/api/instances"
 import { ApiError } from "@/ui/api/http"
-import type { ProjectScope } from "@/ui/api/projectScope"
+import type { ScopedProjectRef } from "@/ui/api/projectScope"
 import type { ReviewChainTemplateItem, RollUpStrategy } from "@/ui/api/projectConfig"
 import type { ProjectType } from "@/ui/api/projects"
 import type { StudyMaterial } from "@/ui/api/subjects"
@@ -186,11 +186,11 @@ function SettingsPanelSwitchCard(props: {
 }
 
 export function ProjectSettingsPage() {
-  const { projectId, subjectId } = useParams()
+  const { scopedProjectId: projectId, subjectId } = useParams()
   const navigate = useNavigate()
   const pid = projectId ?? ""
   const isSubjectSettingsScope = Boolean(subjectId && !pid)
-  const projectScope: ProjectScope | null = subjectId && pid ? { subjectId, projectId: pid } : null
+  const projectScope: ScopedProjectRef | null = subjectId && pid ? { subjectId, scopedProjectId: pid } : null
   const projectQ = useProject(projectScope, { enabled: !!projectScope && !isSubjectSettingsScope })
   const subjectContextQ = useSubjectContext(projectScope, !!projectScope && !isSubjectSettingsScope)
   const scopedSubjectContextQ = useScopedSubjectContext(subjectId ?? "", pid, !!pid && !!subjectId && !isSubjectSettingsScope)
@@ -233,7 +233,7 @@ export function ProjectSettingsPage() {
           : "COURSE")
   const subjectMaterials = subjectContext?.materials ?? []
   const sourceCourseMaterials = subjectMaterials.filter(
-    (material) => material.materialType === "COURSE" && material.projectId && material.projectId !== pid,
+    (material) => material.materialType === "COURSE" && material.scopedProjectId && material.scopedProjectId !== pid,
   )
 
   const existingLayerIndexes = useMemo(() => (layersQ.data ?? []).map((l) => l.layerIndex).sort((a, b) => a - b), [layersQ.data])
@@ -273,7 +273,7 @@ export function ProjectSettingsPage() {
   const missingRecallPointQs = useQueries({
     queries: missingInstances.map((instance) => ({
       queryKey: ["recallPointsByInstance", subjectId ?? "", pid, instance.instanceId],
-      queryFn: () => listRecallPointsByInstance(projectScope as ProjectScope, instance.instanceId),
+      queryFn: () => listRecallPointsByInstance(projectScope as ScopedProjectRef, instance.instanceId),
       enabled: !!projectScope,
     })),
   })

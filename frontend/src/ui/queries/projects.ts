@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query"
 import {
   getProjectMaterialSourceBinding,
 } from "@/ui/api/projects"
-import type { ProjectScope } from "@/ui/api/projectScope"
+import type { ScopedProjectRef } from "@/ui/api/projectScope"
 import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
 import {
   getVirtualStudyReviewProject,
@@ -13,18 +13,18 @@ import { useSubjectContext } from "@/ui/queries/subjects"
 
 const PROJECT_BINDING_QUERY_TIMEOUT_MS = 90_000
 
-export function useProject(scope?: ProjectScope | null, options?: { enabled?: boolean }) {
-  const projectId = scope?.projectId ?? ""
+export function useProject(scope?: ScopedProjectRef | null, options?: { enabled?: boolean }) {
+  const projectId = scope?.scopedProjectId ?? ""
   const isVirtualProject = isVirtualStudyReviewProjectId(projectId)
   const query = useSubjectContext(scope ?? null, (options?.enabled ?? true) && Boolean(projectId) && !isVirtualProject)
   const currentMaterial = query.data?.currentMaterial ?? null
   let project = null
   if (isVirtualProject) {
     project = getVirtualStudyReviewProject()
-  } else if (currentMaterial && currentMaterial.projectId === projectId) {
+  } else if (currentMaterial && currentMaterial.scopedProjectId === projectId) {
     project = {
       subjectId: currentMaterial.subjectId,
-      projectId: currentMaterial.projectId,
+      projectId: currentMaterial.scopedProjectId,
       title: currentMaterial.title,
       state: "ACTIVE",
       createdAt: currentMaterial.createdAt,
@@ -39,14 +39,14 @@ export function useProject(scope?: ProjectScope | null, options?: { enabled?: bo
   }
 }
 
-export function useProjectMaterialSourceBinding(scope: ProjectScope | null) {
-  const projectId = scope?.projectId ?? ""
+export function useProjectMaterialSourceBinding(scope: ScopedProjectRef | null) {
+  const projectId = scope?.scopedProjectId ?? ""
   return useQuery({
     queryKey: ["projectMaterialSourceBinding", scope?.subjectId ?? "", projectId],
     queryFn: ({ signal }) =>
       isVirtualStudyReviewProjectId(projectId)
         ? getVirtualStudyReviewProjectMaterialSourceBinding()
-        : getProjectMaterialSourceBinding(scope as ProjectScope, { signal, timeoutMs: PROJECT_BINDING_QUERY_TIMEOUT_MS }),
+        : getProjectMaterialSourceBinding(scope as ScopedProjectRef, { signal, timeoutMs: PROJECT_BINDING_QUERY_TIMEOUT_MS }),
     enabled: !!scope?.subjectId && !!projectId,
     refetchInterval: isVirtualStudyReviewProjectId(projectId) ? false : 5000,
   })

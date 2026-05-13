@@ -44,8 +44,13 @@ from backend.models.types import (
     ReviewTaskId,
     id_canonical_text,
 )
-from backend.repositories.persistence_interfaces import SqlUnitOfWork, SystemStateRecord
-from backend.repositories.postgres_persistence import PostgresPersistenceUnitOfWork, connect_postgres
+from backend.repositories.persistence_interfaces import SqlSubjectMaterialRelationshipRepository, SqlUnitOfWork, SystemStateRecord
+from backend.repositories.postgres_persistence import (
+    PostgresPersistenceSession,
+    PostgresPersistenceUnitOfWork,
+    PostgresSubjectMaterialRelationshipRepository,
+    connect_postgres,
+)
 from backend.system.persistence_json import decode_project_config_payload, decode_project_storage_config_payload
 from backend.system.postgres_runtime import get_postgres_pool, redact_postgres_dsn
 from backend.system.postgres_schema import (
@@ -194,6 +199,12 @@ class PostgresStore(SQLiteSnapshotStore):
     def begin_unit_of_work(self, *, project_id: str | None = None) -> SqlUnitOfWork:
         return PostgresPersistenceUnitOfWork(connect=self._connect, project_id=project_id)
 
+    def _subject_material_relationship_repository(self) -> SqlSubjectMaterialRelationshipRepository:
+        return PostgresSubjectMaterialRelationshipRepository()
+
+    def _subject_material_relationship_session(self, conn):
+        return PostgresPersistenceSession(raw_connection=conn)
+
     def load_snapshot(self) -> dict[str, Any] | None:
         with self._lock:
             with self._pool_connection() as conn:
@@ -234,6 +245,7 @@ class PostgresStore(SQLiteSnapshotStore):
                         updated_at=updated_at,
                     ),
                 )
+            for project_id, project_payload in projects.items():
                 self._refresh_project_entity_indexes(
                     uow.connection,
                     project_id=str(project_id),
@@ -336,6 +348,8 @@ class PostgresStore(SQLiteSnapshotStore):
         if not isinstance(config_payload, dict):
             raise ValueError("ProjectConfig payload must be a JSON object")
         hydrated["projectConfig"] = config_payload
+
+        self._hydrate_subject_material_relationships(conn, project_id=project_id, hydrated=hydrated)
 
         instance_rows = conn.execute(
             """

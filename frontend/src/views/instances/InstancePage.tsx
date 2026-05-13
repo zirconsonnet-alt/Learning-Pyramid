@@ -6,7 +6,7 @@ import { Link, useNavigate, useParams } from "react-router-dom"
 import { ApiError } from "@/ui/api/http"
 import { listInstances, listRecallPointsByInstance } from "@/ui/api/instances"
 import { listLearningObjectNodes } from "@/ui/api/learningObjects"
-import type { ProjectScope } from "@/ui/api/projectScope"
+import type { ScopedProjectRef } from "@/ui/api/projectScope"
 import { getRecallPoint, type RecallPoint } from "@/ui/api/review"
 import { ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
@@ -30,34 +30,34 @@ function formatTimestamp(value: string | null) {
 }
 
 export function InstancePage() {
-  const { subjectId = "", projectId, instanceId } = useParams()
+  const { subjectId = "", scopedProjectId, instanceId } = useParams()
   const navigate = useNavigate()
-  const pid = projectId ?? ""
+  const pid = scopedProjectId ?? ""
   const iid = instanceId ?? ""
-  const projectScope: ProjectScope | null = subjectId && pid ? { subjectId, projectId: pid } : null
+  const projectScope: ScopedProjectRef | null = subjectId && pid ? { subjectId, scopedProjectId: pid } : null
   const setCurrentMs = useCallback(() => undefined, [])
 
   const instancesQ = useQuery({
     queryKey: ["instances", subjectId, pid],
-    queryFn: () => listInstances(projectScope as ProjectScope),
+    queryFn: () => listInstances(projectScope as ScopedProjectRef),
     enabled: !!projectScope,
   })
 
   const objectNodesQ = useQuery({
     queryKey: ["learningObjectNodes", subjectId, pid],
-    queryFn: () => listLearningObjectNodes(projectScope as ProjectScope),
+    queryFn: () => listLearningObjectNodes(projectScope as ScopedProjectRef),
     enabled: !!projectScope,
   })
 
   const recallPointIdsQ = useQuery({
     queryKey: ["recallPointsByInstance", subjectId, pid, iid],
-    queryFn: () => listRecallPointsByInstance(projectScope as ProjectScope, iid),
+    queryFn: () => listRecallPointsByInstance(projectScope as ScopedProjectRef, iid),
     enabled: !!projectScope && !!iid,
   })
   const recallPointQs = useQueries({
     queries: (recallPointIdsQ.data?.recallPointIds ?? []).map((recallPointId) => ({
       queryKey: ["recallPoint", subjectId, pid, recallPointId],
-      queryFn: () => getRecallPoint(projectScope as ProjectScope, recallPointId),
+      queryFn: () => getRecallPoint(projectScope as ScopedProjectRef, recallPointId),
       enabled: !!projectScope && !!recallPointId,
     })),
   })

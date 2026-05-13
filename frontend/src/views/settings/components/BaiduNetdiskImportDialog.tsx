@@ -5,7 +5,7 @@ import { Link } from "react-router-dom"
 
 import { listProjectBaiduNetdiskFiles, type BaiduNetdiskFileItem } from "@/ui/api/baiduNetdisk"
 import { ApiError } from "@/ui/api/http"
-import type { ProjectScope } from "@/ui/api/projectScope"
+import type { ScopedProjectRef } from "@/ui/api/projectScope"
 import { Button } from "@/ui/components/ui/button"
 import {
   Dialog,
@@ -85,7 +85,7 @@ export function BaiduNetdiskImportDialog({
   onOpenChange: (open: boolean) => void
 }) {
   const accountsQ = useBaiduNetdiskCloudAccounts(open)
-  const projectScope: ProjectScope | null = subjectId && projectId ? { subjectId, projectId } : null
+  const projectScope: ScopedProjectRef | null = subjectId && projectId ? { subjectId, scopedProjectId: projectId } : null
   const importMutation = useImportLearningObjectsFromBaiduNetdisk(projectScope)
 
   const [selectedAccountId, setSelectedAccountId] = useState("")
@@ -105,7 +105,7 @@ export function BaiduNetdiskImportDialog({
     queryKey: ["baiduNetdiskFiles", subjectId, projectId, accountId, dirPath],
     queryFn: ({ signal }) =>
       listProjectBaiduNetdiskFiles(
-        projectScope as ProjectScope,
+        projectScope as ScopedProjectRef,
         { accountId, dirPath, page: 1, limit: 200 },
         { signal, timeoutMs: 90_000 },
       ),

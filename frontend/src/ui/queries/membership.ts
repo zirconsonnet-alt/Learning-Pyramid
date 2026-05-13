@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   bindInviteCode,
   closeMembershipOrder,
-  completePayoutBinding,
+  completeWithdrawalConfirmationAttempt,
   confirmMembershipPayment,
   createMembershipOrder,
   getCommissionSummary,
@@ -15,14 +15,14 @@ import {
   listCoupons,
   listMembershipOrders,
   markCommissionWithdrawalWechatConfirmationStarted,
-  openMobilePayoutBinding,
-  pollPayoutBindingAttempt,
+  openMobileWithdrawalConfirmation,
+  pollWithdrawalConfirmationAttempt,
   previewMembershipOrder,
   requestCommissionWithdrawal,
-  startPayoutBindingAttempt,
+  startWithdrawalConfirmationAttempt,
   syncMembershipPayment,
   type CommissionWithdrawal,
-  type PayoutBindingAttempt,
+  type WithdrawalConfirmationAttempt,
 } from "@/ui/api/membership"
 
 type QueryRefetchInterval<T> =
@@ -202,26 +202,26 @@ export function useMarkCommissionWithdrawalWechatConfirmationStarted() {
   })
 }
 
-export function usePayoutBindingAttempt(bindingAttemptId: string, enabled = true, refetchInterval: QueryRefetchInterval<PayoutBindingAttempt> = false) {
+export function useWithdrawalConfirmationAttempt(withdrawalConfirmationAttemptId: string, enabled = true, refetchInterval: QueryRefetchInterval<WithdrawalConfirmationAttempt> = false) {
   return useQuery({
-    queryKey: ["membership", "payout-binding-attempt", bindingAttemptId],
-    queryFn: () => pollPayoutBindingAttempt({ bindingAttemptId }),
-    enabled: enabled && Boolean(bindingAttemptId),
+    queryKey: ["membership", "withdrawal-confirmation-attempt", withdrawalConfirmationAttemptId],
+    queryFn: () => pollWithdrawalConfirmationAttempt({ withdrawalConfirmationAttemptId }),
+    enabled: enabled && Boolean(withdrawalConfirmationAttemptId),
     staleTime: 0,
     refetchInterval,
   })
 }
 
-export function useOpenMobilePayoutBinding() {
+export function useOpenMobileWithdrawalConfirmation() {
   return useMutation({
-    mutationFn: openMobilePayoutBinding,
+    mutationFn: openMobileWithdrawalConfirmation,
   })
 }
 
-export function useStartPayoutBindingAttempt() {
+export function useStartWithdrawalConfirmationAttempt() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: startPayoutBindingAttempt,
+    mutationFn: startWithdrawalConfirmationAttempt,
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["membership", "payout-identity"] })
       await qc.invalidateQueries({ queryKey: ["membership", "commissions"] })
@@ -229,13 +229,13 @@ export function useStartPayoutBindingAttempt() {
   })
 }
 
-export function useCompletePayoutBinding() {
+export function useCompleteWithdrawalConfirmationAttempt() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: completePayoutBinding,
+    mutationFn: completeWithdrawalConfirmationAttempt,
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["membership", "payout-identity"] })
-      await qc.invalidateQueries({ queryKey: ["membership", "payout-binding-attempt"] })
+      await qc.invalidateQueries({ queryKey: ["membership", "withdrawal-confirmation-attempt"] })
       await qc.invalidateQueries({ queryKey: ["membership", "commissions"] })
       await qc.invalidateQueries({ queryKey: ["membership", "withdrawals"] })
     },

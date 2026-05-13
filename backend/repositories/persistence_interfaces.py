@@ -31,6 +31,25 @@ class ProjectSnapshotRecord:
     updated_at: str
 
 
+@dataclass(frozen=True, slots=True)
+class SubjectMaterialCollectionRecord:
+    subject_id: str
+    initialized: bool
+    updated_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class SubjectMaterialRelationshipRecord:
+    subject_id: str
+    material_id: str
+    material_type: str
+    title: str
+    created_at_ms: int
+    scoped_project_id: str
+    internal_project_id: str
+    updated_at: str
+
+
 class SqlMutationSession(Protocol):
     project_id: str | None
     raw_connection: Any
@@ -54,6 +73,28 @@ class SqlProjectSnapshotRepository(Protocol):
     def upsert(self, session: SqlMutationSession, record: ProjectSnapshotRecord) -> None: ...
 
     def delete_absent(self, session: SqlMutationSession, keep_project_ids: Sequence[str]) -> None: ...
+
+
+class SqlSubjectMaterialRelationshipRepository(Protocol):
+    def delete_for_subject(self, session: SqlMutationSession, subject_id: str) -> None: ...
+
+    def upsert_collection(self, session: SqlMutationSession, record: SubjectMaterialCollectionRecord) -> None: ...
+
+    def insert_relationships(
+        self,
+        session: SqlMutationSession,
+        records: Sequence[SubjectMaterialRelationshipRecord],
+    ) -> None: ...
+
+    def get_collection(self, session: SqlMutationSession, subject_id: str) -> Optional[SubjectMaterialCollectionRecord]: ...
+
+    def list_for_subject(self, session: SqlMutationSession, subject_id: str) -> Sequence[SubjectMaterialRelationshipRecord]: ...
+
+    def get_by_internal_project(
+        self,
+        session: SqlMutationSession,
+        internal_project_id: str,
+    ) -> Optional[SubjectMaterialRelationshipRecord]: ...
 
 
 class SqlLifecycleRepository(Protocol):
@@ -88,6 +129,7 @@ class SqlUnitOfWork(Protocol):
     session: SqlMutationSession
     system_state: SqlSystemStateRepository
     project_snapshots: SqlProjectSnapshotRepository
+    subject_material_relationships: SqlSubjectMaterialRelationshipRepository
     project_lifecycle: SqlLifecycleRepository
 
     def __enter__(self) -> "SqlUnitOfWork": ...
@@ -98,5 +140,6 @@ class SqlUnitOfWork(Protocol):
 PersistenceMutationSession = SqlMutationSession
 SystemStateRepository = SqlSystemStateRepository
 ProjectSnapshotRepository = SqlProjectSnapshotRepository
+SubjectMaterialRelationshipRepository = SqlSubjectMaterialRelationshipRepository
 ProjectLifecycleRepository = SqlLifecycleRepository
 PersistenceUnitOfWork = SqlUnitOfWork

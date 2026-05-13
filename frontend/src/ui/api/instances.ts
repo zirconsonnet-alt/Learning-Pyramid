@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 import { apiRequest, type ApiRequestExecutionOptions } from "@/ui/api/http"
-import { projectApiPath, type ProjectScope } from "@/ui/api/projectScope"
+import { projectApiPath, type ScopedProjectRef } from "@/ui/api/projectScope"
 import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
 import {
   getVirtualStudyReviewRecallPointIdsByInstance,
@@ -48,7 +48,7 @@ const VideoWatchProgressSchema = z.object({
 const VideoWatchProgressMapSchema = z.record(z.string(), VideoWatchProgressSchema)
 export type VideoWatchProgress = z.infer<typeof VideoWatchProgressSchema>
 
-export function listInstances(scope: ProjectScope, options?: ApiRequestExecutionOptions) {
+export function listInstances(scope: ScopedProjectRef, options?: ApiRequestExecutionOptions) {
   return apiRequest({
     path: projectApiPath(scope, "/instances"),
     responseSchema: InstanceListSchema,
@@ -57,7 +57,7 @@ export function listInstances(scope: ProjectScope, options?: ApiRequestExecution
   })
 }
 
-export function listMissingInstances(scope: ProjectScope, options?: ApiRequestExecutionOptions) {
+export function listMissingInstances(scope: ScopedProjectRef, options?: ApiRequestExecutionOptions) {
   return apiRequest({
     path: projectApiPath(scope, "/missing-instances"),
     responseSchema: MissingInstancesSchema,
@@ -66,8 +66,8 @@ export function listMissingInstances(scope: ProjectScope, options?: ApiRequestEx
   })
 }
 
-export function listRecallPointsByInstance(scope: ProjectScope, instanceId: string, options?: ApiRequestExecutionOptions) {
-  if (isVirtualStudyReviewProjectId(scope.projectId)) {
+export function listRecallPointsByInstance(scope: ScopedProjectRef, instanceId: string, options?: ApiRequestExecutionOptions) {
+  if (isVirtualStudyReviewProjectId(scope.scopedProjectId)) {
     return Promise.resolve(getVirtualStudyReviewRecallPointIdsByInstance(instanceId))
   }
   return apiRequest({
@@ -79,11 +79,11 @@ export function listRecallPointsByInstance(scope: ProjectScope, instanceId: stri
 }
 
 export function fetchVideoWatchProgressMap(
-  scope: ProjectScope,
+  scope: ScopedProjectRef,
   instanceIds: string[],
   options?: ApiRequestExecutionOptions,
 ) {
-  if (isVirtualStudyReviewProjectId(scope.projectId)) {
+  if (isVirtualStudyReviewProjectId(scope.scopedProjectId)) {
     return Promise.resolve(getVirtualStudyReviewRemoteVideoWatchProgress(instanceIds))
   }
   const params = new URLSearchParams()
@@ -98,11 +98,11 @@ export function fetchVideoWatchProgressMap(
 }
 
 export function syncVideoWatchProgressRange(
-  scope: ProjectScope,
+  scope: ScopedProjectRef,
   instanceId: string,
   params: { startMs: number; endMs: number; durationMs?: number | null },
 ) {
-  if (isVirtualStudyReviewProjectId(scope.projectId)) {
+  if (isVirtualStudyReviewProjectId(scope.scopedProjectId)) {
     setVirtualStudyReviewVideoWatchProgress(instanceId, {
       watchedMs: Math.max(0, params.endMs),
       durationMs: params.durationMs,
@@ -118,11 +118,11 @@ export function syncVideoWatchProgressRange(
 }
 
 export function markVideoWatchProgressCompleted(
-  scope: ProjectScope,
+  scope: ScopedProjectRef,
   instanceId: string,
   params: { durationMs: number },
 ) {
-  if (isVirtualStudyReviewProjectId(scope.projectId)) {
+  if (isVirtualStudyReviewProjectId(scope.scopedProjectId)) {
     setVirtualStudyReviewVideoWatchProgress(instanceId, {
       watchedMs: params.durationMs,
       durationMs: params.durationMs,
@@ -139,7 +139,7 @@ export function markVideoWatchProgressCompleted(
 }
 
 export function bulkRemapRecallPointsInstance(
-  scope: ProjectScope,
+  scope: ScopedProjectRef,
   params: { fromInstanceId: string; toInstanceId: string; recallPointIds?: string[] },
 ) {
   return apiRequest({
@@ -154,7 +154,7 @@ export function bulkRemapRecallPointsInstance(
   })
 }
 
-export function addInstance(scope: ProjectScope, materialId: string) {
+export function addInstance(scope: ScopedProjectRef, materialId: string) {
   return apiRequest({
     path: projectApiPath(scope, "/instances"),
     method: "POST",

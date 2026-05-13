@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 import { apiRequest, type ApiRequestExecutionOptions } from "@/ui/api/http"
-import { projectApiPath, type ProjectScope } from "@/ui/api/projectScope"
+import { projectApiPath, type ScopedProjectRef } from "@/ui/api/projectScope"
 import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
 import {
   getVirtualStudyReviewRecallPoint,
@@ -120,49 +120,49 @@ export const RecallPointReviewProjectionSchema = z.object({
 })
 export type RecallPointReviewProjection = z.infer<typeof RecallPointReviewProjectionSchema>
 
-export function getReviewTask(scope: ProjectScope, reviewTaskId: string) {
+export function getReviewTask(scope: ScopedProjectRef, reviewTaskId: string) {
   return apiRequest({ path: projectApiPath(scope, `/review-tasks/${reviewTaskId}`), responseSchema: ReviewTaskSchema })
 }
 
-export function getConvergence(scope: ProjectScope, convergenceId: string) {
+export function getConvergence(scope: ScopedProjectRef, convergenceId: string) {
   return apiRequest({ path: projectApiPath(scope, `/convergences/${convergenceId}`), responseSchema: ConvergenceSchema })
 }
 
-export function getReviewChain(scope: ProjectScope, reviewChainId: string) {
+export function getReviewChain(scope: ScopedProjectRef, reviewChainId: string) {
   return apiRequest({ path: projectApiPath(scope, `/review-chains/${reviewChainId}`), responseSchema: ReviewChainSchema })
 }
 
-export function getReviewChainBinding(scope: ProjectScope, reviewChainId: string) {
+export function getReviewChainBinding(scope: ScopedProjectRef, reviewChainId: string) {
   return apiRequest({
     path: projectApiPath(scope, `/review-chains/${reviewChainId}/binding`),
     responseSchema: ReviewChainBindingSchema,
   })
 }
 
-export function getRangeSnapshot(scope: ProjectScope, rangeId: string) {
+export function getRangeSnapshot(scope: ScopedProjectRef, rangeId: string) {
   return apiRequest({ path: projectApiPath(scope, `/ranges/${rangeId}`), responseSchema: RangeSnapshotSchema })
 }
 
-export function getRecallPoint(scope: ProjectScope, recallPointId: string) {
-  if (isVirtualStudyReviewProjectId(scope.projectId)) {
+export function getRecallPoint(scope: ScopedProjectRef, recallPointId: string) {
+  if (isVirtualStudyReviewProjectId(scope.scopedProjectId)) {
     return Promise.resolve(getVirtualStudyReviewRecallPoint(recallPointId))
   }
   return apiRequest({ path: projectApiPath(scope, `/recall-points/${recallPointId}`), responseSchema: RecallPointSchema })
 }
 
-export function listRecallPoints(scope: ProjectScope) {
+export function listRecallPoints(scope: ScopedProjectRef) {
   return apiRequest({ path: projectApiPath(scope, "/recall-points"), responseSchema: z.array(RecallPointSchema) })
 }
 
 export function searchRecallPoints(
-  scope: ProjectScope,
+  scope: ScopedProjectRef,
   params?: {
     q?: string
     limit?: number
   },
   options?: ApiRequestExecutionOptions,
 ) {
-  if (isVirtualStudyReviewProjectId(scope.projectId)) {
+  if (isVirtualStudyReviewProjectId(scope.scopedProjectId)) {
     return Promise.resolve(searchVirtualStudyReviewRecallPoints(params?.q ?? "").slice(0, params?.limit ?? 500))
   }
   const search = new URLSearchParams()
@@ -177,14 +177,14 @@ export function searchRecallPoints(
   })
 }
 
-export function getRecallPointReviewProjection(scope: ProjectScope, recallPointId: string) {
+export function getRecallPointReviewProjection(scope: ScopedProjectRef, recallPointId: string) {
   return apiRequest({
     path: projectApiPath(scope, `/recall-points/${recallPointId}/review-projection`),
     responseSchema: RecallPointReviewProjectionSchema,
   })
 }
 
-export function listReviewRecommendations(scope: ProjectScope, params?: { offset?: number; limit?: number }) {
+export function listReviewRecommendations(scope: ScopedProjectRef, params?: { offset?: number; limit?: number }) {
   const search = new URLSearchParams()
   if (params?.offset !== undefined) search.set("offset", String(params.offset))
   if (params?.limit !== undefined) search.set("limit", String(params.limit))
@@ -195,7 +195,7 @@ export function listReviewRecommendations(scope: ProjectScope, params?: { offset
   })
 }
 
-export async function listAllReviewRecommendations(scope: ProjectScope, params?: { limit?: number }) {
+export async function listAllReviewRecommendations(scope: ScopedProjectRef, params?: { limit?: number }) {
   const limit = params?.limit ?? 500
   const items: ReviewRecommendationItem[] = []
   let offset = 0
@@ -211,7 +211,7 @@ export async function listAllReviewRecommendations(scope: ProjectScope, params?:
 }
 
 export function editRecallPoint(
-  scope: ProjectScope,
+  scope: ScopedProjectRef,
   recallPointId: string,
   params: {
     question: z.infer<typeof RichContentSchema>
@@ -231,7 +231,7 @@ export function editRecallPoint(
   })
 }
 
-export function deleteRecallPoint(scope: ProjectScope, recallPointId: string) {
+export function deleteRecallPoint(scope: ScopedProjectRef, recallPointId: string) {
   return apiRequest({
     path: projectApiPath(scope, `/recall-points/${recallPointId}`),
     method: "DELETE",
@@ -240,7 +240,7 @@ export function deleteRecallPoint(scope: ProjectScope, recallPointId: string) {
 }
 
 export function commitReviewTask(
-  scope: ProjectScope,
+  scope: ScopedProjectRef,
   reviewTaskId: string,
   params: {
     canRecall: number[]

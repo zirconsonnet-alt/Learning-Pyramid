@@ -1,6 +1,6 @@
 # 后端部署与运行
 
-更新时间：2026-05-11
+更新时间：2026-05-13
 
 本文记录当前后端运行、部署、数据位置和运维入口。更细的命令示例仍可参考仓库根目录 `README.md`。
 
@@ -151,12 +151,23 @@ python tools/apply_postgres_migrations.py --postgres-dsn postgresql://user:pass@
 python tools/apply_postgres_migrations.py --postgres-dsn postgresql://user:pass@localhost:5432/learningpyramid --check
 ```
 
+当前 store 迁移会补齐学科材料关系表、把 `subject_material_collection_index.initialized` 规范为 BOOLEAN，并确保 `project_snapshots.snapshot_json` 非空壳列存在。迁移 12 会对已应用早期 relationship migration 的数据库再次幂等规范 `initialized`。迁移前仍必须备份目标 PostgreSQL。
+
 从 SQLite 导出或迁移到 PostgreSQL：
 
 ```powershell
 python tools/export_sqlite_to_postgres.py --output learningpyramid-postgres.sql
 python tools/migrate_sqlite_to_postgres.py --postgres-dsn postgresql://user:pass@localhost:5432/learningpyramid
 ```
+
+检查或修复 PostgreSQL 学科材料关系：
+
+```powershell
+python tools/repair_subject_material_relationship_index.py --postgres-dsn postgresql://user:pass@localhost:5432/learningpyramid
+python tools/repair_subject_material_relationship_index.py --postgres-dsn postgresql://user:pass@localhost:5432/learningpyramid --apply
+```
+
+该脚本默认只输出 dry-run 计划和完整性问题；执行 `--apply` 前必须先完成运行时备份。它只恢复可由 active subject、active material project、`subject_id`、`scoped_project_id` 和受支持 `projectType` 确定的数据，不在请求期猜测关系。
 
 ## 备份、恢复与回滚
 
@@ -201,6 +212,18 @@ Install-Selfhost-Server-SshKey.bat -ReplaceExistingKey -NoKeyPassphrase
 同步脚本会检查远端 `.env`、部署当前构建，并运行 readiness / public smoke check。
 
 ## 后端验证命令
+
+后端 release gate：
+
+```powershell
+python tools/verify_backend_release_gate.py --scope restart
+python tools/verify_backend_release_gate.py --scope identity
+python tools/verify_backend_release_gate.py --scope storage --postgres-dsn postgresql://user:pass@localhost:5432/learningpyramid_test
+```
+
+`restart` 会创建学科材料工作台、保存、重新构造后端运行时，并确认同一 `{subjectId, scopedProjectId}` 能重新解析到同一个内部项目。`identity` 会创建本地 scoped workspace 样本，复用 scoped route、scoped id 和 backend boundary 检查，并报告 `subjectId`、`scopedProjectId`、`internalProjectId` 诊断字段是否可用；如果没有任何 scoped project 样本被验证，该 gate 必须失败。`storage` 是真实 PostgreSQL 迁移与重启 smoke；如果没有传入 DSN，也没有设置 `LEARNINGPYRAMID_TEST_POSTGRES_DSN`、`LEARNINGPYRAMID_STORE_POSTGRES_DSN` 或 `LEARNINGPYRAMID_POSTGRES_DSN`，该 gate 必须失败并报告未完成，不能算通过。
+
+GitHub Actions 的 `Backend CI` workflow 现在也会在 PostgreSQL job 里强制跑这三个 scope，避免只靠本地记忆执行。
 
 后端边界检查：
 

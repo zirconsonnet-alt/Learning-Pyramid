@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 import { ApiError, apiRequest, apiUrl, getBaseUrl, type ApiRequestExecutionOptions } from "@/ui/api/http"
-import { projectApiPath, type ProjectScope } from "@/ui/api/projectScope"
+import { projectApiPath, type ScopedProjectRef } from "@/ui/api/projectScope"
 import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
 
 export const SystemCapabilitiesSchema = z.object({
@@ -401,7 +401,7 @@ export const ProjectLlmDebugRecordSchema = z.object({
 })
 export type ProjectLlmDebugRecord = z.infer<typeof ProjectLlmDebugRecordSchema>
 
-export function getLatestProjectLlmDebug(scope: ProjectScope, options?: ApiRequestExecutionOptions) {
+export function getLatestProjectLlmDebug(scope: ScopedProjectRef, options?: ApiRequestExecutionOptions) {
   return apiRequest({
     path: projectApiPath(scope, "/llm/debug/latest"),
     responseSchema: ProjectLlmDebugRecordSchema.nullable(),
@@ -430,7 +430,7 @@ export function askSystemLlm(
 }
 
 export function askProjectLlm(
-  scope: ProjectScope,
+  scope: ScopedProjectRef,
   body: {
     prompt: string
     systemPrompt?: string
@@ -454,7 +454,7 @@ export function askProjectLlm(
 }
 
 export function askProjectLlmChatCompletion(
-  scope: ProjectScope,
+  scope: ScopedProjectRef,
   body: {
     messages: Array<Record<string, unknown>>
     tools?: Array<Record<string, unknown>>
@@ -466,11 +466,11 @@ export function askProjectLlmChatCompletion(
   },
   options?: ApiRequestExecutionOptions,
 ) {
-  if (isVirtualStudyReviewProjectId(scope.projectId)) {
+  if (isVirtualStudyReviewProjectId(scope.scopedProjectId)) {
     throw new ApiError("引导示范项目不提供 AI 对话。", {
       code: "PRECONDITION",
       status: 400,
-      details: { projectId: scope.projectId },
+      details: { projectId: scope.scopedProjectId },
     })
   }
   return apiRequest({
@@ -493,7 +493,7 @@ type AskProjectLlmStreamOptions = ApiRequestExecutionOptions & {
 }
 
 export async function askProjectLlmStream(
-  scope: ProjectScope,
+  scope: ScopedProjectRef,
   body: {
     prompt: string
     systemPrompt?: string

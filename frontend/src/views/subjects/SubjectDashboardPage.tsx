@@ -124,9 +124,9 @@ export function SubjectDashboardPage() {
   const deleteMaterialMatches = deleteMaterialConfirmation.trim() === deleteMaterialExpectedText
   const materialActivityQs = useQueries({
     queries: materials.map((material) => ({
-      queryKey: ["auditLogEvents", subjectId, material.projectId ?? material.materialId],
-      queryFn: () => listAuditLogEvents({ subjectId, projectId: material.projectId ?? "" }),
-      enabled: Boolean(material.projectId) && !materialsQ.isLoading && !materialsQ.error,
+      queryKey: ["auditLogEvents", subjectId, material.scopedProjectId ?? material.materialId],
+      queryFn: () => listAuditLogEvents({ subjectId, scopedProjectId: material.scopedProjectId ?? "" }),
+      enabled: Boolean(material.scopedProjectId) && !materialsQ.isLoading && !materialsQ.error,
       staleTime: 60_000,
       refetchInterval: 60_000,
     })),
@@ -215,10 +215,10 @@ export function SubjectDashboardPage() {
   }
 
   function openMaterial(material: StudyMaterial, target: "workbench" | "settings") {
-    const projectId = material.projectId
+    const projectId = material.scopedProjectId
     if (!projectId) return
     setSelectedSubjectId(subjectId)
-    setSelectedWorkbenchProjectRef({ subjectId, projectId })
+    setSelectedWorkbenchProjectRef({ subjectId, scopedProjectId: projectId })
     if (target === "settings") {
       completeGuideWalkthroughStep("choose-project")
     }
@@ -231,16 +231,16 @@ export function SubjectDashboardPage() {
 
   async function deleteMaterial() {
     if (!subjectId || !deleteMaterialTarget || !deleteMaterialMatches) return
-    const projectId = deleteMaterialTarget.projectId
+    const projectId = deleteMaterialTarget.scopedProjectId
     try {
       await deleteMaterialM.mutateAsync({ subjectId, materialId: deleteMaterialTarget.materialId })
       if (projectId) {
         removeRecentWorkbenchProjectId(projectId)
-        removeRecentWorkbenchProjectRef({ subjectId, projectId })
+        removeRecentWorkbenchProjectRef({ subjectId, scopedProjectId: projectId })
       }
-      const nextProjectId = materials.find((item) => item.materialId !== deleteMaterialTarget.materialId && item.projectId)?.projectId ?? null
+      const nextProjectId = materials.find((item) => item.materialId !== deleteMaterialTarget.materialId && item.scopedProjectId)?.scopedProjectId ?? null
       setSelectedWorkbenchProjectId(nextProjectId)
-      setSelectedWorkbenchProjectRef(nextProjectId ? { subjectId, projectId: nextProjectId } : null)
+      setSelectedWorkbenchProjectRef(nextProjectId ? { subjectId, scopedProjectId: nextProjectId } : null)
       showSuccessFeedback("项目已删除", `“${deleteMaterialTarget.title}” 已从“${subjectTitle}”下移除。`)
       closeDeleteMaterialDialog()
     } catch (err) {
@@ -307,10 +307,10 @@ export function SubjectDashboardPage() {
           {sortedMaterials.map((material) => {
             const Icon = materialIconByType[material.materialType]
             const active =
-              material.projectId === selectedWorkbenchProjectId &&
+              material.scopedProjectId === selectedWorkbenchProjectId &&
               selectedWorkbenchProjectRef?.subjectId === subjectId
             const materialActivityIndex = materials.findIndex((item) => item.materialId === material.materialId)
-            const materialActivityLoading = material.projectId ? Boolean(materialActivityQs[materialActivityIndex]?.isLoading) : false
+            const materialActivityLoading = material.scopedProjectId ? Boolean(materialActivityQs[materialActivityIndex]?.isLoading) : false
             const lastStudyDisplay = formatLastStudyText(lastStudyByMaterialId[material.materialId] ?? null)
             return (
               <Card
@@ -339,7 +339,7 @@ export function SubjectDashboardPage() {
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {material.projectId ? (
+                  {material.scopedProjectId ? (
                     <div className="flex flex-wrap gap-2">
                       <Button type="button" onClick={() => openMaterial(material, "workbench")}>
                         <ArrowRight className="h-4 w-4" />

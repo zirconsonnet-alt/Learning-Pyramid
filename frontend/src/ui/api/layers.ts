@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 import { apiRequest, type ApiRequestExecutionOptions } from "@/ui/api/http"
-import { projectApiPath, type ProjectScope } from "@/ui/api/projectScope"
+import { projectApiPath, type ScopedProjectRef } from "@/ui/api/projectScope"
 import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
 import { getVirtualStudyReviewLayers } from "@/ui/guideWalkthrough/virtualStudyReviewProject"
 
@@ -33,8 +33,8 @@ export type AggregationEvent = z.infer<typeof AggregationEventSchema>
 
 export const ManualRollUpResultSchema = z.object({ parentNodeId: z.string().nullable() })
 
-export function listLayers(scope: ProjectScope, options?: ApiRequestExecutionOptions) {
-  if (isVirtualStudyReviewProjectId(scope.projectId)) {
+export function listLayers(scope: ScopedProjectRef, options?: ApiRequestExecutionOptions) {
+  if (isVirtualStudyReviewProjectId(scope.scopedProjectId)) {
     return Promise.resolve(getVirtualStudyReviewLayers())
   }
   return apiRequest({
@@ -45,22 +45,22 @@ export function listLayers(scope: ProjectScope, options?: ApiRequestExecutionOpt
   })
 }
 
-export function getAggregationQueue(scope: ProjectScope, layerIndex: number) {
-  if (isVirtualStudyReviewProjectId(scope.projectId)) {
+export function getAggregationQueue(scope: ScopedProjectRef, layerIndex: number) {
+  if (isVirtualStudyReviewProjectId(scope.scopedProjectId)) {
     return Promise.resolve({ currentNodeIds: [] })
   }
   return apiRequest({ path: projectApiPath(scope, `/aggregation-queue/${layerIndex}`), responseSchema: AggQueueSchema })
 }
 
-export function listAggregationEvents(scope: ProjectScope) {
-  if (isVirtualStudyReviewProjectId(scope.projectId)) {
+export function listAggregationEvents(scope: ScopedProjectRef) {
+  if (isVirtualStudyReviewProjectId(scope.scopedProjectId)) {
     return Promise.resolve([])
   }
   return apiRequest({ path: projectApiPath(scope, "/aggregation-events"), responseSchema: AggregationEventsSchema })
 }
 
-export function manualRollUp(scope: ProjectScope, layerIndex: number, title?: string) {
-  if (isVirtualStudyReviewProjectId(scope.projectId)) {
+export function manualRollUp(scope: ScopedProjectRef, layerIndex: number, title?: string) {
+  if (isVirtualStudyReviewProjectId(scope.scopedProjectId)) {
     return Promise.resolve({ parentNodeId: null })
   }
   return apiRequest({

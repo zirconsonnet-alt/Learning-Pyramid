@@ -1,6 +1,6 @@
 # 数据模型
 
-更新时间：2026-05-11
+更新时间：2026-05-13
 
 本文记录当前持久化边界、主要数据集合和迁移规则。接口字段以运行时 OpenAPI 为准，本文不维护 API 明细。
 
@@ -21,7 +21,7 @@ core store 支持 SQLite 和 PostgreSQL。auth store 支持 SQLite 和 PostgreSQ
 - `sqlite`：本地优先和简单单机路径。
 - `postgres`：当前推荐的自托管生产路径。
 
-PostgreSQL schema 由 `backend/system/postgres_schema.py` 中的 `POSTGRES_MIGRATIONS` 定义，并通过 `schema_migrations` 按 `store` 与 `auth` 两个 scope 记录版本。
+PostgreSQL schema 由 `backend/system/postgres_schema.py` 中的 `POSTGRES_MIGRATIONS` 定义，并通过 `schema_migrations` 按 `store` 与 `auth` 两个 scope 记录版本。store migration 10 会在 subject-material backfill 前把 `subject_material_collection_index.initialized` 规范成 BOOLEAN；store migration 11 会补齐 `project_snapshots.snapshot_json` 非空壳列，保持 repository 写入合约；store migration 12 会对已应用早期 relationship migration 的数据库再次幂等规范 `initialized` 为 BOOLEAN。
 
 SQLite core schema 由 `backend/system/persistence_store.py` 初始化。PostgreSQL 初始 schema 从 SQLite schema 渲染，再叠加显式迁移。
 
@@ -31,7 +31,9 @@ core store 的主要表包括：
 
 - `system_state`：全局 schema 版本和 id 计数器。
 - `global_settings_index`：部署级全局设置。
-- `project_snapshots`：项目快照、状态、scoped identity。
+- `project_snapshots`：项目快照、状态、scoped identity。`project_id` 是内部存储身份；`subject_id` 与 `scoped_project_id` 只描述材料项目的学科归属和学科内编号。
+- `subject_material_collection_index`：学科材料集合初始化状态；PostgreSQL 中 `initialized` 是 BOOLEAN。
+- `subject_material_relationship_index`：学科材料关系，连接 `subject_id`、`scoped_project_id` 与内部 `internal_project_id`。
 - `project_storage_config_index`：项目存储根和文件同步策略。
 - `project_material_source_binding_index`：项目材料来源绑定。
 - `project_config_index`：项目配置 JSON。
@@ -56,7 +58,7 @@ core store 的主要表包括：
 - `media_asset_index`：项目媒体资产。
 - `recall_point_review_record_index`：复述点复习记录。
 
-`project_snapshots.snapshot_json` 仍是兼容/导出壳，不是新功能的数据写入模式。PostgreSQL 生产 schema 仍要求该列非空；normalized repository 写入时只维护最小稳定壳，不从该列恢复新业务语义。
+`project_snapshots.snapshot_json` 仍是兼容/导出壳，不是新功能的数据写入模式。PostgreSQL 生产 schema 仍要求该列非空；normalized repository 写入时只维护最小稳定壳 `{}`，不从该列恢复新业务语义。
 
 ## Auth Store 表组
 
@@ -91,7 +93,7 @@ auth migration 3 到 5 曾引入 study group 相关表，当前迁移历史保�
 - `commission_records`：邀请佣金。
 - `commission_withdrawal_requests`：佣金提现请求。
 - `payout_identities`：提现收款身份。
-- `payout_binding_attempts`：收款身份绑定尝试。
+- `payout_binding_attempts`：微信提现确认扫码 attempt；表名沿用早期 binding 命名，但产品入口不再支持单独绑定微信。
 - `payout_provider_events`：支付 provider 事件。
 - `reconciliation_runs`：对账运行记录。
 - `reconciliation_warnings`：对账告警。
@@ -101,7 +103,10 @@ auth migration 3 到 5 曾引入 study group 相关表，当前迁移历史保�
 ## 数据完整性规则
 
 - project 级数据必须带 `project_id`。
-- scoped public id 不能直接当内部 project id 使用。
+- 学科材料工作台由 `{subjectId, scopedProjectId}` 定位；scoped public id 不能直接当内部 project id 使用。
+- 学科材料关系必须通过 `subject_material_relationship_index` 持久化，并指向 active subject 与 active internal project。
+- 可恢复历史材料关系只从 active material project 的 `subject_id`、`scoped_project_id`、`project_config_index.config_json.projectType` 和内部 `project_id` 确定性恢复；恢复生成的 `material_id` 使用 `mat_recovered_{internalProjectId}`。
+- 缺失 subject、缺失 internal project、已删除 subject、已删除 internal project 或缺失/不支持材料 `projectType` 都是数据完整性问题，不能在请求期猜测绑定。
 - core store 中多数 project 子表通过 `project_id` 外键关联 `project_snapshots`。
 - active project 必须同时具备 `project_storage_config_index`、`project_material_source_binding_index` 和 `project_config_index` 行；缺失时运行时应视为数据一致性错误，而不是从 `project_snapshots.snapshot_json` 恢复业务语义。
 - 学习对象树和学习任务树的结构一致性由提交期逻辑保证。
@@ -142,6 +147,14 @@ python tools/migrate_sqlite_to_postgres.py --postgres-dsn postgresql://user:pass
   - `BOOK` -> `MANUAL`
   - `LOOSE_POINTS` -> `MANUAL`
 - 遇到 active project 缺失 `project_config_index` 或未知 `projectType` 时必须阻断。
+- 生产执行前必须先备份目标 PostgreSQL。
+
+`tools/repair_subject_material_relationship_index.py` 用于检查和修复 PostgreSQL 中缺失的学科材料关系。
+
+- 默认 dry-run，只输出可恢复计划和完整性问题。
+- 显式传入 `--apply` 才会写入 `subject_material_collection_index` 和 `subject_material_relationship_index`。
+- 只恢复同时满足 active subject、active material project、存在 `subject_id`、存在 `scoped_project_id` 且 `projectType` 为 `COURSE`、`BOOK` 或 `LOOSE_POINTS` 的记录。
+- 不从学科内编号反查内部项目；内部项目身份只来自 material project 行的 `project_id`。
 - 生产执行前必须先备份目标 PostgreSQL。
 
 ## 维护约束

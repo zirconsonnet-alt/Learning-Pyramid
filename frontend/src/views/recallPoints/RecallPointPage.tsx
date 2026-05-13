@@ -4,7 +4,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 import { Link, useNavigate, useParams } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
-import type { ProjectScope } from "@/ui/api/projectScope"
+import type { ScopedProjectRef } from "@/ui/api/projectScope"
 import {
   appendImageBlock,
   removeImageBlockAt,
@@ -93,16 +93,16 @@ function renderRichContentPreview(subjectId: string, projectId: string, value: R
 }
 
 export function RecallPointPage() {
-  const { subjectId = "", projectId, recallPointId } = useParams()
-  const pid = projectId ?? ""
+  const { subjectId = "", scopedProjectId, recallPointId } = useParams()
+  const pid = scopedProjectId ?? ""
   const rpid = recallPointId ?? ""
-  const projectScope = subjectId && pid ? { subjectId, projectId: pid } : null
+  const projectScope = subjectId && pid ? { subjectId, scopedProjectId: pid } : null
   const navigate = useNavigate()
 
   const qKey = useMemo(() => ["recallPoint", subjectId, pid, rpid], [subjectId, pid, rpid])
   const q = useQuery({
     queryKey: qKey,
-    queryFn: () => getRecallPoint(projectScope as ProjectScope, rpid),
+    queryFn: () => getRecallPoint(projectScope as ScopedProjectRef, rpid),
     enabled: !!projectScope && !!rpid,
   })
 
@@ -141,7 +141,7 @@ export function RecallPointPage() {
           key={`${recallPoint.recallPointId}:${q.dataUpdatedAt}`}
           subjectId={subjectId}
           projectId={pid}
-          projectScope={projectScope as ProjectScope}
+          projectScope={projectScope as ScopedProjectRef}
           recallPointId={rpid}
           qKey={qKey}
           recallPoint={recallPoint}
@@ -161,7 +161,7 @@ function RecallPointDetailLayout({
 }: {
   subjectId: string
   projectId: string
-  projectScope: ProjectScope
+  projectScope: ScopedProjectRef
   recallPointId: string
   qKey: readonly string[]
   recallPoint: RecallPoint

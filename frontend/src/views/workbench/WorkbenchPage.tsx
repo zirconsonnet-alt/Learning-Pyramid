@@ -8,7 +8,7 @@ import { ApiError } from "@/ui/api/http"
 import { fetchVideoWatchProgressMap, listRecallPointsByInstance, type VideoWatchProgress } from "@/ui/api/instances"
 import type { Instance } from "@/ui/api/instances"
 import { getInstancePlaybackDescriptor } from "@/ui/api/media"
-import { projectApiPath, type ProjectScope } from "@/ui/api/projectScope"
+import { projectApiPath, type ScopedProjectRef } from "@/ui/api/projectScope"
 import type { LearningTaskNode } from "@/ui/api/learningTaskNodes"
 import type { ProjectType } from "@/ui/api/projects"
 import { ContentNotice } from "@/ui/components/contentEmptyState"
@@ -136,7 +136,7 @@ async function resolveInstanceDurationMs(params: {
   directoryPermission: "unsupported" | "missing" | "prompt" | "granted" | "denied"
 }) {
   const { subjectId, projectId, instance, serverMediaStreamEnabled, browserLocalMediaEnabled, directoryPermission } = params
-  const scope = { subjectId, projectId }
+  const scope = { subjectId, scopedProjectId: projectId }
   if (typeof instance.durationMs === "number" && instance.durationMs > 0) {
     return instance.durationMs
   }
@@ -213,11 +213,11 @@ function StudyModePane({
 }
 
 export function WorkbenchPage() {
-  const { projectId, subjectId = "" } = useParams()
+  const { scopedProjectId: projectId, subjectId = "" } = useParams()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const pid = projectId ?? ""
-  const projectScope: ProjectScope | null = subjectId && pid ? { subjectId, projectId: pid } : null
+  const projectScope: ScopedProjectRef | null = subjectId && pid ? { subjectId, scopedProjectId: pid } : null
   const isVirtualStudyReviewProject = isVirtualStudyReviewProjectId(pid)
 
   const ensure = useWorkbenchStore((s) => s.ensure)
@@ -240,14 +240,14 @@ export function WorkbenchPage() {
   }, [ensure, pid])
 
   useEffect(() => {
-    if (subjectId && pid && (selectedWorkbenchProjectRef?.subjectId !== subjectId || selectedWorkbenchProjectRef?.projectId !== pid)) {
-      useAppStore.getState().setSelectedWorkbenchProjectRef({ subjectId, projectId: pid })
+    if (subjectId && pid && (selectedWorkbenchProjectRef?.subjectId !== subjectId || selectedWorkbenchProjectRef?.scopedProjectId !== pid)) {
+      useAppStore.getState().setSelectedWorkbenchProjectRef({ subjectId, scopedProjectId: pid })
       return
     }
     if (pid && selectedWorkbenchProjectId !== pid) {
       useAppStore.getState().setSelectedWorkbenchProjectId(pid)
     }
-  }, [pid, selectedWorkbenchProjectId, selectedWorkbenchProjectRef?.projectId, selectedWorkbenchProjectRef?.subjectId, subjectId])
+  }, [pid, selectedWorkbenchProjectId, selectedWorkbenchProjectRef?.scopedProjectId, selectedWorkbenchProjectRef?.subjectId, subjectId])
 
   const instancesQ = useInstances(projectScope)
   const learningTaskNodesQ = useLearningTaskNodes(projectScope)
@@ -280,7 +280,7 @@ export function WorkbenchPage() {
   const missingRecallPointQs = useQueries({
     queries: missingInstances.map((item) => ({
       queryKey: ["recallPointsByInstance", pid, item.instanceId],
-      queryFn: () => listRecallPointsByInstance(projectScope as ProjectScope, item.instanceId),
+      queryFn: () => listRecallPointsByInstance(projectScope as ScopedProjectRef, item.instanceId),
       enabled: !!projectScope && !isVirtualStudyReviewProject,
     })),
   })
@@ -619,7 +619,7 @@ export function WorkbenchPage() {
     for (const targetInstance of pendingRecallPointProbeInstances) {
       void (async () => {
         try {
-          const result = await listRecallPointsByInstance(projectScope as ProjectScope, targetInstance.instanceId, { timeoutMs: 90_000 })
+          const result = await listRecallPointsByInstance(projectScope as ScopedProjectRef, targetInstance.instanceId, { timeoutMs: 90_000 })
           if (recallPointProbeSessionRef.current !== probeSession) return
           setRecallPointCountByInstanceId((current) => ({
             ...current,

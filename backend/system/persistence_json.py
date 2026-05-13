@@ -167,22 +167,22 @@ def _encode_study_material(item: StudyMaterial) -> dict[str, Any]:
         "materialType": item.material_type.value,
         "title": item.title,
         "createdAtMs": _ts_to_ms(item.created_at),
-        "projectId": None if item.project_id is None else str(item.project_id),
-        "internalProjectKey": None if item.internal_project_key is None else str(item.internal_project_key),
+        "scopedProjectId": None if item.scoped_project_id is None else str(item.scoped_project_id),
+        "internalProjectId": None if item.internal_project_id is None else str(item.internal_project_id),
     }
 
 
 def _decode_study_material(data: dict[str, Any]) -> StudyMaterial:
-    raw_project_id = data["projectId"]
-    raw_internal_project_key = data.get("internalProjectKey")
+    raw_scoped_project_id = data["scopedProjectId"]
+    raw_internal_project_id = data.get("internalProjectId")
     return StudyMaterial(
         subject_id=ProjectId(str(data["subjectId"])),
         material_id=str(data["materialId"]),
         material_type=StudyMaterialType(str(data["materialType"])),
         title=str(data["title"]),
         created_at=_ms_to_ts(int(data["createdAtMs"])),
-        project_id=None if raw_project_id is None else ProjectId(str(raw_project_id)),
-        internal_project_key=None if raw_internal_project_key is None else ProjectId(str(raw_internal_project_key)),
+        scoped_project_id=None if raw_scoped_project_id is None else ProjectId(str(raw_scoped_project_id)),
+        internal_project_id=None if raw_internal_project_id is None else ProjectId(str(raw_internal_project_id)),
     )
 
 
@@ -191,7 +191,7 @@ def _encode_subject_material_link(link: SubjectMaterialLink) -> dict[str, Any]:
         "subjectId": str(link.subject_id),
         "materialId": link.material_id,
         "materialType": link.material_type.value,
-        "projectId": None if link.project_id is None else str(link.project_id),
+        "scopedProjectId": None if link.scoped_project_id is None else str(link.scoped_project_id),
     }
 
 
@@ -200,7 +200,7 @@ def _decode_subject_material_link(data: dict[str, Any]) -> SubjectMaterialLink:
         subject_id=ProjectId(str(data["subjectId"])),
         material_id=str(data["materialId"]),
         material_type=StudyMaterialType(str(data["materialType"])),
-        project_id=None if data.get("projectId") is None else ProjectId(str(data.get("projectId"))),
+        scoped_project_id=None if data.get("scopedProjectId") is None else ProjectId(str(data.get("scopedProjectId"))),
     )
 
 

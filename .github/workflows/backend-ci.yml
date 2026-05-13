@@ -71,6 +71,7 @@ jobs:
           --health-retries 20
     env:
       PLM_TEST_POSTGRES_DSN: postgresql://learningpyramid:learningpyramid@127.0.0.1:5432/learningpyramid_test
+      LEARNINGPYRAMID_TEST_POSTGRES_DSN: postgresql://learningpyramid:learningpyramid@127.0.0.1:5432/learningpyramid_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -89,3 +90,8 @@ jobs:
           tests/test_postgres_runtime.py
           tests/test_postgres_hosted_api.py
           -q
+      - name: Run backend release gate
+        run: |
+          python tools/verify_backend_release_gate.py --scope restart
+          python tools/verify_backend_release_gate.py --scope identity
+          python tools/verify_backend_release_gate.py --scope storage

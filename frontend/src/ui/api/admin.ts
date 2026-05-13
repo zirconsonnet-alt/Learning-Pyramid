@@ -262,7 +262,7 @@ export const AdminPayoutIdentitySchema = z.object({
   status: z.string(),
   verifiedAt: z.string(),
   revokedAt: z.string().nullable(),
-  latestBindingAttemptId: z.string().nullable(),
+  latestWithdrawalConfirmationAttemptId: z.string().nullable(),
   failureReason: z.string(),
   createdAt: z.string(),
   updatedAt: z.string(),

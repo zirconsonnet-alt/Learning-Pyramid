@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 import { apiRequest } from "@/ui/api/http"
-import { projectApiPath, type ProjectScope } from "@/ui/api/projectScope"
+import { projectApiPath, type ScopedProjectRef } from "@/ui/api/projectScope"
 import type { RichContent } from "@/ui/api/richContent"
 import { normalizeRichContent, RichContentSchema } from "@/ui/api/richContent"
 
@@ -27,7 +27,7 @@ export type SubmitLearningTaskItem = {
 }
 
 export function submitLearningTask(params: {
-  scope: ProjectScope
+  scope: ScopedProjectRef
   title: string
   items: SubmitLearningTaskItem[]
 }) {
@@ -47,14 +47,14 @@ export function submitLearningTask(params: {
   })
 }
 
-export function getLearningTask(scope: ProjectScope, learningTaskId: string) {
+export function getLearningTask(scope: ScopedProjectRef, learningTaskId: string) {
   return apiRequest({
     path: projectApiPath(scope, `/learning-tasks/${learningTaskId}`),
     responseSchema: LearningTaskSchema,
   })
 }
 
-export function editLearningTask(scope: ProjectScope, learningTaskId: string, title: string) {
+export function editLearningTask(scope: ScopedProjectRef, learningTaskId: string, title: string) {
   return apiRequest({
     path: projectApiPath(scope, `/learning-tasks/${learningTaskId}`),
     method: "PATCH",

@@ -15,7 +15,10 @@ DEFAULT_SCAN_PATHS = (
     "backend/system/api.py",
 )
 SKIP_PARTS = {"__pycache__", ".git", ".pytest_cache", ".venv", "venv", "node_modules"}
-SCOPED_ROUTE_MARKER = "/subjects/{subjectId}/projects/{projectId}"
+SCOPED_ROUTE_MARKERS = (
+    "/subjects/{subjectId}/projects/{scopedProjectId}",
+    "/subjects/{subjectId}/projects/{projectId}",
+)
 APPROVED_TRANSPORT_OWNER_PATHS = {
     "adapter/scoped_projects.py",
 }
@@ -239,7 +242,7 @@ def _scoped_identity_findings(path: Path, root: Path, text: str) -> list[GuardFi
             continue
         for decorator in node.decorator_list:
             route_path = _router_path_from_decorator(decorator)
-            if not route_path or SCOPED_ROUTE_MARKER not in route_path:
+            if not route_path or not any(marker in route_path for marker in SCOPED_ROUTE_MARKERS):
                 continue
             source = ast.get_source_segment(text, node) or ""
             if "resolve_scoped_project" not in source:

@@ -7,7 +7,7 @@ export type StudyMetricRange = {
 
 export type StudyProjectReference = {
   subjectId: string
-  projectId: string
+  scopedProjectId: string
 }
 
 export type DailyWorkbenchStats = {

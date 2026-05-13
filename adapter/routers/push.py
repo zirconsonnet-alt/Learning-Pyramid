@@ -8,7 +8,7 @@ from backend.system.api import SystemAPI
 
 router = APIRouter()
 
-@router.get("/subjects/{subjectId}/projects/{projectId}/review-recommendations")
+@router.get("/subjects/{subjectId}/projects/{scopedProjectId}/review-recommendations")
 def list_review_recommendations(
     offset: int = Query(0, ge=0),
     limit: int | None = Query(None, ge=1),
@@ -16,10 +16,10 @@ def list_review_recommendations(
     api: SystemAPI = Depends(get_api),
 ) -> dict:
     page = api.list_review_recommendations(project.internal_project_id, offset=offset, limit=limit)  # type: ignore[arg-type]
-    return {"ok": True, "data": review_recommendation_page_to_dto(page, public_project_id=project.project_id)}
+    return {"ok": True, "data": review_recommendation_page_to_dto(page, public_project_id=project.scoped_project_id)}
 
 
-@router.get("/subjects/{subjectId}/projects/{projectId}/push-candidates")
+@router.get("/subjects/{subjectId}/projects/{scopedProjectId}/push-candidates")
 def get_push_candidates(
     maxResults: int = Query(50, ge=1),
     project: ScopedProject = Depends(resolve_scoped_project),

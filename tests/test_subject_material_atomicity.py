@@ -32,16 +32,16 @@ class SubjectMaterialAtomicityTest(unittest.TestCase):
 
         materials = api.list_subject_materials(subject_id)
         self.assertIn(material, materials)
-        self.assertIsNotNone(material.internal_project_key)
-        child_store = api.sys.g.projects[str(material.internal_project_key)]
+        self.assertIsNotNone(material.internal_project_id)
+        child_store = api.sys.g.projects[str(material.internal_project_id)]
         self.assertIsNotNone(child_store.project)
         self.assertEqual(subject_id, child_store.project.subject_id)
-        self.assertEqual(material.project_id, child_store.project.scoped_project_id)
+        self.assertEqual(material.scoped_project_id, child_store.project.scoped_project_id)
         self.assertFalse(hasattr(child_store.project, "legacy_global_project_id"))
         self.assertIsNotNone(child_store.subject_material_link)
         self.assertEqual(subject_id, child_store.subject_material_link.subject_id)
         self.assertEqual(material.material_id, child_store.subject_material_link.material_id)
-        self.assertEqual(material.project_id, child_store.subject_material_link.project_id)
+        self.assertEqual(material.scoped_project_id, child_store.subject_material_link.scoped_project_id)
 
     def test_bare_project_is_not_treated_as_subject_material_root(self) -> None:
         api = SystemAPI(InMemorySystem())
@@ -68,7 +68,7 @@ class SubjectMaterialAtomicityTest(unittest.TestCase):
             material_type=StudyMaterialType.BOOK,
             title="Book",
         )
-        material_project_id = material.internal_project_key
+        material_project_id = material.internal_project_id
         self.assertIsNotNone(material_project_id)
         before_materials = api.list_subject_materials(subject_id)
         before_child_title = api.sys.g.projects[str(material_project_id)].project.title
@@ -96,7 +96,7 @@ class SubjectMaterialAtomicityTest(unittest.TestCase):
             material_type=StudyMaterialType.BOOK,
             title="Book",
         )
-        material_project_id = material.internal_project_key
+        material_project_id = material.internal_project_id
         self.assertIsNotNone(material_project_id)
         before_materials = api.list_subject_materials(subject_id)
         before_project_ids = set(api.sys.g.projects.keys())
@@ -144,7 +144,7 @@ class SubjectMaterialAtomicityTest(unittest.TestCase):
             material_type=StudyMaterialType.BOOK,
             title="Book",
         )
-        material_project_id = material.internal_project_key
+        material_project_id = material.internal_project_id
         self.assertIsNotNone(material_project_id)
         before_materials = api.list_subject_materials(subject_id)
         before_child_title = api.sys.g.projects[str(material_project_id)].project.title
@@ -172,7 +172,7 @@ class SubjectMaterialAtomicityTest(unittest.TestCase):
             material_type=StudyMaterialType.BOOK,
             title="Book",
         )
-        material_project_id = material.internal_project_key
+        material_project_id = material.internal_project_id
         self.assertIsNotNone(material_project_id)
         before_materials = api.list_subject_materials(subject_id)
         before_project_ids = set(api.sys.g.projects.keys())
@@ -310,7 +310,7 @@ class SubjectMaterialAtomicityTest(unittest.TestCase):
         api = SystemAPI(InMemorySystem())
         subject_id = api.create_subject("Subject")
         material = api.list_subject_materials(subject_id)[0]
-        material_project_id = material.internal_project_key
+        material_project_id = material.internal_project_id
         self.assertIsNotNone(material_project_id)
 
         with self.assertRaises(PreconditionFailure):
@@ -320,20 +320,20 @@ class SubjectMaterialAtomicityTest(unittest.TestCase):
         api = SystemAPI(InMemorySystem())
         subject_id = api.create_subject("Subject")
         material = api.list_subject_materials(subject_id)[0]
-        material_project_id = material.internal_project_key
+        material_project_id = material.internal_project_id
         self.assertIsNotNone(material_project_id)
 
         with self.assertRaises(PreconditionFailure):
             api.delete_subject(material_project_id)
 
         self.assertEqual("Subject", api._get_active_project_metadata(subject_id).title)
-        self.assertEqual(material_project_id, api.list_subject_materials(subject_id)[0].internal_project_key)
+        self.assertEqual(material_project_id, api.list_subject_materials(subject_id)[0].internal_project_id)
 
     def test_subject_material_mutations_require_subject_root_id(self) -> None:
         api = SystemAPI(InMemorySystem())
         subject_id = api.create_subject("Subject")
         material = api.list_subject_materials(subject_id)[0]
-        material_project_id = material.internal_project_key
+        material_project_id = material.internal_project_id
         self.assertIsNotNone(material_project_id)
         before_project_ids = set(api.sys.g.projects.keys())
 

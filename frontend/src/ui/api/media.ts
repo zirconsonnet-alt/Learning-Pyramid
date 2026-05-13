@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 import { apiRequest, getBaseUrl, type ApiRequestExecutionOptions } from "@/ui/api/http"
-import { projectApiPath, type ProjectScope } from "@/ui/api/projectScope"
+import { projectApiPath, type ScopedProjectRef } from "@/ui/api/projectScope"
 
 export const PlaybackDescriptorSchema = z.object({
   instanceId: z.string(),
@@ -15,7 +15,7 @@ export const PlaybackDescriptorSchema = z.object({
 })
 export type PlaybackDescriptor = z.infer<typeof PlaybackDescriptorSchema>
 
-export function getInstancePlaybackDescriptor(scope: ProjectScope, instanceId: string, options?: ApiRequestExecutionOptions) {
+export function getInstancePlaybackDescriptor(scope: ScopedProjectRef, instanceId: string, options?: ApiRequestExecutionOptions) {
   return apiRequest({
     path: projectApiPath(scope, `/media/instances/${instanceId}/playback`),
     responseSchema: PlaybackDescriptorSchema,

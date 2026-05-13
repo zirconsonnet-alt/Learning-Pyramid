@@ -16,6 +16,7 @@ from backend.system.auth_store import (
     SQLiteAuthStore,
     _AuthStoreImpl,
     _hash_session_token,
+    _pomodoro_weekly_schedule_to_json,
     _session_token_lookup_candidates,
     decrypt_secret_value,
 )
@@ -508,6 +509,81 @@ class BackendLegacyCleanupTest(unittest.TestCase):
         self.assertEqual(DEFAULT_POMODORO_FOCUS_MINUTES, plan.focus_minutes)
         self.assertEqual(DEFAULT_POMODORO_BREAK_MINUTES, plan.break_minutes)
         self.assertEqual(DEFAULT_POMODORO_COUNT, plan.pomodoro_count)
+
+    def test_pomodoro_project_refs_use_scoped_project_id(self) -> None:
+        settings = _AuthStoreImpl._row_to_user_global_settings(
+            {
+                "user_id": "user_1",
+                "payload_json": json.dumps(
+                    {
+                        "pomodoro": {
+                            "enabled": True,
+                            "weeklySchedule": {
+                                "mon": {
+                                    "plans": [
+                                        {
+                                            "enabled": True,
+                                            "startTime": "09:00",
+                                            "focusMinutes": 25,
+                                            "breakMinutes": 5,
+                                            "pomodoroCount": 1,
+                                            "projectRefs": [
+                                                {"subjectId": "subj_000001", "scopedProjectId": "proj_000001"}
+                                            ],
+                                        }
+                                    ]
+                                }
+                            },
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+                "updated_at": "2026-01-01T00:00:00+00:00",
+            }
+        )
+
+        self.assertEqual(
+            ({"subjectId": "subj_000001", "scopedProjectId": "proj_000001"},),
+            settings.pomodoro_weekly_schedule[0].project_refs,
+        )
+        self.assertEqual(
+            [{"subjectId": "subj_000001", "scopedProjectId": "proj_000001"}],
+            _pomodoro_weekly_schedule_to_json(settings.pomodoro_weekly_schedule)["mon"]["plans"][0]["projectRefs"],
+        )
+
+    def test_pomodoro_project_refs_reject_ambiguous_project_id(self) -> None:
+        settings = _AuthStoreImpl._row_to_user_global_settings(
+            {
+                "user_id": "user_1",
+                "payload_json": json.dumps(
+                    {
+                        "pomodoro": {
+                            "enabled": True,
+                            "weeklySchedule": {
+                                "mon": {
+                                    "plans": [
+                                        {
+                                            "enabled": True,
+                                            "startTime": "09:00",
+                                            "focusMinutes": 25,
+                                            "breakMinutes": 5,
+                                            "pomodoroCount": 1,
+                                            "projectRefs": [
+                                                {"subjectId": "subj_000001", "projectId": "proj_000001"}
+                                            ],
+                                        }
+                                    ]
+                                }
+                            },
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+                "updated_at": "2026-01-01T00:00:00+00:00",
+            }
+        )
+
+        self.assertEqual((None,), settings.pomodoro_weekly_schedule[0].project_refs)
 
     def test_wechat_order_id_requires_out_trade_no(self) -> None:
         with self.assertRaises(PreconditionFailure):

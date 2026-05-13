@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 import { apiRequest } from "@/ui/api/http"
-import { projectApiPath, type ProjectScope } from "@/ui/api/projectScope"
+import { projectApiPath, type ScopedProjectRef } from "@/ui/api/projectScope"
 import { ProjectTypeSchema } from "@/ui/api/projects"
 
 export const ReviewChainTemplateItemSchema = z.object({
@@ -39,12 +39,12 @@ export const ProjectConfigSchema = z.object({
 })
 export type ProjectConfig = z.infer<typeof ProjectConfigSchema>
 
-export function getProjectConfig(scope: ProjectScope) {
+export function getProjectConfig(scope: ScopedProjectRef) {
   return apiRequest({ path: projectApiPath(scope, "/project-config"), responseSchema: ProjectConfigSchema })
 }
 
 export function setReviewRecommendationConfig(
-  scope: ProjectScope,
+  scope: ScopedProjectRef,
   params: {
     minRecallPointsToEnable?: number
     maxHistoryLen?: number
@@ -66,7 +66,7 @@ export function setReviewRecommendationConfig(
 }
 
 export function setLayerConfig(
-  scope: ProjectScope,
+  scope: ScopedProjectRef,
   layerIndex: number,
   p: { reviewChainTemplate?: ReviewChainTemplateItem[]; kNode?: number; kPoint?: number; thresholdRollUpEnabled?: boolean },
 ) {
@@ -83,7 +83,7 @@ export function setLayerConfig(
   })
 }
 
-export function setProjectRollUpStrategy(scope: ProjectScope, rollUpStrategy: RollUpStrategy) {
+export function setProjectRollUpStrategy(scope: ScopedProjectRef, rollUpStrategy: RollUpStrategy) {
   return apiRequest({
     path: projectApiPath(scope, "/roll-up-strategy"),
     method: "POST",

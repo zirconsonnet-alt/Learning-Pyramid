@@ -26,7 +26,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { ApiError } from "@/ui/api/http"
 import type { Instance } from "@/ui/api/instances"
 import { listLearningObjectNodes, listRecallPointsByLearningObjectNode, type LearningObjectNode } from "@/ui/api/learningObjects"
-import type { ProjectScope } from "@/ui/api/projectScope"
+import type { ScopedProjectRef } from "@/ui/api/projectScope"
 import { richContentToPlainText } from "@/ui/api/richContent"
 import { getRecallPoint, type RecallPoint } from "@/ui/api/review"
 import type { MaterialSourceKind } from "@/ui/api/projects"
@@ -935,11 +935,11 @@ function ChatMessageRow(props: {
 }
 
 export function AiChatPage() {
-  const { subjectId = "", projectId } = useParams()
+  const { subjectId = "", scopedProjectId } = useParams()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const pid = projectId ?? ""
-  const projectScope: ProjectScope | null = subjectId && pid ? { subjectId, projectId: pid } : null
+  const pid = scopedProjectId ?? ""
+  const projectScope: ScopedProjectRef | null = subjectId && pid ? { subjectId, scopedProjectId: pid } : null
   const globalSettingsPath = buildGlobalSettingsPath()
 
   const touchQaActivity = useCallback(() => {
@@ -982,12 +982,12 @@ export function AiChatPage() {
   const instancesQ = useInstances(projectScope)
   const objectNodesQ = useQuery({
     queryKey: ["learningObjectNodes", subjectId, pid],
-    queryFn: () => listLearningObjectNodes(projectScope as ProjectScope),
+    queryFn: () => listLearningObjectNodes(projectScope as ScopedProjectRef),
     enabled: !!projectScope,
   })
   const recallPointQ = useQuery({
     queryKey: ["recallPoint", subjectId, pid, nodeIdParam],
-    queryFn: () => getRecallPoint(projectScope as ProjectScope, nodeIdParam),
+    queryFn: () => getRecallPoint(projectScope as ScopedProjectRef, nodeIdParam),
     enabled: !!projectScope && isAiChatContextKind(kindParam) && kindParam === "recall" && !!nodeIdParam && !conversationIdParam,
   })
 
@@ -1012,13 +1012,13 @@ export function AiChatPage() {
   const activeNodeId = selectedConversation?.nodeId ?? (kindParam === "task" ? null : nodeIdParam || null)
   const selectedRecallPointQ = useQuery({
     queryKey: ["recallPoint", subjectId, pid, activeNodeId],
-    queryFn: () => getRecallPoint(projectScope as ProjectScope, activeNodeId ?? ""),
+    queryFn: () => getRecallPoint(projectScope as ScopedProjectRef, activeNodeId ?? ""),
     enabled: !!projectScope && activeKind === "recall" && !!activeNodeId,
   })
   const activeRecallPoint = activeKind === "recall" ? selectedRecallPointQ.data ?? (selectedConversation ? null : recallPointQ.data ?? null) : null
   const activeObjectRecallPointsQ = useQuery({
     queryKey: ["aiChatObjectRecallPoints", subjectId, pid, activeNodeId],
-    queryFn: () => listRecallPointsByLearningObjectNode(projectScope as ProjectScope, activeNodeId ?? ""),
+    queryFn: () => listRecallPointsByLearningObjectNode(projectScope as ScopedProjectRef, activeNodeId ?? ""),
     enabled: !!projectScope && activeKind === "object" && !!activeNodeId,
   })
   const activeNodeLabel =
@@ -1193,8 +1193,9 @@ export function AiChatPage() {
     if (!courseContext) return null
 
     try {
+      if (!projectScope) return null
       const document = await loadSubtitleDocumentForInstance({
-        scope: projectScope as ProjectScope,
+        scope: projectScope,
         instance: courseContext.instance,
         sourceKind: courseContext.sourceKind,
       })
@@ -1283,7 +1284,7 @@ export function AiChatPage() {
 
     const resolvedSupplementalContext = supplementalContext === undefined ? await loadActiveSupplementalContext() : supplementalContext
     const result = await askProjectLlmStream(
-      projectScope as ProjectScope,
+      projectScope as ScopedProjectRef,
       {
         prompt: buildConversationPrompt(baseMessages, latestUserInput),
         systemPrompt,

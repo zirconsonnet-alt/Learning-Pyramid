@@ -59,8 +59,8 @@ function currentScopedDirectoryKey(projectId: string) {
   const match = window.location.pathname.match(/^\/subjects\/([^/]+)\/projects\/([^/]+)/)
   if (!match) return projectId
   const subjectId = decodeURIComponent(match[1] ?? "")
-  const currentProjectId = decodeURIComponent(match[2] ?? "")
-  if (!subjectId || currentProjectId !== projectId) return projectId
+  const currentScopedProjectId = decodeURIComponent(match[2] ?? "")
+  if (!subjectId || currentScopedProjectId !== projectId) return projectId
   return `${subjectId}:${projectId}`
 }
 

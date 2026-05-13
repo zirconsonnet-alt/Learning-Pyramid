@@ -83,7 +83,7 @@ def study_material_to_dto(m: StudyMaterial) -> Dict[str, Any]:
         "materialType": _jsonable(m.material_type),
         "title": m.title,
         "createdAt": _jsonable(m.created_at),
-        "projectId": None if m.project_id is None else str(m.project_id),
+        "scopedProjectId": None if m.scoped_project_id is None else str(m.scoped_project_id),
     }
 
 
@@ -95,7 +95,8 @@ def subject_context_to_dto(payload: Dict[str, Any]) -> Dict[str, Any]:
         "subject": subject_to_dto(subject),
         "currentMaterial": study_material_to_dto(current_material),
         "materials": [study_material_to_dto(item) for item in materials],
-        "currentProjectId": str(payload["current_project_id"]),
+        "currentScopedProjectId": str(payload.get("current_scoped_project_id") or current_material.scoped_project_id),
+        "currentInternalProjectId": str(payload["current_internal_project_id"]),
     }
 
 

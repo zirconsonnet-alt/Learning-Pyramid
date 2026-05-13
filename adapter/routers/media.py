@@ -63,7 +63,7 @@ def stream_guide_demo_media(demoId: str) -> FileResponse:
     )
 
 
-@router.post("/subjects/{subjectId}/projects/{projectId}/media-assets")
+@router.post("/subjects/{subjectId}/projects/{scopedProjectId}/media-assets")
 async def upload_media_asset(request: Request, project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
     content_type = str(request.headers.get("content-type", "")).strip().lower()
     if not content_type.startswith("image/"):
@@ -84,12 +84,12 @@ async def upload_media_asset(request: Request, project: ScopedProject = Depends(
         "data": {
             "assetId": str(asset.asset_id),
             "mimeType": asset.mime_type,
-            "url": f"/api/subjects/{project.subject_id}/projects/{project.project_id}/media-assets/{asset.asset_id}",
+            "url": f"/api/subjects/{project.subject_id}/projects/{project.scoped_project_id}/media-assets/{asset.asset_id}",
         },
     }
 
 
-@router.get("/subjects/{subjectId}/projects/{projectId}/media-assets/{assetId}")
+@router.get("/subjects/{subjectId}/projects/{scopedProjectId}/media-assets/{assetId}")
 def stream_media_asset(assetId: str, project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> FileResponse:
     asset = api.get_media_asset(project.internal_project_id, MediaAssetId(assetId))  # type: ignore[arg-type]
     file_path = api.resolve_media_asset_file_path(project.internal_project_id, MediaAssetId(assetId))  # type: ignore[arg-type]
@@ -101,7 +101,7 @@ def stream_media_asset(assetId: str, project: ScopedProject = Depends(resolve_sc
     return FileResponse(path=str(file_path), media_type=asset.mime_type or media_type or "application/octet-stream", filename=file_path.name)
 
 
-@router.get("/subjects/{subjectId}/projects/{projectId}/media/instances/{instanceId}")
+@router.get("/subjects/{subjectId}/projects/{scopedProjectId}/media/instances/{instanceId}")
 def stream_instance_media(instanceId: str, project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> FileResponse:
     require_server_media_stream_enabled()
     file_path = api.resolve_instance_media_file_path(project.internal_project_id, instanceId)  # type: ignore[arg-type]
@@ -114,28 +114,28 @@ def stream_instance_media(instanceId: str, project: ScopedProject = Depends(reso
     return FileResponse(path=str(file_path), media_type=media_type or "application/octet-stream", filename=file_path.name)
 
 
-@router.get("/subjects/{subjectId}/projects/{projectId}/media/instances/{instanceId}/playback")
+@router.get("/subjects/{subjectId}/projects/{scopedProjectId}/media/instances/{instanceId}/playback")
 def get_instance_playback(instanceId: str, project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
-    media_base_path = f"/api/subjects/{project.subject_id}/projects/{project.project_id}/media/instances/{instanceId}"
+    media_base_path = f"/api/subjects/{project.subject_id}/projects/{project.scoped_project_id}/media/instances/{instanceId}"
     return {
         "ok": True,
         "data": api.get_instance_playback_descriptor(project.internal_project_id, instanceId, media_base_path=media_base_path),  # type: ignore[arg-type]
     }
 
 
-@router.get("/subjects/{subjectId}/projects/{projectId}/media/instances/{instanceId}/hls.m3u8")
+@router.get("/subjects/{subjectId}/projects/{scopedProjectId}/media/instances/{instanceId}/hls.m3u8")
 def get_instance_hls_playlist(
     instanceId: str,
     project: ScopedProject = Depends(resolve_scoped_project),
     api: SystemAPI = Depends(get_api),
     auth_store: AuthStore = Depends(get_auth_store),
 ) -> Response:
-    media_base_path = f"/api/subjects/{project.subject_id}/projects/{project.project_id}/media/instances/{instanceId}"
+    media_base_path = f"/api/subjects/{project.subject_id}/projects/{project.scoped_project_id}/media/instances/{instanceId}"
     playlist = api.get_instance_hls_playlist(project.internal_project_id, instanceId, auth_store=auth_store, media_base_path=media_base_path)  # type: ignore[arg-type]
     return Response(content=playlist, media_type="application/vnd.apple.mpegurl")
 
 
-@router.get("/subjects/{subjectId}/projects/{projectId}/media/instances/{instanceId}/segments/{segmentPath:path}")
+@router.get("/subjects/{subjectId}/projects/{scopedProjectId}/media/instances/{instanceId}/segments/{segmentPath:path}")
 def get_instance_hls_segment(
     instanceId: str,
     segmentPath: str,
@@ -163,7 +163,7 @@ def get_instance_hls_segment(
     return StreamingResponse(_iter_bytes(), media_type=content_type)
 
 
-@router.get("/subjects/{subjectId}/projects/{projectId}/instances/{instanceId}/subtitle-file")
+@router.get("/subjects/{subjectId}/projects/{scopedProjectId}/instances/{instanceId}/subtitle-file")
 def get_instance_subtitle_file(
     instanceId: str,
     project: ScopedProject = Depends(resolve_scoped_project),

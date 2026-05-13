@@ -186,7 +186,7 @@ def ask_llm(
     return {"ok": True, "data": {"content": content}}
 
 
-@router.post("/subjects/{subjectId}/projects/{projectId}/llm/ask")
+@router.post("/subjects/{subjectId}/projects/{scopedProjectId}/llm/ask")
 def ask_project_llm(
     req: AskProjectLlmRequest,
     request: Request,
@@ -218,7 +218,7 @@ def reject_scoped_raw_llm_chat() -> None:
     raise PreconditionFailure("scoped raw LLM chat completions are not supported; use project LLM ask endpoints")
 
 
-@router.post("/subjects/{subjectId}/projects/{projectId}/llm/chat-completions")
+@router.post("/subjects/{subjectId}/projects/{scopedProjectId}/llm/chat-completions")
 def ask_project_llm_chat_completions(
     req: AskProjectLlmRawChatCompletionRequest,
     request: Request,
@@ -230,7 +230,7 @@ def ask_project_llm_chat_completions(
     reject_scoped_raw_llm_chat()
 
 
-@router.get("/subjects/{subjectId}/projects/{projectId}/llm/debug/latest")
+@router.get("/subjects/{subjectId}/projects/{scopedProjectId}/llm/debug/latest")
 def get_latest_project_llm_debug(
     project: ScopedProject = Depends(resolve_scoped_project),
     api: SystemAPI = Depends(get_api),
@@ -238,7 +238,7 @@ def get_latest_project_llm_debug(
     return {"ok": True, "data": api.get_latest_project_llm_debug(project.internal_project_id)}  # type: ignore[arg-type]
 
 
-@router.post("/subjects/{subjectId}/projects/{projectId}/llm/ask/stream")
+@router.post("/subjects/{subjectId}/projects/{scopedProjectId}/llm/ask/stream")
 def ask_project_llm_stream(
     req: AskProjectLlmRequest,
     request: Request,

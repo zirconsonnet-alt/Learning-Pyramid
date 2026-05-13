@@ -6,7 +6,7 @@ import { ApiError } from "@/ui/api/http"
 import type { ProjectType } from "@/ui/api/projects"
 import { ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { listLearningObjectNodes, type LearningObjectNode } from "@/ui/api/learningObjects"
-import type { ProjectScope } from "@/ui/api/projectScope"
+import type { ScopedProjectRef } from "@/ui/api/projectScope"
 import { completeGuideWalkthroughStep } from "@/ui/guideWalkthrough/guideWalkthroughController"
 import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
 import { getVirtualStudyReviewLearningObjectNodes } from "@/ui/guideWalkthrough/virtualStudyReviewProject"
@@ -168,7 +168,7 @@ export function LearningObjectTree({
   selectedInstanceId: string | null
   onSelectInstance: (instanceId: string) => void
 }) {
-  const projectScope: ProjectScope = { subjectId, projectId }
+  const projectScope: ScopedProjectRef = { subjectId, scopedProjectId: projectId }
   const directoryBinding = useProjectDirectoryBinding(projectId)
   const q = useQuery({
     queryKey: ["learningObjectNodes", subjectId, projectId],

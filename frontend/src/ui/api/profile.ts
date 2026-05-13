@@ -16,7 +16,7 @@ const UserPomodoroPlanSchema = z.object({
       z
         .object({
           subjectId: z.string().min(1),
-          projectId: z.string().min(1),
+          scopedProjectId: z.string().min(1),
         })
         .nullable(),
     )

@@ -15,8 +15,11 @@ from backend.models.project_storage_config import ProjectStorageConfig
 from backend.models.review_task_queue import ReviewTaskQueue
 from backend.repositories.persistence_interfaces import (
     ProjectSnapshotRecord,
+    SubjectMaterialCollectionRecord,
+    SubjectMaterialRelationshipRecord,
     SqlLifecycleRepository,
     SqlProjectSnapshotRepository,
+    SqlSubjectMaterialRelationshipRepository,
     SqlSystemStateRepository,
     SqlUnitOfWork,
     SystemStateRecord,
@@ -171,6 +174,123 @@ class SQLiteProjectSnapshotRepository(SqlProjectSnapshotRepository):
             subject_id=None if row["subject_id"] is None else str(row["subject_id"]),
             scoped_project_id=None if row["scoped_project_id"] is None else str(row["scoped_project_id"]),
             project_sequence=int(row["project_sequence"] or 0),
+            updated_at=str(row["updated_at"]),
+        )
+
+
+class SQLiteSubjectMaterialRelationshipRepository(SqlSubjectMaterialRelationshipRepository):
+    def delete_for_subject(self, session: SQLitePersistenceSession, subject_id: str) -> None:
+        session.raw_connection.execute("DELETE FROM subject_material_relationship_index WHERE subject_id = ?", (str(subject_id),))
+        session.raw_connection.execute("DELETE FROM subject_material_collection_index WHERE subject_id = ?", (str(subject_id),))
+
+    def upsert_collection(self, session: SQLitePersistenceSession, record: SubjectMaterialCollectionRecord) -> None:
+        session.raw_connection.execute(
+            """
+            INSERT INTO subject_material_collection_index (
+                subject_id,
+                initialized,
+                updated_at
+            )
+            VALUES (?, ?, ?)
+            ON CONFLICT(subject_id) DO UPDATE SET
+                initialized = excluded.initialized,
+                updated_at = excluded.updated_at
+            """,
+            (
+                str(record.subject_id),
+                1 if record.initialized else 0,
+                str(record.updated_at),
+            ),
+        )
+
+    def insert_relationships(
+        self,
+        session: SQLitePersistenceSession,
+        records: Sequence[SubjectMaterialRelationshipRecord],
+    ) -> None:
+        for record in records:
+            session.raw_connection.execute(
+                """
+                INSERT INTO subject_material_relationship_index (
+                    subject_id,
+                    material_id,
+                    material_type,
+                    title,
+                    created_at_ms,
+                    scoped_project_id,
+                    internal_project_id,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(record.subject_id),
+                    str(record.material_id),
+                    str(record.material_type),
+                    str(record.title),
+                    int(record.created_at_ms),
+                    str(record.scoped_project_id),
+                    str(record.internal_project_id),
+                    str(record.updated_at),
+                ),
+            )
+
+    def get_collection(self, session: SQLitePersistenceSession, subject_id: str) -> SubjectMaterialCollectionRecord | None:
+        row = session.raw_connection.execute(
+            """
+            SELECT subject_id, initialized, updated_at
+            FROM subject_material_collection_index
+            WHERE subject_id = ?
+            """,
+            (str(subject_id),),
+        ).fetchone()
+        return None if row is None else self._collection_row_to_record(row)
+
+    def list_for_subject(self, session: SQLitePersistenceSession, subject_id: str) -> tuple[SubjectMaterialRelationshipRecord, ...]:
+        rows = session.raw_connection.execute(
+            """
+            SELECT subject_id, material_id, material_type, title, created_at_ms, scoped_project_id, internal_project_id, updated_at
+            FROM subject_material_relationship_index
+            WHERE subject_id = ?
+            ORDER BY created_at_ms ASC, material_id ASC
+            """,
+            (str(subject_id),),
+        ).fetchall()
+        return tuple(self._relationship_row_to_record(row) for row in rows)
+
+    def get_by_internal_project(
+        self,
+        session: SQLitePersistenceSession,
+        internal_project_id: str,
+    ) -> SubjectMaterialRelationshipRecord | None:
+        row = session.raw_connection.execute(
+            """
+            SELECT subject_id, material_id, material_type, title, created_at_ms, scoped_project_id, internal_project_id, updated_at
+            FROM subject_material_relationship_index
+            WHERE internal_project_id = ?
+            """,
+            (str(internal_project_id),),
+        ).fetchone()
+        return None if row is None else self._relationship_row_to_record(row)
+
+    @staticmethod
+    def _collection_row_to_record(row: sqlite3.Row) -> SubjectMaterialCollectionRecord:
+        return SubjectMaterialCollectionRecord(
+            subject_id=str(row["subject_id"]),
+            initialized=bool(int(row["initialized"])),
+            updated_at=str(row["updated_at"]),
+        )
+
+    @staticmethod
+    def _relationship_row_to_record(row: sqlite3.Row) -> SubjectMaterialRelationshipRecord:
+        return SubjectMaterialRelationshipRecord(
+            subject_id=str(row["subject_id"]),
+            material_id=str(row["material_id"]),
+            material_type=str(row["material_type"]),
+            title=str(row["title"]),
+            created_at_ms=int(row["created_at_ms"]),
+            scoped_project_id=str(row["scoped_project_id"]),
+            internal_project_id=str(row["internal_project_id"]),
             updated_at=str(row["updated_at"]),
         )
 
@@ -517,6 +637,7 @@ class SQLitePersistenceUnitOfWork(SqlUnitOfWork):
         self.session: SQLitePersistenceSession
         self.system_state = SQLiteSystemStateRepository()
         self.project_snapshots = SQLiteProjectSnapshotRepository()
+        self.subject_material_relationships = SQLiteSubjectMaterialRelationshipRepository()
         self.project_lifecycle = SQLiteProjectLifecycleRepository()
 
     @property

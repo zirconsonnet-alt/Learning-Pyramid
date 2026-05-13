@@ -4,6 +4,7 @@ import unittest
 from backend.repositories.persistence_interfaces import SystemStateRecord
 from backend.repositories.persistence_interfaces import ProjectSnapshotRecord
 from backend.repositories.postgres_persistence import PostgresProjectSnapshotRepository, PostgresSystemStateRepository
+from backend.system.postgres_schema import POSTGRES_MIGRATIONS
 
 
 class _Cursor:
@@ -68,6 +69,14 @@ class PostgresSystemStateRepositoryTest(unittest.TestCase):
 
 
 class PostgresProjectSnapshotRepositoryTest(unittest.TestCase):
+    def test_project_snapshot_schema_keeps_required_snapshot_json_shell(self):
+        migration = next(item for item in POSTGRES_MIGRATIONS if item.name == "project_snapshot_json_shell")
+
+        sql = migration.sql_factory()
+
+        self.assertIn("ALTER TABLE project_snapshots", sql)
+        self.assertIn("ADD COLUMN IF NOT EXISTS snapshot_json TEXT NOT NULL DEFAULT '{}'", sql)
+
     def test_upsert_writes_empty_snapshot_shell_for_non_null_legacy_column(self):
         conn = _Connection()
         session = _Session(conn)

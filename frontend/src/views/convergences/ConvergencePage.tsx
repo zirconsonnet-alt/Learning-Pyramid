@@ -4,7 +4,7 @@ import { ChevronLeft, RefreshCw } from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
-import type { ProjectScope } from "@/ui/api/projectScope"
+import type { ScopedProjectRef } from "@/ui/api/projectScope"
 import type { ReviewTask } from "@/ui/api/review"
 import { getRangeSnapshot, getReviewTask } from "@/ui/api/review"
 import { ContentEmptyState, ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
@@ -54,11 +54,11 @@ type ConvergenceRoundEntry = {
 }
 
 export function ConvergencePage() {
-  const { subjectId = "", projectId, convergenceId } = useParams()
+  const { subjectId = "", scopedProjectId, convergenceId } = useParams()
   const navigate = useNavigate()
-  const pid = projectId ?? ""
+  const pid = scopedProjectId ?? ""
   const cid = convergenceId ?? ""
-  const projectScope: ProjectScope | null = subjectId && pid ? { subjectId, projectId: pid } : null
+  const projectScope: ScopedProjectRef | null = subjectId && pid ? { subjectId, scopedProjectId: pid } : null
   const { projectTitle } = useProject(projectScope)
   const convergenceQ = useConvergence(projectScope, cid)
 
@@ -66,7 +66,7 @@ export function ConvergencePage() {
     queries:
       convergenceQ.data?.reviewTaskIds.map((reviewTaskId) => ({
         queryKey: ["reviewTask", subjectId, pid, reviewTaskId],
-        queryFn: () => getReviewTask(projectScope as ProjectScope, reviewTaskId),
+        queryFn: () => getReviewTask(projectScope as ScopedProjectRef, reviewTaskId),
         enabled: !!projectScope,
       })) ?? [],
   })
@@ -75,7 +75,7 @@ export function ConvergencePage() {
       const inputRangeId = query.data?.inputRangeId ?? ""
       return {
         queryKey: ["range", subjectId, pid, inputRangeId],
-        queryFn: () => getRangeSnapshot(projectScope as ProjectScope, inputRangeId),
+        queryFn: () => getRangeSnapshot(projectScope as ScopedProjectRef, inputRangeId),
         enabled: !!projectScope && !!inputRangeId,
       }
     }),
@@ -85,7 +85,7 @@ export function ConvergencePage() {
       const resultRangeId = query.data?.resultRangeId ?? ""
       return {
         queryKey: ["range", subjectId, pid, resultRangeId],
-        queryFn: () => getRangeSnapshot(projectScope as ProjectScope, resultRangeId),
+        queryFn: () => getRangeSnapshot(projectScope as ScopedProjectRef, resultRangeId),
         enabled: !!projectScope && !!resultRangeId,
       }
     }),

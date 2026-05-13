@@ -197,8 +197,8 @@ export const CommissionAccountSchema = z.object({
 
 export type CommissionAccount = z.infer<typeof CommissionAccountSchema>
 
-export const PayoutBindingAttemptSchema = z.object({
-  bindingAttemptId: z.string(),
+export const WithdrawalConfirmationAttemptSchema = z.object({
+  withdrawalConfirmationAttemptId: z.string(),
   provider: z.string(),
   channel: z.string(),
   status: z.string(),
@@ -207,7 +207,7 @@ export const PayoutBindingAttemptSchema = z.object({
   state: z.string().optional(),
   authorizationUrl: z.string().optional(),
   desktopReturnUrl: z.string().optional(),
-  mobileBindingUrl: z.string().optional(),
+  mobileConfirmationUrl: z.string().optional(),
   qrCodePayload: z.string().optional(),
   pollAfterMs: z.number().optional(),
   qrExpiresAt: z.string().nullable().optional(),
@@ -223,16 +223,16 @@ export const PayoutBindingAttemptSchema = z.object({
   failureReason: z.string(),
 })
 
-export type PayoutBindingAttempt = z.infer<typeof PayoutBindingAttemptSchema>
+export type WithdrawalConfirmationAttempt = z.infer<typeof WithdrawalConfirmationAttemptSchema>
 
 export const PayoutIdentitySchema = z.object({
   provider: z.string(),
-  status: z.enum(["unbound", "binding", "ready", "invalid", "provider_unavailable"]).or(z.string()),
+  status: z.enum(["unbound", "awaiting_withdrawal_confirmation", "ready", "invalid", "provider_unavailable"]).or(z.string()),
   identityId: z.string().nullable(),
   maskedLabel: z.string().nullable(),
   verifiedAt: z.string().nullable(),
   nextAction: z.string().optional(),
-  latestBindingAttempt: PayoutBindingAttemptSchema.nullable().optional(),
+  latestWithdrawalConfirmationAttempt: WithdrawalConfirmationAttemptSchema.nullable().optional(),
 })
 
 export type PayoutIdentity = z.infer<typeof PayoutIdentitySchema>
@@ -424,23 +424,23 @@ export function getPayoutIdentity() {
   })
 }
 
-export function startPayoutBindingAttempt(params: { channel?: string; returnUrl: string; amountCent?: number }) {
+export function startWithdrawalConfirmationAttempt(params: { channel?: string; returnUrl: string; amountCent: number }) {
   return apiRequest({
-    path: "/commissions/payout-identity/wechat/binding-attempts",
+    path: "/commissions/payout-identity/wechat/withdrawal-confirmation-attempts",
     method: "POST",
     body: {
       channel: params.channel ?? "desktop_qr_official_account_h5",
       returnUrl: params.returnUrl,
-      amountCent: params.amountCent ?? 0,
+      amountCent: params.amountCent,
     },
-    responseSchema: PayoutBindingAttemptSchema,
+    responseSchema: WithdrawalConfirmationAttemptSchema,
   })
 }
 
-export function pollPayoutBindingAttempt(params: { bindingAttemptId: string }) {
+export function pollWithdrawalConfirmationAttempt(params: { withdrawalConfirmationAttemptId: string }) {
   return apiRequest({
-    path: `/commissions/payout-identity/wechat/binding-attempts/${encodeURIComponent(params.bindingAttemptId)}`,
-    responseSchema: PayoutBindingAttemptSchema.extend({
+    path: `/commissions/payout-identity/wechat/withdrawal-confirmation-attempts/${encodeURIComponent(params.withdrawalConfirmationAttemptId)}`,
+    responseSchema: WithdrawalConfirmationAttemptSchema.extend({
       identityId: z.string().optional(),
       maskedLabel: z.string().optional(),
       verifiedAt: z.string().optional(),
@@ -449,35 +449,32 @@ export function pollPayoutBindingAttempt(params: { bindingAttemptId: string }) {
   })
 }
 
-export function openMobilePayoutBinding(params: { bindingAttemptId: string; state: string }) {
+export function openMobileWithdrawalConfirmation(params: { withdrawalConfirmationAttemptId: string; state: string }) {
   return apiRequest({
-    path: `/commissions/payout-identity/wechat/mobile-bind?attempt=${encodeURIComponent(params.bindingAttemptId)}&state=${encodeURIComponent(params.state)}&response=json`,
-    responseSchema: PayoutBindingAttemptSchema,
+    path: `/commissions/payout-identity/wechat/withdrawal-confirmation/mobile?attempt=${encodeURIComponent(params.withdrawalConfirmationAttemptId)}&state=${encodeURIComponent(params.state)}&response=json`,
+    responseSchema: WithdrawalConfirmationAttemptSchema,
   })
 }
 
-export function completePayoutBinding(params: {
-  bindingAttemptId: string
+export function completeWithdrawalConfirmationAttempt(params: {
+  withdrawalConfirmationAttemptId: string
   authorizationCode: string
   state: string
   confirmedLearningPyramidUserId?: string
 }) {
   return apiRequest({
-    path: "/commissions/payout-identity/wechat/bind",
+    path: "/commissions/payout-identity/wechat/withdrawal-confirmation/complete",
     method: "POST",
     body: {
-      bindingAttemptId: params.bindingAttemptId,
+      withdrawalConfirmationAttemptId: params.withdrawalConfirmationAttemptId,
       authorizationCode: params.authorizationCode.trim(),
       state: params.state,
       confirmedLearningPyramidUserId: params.confirmedLearningPyramidUserId,
     },
-    responseSchema: z.union([
-      PayoutIdentityDetailSchema,
-      z.object({
-        identity: PayoutIdentityDetailSchema,
-        withdrawal: CommissionWithdrawalSchema,
-      }),
-    ]),
+    responseSchema: z.object({
+      identity: PayoutIdentityDetailSchema,
+      withdrawal: CommissionWithdrawalSchema,
+    }),
   })
 }
 

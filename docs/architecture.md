@@ -1,6 +1,6 @@
 # 后端架构
 
-更新时间：2026-05-10
+更新时间：2026-05-13
 
 本文只记录当前仓库可验证的后端结构和边界。未确认的重构方向、兼容策略和未来计划不写入本文。
 
@@ -27,7 +27,7 @@
 - HTTP 适配层。
 - `adapter/main.py` 负责应用装配、中间件、路由挂载和前端静态文件服务。
 - `adapter/routers/` 负责请求参数、请求体、依赖注入和响应 DTO 适配。
-- `adapter/scoped_projects.py` 是 scoped project identity 的适配边界，负责把公开的 `{subjectId, projectId}` 解析为后端内部 project id。
+- `adapter/scoped_projects.py` 是 scoped project identity 的适配边界，负责把公开的 `{subjectId, scopedProjectId}` 解析为后端内部 project id。
 
 `backend/models/`
 
@@ -40,6 +40,7 @@
 - `backend/system/api.py` 暴露 `SystemAPI`，是路由调用后端行为的主要入口。
 - `backend/system/inmemory_system.py` 承载当前核心运行时状态和领域操作。
 - `backend/system/sql_backend.py` 根据 `LEARNINGPYRAMID_SQL_BACKEND` 选择 SQLite 或 PostgreSQL。
+- `backend/system/subject_material_recovery.py` 负责学科材料关系的确定性恢复计划和完整性问题建模，不参与请求期兜底解析。
 - auth、membership、media、ASR、LLM、public downloads、runtime feature/config 等运行时能力位于该目录下。
 
 `backend/repositories/`
@@ -47,6 +48,7 @@
 - 持久化接口与 SQLite / PostgreSQL 实现。
 - `persistence_interfaces.py` 定义持久化边界。
 - `sqlite_persistence.py` 和 `postgres_persistence.py` 是具体存储实现。
+- subject-material relationship repository 是学科材料身份的持久化边界，SQLite/PostgreSQL native load 都从该关系表恢复 `studyMaterials` 和 `subjectMaterialLink`。
 
 `tools/`
 
@@ -60,7 +62,7 @@
 2. `request_context_middleware` 生成或传播 `X-Request-ID`，并记录请求日志。
 3. `auth_middleware` 根据 `LEARNINGPYRAMID_ENABLE_AUTH` 和公开路径规则决定是否要求认证。
 4. router 解析请求并调用公开的 `SystemAPI` 方法。
-5. scoped project 路由通过 `resolve_scoped_project()` 把公开 project id 解析成内部 project id。
+5. scoped project 路由通过 `resolve_scoped_project()` 把公开 scoped project id 解析成内部 project id。
 6. `SystemAPI` 执行业务行为并读写当前持久化 store。
 7. router 把结果映射成 HTTP 响应。
 

@@ -13,7 +13,7 @@ import {
 import { Link, useParams } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
-import type { ProjectScope } from "@/ui/api/projectScope"
+import type { ScopedProjectRef } from "@/ui/api/projectScope"
 import { type RecallPoint, type ReviewRecommendationItem } from "@/ui/api/review"
 import { normalizeRichContent, richContentHasMeaning, setRichContentText, type RichContent } from "@/ui/api/richContent"
 import { RichContentRenderer } from "@/ui/components/RichContentRenderer"
@@ -84,9 +84,9 @@ function StatBlock({ label, value, detail }: { label: string; value: string; det
 }
 
 export function ReviewRecommendationsPage() {
-  const { subjectId = "", projectId } = useParams()
-  const pid = projectId ?? ""
-  const projectScope: ProjectScope | null = subjectId && pid ? { subjectId, projectId: pid } : null
+  const { subjectId = "", scopedProjectId } = useParams()
+  const pid = scopedProjectId ?? ""
+  const projectScope: ScopedProjectRef | null = subjectId && pid ? { subjectId, scopedProjectId: pid } : null
   const [selectedRecallPointId, setSelectedRecallPointId] = useState<string | null>(null)
   const [revealedAnswerIds, setRevealedAnswerIds] = useState<Record<string, boolean>>({})
   const [sessionAnswers, setSessionAnswers] = useState<Record<string, SessionAnswer>>({})

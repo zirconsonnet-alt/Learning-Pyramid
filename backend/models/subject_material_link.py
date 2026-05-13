@@ -9,4 +9,4 @@ class SubjectMaterialLink:
     subject_id: ProjectId
     material_id: str
     material_type: StudyMaterialType
-    project_id: ProjectId | None = None
+    scoped_project_id: ProjectId | None = None

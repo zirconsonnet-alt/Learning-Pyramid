@@ -13,31 +13,31 @@ from backend.system.api import SystemAPI
 router = APIRouter()
 
 
-@router.get("/subjects/{subjectId}/projects/{projectId}/layers")
+@router.get("/subjects/{subjectId}/projects/{scopedProjectId}/layers")
 def list_layers(project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
-    layers = [layer_to_dto(l, public_project_id=project.project_id) for l in api.list_layers(project.internal_project_id)]  # type: ignore[arg-type]
+    layers = [layer_to_dto(l, public_project_id=project.scoped_project_id) for l in api.list_layers(project.internal_project_id)]  # type: ignore[arg-type]
     return {"ok": True, "data": layers}
 
 
-@router.get("/subjects/{subjectId}/projects/{projectId}/aggregation-queue/{layerIndex}")
+@router.get("/subjects/{subjectId}/projects/{scopedProjectId}/aggregation-queue/{layerIndex}")
 def get_agg_queue(layerIndex: int, project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
     ids = api.get_aggregation_queue_current(project.internal_project_id, layerIndex)  # type: ignore[arg-type]
     return {"ok": True, "data": {"currentNodeIds": [str(x) for x in ids]}}
 
 
-@router.post("/subjects/{subjectId}/projects/{projectId}/layers/{layerIndex}/roll-up")
+@router.post("/subjects/{subjectId}/projects/{scopedProjectId}/layers/{layerIndex}/roll-up")
 def manual_roll_up(layerIndex: int, req: ManualRollUpRequest, project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
     parent = api.manual_roll_up(project.internal_project_id, layerIndex, req.title)  # type: ignore[arg-type]
     return {"ok": True, "data": {"parentNodeId": None if parent is None else str(parent)}}
 
 
-@router.get("/subjects/{subjectId}/projects/{projectId}/aggregation-events")
+@router.get("/subjects/{subjectId}/projects/{scopedProjectId}/aggregation-events")
 def list_events(project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
-    events = [aggregation_event_to_dto(ev, public_project_id=project.project_id) for ev in api.list_aggregation_events(project.internal_project_id)]  # type: ignore[arg-type]
+    events = [aggregation_event_to_dto(ev, public_project_id=project.scoped_project_id) for ev in api.list_aggregation_events(project.internal_project_id)]  # type: ignore[arg-type]
     return {"ok": True, "data": events}
 
 
-@router.post("/subjects/{subjectId}/projects/{projectId}/layers/{layerIndex}/config")
+@router.post("/subjects/{subjectId}/projects/{scopedProjectId}/layers/{layerIndex}/config")
 def set_layer_config(layerIndex: int, req: SetLayerConfigRequest, project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
     tmpl = None
     if req.reviewChainTemplate is not None:

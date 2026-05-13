@@ -73,9 +73,9 @@ def _is_public_api_path(path: str) -> bool:
         return True
     if path == "/api/payments/wechat/transfer-notify":
         return True
-    if path == "/api/commissions/payout-identity/wechat/mobile-bind":
+    if path == "/api/commissions/payout-identity/wechat/withdrawal-confirmation/mobile":
         return True
-    if path == "/api/commissions/payout-identity/wechat/bind":
+    if path == "/api/commissions/payout-identity/wechat/withdrawal-confirmation/complete":
         return True
     if path.startswith("/api/commissions/withdrawals/") and path.endswith("/wechat-confirmation/started"):
         return True
@@ -89,7 +89,7 @@ def _is_public_api_path(path: str) -> bool:
 def _public_api_path_supports_optional_auth(path: str) -> bool:
     return path in {
         "/api/system/capabilities",
-        "/api/commissions/payout-identity/wechat/bind",
+        "/api/commissions/payout-identity/wechat/withdrawal-confirmation/complete",
     }
 
 

@@ -90,7 +90,7 @@ function createBaseVirtualStudyReviewState(): VirtualStudyReviewState {
     materialType: "COURSE",
     title: "线性代数导论示范视频",
     createdAt,
-    projectId: VIRTUAL_STUDY_REVIEW_PROJECT_ID,
+    scopedProjectId: VIRTUAL_STUDY_REVIEW_PROJECT_ID,
   }
   const projectBinding: ProjectMaterialSourceBinding = {
     projectId: VIRTUAL_STUDY_REVIEW_PROJECT_ID,
@@ -222,7 +222,8 @@ function createBaseVirtualStudyReviewState(): VirtualStudyReviewState {
     subject,
     currentMaterial: subjectMaterial,
     materials: [subjectMaterial],
-    currentProjectId: VIRTUAL_STUDY_REVIEW_PROJECT_ID,
+    currentScopedProjectId: VIRTUAL_STUDY_REVIEW_PROJECT_ID,
+    currentInternalProjectId: VIRTUAL_STUDY_REVIEW_PROJECT_ID,
   }
 
   return {
@@ -275,7 +276,7 @@ export function startVirtualStudyReviewProjectSession() {
   useAppStore.getState().setSelectedSubjectId(VIRTUAL_STUDY_REVIEW_SUBJECT_ID)
   useAppStore.getState().setSelectedWorkbenchProjectRef({
     subjectId: VIRTUAL_STUDY_REVIEW_SUBJECT_ID,
-    projectId: VIRTUAL_STUDY_REVIEW_PROJECT_ID,
+    scopedProjectId: VIRTUAL_STUDY_REVIEW_PROJECT_ID,
   })
   return virtualStudyReviewState
 }
@@ -286,7 +287,7 @@ export function clearVirtualStudyReviewProjectSession() {
   useAppStore.getState().removeRecentWorkbenchProjectId(VIRTUAL_STUDY_REVIEW_PROJECT_ID)
   useAppStore.getState().removeRecentWorkbenchProjectRef({
     subjectId: VIRTUAL_STUDY_REVIEW_SUBJECT_ID,
-    projectId: VIRTUAL_STUDY_REVIEW_PROJECT_ID,
+    scopedProjectId: VIRTUAL_STUDY_REVIEW_PROJECT_ID,
   })
   if (useAppStore.getState().selectedSubjectId === VIRTUAL_STUDY_REVIEW_SUBJECT_ID) {
     useAppStore.getState().setSelectedSubjectId(null)

@@ -394,7 +394,7 @@ def _admin_payout_identity_to_dto(item: PayoutIdentity, auth_store: AuthStore) -
         "status": item.status,
         "verifiedAt": item.verified_at,
         "revokedAt": item.revoked_at,
-        "latestBindingAttemptId": item.latest_binding_attempt_id,
+        "latestWithdrawalConfirmationAttemptId": item.latest_binding_attempt_id,
         "failureReason": item.failure_reason,
         "createdAt": item.created_at,
         "updatedAt": item.updated_at,

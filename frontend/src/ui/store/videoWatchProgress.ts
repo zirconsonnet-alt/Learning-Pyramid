@@ -4,7 +4,7 @@ import {
   syncVideoWatchProgressRange as syncRemoteVideoWatchProgressRange,
   type VideoWatchProgress,
 } from "@/ui/api/instances"
-import type { ProjectScope } from "@/ui/api/projectScope"
+import type { ScopedProjectRef } from "@/ui/api/projectScope"
 import { loadVideoWatchCoverageMap, recordVideoWatchCoverageRange } from "@/ui/store/videoWatchCoverage"
 
 export type VideoWatchProgressMap = Record<string, VideoWatchProgress>
@@ -28,7 +28,7 @@ export function loadVideoWatchProgressMap(
 }
 
 export async function fetchPersistentVideoWatchProgressMap(
-  scope: ProjectScope,
+  scope: ScopedProjectRef,
   projectId: string,
   instanceIds: string[],
   signal?: AbortSignal,
@@ -38,7 +38,7 @@ export async function fetchPersistentVideoWatchProgressMap(
 }
 
 export function syncVideoWatchProgressRange(
-  scope: ProjectScope,
+  scope: ScopedProjectRef,
   projectId: string,
   instanceId: string,
   startMs: number,
@@ -50,7 +50,7 @@ export function syncVideoWatchProgressRange(
   return watchedMs
 }
 
-export function markVideoWatchProgressCompleted(scope: ProjectScope, projectId: string, instanceId: string, durationMs: number) {
+export function markVideoWatchProgressCompleted(scope: ScopedProjectRef, projectId: string, instanceId: string, durationMs: number) {
   const safeDurationMs = Math.max(0, Math.floor(durationMs))
   if (safeDurationMs <= 0) return 0
   const watchedMs = recordVideoWatchCoverageRange(projectId, instanceId, 0, safeDurationMs, safeDurationMs)

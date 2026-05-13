@@ -1,9 +1,9 @@
-export type ProjectScope = {
+export type ScopedProjectRef = {
   subjectId: string
-  projectId: string
+  scopedProjectId: string
 }
 
-export function projectApiPath(scope: ProjectScope, suffix = "") {
+export function projectApiPath(scope: ScopedProjectRef, suffix = "") {
   const normalizedSuffix = suffix ? (suffix.startsWith("/") ? suffix : `/${suffix}`) : ""
-  return `/subjects/${encodeURIComponent(scope.subjectId)}/projects/${encodeURIComponent(scope.projectId)}${normalizedSuffix}`
+  return `/subjects/${encodeURIComponent(scope.subjectId)}/projects/${encodeURIComponent(scope.scopedProjectId)}${normalizedSuffix}`
 }

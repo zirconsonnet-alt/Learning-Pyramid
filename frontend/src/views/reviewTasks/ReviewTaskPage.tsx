@@ -3,7 +3,7 @@ import { ChevronLeft, RefreshCw } from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
-import type { ProjectScope } from "@/ui/api/projectScope"
+import type { ScopedProjectRef } from "@/ui/api/projectScope"
 import { RichContentRenderer } from "@/ui/components/RichContentRenderer"
 import { ContentEmptyState, ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
@@ -57,11 +57,11 @@ function firstError(items: unknown[]) {
 }
 
 export function ReviewTaskPage() {
-  const { subjectId = "", projectId, reviewTaskId } = useParams()
+  const { subjectId = "", scopedProjectId, reviewTaskId } = useParams()
   const navigate = useNavigate()
-  const pid = projectId ?? ""
+  const pid = scopedProjectId ?? ""
   const rtid = reviewTaskId ?? ""
-  const projectScope: ProjectScope | null = subjectId && pid ? { subjectId, projectId: pid } : null
+  const projectScope: ScopedProjectRef | null = subjectId && pid ? { subjectId, scopedProjectId: pid } : null
   const { projectTitle } = useProject(projectScope)
   const { reviewTaskQ, inputRangeQ, resultRangeQ, recallPointQs } = useReviewTaskDetails(projectScope, rtid)
 

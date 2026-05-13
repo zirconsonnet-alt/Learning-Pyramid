@@ -183,11 +183,11 @@ def delete_subject_material(
 ) -> dict:
     _ensure_auth_subject_access(subjectId, request, auth_store)
     cleanup_ids = [
-        item.internal_project_key or item.project_id
+        item.internal_project_id or item.scoped_project_id
         for item in api.list_subject_materials(subjectId)  # type: ignore[arg-type]
         if item.material_id == materialId
-        and item.project_id is not None
-        and str(item.project_id) != str(subjectId)
+        and item.scoped_project_id is not None
+        and str(item.scoped_project_id) != str(subjectId)
     ]
     api.delete_subject_material(subjectId, materialId)  # type: ignore[arg-type]
     if current_runtime_features().auth_enabled:
@@ -196,22 +196,22 @@ def delete_subject_material(
     return {"ok": True, "data": None}
 
 
-@router.get("/subjects/{subjectId}/projects/{projectId}/subject-context")
+@router.get("/subjects/{subjectId}/projects/{scopedProjectId}/subject-context")
 def get_scoped_project_subject_context(
     project: ScopedProject = Depends(resolve_scoped_project),
     api: SystemAPI = Depends(get_api),
 ) -> dict:
-    payload = api.get_scoped_subject_context_for_project(project.internal_project_id, public_project_id=project.project_id)  # type: ignore[arg-type]
+    payload = api.get_scoped_subject_context_for_project(project.internal_project_id, public_project_id=project.scoped_project_id)  # type: ignore[arg-type]
     return {"ok": True, "data": subject_context_to_dto(payload)}
 
 
-@router.get("/subjects/{subjectId}/projects/{projectId}/project-config")
+@router.get("/subjects/{subjectId}/projects/{scopedProjectId}/project-config")
 def get_project_config(project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
     cfg = api.get_project_config(project.internal_project_id)  # type: ignore[arg-type]
-    return {"ok": True, "data": with_project_reference(project_config_to_dto(cfg), subject_id=project.subject_id, project_id=project.project_id)}
+    return {"ok": True, "data": with_project_reference(project_config_to_dto(cfg), subject_id=project.subject_id, project_id=project.scoped_project_id)}
 
 
-@router.post("/subjects/{subjectId}/projects/{projectId}/roll-up-strategy")
+@router.post("/subjects/{subjectId}/projects/{scopedProjectId}/roll-up-strategy")
 def set_project_roll_up_strategy(
     req: SetProjectRollUpStrategyRequest,
     project: ScopedProject = Depends(resolve_scoped_project),
@@ -221,7 +221,7 @@ def set_project_roll_up_strategy(
     return {"ok": True, "data": None}
 
 
-@router.post("/subjects/{subjectId}/projects/{projectId}/review-recommendation-config")
+@router.post("/subjects/{subjectId}/projects/{scopedProjectId}/review-recommendation-config")
 def set_review_recommendation_config(
     req: SetReviewRecommendationConfigRequest,
     project: ScopedProject = Depends(resolve_scoped_project),
@@ -237,19 +237,19 @@ def set_review_recommendation_config(
     return {"ok": True, "data": None}
 
 
-@router.get("/subjects/{subjectId}/projects/{projectId}/project-storage-config")
+@router.get("/subjects/{subjectId}/projects/{scopedProjectId}/project-storage-config")
 def get_project_storage_config(project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
     cfg = api.get_project_storage_config(project.internal_project_id)  # type: ignore[arg-type]
-    return {"ok": True, "data": with_project_reference(project_storage_config_to_dto(cfg), subject_id=project.subject_id, project_id=project.project_id)}
+    return {"ok": True, "data": with_project_reference(project_storage_config_to_dto(cfg), subject_id=project.subject_id, project_id=project.scoped_project_id)}
 
 
-@router.get("/subjects/{subjectId}/projects/{projectId}/material-source-binding")
+@router.get("/subjects/{subjectId}/projects/{scopedProjectId}/material-source-binding")
 def get_project_material_source_binding(project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
     binding = api.get_project_material_source_binding(project.internal_project_id)  # type: ignore[arg-type]
-    return {"ok": True, "data": with_project_reference(project_material_source_binding_to_dto(binding), subject_id=project.subject_id, project_id=project.project_id)}
+    return {"ok": True, "data": with_project_reference(project_material_source_binding_to_dto(binding), subject_id=project.subject_id, project_id=project.scoped_project_id)}
 
 
-@router.post("/subjects/{subjectId}/projects/{projectId}/material-source-binding")
+@router.post("/subjects/{subjectId}/projects/{scopedProjectId}/material-source-binding")
 def set_project_material_source_binding(
     req: SetProjectMaterialSourceBindingRequest,
     project: ScopedProject = Depends(resolve_scoped_project),
@@ -263,7 +263,7 @@ def set_project_material_source_binding(
     return {"ok": True, "data": None}
 
 
-@router.get("/subjects/{subjectId}/projects/{projectId}/audit-log-events")
+@router.get("/subjects/{subjectId}/projects/{scopedProjectId}/audit-log-events")
 def list_audit_log_events(project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
-    items = [audit_log_event_to_dto(ev, public_project_id=project.project_id) for ev in api.list_audit_log_events(project.internal_project_id)]  # type: ignore[arg-type]
+    items = [audit_log_event_to_dto(ev, public_project_id=project.scoped_project_id) for ev in api.list_audit_log_events(project.internal_project_id)]  # type: ignore[arg-type]
     return {"ok": True, "data": items}

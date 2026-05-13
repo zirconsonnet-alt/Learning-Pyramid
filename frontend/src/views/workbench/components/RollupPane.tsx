@@ -6,7 +6,7 @@ import { Link } from "react-router-dom"
 import { getAggregationQueue, type Layer } from "@/ui/api/layers"
 import { ApiError } from "@/ui/api/http"
 import type { LearningTaskNode } from "@/ui/api/learningTaskNodes"
-import type { ProjectScope } from "@/ui/api/projectScope"
+import type { ScopedProjectRef } from "@/ui/api/projectScope"
 import { ContentEmptyState } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
@@ -88,7 +88,7 @@ export function RollupPane({
   rollUpError: unknown
   thresholdRollUpEnabledByLayerIndex: Record<number, boolean>
 }) {
-  const projectScope: ProjectScope = { subjectId, projectId }
+  const projectScope: ScopedProjectRef = { subjectId, scopedProjectId: projectId }
   const [selectedLayerIndex, setSelectedLayerIndex] = useState<number | null>(null)
 
   const aggregationQueueQs = useQueries({

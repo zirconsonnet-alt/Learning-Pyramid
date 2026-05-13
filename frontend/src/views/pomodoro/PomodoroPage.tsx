@@ -140,8 +140,8 @@ function normalizePomodoroProjectRef(value: unknown): PomodoroProjectReference |
   if (!value || typeof value !== "object") return null
   const input = value as Partial<PomodoroProjectReference>
   const subjectId = typeof input.subjectId === "string" ? input.subjectId.trim() : ""
-  const projectId = typeof input.projectId === "string" ? input.projectId.trim() : ""
-  return subjectId && projectId ? { subjectId, projectId } : null
+  const scopedProjectId = typeof input.scopedProjectId === "string" ? input.scopedProjectId.trim() : ""
+  return subjectId && scopedProjectId ? { subjectId, scopedProjectId } : null
 }
 
 function normalizeDraftProjectRefs(projectRefs: Array<PomodoroProjectReference | null> | undefined, pomodoroCount: number) {
@@ -179,6 +179,10 @@ function buildScopedWorkbenchPath(subjectId: string, projectId: string) {
   return subjectId && projectId ? `/subjects/${encodeURIComponent(subjectId)}/projects/${encodeURIComponent(projectId)}/workbench` : ""
 }
 
+function toPomodoroProjectReference(project: { subjectId: string; projectId: string }): PomodoroProjectReference {
+  return { subjectId: project.subjectId, scopedProjectId: project.projectId }
+}
+
 function buildPomodoroSubjectProjectOptions(
   subjects: Subject[],
   materialResults: Array<StudyMaterial[] | undefined>,
@@ -189,20 +193,20 @@ function buildPomodoroSubjectProjectOptions(
 
   subjects.forEach((subject, index) => {
     const options = (materialResults[index] ?? [])
-      .filter((material) => material.projectId)
+      .filter((material) => material.scopedProjectId)
       .map((material) => {
-        const projectId = material.projectId ?? ""
+        const projectId = material.scopedProjectId ?? ""
         return {
           subjectId: subject.subjectId,
           subjectTitle: subject.title,
           projectId,
-          title: material.title || projectTitleByRef.get(pomodoroProjectRefKey({ subjectId: subject.subjectId, projectId })) || "未命名项目",
+          title: material.title || projectTitleByRef.get(pomodoroProjectRefKey({ subjectId: subject.subjectId, scopedProjectId: projectId })) || "未命名项目",
           materialType: material.materialType,
         }
       })
 
     for (const option of options) {
-      projectTitleByProjectRef.set(pomodoroProjectRefKey(option), option.title)
+      projectTitleByProjectRef.set(pomodoroProjectRefKey(toPomodoroProjectReference(option)), option.title)
     }
     subjectProjectOptions.set(subject.subjectId, options)
   })
@@ -478,7 +482,7 @@ function buildPomodoroPlanMetricSummaries(schedule: PomodoroWeekSchedule, now: n
     ).filter((segment) => segment.phase === "focus")
     const segments: PomodoroSegmentMetricSummary[] = focusSegments.map((segment) =>
       loadPomodoroSegmentMetricSummary({
-        projectId: segment.projectRef?.projectId ?? null,
+        projectId: segment.projectRef?.scopedProjectId ?? null,
         projectRef: segment.projectRef ?? null,
         dateKey,
         planId: plan.id,
@@ -813,7 +817,7 @@ export function PomodoroPage() {
     () =>
       (subjectsQ.data ?? []).map((subject, index) => ({
         subject,
-        materials: (materialResults[index] ?? []).filter((material) => material.projectId),
+        materials: (materialResults[index] ?? []).filter((material) => material.scopedProjectId),
       })),
     [materialResults, subjectsQ.data],
   )
@@ -830,7 +834,7 @@ export function PomodoroPage() {
     [subjectProjectOptions],
   )
   const validPomodoroProjectRefs = useMemo(
-    () => new Set(availablePomodoroProjects.map((project) => pomodoroProjectRefKey(project))),
+    () => new Set(availablePomodoroProjects.map((project) => pomodoroProjectRefKey(toPomodoroProjectReference(project)))),
     [availablePomodoroProjects],
   )
   const pomodoroProjectOptionsLoading =
@@ -868,14 +872,14 @@ export function PomodoroPage() {
   const quickPomodoroSelectableProjects = quickPomodoroSubjectId ? subjectProjectOptions.get(quickPomodoroSubjectId) ?? [] : []
   const quickPomodoroProjectRef =
     quickPomodoroSubjectId && quickPomodoroProjectId
-      ? { subjectId: quickPomodoroSubjectId, projectId: quickPomodoroProjectId }
+      ? { subjectId: quickPomodoroSubjectId, scopedProjectId: quickPomodoroProjectId }
       : null
   const canCreateQuickPomodoro =
     Boolean(quickPomodoroProjectRef) &&
     validPomodoroProjectRefs.has(pomodoroProjectRefKey(quickPomodoroProjectRef))
   const focusWorkbenchPath =
     focusProjectRef && hasFocusProject
-      ? buildScopedWorkbenchPath(focusProjectRef.subjectId, focusProjectRef.projectId)
+      ? buildScopedWorkbenchPath(focusProjectRef.subjectId, focusProjectRef.scopedProjectId)
       : ""
   const activeWorkbenchPath = snapshot.status === "running" && snapshot.phase === "focus" && snapshot.canUseWorkbench
     ? focusWorkbenchPath
@@ -1002,7 +1006,7 @@ export function PomodoroPage() {
       if (!alreadyTracked) {
         quickSegments.push(
           loadPomodoroSegmentMetricSummary({
-            projectId: quickPomodoro.projectRef?.projectId ?? null,
+            projectId: quickPomodoro.projectRef?.scopedProjectId ?? null,
             projectRef: quickPomodoro.projectRef ?? null,
             dateKey: formatDateKey(quickPomodoro.endAtMs),
             planId: QUICK_POMODORO_PLAN_ID,
@@ -1498,11 +1502,11 @@ export function PomodoroPage() {
                                 id={`pomodoro-project-${pomodoroDraft.id}-${index}`}
                                 data-guide-tour={index === 0 ? "pomodoro-project-binding" : undefined}
                                 className="theme-select h-10 w-full rounded-xl px-3 text-sm"
-                                value={projectRef && validPomodoroProjectRefs.has(pomodoroProjectRefKey(projectRef)) ? projectRef.projectId : ""}
+                                value={projectRef && validPomodoroProjectRefs.has(pomodoroProjectRefKey(projectRef)) ? projectRef.scopedProjectId : ""}
                                 disabled={!draftSubjectId}
                                 onChange={(event) => {
                                   const nextProjectId = event.target.value.trim() || null
-                                  const nextProjectRef = nextProjectId ? { subjectId: draftSubjectId, projectId: nextProjectId } : null
+                                  const nextProjectRef = nextProjectId ? { subjectId: draftSubjectId, scopedProjectId: nextProjectId } : null
                                   updatePomodoroDraft(pomodoroDraft.id, (draft) => {
                                     const nextProjectRefs = normalizeDraftProjectRefs(
                                       draft.projectRefs,

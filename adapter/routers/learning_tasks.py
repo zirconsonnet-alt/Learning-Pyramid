@@ -39,7 +39,7 @@ def _to_rich_content(blocks) -> RichContent:
     return tuple(out)
 
 
-@router.post("/subjects/{subjectId}/projects/{projectId}/learning-tasks")
+@router.post("/subjects/{subjectId}/projects/{scopedProjectId}/learning-tasks")
 def submit_learning_task(req: SubmitLearningTaskRequest, project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
     items = []
     for it in req.items:
@@ -56,7 +56,7 @@ def submit_learning_task(req: SubmitLearningTaskRequest, project: ScopedProject 
     return {"ok": True, "data": {"entryNodeId": str(entry_node_id)}}
 
 
-@router.get("/subjects/{subjectId}/projects/{projectId}/learning-tasks/{learningTaskId}")
+@router.get("/subjects/{subjectId}/projects/{scopedProjectId}/learning-tasks/{learningTaskId}")
 def get_learning_task(learningTaskId: str, project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
     task = api.get_learning_task(project.internal_project_id, LearningTaskId(learningTaskId))  # type: ignore[arg-type]
     reg = api.get_learning_task_entry_registration(project.internal_project_id, LearningTaskId(learningTaskId))  # type: ignore[arg-type]
@@ -71,12 +71,12 @@ def get_learning_task(learningTaskId: str, project: ScopedProject = Depends(reso
             entry_node_title=entry_node.title,
             review_chain_id=str(reg.review_chain_id),
             target_layer_index=int(reg.target_layer_index),
-            public_project_id=project.project_id,
+            public_project_id=project.scoped_project_id,
         ),
     }
 
 
-@router.get("/subjects/{subjectId}/projects/{projectId}/learning-task-nodes/{nodeId}")
+@router.get("/subjects/{subjectId}/projects/{scopedProjectId}/learning-task-nodes/{nodeId}")
 def get_learning_task_node(nodeId: str, project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
     n = api.get_learning_task_node(project.internal_project_id, nodeId)  # type: ignore[arg-type]
     target_layer_index = _learning_task_node_target_layer_index(api, project.internal_project_id, nodeId)
@@ -85,12 +85,12 @@ def get_learning_task_node(nodeId: str, project: ScopedProject = Depends(resolve
         "data": learning_task_node_to_dto(
             n,
             target_layer_index=target_layer_index,
-            public_project_id=project.project_id,
+            public_project_id=project.scoped_project_id,
         ),
     }
 
 
-@router.get("/subjects/{subjectId}/projects/{projectId}/learning-task-nodes/{nodeId}/binding")
+@router.get("/subjects/{subjectId}/projects/{scopedProjectId}/learning-task-nodes/{nodeId}/binding")
 def get_learning_task_node_binding(nodeId: str, project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
     reg = api.get_learning_task_node_entry_registration(project.internal_project_id, nodeId)  # type: ignore[arg-type]
     entry_node = api.get_learning_task_node(project.internal_project_id, nodeId)  # type: ignore[arg-type]
@@ -98,7 +98,7 @@ def get_learning_task_node_binding(nodeId: str, project: ScopedProject = Depends
     return {
         "ok": True,
         "data": review_chain_binding_to_dto(
-            project_id=project.project_id,
+            project_id=project.scoped_project_id,
             reg=reg,
             entry_node=entry_node,
             learning_task=task,
@@ -106,7 +106,7 @@ def get_learning_task_node_binding(nodeId: str, project: ScopedProject = Depends
     }
 
 
-@router.get("/subjects/{subjectId}/projects/{projectId}/learning-task-nodes")
+@router.get("/subjects/{subjectId}/projects/{scopedProjectId}/learning-task-nodes")
 def list_learning_task_nodes(project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
     nodes = tuple(api.list_learning_task_nodes(project.internal_project_id))  # type: ignore[arg-type]
     target_layers_by_node_id = {
@@ -117,32 +117,32 @@ def list_learning_task_nodes(project: ScopedProject = Depends(resolve_scoped_pro
         learning_task_node_to_dto(
             n,
             target_layer_index=target_layers_by_node_id[id_canonical_text(n.node_id)],
-            public_project_id=project.project_id,
+            public_project_id=project.scoped_project_id,
         )
         for n in nodes
     ]
     return {"ok": True, "data": items}
 
 
-@router.get("/subjects/{subjectId}/projects/{projectId}/learning-task-nodes/{nodeId}/recall-points")
+@router.get("/subjects/{subjectId}/projects/{scopedProjectId}/learning-task-nodes/{nodeId}/recall-points")
 def list_recall_points_by_learning_task_node(nodeId: str, project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
-    items = [recall_point_to_dto(rp, public_project_id=project.project_id) for rp in api.list_recall_points_by_learning_task_node(project.internal_project_id, nodeId)]  # type: ignore[arg-type]
+    items = [recall_point_to_dto(rp, public_project_id=project.scoped_project_id) for rp in api.list_recall_points_by_learning_task_node(project.internal_project_id, nodeId)]  # type: ignore[arg-type]
     return {"ok": True, "data": items}
 
 
-@router.get("/subjects/{subjectId}/projects/{projectId}/learning-task-nodes/{nodeId}/exports/recall-points")
+@router.get("/subjects/{subjectId}/projects/{scopedProjectId}/learning-task-nodes/{nodeId}/exports/recall-points")
 def export_recall_points_by_learning_task_node(nodeId: str, project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
-    items = [recall_point_to_dto(rp, public_project_id=project.project_id) for rp in api.export_recall_points_by_learning_task_node(project.internal_project_id, nodeId)]  # type: ignore[arg-type]
+    items = [recall_point_to_dto(rp, public_project_id=project.scoped_project_id) for rp in api.export_recall_points_by_learning_task_node(project.internal_project_id, nodeId)]  # type: ignore[arg-type]
     return {"ok": True, "data": items}
 
 
-@router.get("/subjects/{subjectId}/projects/{projectId}/learning-task-nodes/{nodeId}/exports/asr")
+@router.get("/subjects/{subjectId}/projects/{scopedProjectId}/learning-task-nodes/{nodeId}/exports/asr")
 def export_asr_by_learning_task_node(nodeId: str, project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
-    items = [asr_artifact_to_dto(art, public_project_id=project.project_id) for art in api.export_asr_by_learning_task_node(project.internal_project_id, nodeId)]  # type: ignore[arg-type]
+    items = [asr_artifact_to_dto(art, public_project_id=project.scoped_project_id) for art in api.export_asr_by_learning_task_node(project.internal_project_id, nodeId)]  # type: ignore[arg-type]
     return {"ok": True, "data": items}
 
 
-@router.patch("/subjects/{subjectId}/projects/{projectId}/learning-tasks/{learningTaskId}")
+@router.patch("/subjects/{subjectId}/projects/{scopedProjectId}/learning-tasks/{learningTaskId}")
 def edit_learning_task(
     learningTaskId: str, req: EditLearningTaskRequest, project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)
 ) -> dict:
@@ -150,7 +150,7 @@ def edit_learning_task(
     return {"ok": True, "data": None}
 
 
-@router.patch("/subjects/{subjectId}/projects/{projectId}/learning-task-nodes/{nodeId}")
+@router.patch("/subjects/{subjectId}/projects/{scopedProjectId}/learning-task-nodes/{nodeId}")
 def edit_learning_task_node(
     nodeId: str, req: EditLearningTaskNodeRequest, project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)
 ) -> dict:

@@ -4,7 +4,7 @@ import { ChevronLeft, RefreshCw } from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
-import type { ProjectScope } from "@/ui/api/projectScope"
+import type { ScopedProjectRef } from "@/ui/api/projectScope"
 import type { Convergence, ReviewTask } from "@/ui/api/review"
 import { getConvergence, getReviewTask } from "@/ui/api/review"
 import { ContentEmptyState, ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
@@ -68,11 +68,11 @@ function convergenceDetailPath(subjectId: string, projectId: string, convergence
 }
 
 export function ReviewChainPage() {
-  const { subjectId = "", projectId, reviewChainId } = useParams()
+  const { subjectId = "", scopedProjectId, reviewChainId } = useParams()
   const navigate = useNavigate()
-  const pid = projectId ?? ""
+  const pid = scopedProjectId ?? ""
   const chainId = reviewChainId ?? ""
-  const projectScope: ProjectScope | null = subjectId && pid ? { subjectId, projectId: pid } : null
+  const projectScope: ScopedProjectRef | null = subjectId && pid ? { subjectId, scopedProjectId: pid } : null
   const { projectTitle } = useProject(projectScope)
   const chainQ = useReviewChain(projectScope, chainId)
   const bindingQ = useReviewChainBinding(projectScope, chainId)
@@ -83,12 +83,12 @@ export function ReviewChainPage() {
         item.kind === "REVIEW_TASK"
           ? {
               queryKey: ["reviewTask", subjectId, pid, item.id],
-              queryFn: () => getReviewTask(projectScope as ProjectScope, item.id),
+              queryFn: () => getReviewTask(projectScope as ScopedProjectRef, item.id),
               enabled: !!projectScope,
             }
           : {
               queryKey: ["convergence", subjectId, pid, item.id],
-              queryFn: () => getConvergence(projectScope as ProjectScope, item.id),
+              queryFn: () => getConvergence(projectScope as ScopedProjectRef, item.id),
               enabled: !!projectScope,
             },
       ) ?? [],

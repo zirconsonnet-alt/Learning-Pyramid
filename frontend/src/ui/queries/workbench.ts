@@ -14,7 +14,7 @@ import { addInstance, bulkRemapRecallPointsInstance, listInstances, listMissingI
 import { submitLearningTask } from "@/ui/api/learningTasks"
 import { getProjectConfig, setLayerConfig, setProjectRollUpStrategy, setReviewRecommendationConfig } from "@/ui/api/projectConfig"
 import type { ReviewChainTemplateItem, RollUpStrategy } from "@/ui/api/projectConfig"
-import type { ProjectScope } from "@/ui/api/projectScope"
+import type { ScopedProjectRef } from "@/ui/api/projectScope"
 import { getProjectStorageConfig } from "@/ui/api/projectStorageConfig"
 import { getQueue } from "@/ui/api/queue"
 import { commitReviewTask, getRangeSnapshot, getRecallPoint, getReviewTask } from "@/ui/api/review"
@@ -36,94 +36,94 @@ import {
 
 const WORKBENCH_QUERY_TIMEOUT_MS = 90_000
 
-function scopeProjectId(scope: ProjectScope | null) {
-  return scope?.projectId ?? ""
+function scopeProjectId(scope: ScopedProjectRef | null) {
+  return scope?.scopedProjectId ?? ""
 }
 
-function scopeSubjectId(scope: ProjectScope | null) {
+function scopeSubjectId(scope: ScopedProjectRef | null) {
   return scope?.subjectId ?? ""
 }
 
-function hasProjectScope(scope: ProjectScope | null): scope is ProjectScope {
-  return Boolean(scope?.subjectId && scope.projectId)
+function hasProjectScope(scope: ScopedProjectRef | null): scope is ScopedProjectRef {
+  return Boolean(scope?.subjectId && scope.scopedProjectId)
 }
 
-export function useInstances(scope: ProjectScope | null) {
+export function useInstances(scope: ScopedProjectRef | null) {
   const projectId = scopeProjectId(scope)
   return useQuery({
     queryKey: ["instances", scopeSubjectId(scope), projectId],
     queryFn: ({ signal }) =>
       isVirtualStudyReviewProjectId(projectId)
         ? getVirtualStudyReviewInstances()
-        : listInstances(scope as ProjectScope, { signal, timeoutMs: WORKBENCH_QUERY_TIMEOUT_MS }),
+        : listInstances(scope as ScopedProjectRef, { signal, timeoutMs: WORKBENCH_QUERY_TIMEOUT_MS }),
     enabled: hasProjectScope(scope),
   })
 }
 
-export function useMissingInstances(scope: ProjectScope | null) {
+export function useMissingInstances(scope: ScopedProjectRef | null) {
   const projectId = scopeProjectId(scope)
   return useQuery({
     queryKey: ["missingInstances", scopeSubjectId(scope), projectId],
-    queryFn: () => (isVirtualStudyReviewProjectId(projectId) ? { instanceIds: [] } : listMissingInstances(scope as ProjectScope)),
+    queryFn: () => (isVirtualStudyReviewProjectId(projectId) ? { instanceIds: [] } : listMissingInstances(scope as ScopedProjectRef)),
     enabled: hasProjectScope(scope),
   })
 }
 
-export function useRecallPointsByInstance(scope: ProjectScope | null, instanceId: string) {
+export function useRecallPointsByInstance(scope: ScopedProjectRef | null, instanceId: string) {
   const projectId = scopeProjectId(scope)
   return useQuery({
     queryKey: ["recallPointsByInstance", scopeSubjectId(scope), projectId, instanceId],
     queryFn: ({ signal }) =>
       isVirtualStudyReviewProjectId(projectId)
         ? getVirtualStudyReviewRecallPointIdsByInstance(instanceId)
-        : listRecallPointsByInstance(scope as ProjectScope, instanceId, { signal, timeoutMs: WORKBENCH_QUERY_TIMEOUT_MS }),
+        : listRecallPointsByInstance(scope as ScopedProjectRef, instanceId, { signal, timeoutMs: WORKBENCH_QUERY_TIMEOUT_MS }),
     enabled: hasProjectScope(scope) && !!instanceId,
   })
 }
 
-export function useInstancePlaybackDescriptor(scope: ProjectScope | null, instanceId: string, enabled = true) {
+export function useInstancePlaybackDescriptor(scope: ScopedProjectRef | null, instanceId: string, enabled = true) {
   const projectId = scopeProjectId(scope)
   return useQuery({
     queryKey: ["instancePlaybackDescriptor", scopeSubjectId(scope), projectId, instanceId],
     queryFn: ({ signal }) =>
       isVirtualStudyReviewProjectId(projectId)
         ? getVirtualStudyReviewPlaybackDescriptor(instanceId)
-        : getInstancePlaybackDescriptor(scope as ProjectScope, instanceId, { signal, timeoutMs: WORKBENCH_QUERY_TIMEOUT_MS }),
+        : getInstancePlaybackDescriptor(scope as ScopedProjectRef, instanceId, { signal, timeoutMs: WORKBENCH_QUERY_TIMEOUT_MS }),
     enabled: enabled && hasProjectScope(scope) && !!instanceId,
     staleTime: 15_000,
   })
 }
 
-export function useQueue(scope: ProjectScope | null) {
+export function useQueue(scope: ScopedProjectRef | null) {
   const projectId = scopeProjectId(scope)
   return useQuery({
     queryKey: ["queue", scopeSubjectId(scope), projectId],
     queryFn: ({ signal }) =>
       isVirtualStudyReviewProjectId(projectId)
         ? getVirtualStudyReviewQueue()
-        : getQueue(scope as ProjectScope, { signal, timeoutMs: WORKBENCH_QUERY_TIMEOUT_MS }),
+        : getQueue(scope as ScopedProjectRef, { signal, timeoutMs: WORKBENCH_QUERY_TIMEOUT_MS }),
     enabled: hasProjectScope(scope),
     refetchInterval: isVirtualStudyReviewProjectId(projectId) ? false : 5_000,
   })
 }
 
-export function useAddInstance(scope: ProjectScope | null) {
+export function useAddInstance(scope: ScopedProjectRef | null) {
   const projectId = scopeProjectId(scope)
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (p: { materialId: string }) => addInstance(scope as ProjectScope, p.materialId),
+    mutationFn: (p: { materialId: string }) => addInstance(scope as ScopedProjectRef, p.materialId),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["instances", scopeSubjectId(scope), projectId] })
     },
   })
 }
 
-export function useBulkRemapRecallPointsInstance(scope: ProjectScope | null) {
+export function useBulkRemapRecallPointsInstance(scope: ScopedProjectRef | null) {
   const projectId = scopeProjectId(scope)
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (p: { fromInstanceId: string; toInstanceId: string; recallPointIds?: string[] }) =>
-      bulkRemapRecallPointsInstance(scope as ProjectScope, p),
+      bulkRemapRecallPointsInstance(scope as ScopedProjectRef, p),
     onSuccess: async () => {
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["instances", scopeSubjectId(scope), projectId] }),
@@ -135,44 +135,44 @@ export function useBulkRemapRecallPointsInstance(scope: ProjectScope | null) {
   })
 }
 
-export function useLearningObjectNode(scope: ProjectScope | null, nodeId: string) {
+export function useLearningObjectNode(scope: ScopedProjectRef | null, nodeId: string) {
   const projectId = scopeProjectId(scope)
   return useQuery({
     queryKey: ["learningObjectNode", scopeSubjectId(scope), projectId, nodeId],
-    queryFn: () => getLearningObjectNode(scope as ProjectScope, nodeId),
+    queryFn: () => getLearningObjectNode(scope as ScopedProjectRef, nodeId),
     enabled: hasProjectScope(scope) && !!nodeId,
   })
 }
 
-export function useLayers(scope: ProjectScope | null) {
+export function useLayers(scope: ScopedProjectRef | null) {
   const projectId = scopeProjectId(scope)
   return useQuery({
     queryKey: ["layers", scopeSubjectId(scope), projectId],
     queryFn: ({ signal }) =>
       isVirtualStudyReviewProjectId(projectId)
         ? getVirtualStudyReviewLayers()
-        : listLayers(scope as ProjectScope, { signal, timeoutMs: WORKBENCH_QUERY_TIMEOUT_MS }),
+        : listLayers(scope as ScopedProjectRef, { signal, timeoutMs: WORKBENCH_QUERY_TIMEOUT_MS }),
     enabled: hasProjectScope(scope),
   })
 }
 
-export function useProjectConfig(scope: ProjectScope | null) {
+export function useProjectConfig(scope: ScopedProjectRef | null) {
   const projectId = scopeProjectId(scope)
   return useQuery({
     queryKey: ["projectConfig", scopeSubjectId(scope), projectId],
-    queryFn: () => (isVirtualStudyReviewProjectId(projectId) ? getVirtualStudyReviewProjectConfig() : getProjectConfig(scope as ProjectScope)),
+    queryFn: () => (isVirtualStudyReviewProjectId(projectId) ? getVirtualStudyReviewProjectConfig() : getProjectConfig(scope as ScopedProjectRef)),
     enabled: hasProjectScope(scope),
     refetchInterval: isVirtualStudyReviewProjectId(projectId) ? false : 5000,
   })
 }
 
-export function useProjectStorageConfig(scope: ProjectScope | null) {
+export function useProjectStorageConfig(scope: ScopedProjectRef | null) {
   const projectId = scopeProjectId(scope)
   return useQuery({
     queryKey: ["projectStorageConfig", scopeSubjectId(scope), projectId],
     queryFn: async () => {
       try {
-        return await getProjectStorageConfig(scope as ProjectScope)
+        return await getProjectStorageConfig(scope as ScopedProjectRef)
       } catch (err) {
         if (err instanceof ApiError && err.status === 404) {
           return null
@@ -186,7 +186,7 @@ export function useProjectStorageConfig(scope: ProjectScope | null) {
   })
 }
 
-export function useSetLayerConfig(scope: ProjectScope | null) {
+export function useSetLayerConfig(scope: ScopedProjectRef | null) {
   const projectId = scopeProjectId(scope)
   const qc = useQueryClient()
   return useMutation({
@@ -197,7 +197,7 @@ export function useSetLayerConfig(scope: ProjectScope | null) {
       kPoint?: number
       thresholdRollUpEnabled?: boolean
     }) =>
-      setLayerConfig(scope as ProjectScope, p.layerIndex, {
+      setLayerConfig(scope as ScopedProjectRef, p.layerIndex, {
         reviewChainTemplate: p.reviewChainTemplate,
         kNode: p.kNode,
         kPoint: p.kPoint,
@@ -212,11 +212,11 @@ export function useSetLayerConfig(scope: ProjectScope | null) {
   })
 }
 
-export function useSetProjectRollUpStrategy(scope: ProjectScope | null) {
+export function useSetProjectRollUpStrategy(scope: ScopedProjectRef | null) {
   const projectId = scopeProjectId(scope)
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (rollUpStrategy: RollUpStrategy) => setProjectRollUpStrategy(scope as ProjectScope, rollUpStrategy),
+    mutationFn: (rollUpStrategy: RollUpStrategy) => setProjectRollUpStrategy(scope as ScopedProjectRef, rollUpStrategy),
     onSuccess: async () => {
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["projectConfig", scopeSubjectId(scope), projectId] }),
@@ -229,7 +229,7 @@ export function useSetProjectRollUpStrategy(scope: ProjectScope | null) {
   })
 }
 
-export function useSetReviewRecommendationConfig(scope: ProjectScope | null) {
+export function useSetReviewRecommendationConfig(scope: ScopedProjectRef | null) {
   const projectId = scopeProjectId(scope)
   const qc = useQueryClient()
   return useMutation({
@@ -238,34 +238,34 @@ export function useSetReviewRecommendationConfig(scope: ProjectScope | null) {
       maxHistoryLen?: number
       recommendedBatchSize?: number
       forgettingCurveDecayPerDay?: number
-    }) => setReviewRecommendationConfig(scope as ProjectScope, params),
+    }) => setReviewRecommendationConfig(scope as ScopedProjectRef, params),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["projectConfig", scopeSubjectId(scope), projectId] })
     },
   })
 }
 
-export function useAggregationEvents(scope: ProjectScope | null) {
+export function useAggregationEvents(scope: ScopedProjectRef | null) {
   const projectId = scopeProjectId(scope)
   return useQuery({
     queryKey: ["aggregationEvents", scopeSubjectId(scope), projectId],
-    queryFn: () => listAggregationEvents(scope as ProjectScope),
+    queryFn: () => listAggregationEvents(scope as ScopedProjectRef),
     enabled: hasProjectScope(scope),
     refetchInterval: 3000,
   })
 }
 
-export function useAggregationQueue(scope: ProjectScope | null, layerIndex: number) {
+export function useAggregationQueue(scope: ScopedProjectRef | null, layerIndex: number) {
   const projectId = scopeProjectId(scope)
   return useQuery({
     queryKey: ["aggQueue", scopeSubjectId(scope), projectId, layerIndex],
-    queryFn: () => getAggregationQueue(scope as ProjectScope, layerIndex),
+    queryFn: () => getAggregationQueue(scope as ScopedProjectRef, layerIndex),
     enabled: hasProjectScope(scope) && Number.isFinite(layerIndex),
     refetchInterval: 3000,
   })
 }
 
-export function useSubmitLearningTask(scope: ProjectScope | null) {
+export function useSubmitLearningTask(scope: ScopedProjectRef | null) {
   const projectId = scopeProjectId(scope)
   const qc = useQueryClient()
   return useMutation({
@@ -275,7 +275,7 @@ export function useSubmitLearningTask(scope: ProjectScope | null) {
     }) =>
       isVirtualStudyReviewProjectId(projectId)
         ? Promise.resolve(submitVirtualStudyReviewLearningTask(p))
-        : submitLearningTask({ scope: scope as ProjectScope, ...p }),
+        : submitLearningTask({ scope: scope as ScopedProjectRef, ...p }),
     onSuccess: async () => {
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["queue", scopeSubjectId(scope), projectId] }),
@@ -291,11 +291,11 @@ export function useSubmitLearningTask(scope: ProjectScope | null) {
   })
 }
 
-export function useInitializeBookLearningObjects(scope: ProjectScope | null) {
+export function useInitializeBookLearningObjects(scope: ScopedProjectRef | null) {
   const projectId = scopeProjectId(scope)
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (params: { items: { depth: number; title: string }[] }) => initializeBookLearningObjects(scope as ProjectScope, params),
+    mutationFn: (params: { items: { depth: number; title: string }[] }) => initializeBookLearningObjects(scope as ScopedProjectRef, params),
     onSuccess: async () => {
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["instances", scopeSubjectId(scope), projectId] }),
@@ -305,11 +305,11 @@ export function useInitializeBookLearningObjects(scope: ProjectScope | null) {
   })
 }
 
-export function useInitializeBookLearningObjectsFromSubjectMaterial(scope: ProjectScope | null) {
+export function useInitializeBookLearningObjectsFromSubjectMaterial(scope: ScopedProjectRef | null) {
   const projectId = scopeProjectId(scope)
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (params: { sourceMaterialId: string }) => initializeBookLearningObjectsFromSubjectMaterial(scope as ProjectScope, params),
+    mutationFn: (params: { sourceMaterialId: string }) => initializeBookLearningObjectsFromSubjectMaterial(scope as ScopedProjectRef, params),
     onSuccess: async () => {
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["instances", scopeSubjectId(scope), projectId] }),
@@ -319,11 +319,11 @@ export function useInitializeBookLearningObjectsFromSubjectMaterial(scope: Proje
   })
 }
 
-export function useReviewBundle(scope: ProjectScope | null, headId: string) {
+export function useReviewBundle(scope: ScopedProjectRef | null, headId: string) {
   const projectId = scopeProjectId(scope)
   const reviewTaskQ = useQuery({
     queryKey: ["reviewTask", scopeSubjectId(scope), projectId, headId],
-    queryFn: () => (isVirtualStudyReviewProjectId(projectId) ? getVirtualStudyReviewReviewTask(headId) : getReviewTask(scope as ProjectScope, headId)),
+    queryFn: () => (isVirtualStudyReviewProjectId(projectId) ? getVirtualStudyReviewReviewTask(headId) : getReviewTask(scope as ScopedProjectRef, headId)),
     enabled: hasProjectScope(scope) && !!headId,
   })
 
@@ -332,7 +332,7 @@ export function useReviewBundle(scope: ProjectScope | null, headId: string) {
     queryFn: () =>
       isVirtualStudyReviewProjectId(projectId)
         ? getVirtualStudyReviewRangeSnapshot(reviewTaskQ.data!.inputRangeId)
-        : getRangeSnapshot(scope as ProjectScope, reviewTaskQ.data!.inputRangeId),
+        : getRangeSnapshot(scope as ScopedProjectRef, reviewTaskQ.data!.inputRangeId),
     enabled: hasProjectScope(scope) && !!reviewTaskQ.data?.inputRangeId,
   })
 
@@ -340,7 +340,7 @@ export function useReviewBundle(scope: ProjectScope | null, headId: string) {
     queries:
       rangeQ.data?.recallPointIds.map((rpId) => ({
         queryKey: ["recallPoint", scopeSubjectId(scope), projectId, rpId],
-        queryFn: () => (isVirtualStudyReviewProjectId(projectId) ? getVirtualStudyReviewRecallPoint(rpId) : getRecallPoint(scope as ProjectScope, rpId)),
+        queryFn: () => (isVirtualStudyReviewProjectId(projectId) ? getVirtualStudyReviewRecallPoint(rpId) : getRecallPoint(scope as ScopedProjectRef, rpId)),
         enabled: hasProjectScope(scope) && !!rpId,
       })) ?? [],
   })
@@ -348,7 +348,7 @@ export function useReviewBundle(scope: ProjectScope | null, headId: string) {
   return { reviewTaskQ, rangeQ, recallPointQs }
 }
 
-export function useCommitReviewTask(scope: ProjectScope | null) {
+export function useCommitReviewTask(scope: ScopedProjectRef | null) {
   const projectId = scopeProjectId(scope)
   const qc = useQueryClient()
   return useMutation({
@@ -359,7 +359,7 @@ export function useCommitReviewTask(scope: ProjectScope | null) {
     }) =>
       isVirtualStudyReviewProjectId(projectId)
         ? Promise.resolve(commitVirtualStudyReviewTask(p))
-        : commitReviewTask(scope as ProjectScope, p.reviewTaskId, {
+        : commitReviewTask(scope as ScopedProjectRef, p.reviewTaskId, {
             canRecall: p.canRecall,
             appendedInsights: p.appendedInsights,
           }),
@@ -378,11 +378,11 @@ export function useCommitReviewTask(scope: ProjectScope | null) {
   })
 }
 
-export function useManualRollUp(scope: ProjectScope | null) {
+export function useManualRollUp(scope: ScopedProjectRef | null) {
   const projectId = scopeProjectId(scope)
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (p: { layerIndex: number; title?: string }) => manualRollUp(scope as ProjectScope, p.layerIndex, p.title),
+    mutationFn: (p: { layerIndex: number; title?: string }) => manualRollUp(scope as ScopedProjectRef, p.layerIndex, p.title),
     onSuccess: async () => {
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["layers", scopeSubjectId(scope), projectId] }),
@@ -393,11 +393,11 @@ export function useManualRollUp(scope: ProjectScope | null) {
   })
 }
 
-export function useImportLearningObjectsFromBrowser(scope: ProjectScope | null) {
+export function useImportLearningObjectsFromBrowser(scope: ScopedProjectRef | null) {
   const projectId = scopeProjectId(scope)
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (p: { rootTitle?: string; relativeFilePaths: string[] }) => importLearningObjectsFromBrowser(scope as ProjectScope, p),
+    mutationFn: (p: { rootTitle?: string; relativeFilePaths: string[] }) => importLearningObjectsFromBrowser(scope as ScopedProjectRef, p),
     onSuccess: async () => {
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["instances", scopeSubjectId(scope), projectId] }),
@@ -408,7 +408,7 @@ export function useImportLearningObjectsFromBrowser(scope: ProjectScope | null) 
   })
 }
 
-export function useImportLearningObjectsFromBaiduNetdisk(scope: ProjectScope | null) {
+export function useImportLearningObjectsFromBaiduNetdisk(scope: ScopedProjectRef | null) {
   const projectId = scopeProjectId(scope)
   const qc = useQueryClient()
   return useMutation({
@@ -423,7 +423,7 @@ export function useImportLearningObjectsFromBaiduNetdisk(scope: ProjectScope | n
         mimeType?: string | null
         durationMs?: number | null
       }>
-    }) => importLearningObjectsFromBaiduNetdisk(scope as ProjectScope, params),
+    }) => importLearningObjectsFromBaiduNetdisk(scope as ScopedProjectRef, params),
     onSuccess: async () => {
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["instances", scopeSubjectId(scope), projectId] }),

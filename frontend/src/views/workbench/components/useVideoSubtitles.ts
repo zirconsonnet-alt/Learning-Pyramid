@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 
 import type { Instance } from "@/ui/api/instances"
-import type { ProjectScope } from "@/ui/api/projectScope"
+import type { ScopedProjectRef } from "@/ui/api/projectScope"
 import type { MaterialSourceKind } from "@/ui/api/projects"
 import {
   clearSubtitleDocumentCache,
@@ -31,7 +31,7 @@ type SubtitleLoadState = {
 
 export function useVideoSubtitles(params: UseVideoSubtitlesParams) {
   const { subjectId, projectId, instance, playbackMs, subtitlesEnabled, detectionEnabled, sourceKind, subtitleDelayMs } = params
-  const projectScope: ProjectScope = useMemo(() => ({ subjectId, projectId }), [projectId, subjectId])
+  const projectScope: ScopedProjectRef = useMemo(() => ({ subjectId, scopedProjectId: projectId }), [projectId, subjectId])
   const [loadState, setLoadState] = useState<SubtitleLoadState>({
     document: null,
     isLoading: false,

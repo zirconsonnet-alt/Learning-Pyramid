@@ -61,7 +61,7 @@ def build_migration_report(store_path: str | Path, *, mode: str = "dry-run") -> 
             if not subject_id:
                 blocking.append({"code": "PROJECT_WITHOUT_SUBJECT", "projectId": project_id})
                 continue
-            mappings.append({"internalProjectKey": project_id, "subjectId": subject_id, "projectId": scoped_project_id})
+            mappings.append({"internalProjectId": project_id, "subjectId": subject_id, "scopedProjectId": scoped_project_id})
             continue
         if project_id in subject_ids:
             continue

@@ -127,11 +127,11 @@ test("membership withdrawal confirmation dialog closes after WeChat confirmation
   expectNoConsoleIssues(consoleIssues)
 })
 
-test("wechat payout binding page shows a readable account label", async ({ page }) => {
+test("wechat payout confirmation page shows a readable account label for scanned withdrawals", async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
   await installMockApi(page)
 
-  await page.goto("/membership/wechat-payout-bind?attempt=bind_e2e&state=state_e2e&code=code_e2e")
+  await page.goto("/membership/wechat-payout-confirm?attempt=bind_e2e&state=state_e2e&code=code_e2e")
   await expect(page.getByRole("heading", { name: "确认微信提现" })).toBeVisible()
   await expect(page.getByText("自动化测试账号（LP-E2E）")).toBeVisible()
   await expect(page.getByText("user_e2e")).toHaveCount(0)
@@ -139,7 +139,7 @@ test("wechat payout binding page shows a readable account label", async ({ page 
   expectNoConsoleIssues(consoleIssues)
 })
 
-test("wechat payout binding page disables repeated withdrawal confirmation after invoking WeChat", async ({ page }) => {
+test("wechat payout confirmation page disables repeated scanned withdrawal confirmation after invoking WeChat", async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
   let confirmationStartedRequested = false
   page.on("request", (request) => {
@@ -151,7 +151,7 @@ test("wechat payout binding page disables repeated withdrawal confirmation after
   await installMockApi(page)
   await installWeixinBridge(page)
 
-  await page.goto("/membership/wechat-payout-bind?attempt=bind_e2e&state=state_e2e&code=code_e2e")
+  await page.goto("/membership/wechat-payout-confirm?attempt=bind_e2e&state=state_e2e&code=code_e2e")
   await page.getByRole("button", { name: "确认并提现" }).click()
 
   await expect(page.getByRole("heading", { name: "已提交微信确认" })).toBeVisible()

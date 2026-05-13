@@ -103,8 +103,8 @@ The membership invite commission flow now supports unattended refund-window sett
 - WeChat Pay native payment credentials plus merchant transfer capability.
 - `LEARNINGPYRAMID_PUBLIC_ORIGIN` and public HTTPS callbacks for `/api/payments/wechat/notify`, `/api/payments/wechat/refund-notify`, and `/api/payments/wechat/transfer-notify`.
 - `LEARNINGPYRAMID_WECHAT_PAY_TRANSFER_SCENE_ID` and, when required by the transfer scene, `LEARNINGPYRAMID_WECHAT_PAY_TRANSFER_SCENE_REPORT_INFOS_JSON`.
-- `LEARNINGPYRAMID_WECHAT_PAY_APP_SECRET` for the mobile WeChat authorization step used by the desktop QR receiving identity binding flow.
-- A real WeChat receiving identity binding flow with public HTTPS access to `/membership/wechat-payout-bind`; local tests can use `manual_test` when `LEARNINGPYRAMID_ENABLE_MANUAL_TEST_PAYMENT=true`.
+- `LEARNINGPYRAMID_WECHAT_PAY_APP_SECRET` for the mobile WeChat authorization step used by the desktop QR withdrawal confirmation flow.
+- A real WeChat withdrawal confirmation flow with public HTTPS access to `/membership/wechat-payout-confirm`; local tests can use `manual_test` when `LEARNINGPYRAMID_ENABLE_MANUAL_TEST_PAYMENT=true`.
 
 Run these scheduler jobs every few minutes in self-hosted production:
 

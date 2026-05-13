@@ -11,7 +11,7 @@ import {
   listLearningObjectNodes,
   listRecallPointsByLearningObjectNode,
 } from "@/ui/api/learningObjects"
-import type { ProjectScope } from "@/ui/api/projectScope"
+import type { ScopedProjectRef } from "@/ui/api/projectScope"
 import { ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader } from "@/ui/components/ui/card"
@@ -33,32 +33,32 @@ function formatNodeType(kind: "leaf" | "container", depth: number) {
 }
 
 export function LearningObjectNodePage() {
-  const { subjectId = "", projectId, nodeId } = useParams()
+  const { subjectId = "", scopedProjectId, nodeId } = useParams()
   const navigate = useNavigate()
-  const pid = projectId ?? ""
+  const pid = scopedProjectId ?? ""
   const nid = nodeId ?? ""
-  const projectScope: ProjectScope | null = subjectId && pid ? { subjectId, projectId: pid } : null
+  const projectScope: ScopedProjectRef | null = subjectId && pid ? { subjectId, scopedProjectId: pid } : null
 
   const nodeQ = useQuery({
     queryKey: ["learningObjectNode", subjectId, pid, nid],
-    queryFn: () => getLearningObjectNode(projectScope as ProjectScope, nid),
+    queryFn: () => getLearningObjectNode(projectScope as ScopedProjectRef, nid),
     enabled: !!projectScope && !!nid,
   })
 
   const nodesQ = useQuery({
     queryKey: ["learningObjectNodes", subjectId, pid],
-    queryFn: () => listLearningObjectNodes(projectScope as ProjectScope),
+    queryFn: () => listLearningObjectNodes(projectScope as ScopedProjectRef),
     enabled: !!projectScope,
   })
 
   const instancesQ = useQuery({
     queryKey: ["instances", subjectId, pid],
-    queryFn: () => listInstances(projectScope as ProjectScope),
+    queryFn: () => listInstances(projectScope as ScopedProjectRef),
     enabled: !!projectScope,
   })
   const recallPointsQ = useQuery({
     queryKey: ["recallPointsByObjectNode", subjectId, pid, nid],
-    queryFn: () => listRecallPointsByLearningObjectNode(projectScope as ProjectScope, nid),
+    queryFn: () => listRecallPointsByLearningObjectNode(projectScope as ScopedProjectRef, nid),
     enabled: !!projectScope && !!nid,
   })
 
@@ -191,7 +191,7 @@ export function LearningObjectNodePage() {
                   projectId={pid}
                   nodeTitle={title}
                   recallPoints={recallPointsQ.data ?? []}
-                  exportRecallPoints={() => exportRecallPointsByLearningObjectNode(projectScope as ProjectScope, nid)}
+                  exportRecallPoints={() => exportRecallPointsByLearningObjectNode(projectScope as ScopedProjectRef, nid)}
                 />
               }
             />

@@ -19,7 +19,7 @@ export type PomodoroSegment = {
 
 export type PomodoroProjectReference = {
   subjectId: string
-  projectId: string
+  scopedProjectId: string
 }
 
 export type PomodoroPlanSchedule = {
@@ -89,7 +89,7 @@ export type PomodoroSnapshot = {
   canUseWorkbench: boolean
   shouldRestrictWorkbench: boolean
   currentProjectRef: PomodoroProjectReference | null
-  currentProjectId: string | null
+  currentScopedProjectId: string | null
 }
 
 export type PomodoroUpcomingSegmentPreview = {
@@ -219,15 +219,15 @@ function normalizePomodoroSubjectId(value: unknown) {
 }
 
 export function pomodoroProjectRefKey(projectRef: PomodoroProjectReference | null | undefined) {
-  return projectRef ? `${projectRef.subjectId}:${projectRef.projectId}` : ""
+  return projectRef ? `${projectRef.subjectId}:${projectRef.scopedProjectId}` : ""
 }
 
 function normalizePomodoroProjectReference(value: unknown): PomodoroProjectReference | null {
   if (!value || typeof value !== "object") return null
   const raw = value as Partial<PomodoroProjectReference>
   const subjectId = normalizePomodoroSubjectId(raw.subjectId)
-  const projectId = normalizePomodoroProjectId(raw.projectId)
-  return subjectId && projectId ? { subjectId, projectId } : null
+  const scopedProjectId = normalizePomodoroProjectId(raw.scopedProjectId)
+  return subjectId && scopedProjectId ? { subjectId, scopedProjectId } : null
 }
 
 function createSessionId() {
@@ -672,7 +672,7 @@ export function getPomodoroSnapshot(
     canUseWorkbench: false,
     shouldRestrictWorkbench: enabled,
     currentProjectRef: null,
-    currentProjectId: null,
+    currentScopedProjectId: null,
     ...overrides,
   })
 
@@ -745,7 +745,7 @@ export function getPomodoroSnapshot(
       canUseWorkbench,
       shouldRestrictWorkbench: !canUseWorkbench,
       currentProjectRef,
-      currentProjectId: currentProjectRef?.projectId ?? null,
+      currentScopedProjectId: currentProjectRef?.scopedProjectId ?? null,
     })
   }
 
@@ -842,7 +842,7 @@ export function getPomodoroSnapshot(
     canUseWorkbench,
     shouldRestrictWorkbench: !canUseWorkbench,
     currentProjectRef,
-    currentProjectId: currentProjectRef?.projectId ?? null,
+    currentScopedProjectId: currentProjectRef?.scopedProjectId ?? null,
   })
 }
 

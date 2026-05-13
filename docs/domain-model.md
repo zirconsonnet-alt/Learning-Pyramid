@@ -13,7 +13,7 @@
 - `public_project_id` 优先返回 `scoped_project_id`，没有 scoped identity 时返回内部 `project_id`。
 - `state` 当前为 `ACTIVE` 或 `DELETED`。
 
-scoped project 的公开身份解析属于 adapter 边界：公开 `{subjectId, projectId}` 必须通过 `adapter/scoped_projects.py` 解析为内部 project id。
+scoped project 的公开身份解析属于 adapter 边界：公开 `{subjectId, scopedProjectId}` 必须通过 `adapter/scoped_projects.py` 解析为内部 project id。
 
 ## 材料与媒体
 

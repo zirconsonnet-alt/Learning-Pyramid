@@ -49,8 +49,19 @@ from backend.models.review_task import ReviewTask
 from backend.models.convergence import Convergence
 from backend.models.recall_point import Anchor, RecallPoint
 from backend.models.rich_content import ContentBlock
-from backend.repositories.persistence_interfaces import ProjectSnapshotRecord, SqlUnitOfWork, SystemStateRecord
-from backend.repositories.sqlite_persistence import SQLitePersistenceUnitOfWork
+from backend.repositories.persistence_interfaces import (
+    ProjectSnapshotRecord,
+    SqlSubjectMaterialRelationshipRepository,
+    SqlUnitOfWork,
+    SubjectMaterialCollectionRecord,
+    SubjectMaterialRelationshipRecord,
+    SystemStateRecord,
+)
+from backend.repositories.sqlite_persistence import (
+    SQLitePersistenceSession,
+    SQLitePersistenceUnitOfWork,
+    SQLiteSubjectMaterialRelationshipRepository,
+)
 from backend.models.types import (
     InstanceId,
     AggregationEventId,
@@ -334,6 +345,47 @@ class SQLiteSnapshotStore:
                     """
                     CREATE INDEX IF NOT EXISTS idx_project_snapshots_state
                     ON project_snapshots (project_state)
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS subject_material_collection_index (
+                        subject_id TEXT PRIMARY KEY,
+                        initialized INTEGER NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        FOREIGN KEY(subject_id) REFERENCES project_snapshots(project_id) ON DELETE CASCADE
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS subject_material_relationship_index (
+                        subject_id TEXT NOT NULL,
+                        material_id TEXT NOT NULL,
+                        material_type TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        created_at_ms INTEGER NOT NULL,
+                        scoped_project_id TEXT NOT NULL,
+                        internal_project_id TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        PRIMARY KEY(subject_id, material_id),
+                        UNIQUE(subject_id, scoped_project_id),
+                        UNIQUE(internal_project_id),
+                        FOREIGN KEY(subject_id) REFERENCES project_snapshots(project_id) ON DELETE CASCADE,
+                        FOREIGN KEY(internal_project_id) REFERENCES project_snapshots(project_id) ON DELETE CASCADE
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_subject_material_relationship_scoped
+                    ON subject_material_relationship_index (subject_id, scoped_project_id)
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_subject_material_relationship_internal
+                    ON subject_material_relationship_index (internal_project_id)
                     """
                 )
                 conn.execute(
@@ -820,6 +872,25 @@ class SQLiteSnapshotStore:
         )
         cls._validate_required_columns(
             conn,
+            "subject_material_collection_index",
+            {"subject_id", "initialized", "updated_at"},
+        )
+        cls._validate_required_columns(
+            conn,
+            "subject_material_relationship_index",
+            {
+                "subject_id",
+                "material_id",
+                "material_type",
+                "title",
+                "created_at_ms",
+                "scoped_project_id",
+                "internal_project_id",
+                "updated_at",
+            },
+        )
+        cls._validate_required_columns(
+            conn,
             "recall_point_index",
             {
                 "project_id",
@@ -948,6 +1019,12 @@ class SQLiteSnapshotStore:
             updated_at=cls._ms_to_ts(int(row["updated_at_ms"])),
         )
 
+    def _subject_material_relationship_repository(self) -> SqlSubjectMaterialRelationshipRepository:
+        return SQLiteSubjectMaterialRelationshipRepository()
+
+    def _subject_material_relationship_session(self, conn: sqlite3.Connection):
+        return SQLitePersistenceSession(raw_connection=conn)
+
     def _refresh_project_entity_indexes(
         self,
         conn: sqlite3.Connection,
@@ -955,6 +1032,9 @@ class SQLiteSnapshotStore:
         project_id: str,
         project_payload: dict[str, Any],
     ) -> None:
+        relationship_repo = self._subject_material_relationship_repository()
+        relationship_session = self._subject_material_relationship_session(conn)
+        relationship_repo.delete_for_subject(relationship_session, str(project_id))
         conn.execute("DELETE FROM project_storage_config_index WHERE project_id = ?", (project_id,))
         conn.execute("DELETE FROM project_material_source_binding_index WHERE project_id = ?", (project_id,))
         conn.execute("DELETE FROM project_config_index WHERE project_id = ?", (project_id,))
@@ -1040,6 +1120,39 @@ class SQLiteSnapshotStore:
                     json.dumps(project_config, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
                 ),
             )
+
+        raw_study_materials = dict(project_payload.get("studyMaterials", {}))
+        study_materials_initialized = bool(project_payload.get("studyMaterialsInitialized", bool(raw_study_materials)))
+        if study_materials_initialized or raw_study_materials:
+            relationship_updated_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+            relationship_repo.upsert_collection(
+                relationship_session,
+                SubjectMaterialCollectionRecord(
+                    subject_id=str(project_id),
+                    initialized=study_materials_initialized,
+                    updated_at=relationship_updated_at,
+                ),
+            )
+            relationship_records: list[SubjectMaterialRelationshipRecord] = []
+            for material_id, raw_material in raw_study_materials.items():
+                material_payload = dict(raw_material)
+                scoped_project_id = material_payload.get("scopedProjectId")
+                internal_project_id = material_payload.get("internalProjectId")
+                if scoped_project_id is None or internal_project_id is None:
+                    raise ValueError("Subject material relationship requires scopedProjectId and internalProjectId")
+                relationship_records.append(
+                    SubjectMaterialRelationshipRecord(
+                        subject_id=str(project_id),
+                        material_id=str(material_id),
+                        material_type=str(material_payload.get("materialType", "")),
+                        title=str(material_payload.get("title", "")),
+                        created_at_ms=int(material_payload.get("createdAtMs", 0)),
+                        scoped_project_id=str(scoped_project_id),
+                        internal_project_id=str(internal_project_id),
+                        updated_at=relationship_updated_at,
+                    )
+                )
+            relationship_repo.insert_relationships(relationship_session, tuple(relationship_records))
 
         for instance_id, raw_instance in dict(project_payload.get("instances", {})).items():
             instance_payload = dict(raw_instance)
@@ -2081,6 +2194,8 @@ class SQLiteSnapshotStore:
             raise ValueError("ProjectConfig payload must be a JSON object")
         hydrated["projectConfig"] = config_payload
 
+        self._hydrate_subject_material_relationships(conn, project_id=project_id, hydrated=hydrated)
+
         instance_rows = conn.execute(
             """
             SELECT instance_id, material_id, presence, last_seen_at_ms
@@ -2439,6 +2554,34 @@ class SQLiteSnapshotStore:
         }
         return hydrated
 
+    def _hydrate_subject_material_relationships(self, conn, *, project_id: str, hydrated: dict[str, Any]) -> None:
+        relationship_repo = self._subject_material_relationship_repository()
+        relationship_session = self._subject_material_relationship_session(conn)
+        collection = relationship_repo.get_collection(relationship_session, str(project_id))
+        material_rows = relationship_repo.list_for_subject(relationship_session, str(project_id))
+        hydrated["studyMaterials"] = {
+            str(row.material_id): {
+                "subjectId": str(project_id),
+                "materialId": str(row.material_id),
+                "materialType": str(row.material_type),
+                "title": str(row.title),
+                "createdAtMs": int(row.created_at_ms),
+                "scopedProjectId": str(row.scoped_project_id),
+                "internalProjectId": str(row.internal_project_id),
+            }
+            for row in material_rows
+        }
+        hydrated["studyMaterialsInitialized"] = bool(
+            collection.initialized if collection is not None else bool(material_rows)
+        )
+        link_record = relationship_repo.get_by_internal_project(relationship_session, str(project_id))
+        hydrated["subjectMaterialLink"] = None if link_record is None else {
+            "subjectId": str(link_record.subject_id),
+            "materialId": str(link_record.material_id),
+            "materialType": str(link_record.material_type),
+            "scopedProjectId": str(link_record.scoped_project_id),
+        }
+
     @staticmethod
     def _project_payload_from_snapshot_row(row: sqlite3.Row) -> dict[str, Any]:
         deleted_at_ms_raw = row["deleted_at_ms"]
@@ -2652,6 +2795,7 @@ class SQLiteSnapshotStore:
                         updated_at=updated_at,
                     ),
                 )
+            for project_id, project_payload in projects.items():
                 self._refresh_project_entity_indexes(
                     uow.connection,
                     project_id=str(project_id),

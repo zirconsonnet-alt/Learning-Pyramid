@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom"
 
 import { listAuditLogEvents, type AuditLogEvent } from "@/ui/api/auditLog"
 import { ApiError } from "@/ui/api/http"
+import type { ScopedProjectRef } from "@/ui/api/projectScope"
 import { getSystemDataSafetyStatus } from "@/ui/api/system"
 import type { StudyMaterial, Subject } from "@/ui/api/subjects"
 import { Button } from "@/ui/components/ui/button"
@@ -105,6 +106,10 @@ type SubjectMaterialProjectRef = {
   projectId: string
 }
 
+function toScopedProjectRef(ref: SubjectMaterialProjectRef): ScopedProjectRef {
+  return { subjectId: ref.subjectId, scopedProjectId: ref.projectId }
+}
+
 export function ProjectsPage() {
   const nav = useNavigate()
   const { data, isLoading, error } = useSubjects()
@@ -146,17 +151,17 @@ export function ProjectsPage() {
     return subjects.flatMap((subject, index) => {
       const materials = (subjectMaterialQs[index]?.data ?? []) as StudyMaterial[]
       return materials
-        .filter((material) => Boolean(material.projectId))
+        .filter((material) => Boolean(material.scopedProjectId))
         .map((material) => ({
           subjectId: subject.subjectId,
-          projectId: material.projectId as string,
+          projectId: material.scopedProjectId as string,
         }))
     })
   }, [subjectMaterialQs, subjects])
   const projectActivityQs = useQueries({
     queries: subjectMaterialProjectRefs.map((item) => ({
       queryKey: ["auditLogEvents", item.subjectId, item.projectId],
-      queryFn: () => listAuditLogEvents(item),
+      queryFn: () => listAuditLogEvents(toScopedProjectRef(item)),
       enabled: !isLoading && !error,
       staleTime: 60_000,
       refetchInterval: 60_000,

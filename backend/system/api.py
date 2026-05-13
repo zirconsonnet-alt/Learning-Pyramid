@@ -2105,7 +2105,7 @@ class SystemAPI:
 
     @staticmethod
     def _material_internal_project_key(material: StudyMaterial) -> ProjectId | None:
-        return material.internal_project_key or material.project_id
+        return material.internal_project_id
 
     @staticmethod
     def _scoped_project_id_for_sequence(n: int) -> ProjectId:
@@ -2123,27 +2123,27 @@ class SystemAPI:
         current = int(getattr(subject, "project_sequence", 0) or 0)
         current = max(current, self._parse_scoped_project_sequence(subject.project_id))
         for material in materials:
-            current = max(current, self._parse_scoped_project_sequence(material.project_id))
+            current = max(current, self._parse_scoped_project_sequence(material.scoped_project_id))
         next_sequence = current + 1
         return self._scoped_project_id_for_sequence(next_sequence), next_sequence
 
-    def resolve_scoped_project_internal_key(self, subject_id: ProjectId, project_id: ProjectId) -> ProjectId:
+    def resolve_scoped_project_internal_key(self, subject_id: ProjectId, scoped_project_id: ProjectId) -> ProjectId:
         self._require_subject_root_project(subject_id)
         for material in self._list_subject_materials_from_store(subject_id):
-            if material.project_id is None:
+            if material.scoped_project_id is None:
                 continue
-            if id_canonical_text(material.project_id) != id_canonical_text(project_id):
+            if id_canonical_text(material.scoped_project_id) != id_canonical_text(scoped_project_id):
                 continue
             internal_key = self._material_internal_project_key(material)
             if internal_key is None:
                 raise PreconditionFailure("scoped project missing internal storage key")
             return internal_key
-        raise NotFound(project_id)
+        raise NotFound(scoped_project_id)
 
     def get_scoped_subject_context_for_project(self, project_id: ProjectId, *, public_project_id: ProjectId) -> dict[str, object]:
         payload = self.get_subject_context(project_id)
-        payload["current_project_id"] = public_project_id
-        payload["current_internal_project_key"] = project_id
+        payload["current_scoped_project_id"] = public_project_id
+        payload["current_internal_project_id"] = project_id
         return payload
 
     def _resolve_subject_id(self, project_id: ProjectId) -> ProjectId:
@@ -4110,7 +4110,7 @@ class SystemAPI:
                     subject_id=subject_id,
                     material_id=material_id,
                     material_type=material_type,
-                    project_id=scoped_project_id,
+                    scoped_project_id=scoped_project_id,
                 ),
             )
             material = StudyMaterial(
@@ -4119,8 +4119,8 @@ class SystemAPI:
                 material_type=material_type,
                 title=material_title,
                 created_at=now_utc_ms(),
-                project_id=scoped_project_id,
-                internal_project_key=material_project_id,
+                scoped_project_id=scoped_project_id,
+                internal_project_id=material_project_id,
             )
             subject_store.project = replace(subject, project_sequence=next_sequence)
             subject_store.study_materials = {material.material_id: material}
@@ -4154,7 +4154,7 @@ class SystemAPI:
             "subject": subject,
             "current_material": current_material,
             "materials": materials,
-            "current_project_id": project_id,
+            "current_internal_project_id": project_id,
         }
 
     def edit_subject(self, subject_id: ProjectId, title: str) -> None:
@@ -4261,7 +4261,7 @@ class SystemAPI:
                     subject_id=resolved_subject_id,
                     material_id=material_id,
                     material_type=material_type,
-                    project_id=scoped_project_id,
+                    scoped_project_id=scoped_project_id,
                 ),
             )
             material = StudyMaterial(
@@ -4270,8 +4270,8 @@ class SystemAPI:
                 material_type=material_type,
                 title=normalized_title,
                 created_at=now_utc_ms(),
-                project_id=scoped_project_id,
-                internal_project_key=material_project_id,
+                scoped_project_id=scoped_project_id,
+                internal_project_id=material_project_id,
             )
             if id_canonical_text(material_project_id) in self.sys.g.projects:
                 raise PreconditionFailure("project_id already exists")
@@ -4398,7 +4398,7 @@ class SystemAPI:
             return (project_id,)
         related_project_ids = {id_canonical_text(project_id): project_id}
         for material in self._list_subject_materials_from_store(project_id):
-            if material.project_id is None:
+            if material.scoped_project_id is None:
                 continue
             internal_key = self._material_internal_project_key(material)
             if internal_key is not None:
@@ -4963,7 +4963,7 @@ class SystemAPI:
             raise PreconditionFailure(
                 "initialize_book_learning_objects_from_subject_material source material type is unsupported"
             )
-        source_project_id = source_material.project_id
+        source_project_id = source_material.internal_project_id
         if source_project_id is None:
             raise PreconditionFailure("source material has no project")
 

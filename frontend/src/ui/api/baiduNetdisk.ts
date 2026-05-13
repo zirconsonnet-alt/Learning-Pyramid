@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 import { apiRequest, type ApiRequestExecutionOptions } from "@/ui/api/http"
-import { projectApiPath, type ProjectScope } from "@/ui/api/projectScope"
+import { projectApiPath, type ScopedProjectRef } from "@/ui/api/projectScope"
 
 export const BaiduNetdiskFileItemSchema = z.object({
   fileId: z.string(),
@@ -26,7 +26,7 @@ export const BaiduNetdiskFileListSchema = z.object({
 export type BaiduNetdiskFileList = z.infer<typeof BaiduNetdiskFileListSchema>
 
 export function listProjectBaiduNetdiskFiles(
-  scope: ProjectScope,
+  scope: ScopedProjectRef,
   params: {
     accountId: string
     dirPath?: string

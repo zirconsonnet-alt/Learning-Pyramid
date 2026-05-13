@@ -657,10 +657,10 @@ def _normalize_pomodoro_project_ref(value: Any) -> dict[str, str] | None:
     if not isinstance(value, dict):
         return None
     subject_id = str(value.get("subjectId") or "").strip()
-    project_id = str(value.get("projectId") or "").strip()
-    if not subject_id or not project_id:
+    scoped_project_id = str(value.get("scopedProjectId") or "").strip()
+    if not subject_id or not scoped_project_id:
         return None
-    return {"subjectId": subject_id, "projectId": project_id}
+    return {"subjectId": subject_id, "scopedProjectId": scoped_project_id}
 
 
 def _normalize_pomodoro_project_refs(

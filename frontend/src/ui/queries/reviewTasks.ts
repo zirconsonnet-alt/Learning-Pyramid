@@ -1,7 +1,7 @@
 import { useQueries, useQuery } from "@tanstack/react-query"
 
 import { getLearningTask } from "@/ui/api/learningTasks"
-import type { ProjectScope } from "@/ui/api/projectScope"
+import type { ScopedProjectRef } from "@/ui/api/projectScope"
 import { getConvergence, getRangeSnapshot, getRecallPoint, getReviewChain, getReviewTask, type Convergence, type ReviewChain } from "@/ui/api/review"
 
 function collectReviewTaskIdsFromChain(chain: ReviewChain | undefined, convergences: readonly (Convergence | undefined)[]) {
@@ -27,18 +27,18 @@ function collectReviewTaskIdsFromChain(chain: ReviewChain | undefined, convergen
   return reviewTaskIds
 }
 
-export function useLearningTaskReviewTasks(scope: ProjectScope | null, learningTaskId: string) {
-  const projectId = scope?.projectId ?? ""
+export function useLearningTaskReviewTasks(scope: ScopedProjectRef | null, learningTaskId: string) {
+  const projectId = scope?.scopedProjectId ?? ""
   const taskQ = useQuery({
     queryKey: ["learningTask", scope?.subjectId ?? "", projectId, learningTaskId],
-    queryFn: () => getLearningTask(scope as ProjectScope, learningTaskId),
+    queryFn: () => getLearningTask(scope as ScopedProjectRef, learningTaskId),
     enabled: !!scope?.subjectId && !!projectId && !!learningTaskId,
   })
 
   const reviewChainId = taskQ.data?.reviewChainId ?? ""
   const chainQ = useQuery({
     queryKey: ["reviewChain", scope?.subjectId ?? "", projectId, reviewChainId],
-    queryFn: () => getReviewChain(scope as ProjectScope, reviewChainId),
+    queryFn: () => getReviewChain(scope as ScopedProjectRef, reviewChainId),
     enabled: !!scope?.subjectId && !!projectId && !!reviewChainId,
   })
 
@@ -46,7 +46,7 @@ export function useLearningTaskReviewTasks(scope: ProjectScope | null, learningT
   const convergenceQs = useQueries({
     queries: convergenceIds.map((convergenceId) => ({
       queryKey: ["convergence", scope?.subjectId ?? "", projectId, convergenceId],
-      queryFn: () => getConvergence(scope as ProjectScope, convergenceId),
+      queryFn: () => getConvergence(scope as ScopedProjectRef, convergenceId),
       enabled: !!scope?.subjectId && !!projectId,
     })),
   })
@@ -59,7 +59,7 @@ export function useLearningTaskReviewTasks(scope: ProjectScope | null, learningT
   const reviewTaskQs = useQueries({
     queries: reviewTaskIds.map((reviewTaskId) => ({
       queryKey: ["reviewTask", scope?.subjectId ?? "", projectId, reviewTaskId],
-      queryFn: () => getReviewTask(scope as ProjectScope, reviewTaskId),
+      queryFn: () => getReviewTask(scope as ScopedProjectRef, reviewTaskId),
       enabled: !!scope?.subjectId && !!projectId,
     })),
   })
@@ -73,25 +73,25 @@ export function useLearningTaskReviewTasks(scope: ProjectScope | null, learningT
   }
 }
 
-export function useReviewTaskDetails(scope: ProjectScope | null, reviewTaskId: string) {
-  const projectId = scope?.projectId ?? ""
+export function useReviewTaskDetails(scope: ScopedProjectRef | null, reviewTaskId: string) {
+  const projectId = scope?.scopedProjectId ?? ""
   const reviewTaskQ = useQuery({
     queryKey: ["reviewTask", scope?.subjectId ?? "", projectId, reviewTaskId],
-    queryFn: () => getReviewTask(scope as ProjectScope, reviewTaskId),
+    queryFn: () => getReviewTask(scope as ScopedProjectRef, reviewTaskId),
     enabled: !!scope?.subjectId && !!projectId && !!reviewTaskId,
   })
 
   const inputRangeId = reviewTaskQ.data?.inputRangeId ?? ""
   const inputRangeQ = useQuery({
     queryKey: ["range", scope?.subjectId ?? "", projectId, inputRangeId],
-    queryFn: () => getRangeSnapshot(scope as ProjectScope, inputRangeId),
+    queryFn: () => getRangeSnapshot(scope as ScopedProjectRef, inputRangeId),
     enabled: !!scope?.subjectId && !!projectId && !!inputRangeId,
   })
 
   const resultRangeId = reviewTaskQ.data?.resultRangeId ?? ""
   const resultRangeQ = useQuery({
     queryKey: ["range", scope?.subjectId ?? "", projectId, resultRangeId],
-    queryFn: () => getRangeSnapshot(scope as ProjectScope, resultRangeId),
+    queryFn: () => getRangeSnapshot(scope as ScopedProjectRef, resultRangeId),
     enabled: !!scope?.subjectId && !!projectId && !!resultRangeId,
   })
 
@@ -99,7 +99,7 @@ export function useReviewTaskDetails(scope: ProjectScope | null, reviewTaskId: s
   const recallPointQs = useQueries({
     queries: recallPointIds.map((recallPointId) => ({
       queryKey: ["recallPoint", scope?.subjectId ?? "", projectId, recallPointId],
-      queryFn: () => getRecallPoint(scope as ProjectScope, recallPointId),
+      queryFn: () => getRecallPoint(scope as ScopedProjectRef, recallPointId),
       enabled: !!scope?.subjectId && !!projectId,
     })),
   })

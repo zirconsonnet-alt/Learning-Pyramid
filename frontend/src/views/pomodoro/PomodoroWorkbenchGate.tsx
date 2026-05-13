@@ -8,7 +8,7 @@ import { buildPomodoroPath } from "@/views/pomodoro/pomodoroRouting"
 
 export function PomodoroWorkbenchGate(props: { children: ReactNode }) {
   const { children } = props
-  const { subjectId, projectId } = useParams()
+  const { subjectId, scopedProjectId: projectId } = useParams()
   const location = useLocation()
   const enabled = usePomodoroStore((state) => state.enabled)
   const weeklySchedule = usePomodoroStore((state) => state.weeklySchedule)
@@ -34,7 +34,9 @@ export function PomodoroWorkbenchGate(props: { children: ReactNode }) {
   const pomodoroProjectCatalogReady = !projectCatalog.isLoading
   const focusProjectRef = snapshot.currentProjectRef
   const focusProjectKey = pomodoroProjectRefKey(focusProjectRef)
-  const accessibleProjectRefs = new Set(projectCatalog.projects.map((item) => pomodoroProjectRefKey(item)))
+  const accessibleProjectRefs = new Set(
+    projectCatalog.projects.map((item) => pomodoroProjectRefKey({ subjectId: item.subjectId, scopedProjectId: item.projectId })),
+  )
   const canUseFocusedWorkbench = Boolean(
     snapshot.canUseWorkbench &&
     pomodoroProjectCatalogReady &&
@@ -47,15 +49,15 @@ export function PomodoroWorkbenchGate(props: { children: ReactNode }) {
     return null
   }
 
-  if (canUseFocusedWorkbench && focusProjectRef && (subjectId !== focusProjectRef.subjectId || projectId !== focusProjectRef.projectId)) {
+  if (canUseFocusedWorkbench && focusProjectRef && (subjectId !== focusProjectRef.subjectId || projectId !== focusProjectRef.scopedProjectId)) {
     return (
       <Navigate
-        to={`/subjects/${encodeURIComponent(focusProjectRef.subjectId)}/projects/${encodeURIComponent(focusProjectRef.projectId)}/workbench`}
+        to={`/subjects/${encodeURIComponent(focusProjectRef.subjectId)}/projects/${encodeURIComponent(focusProjectRef.scopedProjectId)}/workbench`}
         replace
         state={{
           from: `${location.pathname}${location.search}${location.hash}`,
           blockedProjectId: projectId,
-          targetProjectId: focusProjectRef.projectId,
+          targetProjectId: focusProjectRef.scopedProjectId,
         }}
       />
     )
@@ -72,7 +74,7 @@ export function PomodoroWorkbenchGate(props: { children: ReactNode }) {
       state={{
         from: `${location.pathname}${location.search}${location.hash}`,
         blockedProjectId: projectId,
-        targetProjectId: focusProjectRef?.projectId,
+        targetProjectId: focusProjectRef?.scopedProjectId,
       }}
     />
   )

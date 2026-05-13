@@ -93,7 +93,7 @@ const toolSupportCache = new Map<string, boolean>()
 const visionSupportCache = new Map<string, boolean>()
 
 export async function askCourseAgent(params: AskCourseAgentParams): Promise<{ content: string; evidence: AiChatCourseEvidence[] }> {
-  const scope = { subjectId: params.subjectId, projectId: params.projectId }
+  const scope = { subjectId: params.subjectId, scopedProjectId: params.projectId }
   const document = await loadSubtitleDocumentForInstance({
     scope,
     instance: params.instance,
@@ -316,7 +316,7 @@ async function answerWithCompatibilityMode(params: {
 
   params.params.onStatus?.(params.hasTranscriptContext ? "正在基于相关字幕生成回答..." : "正在基于当前画面生成回答...")
   const response = await askProjectLlmChatCompletion(
-    { subjectId: params.params.subjectId, projectId: params.params.projectId },
+    { subjectId: params.params.subjectId, scopedProjectId: params.params.projectId },
     {
       messages,
       modelName: params.params.modelName,
@@ -1233,7 +1233,7 @@ async function resolveVideoSource(params: AskCourseAgentParams): Promise<{ src: 
   }
 
   return {
-    src: apiUrl(projectApiPath({ subjectId: params.subjectId, projectId: params.projectId }, `/media/instances/${params.instance.instanceId}`)),
+    src: apiUrl(projectApiPath({ subjectId: params.subjectId, scopedProjectId: params.projectId }, `/media/instances/${params.instance.instanceId}`)),
   }
 }
 
@@ -1358,7 +1358,7 @@ async function requestSlideTextExtraction(
   options: { useResponseFormat: boolean },
 ) {
   return await askProjectLlmChatCompletion(
-    { subjectId: params.subjectId, projectId: params.projectId },
+    { subjectId: params.subjectId, scopedProjectId: params.projectId },
     {
       modelName: params.modelName,
       temperature: 0,

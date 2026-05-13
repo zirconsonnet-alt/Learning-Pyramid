@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 import { apiRequest } from "@/ui/api/http"
-import { projectApiPath, type ProjectScope } from "@/ui/api/projectScope"
+import { projectApiPath, type ScopedProjectRef } from "@/ui/api/projectScope"
 
 export const SubjectSchema = z.object({
   subjectId: z.string(),
@@ -21,7 +21,7 @@ export const StudyMaterialSchema = z.object({
   materialType: StudyMaterialTypeSchema,
   title: z.string(),
   createdAt: z.string(),
-  projectId: z.string().nullable(),
+  scopedProjectId: z.string().nullable(),
 })
 export type StudyMaterial = z.infer<typeof StudyMaterialSchema>
 
@@ -29,7 +29,8 @@ export const SubjectContextSchema = z.object({
   subject: SubjectSchema,
   currentMaterial: StudyMaterialSchema,
   materials: z.array(StudyMaterialSchema),
-  currentProjectId: z.string(),
+  currentScopedProjectId: z.string(),
+  currentInternalProjectId: z.string(),
 })
 export type SubjectContext = z.infer<typeof SubjectContextSchema>
 
@@ -102,7 +103,7 @@ export function deleteSubjectMaterial(subjectId: string, materialId: string) {
   })
 }
 
-export function getProjectSubjectContext(scope: ProjectScope) {
+export function getProjectSubjectContext(scope: ScopedProjectRef) {
   return apiRequest({
     path: projectApiPath(scope, "/subject-context"),
     responseSchema: SubjectContextSchema,

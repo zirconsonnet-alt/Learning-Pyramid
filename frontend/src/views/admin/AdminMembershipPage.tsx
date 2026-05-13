@@ -887,7 +887,7 @@ export function AdminMembershipPage() {
             {payoutIdentitiesQ.error ? <ErrorNotice title="收款身份加载失败" message={formatApiError(payoutIdentitiesQ.error)} /> : null}
             {!payoutIdentitiesQ.error && payoutIdentitiesQ.isLoading ? <LoadingNotice title="正在加载收款身份" message="后台正在读取绑定记录。" /> : null}
             {!payoutIdentitiesQ.error && !payoutIdentitiesQ.isLoading && (payoutIdentitiesQ.data?.length ?? 0) === 0 ? (
-              <ContentEmptyState title="暂无收款身份" message="当前还没有用户完成微信收款身份绑定。" />
+              <ContentEmptyState title="暂无收款身份" message="当前还没有用户完成微信提现确认。" />
             ) : null}
             {payoutIdentitiesQ.data?.map((item) => {
               const owner = userLabel(item.user)

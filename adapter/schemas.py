@@ -89,14 +89,14 @@ class CreateCommissionWithdrawalRequest(BaseModel):
     amountCent: int = Field(ge=1)
 
 
-class StartWeChatPayoutBindingRequest(BaseModel):
+class StartWeChatWithdrawalConfirmationAttemptRequest(BaseModel):
     channel: str = Field(default="desktop_qr_official_account_h5", min_length=1, max_length=64)
     returnUrl: str = Field(min_length=1, max_length=2048)
-    amountCent: int = Field(default=0, ge=0)
+    amountCent: int = Field(ge=1)
 
 
-class CompleteWeChatPayoutBindingRequest(BaseModel):
-    bindingAttemptId: str = Field(min_length=1)
+class CompleteWeChatWithdrawalConfirmationAttemptRequest(BaseModel):
+    withdrawalConfirmationAttemptId: str = Field(min_length=1)
     authorizationCode: str = Field(min_length=1, max_length=512)
     state: str = Field(min_length=1, max_length=512)
     confirmedLearningPyramidUserId: Optional[str] = Field(default=None, max_length=128)
@@ -372,7 +372,7 @@ class UpdateUserServiceSettingsRequest(BaseModel):
 
 class UserPomodoroProjectReferenceRequest(BaseModel):
     subjectId: str = Field(min_length=1, max_length=200)
-    projectId: str = Field(min_length=1, max_length=200)
+    scopedProjectId: str = Field(min_length=1, max_length=200)
 
 
 class UserPomodoroSettingsRequest(BaseModel):

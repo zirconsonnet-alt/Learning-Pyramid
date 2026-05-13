@@ -2,15 +2,15 @@ export function buildSubjectSettingsPath(subjectId: string) {
   return subjectId ? `/subjects/${subjectId}/settings` : ""
 }
 
-export function buildScopedProjectPath(subjectId: string, projectId: string, suffix: string) {
+export function buildScopedProjectPath(subjectId: string, scopedProjectId: string, suffix: string) {
   const normalizedSuffix = suffix.startsWith("/") ? suffix : `/${suffix}`
-  return subjectId && projectId ? `/subjects/${encodeURIComponent(subjectId)}/projects/${encodeURIComponent(projectId)}${normalizedSuffix}` : ""
+  return subjectId && scopedProjectId ? `/subjects/${encodeURIComponent(subjectId)}/projects/${encodeURIComponent(scopedProjectId)}${normalizedSuffix}` : ""
 }
 
-export function buildProjectSettingsPath(subjectId: string, projectId: string) {
-  return buildScopedProjectPath(subjectId, projectId, "/settings")
+export function buildProjectSettingsPath(subjectId: string, scopedProjectId: string) {
+  return buildScopedProjectPath(subjectId, scopedProjectId, "/settings")
 }
 
-export function buildProjectWorkbenchPath(subjectId: string, projectId: string) {
-  return buildScopedProjectPath(subjectId, projectId, "/workbench")
+export function buildProjectWorkbenchPath(subjectId: string, scopedProjectId: string) {
+  return buildScopedProjectPath(subjectId, scopedProjectId, "/workbench")
 }
