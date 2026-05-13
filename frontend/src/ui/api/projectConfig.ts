@@ -24,7 +24,7 @@ export type RollUpStrategy = z.infer<typeof RollUpStrategySchema>
 export const ProjectConfigSchema = z.object({
   projectId: z.string(),
   projectType: ProjectTypeSchema,
-  rollUpStrategy: RollUpStrategySchema.default("THRESHOLD_AUTO"),
+  rollUpStrategy: RollUpStrategySchema.default("LEARNING_OBJECT_ISOMORPHIC"),
   updatedAt: z.string(),
   layerConfigs: z.record(z.string(), LayerConfigSchema),
   pushConfig: z

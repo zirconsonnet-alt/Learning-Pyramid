@@ -117,6 +117,16 @@ type MockGlobalSettings = {
 }
 type MockMembershipProvider = "manual_test" | "wechat_native"
 type MockWithdrawalScenario = "none" | "awaiting_then_succeeded" | "awaiting_then_processing"
+type MockLlmSettings = {
+  baseUrl: string
+  modelName: string
+  promptAssemblyMode: "system" | "user_concat"
+  savedApiKeyConfigured: boolean
+  savedApiKeyPreview: string | null
+  llmConfigured: boolean
+  storyGenerationConfigured: boolean
+  llmSource: "user" | "global" | "env" | "none"
+}
 
 function createEmptyPomodoroSchedule(): MockGlobalSettings["pomodoro"]["weeklySchedule"] {
   return {
@@ -147,7 +157,7 @@ export function createMockGlobalSettings(overrides: Partial<MockGlobalSettings> 
       weeklySchedule: createEmptyPomodoroSchedule(),
       ...overrides.pomodoro,
     },
-    defaultProjectReviewTemplate: [{ kind: "CONVERGENCE" }],
+    defaultProjectReviewTemplate: [{ kind: "REVIEW_TASK" }, { kind: "CONVERGENCE" }],
     learningPlans: { plans: [], progressSnapshots: [] },
     updatedAt: nowIso,
     ...overrides,
@@ -174,6 +184,16 @@ export async function installMockApi(
   const queueHeadId = options.queueHeadId ?? null
   let globalSettings = options.globalSettings ?? createMockGlobalSettings()
   let membershipOrders: MockMembershipOrder[] = []
+  let llmSettings: MockLlmSettings = {
+    baseUrl: "",
+    modelName: "",
+    promptAssemblyMode: "system",
+    savedApiKeyConfigured: false,
+    savedApiKeyPreview: null,
+    llmConfigured: false,
+    storyGenerationConfigured: false,
+    llmSource: "none",
+  }
   let withdrawalRequested = false
   let withdrawalPollCount = 0
   let withdrawalConfirmationStarted = false
@@ -274,6 +294,32 @@ export async function installMockApi(
       return
     }
 
+    if (path === "/profile/me/llm-settings") {
+      if (method === "PUT") {
+        const payload = JSON.parse(request.postData() || "{}") as Partial<{
+          baseUrl: string
+          modelName: string
+          promptAssemblyMode: "system" | "user_concat"
+          apiKey: string
+          clearApiKey: boolean
+        }>
+        const savedApiKeyConfigured = payload.clearApiKey ? false : Boolean(payload.apiKey || llmSettings.savedApiKeyConfigured)
+        llmSettings = {
+          ...llmSettings,
+          baseUrl: payload.baseUrl ?? llmSettings.baseUrl,
+          modelName: payload.modelName ?? llmSettings.modelName,
+          promptAssemblyMode: payload.promptAssemblyMode ?? llmSettings.promptAssemblyMode,
+          savedApiKeyConfigured,
+          savedApiKeyPreview: savedApiKeyConfigured ? "sk-...e2e" : null,
+          llmConfigured: Boolean((payload.baseUrl ?? llmSettings.baseUrl) && (payload.modelName ?? llmSettings.modelName) && savedApiKeyConfigured),
+          storyGenerationConfigured: Boolean((payload.baseUrl ?? llmSettings.baseUrl) && (payload.modelName ?? llmSettings.modelName) && savedApiKeyConfigured),
+          llmSource: savedApiKeyConfigured ? "user" : "none",
+        }
+      }
+      await fulfill(route, llmSettings)
+      return
+    }
+
     if (path === "/profile/me/global-settings") {
       if (method === "PUT") {
         const payload = JSON.parse(request.postData() || "{}") as Partial<MockGlobalSettings>
@@ -321,7 +367,7 @@ export async function installMockApi(
       await fulfill(route, {
         projectId: project.projectId,
         projectType: "COURSE",
-        rollUpStrategy: "THRESHOLD_AUTO",
+        rollUpStrategy: "LEARNING_OBJECT_ISOMORPHIC",
         layerConfigs: {},
         reviewRecommendationConfig: {
           minRecallPointsToEnable: 1,

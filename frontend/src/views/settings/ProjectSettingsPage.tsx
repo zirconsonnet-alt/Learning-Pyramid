@@ -213,7 +213,7 @@ export function ProjectSettingsPage() {
   const setProjectRollUpStrategyM = useSetProjectRollUpStrategy(projectScope)
   const bulkRemapM = useBulkRemapRecallPointsInstance(projectScope)
   const projectType = projectConfigQ.data?.projectType ?? "COURSE"
-  const currentRollUpStrategy = projectConfigQ.data?.rollUpStrategy ?? "THRESHOLD_AUTO"
+  const currentRollUpStrategy = projectConfigQ.data?.rollUpStrategy ?? "LEARNING_OBJECT_ISOMORPHIC"
   const subjectContext = scopedSubjectContextQ.data ?? subjectContextQ.data
   const subject = useMemo(
     () => (subjectsQ.data ?? []).find((item) => item.subjectId === subjectId) ?? null,
@@ -238,7 +238,12 @@ export function ProjectSettingsPage() {
 
   const existingLayerIndexes = useMemo(() => (layersQ.data ?? []).map((l) => l.layerIndex).sort((a, b) => a - b), [layersQ.data])
   const defaultLayerConfig = useMemo(
-    () => ({ reviewChainTemplate: [{ kind: "CONVERGENCE" as const }], aggregationKNode: 10, aggregationKPoint: 200, thresholdRollUpEnabled: true }),
+    () => ({
+      reviewChainTemplate: [{ kind: "REVIEW_TASK" as const }, { kind: "CONVERGENCE" as const }],
+      aggregationKNode: 10,
+      aggregationKPoint: 200,
+      thresholdRollUpEnabled: true,
+    }),
     [],
   )
 

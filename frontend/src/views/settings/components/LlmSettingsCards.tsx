@@ -134,6 +134,7 @@ function PromptAssemblyModeSelector({
 
 function SavedApiKeyInput({
   id,
+  name,
   draftValue,
   onDraftChange,
   savedApiKeyConfigured,
@@ -142,6 +143,7 @@ function SavedApiKeyInput({
   savedPlaceholder,
 }: {
   id: string
+  name: string
   draftValue: string
   onDraftChange: (value: string) => void
   savedApiKeyConfigured: boolean
@@ -155,6 +157,7 @@ function SavedApiKeyInput({
   return (
     <Input
       id={id}
+      name={name}
       type="password"
       value={showSavedMask ? SAVED_API_KEY_MASK : draftValue}
       onFocus={() => {
@@ -171,7 +174,9 @@ function SavedApiKeyInput({
       onChange={(event) => onDraftChange(event.target.value)}
       placeholder={savedApiKeyConfigured ? savedPlaceholder : emptyPlaceholder}
       disabled={disabled}
-      autoComplete="off"
+      autoComplete="new-password"
+      autoCapitalize="none"
+      spellCheck={false}
     />
   )
 }
@@ -229,28 +234,35 @@ function LlmSettingsDraftForm({
           <Label htmlFor={`${idPrefix}BaseUrl`}>Base URL</Label>
           <Input
             id={`${idPrefix}BaseUrl`}
+            name={`${idPrefix}BaseUrl`}
             value={baseUrlDraft}
             onChange={(event) => setBaseUrlDraft(event.target.value)}
             placeholder="https://api.openai.com/v1"
             disabled={isLoading || isPending}
             autoComplete="off"
+            autoCapitalize="none"
+            spellCheck={false}
           />
         </div>
         <div className="space-y-2">
           <Label htmlFor={`${idPrefix}Model`}>模型名</Label>
           <Input
             id={`${idPrefix}Model`}
+            name={`${idPrefix}ModelName`}
             value={modelDraft}
             onChange={(event) => setModelDraft(event.target.value)}
             placeholder="gpt-4o-mini"
             disabled={isLoading || isPending}
             autoComplete="off"
+            autoCapitalize="none"
+            spellCheck={false}
           />
         </div>
         <div className="space-y-2">
           <Label htmlFor={`${idPrefix}ApiKey`}>API 密钥</Label>
           <SavedApiKeyInput
             id={`${idPrefix}ApiKey`}
+            name={`${idPrefix}ApiKey`}
             draftValue={apiKeyDraft}
             onDraftChange={setApiKeyDraft}
             savedApiKeyConfigured={!!settings?.savedApiKeyConfigured}

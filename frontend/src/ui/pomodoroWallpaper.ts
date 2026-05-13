@@ -3,11 +3,34 @@ const POMODORO_WALLPAPER_STORE_NAME = "wallpaper"
 const POMODORO_WALLPAPER_RECORD_KEY = "current"
 export const POMODORO_WALLPAPER_MAX_BYTES = 12 * 1024 * 1024
 
+export type PomodoroWallpaperScope =
+  | { kind: "local" }
+  | { kind: "user"; userId: string }
+
 type PomodoroWallpaperRecord = {
   blob: Blob
   name: string
   type: string
   updatedAt: number
+}
+
+export function resolvePomodoroWallpaperScope(
+  authEnabled: boolean | undefined,
+  userId: string | null | undefined,
+): PomodoroWallpaperScope | null {
+  if (authEnabled === undefined) return null
+  if (!authEnabled) return { kind: "local" }
+  return userId ? { kind: "user", userId } : null
+}
+
+export function getPomodoroWallpaperScopeSignature(scope: PomodoroWallpaperScope | null) {
+  if (!scope) return ""
+  return scope.kind === "user" ? `user:${scope.userId}` : "local"
+}
+
+function getPomodoroWallpaperRecordKey(scope: PomodoroWallpaperScope): IDBValidKey {
+  if (scope.kind === "user") return ["user", scope.userId, POMODORO_WALLPAPER_RECORD_KEY]
+  return POMODORO_WALLPAPER_RECORD_KEY
 }
 
 function openPomodoroWallpaperDatabase() {
@@ -54,14 +77,14 @@ async function runPomodoroWallpaperRequest<T>(
   })
 }
 
-export async function readPomodoroWallpaperBlob() {
+export async function readPomodoroWallpaperBlob(scope: PomodoroWallpaperScope) {
   const record = await runPomodoroWallpaperRequest<PomodoroWallpaperRecord | undefined>("readonly", (store) =>
-    store.get(POMODORO_WALLPAPER_RECORD_KEY),
+    store.get(getPomodoroWallpaperRecordKey(scope)),
   )
   return record?.blob instanceof Blob ? record.blob : null
 }
 
-export async function savePomodoroWallpaperBlob(file: File) {
+export async function savePomodoroWallpaperBlob(scope: PomodoroWallpaperScope, file: File) {
   const record: PomodoroWallpaperRecord = {
     blob: file,
     name: file.name,
@@ -69,12 +92,12 @@ export async function savePomodoroWallpaperBlob(file: File) {
     updatedAt: Date.now(),
   }
   await runPomodoroWallpaperRequest<IDBValidKey>("readwrite", (store) =>
-    store.put(record, POMODORO_WALLPAPER_RECORD_KEY),
+    store.put(record, getPomodoroWallpaperRecordKey(scope)),
   )
 }
 
-export async function removePomodoroWallpaperBlob() {
+export async function removePomodoroWallpaperBlob(scope: PomodoroWallpaperScope) {
   await runPomodoroWallpaperRequest<undefined>("readwrite", (store) =>
-    store.delete(POMODORO_WALLPAPER_RECORD_KEY),
+    store.delete(getPomodoroWallpaperRecordKey(scope)),
   )
 }

@@ -737,7 +737,7 @@ class BackendLegacyCleanupTest(unittest.TestCase):
                                 "projectType": "COURSE",
                                 "layerConfigs": {
                                     "0": {
-                                        "reviewChainTemplate": [{"kind": "CONVERGENCE"}],
+                                        "reviewChainTemplate": [{"kind": "REVIEW_TASK"}, {"kind": "CONVERGENCE"}],
                                         "aggregationKNode": 8,
                                         "aggregationKPoint": 64,
                                     }
@@ -796,7 +796,7 @@ class BackendLegacyCleanupTest(unittest.TestCase):
                     VALUES (
                         'proj_000001',
                         0,
-                        '{"projectId":"proj_000001","projectType":"COURSE","layerConfigs":{"0":{"reviewChainTemplate":[{"kind":"CONVERGENCE"}],"aggregationKNode":8,"aggregationKPoint":64}},"pushConfig":{"strategy":"none","params":{}},"updatedAtMs":0}'
+                        '{"projectId":"proj_000001","projectType":"COURSE","layerConfigs":{"0":{"reviewChainTemplate":[{"kind":"REVIEW_TASK"},{"kind":"CONVERGENCE"}],"aggregationKNode":8,"aggregationKPoint":64}},"pushConfig":{"strategy":"none","params":{}},"updatedAtMs":0}'
                     )
                     """
                 )

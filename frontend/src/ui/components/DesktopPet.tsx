@@ -11,9 +11,11 @@ export function DesktopPet(props: { page?: "home" | "workbench"; assistantState?
   const assistantState = props.assistantState ?? "idle"
   const hasPopover = page === "workbench" && !!props.children
   const [pinRequested, setPinRequested] = useState(false)
+  const [popoverSuppressed, setPopoverSuppressed] = useState(false)
   const isPinned = hasPopover && pinRequested
   const popoverId = useId()
   const rootRef = useRef<HTMLElement | null>(null)
+  const triggerRef = useRef<HTMLButtonElement | null>(null)
 
   useEffect(() => {
     if (!hasPopover || !isPinned) return
@@ -25,7 +27,10 @@ export function DesktopPet(props: { page?: "home" | "workbench"; assistantState?
       setPinRequested(false)
     }
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setPinRequested(false)
+      if (event.key === "Escape") {
+        setPinRequested(false)
+        setPopoverSuppressed(true)
+      }
     }
 
     document.addEventListener("pointerdown", onPointerDown)
@@ -44,18 +49,28 @@ export function DesktopPet(props: { page?: "home" | "workbench"; assistantState?
         page === "workbench" ? "is-workbench" : "is-home",
         hasPopover && "has-popover",
         isPinned && "is-pinned",
+        popoverSuppressed && "is-popover-suppressed",
         assistantState === "thinking" && "is-thinking",
       )}
       aria-label="雪豹桌面宠物"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) {
+          setPopoverSuppressed(false)
+        }
+      }}
     >
       <button
+        ref={triggerRef}
         type="button"
         className="plm-desktop-pet-button"
         aria-expanded={isPinned}
         aria-controls={hasPopover ? popoverId : undefined}
         aria-label={hasPopover ? (isPinned ? "收起雪豹问答" : "固定展开雪豹问答") : "雪豹桌面宠物"}
         onClick={() => {
-          if (hasPopover) setPinRequested((current) => !current)
+          if (hasPopover) {
+            setPopoverSuppressed(false)
+            setPinRequested((current) => !current)
+          }
         }}
       >
         <span className="plm-desktop-pet-hit-area" aria-hidden="true" />
@@ -74,7 +89,11 @@ export function DesktopPet(props: { page?: "home" | "workbench"; assistantState?
             className="plm-desktop-pet-popover-close"
             aria-label="关闭雪豹问答"
             title="关闭雪豹问答"
-            onClick={() => setPinRequested(false)}
+            onClick={() => {
+              setPinRequested(false)
+              setPopoverSuppressed(true)
+              triggerRef.current?.focus()
+            }}
           >
             <X className="h-4 w-4" />
           </button>

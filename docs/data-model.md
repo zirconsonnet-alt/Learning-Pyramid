@@ -14,6 +14,10 @@
 
 core store 支持 SQLite 和 PostgreSQL。auth store 支持 SQLite 和 PostgreSQL。membership store 当前由独立 SQLite 文件初始化和维护。
 
+客户端浏览器也会保存少量本地偏好，不进入后端 store。番茄钟壁纸保存在 IndexedDB
+`learningpyramid-pomodoro-wallpaper` 的 `wallpaper` object store 中；启用账号系统时按 `user_id`
+使用账号级 key，未启用账号系统时使用浏览器本地 key。登录账号不得读取浏览器旧的全局壁纸 key。
+
 ## SQLite 与 PostgreSQL
 
 运行时通过 `LEARNINGPYRAMID_SQL_BACKEND` 选择 core/auth 的 SQL 后端：

@@ -1,10 +1,10 @@
-import { expect, test } from "@playwright/test"
+import { expect, test, type Page } from "@playwright/test"
 
 import { collectConsoleIssues, expectNoConsoleIssues } from "../fixtures/app-checks"
 import { createMockGlobalSettings, installMockApi } from "../fixtures/mock-api"
 import { journeyIds } from "../fixtures/journeys"
 import { recordJourney } from "../fixtures/journey-result"
-import { project, subject } from "../fixtures/test-data"
+import { project, subject, testUser } from "../fixtures/test-data"
 
 function createPomodoroPlan(overrides: Partial<ReturnType<typeof createMockGlobalSettings>["pomodoro"]["weeklySchedule"]["sat"]["plans"][number]> = {}) {
   return {
@@ -21,6 +21,43 @@ function createPomodoroPlan(overrides: Partial<ReturnType<typeof createMockGloba
   }
 }
 
+async function seedPomodoroWallpaper(page: Page, recordKey: IDBValidKey = ["user", testUser.userId, "current"]) {
+  await page.addInitScript(async ({ key }) => {
+    const dbRequest = indexedDB.open("learningpyramid-pomodoro-wallpaper", 1)
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      dbRequest.onupgradeneeded = () => {
+        const db = dbRequest.result
+        if (!db.objectStoreNames.contains("wallpaper")) {
+          db.createObjectStore("wallpaper")
+        }
+      }
+      dbRequest.onsuccess = () => resolve(dbRequest.result)
+      dbRequest.onerror = () => reject(dbRequest.error)
+    })
+    const blob = await fetch(
+      "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='80'%3E%3Crect width='120' height='80' fill='%232563eb'/%3E%3C/svg%3E",
+    ).then((response) => response.blob())
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction("wallpaper", "readwrite")
+      transaction.objectStore("wallpaper").put(
+        {
+          blob,
+          name: "e2e-wallpaper.svg",
+          type: blob.type,
+          updatedAt: Date.now(),
+        },
+        key,
+      )
+      transaction.oncomplete = () => {
+        db.close()
+        resolve()
+      }
+      transaction.onerror = () => reject(transaction.error)
+      transaction.onabort = () => reject(transaction.error)
+    })
+  }, { key: recordKey })
+}
+
 test(journeyIds.pomodoro, async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
   await installMockApi(page)
@@ -31,6 +68,64 @@ test(journeyIds.pomodoro, async ({ page }) => {
     await page.getByRole("button", { name: "统计" }).click()
     await expect(page.getByText("今天还没有可统计的番茄记录。")).toBeVisible()
   })
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
+test("pomodoro settings shares the pomodoro wallpaper backdrop", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await seedPomodoroWallpaper(page)
+  await installMockApi(page, {
+    globalSettings: createMockGlobalSettings({
+      pomodoro: {
+        enabled: false,
+        transitionSoundEnabled: false,
+        defaultFocusPrompt: "",
+        defaultBreakPrompt: "",
+        microBreaks: {
+          enabled: false,
+          minIntervalSeconds: 180,
+          maxIntervalSeconds: 300,
+          durationSeconds: 10,
+        },
+        weeklySchedule: {
+          mon: { plans: [] },
+          tue: { plans: [] },
+          wed: { plans: [] },
+          thu: { plans: [] },
+          fri: { plans: [] },
+          sat: { plans: [createPomodoroPlan({ id: "wallpaper_plan" })] },
+          sun: { plans: [] },
+        },
+      },
+    }),
+  })
+
+  await page.goto("/pomodoro")
+  await expect(page.locator("[data-pomodoro-wallpaper-backdrop]")).toBeVisible()
+
+  await page.goto("/pomodoro/plans/wallpaper_plan")
+  await expect(page.locator("[data-pomodoro-wallpaper-backdrop]")).toBeVisible()
+
+  await page.goto("/pomodoro/settings")
+  await expect(page.locator("[data-pomodoro-wallpaper-backdrop]")).toBeVisible()
+  await expect(page.getByText("番茄钟设置")).toBeVisible()
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
+test("pomodoro wallpaper ignores the old browser-global record for signed-in accounts", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await seedPomodoroWallpaper(page, "current")
+  await installMockApi(page)
+
+  await page.goto("/pomodoro")
+  await expect(page.getByText("番茄钟", { exact: true })).toBeVisible()
+  await expect(page.locator("[data-pomodoro-wallpaper-backdrop]")).toHaveCount(0)
+
+  await page.goto("/pomodoro/settings")
+  await expect(page.getByText("番茄钟设置")).toBeVisible()
+  await expect(page.locator("[data-pomodoro-wallpaper-backdrop]")).toHaveCount(0)
 
   expectNoConsoleIssues(consoleIssues)
 })

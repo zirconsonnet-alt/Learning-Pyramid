@@ -3,7 +3,7 @@ import { persist } from "zustand/middleware"
 
 import type { ReviewChainTemplateItem } from "@/ui/api/projectConfig"
 
-export const DEFAULT_PROJECT_REVIEW_TEMPLATE: ReviewChainTemplateItem[] = [{ kind: "CONVERGENCE" }]
+export const DEFAULT_PROJECT_REVIEW_TEMPLATE: ReviewChainTemplateItem[] = [{ kind: "REVIEW_TASK" }, { kind: "CONVERGENCE" }]
 
 function normalizeReviewTaskCount(value: unknown) {
   const parsed = Number(value)

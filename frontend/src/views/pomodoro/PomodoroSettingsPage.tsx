@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react"
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react"
 import { ArrowLeft, FolderOpen, ImageOff, ImagePlus, Music2, RotateCcw, Save, Trash2 } from "lucide-react"
 import { Link } from "react-router-dom"
 
@@ -8,8 +8,8 @@ import { Label } from "@/ui/components/ui/label"
 import { type DirectoryBindingPermission, usePomodoroRestMusicDirectoryBinding } from "@/ui/localMedia/projectDirectory"
 import {
   POMODORO_WALLPAPER_MAX_BYTES,
-  readPomodoroWallpaperBlob,
   removePomodoroWallpaperBlob,
+  resolvePomodoroWallpaperScope,
   savePomodoroWallpaperBlob,
 } from "@/ui/pomodoroWallpaper"
 import { useCurrentUser } from "@/ui/queries/auth"
@@ -28,6 +28,7 @@ import {
 import { useThemeStore } from "@/ui/store/themeStore"
 import { MemberOnlyFeatureNotice } from "@/views/membership/membershipUi"
 import { buildPomodoroPath, buildPomodoroSettingsPath } from "@/views/pomodoro/pomodoroRouting"
+import { PomodoroWallpaperBackdrop, usePomodoroWallpaper } from "@/views/pomodoro/PomodoroWallpaperBackdrop"
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -128,10 +129,14 @@ export function PomodoroSettingsPage() {
   const pomodoroMemberBlocked = authEnabled && (membershipQ.isLoading || Boolean(membershipQ.error) || !membershipQ.data?.isActive)
   const restMusicDirectory = usePomodoroRestMusicDirectoryBinding()
   const [restMusicDirectoryAction, setRestMusicDirectoryAction] = useState<"authorize" | "request" | "clear" | null>(null)
-  const [wallpaperUrl, setWallpaperUrl] = useState("")
+  const wallpaperScope = useMemo(
+    () => resolvePomodoroWallpaperScope(capabilitiesQ.data?.authEnabled, currentUserQ.data?.userId),
+    [capabilitiesQ.data?.authEnabled, currentUserQ.data?.userId],
+  )
+  const { wallpaperUrl, replacePomodoroWallpaperPreview } = usePomodoroWallpaper(wallpaperScope)
   const wallpaperInputRef = useRef<HTMLInputElement | null>(null)
-  const wallpaperObjectUrlRef = useRef("")
   const restMusicDirectoryBusy = restMusicDirectoryAction !== null
+  const wallpaperActionDisabled = !wallpaperScope
   const canChooseRestMusicDirectory =
     restMusicDirectory.supported && !restMusicDirectory.loading && !restMusicDirectoryBusy
   const canRequestRestMusicDirectoryPermission =
@@ -145,20 +150,6 @@ export function PomodoroSettingsPage() {
     !restMusicDirectoryBusy &&
     restMusicDirectory.permission !== "missing"
 
-  const replacePomodoroWallpaperPreview = useCallback((blob: Blob | null) => {
-    if (wallpaperObjectUrlRef.current) {
-      URL.revokeObjectURL(wallpaperObjectUrlRef.current)
-      wallpaperObjectUrlRef.current = ""
-    }
-    if (!blob) {
-      setWallpaperUrl("")
-      return
-    }
-    const nextUrl = URL.createObjectURL(blob)
-    wallpaperObjectUrlRef.current = nextUrl
-    setWallpaperUrl(nextUrl)
-  }, [])
-
   useEffect(() => {
     setFocusPromptDraft(defaultFocusPrompt)
   }, [defaultFocusPrompt])
@@ -171,25 +162,6 @@ export function PomodoroSettingsPage() {
     setMicroBreakDraft(toMicroBreakDraft(microBreaks))
     setMicroBreakError("")
   }, [microBreaks])
-
-  useEffect(() => {
-    let cancelled = false
-    void readPomodoroWallpaperBlob()
-      .then((blob) => {
-        if (cancelled) return
-        replacePomodoroWallpaperPreview(blob)
-      })
-      .catch(() => {
-        // Local wallpaper is cosmetic; settings remain usable if IndexedDB is unavailable.
-      })
-    return () => {
-      cancelled = true
-      if (wallpaperObjectUrlRef.current) {
-        URL.revokeObjectURL(wallpaperObjectUrlRef.current)
-        wallpaperObjectUrlRef.current = ""
-      }
-    }
-  }, [replacePomodoroWallpaperPreview])
 
   async function persistPomodoroPromptSettings(
     nextFocusPrompt: string,
@@ -320,8 +292,12 @@ export function PomodoroSettingsPage() {
       showErrorFeedback("设置壁纸失败", "请选择 12 MB 以内的图片。")
       return
     }
+    if (!wallpaperScope) {
+      showErrorFeedback("设置壁纸失败", "当前账号状态还在加载，请稍后再试。")
+      return
+    }
     try {
-      await savePomodoroWallpaperBlob(file)
+      await savePomodoroWallpaperBlob(wallpaperScope, file)
       replacePomodoroWallpaperPreview(file)
       showSuccessFeedback("壁纸已更新", "只保存在当前浏览器，不会上传服务器，也不会影响其他页面。")
     } catch (err) {
@@ -330,8 +306,12 @@ export function PomodoroSettingsPage() {
   }
 
   async function handleRemovePomodoroWallpaper() {
+    if (!wallpaperScope) {
+      showErrorFeedback("移除壁纸失败", "当前账号状态还在加载，请稍后再试。")
+      return
+    }
     try {
-      await removePomodoroWallpaperBlob()
+      await removePomodoroWallpaperBlob(wallpaperScope)
       replacePomodoroWallpaperPreview(null)
       showInfoFeedback("壁纸已移除", "番茄钟页已恢复默认背景。")
     } catch (err) {
@@ -341,34 +321,39 @@ export function PomodoroSettingsPage() {
 
   if (pomodoroMemberBlocked) {
     return (
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
-        <Button variant="ghost" asChild className="self-start px-0">
-          <Link to={buildPomodoroPath()}>
-            <ArrowLeft className="h-4 w-4" />
-            返回番茄钟
-          </Link>
-        </Button>
-        <MemberOnlyFeatureNotice
-          title="番茄钟设置是会员专属功能"
-          message="当前账号还没有有效会员。开通会员后，就可以继续设置默认提示词、随机微休息、休息音乐目录和壁纸。"
-        />
-      </div>
+      <>
+        <PomodoroWallpaperBackdrop wallpaperUrl={wallpaperUrl} />
+        <div data-pomodoro-wallpaper-scope="page" className="relative z-10 mx-auto flex w-full max-w-3xl flex-col gap-6">
+          <Button variant="ghost" asChild className="self-start px-0">
+            <Link to={buildPomodoroPath()}>
+              <ArrowLeft className="h-4 w-4" />
+              返回番茄钟
+            </Link>
+          </Button>
+          <MemberOnlyFeatureNotice
+            title="番茄钟设置是会员专属功能"
+            message="当前账号还没有有效会员。开通会员后，就可以继续设置默认提示词、随机微休息、休息音乐目录和壁纸。"
+          />
+        </div>
+      </>
     )
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
-      <section className="space-y-4">
-        <Button variant="ghost" asChild className="px-0">
-          <Link to={buildPomodoroPath()}>
-            <ArrowLeft className="h-4 w-4" />
-            返回番茄钟
-          </Link>
-        </Button>
-        <div>
-          <h1 className="mt-1 text-2xl font-semibold tracking-[-0.03em] text-foreground">番茄钟设置</h1>
-        </div>
-      </section>
+    <>
+      <PomodoroWallpaperBackdrop wallpaperUrl={wallpaperUrl} />
+      <div data-pomodoro-wallpaper-scope="page" className="relative z-10 mx-auto flex w-full max-w-3xl flex-col gap-6">
+        <section className="space-y-4">
+          <Button variant="ghost" asChild className="px-0">
+            <Link to={buildPomodoroPath()}>
+              <ArrowLeft className="h-4 w-4" />
+              返回番茄钟
+            </Link>
+          </Button>
+          <div>
+            <h1 className="mt-1 text-2xl font-semibold tracking-[-0.03em] text-foreground">番茄钟设置</h1>
+          </div>
+        </section>
 
       <section className="space-y-5 border-t border-border/60 pt-6">
         <div className="space-y-4 border-b border-border/60 pb-6">
@@ -481,12 +466,12 @@ export function PomodoroSettingsPage() {
                   className="hidden"
                   onChange={(event) => void handlePomodoroWallpaperChange(event)}
                 />
-                <Button type="button" variant="outline" onClick={() => wallpaperInputRef.current?.click()}>
+                <Button type="button" variant="outline" onClick={() => wallpaperInputRef.current?.click()} disabled={wallpaperActionDisabled}>
                   <ImagePlus className="h-4 w-4" />
                   {wallpaperUrl ? "更换壁纸" : "设置壁纸"}
                 </Button>
                 {wallpaperUrl ? (
-                  <Button type="button" variant="ghost" onClick={() => void handleRemovePomodoroWallpaper()}>
+                  <Button type="button" variant="ghost" onClick={() => void handleRemovePomodoroWallpaper()} disabled={wallpaperActionDisabled}>
                     <ImageOff className="h-4 w-4" />
                     移除壁纸
                   </Button>
@@ -625,6 +610,7 @@ export function PomodoroSettingsPage() {
           </Button>
         </div>
       </section>
-    </div>
+      </div>
+    </>
   )
 }

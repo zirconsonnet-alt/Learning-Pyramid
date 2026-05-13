@@ -76,7 +76,10 @@ class LayerConfig:
 
 def default_layer_config() -> LayerConfig:
     return LayerConfig(
-        review_chain_template=(ReviewChainTemplateItem(kind=ReviewChainTemplateItemKind.CONVERGENCE),),
+        review_chain_template=(
+            ReviewChainTemplateItem(kind=ReviewChainTemplateItemKind.REVIEW_TASK),
+            ReviewChainTemplateItem(kind=ReviewChainTemplateItemKind.CONVERGENCE),
+        ),
         aggregation_k_node=DEFAULT_AGGREGATION_K_NODE,
         aggregation_k_point=DEFAULT_AGGREGATION_K_POINT,
         threshold_roll_up_enabled=True,
@@ -179,7 +182,7 @@ class ProjectConfig:
     layer_configs: Dict[int, LayerConfig]
     push_config: RecallPointPushConfig
     updated_at: Timestamp
-    roll_up_strategy: RollUpStrategy = RollUpStrategy.THRESHOLD_AUTO
+    roll_up_strategy: RollUpStrategy = RollUpStrategy.LEARNING_OBJECT_ISOMORPHIC
 
     def validate_write_time(self) -> None:
         if not str(self.project_id).strip():
@@ -228,6 +231,6 @@ def default_project_config(
         project_type=project_type,
         layer_configs={0: default_layer_config()},
         push_config=default_push_config(),
-        roll_up_strategy=RollUpStrategy.THRESHOLD_AUTO,
+        roll_up_strategy=RollUpStrategy.LEARNING_OBJECT_ISOMORPHIC,
         updated_at=updated_at,
     )

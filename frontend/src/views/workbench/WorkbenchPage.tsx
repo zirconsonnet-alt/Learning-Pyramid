@@ -30,7 +30,7 @@ import {
   useSetLayerConfig,
 } from "@/ui/queries/workbench"
 import { useAppStore } from "@/ui/store/appStore"
-import { getLocalDateKey, listDailyStudyMetricEntries, loadDailyWorkbenchStats } from "@/ui/store/workbenchDailyStats"
+import { getLocalDateKey, listDailyStudyMetricEntries, loadDailyWorkbenchStats, type DailyWorkbenchStats } from "@/ui/store/workbenchDailyStats"
 import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { syncStudyMetricsSnapshot } from "@/ui/studyMetricsSync"
 import { createStudyPresenceTracker } from "@/ui/store/studyPresenceStore"
@@ -164,13 +164,65 @@ async function resolveInstanceDurationMs(params: {
   }
 }
 
-function StatusMetricRow(props: { label: string; value: string; emphasize?: boolean }) {
-  const { label, value } = props
+type TodayReviewSlice = {
+  label: string
+  value: number
+  color: string
+}
+
+function TodayReviewStatsChart(props: { stats: DailyWorkbenchStats }) {
+  const { stats } = props
+  const slices: TodayReviewSlice[] = [
+    { label: "视频观看", value: stats.videoMs, color: "#2563eb" },
+    { label: "复述点录入", value: stats.recallEntryMs, color: "#16a34a" },
+    { label: "复习用时", value: stats.reviewMs, color: "#d97706" },
+    { label: "AI 问答", value: stats.aiQaMs, color: "#7c3aed" },
+    { label: "走神时间", value: stats.distractionMs, color: "#64748b" },
+  ].filter((slice) => slice.value > 0)
+  const total = slices.reduce((sum, slice) => sum + slice.value, 0)
+  let cursor = 0
+  const gradient =
+    total <= 0
+      ? "conic-gradient(hsl(var(--muted)) 0deg 360deg)"
+      : `conic-gradient(${slices
+          .map((slice) => {
+            const start = (cursor / total) * 360
+            cursor += slice.value
+            const end = (cursor / total) * 360
+            return `${slice.color} ${start}deg ${end}deg`
+          })
+          .join(", ")})`
+
   return (
-    <div className="flex items-center justify-between gap-4 py-2.5">
-      <div className={cn("text-[13px] text-muted-foreground", props.emphasize ? "font-semibold" : "font-medium")}>{label}</div>
-      <div className={cn("text-[13px]", props.emphasize ? "font-semibold text-foreground" : "font-medium text-[color:var(--theme-soft-text-strong)]")}>
-        {value}
+    <div className="mt-3 border-t border-border/60 pt-4">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <div className="text-[12px] font-medium text-muted-foreground">网页驻留</div>
+          <div className="mt-1 text-[17px] font-semibold tracking-[-0.02em] text-[color:var(--theme-soft-text-strong)]">
+            {formatDurationCompact(stats.webPresenceMs)}
+          </div>
+        </div>
+        <div
+          aria-label="今日回看统计图"
+          role="img"
+          className="relative h-24 w-24 shrink-0 rounded-full"
+          style={{ background: gradient }}
+        />
+      </div>
+      <div className="mt-4 grid gap-2 text-xs text-muted-foreground">
+        {slices.length === 0 ? (
+          <div>暂无学习分解</div>
+        ) : (
+          slices.map((slice) => (
+            <div key={slice.label} className="flex items-center justify-between gap-3">
+              <span className="flex items-center gap-2">
+                <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: slice.color }} />
+                {slice.label}
+              </span>
+              <span>{formatDurationCompact(slice.value)}</span>
+            </div>
+          ))
+        )}
       </div>
     </div>
   )
@@ -230,7 +282,6 @@ export function WorkbenchPage() {
   const [currentMs, setCurrentMs] = useState(0)
   const [seekTo, setSeekTo] = useState<{ instanceId: string; ms: number; nonce: number } | null>(null)
   const [centerPanelMode, setCenterPanelMode] = useState<"main" | "rollup">("main")
-  const [sidebarStatsExpanded, setSidebarStatsExpanded] = useState(false)
   const [petAssistantState, setPetAssistantState] = useState<"idle" | "thinking">("idle")
   const videoPaneRef = useRef<HTMLDivElement | null>(null)
 
@@ -260,7 +311,7 @@ export function WorkbenchPage() {
   const directoryBinding = useProjectDirectoryBinding(pid)
   const projectType = projectConfigQ.data?.projectType ?? "COURSE"
   const projectSettingsPath = buildProjectSettingsPath(subjectId, pid)
-  const currentRollUpStrategy = projectConfigQ.data?.rollUpStrategy ?? "THRESHOLD_AUTO"
+  const currentRollUpStrategy = projectConfigQ.data?.rollUpStrategy ?? "LEARNING_OBJECT_ISOMORPHIC"
   const requiresLearningObjectTree = projectTypeRequiresLearningObjectTree(projectType)
   const usesResolvableCourseAnchor = projectTypeUsesResolvableCourseAnchor(projectType)
   const selectedInstanceId = ps?.selectedInstanceId ?? null
@@ -1045,28 +1096,8 @@ export function WorkbenchPage() {
               </section>
 
               <section>
-                <button
-                  type="button"
-                  className="flex w-full items-start justify-between gap-4 text-left"
-                  onClick={() => setSidebarStatsExpanded((current) => !current)}
-                >
-                  <div>
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">今日回看</div>
-                  </div>
-                  <span className="text-xs font-medium text-primary">{sidebarStatsExpanded ? "收起" : "展开"}</span>
-                </button>
-                {sidebarStatsExpanded ? (
-                  <div className="mt-3 border-t border-border/60 pt-2">
-                    <div className="divide-y divide-border/60">
-                      <StatusMetricRow label="网页驻留" value={formatDurationCompact(todayStats.webPresenceMs)} emphasize />
-                      <StatusMetricRow label="视频观看" value={formatDurationCompact(todayStats.videoMs)} />
-                      <StatusMetricRow label="复述点录入" value={formatDurationCompact(todayStats.recallEntryMs)} />
-                      <StatusMetricRow label="复习用时" value={formatDurationCompact(todayStats.reviewMs)} />
-                      <StatusMetricRow label="AI 问答" value={formatDurationCompact(todayStats.aiQaMs)} />
-                      <StatusMetricRow label="走神时间" value={formatDurationCompact(todayStats.distractionMs)} />
-                    </div>
-                  </div>
-                ) : null}
+                <SidebarSectionTitle title="今日回看" />
+                <TodayReviewStatsChart stats={todayStats} />
               </section>
               {queueQ.error ? <p className="text-sm text-destructive">{formatApiError(queueQ.error)}</p> : null}
             </CardContent>

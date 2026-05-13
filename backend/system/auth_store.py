@@ -802,7 +802,7 @@ def _normalize_review_chain_template(
         if kind == "CONVERGENCE":
             has_convergence = True
     if not normalized:
-        return (("CONVERGENCE", None),)
+        return (("REVIEW_TASK", None), ("CONVERGENCE", None))
     if not has_convergence:
         normalized.insert(0, ("CONVERGENCE", None))
     return tuple(normalized)
@@ -1226,7 +1226,10 @@ class _AuthStoreImpl:
             pomodoro_default_break_prompt="",
             pomodoro_micro_breaks=_normalize_pomodoro_micro_break_settings({}),
             pomodoro_weekly_schedule=_normalize_pomodoro_weekly_schedule({}),
-            default_project_review_template=(ReviewChainTemplateStep(kind="CONVERGENCE"),),
+            default_project_review_template=(
+                ReviewChainTemplateStep(kind="REVIEW_TASK"),
+                ReviewChainTemplateStep(kind="CONVERGENCE"),
+            ),
             learning_plans=_default_learning_plans_payload(),
             updated_at=None,
         )

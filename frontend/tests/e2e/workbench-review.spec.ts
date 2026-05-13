@@ -13,9 +13,8 @@ test(journeyIds.workbench, async ({ page }) => {
 
   await recordJourney(journeyIds.workbench, async () => {
     await gotoWorkbench(page)
-    const todayReviewToggle = page.getByRole("button", { name: /今日回看.*展开/ })
-    await todayReviewToggle.focus()
-    await page.keyboard.press("Enter")
+    await expect(page.getByRole("button", { name: /今日回看/ })).toHaveCount(0)
+    await expect(page.getByLabel("今日回看统计图")).toBeVisible()
     await expect(page.getByText("网页驻留")).toBeVisible()
     await page.getByRole("button", { name: "层推进与学习任务" }).click()
     await expect(page.getByRole("heading", { name: "层推进与学习任务" })).toBeVisible()
@@ -127,6 +126,11 @@ test("workbench pet assistant stays above the video control bar", async ({ page 
   expect(overlap.intersects, JSON.stringify(overlap)).toBe(true)
   expect(overlap.popoverContainsTop, JSON.stringify(overlap)).toBe(true)
   expect(overlap.videoChromeContainsTop, JSON.stringify(overlap)).toBe(false)
+
+  await page.getByRole("button", { name: "关闭雪豹问答" }).click()
+  await expect(petPopover).toBeHidden()
+  await page.mouse.move(10, 10)
+  await expect(petPopover).toBeHidden()
 
   expectNoConsoleIssues(consoleIssues)
 })

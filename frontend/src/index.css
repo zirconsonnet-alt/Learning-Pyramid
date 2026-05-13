@@ -760,11 +760,13 @@
     bottom: 12px;
     width: min(390px, calc(100vw - 42px));
     max-height: min(620px, calc(100vh - 96px));
+    visibility: hidden;
     opacity: 0;
     pointer-events: none;
     transform: translate3d(10px, 8px, 0) scale(0.98);
     transform-origin: 100% 100%;
     transition:
+      visibility 0ms linear 150ms,
       opacity 150ms ease,
       transform 150ms ease;
   }
@@ -778,12 +780,17 @@
     height: 88px;
   }
 
-  .plm-desktop-pet.has-popover:hover .plm-desktop-pet-popover,
-  .plm-desktop-pet.has-popover:focus-within .plm-desktop-pet-popover,
+  .plm-desktop-pet.has-popover:not(.is-popover-suppressed):hover .plm-desktop-pet-popover,
+  .plm-desktop-pet.has-popover:not(.is-popover-suppressed):focus-within .plm-desktop-pet-popover,
   .plm-desktop-pet.has-popover.is-pinned .plm-desktop-pet-popover {
+    visibility: visible;
     opacity: 1;
     pointer-events: auto;
     transform: translate3d(0, 0, 0) scale(1);
+    transition:
+      visibility 0ms linear,
+      opacity 150ms ease,
+      transform 150ms ease;
   }
 
   .plm-desktop-pet-popover-close {
@@ -905,8 +912,8 @@
       height: 28px;
     }
 
-    .plm-desktop-pet.is-workbench.has-popover:hover .plm-desktop-pet-popover,
-    .plm-desktop-pet.is-workbench.has-popover:focus-within .plm-desktop-pet-popover,
+    .plm-desktop-pet.is-workbench.has-popover:not(.is-popover-suppressed):hover .plm-desktop-pet-popover,
+    .plm-desktop-pet.is-workbench.has-popover:not(.is-popover-suppressed):focus-within .plm-desktop-pet-popover,
     .plm-desktop-pet.is-workbench.has-popover.is-pinned .plm-desktop-pet-popover {
       transform: translate3d(50%, 0, 0) scale(1);
     }

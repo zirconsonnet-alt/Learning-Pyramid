@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useQueries } from "@tanstack/react-query"
 import { BarChart3, CircleStop, FolderOpen, Music2, PanelsTopLeft, Pause, Play, Plus, RefreshCw, RotateCcw, Save, Settings2, SkipForward, TimerReset, Trash2, Volume2 } from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router-dom"
@@ -22,7 +22,6 @@ import {
   type PomodoroRestMusicTrack,
   usePomodoroRestMusicDirectoryBinding,
 } from "@/ui/localMedia/projectDirectory"
-import { readPomodoroWallpaperBlob } from "@/ui/pomodoroWallpaper"
 import { useCurrentUser } from "@/ui/queries/auth"
 import { useMembershipSummary } from "@/ui/queries/membership"
 import { useUpdateMyGlobalSettings } from "@/ui/queries/profile"
@@ -54,12 +53,14 @@ import {
   usePomodoroNow,
   usePomodoroStore,
 } from "@/ui/store/pomodoroStore"
+import { resolvePomodoroWallpaperScope } from "@/ui/pomodoroWallpaper"
 import { loadPomodoroSegmentMetricSummary, type PomodoroSegmentMetricSummary } from "@/ui/store/workbenchDailyStats"
 import { formatStudyMaterialTypeLabel } from "@/ui/subjects/studyMaterials"
 import { useThemeStore } from "@/ui/store/themeStore"
 import { cn } from "@/ui/utils"
 import { MemberOnlyFeatureNotice } from "@/views/membership/membershipUi"
 import { buildPomodoroPath, buildPomodoroPlanPath, buildPomodoroSettingsPath } from "@/views/pomodoro/pomodoroRouting"
+import { PomodoroWallpaperBackdrop, usePomodoroWallpaper } from "@/views/pomodoro/PomodoroWallpaperBackdrop"
 
 type PomodoroPlanDraft = {
   id: string
@@ -783,13 +784,10 @@ export function PomodoroPage() {
   const [pomodoroOverviewMode, setPomodoroOverviewMode] = useState<"plans" | "stats">("plans")
   const [testingPromptKey, setTestingPromptKey] = useState("")
   const [deletingPomodoroDraftId, setDeletingPomodoroDraftId] = useState("")
-  const [wallpaperUrl, setWallpaperUrl] = useState("")
   const [quickPomodoroDialogOpen, setQuickPomodoroDialogOpen] = useState(false)
   const [quickPomodoroSubjectId, setQuickPomodoroSubjectId] = useState("")
   const [quickPomodoroProjectId, setQuickPomodoroProjectId] = useState("")
   const [pomodoroActivityRecords, setPomodoroActivityRecords] = useState<PomodoroActivityRecord[]>(() => listPomodoroActivityRecords())
-  const wallpaperObjectUrlRef = useRef("")
-
   usePageMeta({
     title: activePlanId ? "番茄计划详情 | LearningPyramid" : "番茄钟 | LearningPyramid",
     description: activePlanId ? "编辑单个番茄计划" : "番茄钟",
@@ -799,6 +797,11 @@ export function PomodoroPage() {
   const capabilitiesQ = useSystemCapabilities()
   const authEnabled = capabilitiesQ.data?.authEnabled ?? false
   const currentUserQ = useCurrentUser(authEnabled)
+  const wallpaperScope = useMemo(
+    () => resolvePomodoroWallpaperScope(capabilitiesQ.data?.authEnabled, currentUserQ.data?.userId),
+    [capabilitiesQ.data?.authEnabled, currentUserQ.data?.userId],
+  )
+  const { wallpaperUrl } = usePomodoroWallpaper(wallpaperScope)
   const updateGlobalSettings = useUpdateMyGlobalSettings()
   const shouldSyncRemotely = authEnabled && Boolean(currentUserQ.data?.userId)
   const membershipQ = useMembershipSummary(authEnabled)
@@ -844,20 +847,6 @@ export function PomodoroPage() {
     () => ({ focusPrompt: defaultFocusPrompt, breakPrompt: defaultBreakPrompt }),
     [defaultBreakPrompt, defaultFocusPrompt],
   )
-
-  const replacePomodoroWallpaperPreview = useCallback((blob: Blob | null) => {
-    if (wallpaperObjectUrlRef.current) {
-      URL.revokeObjectURL(wallpaperObjectUrlRef.current)
-      wallpaperObjectUrlRef.current = ""
-    }
-    if (!blob) {
-      setWallpaperUrl("")
-      return
-    }
-    const nextUrl = URL.createObjectURL(blob)
-    wallpaperObjectUrlRef.current = nextUrl
-    setWallpaperUrl(nextUrl)
-  }, [])
 
   const snapshot = useMemo(() => getPomodoroSnapshot({ enabled, weeklySchedule, quickPomodoro }, now), [enabled, now, quickPomodoro, weeklySchedule])
   const activeQuickPomodoro = isQuickPomodoroSessionActive(quickPomodoro, now) ? quickPomodoro : null
@@ -923,25 +912,6 @@ export function PomodoroPage() {
       setQuickPomodoroProjectId("")
     }
   }, [quickPomodoroProjectId, quickPomodoroSubjectId, subjectProjectOptions])
-
-  useEffect(() => {
-    let cancelled = false
-    void readPomodoroWallpaperBlob()
-      .then((blob) => {
-        if (cancelled || !blob) return
-        replacePomodoroWallpaperPreview(blob)
-      })
-      .catch(() => {
-        // Wallpaper is cosmetic, so a local storage read failure should not block the timer page.
-      })
-    return () => {
-      cancelled = true
-      if (wallpaperObjectUrlRef.current) {
-        URL.revokeObjectURL(wallpaperObjectUrlRef.current)
-        wallpaperObjectUrlRef.current = ""
-      }
-    }
-  }, [replacePomodoroWallpaperPreview])
 
   const draftSchedule = useMemo(
     () => buildPomodoroScheduleFromPlanDrafts(pomodoroDrafts),
@@ -1211,21 +1181,7 @@ export function PomodoroPage() {
     openQuickPomodoroDialog()
   }
 
-  const wallpaperBackdrop = wallpaperUrl ? (
-    <div
-      data-pomodoro-wallpaper-backdrop
-      className="pointer-events-none fixed inset-x-0 bottom-0 top-[3.75rem] z-0 bg-cover bg-center"
-      style={{ backgroundImage: `url(${wallpaperUrl})` }}
-    >
-      <div
-        className="absolute inset-0 backdrop-blur-[1px]"
-        style={{
-          background:
-            "linear-gradient(180deg, hsl(var(--background) / 0.58) 0%, hsl(var(--background) / 0.72) 48%, hsl(var(--background) / 0.82) 100%)",
-        }}
-      />
-    </div>
-  ) : null
+  const wallpaperBackdrop = <PomodoroWallpaperBackdrop wallpaperUrl={wallpaperUrl} />
 
   if (pomodoroMemberBlocked) {
     return (

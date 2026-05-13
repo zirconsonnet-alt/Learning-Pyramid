@@ -1,6 +1,6 @@
 # 领域模型
 
-更新时间：2026-05-10
+更新时间：2026-05-13
 
 本文记录当前仓库中可验证的长期业务概念。接口字段以运行时 OpenAPI 为准，本文不维护 API 明细。
 
@@ -72,6 +72,8 @@ scoped project 的公开身份解析属于 adapter 边界：公开 `{subjectId, 
 - `AggregationQueue` 与 `AggregationEvent` 记录聚合队列和聚合事件。
 
 聚合、复习链推进和任务提交属于后端行为层职责，不应在 router 或前端复制业务规则。
+
+新建项目默认第 0 层配置使用 `REVIEW_TASK -> CONVERGENCE` 复习链模板，默认上推策略为 `LEARNING_OBJECT_ISOMORPHIC`。该默认只描述新配置入口；已有项目的已保存配置不应被静默改写。
 
 ## 认证、用户与会员
 
