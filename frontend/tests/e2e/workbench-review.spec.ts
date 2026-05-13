@@ -121,6 +121,7 @@ test(journeyIds.review, async ({ page }) => {
   await recordJourney(journeyIds.review, async () => {
     await page.goto(projectPath("/recommended-reviews"))
     await expect(page.getByText("什么是自动化测试？")).toBeVisible()
+    await expect(page.getByText("查看复述点详情")).toHaveCount(0)
     await page.getByRole("button", { name: "跳过" }).click()
     await expect(page.getByText("用程序验证用户关键流程。")).toBeVisible()
   })

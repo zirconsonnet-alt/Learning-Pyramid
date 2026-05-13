@@ -63,7 +63,7 @@ test(journeyIds.membership, async ({ page }) => {
     await expect(page.getByText("当前状态")).toBeVisible()
     const currentStatusBlock = page.getByText("当前状态", { exact: true }).locator("xpath=ancestor::div[contains(@class,'space-y-2')][1]")
     const inviteCodeBlock = page.getByText("邀请码", { exact: true }).locator("xpath=ancestor::div[contains(@class,'rounded-')][1]")
-    await expect(inviteCodeBlock.getByText("LP45472290")).toBeVisible()
+    await expect(inviteCodeBlock.getByText("已绑定 LP45472290")).toBeVisible()
     await expect(currentStatusBlock.getByText("有效期至")).toHaveCount(0)
     await expect(inviteCodeBlock.getByText("上级邀请码")).toHaveCount(0)
   })

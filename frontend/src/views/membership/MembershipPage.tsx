@@ -921,7 +921,7 @@ export function MembershipPage() {
                         <div className="min-w-0">
                           <div className="truncate text-2xl font-semibold tracking-tight text-foreground">{inviteSummaryQ.data?.inviteCode ?? "加载中..."}</div>
                           {inviteSummaryQ.data?.boundInviteCode ? (
-                            <div className="mt-1 text-sm text-muted-foreground">{inviteSummaryQ.data.boundInviteCode}</div>
+                            <div className="mt-1 text-sm text-muted-foreground">已绑定 {inviteSummaryQ.data.boundInviteCode}</div>
                           ) : null}
                         </div>
                       </div>

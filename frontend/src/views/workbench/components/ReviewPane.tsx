@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
-  ArrowUpRight,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -490,10 +489,6 @@ export function ReviewPane({
                           >
                             <div className="text-[15px] font-semibold leading-6 text-foreground transition group-hover:text-primary">
                               <RichContentRenderer subjectId={subjectId} projectId={projectId} value={activeRecallPoint.question} />
-                            </div>
-                            <div className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary/85">
-                              查看复述点详情
-                              <ArrowUpRight className="h-3.5 w-3.5" />
                             </div>
                           </Link>
 

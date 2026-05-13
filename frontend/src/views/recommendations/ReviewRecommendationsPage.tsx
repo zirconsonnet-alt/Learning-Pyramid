@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react"
 import {
-  ArrowUpRight,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -375,10 +374,6 @@ export function ReviewRecommendationsPage() {
                           >
                             <div className="text-[15px] font-semibold leading-6 text-foreground transition hover:text-primary">
                               <RichContentRenderer subjectId={subjectId} projectId={pid} value={activeEntry.recallPoint.question} />
-                            </div>
-                            <div className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary/85">
-                              查看复述点详情
-                              <ArrowUpRight className="h-3.5 w-3.5" />
                             </div>
                           </Link>
 

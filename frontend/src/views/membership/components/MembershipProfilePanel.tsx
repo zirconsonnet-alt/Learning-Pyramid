@@ -101,7 +101,7 @@ export function MembershipProfilePanel() {
                     <Link to="/membership">查看邀请记录</Link>
                   </Button>
                 </div>
-                {inviteSummary?.boundInviteCode ? <div className="theme-subtle-surface px-3 py-3 text-sm">{inviteSummary.boundInviteCode}</div> : null}
+                {inviteSummary?.boundInviteCode ? <div className="theme-subtle-surface px-3 py-3 text-sm">已绑定 {inviteSummary.boundInviteCode}</div> : null}
               </div>
             ) : null}
           </div>
