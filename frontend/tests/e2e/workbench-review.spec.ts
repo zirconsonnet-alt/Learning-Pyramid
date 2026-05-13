@@ -5,7 +5,7 @@ import { installMockApi } from "../fixtures/mock-api"
 import { journeyIds } from "../fixtures/journeys"
 import { recordJourney } from "../fixtures/journey-result"
 import { gotoWorkbench, projectPath } from "../fixtures/page-objects"
-import { instance } from "../fixtures/test-data"
+import { instance, reviewTask } from "../fixtures/test-data"
 
 test(journeyIds.workbench, async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
@@ -45,6 +45,23 @@ test("workbench empty content tree avoids duplicate setup prompt", async ({ page
   await expect(contentTreeCard.getByText("尚未绑定素材目录")).toBeVisible()
   await expect(contentTreeCard.getByText("当前还没有学习对象")).toHaveCount(0)
   await expect(contentTreeCard.getByRole("link", { name: "前往项目设置" })).toHaveCount(0)
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
+test("workbench review card hides selected memory label and colors memory buttons", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page, { queueHeadId: reviewTask.reviewTaskId })
+
+  await gotoWorkbench(page)
+  await expect(page.getByText("什么是自动化测试？")).toBeVisible()
+  await page.getByRole("button", { name: "跳过" }).click()
+  const rememberedButton = page.getByRole("button", { name: "记得", exact: true })
+  const forgottenButton = page.getByRole("button", { name: "不记得", exact: true })
+  await expect(rememberedButton).toHaveClass(/!text-emerald-700/)
+  await expect(forgottenButton).toHaveClass(/!text-red-700/)
+  await forgottenButton.click()
+  await expect(page.getByText("已标记为不记得")).toHaveCount(0)
 
   expectNoConsoleIssues(consoleIssues)
 })
@@ -133,6 +150,12 @@ test(journeyIds.review, async ({ page }) => {
     await expect(page.getByText(/已展开答案/)).toHaveCount(0)
     const answerContentCard = page.getByText("用程序验证用户关键流程。").locator("xpath=ancestor::div[contains(@class,'theme-canvas')][1]")
     await expect(answerContentCard.getByText("答案", { exact: true })).toHaveCount(0)
+    const rememberedButton = page.getByRole("button", { name: "记得", exact: true })
+    const forgottenButton = page.getByRole("button", { name: "不记得", exact: true })
+    await expect(rememberedButton).toHaveClass(/text-emerald-700/)
+    await expect(forgottenButton).toHaveClass(/text-red-700/)
+    await forgottenButton.click()
+    await expect(page.getByText("已标记为不记得")).toHaveCount(0)
   })
 
   expectNoConsoleIssues(consoleIssues)

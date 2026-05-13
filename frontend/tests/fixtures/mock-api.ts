@@ -164,12 +164,14 @@ export async function installMockApi(
     membershipProvider?: MockMembershipProvider
     withdrawalScenario?: MockWithdrawalScenario
     boundInviteCode?: string | null
+    queueHeadId?: string | null
   } = {},
 ) {
   const authState = options.authState ?? "signed-in"
   const contentState = options.contentState ?? "ready"
   const membershipProvider = options.membershipProvider ?? "manual_test"
   const withdrawalScenario = options.withdrawalScenario ?? "none"
+  const queueHeadId = options.queueHeadId ?? null
   let globalSettings = options.globalSettings ?? createMockGlobalSettings()
   let membershipOrders: MockMembershipOrder[] = []
   let withdrawalRequested = false
@@ -352,7 +354,7 @@ export async function installMockApi(
     }
 
     if (path === `${scopedProjectPath}/queue`) {
-      await fulfill(route, { headId: null, ids: [] })
+      await fulfill(route, { headId: queueHeadId, ids: queueHeadId ? [queueHeadId] : [] })
       return
     }
 

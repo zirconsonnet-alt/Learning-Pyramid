@@ -362,8 +362,6 @@ export function ReviewRecommendationsPage() {
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                             <span>第 {activeReviewEntryIndex + 1} 题</span>
-                            {isRemembered ? <span className="rounded-full bg-emerald-50 px-2 py-0.5 tracking-[0.08em] text-emerald-700">已标记为记得</span> : null}
-                            {isForgotten ? <span className="rounded-full bg-amber-50 px-2 py-0.5 tracking-[0.08em] text-amber-700">已标记为不记得</span> : null}
                           </div>
 
                           <Link
@@ -456,18 +454,24 @@ export function ReviewRecommendationsPage() {
 
                       <div className="mt-4 flex flex-wrap items-center gap-2">
                         <Button
-                          variant={isRemembered ? "default" : "outline"}
+                          variant="outline"
                           size="sm"
-                          className={cn("min-w-[96px] rounded-full", isRemembered ? "bg-emerald-600 hover:bg-emerald-700" : "")}
+                          className={cn(
+                            "min-w-[96px] rounded-full !border-emerald-200 !bg-emerald-50 !text-emerald-700 hover:!border-emerald-300 hover:!bg-emerald-100 hover:!text-emerald-800",
+                            isRemembered ? "!bg-emerald-600 !text-white hover:!bg-emerald-700 hover:!text-white" : "",
+                          )}
                           onClick={() => chooseSessionAnswer(rpId, "remembered")}
                           disabled={!hasSubmittedWrittenAnswer}
                         >
                           记得
                         </Button>
                         <Button
-                          variant={isForgotten ? "secondary" : "outline"}
+                          variant="outline"
                           size="sm"
-                          className={cn("min-w-[96px] rounded-full", isForgotten ? "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100" : "")}
+                          className={cn(
+                            "min-w-[96px] rounded-full !border-red-200 !bg-red-50 !text-red-700 hover:!border-red-300 hover:!bg-red-100 hover:!text-red-800",
+                            isForgotten ? "!bg-red-600 !text-white hover:!bg-red-700 hover:!text-white" : "",
+                          )}
                           onClick={() => chooseSessionAnswer(rpId, "forgotten")}
                           disabled={!hasSubmittedWrittenAnswer}
                         >
