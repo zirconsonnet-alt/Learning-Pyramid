@@ -322,8 +322,8 @@ export function SubjectDashboardPage() {
                 )}
               >
                 <CardHeader className="space-y-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex min-w-0 gap-3">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="flex min-w-0 flex-1 gap-3">
                       <div className="theme-icon-surface h-11 w-11 shrink-0">
                         <Icon className="h-5 w-5" />
                       </div>
@@ -338,6 +338,9 @@ export function SubjectDashboardPage() {
                           </span>
                         </CardDescription>
                       </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {active ? <span className="theme-meta-strong">当前项目</span> : null}
                     </div>
                   </div>
                 </CardHeader>

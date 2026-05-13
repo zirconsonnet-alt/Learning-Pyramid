@@ -80,6 +80,7 @@ test("subject and project cards share title meta and selected styles", async ({ 
   const projectCard = page.getByTestId(`project-card-${material.materialId}`)
   await expect(projectCard.getByRole("heading", { name: project.title })).toHaveClass(/text-lg/)
   await expect(projectCard.getByTestId("project-card-type")).toHaveClass(/theme-meta-strong/)
+  await expect(projectCard.getByText("当前项目", { exact: true })).toBeVisible()
   await expect(projectCard).toHaveClass(/border-primary\/20/)
   await expect(projectCard).toHaveClass(selectedShadowClass)
   await expect(projectCard).toHaveClass(/ring-primary\/10/)
