@@ -60,6 +60,7 @@ import { useThemeStore } from "@/ui/store/themeStore"
 import { cn } from "@/ui/utils"
 import { MemberOnlyFeatureNotice } from "@/views/membership/membershipUi"
 import { buildPomodoroPath, buildPomodoroPlanPath, buildPomodoroSettingsPath } from "@/views/pomodoro/pomodoroRouting"
+import { PomodoroSubpageFrame } from "@/views/pomodoro/PomodoroSubpageFrame"
 import { PomodoroWallpaperBackdrop, usePomodoroWallpaper } from "@/views/pomodoro/PomodoroWallpaperBackdrop"
 
 type PomodoroPlanDraft = {
@@ -1185,23 +1186,21 @@ export function PomodoroPage() {
 
   if (pomodoroMemberBlocked) {
     return (
-      <>
-        {wallpaperBackdrop}
-        <div data-pomodoro-wallpaper-scope="page" className="relative z-10 mx-auto flex w-full max-w-3xl flex-col gap-6">
+      <PomodoroSubpageFrame wallpaperUrl={wallpaperUrl} maxWidthClassName="max-w-3xl">
+        <div className="space-y-6">
           <MemberOnlyFeatureNotice
             title="番茄钟是会员专属功能"
             message="当前账号还没有有效会员。开通会员后，就可以继续使用排程、小番茄和相关设置。"
           />
         </div>
-      </>
+      </PomodoroSubpageFrame>
     )
   }
 
   if (activePlanId) {
     return (
-      <>
-        {wallpaperBackdrop}
-        <div data-pomodoro-wallpaper-scope="page" className="relative z-10 mx-auto flex w-full max-w-5xl flex-col gap-8">
+      <PomodoroSubpageFrame wallpaperUrl={wallpaperUrl}>
+        <div className="space-y-6">
           <section data-pomodoro-plan-detail className="space-y-6">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="text-2xl font-semibold text-foreground">
@@ -1607,7 +1606,7 @@ export function PomodoroPage() {
             ) : null}
           </section>
         </div>
-      </>
+      </PomodoroSubpageFrame>
     )
   }
 

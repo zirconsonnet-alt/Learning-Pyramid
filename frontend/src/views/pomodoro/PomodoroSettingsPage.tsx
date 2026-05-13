@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react"
-import { ArrowLeft, FolderOpen, ImageOff, ImagePlus, Music2, RotateCcw, Save, Trash2 } from "lucide-react"
+import { FolderOpen, ImageOff, ImagePlus, Music2, RotateCcw, Save, Trash2 } from "lucide-react"
 import { Link } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
@@ -28,7 +28,8 @@ import {
 import { useThemeStore } from "@/ui/store/themeStore"
 import { MemberOnlyFeatureNotice } from "@/views/membership/membershipUi"
 import { buildPomodoroPath, buildPomodoroSettingsPath } from "@/views/pomodoro/pomodoroRouting"
-import { PomodoroWallpaperBackdrop, usePomodoroWallpaper } from "@/views/pomodoro/PomodoroWallpaperBackdrop"
+import { PomodoroSubpageFrame } from "@/views/pomodoro/PomodoroSubpageFrame"
+import { usePomodoroWallpaper } from "@/views/pomodoro/PomodoroWallpaperBackdrop"
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -321,99 +322,60 @@ export function PomodoroSettingsPage() {
 
   if (pomodoroMemberBlocked) {
     return (
-      <>
-        <PomodoroWallpaperBackdrop wallpaperUrl={wallpaperUrl} />
-        <div data-pomodoro-wallpaper-scope="page" className="relative z-10 mx-auto flex w-full max-w-3xl flex-col gap-6">
-          <Button variant="ghost" asChild className="self-start px-0">
-            <Link to={buildPomodoroPath()}>
-              <ArrowLeft className="h-4 w-4" />
-              返回番茄钟
-            </Link>
-          </Button>
+      <PomodoroSubpageFrame wallpaperUrl={wallpaperUrl}>
+        <section className="space-y-6">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="text-2xl font-semibold text-foreground">番茄钟设置</div>
+            <Button asChild variant="outline">
+              <Link to={buildPomodoroPath()}>返回番茄钟</Link>
+            </Button>
+          </div>
           <MemberOnlyFeatureNotice
             title="番茄钟设置是会员专属功能"
             message="当前账号还没有有效会员。开通会员后，就可以继续设置默认提示词、随机微休息、休息音乐目录和壁纸。"
           />
-        </div>
-      </>
+        </section>
+      </PomodoroSubpageFrame>
     )
   }
 
   return (
-    <>
-      <PomodoroWallpaperBackdrop wallpaperUrl={wallpaperUrl} />
-      <div data-pomodoro-wallpaper-scope="page" className="relative z-10 mx-auto flex w-full max-w-3xl flex-col gap-6">
-        <section className="space-y-4">
-          <Button variant="ghost" asChild className="px-0">
-            <Link to={buildPomodoroPath()}>
-              <ArrowLeft className="h-4 w-4" />
-              返回番茄钟
-            </Link>
+    <PomodoroSubpageFrame wallpaperUrl={wallpaperUrl}>
+      <section data-pomodoro-settings className="space-y-6">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="text-2xl font-semibold text-foreground">番茄钟设置</div>
+          <Button asChild variant="outline">
+            <Link to={buildPomodoroPath()}>返回番茄钟</Link>
           </Button>
-          <div>
-            <h1 className="mt-1 text-2xl font-semibold tracking-[-0.03em] text-foreground">番茄钟设置</h1>
-          </div>
-        </section>
+        </div>
 
-      <section className="space-y-5 border-t border-border/60 pt-6">
-        <div className="space-y-4 border-b border-border/60 pb-6">
-          <div>
-            <h2 className="text-lg font-semibold text-foreground">本地资源</h2>
-          </div>
+        <div className="space-y-5 border-t border-border/60 pt-6">
+          <div className="space-y-4 border-b border-border/60 pb-6">
+            <div>
+              <h2 className="text-lg font-semibold text-foreground">本地资源</h2>
+            </div>
 
-          <div className="rounded-xl border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] p-4">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Music2 className="h-4 w-4 text-[color:var(--theme-soft-text-strong)]" />
-                  <span className="text-sm font-semibold text-foreground">休息音乐目录</span>
-                  <span
-                    className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${describeLocalDirectoryPermissionTone(restMusicDirectory.permission)}`}
-                  >
-                    {describeLocalDirectoryPermission(restMusicDirectory.permission)}
-                  </span>
-                </div>
-                <div className="mt-2 break-all text-sm text-muted-foreground">
-                  {restMusicDirectory.handleName || "还没有绑定本地音乐目录。"}
-                </div>
-                {restMusicDirectory.error ? (
-                  <div className="mt-2 text-sm text-destructive">{restMusicDirectory.error}</div>
-                ) : null}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {restMusicDirectory.permission === "granted" ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => void onAuthorizeRestMusicDirectory()}
-                    disabled={!canChooseRestMusicDirectory}
-                  >
-                    <FolderOpen className="h-4 w-4" />
-                    更换音乐目录
-                  </Button>
-                ) : null}
-                {(restMusicDirectory.permission === "missing" || restMusicDirectory.permission === "unsupported") ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => void onAuthorizeRestMusicDirectory()}
-                    disabled={!canChooseRestMusicDirectory}
-                  >
-                    <FolderOpen className="h-4 w-4" />
-                    {restMusicDirectoryAction === "authorize" ? "打开目录选择器..." : "选择音乐目录"}
-                  </Button>
-                ) : null}
-                {(restMusicDirectory.permission === "prompt" || restMusicDirectory.permission === "denied") ? (
-                  <>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => void onRequestRestMusicDirectoryPermission()}
-                      disabled={!canRequestRestMusicDirectoryPermission}
+            <div className="rounded-xl border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] p-4">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Music2 className="h-4 w-4 text-[color:var(--theme-soft-text-strong)]" />
+                    <span className="text-sm font-semibold text-foreground">休息音乐目录</span>
+                    <span
+                      className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${describeLocalDirectoryPermissionTone(restMusicDirectory.permission)}`}
                     >
-                      <FolderOpen className="h-4 w-4" />
-                      {restMusicDirectoryAction === "request" ? "请求中..." : "继续授权"}
-                    </Button>
+                      {describeLocalDirectoryPermission(restMusicDirectory.permission)}
+                    </span>
+                  </div>
+                  <div className="mt-2 break-all text-sm text-muted-foreground">
+                    {restMusicDirectory.handleName || "还没有绑定本地音乐目录。"}
+                  </div>
+                  {restMusicDirectory.error ? (
+                    <div className="mt-2 text-sm text-destructive">{restMusicDirectory.error}</div>
+                  ) : null}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {restMusicDirectory.permission === "granted" ? (
                     <Button
                       type="button"
                       variant="outline"
@@ -421,196 +383,228 @@ export function PomodoroSettingsPage() {
                       disabled={!canChooseRestMusicDirectory}
                     >
                       <FolderOpen className="h-4 w-4" />
-                      {restMusicDirectoryAction === "authorize" ? "打开目录选择器..." : "更换音乐目录"}
+                      更换音乐目录
                     </Button>
-                  </>
-                ) : null}
-                {restMusicDirectory.permission !== "missing" && restMusicDirectory.permission !== "unsupported" ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={() => void onClearRestMusicDirectory()}
-                    disabled={!canClearRestMusicDirectory}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    {restMusicDirectoryAction === "clear" ? "清除中..." : "清除音乐目录"}
-                  </Button>
-                ) : null}
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] p-4">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <ImagePlus className="h-4 w-4 text-[color:var(--theme-soft-text-strong)]" />
-                  <span className="text-sm font-semibold text-foreground">番茄钟壁纸</span>
-                  <span className="theme-pill-default inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold">
-                    {wallpaperUrl ? "已设置" : "未设置"}
-                  </span>
+                  ) : null}
+                  {(restMusicDirectory.permission === "missing" || restMusicDirectory.permission === "unsupported") ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => void onAuthorizeRestMusicDirectory()}
+                      disabled={!canChooseRestMusicDirectory}
+                    >
+                      <FolderOpen className="h-4 w-4" />
+                      {restMusicDirectoryAction === "authorize" ? "打开目录选择器..." : "选择音乐目录"}
+                    </Button>
+                  ) : null}
+                  {(restMusicDirectory.permission === "prompt" || restMusicDirectory.permission === "denied") ? (
+                    <>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => void onRequestRestMusicDirectoryPermission()}
+                        disabled={!canRequestRestMusicDirectoryPermission}
+                      >
+                        <FolderOpen className="h-4 w-4" />
+                        {restMusicDirectoryAction === "request" ? "请求中..." : "继续授权"}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => void onAuthorizeRestMusicDirectory()}
+                        disabled={!canChooseRestMusicDirectory}
+                      >
+                        <FolderOpen className="h-4 w-4" />
+                        {restMusicDirectoryAction === "authorize" ? "打开目录选择器..." : "更换音乐目录"}
+                      </Button>
+                    </>
+                  ) : null}
+                  {restMusicDirectory.permission !== "missing" && restMusicDirectory.permission !== "unsupported" ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => void onClearRestMusicDirectory()}
+                      disabled={!canClearRestMusicDirectory}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      {restMusicDirectoryAction === "clear" ? "清除中..." : "清除音乐目录"}
+                    </Button>
+                  ) : null}
                 </div>
-                {wallpaperUrl ? (
-                  <div
-                    className="mt-3 h-24 w-full max-w-xs rounded-xl border border-[color:var(--theme-soft-border)] bg-cover bg-center"
-                    style={{ backgroundImage: `url(${wallpaperUrl})` }}
-                    aria-label="当前番茄钟壁纸预览"
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] p-4">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <ImagePlus className="h-4 w-4 text-[color:var(--theme-soft-text-strong)]" />
+                    <span className="text-sm font-semibold text-foreground">番茄钟壁纸</span>
+                    <span className="theme-pill-default inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold">
+                      {wallpaperUrl ? "已设置" : "未设置"}
+                    </span>
+                  </div>
+                  {wallpaperUrl ? (
+                    <div
+                      className="mt-3 h-24 w-full max-w-xs rounded-xl border border-[color:var(--theme-soft-border)] bg-cover bg-center"
+                      style={{ backgroundImage: `url(${wallpaperUrl})` }}
+                      aria-label="当前番茄钟壁纸预览"
+                    />
+                  ) : null}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <input
+                    ref={wallpaperInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(event) => void handlePomodoroWallpaperChange(event)}
                   />
-                ) : null}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <input
-                  ref={wallpaperInputRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(event) => void handlePomodoroWallpaperChange(event)}
-                />
-                <Button type="button" variant="outline" onClick={() => wallpaperInputRef.current?.click()} disabled={wallpaperActionDisabled}>
-                  <ImagePlus className="h-4 w-4" />
-                  {wallpaperUrl ? "更换壁纸" : "设置壁纸"}
-                </Button>
-                {wallpaperUrl ? (
-                  <Button type="button" variant="ghost" onClick={() => void handleRemovePomodoroWallpaper()} disabled={wallpaperActionDisabled}>
-                    <ImageOff className="h-4 w-4" />
-                    移除壁纸
+                  <Button type="button" variant="outline" onClick={() => wallpaperInputRef.current?.click()} disabled={wallpaperActionDisabled}>
+                    <ImagePlus className="h-4 w-4" />
+                    {wallpaperUrl ? "更换壁纸" : "设置壁纸"}
                   </Button>
-                ) : null}
+                  {wallpaperUrl ? (
+                    <Button type="button" variant="ghost" onClick={() => void handleRemovePomodoroWallpaper()} disabled={wallpaperActionDisabled}>
+                      <ImageOff className="h-4 w-4" />
+                      移除壁纸
+                    </Button>
+                  ) : null}
+                </div>
               </div>
             </div>
           </div>
-        </div>
 
-        <div className="space-y-4 border-b border-border/60 pb-6">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold text-foreground">随机微休息</h2>
+          <div className="space-y-4 border-b border-border/60 pb-6">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold text-foreground">随机微休息</h2>
+              </div>
+              <label className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-lg border border-[color:var(--theme-soft-border)] px-3 py-2 text-sm font-medium">
+                <input
+                  id="pomodoro-micro-break-enabled"
+                  type="checkbox"
+                  checked={microBreakDraft.enabled}
+                  onChange={(event) =>
+                    setMicroBreakDraft((prev) => ({
+                      ...prev,
+                      enabled: event.target.checked,
+                    }))
+                  }
+                />
+                启用
+              </label>
             </div>
-            <label className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-lg border border-[color:var(--theme-soft-border)] px-3 py-2 text-sm font-medium">
-              <input
-                id="pomodoro-micro-break-enabled"
-                type="checkbox"
-                checked={microBreakDraft.enabled}
-                onChange={(event) =>
-                  setMicroBreakDraft((prev) => ({
-                    ...prev,
-                    enabled: event.target.checked,
-                  }))
-                }
-              />
-              启用
-            </label>
+
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="space-y-2">
+                <Label htmlFor="pomodoro-micro-break-min-interval">最短间隔（秒）</Label>
+                <input
+                  id="pomodoro-micro-break-min-interval"
+                  type="number"
+                  min={30}
+                  max={3600}
+                  value={microBreakDraft.minIntervalSeconds}
+                  onChange={(event) =>
+                    setMicroBreakDraft((prev) => ({
+                      ...prev,
+                      minIntervalSeconds: event.target.value,
+                    }))
+                  }
+                  className="h-10 w-full rounded-lg border border-[color:var(--theme-soft-border)] bg-background px-3 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="pomodoro-micro-break-max-interval">最长间隔（秒）</Label>
+                <input
+                  id="pomodoro-micro-break-max-interval"
+                  type="number"
+                  min={30}
+                  max={3600}
+                  value={microBreakDraft.maxIntervalSeconds}
+                  onChange={(event) =>
+                    setMicroBreakDraft((prev) => ({
+                      ...prev,
+                      maxIntervalSeconds: event.target.value,
+                    }))
+                  }
+                  className="h-10 w-full rounded-lg border border-[color:var(--theme-soft-border)] bg-background px-3 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="pomodoro-micro-break-duration">闭眼休息（秒）</Label>
+                <input
+                  id="pomodoro-micro-break-duration"
+                  type="number"
+                  min={5}
+                  max={300}
+                  value={microBreakDraft.durationSeconds}
+                  onChange={(event) =>
+                    setMicroBreakDraft((prev) => ({
+                      ...prev,
+                      durationSeconds: event.target.value,
+                    }))
+                  }
+                  className="h-10 w-full rounded-lg border border-[color:var(--theme-soft-border)] bg-background px-3 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+                />
+              </div>
+            </div>
+
+            {microBreakError ? <div className="text-sm text-destructive">{microBreakError}</div> : null}
+
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void resetMicroBreakPreferences()}
+              disabled={updateGlobalSettings.isPending}
+            >
+              <RotateCcw className="h-4 w-4" />
+              恢复微休息默认值
+            </Button>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div className="space-y-2">
-              <Label htmlFor="pomodoro-micro-break-min-interval">最短间隔（秒）</Label>
-              <input
-                id="pomodoro-micro-break-min-interval"
-                type="number"
-                min={30}
-                max={3600}
-                value={microBreakDraft.minIntervalSeconds}
-                onChange={(event) =>
-                  setMicroBreakDraft((prev) => ({
-                    ...prev,
-                    minIntervalSeconds: event.target.value,
-                  }))
-                }
-                className="h-10 w-full rounded-lg border border-[color:var(--theme-soft-border)] bg-background px-3 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="pomodoro-micro-break-max-interval">最长间隔（秒）</Label>
-              <input
-                id="pomodoro-micro-break-max-interval"
-                type="number"
-                min={30}
-                max={3600}
-                value={microBreakDraft.maxIntervalSeconds}
-                onChange={(event) =>
-                  setMicroBreakDraft((prev) => ({
-                    ...prev,
-                    maxIntervalSeconds: event.target.value,
-                  }))
-                }
-                className="h-10 w-full rounded-lg border border-[color:var(--theme-soft-border)] bg-background px-3 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="pomodoro-micro-break-duration">闭眼休息（秒）</Label>
-              <input
-                id="pomodoro-micro-break-duration"
-                type="number"
-                min={5}
-                max={300}
-                value={microBreakDraft.durationSeconds}
-                onChange={(event) =>
-                  setMicroBreakDraft((prev) => ({
-                    ...prev,
-                    durationSeconds: event.target.value,
-                  }))
-                }
-                className="h-10 w-full rounded-lg border border-[color:var(--theme-soft-border)] bg-background px-3 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
-              />
-            </div>
+          <div className="space-y-4">
+            <h2 className="text-lg font-semibold text-foreground">提示词设置</h2>
           </div>
 
-          {microBreakError ? <div className="text-sm text-destructive">{microBreakError}</div> : null}
+          <div className="space-y-2">
+            <Label htmlFor="pomodoro-default-focus-prompt">默认学习提示词</Label>
+            <textarea
+              id="pomodoro-default-focus-prompt"
+              value={focusPromptDraft}
+              maxLength={200}
+              onChange={(event) => setFocusPromptDraft(event.target.value)}
+              className="min-h-[112px] w-full resize-y rounded-lg border border-[color:var(--theme-soft-border)] bg-background px-3 py-2 text-sm leading-6 text-foreground outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15"
+              placeholder="例如：10 秒后开始学习，请准备进入专注。"
+            />
+            <div className="text-xs text-muted-foreground">{focusPromptDraft.length}/200</div>
+          </div>
 
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => void resetMicroBreakPreferences()}
-            disabled={updateGlobalSettings.isPending}
-          >
-            <RotateCcw className="h-4 w-4" />
-            恢复微休息默认值
-          </Button>
-        </div>
+          <div className="space-y-2">
+            <Label htmlFor="pomodoro-default-break-prompt">默认休息提示词</Label>
+            <textarea
+              id="pomodoro-default-break-prompt"
+              value={breakPromptDraft}
+              maxLength={200}
+              onChange={(event) => setBreakPromptDraft(event.target.value)}
+              className="min-h-[112px] w-full resize-y rounded-lg border border-[color:var(--theme-soft-border)] bg-background px-3 py-2 text-sm leading-6 text-foreground outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15"
+              placeholder="例如：10 秒后进入休息，离开屏幕放松一下。"
+            />
+            <div className="text-xs text-muted-foreground">{breakPromptDraft.length}/200</div>
+          </div>
 
-        <div className="space-y-4">
-          <h2 className="text-lg font-semibold text-foreground">提示词设置</h2>
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="pomodoro-default-focus-prompt">默认学习提示词</Label>
-          <textarea
-            id="pomodoro-default-focus-prompt"
-            value={focusPromptDraft}
-            maxLength={200}
-            onChange={(event) => setFocusPromptDraft(event.target.value)}
-            className="min-h-[112px] w-full resize-y rounded-lg border border-[color:var(--theme-soft-border)] bg-background px-3 py-2 text-sm leading-6 text-foreground outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15"
-            placeholder="例如：10 秒后开始学习，请准备进入专注。"
-          />
-          <div className="text-xs text-muted-foreground">{focusPromptDraft.length}/200</div>
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="pomodoro-default-break-prompt">默认休息提示词</Label>
-          <textarea
-            id="pomodoro-default-break-prompt"
-            value={breakPromptDraft}
-            maxLength={200}
-            onChange={(event) => setBreakPromptDraft(event.target.value)}
-            className="min-h-[112px] w-full resize-y rounded-lg border border-[color:var(--theme-soft-border)] bg-background px-3 py-2 text-sm leading-6 text-foreground outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15"
-            placeholder="例如：10 秒后进入休息，离开屏幕放松一下。"
-          />
-          <div className="text-xs text-muted-foreground">{breakPromptDraft.length}/200</div>
-        </div>
-
-        <div className="flex flex-wrap gap-3">
-          <Button type="button" onClick={() => void savePomodoroPromptSettings()} disabled={updateGlobalSettings.isPending}>
-            <Save className="h-4 w-4" />
-            保存设置
-          </Button>
-          <Button type="button" variant="outline" onClick={() => void resetPomodoroPromptSettings()} disabled={updateGlobalSettings.isPending}>
-            <RotateCcw className="h-4 w-4" />
-            清空默认值
-          </Button>
+          <div className="flex flex-wrap gap-3">
+            <Button type="button" onClick={() => void savePomodoroPromptSettings()} disabled={updateGlobalSettings.isPending}>
+              <Save className="h-4 w-4" />
+              保存设置
+            </Button>
+            <Button type="button" variant="outline" onClick={() => void resetPomodoroPromptSettings()} disabled={updateGlobalSettings.isPending}>
+              <RotateCcw className="h-4 w-4" />
+              清空默认值
+            </Button>
+          </div>
         </div>
       </section>
-      </div>
-    </>
+    </PomodoroSubpageFrame>
   )
 }
