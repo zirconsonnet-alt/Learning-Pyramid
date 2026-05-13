@@ -163,6 +163,7 @@ export async function installMockApi(
     systemCapabilities?: Partial<MockSystemCapabilities>
     membershipProvider?: MockMembershipProvider
     withdrawalScenario?: MockWithdrawalScenario
+    boundInviteCode?: string | null
   } = {},
 ) {
   const authState = options.authState ?? "signed-in"
@@ -483,10 +484,10 @@ export async function installMockApi(
       await fulfill(route, {
         userId: testUser.userId,
         inviteCode: "LP-E2E",
-        boundInviterUserId: null,
-        boundInviteCode: null,
-        bindingStatus: null,
-        boundAt: null,
+        boundInviterUserId: options.boundInviteCode ? "user_inviter_e2e" : null,
+        boundInviteCode: options.boundInviteCode ?? null,
+        bindingStatus: options.boundInviteCode ? "bound" : null,
+        boundAt: options.boundInviteCode ? nowIso : null,
         totalInvitedUsers: 1,
         rewardedInviteCount: 0,
         availableCouponCount: 0,

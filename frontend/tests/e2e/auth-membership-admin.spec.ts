@@ -52,7 +52,7 @@ test("auth page removes secondary helper copy", async ({ page }) => {
 
 test(journeyIds.membership, async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
-  await installMockApi(page)
+  await installMockApi(page, { boundInviteCode: "LP45472290" })
 
   await recordJourney(journeyIds.membership, async () => {
     await page.goto("/membership")
@@ -61,6 +61,11 @@ test(journeyIds.membership, async ({ page }) => {
     await expect(page.getByRole("button", { name: /立即开通|立即续费|继续支付/ })).toBeVisible()
     await page.getByRole("button", { name: "复制邀请码" }).click()
     await expect(page.getByText("当前状态")).toBeVisible()
+    const currentStatusBlock = page.getByText("当前状态", { exact: true }).locator("xpath=ancestor::div[contains(@class,'space-y-2')][1]")
+    const inviteCodeBlock = page.getByText("邀请码", { exact: true }).locator("xpath=ancestor::div[contains(@class,'rounded-')][1]")
+    await expect(inviteCodeBlock.getByText("LP45472290")).toBeVisible()
+    await expect(currentStatusBlock.getByText("有效期至")).toHaveCount(0)
+    await expect(inviteCodeBlock.getByText("上级邀请码")).toHaveCount(0)
   })
 
   expectNoConsoleIssues(consoleIssues)

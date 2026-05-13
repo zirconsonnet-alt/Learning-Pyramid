@@ -910,7 +910,7 @@ export function MembershipPage() {
                 <div className="space-y-2">
                   <div className="text-sm font-medium text-[color:var(--theme-subtle-text)]">当前状态</div>
                   <div className="text-2xl font-semibold tracking-tight text-foreground">{membershipState}</div>
-                  {summary?.currentEndsAt ? <div className="text-sm leading-6 text-muted-foreground">有效期至 {formatMembershipDateTime(summary.currentEndsAt)}</div> : null}
+                  {summary?.currentEndsAt ? <div className="text-sm leading-6 text-muted-foreground">{formatMembershipDateTime(summary.currentEndsAt)}</div> : null}
                 </div>
                 <div className="flex w-full max-w-[22rem] flex-col gap-3 md:w-auto">
                   <div className="rounded-[1.25rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-5 py-4">
@@ -921,7 +921,7 @@ export function MembershipPage() {
                         <div className="min-w-0">
                           <div className="truncate text-2xl font-semibold tracking-tight text-foreground">{inviteSummaryQ.data?.inviteCode ?? "加载中..."}</div>
                           {inviteSummaryQ.data?.boundInviteCode ? (
-                            <div className="mt-1 text-sm text-muted-foreground">已绑定上级邀请码：{inviteSummaryQ.data.boundInviteCode}</div>
+                            <div className="mt-1 text-sm text-muted-foreground">{inviteSummaryQ.data.boundInviteCode}</div>
                           ) : null}
                         </div>
                       </div>

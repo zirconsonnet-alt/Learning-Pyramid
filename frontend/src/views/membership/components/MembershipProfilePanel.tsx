@@ -69,7 +69,7 @@ export function MembershipProfilePanel() {
                 <div className="text-2xl font-semibold tracking-tight text-foreground">
                   {summary?.isActive ? "会员有效" : summary?.currentStatus === "expired" ? "会员已过期" : "尚未开通"}
                 </div>
-                {summary?.currentEndsAt ? <div className="text-sm leading-6 text-muted-foreground">有效期至 {formatMembershipDateTime(summary.currentEndsAt)}</div> : null}
+                {summary?.currentEndsAt ? <div className="text-sm leading-6 text-muted-foreground">{formatMembershipDateTime(summary.currentEndsAt)}</div> : null}
                 <div className="theme-subtle-surface px-3 py-3 text-sm">
                   <div>首单价：{formatMembershipPrice(summary?.firstOrderPriceCent ?? 0)}</div>
                   <div className="mt-1">续费价：{formatMembershipPrice(summary?.renewalPriceCent ?? 0)}</div>
@@ -101,11 +101,7 @@ export function MembershipProfilePanel() {
                     <Link to="/membership">查看邀请记录</Link>
                   </Button>
                 </div>
-                {inviteSummary?.boundInviteCode ? (
-                  <div className="theme-subtle-surface px-3 py-3 text-sm">
-                    已绑定上级邀请码：{inviteSummary.boundInviteCode}
-                  </div>
-                ) : null}
+                {inviteSummary?.boundInviteCode ? <div className="theme-subtle-surface px-3 py-3 text-sm">{inviteSummary.boundInviteCode}</div> : null}
               </div>
             ) : null}
           </div>
