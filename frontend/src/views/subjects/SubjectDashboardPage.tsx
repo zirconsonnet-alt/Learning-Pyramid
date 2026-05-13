@@ -447,17 +447,13 @@ export function SubjectDashboardPage() {
               </div>
 
               <div className="grid gap-2">
-                <Label htmlFor="delete-material-confirmation">输入项目名称以确认删除</Label>
                 <Input
                   id="delete-material-confirmation"
                   value={deleteMaterialConfirmation}
                   onChange={(event) => setDeleteMaterialConfirmation(event.target.value)}
-                  placeholder="删除前请确认这个项目没有需要保留的内容、草稿或工作流入口。"
+                  placeholder={`请输入 ${deleteMaterialExpectedText} 完成确认。`}
                   autoFocus
                 />
-                <p className="text-xs text-muted-foreground">
-                  请输入 <span className="font-semibold text-foreground">{deleteMaterialExpectedText}</span> 完成确认。
-                </p>
               </div>
             </div>
           ) : null}

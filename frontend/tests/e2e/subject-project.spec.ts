@@ -4,8 +4,8 @@ import { collectConsoleIssues, expectNoConsoleIssues } from "../fixtures/app-che
 import { installMockApi } from "../fixtures/mock-api"
 import { journeyIds } from "../fixtures/journeys"
 import { recordJourney } from "../fixtures/journey-result"
-import { openSubject, projectPath } from "../fixtures/page-objects"
-import { project } from "../fixtures/test-data"
+import { gotoProjects, openSubject, projectPath } from "../fixtures/page-objects"
+import { material, project, subject } from "../fixtures/test-data"
 
 test(journeyIds.subjectProjectEntry, async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
@@ -31,6 +31,30 @@ test("project settings shows concise convergence template copy", async ({ page }
   await expect(page.getByText("推送上次复习时不记得的重点")).toBeVisible()
   await expect(page.getByText("完成一轮后决定是否继续生成复习任务。")).toHaveCount(0)
   await expect(page.getByText("这个步骤没有额外参数")).toHaveCount(0)
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
+test("delete confirmation dialogs keep confirmation copy inside the input", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page)
+
+  await gotoProjects(page)
+  await page.getByRole("button", { name: "删除" }).click()
+  const subjectDialog = page.getByRole("dialog", { name: "删除学科" })
+  await expect(subjectDialog).toBeVisible()
+  await expect(subjectDialog.getByText("输入学科标题以确认删除")).toHaveCount(0)
+  await expect(subjectDialog.getByText(`请输入 ${subject.title} 完成确认。`)).toHaveCount(0)
+  await expect(subjectDialog.getByPlaceholder(`请输入 ${subject.title} 完成确认。`)).toBeVisible()
+
+  await subjectDialog.getByRole("button", { name: "取消" }).click()
+  await openSubject(page)
+  await page.getByRole("button", { name: "删除" }).click()
+  const materialDialog = page.getByRole("dialog", { name: "删除项目" })
+  await expect(materialDialog).toBeVisible()
+  await expect(materialDialog.getByText("输入项目名称以确认删除")).toHaveCount(0)
+  await expect(materialDialog.getByText(`请输入 ${material.title} 完成确认。`)).toHaveCount(0)
+  await expect(materialDialog.getByPlaceholder(`请输入 ${material.title} 完成确认。`)).toBeVisible()
 
   expectNoConsoleIssues(consoleIssues)
 })
