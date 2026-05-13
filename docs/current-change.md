@@ -8,6 +8,7 @@
 - 删除截图中标出的输入框上方说明和下方说明。
 - 把“请输入标题完成确认”的提示移到输入框 placeholder。
 - 项目删除弹窗也做同样处理。
+- 两个删除弹窗顶部说明只保留第一段，不再展示后半段解释。
 
 ## 2. 本次实际修改文件
 
@@ -20,7 +21,7 @@
 
 - `ProjectsPage.tsx`：删除学科删除弹窗中输入框上方 label、下方辅助说明和冗长删除建议；输入框 placeholder 改为确认文案。
 - `SubjectDashboardPage.tsx`：删除项目删除弹窗中输入框上方 label、下方辅助说明和冗长删除建议；输入框 placeholder 改为确认文案。
-- `subject-project.spec.ts`：增加回归断言，防止删除确认弹窗重新出现重复可见说明。
+- `subject-project.spec.ts`：增加回归断言，防止删除确认弹窗重新出现重复可见说明或冗长顶部说明。
 - `docs/current-change.md`：覆盖为当前 UI 精简任务的工作单。
 
 ## 4. 行为语义是否变化
@@ -69,6 +70,7 @@
 ## 11. 验证状态
 
 - 已运行红灯：`pnpm --dir frontend test:e2e -- subject-project.spec.ts -g "delete confirmation dialogs keep confirmation copy inside the input"`，失败点为删除学科弹窗仍显示上方说明。
+- 本轮追加红灯：`pnpm --dir frontend test:e2e -- subject-project.spec.ts -g "delete confirmation dialogs keep confirmation copy inside the input"`，失败点为删除学科弹窗找不到精确短句 `这会移除“自动化测试学科”的当前学科入口。`，说明当前顶部说明仍是长句。
 - 修复后运行当前源码 dev server：`LEARNINGPYRAMID_FRONTEND_E2E_USE_DEV_SERVER=1 LEARNINGPYRAMID_FRONTEND_E2E_PORT=5177 pnpm --dir frontend test:e2e -- subject-project.spec.ts -g "delete confirmation dialogs keep confirmation copy inside the input"`，1 passed。
 - `pnpm --dir frontend build`：通过；仍有既有大 chunk warning。
 - 构建后运行默认 preview：`pnpm --dir frontend test:e2e -- subject-project.spec.ts -g "delete confirmation dialogs keep confirmation copy inside the input"`，1 passed。

@@ -433,7 +433,7 @@ export function SubjectDashboardPage() {
             <DialogTitle>删除项目</DialogTitle>
             <DialogDescription>
               {deleteMaterialTarget
-                ? `这会移除“${deleteMaterialTarget.title}”和它的工作台，学科“${subjectTitle}”以及其他项目会保留。`
+                ? `这会移除“${deleteMaterialTarget.title}”和它的工作台。`
                 : "确认是否删除当前项目。"}
             </DialogDescription>
           </DialogHeader>

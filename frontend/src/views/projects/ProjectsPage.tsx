@@ -425,7 +425,7 @@ export function ProjectsPage() {
             <DialogTitle>删除学科</DialogTitle>
             <DialogDescription>
               {deleteTarget
-                ? `这会移除“${deleteTarget.title}”的当前学科入口，并清掉本浏览器里与该学科相关的已选状态和草稿缓存。`
+                ? `这会移除“${deleteTarget.title}”的当前学科入口。`
                 : "确认是否删除当前学科。"}
             </DialogDescription>
           </DialogHeader>
