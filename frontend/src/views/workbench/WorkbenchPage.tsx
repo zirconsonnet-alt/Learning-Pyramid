@@ -29,7 +29,6 @@ import {
   useQueue,
   useSetLayerConfig,
 } from "@/ui/queries/workbench"
-import { useAppStore } from "@/ui/store/appStore"
 import { getLocalDateKey, listDailyStudyMetricEntries, loadDailyWorkbenchStats, type DailyWorkbenchStats } from "@/ui/store/workbenchDailyStats"
 import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { syncStudyMetricsSnapshot } from "@/ui/studyMetricsSync"
@@ -276,9 +275,6 @@ export function WorkbenchPage() {
   const ps = useWorkbenchStore((s) => (pid ? s.byProjectId[pid] : undefined))
   const setSelectedInstanceId = useWorkbenchStore((s) => s.setSelectedInstanceId)
 
-  const selectedWorkbenchProjectId = useAppStore((s) => s.selectedWorkbenchProjectId)
-  const selectedWorkbenchProjectRef = useAppStore((s) => s.selectedWorkbenchProjectRef)
-
   const [currentMs, setCurrentMs] = useState(0)
   const [seekTo, setSeekTo] = useState<{ instanceId: string; ms: number; nonce: number } | null>(null)
   const [centerPanelMode, setCenterPanelMode] = useState<"main" | "rollup">("main")
@@ -289,16 +285,6 @@ export function WorkbenchPage() {
     if (!pid) return
     ensure(pid)
   }, [ensure, pid])
-
-  useEffect(() => {
-    if (subjectId && pid && (selectedWorkbenchProjectRef?.subjectId !== subjectId || selectedWorkbenchProjectRef?.scopedProjectId !== pid)) {
-      useAppStore.getState().setSelectedWorkbenchProjectRef({ subjectId, scopedProjectId: pid })
-      return
-    }
-    if (pid && selectedWorkbenchProjectId !== pid) {
-      useAppStore.getState().setSelectedWorkbenchProjectId(pid)
-    }
-  }, [pid, selectedWorkbenchProjectId, selectedWorkbenchProjectRef?.scopedProjectId, selectedWorkbenchProjectRef?.subjectId, subjectId])
 
   const instancesQ = useInstances(projectScope)
   const learningTaskNodesQ = useLearningTaskNodes(projectScope)

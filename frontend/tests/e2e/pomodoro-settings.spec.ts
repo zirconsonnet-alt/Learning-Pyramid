@@ -198,27 +198,36 @@ test("pomodoro blocks workbench when enabled without an active focus segment", a
       },
     }),
   })
-  await page.addInitScript(({ subjectId, projectId }) => {
+  await page.addInitScript(({ oldProjectId, subjectId }) => {
     window.localStorage.setItem(
       "plm-app",
       JSON.stringify({
         state: {
           selectedSubjectId: subjectId,
-          selectedWorkbenchProjectId: projectId,
-          selectedWorkbenchProjectRef: { subjectId, scopedProjectId: projectId },
+          selectedWorkbenchProjectId: oldProjectId,
+          selectedWorkbenchProjectRef: { subjectId, scopedProjectId: oldProjectId },
           recentSubjectIds: [subjectId],
-          recentWorkbenchProjectIds: [projectId],
-          recentWorkbenchProjectRefs: [{ subjectId, scopedProjectId: projectId }],
+          recentWorkbenchProjectIds: [oldProjectId],
+          recentWorkbenchProjectRefs: [{ subjectId, scopedProjectId: oldProjectId }],
         },
         version: 0,
       }),
     )
-  }, { subjectId: subject.subjectId, projectId: project.projectId })
+  }, { oldProjectId: "old_proj_e2e", subjectId: subject.subjectId })
 
   await page.goto("/pomodoro")
   await expect(page.getByRole("link", { name: /进入.*工作台/ })).toHaveCount(0)
   await page.goto(`/subjects/${subject.subjectId}/projects/${project.projectId}/workbench`)
   await expect(page).toHaveURL(/\/pomodoro$/)
+  await expect
+    .poll(async () =>
+      page.evaluate(() => {
+        const raw = window.localStorage.getItem("plm-app")
+        if (!raw) return null
+        return JSON.parse(raw).state.selectedWorkbenchProjectRef
+      }),
+    )
+    .toEqual({ subjectId: subject.subjectId, scopedProjectId: project.projectId })
 
   expectNoConsoleIssues(consoleIssues)
 })

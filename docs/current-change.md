@@ -4,39 +4,38 @@
 
 ## 1. 当前用户要求
 
-- 新建小番茄时，如果预计 25 分钟学习时间会和已有番茄计划冲突，应禁止新建。
-- 使用已确认规则：小番茄预计区间与今天已启用番茄计划任一区间重叠即判定冲突。
+- 修复选择工作台时被番茄钟拦截后，当前项目没有切到刚选择项目的问题。
+- 被番茄钟拦到番茄钟页面可以接受，但不能吞掉用户选择当前项目的意图。
 
 ## 2. 本次实际修改文件
 
-- `frontend/src/ui/store/pomodoroStore.ts`
-- `frontend/src/views/pomodoro/PomodoroPage.tsx`
+- `frontend/src/shell/AppShell.tsx`
+- `frontend/src/views/workbench/WorkbenchPage.tsx`
 - `frontend/tests/e2e/pomodoro-settings.spec.ts`
 - `docs/current-change.md`
 
 ## 3. 每个文件为什么修改
 
-- `pomodoroStore.ts`：补充小番茄与当日启用计划的时间重叠判断，供页面入口复用。
-- `PomodoroPage.tsx`：在打开新建小番茄弹窗和最终创建前拦截冲突，避免创建会覆盖排程语义的小番茄。
-- `pomodoro-settings.spec.ts`：增加 e2e 用例，覆盖小番茄预计区间与已有计划重叠时必须阻止创建。
+- `AppShell.tsx`：把项目路由参数同步为完整 `selectedWorkbenchProjectRef`，让当前项目选择发生在页面门禁之前。
+- `WorkbenchPage.tsx`：移除页面内重复写当前项目的逻辑，避免路由层和页面层同时承担同一状态同步职责。
+- `pomodoro-settings.spec.ts`：补充番茄门禁场景下的 e2e 断言，确认被重定向到番茄钟后当前项目仍切到用户访问的项目。
 - `docs/current-change.md`：覆盖为本次任务工作单。
 
 ## 4. 行为语义是否变化
 
 - 是。
-- 以前只禁止当前处于学习阶段时新建小番茄。
-- 现在小番茄预计学习区间只要与今天已启用计划重叠，就禁止新建并提示冲突。
+- 以前访问项目工作台被番茄钟门禁拦截时，只可能同步旧的 `selectedWorkbenchProjectId`，`selectedWorkbenchProjectRef` 仍可能停留在旧项目。
+- 现在只要路由进入具体学科项目范围，当前项目引用会先同步到该路由对应项目，再由番茄门禁决定是否允许进入工作台内容。
 
 ## 5. 是否做了重构，以及为什么
 
-- 仅做当前范围内的局部整理。
-- 目的是把时间区间判断放在番茄 store 的纯函数中，避免页面层复制排程计算逻辑。
+- 做了当前范围内的局部边界调整。
+- 目的是让“选择当前项目”归属于路由层状态同步，而不是依赖 `WorkbenchPage` 是否成功渲染；同时移除工作台页面内的重复写入路径。
 
 ## 6. 未修改哪些相关内容，以及为什么
 
-- 未修改番茄计划数据结构，因为冲突判断可由现有 schedule 推导。
-- 未修改后端 API，因为该行为目前发生在前端本地番茄状态。
-- 未做自动顺延、覆盖或二次确认，因为这些会引入未确认的优先级语义。
+- 未修改 `PomodoroWorkbenchGate` 的访问控制语义，因为拦截到番茄钟页本身是允许的。
+- 未修改 API、数据结构或番茄计划逻辑，因为问题是前端路由状态同步边界。
 
 ## 7. 是否影响 API、架构、部署、数据结构、UI、测试
 
@@ -44,12 +43,12 @@
 - 架构：否。
 - 部署：否。
 - 数据结构：否。
-- UI：是，新增冲突提示。
-- 测试：是，新增 e2e 覆盖。
+- UI：间接影响，当前项目菜单会在被番茄钟拦截后仍反映用户刚选择的项目。
+- 测试：是，补充 e2e 断言。
 
 ## 8. 当前风险点和不确定项
 
-- 冲突范围限定为今天的启用计划，不跨天检查。
+- 无。
 
 ## 9. 仍需用户确认的问题
 
@@ -67,10 +66,8 @@
 
 ## 11. 验证状态
 
-- 已先运行新增 e2e，旧实现因缺少“小番茄时间冲突”提示而失败。
-- 已补充“排程关闭时保存计划不阻止小番茄”的 e2e，确认初版实现会误拦后修正。
+- 已先运行新增 e2e 断言，旧实现会保持旧 `selectedWorkbenchProjectRef` 而失败。
 - `pnpm --dir frontend build`：通过；仍有既有 `hls` chunk 大于 500 kB 的 warning。
-- `pnpm --dir frontend exec playwright test frontend/tests/e2e/pomodoro-settings.spec.ts -g "overlaps an enabled plan"`：实现后通过。
-- `pnpm --dir frontend exec playwright test frontend/tests/e2e/pomodoro-settings.spec.ts -g "overlaps an enabled plan|ignores saved plans"`：通过，2 个用例全部通过。
+- `pnpm --dir frontend exec playwright test frontend/tests/e2e/pomodoro-settings.spec.ts -g "blocks workbench when enabled"`：通过。
 - `pnpm --dir frontend exec playwright test frontend/tests/e2e/pomodoro-settings.spec.ts`：通过，14 个用例全部通过。
-- `git diff --check -- frontend/src/ui/store/pomodoroStore.ts frontend/src/views/pomodoro/PomodoroPage.tsx frontend/tests/e2e/pomodoro-settings.spec.ts docs/current-change.md`：通过；仅有 Windows 换行提示。
+- `pnpm --dir frontend exec playwright test frontend/tests/e2e/navigation.spec.ts frontend/tests/e2e/subject-project.spec.ts`：通过，7 个用例全部通过。

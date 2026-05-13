@@ -301,8 +301,8 @@ export function AppShell() {
   useGuideWalkthroughController({ navigate: nav, pathname: location.pathname })
   const { scopedProjectId: projectId, subjectId: routeSubjectId } = useParams()
   const pid = projectId ?? ""
-  const selectedWorkbenchProjectId = useAppStore((state) => state.selectedWorkbenchProjectId)
-  const setSelectedWorkbenchProjectId = useAppStore((state) => state.setSelectedWorkbenchProjectId)
+  const selectedWorkbenchProjectRef = useAppStore((state) => state.selectedWorkbenchProjectRef)
+  const setSelectedWorkbenchProjectRef = useAppStore((state) => state.setSelectedWorkbenchProjectRef)
   const [globalMenuOpen, setGlobalMenuOpen] = useState(false)
   const [subjectMenuOpen, setSubjectMenuOpen] = useState(false)
   const [projectMenuOpen, setProjectMenuOpen] = useState(false)
@@ -570,9 +570,10 @@ export function AppShell() {
               : "已关闭"
 
   useEffect(() => {
-    if (!pid || selectedWorkbenchProjectId === pid) return
-    setSelectedWorkbenchProjectId(pid)
-  }, [pid, selectedWorkbenchProjectId, setSelectedWorkbenchProjectId])
+    if (!routeSubjectId || !pid) return
+    if (selectedWorkbenchProjectRef?.subjectId === routeSubjectId && selectedWorkbenchProjectRef.scopedProjectId === pid) return
+    setSelectedWorkbenchProjectRef({ subjectId: routeSubjectId, scopedProjectId: pid })
+  }, [pid, routeSubjectId, selectedWorkbenchProjectRef?.scopedProjectId, selectedWorkbenchProjectRef?.subjectId, setSelectedWorkbenchProjectRef])
 
   useEffect(() => {
     void checkFrontendFreshness()
