@@ -1,6 +1,6 @@
-import { useCallback, useMemo, type ReactNode } from "react"
+import { useCallback, useMemo } from "react"
 import { useQueries, useQuery } from "@tanstack/react-query"
-import { ChevronLeft } from "lucide-react"
+import { FileVideoCamera } from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
@@ -10,10 +10,10 @@ import type { ScopedProjectRef } from "@/ui/api/projectScope"
 import { getRecallPoint, type RecallPoint } from "@/ui/api/review"
 import { ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader } from "@/ui/components/ui/card"
 import { formatInstanceReference, formatMaterialReference } from "@/ui/displayIdentifiers"
 import { buildScopedProjectPath } from "@/ui/projectPaths"
 import { RecallPointListCard } from "@/views/recallPoints/components/RecallPointListCard"
+import { DetailSummaryCard } from "@/views/shared/DetailSummaryCard"
 import { VideoPane } from "@/views/workbench/components/VideoPane"
 
 function formatApiError(err: unknown) {
@@ -94,24 +94,10 @@ export function InstancePage() {
   ) : (
     "未绑定对象节点"
   )
-  const backAction = (
-    <Button
-      variant="ghost"
-      size="sm"
-      className="-ml-2 h-8 rounded-full px-2 text-[#60748c] hover:bg-[#f3f7fb] hover:text-foreground"
-      asChild
-    >
-      <Link to={buildScopedProjectPath(subjectId, pid, "/structure-view?view=object")}>
-        <ChevronLeft className="h-4 w-4" />
-        返回学习对象树
-      </Link>
-    </Button>
-  )
   const summaryPanel = instance ? (
-    <InstanceSummaryCard
-      topAction={backAction}
-      header={<h1 className="truncate text-lg font-semibold">{instance.materialDisplayName}</h1>}
-      description="查看这个内容实例的播放、对象树绑定与复述点引用。"
+    <DetailSummaryCard
+      icon={FileVideoCamera}
+      title={instance.materialDisplayName}
       items={[
         { label: "状态", value: instance.presence === "MISSING" ? "缺失" : "正常" },
         { label: "当前引用", value: formatInstanceReference(iid) },
@@ -181,45 +167,5 @@ export function InstancePage() {
         </div>
       ) : null}
     </div>
-  )
-}
-
-type SummaryItem = {
-  label: string
-  value: ReactNode
-}
-
-function InstanceSummaryCard({
-  description,
-  header,
-  items,
-  topAction,
-}: {
-  description?: string
-  header: ReactNode
-  items: SummaryItem[]
-  topAction?: ReactNode
-}) {
-  return (
-    <Card>
-      <CardHeader className="pb-3">
-        {topAction ? <div className="flex items-center">{topAction}</div> : null}
-        <div className="min-w-0">{header}</div>
-        {description ? <CardDescription>{description}</CardDescription> : null}
-      </CardHeader>
-      <CardContent>
-        <div className="flex flex-wrap gap-3">
-          {items.map((item) => (
-            <div
-              key={item.label}
-              className="min-w-[10rem] flex-1 rounded-xl border border-[#dbe4ee] bg-[#f8fafc] px-4 py-3 shadow-[0_10px_24px_-24px_rgba(15,23,42,0.6)]"
-            >
-              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#64748b]">{item.label}</div>
-              <div className="mt-1.5 break-words text-sm font-semibold text-slate-900">{item.value}</div>
-            </div>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
   )
 }

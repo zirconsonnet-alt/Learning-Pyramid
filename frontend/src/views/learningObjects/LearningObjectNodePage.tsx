@@ -1,6 +1,6 @@
-import { useMemo, type ReactNode } from "react"
+import { useMemo } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { ChevronLeft, Sparkles } from "lucide-react"
+import { Boxes, Sparkles } from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
@@ -14,10 +14,10 @@ import {
 import type { ScopedProjectRef } from "@/ui/api/projectScope"
 import { ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader } from "@/ui/components/ui/card"
 import { buildScopedProjectPath } from "@/ui/projectPaths"
 import { buildAiChatPath } from "@/views/ai/chatRouting"
 import { RecallPointListCard } from "@/views/recallPoints/components/RecallPointListCard"
+import { DetailSummaryCard } from "@/views/shared/DetailSummaryCard"
 import { NodeExportCard } from "@/views/shared/NodeExportCard"
 
 function formatApiError(err: unknown) {
@@ -103,19 +103,6 @@ export function LearningObjectNodePage() {
   }
 
   const title = nodeQ.data?.title?.trim() || "学习对象节点"
-  const backToObjectTreeAction = (
-    <Button
-      variant="ghost"
-      size="sm"
-      className="-ml-2 h-8 rounded-full px-2 text-[#60748c] hover:bg-[#f3f7fb] hover:text-foreground"
-      asChild
-    >
-      <Link to={buildScopedProjectPath(subjectId, pid, "/structure-view?view=object")}>
-        <ChevronLeft className="h-4 w-4" />
-        返回学习对象树
-      </Link>
-    </Button>
-  )
   const summaryItems = nodeQ.data
     ? nodeQ.data.kind === "container"
       ? [
@@ -141,9 +128,9 @@ export function LearningObjectNodePage() {
     : []
   const summaryPanel = nodeQ.data ? (
     <div className="space-y-4">
-      <LearningObjectSummaryCard
-        topAction={backToObjectTreeAction}
-        header={<h1 className="truncate text-lg font-semibold">{title}</h1>}
+      <DetailSummaryCard
+        icon={Boxes}
+        title={title}
         items={summaryItems}
       />
 
@@ -199,45 +186,5 @@ export function LearningObjectNodePage() {
         </div>
       ) : null}
     </div>
-  )
-}
-
-type SummaryItem = {
-  label: string
-  value: ReactNode
-}
-
-function LearningObjectSummaryCard({
-  description,
-  header,
-  items,
-  topAction,
-}: {
-  description?: string
-  header: ReactNode
-  items: SummaryItem[]
-  topAction?: ReactNode
-}) {
-  return (
-    <Card>
-      <CardHeader className="pb-3">
-        {topAction ? <div className="flex items-center">{topAction}</div> : null}
-        <div className="min-w-0">{header}</div>
-        {description ? <CardDescription>{description}</CardDescription> : null}
-      </CardHeader>
-      <CardContent>
-        <div className="flex flex-wrap gap-3">
-          {items.map((item) => (
-            <div
-              key={item.label}
-              className="min-w-[10rem] flex-1 rounded-xl border border-[#dbe4ee] bg-[#f8fafc] px-4 py-3 shadow-[0_10px_24px_-24px_rgba(15,23,42,0.6)]"
-            >
-              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#64748b]">{item.label}</div>
-              <div className="mt-1.5 text-sm font-semibold text-slate-900">{item.value}</div>
-            </div>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
   )
 }

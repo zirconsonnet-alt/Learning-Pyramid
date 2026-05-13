@@ -1,13 +1,17 @@
 import type { Page, Route } from "@playwright/test"
 
 import {
+  convergence,
   instance,
   learningObjectNode,
+  learningTask,
+  learningTaskNode,
   material,
   membershipSummary,
   nowIso,
   project,
   recallPoint,
+  reviewChain,
   reviewTask,
   subject,
   testUser,
@@ -410,7 +414,37 @@ export async function installMockApi(
     }
 
     if (path === `${scopedProjectPath}/learning-task-nodes`) {
-      await fulfill(route, [])
+      await fulfill(route, contentState === "empty" ? [] : [learningTaskNode])
+      return
+    }
+
+    if (path === `${scopedProjectPath}/learning-task-nodes/${learningTaskNode.nodeId}`) {
+      await fulfill(route, learningTaskNode)
+      return
+    }
+
+    if (path === `${scopedProjectPath}/learning-task-nodes/${learningTaskNode.nodeId}/binding`) {
+      await fulfill(route, {
+        projectId: project.projectId,
+        reviewChainId: reviewChain.reviewChainId,
+        entryNodeId: learningTaskNode.nodeId,
+        entryNodeTitle: learningTaskNode.title,
+        entryNodeKind: "leaf",
+        learningTaskId: learningTask.learningTaskId,
+        learningTaskTitle: learningTask.title,
+        childCount: null,
+        targetLayerIndex: 1,
+      })
+      return
+    }
+
+    if (path === `${scopedProjectPath}/learning-task-nodes/${learningTaskNode.nodeId}/recall-points`) {
+      await fulfill(route, [recallPoint])
+      return
+    }
+
+    if (path === `${scopedProjectPath}/learning-tasks/${learningTask.learningTaskId}`) {
+      await fulfill(route, learningTask)
       return
     }
 
@@ -421,6 +455,11 @@ export async function installMockApi(
 
     if (path === `${scopedProjectPath}/learning-object-nodes`) {
       await fulfill(route, contentState === "empty" ? [] : [learningObjectNode])
+      return
+    }
+
+    if (path === `${scopedProjectPath}/learning-objects/${learningObjectNode.nodeId}`) {
+      await fulfill(route, learningObjectNode)
       return
     }
 
@@ -458,6 +497,31 @@ export async function installMockApi(
       return
     }
 
+    if (path === `${scopedProjectPath}/review-chains/${reviewChain.reviewChainId}`) {
+      await fulfill(route, reviewChain)
+      return
+    }
+
+    if (path === `${scopedProjectPath}/review-chains/${reviewChain.reviewChainId}/binding`) {
+      await fulfill(route, {
+        projectId: project.projectId,
+        reviewChainId: reviewChain.reviewChainId,
+        entryNodeId: learningTaskNode.nodeId,
+        entryNodeTitle: learningTaskNode.title,
+        entryNodeKind: "leaf",
+        learningTaskId: learningTask.learningTaskId,
+        learningTaskTitle: learningTask.title,
+        childCount: null,
+        targetLayerIndex: 1,
+      })
+      return
+    }
+
+    if (path === `${scopedProjectPath}/convergences/${convergence.convergenceId}`) {
+      await fulfill(route, convergence)
+      return
+    }
+
     if (path === `${scopedProjectPath}/ranges/range_e2e`) {
       await fulfill(route, { projectId: project.projectId, rangeId: "range_e2e", recallPointIds: [recallPoint.recallPointId] })
       return
@@ -465,6 +529,23 @@ export async function installMockApi(
 
     if (path === `${scopedProjectPath}/recall-points/${recallPoint.recallPointId}`) {
       await fulfill(route, recallPoint)
+      return
+    }
+
+    if (path === `${scopedProjectPath}/recall-points/${recallPoint.recallPointId}/review-projection`) {
+      await fulfill(route, {
+        recallPointId: recallPoint.recallPointId,
+        calculatedAt: nowIso,
+        reviewRecommendationIndex: 1,
+        estimatedMemoryStrength: 0.5,
+        weightedSuccessRatio: 0.5,
+        forgettingCurveDecayPerDay: 0.18,
+        historyWindowSize: 0,
+        lastReviewedAt: null,
+        lastReviewResult: null,
+        reviewCount: 0,
+        history: [],
+      })
       return
     }
 

@@ -1,5 +1,5 @@
-import { useEffect, useState, type ReactNode } from "react"
-import { ChevronLeft, Sparkles } from "lucide-react"
+import { useEffect, useState } from "react"
+import { BookOpenCheck, Sparkles } from "lucide-react"
 import { useQuery } from "@tanstack/react-query"
 import { Link, useNavigate, useParams } from "react-router-dom"
 
@@ -11,7 +11,6 @@ import {
 import type { ScopedProjectRef } from "@/ui/api/projectScope"
 import { ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader } from "@/ui/components/ui/card"
 import { Input } from "@/ui/components/ui/input"
 import { buildScopedProjectPath } from "@/ui/projectPaths"
 import { useEditLearningTask, useEditLearningTaskNode, useLearningTask, useLearningTaskNode, useLearningTaskNodeBinding } from "@/ui/queries/learningTasks"
@@ -19,6 +18,7 @@ import { useInstances } from "@/ui/queries/workbench"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { formatLearningTaskNodeDisplayTitle } from "@/views/learningTasks/displayTitle"
 import { RecallPointListCard } from "@/views/recallPoints/components/RecallPointListCard"
+import { DetailSummaryCard, DetailSummaryTitle } from "@/views/shared/DetailSummaryCard"
 import { NodeExportCard } from "@/views/shared/NodeExportCard"
 import type { LearningTaskNode } from "@/ui/api/learningTaskNodes"
 
@@ -77,31 +77,22 @@ export function LearningTaskNodePage() {
     if (ids.length === 1) return instanceTitleById[ids[0]] ?? "关联内容"
     return `${ids.length} 个关联内容`
   })()
-  const backToTaskTreeAction = (
-    <Button
-      variant="ghost"
-      size="sm"
-      className="-ml-2 h-8 rounded-full px-2 text-[#60748c] hover:bg-[#f3f7fb] hover:text-foreground"
-      asChild
-    >
-      <Link to={buildScopedProjectPath(subjectId, pid, "/structure-view?view=task")}>
-        <ChevronLeft className="h-4 w-4" />
-        返回学习任务树
-      </Link>
-    </Button>
-  )
   const summaryPanel = nodeQ.data ? (
     <div className="space-y-3">
       {isContainer ? (
-        <LearningTaskSummaryCard
-          topAction={backToTaskTreeAction}
+        <DetailSummaryCard
           header={
-            <LearningTaskNodeTitleHeaderEditor
-              projectId={pid}
-              subjectId={subjectId}
-              nodeId={nid}
-              displayTitle={title}
-              nodeTitle={nodeQ.data.title}
+            <DetailSummaryTitle
+              icon={BookOpenCheck}
+              title={
+                <LearningTaskNodeTitleHeaderEditor
+                  projectId={pid}
+                  subjectId={subjectId}
+                  nodeId={nid}
+                  displayTitle={title}
+                  nodeTitle={nodeQ.data.title}
+                />
+              }
             />
           }
           items={[
@@ -128,7 +119,6 @@ export function LearningTaskNodePage() {
           displayTitle={title}
           relatedInstanceLabel={relatedInstanceLabel}
           reviewChainId={bindingQ.data?.reviewChainId ?? null}
-          topAction={backToTaskTreeAction}
         />
       ) : null}
       <Button asChild className="w-full">
@@ -196,24 +186,27 @@ function LeafLearningTaskCard(props: {
   displayTitle: string
   relatedInstanceLabel: string
   reviewChainId: string | null
-  topAction?: ReactNode
 }) {
-  const { subjectId, projectId, learningTaskId, learningTaskQ, displayTitle, relatedInstanceLabel, reviewChainId, topAction } = props
+  const { subjectId, projectId, learningTaskId, learningTaskQ, displayTitle, relatedInstanceLabel, reviewChainId } = props
   return (
-    <LearningTaskSummaryCard
-      topAction={topAction}
+    <DetailSummaryCard
       header={
-        learningTaskQ.data ? (
-          <LearningTaskTitleHeaderEditor
-            subjectId={subjectId}
-            projectId={projectId}
-            learningTaskId={learningTaskId}
-            displayTitle={displayTitle}
-            taskTitle={learningTaskQ.data.title}
-          />
-        ) : (
-          <h1 className="truncate text-lg font-semibold">{displayTitle}</h1>
-        )
+        <DetailSummaryTitle
+          icon={BookOpenCheck}
+          title={
+            learningTaskQ.data ? (
+              <LearningTaskTitleHeaderEditor
+                subjectId={subjectId}
+                projectId={projectId}
+                learningTaskId={learningTaskId}
+                displayTitle={displayTitle}
+                taskTitle={learningTaskQ.data.title}
+              />
+            ) : (
+              <h1 className="truncate text-lg font-semibold text-foreground">{displayTitle}</h1>
+            )
+          }
+        />
       }
       items={[
         { label: "复述点", value: learningTaskQ.data?.size ?? "-" },
@@ -234,46 +227,6 @@ function LeafLearningTaskCard(props: {
         },
       ]}
     />
-  )
-}
-
-type SummaryItem = {
-  label: string
-  value: ReactNode
-}
-
-function LearningTaskSummaryCard({
-  description,
-  header,
-  items,
-  topAction,
-}: {
-  description?: string
-  header: ReactNode
-  items: SummaryItem[]
-  topAction?: ReactNode
-}) {
-  return (
-    <Card>
-      <CardHeader className="pb-3">
-        {topAction ? <div className="flex items-center">{topAction}</div> : null}
-        <div className="min-w-0">{header}</div>
-        {description ? <CardDescription>{description}</CardDescription> : null}
-      </CardHeader>
-      <CardContent>
-        <div className="flex flex-wrap gap-3">
-          {items.map((item) => (
-            <div
-              key={item.label}
-              className="min-w-[10rem] flex-1 rounded-xl border border-[#dbe4ee] bg-[#f8fafc] px-4 py-3 shadow-[0_10px_24px_-24px_rgba(15,23,42,0.6)]"
-            >
-              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#64748b]">{item.label}</div>
-              <div className="mt-1.5 text-sm font-semibold text-slate-900">{item.value}</div>
-            </div>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
   )
 }
 
@@ -391,7 +344,7 @@ function TitleHeaderEditor({
   if (!isEditing) {
     return (
       <div className="flex flex-wrap items-center gap-3">
-        <h1 className="truncate text-lg font-semibold">{displayTitle}</h1>
+        <h1 className="truncate text-lg font-semibold text-foreground">{displayTitle}</h1>
         <Button type="button" size="sm" variant="outline" className="shrink-0 rounded-full" onClick={openEditor}>
           修改名称
         </Button>

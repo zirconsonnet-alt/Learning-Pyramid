@@ -1,6 +1,6 @@
 import { type ReactNode } from "react"
 import { useQueries } from "@tanstack/react-query"
-import { ChevronLeft, RefreshCw } from "lucide-react"
+import { GitMerge, RefreshCw } from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
@@ -16,9 +16,9 @@ import {
   formatReviewTaskReference,
 } from "@/ui/displayIdentifiers"
 import { buildScopedProjectPath } from "@/ui/projectPaths"
-import { useProject } from "@/ui/queries/projects"
 import { useConvergence } from "@/ui/queries/reviewChains"
 import { cn } from "@/ui/utils"
+import { DetailSummaryCard } from "@/views/shared/DetailSummaryCard"
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -59,7 +59,6 @@ export function ConvergencePage() {
   const pid = scopedProjectId ?? ""
   const cid = convergenceId ?? ""
   const projectScope: ScopedProjectRef | null = subjectId && pid ? { subjectId, scopedProjectId: pid } : null
-  const { projectTitle } = useProject(projectScope)
   const convergenceQ = useConvergence(projectScope, cid)
 
   const reviewTaskQs = useQueries({
@@ -124,28 +123,11 @@ export function ConvergencePage() {
     resultRangeQs.find((query) => query.error)?.error ??
     null
 
-  const backAction = (
-    <Button
-      type="button"
-      variant="ghost"
-      size="sm"
-      className="-ml-2 h-8 rounded-full px-2 text-[#60748c] hover:bg-[#f3f7fb] hover:text-foreground"
-      onClick={() => navigate(-1)}
-    >
-      <ChevronLeft className="h-4 w-4" />
-      返回
-    </Button>
-  )
   const summaryPanel = convergenceQ.data ? (
     <div className="space-y-3">
-      <ConvergenceSummaryCard
-        topAction={backAction}
-        header={<h1 className="truncate text-lg font-semibold">收敛详情</h1>}
-        description={
-          <>
-            项目：<span className="font-medium text-foreground">{projectTitle}</span>
-          </>
-        }
+      <DetailSummaryCard
+        icon={GitMerge}
+        title="收敛"
         items={[
           { label: "状态", value: describeConvergenceState(convergenceQ.data.state) },
           { label: "当前引用", value: formatConvergenceReference(cid) },
@@ -197,46 +179,6 @@ export function ConvergencePage() {
         </div>
       ) : null}
     </div>
-  )
-}
-
-type SummaryItem = {
-  label: string
-  value: ReactNode
-}
-
-function ConvergenceSummaryCard({
-  description,
-  header,
-  items,
-  topAction,
-}: {
-  description?: ReactNode
-  header: ReactNode
-  items: SummaryItem[]
-  topAction?: ReactNode
-}) {
-  return (
-    <Card>
-      <CardHeader className="pb-3">
-        {topAction ? <div className="flex items-center">{topAction}</div> : null}
-        <div className="min-w-0">{header}</div>
-        {description ? <CardDescription>{description}</CardDescription> : null}
-      </CardHeader>
-      <CardContent>
-        <div className="flex flex-wrap gap-3">
-          {items.map((item) => (
-            <div
-              key={item.label}
-              className="min-w-[10rem] flex-1 rounded-xl border border-[#dbe4ee] bg-[#f8fafc] px-4 py-3 shadow-[0_10px_24px_-24px_rgba(15,23,42,0.6)]"
-            >
-              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#64748b]">{item.label}</div>
-              <div className="mt-1.5 break-words text-sm font-semibold text-slate-900">{item.value}</div>
-            </div>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
   )
 }
 

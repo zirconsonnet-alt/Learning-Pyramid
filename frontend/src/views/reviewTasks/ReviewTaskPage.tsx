@@ -1,5 +1,5 @@
 import { type ReactNode } from "react"
-import { ChevronLeft, RefreshCw } from "lucide-react"
+import { ClipboardCheck, RefreshCw } from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
@@ -15,8 +15,8 @@ import {
   formatReviewTaskReference,
 } from "@/ui/displayIdentifiers"
 import { buildScopedProjectPath } from "@/ui/projectPaths"
-import { useProject } from "@/ui/queries/projects"
 import { useReviewTaskDetails } from "@/ui/queries/reviewTasks"
+import { DetailSummaryCard } from "@/views/shared/DetailSummaryCard"
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -62,7 +62,6 @@ export function ReviewTaskPage() {
   const pid = scopedProjectId ?? ""
   const rtid = reviewTaskId ?? ""
   const projectScope: ScopedProjectRef | null = subjectId && pid ? { subjectId, scopedProjectId: pid } : null
-  const { projectTitle } = useProject(projectScope)
   const { reviewTaskQ, inputRangeQ, resultRangeQ, recallPointQs } = useReviewTaskDetails(projectScope, rtid)
 
   if (!subjectId || !pid || !rtid) {
@@ -90,28 +89,11 @@ export function ReviewTaskPage() {
     reviewTaskQ.data?.state === "DONE" && inputRangeQ.data ? inputRangeQ.data.recallPointIds.length - failedRecallPointIds.size : null
   const resultSummary =
     reviewTaskQ.data?.state === "DONE" ? `会 ${canRecallCount ?? 0} / 不会 ${cannotRecallCount ?? 0}` : "尚未提交结果"
-  const backAction = (
-    <Button
-      type="button"
-      variant="ghost"
-      size="sm"
-      className="-ml-2 h-8 rounded-full px-2 text-[#60748c] hover:bg-[#f3f7fb] hover:text-foreground"
-      onClick={() => navigate(-1)}
-    >
-      <ChevronLeft className="h-4 w-4" />
-      返回
-    </Button>
-  )
   const summaryPanel = reviewTaskQ.data ? (
     <div className="space-y-3">
-      <ReviewTaskSummaryCard
-        topAction={backAction}
-        header={<h1 className="truncate text-lg font-semibold">复习任务</h1>}
-        description={
-          <>
-            项目：<span className="font-medium text-foreground">{projectTitle}</span>
-          </>
-        }
+      <DetailSummaryCard
+        icon={ClipboardCheck}
+        title="复习任务"
         items={[
           { label: "状态", value: describeReviewTaskState(reviewTaskQ.data.state) },
           { label: "当前引用", value: formatReviewTaskReference(rtid) },
@@ -248,46 +230,6 @@ export function ReviewTaskPage() {
         </div>
       ) : null}
     </div>
-  )
-}
-
-type SummaryItem = {
-  label: string
-  value: ReactNode
-}
-
-function ReviewTaskSummaryCard({
-  description,
-  header,
-  items,
-  topAction,
-}: {
-  description?: ReactNode
-  header: ReactNode
-  items: SummaryItem[]
-  topAction?: ReactNode
-}) {
-  return (
-    <Card>
-      <CardHeader className="pb-3">
-        {topAction ? <div className="flex items-center">{topAction}</div> : null}
-        <div className="min-w-0">{header}</div>
-        {description ? <CardDescription>{description}</CardDescription> : null}
-      </CardHeader>
-      <CardContent>
-        <div className="flex flex-wrap gap-3">
-          {items.map((item) => (
-            <div
-              key={item.label}
-              className="min-w-[10rem] flex-1 rounded-xl border border-[#dbe4ee] bg-[#f8fafc] px-4 py-3 shadow-[0_10px_24px_-24px_rgba(15,23,42,0.6)]"
-            >
-              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#64748b]">{item.label}</div>
-              <div className="mt-1.5 break-words text-sm font-semibold text-slate-900">{item.value}</div>
-            </div>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
   )
 }
 

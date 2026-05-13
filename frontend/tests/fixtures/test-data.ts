@@ -61,6 +61,28 @@ export const learningObjectNode = {
   title: "第一讲 自动化导论",
 }
 
+export const learningTaskNode = {
+  kind: "leaf",
+  projectId: project.projectId,
+  nodeId: "task_node_e2e",
+  parentId: null,
+  boundLearningTaskId: "task_e2e",
+  title: "自动化测试任务",
+  targetLayerIndex: 1,
+}
+
+export const learningTask = {
+  projectId: project.projectId,
+  learningTaskId: learningTaskNode.boundLearningTaskId,
+  title: "自动化测试任务",
+  recallPointIds: ["rp_e2e"],
+  size: 1,
+  entryNodeId: learningTaskNode.nodeId,
+  entryNodeTitle: learningTaskNode.title,
+  reviewChainId: "chain_e2e",
+  targetLayerIndex: 1,
+}
+
 export const recallPoint = {
   projectId: project.projectId,
   recallPointId: "rp_e2e",
@@ -82,6 +104,27 @@ export const reviewTask = {
   state: "PENDING",
   executedAt: null,
   resultRangeId: null,
+}
+
+export const convergence = {
+  projectId: project.projectId,
+  convergenceId: "conv_e2e",
+  seedRangeId: "range_e2e",
+  ruleId: "rule_e2e",
+  reviewTaskIds: [reviewTask.reviewTaskId],
+  state: "IN_PROGRESS",
+  roundCount: 1,
+}
+
+export const reviewChain = {
+  projectId: project.projectId,
+  reviewChainId: "chain_e2e",
+  headIndex: 0,
+  state: "IN_PROGRESS",
+  queue: [
+    { kind: "REVIEW_TASK", id: reviewTask.reviewTaskId },
+    { kind: "CONVERGENCE", id: convergence.convergenceId },
+  ],
 }
 
 export const membershipSummary = {

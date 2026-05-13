@@ -1,5 +1,5 @@
-import { ArrowLeft, PencilLine, Save, Sparkles, Trash2, X } from "lucide-react"
-import { useMemo, useState, type ReactNode } from "react"
+import { MessageSquareText, PencilLine, Save, Sparkles, Trash2, X } from "lucide-react"
+import { useMemo, useState } from "react"
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useNavigate, useParams } from "react-router-dom"
 
@@ -17,7 +17,7 @@ import { ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/conte
 import { RichContentEditor } from "@/ui/components/RichContentEditor"
 import { RichContentRenderer } from "@/ui/components/RichContentRenderer"
 import { Button } from "@/ui/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
 import { buildScopedProjectPath } from "@/ui/projectPaths"
@@ -26,6 +26,7 @@ import { useInstances, useProjectConfig } from "@/ui/queries/workbench"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { buildAiChatPath } from "@/views/ai/chatRouting"
 import { ReviewProjectionCard } from "@/views/recallPoints/components/ReviewProjectionCard"
+import { DetailSummaryCard } from "@/views/shared/DetailSummaryCard"
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -284,25 +285,13 @@ function RecallPointDetailLayout({
     setEditingContent(false)
   }
 
-  const backAction = (
-    <Button
-      variant="ghost"
-      size="sm"
-      className="-ml-2 h-8 rounded-full px-2 text-[#60748c] hover:bg-[#f3f7fb] hover:text-foreground"
-      onClick={() => navigate(-1)}
-    >
-      <ArrowLeft className="h-4 w-4" />
-      返回
-    </Button>
-  )
-
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)] xl:items-start">
       <aside className="xl:sticky xl:top-28 xl:self-start">
         <div className="space-y-3">
-          <RecallPointSummaryCard
-            topAction={backAction}
-            header={<h1 className="truncate text-lg font-semibold">复述点详情</h1>}
+          <DetailSummaryCard
+            icon={MessageSquareText}
+            title="复述点"
             items={[
               {
                 label: "内容实例",
@@ -426,43 +415,6 @@ function RecallPointDetailLayout({
         </Card>
       </section>
     </div>
-  )
-}
-
-type SummaryItem = {
-  label: string
-  value: ReactNode
-}
-
-function RecallPointSummaryCard({
-  description,
-  header,
-  items,
-  topAction,
-}: {
-  description?: ReactNode
-  header: ReactNode
-  items: SummaryItem[]
-  topAction?: ReactNode
-}) {
-  return (
-    <Card>
-      <CardHeader className="pb-3">
-        {topAction ? <div className="flex items-center">{topAction}</div> : null}
-        <div className="min-w-0">{header}</div>
-        {description ? <CardDescription>{description}</CardDescription> : null}
-      </CardHeader>
-      <CardContent>
-        <div className="flex flex-wrap gap-3">
-          {items.map((item) => (
-            <div key={item.label} className="min-w-[10rem] flex-1 rounded-xl border border-[#dbe4ee] bg-[#f8fafc] px-4 py-3 shadow-[0_10px_24px_-24px_rgba(15,23,42,0.6)]">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#64748b]">{item.label}</div>
-              <div className="mt-1.5 break-words text-sm font-semibold text-slate-900">{item.value}</div>
-            </div>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
   )
 }
 
