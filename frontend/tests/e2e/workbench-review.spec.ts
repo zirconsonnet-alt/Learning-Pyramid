@@ -135,6 +135,23 @@ test("workbench pet assistant stays above the video control bar", async ({ page 
   expectNoConsoleIssues(consoleIssues)
 })
 
+test("workbench compose pane hides redundant helper copy", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page)
+
+  await gotoWorkbench(page)
+  await page.getByRole("button", { name: instance.materialDisplayName }).click()
+  await page.getByRole("button", { name: "添加" }).click()
+
+  await expect(page.getByText("网课锚点可编辑，提交时会保存为可跳转的视频时间点。")).toHaveCount(0)
+
+  await page.getByPlaceholder("请输入问题/提示语").fill("1")
+  await page.getByPlaceholder("请输入答案/复述内容").fill("1")
+  await expect(page.getByText("已准备好提交，共 1 个复述点，已完成 1 个。")).toHaveCount(0)
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
 test(journeyIds.review, async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
   await installMockApi(page)

@@ -575,11 +575,6 @@ export function ComposePane({
                       }
                       className="h-11 rounded-xl border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)]"
                     />
-                    <p className="text-xs text-muted-foreground">
-                      {usesResolvableCourseAnchor
-                        ? "网课锚点可编辑，提交时会保存为可跳转的视频时间点。"
-                        : "书本项目必须填写文本锚点，例如页码、章节、小节、题号或段落说明。"}
-                    </p>
                   </div>
                 ) : null}
 
@@ -766,13 +761,6 @@ export function ComposePane({
           ) : null}
           {!submit.isPending && !submit.error && hasIncompleteAnchor ? (
             <p className="mt-2 text-xs text-muted-foreground">提交前还需要把每条复述点的锚点位置补完整。</p>
-          ) : null}
-          {!submit.isPending &&
-          !submit.error &&
-          drafts.length > 0 &&
-          !drafts.some((d) => !richContentHasMeaning(d.question) || !richContentHasMeaning(d.answer)) &&
-          !hasIncompleteAnchor ? (
-            <p className="mt-2 text-xs text-muted-foreground">已准备好提交，共 {drafts.length} 个复述点，已完成 {completedDraftCount} 个。</p>
           ) : null}
         </div>
       </CardContent>
