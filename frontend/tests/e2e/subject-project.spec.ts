@@ -35,6 +35,17 @@ test("project settings shows concise convergence template copy", async ({ page }
   expectNoConsoleIssues(consoleIssues)
 })
 
+test("subject cards show a leading icon like project cards", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page)
+
+  await gotoProjects(page)
+  const subjectCard = page.getByTestId(`subject-card-${subject.subjectId}`)
+  await expect(subjectCard.getByTestId("subject-card-icon")).toBeVisible()
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
 test("delete confirmation dialogs keep confirmation copy inside the input", async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
   await installMockApi(page)

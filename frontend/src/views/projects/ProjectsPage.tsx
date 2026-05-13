@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react"
 import { useQueries, useQuery } from "@tanstack/react-query"
-import { AlertTriangle, ArrowRight, ArrowUpDown, ChevronDown, Plus, Settings2, Trash2 } from "lucide-react"
+import { AlertTriangle, ArrowRight, ArrowUpDown, BookOpen, ChevronDown, Plus, Settings2, Trash2 } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 
 import { listAuditLogEvents, type AuditLogEvent } from "@/ui/api/auditLog"
@@ -318,6 +318,7 @@ export function ProjectsPage() {
                   return (
                     <Card
                       key={p.subjectId}
+                      data-testid={`subject-card-${p.subjectId}`}
                       className={cn(
                         "h-full border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] shadow-[var(--theme-soft-shadow)] transition-all duration-200",
                         selectedSubjectId === p.subjectId && "border-primary/20 shadow-[0_24px_60px_-38px_rgba(30,58,95,0.34)] ring-1 ring-primary/10",
@@ -325,14 +326,19 @@ export function ProjectsPage() {
                     >
                       <CardHeader className="space-y-4">
                         <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div className="min-w-0 space-y-2">
-                            <CardTitle className="truncate text-xl">{p.title}</CardTitle>
-                            <CardDescription className="flex flex-wrap items-center gap-2 text-xs">
-                              <span className="font-medium text-[color:var(--theme-soft-text-strong)]">{subjectProjectCountText}</span>
-                              <span className={cn("font-medium", activityLoading ? "text-muted-foreground" : lastStudyDisplay.className)}>
-                                {activityLoading ? "学习记录载入中" : lastStudyDisplay.text}
-                              </span>
-                            </CardDescription>
+                          <div className="flex min-w-0 flex-1 gap-3">
+                            <div className="theme-icon-surface h-11 w-11 shrink-0" aria-hidden="true" data-testid="subject-card-icon">
+                              <BookOpen className="h-5 w-5" />
+                            </div>
+                            <div className="min-w-0 space-y-2">
+                              <CardTitle className="truncate text-xl">{p.title}</CardTitle>
+                              <CardDescription className="flex flex-wrap items-center gap-2 text-xs">
+                                <span className="font-medium text-[color:var(--theme-soft-text-strong)]">{subjectProjectCountText}</span>
+                                <span className={cn("font-medium", activityLoading ? "text-muted-foreground" : lastStudyDisplay.className)}>
+                                  {activityLoading ? "学习记录载入中" : lastStudyDisplay.text}
+                                </span>
+                              </CardDescription>
+                            </div>
                           </div>
                           <div className="flex flex-wrap items-center gap-2">
                             {selectedSubjectId === p.subjectId ? <span className="theme-meta-strong">当前学科</span> : null}
