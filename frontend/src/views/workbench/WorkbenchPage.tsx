@@ -999,7 +999,7 @@ export function WorkbenchPage() {
           )}
         </section>
 
-        <aside className="xl:sticky xl:top-28 xl:self-start">
+        <aside className="xl:sticky xl:top-28 xl:z-30 xl:self-start">
             <Card className="theme-card-main xl:flex xl:max-h-[calc(100dvh-9rem)] xl:min-h-0 xl:flex-col xl:overflow-hidden">
             <CardHeader className="theme-card-header">
               <div className="flex items-center gap-3">

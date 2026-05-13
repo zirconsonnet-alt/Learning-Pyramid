@@ -51,20 +51,65 @@ test("workbench empty content tree avoids duplicate setup prompt", async ({ page
 
 test("workbench pet assistant stays above the video control bar", async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
+  await page.emulateMedia({ reducedMotion: "reduce" })
   await installMockApi(page, { systemCapabilities: { serverMediaStreamEnabled: true } })
+  await page.setViewportSize({ width: 1365, height: 744 })
 
   await gotoWorkbench(page)
   await page.getByRole("button", { name: instance.materialDisplayName }).click()
   const petRoot = page.locator(".plm-desktop-pet")
   const videoChrome = page.getByLabel("播放进度").locator("xpath=ancestor::div[contains(concat(' ', normalize-space(@class), ' '), ' z-20 ')][1]")
+  const petButton = page.locator(".plm-desktop-pet-button")
+  const petPopover = page.locator(".plm-desktop-pet-popover")
   await expect(petRoot).toBeVisible()
   await expect(videoChrome).toBeVisible()
+  await petButton.click()
+  await expect(petPopover).toBeVisible()
 
   const [petZIndex, videoChromeZIndex] = await Promise.all([
     petRoot.evaluate((element) => getComputedStyle(element).zIndex),
     videoChrome.evaluate((element) => getComputedStyle(element).zIndex),
   ])
   expect(Number(petZIndex)).toBeGreaterThan(Number(videoChromeZIndex))
+
+  const overlap = await page.evaluate(() => {
+    const popover = document.querySelector(".plm-desktop-pet-popover")
+    const chrome = document.querySelector("[aria-label='播放进度']")?.closest(".z-20")
+    if (!(popover instanceof HTMLElement) || !(chrome instanceof HTMLElement)) {
+      return { intersects: false, popoverContainsTop: false, videoChromeContainsTop: false, reason: "missing-elements" }
+    }
+
+    const popoverRect = popover.getBoundingClientRect()
+    const chromeRect = chrome.getBoundingClientRect()
+    const left = Math.max(popoverRect.left, chromeRect.left)
+    const top = Math.max(popoverRect.top, chromeRect.top)
+    const right = Math.min(popoverRect.right, chromeRect.right)
+    const bottom = Math.min(popoverRect.bottom, chromeRect.bottom)
+    if (left >= right || top >= bottom) {
+      return {
+        intersects: false,
+        popoverContainsTop: false,
+        videoChromeContainsTop: false,
+        reason: "no-overlap",
+        popoverRect: popoverRect.toJSON(),
+        chromeRect: chromeRect.toJSON(),
+      }
+    }
+
+    const x = Math.floor((left + right) / 2)
+    const y = Math.floor((top + bottom) / 2)
+    const topElement = document.elementFromPoint(x, y)
+    return {
+      intersects: true,
+      popoverContainsTop: !!topElement && popover.contains(topElement),
+      videoChromeContainsTop: !!topElement && chrome.contains(topElement),
+      point: { x, y },
+      topElementClass: topElement instanceof HTMLElement ? topElement.className : null,
+    }
+  })
+  expect(overlap.intersects, JSON.stringify(overlap)).toBe(true)
+  expect(overlap.popoverContainsTop, JSON.stringify(overlap)).toBe(true)
+  expect(overlap.videoChromeContainsTop, JSON.stringify(overlap)).toBe(false)
 
   expectNoConsoleIssues(consoleIssues)
 })
