@@ -327,9 +327,9 @@ export function SubjectDashboardPage() {
                       <div className="theme-icon-surface h-11 w-11 shrink-0">
                         <Icon className="h-5 w-5" />
                       </div>
-                      <div className="min-w-0">
+                      <div className="min-w-0 space-y-2">
                         <CardTitle className="truncate text-lg">{material.title}</CardTitle>
-                        <CardDescription className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                        <CardDescription className="flex flex-wrap items-center gap-2 text-xs">
                           <span className="theme-meta-strong" data-testid="project-card-type">
                             {formatStudyMaterialTypeLabel(material.materialType)}
                           </span>

@@ -5,6 +5,7 @@ import { installMockApi } from "../fixtures/mock-api"
 import { journeyIds } from "../fixtures/journeys"
 import { recordJourney } from "../fixtures/journey-result"
 import { gotoWorkbench, projectPath } from "../fixtures/page-objects"
+import { instance } from "../fixtures/test-data"
 
 test(journeyIds.workbench, async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
@@ -44,6 +45,26 @@ test("workbench empty content tree avoids duplicate setup prompt", async ({ page
   await expect(contentTreeCard.getByText("尚未绑定素材目录")).toBeVisible()
   await expect(contentTreeCard.getByText("当前还没有学习对象")).toHaveCount(0)
   await expect(contentTreeCard.getByRole("link", { name: "前往项目设置" })).toHaveCount(0)
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
+test("workbench pet assistant stays above the video control bar", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page, { systemCapabilities: { serverMediaStreamEnabled: true } })
+
+  await gotoWorkbench(page)
+  await page.getByRole("button", { name: instance.materialDisplayName }).click()
+  const petRoot = page.locator(".plm-desktop-pet")
+  const videoChrome = page.getByLabel("播放进度").locator("xpath=ancestor::div[contains(concat(' ', normalize-space(@class), ' '), ' z-20 ')][1]")
+  await expect(petRoot).toBeVisible()
+  await expect(videoChrome).toBeVisible()
+
+  const [petZIndex, videoChromeZIndex] = await Promise.all([
+    petRoot.evaluate((element) => getComputedStyle(element).zIndex),
+    videoChrome.evaluate((element) => getComputedStyle(element).zIndex),
+  ])
+  expect(Number(petZIndex)).toBeGreaterThan(Number(videoChromeZIndex))
 
   expectNoConsoleIssues(consoleIssues)
 })

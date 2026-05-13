@@ -662,7 +662,8 @@
     position: fixed;
     right: clamp(16px, 2vw, 28px);
     bottom: clamp(28px, 8vh, 88px);
-    z-index: 18;
+    /* Keep the workbench assistant above video chrome, but below the app header. */
+    z-index: 25;
     width: clamp(132px, 12vw, 184px);
     pointer-events: none;
   }
