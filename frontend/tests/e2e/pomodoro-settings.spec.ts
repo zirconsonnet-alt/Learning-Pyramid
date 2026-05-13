@@ -107,10 +107,12 @@ test("pomodoro settings shares the pomodoro wallpaper backdrop", async ({ page }
   await page.goto("/pomodoro/plans/wallpaper_plan")
   await expect(page.locator("[data-pomodoro-wallpaper-backdrop]")).toBeVisible()
   const planDetailFrame = await page.locator("[data-pomodoro-wallpaper-scope='page']").boundingBox()
+  await expect(page.getByRole("link", { name: "返回番茄钟" })).toBeVisible()
 
   await page.goto("/pomodoro/settings")
   await expect(page.locator("[data-pomodoro-wallpaper-backdrop]")).toBeVisible()
   await expect(page.getByText("番茄钟设置")).toBeVisible()
+  await expect(page.getByRole("link", { name: "返回番茄钟" })).toBeVisible()
   const settingsFrame = await page.locator("[data-pomodoro-wallpaper-scope='page']").boundingBox()
   expect(settingsFrame?.width).toBe(planDetailFrame?.width)
 

@@ -1207,7 +1207,7 @@ export function PomodoroPage() {
                 {activePomodoroDraft ? `计划 ${activePomodoroDraftIndex + 1}` : "计划不存在"}
               </div>
               <Button asChild variant="outline">
-                <Link to={buildPomodoroPath()}>返回番茄计划</Link>
+                <Link to={buildPomodoroPath()}>返回番茄钟</Link>
               </Button>
             </div>
 
