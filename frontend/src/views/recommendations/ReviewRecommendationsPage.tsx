@@ -5,7 +5,6 @@ import {
   ChevronRight,
   ClipboardCheck,
   Lightbulb,
-  PlayCircle,
   SlidersHorizontal,
   Undo2,
 } from "lucide-react"
@@ -378,33 +377,32 @@ export function ReviewRecommendationsPage() {
                           </Link>
 
                           <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                            <span className="theme-pill-default rounded-full px-2.5 py-1 font-medium">{formatAnchorLabel(activeEntry.recallPoint)}</span>
+                            {activeEntry.recallPoint.anchor ? (
+                              <Link
+                                to={buildScopedProjectPath(subjectId, pid, `/instances/${activeEntry.recallPoint.anchor.instanceId}`)}
+                                className="theme-pill-default rounded-full px-2.5 py-1 font-medium transition hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                                title="回到锚点"
+                              >
+                                {formatAnchorLabel(activeEntry.recallPoint)}
+                              </Link>
+                            ) : (
+                              <span className="theme-pill-default rounded-full px-2.5 py-1 font-medium">{formatAnchorLabel(activeEntry.recallPoint)}</span>
+                            )}
                             {activeEntry.recallPoint.insights.length > 0 ? (
                               <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 font-medium text-amber-700">
                                 <Lightbulb className="h-3.5 w-3.5" />
                                 已有 {activeEntry.recallPoint.insights.length} 条理解
                               </span>
                             ) : null}
+                            <Button variant="ghost" size="sm" className="rounded-full" onClick={() => toggleInsightEditor(rpId)}>
+                              <Lightbulb className="h-4 w-4" />
+                              {insightEditorVisible ? "收起理解" : "追加理解"}
+                            </Button>
                             <span className="theme-pill-default rounded-full px-2.5 py-1 font-medium">
                               系统推荐 {activeEntry.rankLabel} · {formatStatValue(activeEntry.recommendation.reviewRecommendationIndex)}
                             </span>
                           </div>
                         </div>
-                      </div>
-
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {activeEntry.recallPoint.anchor ? (
-                          <Button variant="outline" size="sm" className="rounded-full" asChild>
-                            <Link to={buildScopedProjectPath(subjectId, pid, `/instances/${activeEntry.recallPoint.anchor.instanceId}`)}>
-                              <PlayCircle className="h-4 w-4" />
-                              回到锚点
-                            </Link>
-                          </Button>
-                        ) : null}
-                        <Button variant="ghost" size="sm" className="rounded-full" onClick={() => toggleInsightEditor(rpId)}>
-                          <Lightbulb className="h-4 w-4" />
-                          {insightEditorVisible ? "收起理解" : "追加理解"}
-                        </Button>
                       </div>
 
                       <div className="mt-4">
@@ -423,32 +421,24 @@ export function ReviewRecommendationsPage() {
                           textareaClassName="min-h-[140px] resize-y rounded-xl [border-color:var(--theme-subtle-border)] [background:var(--theme-subtle-bg)] text-foreground outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:cursor-not-allowed disabled:opacity-75"
                           imageClassName="h-28 w-full max-w-[220px] rounded-xl border [border-color:var(--theme-subtle-border)] [background:var(--theme-subtle-bg)] object-cover"
                         />
-                        <div className="mt-2 flex flex-wrap items-center gap-2">
-                          {hasSubmittedWrittenAnswer ? (
-                            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                              <CheckCircle2 className="h-4 w-4" />
-                              已提交答案
-                            </span>
-                          ) : (
-                            <>
-                              <Button type="button" variant="default" size="sm" className="rounded-xl" onClick={() => submitWrittenAnswer(rpId)} disabled={!canSubmitWrittenAnswer}>
-                                提交答案
-                              </Button>
-                              <Button type="button" variant="outline" size="sm" className="rounded-xl" onClick={() => skipWrittenAnswer(rpId)}>
-                                跳过
-                              </Button>
-                            </>
-                          )}
-                          <span className="text-xs text-muted-foreground">
-                            {hasSubmittedWrittenAnswer ? "已展开答案，可判断记忆状态。" : "先提交自己的答案或跳过，再判断记忆状态。"}
-                          </span>
-                        </div>
+                        {!hasSubmittedWrittenAnswer ? (
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <Button type="button" variant="default" size="sm" className="rounded-xl" onClick={() => submitWrittenAnswer(rpId)} disabled={!canSubmitWrittenAnswer}>
+                              提交答案
+                            </Button>
+                            <Button type="button" variant="outline" size="sm" className="rounded-xl" onClick={() => skipWrittenAnswer(rpId)}>
+                              跳过
+                            </Button>
+                          </div>
+                        ) : null}
                       </div>
 
                       {answerVisible ? (
-                        <div className="theme-canvas mt-3 rounded-2xl border border-[color:var(--theme-soft-border)] p-3 text-sm">
+                        <div className="mt-3">
                           <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">答案</div>
-                          <RichContentRenderer subjectId={subjectId} projectId={pid} value={activeEntry.recallPoint.answer} />
+                          <div className="theme-canvas rounded-2xl border border-[color:var(--theme-soft-border)] p-3 text-sm">
+                            <RichContentRenderer subjectId={subjectId} projectId={pid} value={activeEntry.recallPoint.answer} />
+                          </div>
                         </div>
                       ) : null}
 
