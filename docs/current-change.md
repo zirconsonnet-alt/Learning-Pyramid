@@ -4,38 +4,38 @@
 
 ## 1. 当前用户要求
 
-- 修复选择工作台时被番茄钟拦截后，当前项目没有切到刚选择项目的问题。
-- 被番茄钟拦到番茄钟页面可以接受，但不能吞掉用户选择当前项目的意图。
+- 删除推荐复习页顶部外层标题区。
+- 删除推荐复习页顶部“返回工作台”按钮。
+- 把“更新推荐阈值”按钮移动到复习任务卡片右上角，放在“已完成”信息右侧。
 
 ## 2. 本次实际修改文件
 
-- `frontend/src/shell/AppShell.tsx`
-- `frontend/src/views/workbench/WorkbenchPage.tsx`
-- `frontend/tests/e2e/pomodoro-settings.spec.ts`
+- `frontend/src/views/recommendations/ReviewRecommendationsPage.tsx`
+- `frontend/tests/e2e/subject-project.spec.ts`
 - `docs/current-change.md`
 
 ## 3. 每个文件为什么修改
 
-- `AppShell.tsx`：把项目路由参数同步为完整 `selectedWorkbenchProjectRef`，让当前项目选择发生在页面门禁之前。
-- `WorkbenchPage.tsx`：移除页面内重复写当前项目的逻辑，避免路由层和页面层同时承担同一状态同步职责。
-- `pomodoro-settings.spec.ts`：补充番茄门禁场景下的 e2e 断言，确认被重定向到番茄钟后当前项目仍切到用户访问的项目。
+- `ReviewRecommendationsPage.tsx`：调整推荐复习页信息层级，删除外层标题与返回按钮，把阈值操作并入复习任务卡片头部。
+- `subject-project.spec.ts`：补充推荐复习页 UI 断言，避免按钮再次漂到卡片外。
 - `docs/current-change.md`：覆盖为本次任务工作单。
 
 ## 4. 行为语义是否变化
 
 - 是。
-- 以前访问项目工作台被番茄钟门禁拦截时，只可能同步旧的 `selectedWorkbenchProjectId`，`selectedWorkbenchProjectRef` 仍可能停留在旧项目。
-- 现在只要路由进入具体学科项目范围，当前项目引用会先同步到该路由对应项目，再由番茄门禁决定是否允许进入工作台内容。
+- 页面不再提供推荐复习页内的“返回工作台”按钮。
+- “更新推荐阈值”仍打开同一个阈值弹窗，只是位置从页面外层操作区移动到复习任务卡片头部。
 
 ## 5. 是否做了重构，以及为什么
 
-- 做了当前范围内的局部边界调整。
-- 目的是让“选择当前项目”归属于路由层状态同步，而不是依赖 `WorkbenchPage` 是否成功渲染；同时移除工作台页面内的重复写入路径。
+- 否。
+- 本次是局部 UI 结构调整，不改变数据流或组件边界。
 
 ## 6. 未修改哪些相关内容，以及为什么
 
-- 未修改 `PomodoroWorkbenchGate` 的访问控制语义，因为拦截到番茄钟页本身是允许的。
-- 未修改 API、数据结构或番茄计划逻辑，因为问题是前端路由状态同步边界。
+- 未修改推荐阈值弹窗逻辑，因为用户只要求移动入口按钮。
+- 未修改推荐复习计算和复习作答流程，因为本次问题是页面布局层级。
+- 未新增替代返回入口，因为用户明确要求删除红框里的返回工作台按钮。
 
 ## 7. 是否影响 API、架构、部署、数据结构、UI、测试
 
@@ -43,7 +43,7 @@
 - 架构：否。
 - 部署：否。
 - 数据结构：否。
-- UI：间接影响，当前项目菜单会在被番茄钟拦截后仍反映用户刚选择的项目。
+- UI：是，推荐复习页顶部区域和卡片头部按钮位置变化。
 - 测试：是，补充 e2e 断言。
 
 ## 8. 当前风险点和不确定项
@@ -66,8 +66,8 @@
 
 ## 11. 验证状态
 
-- 已先运行新增 e2e 断言，旧实现会保持旧 `selectedWorkbenchProjectRef` 而失败。
+- 已先运行新增 e2e，旧实现因页面外仍有“推荐复习”标题而失败。
 - `pnpm --dir frontend build`：通过；仍有既有 `hls` chunk 大于 500 kB 的 warning。
-- `pnpm --dir frontend exec playwright test frontend/tests/e2e/pomodoro-settings.spec.ts -g "blocks workbench when enabled"`：通过。
-- `pnpm --dir frontend exec playwright test frontend/tests/e2e/pomodoro-settings.spec.ts`：通过，14 个用例全部通过。
-- `pnpm --dir frontend exec playwright test frontend/tests/e2e/navigation.spec.ts frontend/tests/e2e/subject-project.spec.ts`：通过，7 个用例全部通过。
+- `pnpm --dir frontend exec playwright test frontend/tests/e2e/subject-project.spec.ts -g "recommended review actions"`：通过。
+- `pnpm --dir frontend exec playwright test frontend/tests/e2e/subject-project.spec.ts`：通过，6 个用例全部通过。
+- `pnpm --dir frontend exec playwright test frontend/tests/e2e/navigation.spec.ts`：通过，2 个用例全部通过。

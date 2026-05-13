@@ -23,7 +23,6 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/ui/components/ui/input"
 import { formatInstanceReference } from "@/ui/displayIdentifiers"
 import { buildScopedProjectPath } from "@/ui/projectPaths"
-import { useProject } from "@/ui/queries/projects"
 import { useAllReviewRecommendations } from "@/ui/queries/reviewRecommendations"
 import { cn } from "@/ui/utils"
 
@@ -97,7 +96,6 @@ export function ReviewRecommendationsPage() {
   const [thresholdDraft, setThresholdDraft] = useState("70")
   const [thresholdDialogOpen, setThresholdDialogOpen] = useState(false)
   const allReviewRecommendationsQ = useAllReviewRecommendations(projectScope)
-  const { projectTitle } = useProject(projectScope)
   const workspaceRecommendations = useMemo(
     () => workspaceRecommendationsByProjectId[pid] ?? [],
     [pid, workspaceRecommendationsByProjectId],
@@ -231,24 +229,6 @@ export function ReviewRecommendationsPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-        <div>
-          <h1 className="text-lg font-semibold">推荐复习</h1>
-          <p className="text-sm text-muted-foreground">
-            项目：<span className="font-medium text-foreground">{projectTitle}</span>
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" asChild>
-            <Link to={buildScopedProjectPath(subjectId, pid, "/workbench")}>返回工作台</Link>
-          </Button>
-          <Button variant="outline" onClick={() => setThresholdDialogOpen(true)} disabled={allReviewRecommendationsQ.isFetching}>
-            <SlidersHorizontal className="h-4 w-4" />
-            更新推荐阈值
-          </Button>
-        </div>
-      </div>
-
       {allReviewRecommendationsQ.isLoading ? <LoadingNotice title="正在加载推荐复习" message="正在根据复习历史和掌握概率计算当前批次。" /> : null}
       {allReviewRecommendationsQ.error ? <ErrorNotice title="推荐复习加载失败" message={formatApiError(allReviewRecommendationsQ.error)} /> : null}
       {!allReviewRecommendationsQ.isLoading && !allReviewRecommendationsQ.error && allReviewRecommendationsQ.data && allReviewRecommendationsQ.data.totalCount === 0 ? (
@@ -272,12 +252,14 @@ export function ReviewRecommendationsPage() {
             </div>
           </div>
 
-          <div className="min-w-[180px] space-y-2">
-            <div className="flex items-center justify-between gap-3 text-sm">
+          <div className="flex min-w-[180px] flex-col gap-2 sm:min-w-[280px]">
+            <div className="flex flex-wrap items-center justify-end gap-3 text-sm">
               <span className="theme-meta">{reviewWorkspaceEntries.length} 题</span>
-              <span className="font-medium text-[color:var(--theme-subtle-text)]">
-                已完成 {answeredCount} / {reviewWorkspaceEntries.length}
-              </span>
+              <span className="font-medium text-[color:var(--theme-subtle-text)]">已完成 {answeredCount} / {reviewWorkspaceEntries.length}</span>
+              <Button variant="outline" size="sm" onClick={() => setThresholdDialogOpen(true)} disabled={allReviewRecommendationsQ.isFetching}>
+                <SlidersHorizontal className="h-4 w-4" />
+                更新推荐阈值
+              </Button>
             </div>
             <div className="theme-progress-track h-2 overflow-hidden rounded-full">
               <div className="theme-progress-fill h-full rounded-full transition-[width] duration-300" style={{ width: `${completionPercent}%` }} />

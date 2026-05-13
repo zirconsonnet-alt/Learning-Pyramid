@@ -35,6 +35,30 @@ test("project settings shows concise convergence template copy", async ({ page }
   expectNoConsoleIssues(consoleIssues)
 })
 
+test("recommended review actions live inside the review task card", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page)
+
+  await page.goto(projectPath("/recommended-reviews"))
+  await expect(page.getByRole("heading", { name: "推荐复习" })).toHaveCount(0)
+  await expect(page.getByRole("link", { name: "返回工作台" })).toHaveCount(0)
+
+  const reviewTaskCard = page.locator(".theme-card-main").filter({ has: page.getByRole("heading", { name: "复习任务" }) })
+  await expect(reviewTaskCard).toBeVisible()
+  const completedText = reviewTaskCard.getByText(/已完成 \d+ \/ \d+/)
+  const thresholdButton = reviewTaskCard.getByRole("button", { name: "更新推荐阈值" })
+  await expect(completedText).toBeVisible()
+  await expect(thresholdButton).toBeVisible()
+
+  const completedBox = await completedText.boundingBox()
+  const thresholdButtonBox = await thresholdButton.boundingBox()
+  expect(completedBox).not.toBeNull()
+  expect(thresholdButtonBox).not.toBeNull()
+  expect((thresholdButtonBox?.x ?? 0)).toBeGreaterThan((completedBox?.x ?? 0) + (completedBox?.width ?? 0) - 1)
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
 test("subject cards show a leading icon like project cards", async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
   await installMockApi(page)
