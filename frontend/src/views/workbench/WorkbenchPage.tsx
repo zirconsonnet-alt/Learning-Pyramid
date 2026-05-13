@@ -1064,36 +1064,26 @@ export function WorkbenchPage() {
               </div>
             </CardHeader>
             <CardContent className="space-y-5 pt-4 text-sm xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:overscroll-contain xl:pr-3">
-              <section className="space-y-3">
-                <SidebarSectionTitle title="推进判断" />
+              {studyEstimatePresentation ? (
+                <section className="space-y-3">
+                  <SidebarSectionTitle title="预计剩余学习时长" />
+                  <div className="text-[17px] font-semibold tracking-[-0.02em] text-[color:var(--theme-soft-text-strong)]">
+                    {studyEstimatePresentation.value}
+                  </div>
+                </section>
+              ) : null}
 
-                {studyEstimatePresentation ? (
-                  <section>
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-[12px] font-medium text-muted-foreground">预计剩余学习时长</div>
-                        <div className="mt-1 text-[17px] font-semibold tracking-[-0.02em] text-[color:var(--theme-soft-text-strong)]">
-                          {studyEstimatePresentation.value}
-                        </div>
-                      </div>
+              {usesResolvableCourseAnchor ? (
+                <section className="space-y-3">
+                  <SidebarSectionTitle title="观看覆盖" />
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-[17px] font-semibold tracking-[-0.02em] text-[color:var(--theme-soft-text-strong)]">
+                      {formatDurationCompact(videoProgress.watchedMs)} / {formatDurationCompact(videoProgress.totalMs)}
                     </div>
-                  </section>
-                ) : null}
-
-                {usesResolvableCourseAnchor ? (
-                  <section>
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <div className="text-[12px] font-medium text-muted-foreground">观看覆盖</div>
-                        <div className="mt-1 text-[17px] font-semibold tracking-[-0.02em] text-[color:var(--theme-soft-text-strong)]">
-                          {formatDurationCompact(videoProgress.watchedMs)} / {formatDurationCompact(videoProgress.totalMs)}
-                        </div>
-                      </div>
-                      <div className="text-[13px] font-semibold text-[color:var(--theme-soft-text-strong)]">{Math.round(videoProgressPercent)}%</div>
-                    </div>
-                  </section>
-                ) : null}
-              </section>
+                    <div className="text-[13px] font-semibold text-[color:var(--theme-soft-text-strong)]">{Math.round(videoProgressPercent)}%</div>
+                  </div>
+                </section>
+              ) : null}
 
               <section>
                 <SidebarSectionTitle title="今日回看" />

@@ -14,6 +14,10 @@ test(journeyIds.workbench, async ({ page }) => {
   await recordJourney(journeyIds.workbench, async () => {
     await gotoWorkbench(page)
     await expect(page.getByRole("button", { name: /今日回看/ })).toHaveCount(0)
+    await expect(page.getByText("推进判断")).toHaveCount(0)
+    await expect(page.getByText("预计剩余学习时长")).toBeVisible()
+    await expect(page.getByText("观看覆盖")).toBeVisible()
+    await expect(page.getByText("今日回看")).toBeVisible()
     await expect(page.getByLabel("今日回看统计图")).toBeVisible()
     await expect(page.getByText("网页驻留")).toBeVisible()
     await page.getByRole("button", { name: "层推进与学习任务" }).click()
