@@ -265,6 +265,23 @@ export function isQuickPomodoroSessionActive(quickPomodoro: QuickPomodoroSession
   return Boolean(quickPomodoro && now < quickPomodoro.endAtMs)
 }
 
+export function quickPomodoroOverlapsEnabledPlan(
+  weeklySchedule: PomodoroWeekSchedule,
+  now = Date.now(),
+) {
+  const normalized = normalizePomodoroWeekSchedule(weeklySchedule)
+  const date = new Date(now)
+  const quickStartAtMs = now + QUICK_POMODORO_PREPARE_MS
+  const quickEndAtMs = quickStartAtMs + QUICK_POMODORO_FOCUS_MS
+  const todayPlans = getActivePomodoroDayPlans(normalized[getPomodoroWeekday(date)])
+
+  return todayPlans.some((plan) => {
+    const planStartAtMs = getScheduledStartAtMs(date, plan.startTime)
+    const planEndAtMs = planStartAtMs + getPomodoroPlanDurationMs(plan)
+    return quickStartAtMs < planEndAtMs && quickEndAtMs > planStartAtMs
+  })
+}
+
 export function normalizePomodoroPromptText(value: unknown) {
   const text = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : ""
   return text.slice(0, MAX_POMODORO_PROMPT_LENGTH)

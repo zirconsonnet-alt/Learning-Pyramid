@@ -4,41 +4,39 @@
 
 ## 1. 当前用户要求
 
-- 工作台右侧“工作状态”区域看起来太乱。
-- 删除“推进判断”四个字。
-- 只保留三个同级小标题：
-  - 预计剩余学习时长
-  - 观看覆盖
-  - 今日回看
-- “预计剩余学习时长”和“观看覆盖”的标题样式要和“今日回看”一致。
+- 新建小番茄时，如果预计 25 分钟学习时间会和已有番茄计划冲突，应禁止新建。
+- 使用已确认规则：小番茄预计区间与今天已启用番茄计划任一区间重叠即判定冲突。
 
 ## 2. 本次实际修改文件
 
-- `frontend/src/views/workbench/WorkbenchPage.tsx`
-- `frontend/tests/e2e/workbench-review.spec.ts`
+- `frontend/src/ui/store/pomodoroStore.ts`
+- `frontend/src/views/pomodoro/PomodoroPage.tsx`
+- `frontend/tests/e2e/pomodoro-settings.spec.ts`
 - `docs/current-change.md`
 
 ## 3. 每个文件为什么修改
 
-- `WorkbenchPage.tsx`：移除右侧侧栏中的“推进判断”分组标题；把“预计剩余学习时长”“观看覆盖”“今日回看”改为同级 section，并统一使用 `SidebarSectionTitle`。
-- `workbench-review.spec.ts`：补充 e2e 断言，确认“推进判断”不再显示，三个同级标题仍可见。
+- `pomodoroStore.ts`：补充小番茄与当日启用计划的时间重叠判断，供页面入口复用。
+- `PomodoroPage.tsx`：在打开新建小番茄弹窗和最终创建前拦截冲突，避免创建会覆盖排程语义的小番茄。
+- `pomodoro-settings.spec.ts`：增加 e2e 用例，覆盖小番茄预计区间与已有计划重叠时必须阻止创建。
 - `docs/current-change.md`：覆盖为本次任务工作单。
 
 ## 4. 行为语义是否变化
 
-- UI 语义变化：右侧工作状态区从“推进判断”分组改为三个同级统计项。
-- 业务语义不变：预计时长、观看覆盖和今日回看数据来源、计算逻辑、刷新逻辑均不变。
+- 是。
+- 以前只禁止当前处于学习阶段时新建小番茄。
+- 现在小番茄预计学习区间只要与今天已启用计划重叠，就禁止新建并提示冲突。
 
 ## 5. 是否做了重构，以及为什么
 
-- 做了当前范围内的极小 JSX 结构整理。
-- 目的是消除多余父级分组，让三个用户可见标题同级，不改变数据流或组件边界。
+- 仅做当前范围内的局部整理。
+- 目的是把时间区间判断放在番茄 store 的纯函数中，避免页面层复制排程计算逻辑。
 
 ## 6. 未修改哪些相关内容，以及为什么
 
-- 未修改 `TodayReviewStatsChart` 饼图结构，因为用户只要求标题层级和“推进判断”文案。
-- 未修改学习时长估算和观看覆盖计算，因为问题只在右侧侧栏呈现层级。
-- 未修改工作状态卡片标题和当前状态文案，因为它们不属于本次指定的三个统计项。
+- 未修改番茄计划数据结构，因为冲突判断可由现有 schedule 推导。
+- 未修改后端 API，因为该行为目前发生在前端本地番茄状态。
+- 未做自动顺延、覆盖或二次确认，因为这些会引入未确认的优先级语义。
 
 ## 7. 是否影响 API、架构、部署、数据结构、UI、测试
 
@@ -46,12 +44,12 @@
 - 架构：否。
 - 部署：否。
 - 数据结构：否。
-- UI：是，调整工作状态侧栏的标题层级和样式一致性。
-- 测试：是，新增/更新 e2e 断言。
+- UI：是，新增冲突提示。
+- 测试：是，新增 e2e 覆盖。
 
 ## 8. 当前风险点和不确定项
 
-- 无。
+- 冲突范围限定为今天的启用计划，不跨天检查。
 
 ## 9. 仍需用户确认的问题
 
@@ -69,7 +67,10 @@
 
 ## 11. 验证状态
 
-- 已先运行工作台 e2e，确认旧实现会因“推进判断”仍存在而失败。
+- 已先运行新增 e2e，旧实现因缺少“小番茄时间冲突”提示而失败。
+- 已补充“排程关闭时保存计划不阻止小番茄”的 e2e，确认初版实现会误拦后修正。
 - `pnpm --dir frontend build`：通过；仍有既有 `hls` chunk 大于 500 kB 的 warning。
-- `pnpm --dir frontend exec playwright test frontend/tests/e2e/workbench-review.spec.ts -g "workbench$"`：通过。
-- `pnpm --dir frontend exec playwright test frontend/tests/e2e/workbench-review.spec.ts`：通过，7 个用例全部通过。
+- `pnpm --dir frontend exec playwright test frontend/tests/e2e/pomodoro-settings.spec.ts -g "overlaps an enabled plan"`：实现后通过。
+- `pnpm --dir frontend exec playwright test frontend/tests/e2e/pomodoro-settings.spec.ts -g "overlaps an enabled plan|ignores saved plans"`：通过，2 个用例全部通过。
+- `pnpm --dir frontend exec playwright test frontend/tests/e2e/pomodoro-settings.spec.ts`：通过，14 个用例全部通过。
+- `git diff --check -- frontend/src/ui/store/pomodoroStore.ts frontend/src/views/pomodoro/PomodoroPage.tsx frontend/tests/e2e/pomodoro-settings.spec.ts docs/current-change.md`：通过；仅有 Windows 换行提示。

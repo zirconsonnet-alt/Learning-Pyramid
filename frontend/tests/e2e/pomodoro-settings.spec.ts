@@ -292,6 +292,86 @@ test("pomodoro creates quick pomodoro from an explicit subject and project selec
   expectNoConsoleIssues(consoleIssues)
 })
 
+test("pomodoro blocks quick pomodoro when it overlaps an enabled plan", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page, {
+    globalSettings: createMockGlobalSettings({
+      pomodoro: {
+        enabled: true,
+        transitionSoundEnabled: false,
+        defaultFocusPrompt: "",
+        defaultBreakPrompt: "",
+        microBreaks: {
+          enabled: false,
+          minIntervalSeconds: 180,
+          maxIntervalSeconds: 300,
+          durationSeconds: 10,
+        },
+        weeklySchedule: {
+          mon: { plans: [] },
+          tue: { plans: [] },
+          wed: { plans: [] },
+          thu: { plans: [] },
+          fri: { plans: [] },
+          sat: { plans: [createPomodoroPlan({ startTime: "08:00" })] },
+          sun: { plans: [] },
+        },
+      },
+    }),
+  })
+
+  await page.clock.setFixedTime(new Date("2026-05-08T23:45:00Z"))
+  await page.goto("/pomodoro")
+  const quickPomodoroButton = page.getByRole("button", { name: "新建小番茄" })
+  await expect(quickPomodoroButton).toBeVisible()
+  await quickPomodoroButton.click()
+
+  await expect(page.getByText("小番茄时间冲突")).toBeVisible()
+  await expect(page.getByText("预计 25 分钟学习会和已有番茄计划重叠，请先调整计划或等计划结束后再创建。")).toBeVisible()
+  await expect(page.getByRole("dialog", { name: "新建小番茄" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "结束小番茄" })).toHaveCount(0)
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
+test("pomodoro ignores saved plans when schedule is disabled for quick pomodoro", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page, {
+    globalSettings: createMockGlobalSettings({
+      pomodoro: {
+        enabled: false,
+        transitionSoundEnabled: false,
+        defaultFocusPrompt: "",
+        defaultBreakPrompt: "",
+        microBreaks: {
+          enabled: false,
+          minIntervalSeconds: 180,
+          maxIntervalSeconds: 300,
+          durationSeconds: 10,
+        },
+        weeklySchedule: {
+          mon: { plans: [] },
+          tue: { plans: [] },
+          wed: { plans: [] },
+          thu: { plans: [] },
+          fri: { plans: [] },
+          sat: { plans: [createPomodoroPlan({ startTime: "08:00" })] },
+          sun: { plans: [] },
+        },
+      },
+    }),
+  })
+
+  await page.clock.setFixedTime(new Date("2026-05-08T23:45:00Z"))
+  await page.goto("/pomodoro")
+  await page.getByRole("button", { name: "新建小番茄" }).click()
+
+  await expect(page.getByRole("dialog", { name: "新建小番茄" })).toBeVisible()
+  await expect(page.getByText("小番茄时间冲突")).toHaveCount(0)
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
 test("pomodoro allows only the focused project workbench during focus time", async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
   await installMockApi(page, {

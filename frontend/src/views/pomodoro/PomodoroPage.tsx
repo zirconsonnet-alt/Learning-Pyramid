@@ -43,6 +43,7 @@ import {
   normalizePomodoroPromptText,
   normalizePomodoroWeekSchedule,
   pomodoroProjectRefKey,
+  quickPomodoroOverlapsEnabledPlan,
   validatePomodoroWeekSchedule,
   type PomodoroDefaultPrompts,
   type PomodoroPlanSchedule,
@@ -854,6 +855,7 @@ export function PomodoroPage() {
   const quickPomodoroButtonLabel =
     activeQuickPomodoro ? "结束小番茄" : "新建小番茄"
   const isFocusRunning = snapshot.status === "running" && snapshot.phase === "focus"
+  const hasQuickPomodoroPlanConflict = enabled && quickPomodoroOverlapsEnabledPlan(weeklySchedule, now)
   const focusProjectRef = snapshot.currentProjectRef
   const focusProjectKey = pomodoroProjectRefKey(focusProjectRef)
   const hasFocusProject = Boolean(focusProjectKey && validPomodoroProjectRefs.has(focusProjectKey))
@@ -1151,12 +1153,20 @@ export function PomodoroPage() {
       showInfoFeedback("番茄钟正在运行", "当前已经处于学习阶段，结束后再新建小番茄。")
       return
     }
+    if (hasQuickPomodoroPlanConflict) {
+      showInfoFeedback("小番茄时间冲突", "预计 25 分钟学习会和已有番茄计划重叠，请先调整计划或等计划结束后再创建。")
+      return
+    }
     setQuickPomodoroDialogOpen(true)
   }
 
   function handleStartQuickPomodoro() {
     if (isFocusRunning) {
       showInfoFeedback("番茄钟正在运行", "当前已经处于学习阶段，结束后再新建小番茄。")
+      return
+    }
+    if (hasQuickPomodoroPlanConflict) {
+      showInfoFeedback("小番茄时间冲突", "预计 25 分钟学习会和已有番茄计划重叠，请先调整计划或等计划结束后再创建。")
       return
     }
     if (!quickPomodoroProjectRef || !canCreateQuickPomodoro) {
