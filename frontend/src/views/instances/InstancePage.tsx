@@ -10,7 +10,6 @@ import type { ScopedProjectRef } from "@/ui/api/projectScope"
 import { getRecallPoint, type RecallPoint } from "@/ui/api/review"
 import { ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
-import { formatInstanceReference, formatMaterialReference } from "@/ui/displayIdentifiers"
 import { buildScopedProjectPath } from "@/ui/projectPaths"
 import { RecallPointListCard } from "@/views/recallPoints/components/RecallPointListCard"
 import { DetailSummaryCard } from "@/views/shared/DetailSummaryCard"
@@ -100,9 +99,7 @@ export function InstancePage() {
       title={instance.materialDisplayName}
       items={[
         { label: "状态", value: instance.presence === "MISSING" ? "缺失" : "正常" },
-        { label: "当前引用", value: formatInstanceReference(iid) },
         { label: "复述点", value: recallPointIdsQ.data?.recallPointIds.length ?? "-" },
-        { label: "内容引用", value: formatMaterialReference(instance.materialId) },
         { label: "最近看到", value: formatTimestamp(instance.lastSeenAt) },
         { label: "对象树绑定", value: boundObjectNodeValue },
       ]}

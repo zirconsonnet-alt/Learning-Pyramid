@@ -3,7 +3,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test"
 import { collectConsoleIssues, expectHealthyPage, expectNoConsoleIssues } from "../fixtures/app-checks"
 import { installMockApi } from "../fixtures/mock-api"
 import { projectPath } from "../fixtures/page-objects"
-import { convergence, instance, learningTaskNode, reviewChain, reviewTask } from "../fixtures/test-data"
+import { convergence, instance, learningTaskNode, learningObjectNode, reviewChain, reviewTask } from "../fixtures/test-data"
 
 async function expectSummaryLabelOrder(summaryCard: Locator, labels: string[]) {
   const text = await summaryCard.innerText()
@@ -24,6 +24,12 @@ async function expectNoOpaqueReviewReferences(page: Page) {
   expect(bodyText).not.toMatch(/结果范围\s+#/)
   expect(bodyText).not.toMatch(/内容实例\s+#/)
   expect(bodyText).not.toMatch(/复述点\s+#/)
+}
+
+async function expectNoOpaqueInstanceReferences(page: Page) {
+  const bodyText = await page.locator("body").innerText()
+  expect(bodyText).not.toMatch(/内容实例\s+#/)
+  expect(bodyText).not.toMatch(/内容\s+#/)
 }
 
 test("review task detail uses a clickable related entry and hides unreadable ids", async ({ page }) => {
@@ -84,6 +90,22 @@ test("learning task detail renames related content to a clickable related entry"
   await expectSummaryLabelOrder(summaryCard, ["复述点", "层级", "关联入口", "复习关系"])
   await expect(summaryCard.getByRole("link", { name: instance.materialDisplayName })).toHaveAttribute("href", projectPath(`/instances/${instance.instanceId}`))
   await expect(summaryCard.getByText("关联内容")).toHaveCount(0)
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
+test("instance detail removes opaque ids from the summary card", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page)
+
+  await page.goto(projectPath(`/instances/${instance.instanceId}`))
+  await expectHealthyPage(page, projectPath(`/instances/${instance.instanceId}`))
+
+  const summaryCard = page.getByTestId("detail-summary-card")
+  await expect(summaryCard.getByText("当前引用")).toHaveCount(0)
+  await expect(summaryCard.getByText("内容引用")).toHaveCount(0)
+  await expect(summaryCard.getByRole("link", { name: learningObjectNode.title })).toHaveAttribute("href", projectPath(`/learning-object-nodes/${learningObjectNode.nodeId}`))
+  await expectNoOpaqueInstanceReferences(page)
 
   expectNoConsoleIssues(consoleIssues)
 })
