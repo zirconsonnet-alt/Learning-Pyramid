@@ -308,6 +308,7 @@ async function captureDisplayedVideoFrameFile(video: HTMLVideoElement, timeMs: n
 }
 
 export function VideoPane({
+  surface = "workbench",
   subjectId,
   projectId,
   instance,
@@ -327,6 +328,7 @@ export function VideoPane({
   onDurationResolved?: (instanceId: string, durationMs: number) => void
   queueHasGate: boolean
   allowCaptureDrafts?: boolean
+  surface?: "detail" | "workbench"
 }) {
   const projectScope: ScopedProjectRef = { subjectId, scopedProjectId: projectId }
   const playerShellRef = useRef<HTMLDivElement | null>(null)
@@ -1953,7 +1955,11 @@ export function VideoPane({
     pomodoroUpcomingSegment.startsInMs <= POMODORO_TRANSITION_PREVIEW_WINDOW_MS
 
   return (
-    <Card className="theme-card-main overflow-hidden">
+    <Card
+      className={cn(surface === "workbench" ? "theme-card-main overflow-hidden" : "overflow-hidden")}
+      data-surface={surface}
+      data-testid="video-pane-card"
+    >
       <CardContent className="space-y-4 p-4">
         {shouldRenderVideo ? (
           <div
@@ -2779,7 +2785,12 @@ export function VideoPane({
             ) : null}
           </div>
         ) : (
-          <div className="theme-canvas rounded-[1.2rem] border border-border/60 p-6 text-sm text-muted-foreground">
+          <div
+            className={cn(
+              "rounded-[1.2rem] border p-6 text-sm text-muted-foreground",
+              surface === "workbench" ? "theme-canvas border-border/60" : "border-[#dbe4ee] bg-[#fbfdff]",
+            )}
+          >
             <div className="flex items-start gap-3">
               <div className="theme-icon-surface mt-0.5 h-10 w-10 shrink-0">
                 <VideoOff className="h-5 w-5" />

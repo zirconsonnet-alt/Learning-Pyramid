@@ -84,26 +84,27 @@ export function InstancePage() {
   )
   const recallPointsLoading = recallPointIdsQ.isLoading || recallPointQs.some((query) => query.isLoading)
   const recallPointsError = recallPointIdsQ.error ?? recallPointQs.find((query) => query.error)?.error ?? null
-  const boundObjectNodeValue = boundObjectNode ? (
-    <Link className="text-primary underline-offset-4 hover:underline" to={buildScopedProjectPath(subjectId, pid, `/learning-object-nodes/${boundObjectNode.nodeId}`)}>
-      {boundObjectNode.title}
-    </Link>
-  ) : objectNodesQ.isLoading ? (
-    "读取中..."
-  ) : (
-    "未绑定对象节点"
-  )
   const summaryPanel = instance ? (
-    <DetailSummaryCard
-      icon={FileVideoCamera}
-      title={instance.materialDisplayName}
-      items={[
-        { label: "状态", value: instance.presence === "MISSING" ? "缺失" : "正常" },
-        { label: "复述点", value: recallPointIdsQ.data?.recallPointIds.length ?? "-" },
-        { label: "最近看到", value: formatTimestamp(instance.lastSeenAt) },
-        { label: "对象树绑定", value: boundObjectNodeValue },
-      ]}
-    />
+    <div className="space-y-3">
+      <DetailSummaryCard
+        icon={FileVideoCamera}
+        title={instance.materialDisplayName}
+        items={[
+          { label: "状态", value: instance.presence === "MISSING" ? "缺失" : "正常" },
+          { label: "复述点", value: recallPointIdsQ.data?.recallPointIds.length ?? "-" },
+          { label: "最近看到", value: formatTimestamp(instance.lastSeenAt) },
+        ]}
+      />
+      {boundObjectNode ? (
+        <Button variant="outline" className="w-full rounded-full" asChild>
+          <Link to={buildScopedProjectPath(subjectId, pid, `/learning-object-nodes/${boundObjectNode.nodeId}`)}>查看对象节点</Link>
+        </Button>
+      ) : objectNodesQ.isLoading ? (
+        <Button variant="outline" className="w-full rounded-full" disabled>
+          读取对象节点中...
+        </Button>
+      ) : null}
+    </div>
   ) : null
 
   if (!pid || !iid) {
@@ -149,6 +150,7 @@ export function InstancePage() {
               setCurrentMs={setCurrentMs}
               queueHasGate={false}
               allowCaptureDrafts={false}
+              surface="detail"
             />
             <RecallPointListCard
               subjectId={subjectId}
