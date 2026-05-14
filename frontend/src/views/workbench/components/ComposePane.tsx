@@ -10,6 +10,7 @@ import type { ProjectType } from "@/ui/api/projects"
 import { searchRecallPoints, type RecallPoint } from "@/ui/api/review"
 import { richContentHasMeaning, richContentToPlainText, richText } from "@/ui/api/richContent"
 import { RichContentEditor } from "@/ui/components/RichContentEditor"
+import { RichContentFieldPreview } from "@/ui/components/RichContentFieldPreview"
 import { ContentEmptyState } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
@@ -580,7 +581,7 @@ export function ComposePane({
 
                 <div className="grid gap-3 xl:grid-cols-2">
                   <div className="space-y-2" data-guide-tour="recall-question-editor">
-                    <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">问题</div>
+                    <RichContentFieldPreview label="问题" subjectId={subjectId} projectId={projectId} value={activeDraft.question} />
                     <RichContentEditor
                       subjectId={subjectId}
                       projectId={projectId}
@@ -635,7 +636,7 @@ export function ComposePane({
                   </div>
 
                   <div className="space-y-2" data-guide-tour="recall-answer-editor">
-                    <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">答案</div>
+                    <RichContentFieldPreview label="答案" subjectId={subjectId} projectId={projectId} value={activeDraft.answer} />
                     <RichContentEditor
                       subjectId={subjectId}
                       projectId={projectId}

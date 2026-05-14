@@ -73,3 +73,37 @@ for (const detailPage of detailPages) {
     expectNoConsoleIssues(consoleIssues)
   })
 }
+
+test("recall point detail editor previews markdown and latex while hovering field labels", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page)
+
+  await page.goto(projectPath(`/recall-points/${recallPoint.recallPointId}`))
+  await expectHealthyPage(page, projectPath(`/recall-points/${recallPoint.recallPointId}`))
+
+  await page.getByRole("button", { name: "修改内容" }).click()
+  await page.getByPlaceholder("输入问题/提示语").fill("**概率论** 的密度函数：$f(x)=\\frac{1}{\\sqrt{2\\pi}\\sigma}$")
+  await page.getByPlaceholder("输入答案/复述内容").fill("答案满足 $\\mu=0$。")
+
+  const questionPreviewButton = page.getByRole("button", { name: "题面预览" })
+  const answerPreviewButton = page.getByRole("button", { name: "答案预览" })
+  await expect(questionPreviewButton).toBeVisible()
+  await expect(answerPreviewButton).toBeVisible()
+
+  await questionPreviewButton.hover()
+  const questionPreview = page.getByRole("tooltip", { name: "题面渲染预览" })
+  await expect(questionPreview).toBeVisible()
+  await expect(questionPreview.locator(".katex")).toHaveCount(1)
+  await expect(questionPreview.getByText("概率论")).toBeVisible()
+
+  await answerPreviewButton.hover()
+  const answerPreview = page.getByRole("tooltip", { name: "答案渲染预览" })
+  await expect(answerPreview).toBeVisible()
+  await expect(answerPreview.locator(".katex")).toHaveCount(1)
+  await expect(questionPreview).toBeHidden()
+
+  await page.mouse.move(5, 5)
+  await expect(answerPreview).toBeHidden()
+
+  expectNoConsoleIssues(consoleIssues)
+})

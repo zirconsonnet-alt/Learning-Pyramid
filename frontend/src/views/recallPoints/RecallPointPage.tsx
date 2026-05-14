@@ -15,11 +15,11 @@ import {
 import { deleteRecallPoint, editRecallPoint, getRecallPoint, type RecallPoint } from "@/ui/api/review"
 import { ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { RichContentEditor } from "@/ui/components/RichContentEditor"
+import { RichContentFieldPreview } from "@/ui/components/RichContentFieldPreview"
 import { RichContentRenderer } from "@/ui/components/RichContentRenderer"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import { Input } from "@/ui/components/ui/input"
-import { Label } from "@/ui/components/ui/label"
 import { buildScopedProjectPath } from "@/ui/projectPaths"
 import { projectTypeRequiresAnchor } from "@/ui/projectTypes"
 import { useInstances, useProjectConfig } from "@/ui/queries/workbench"
@@ -480,11 +480,11 @@ function RecallPointContentCard({
         {editingContent ? (
           <div className="space-y-5">
             <div className="space-y-3">
-              <Label className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">题面</Label>
+              <RichContentFieldPreview label="题面" subjectId={subjectId} projectId={projectId} value={question} labelClassName="mb-0" />
               <RichContentEditor subjectId={subjectId} projectId={projectId} field="question" value={question} disabled={!canEdit} placeholder="输入问题/提示语" className="space-y-3" textareaClassName="min-h-[120px] rounded-[1rem] border-[#dbe4ee] bg-[#fbfdff] px-4 py-3 text-sm leading-6 text-foreground placeholder:text-muted-foreground" imageClassName="h-24 w-24 rounded-[0.95rem] border-[#dbe4ee] bg-[#fbfdff]" onTextChange={onSetQuestionText} onAppendImage={onAppendQuestionImage} onRemoveImage={onRemoveQuestionImage} />
             </div>
             <div className="space-y-3">
-              <Label className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">答案</Label>
+              <RichContentFieldPreview label="答案" subjectId={subjectId} projectId={projectId} value={answer} labelClassName="mb-0" />
               <RichContentEditor subjectId={subjectId} projectId={projectId} field="answer" value={answer} disabled={!canEdit} placeholder="输入答案/复述内容" className="space-y-3" textareaClassName="min-h-[160px] rounded-[1rem] border-[#dbe4ee] bg-[#fbfdff] px-4 py-3 text-sm leading-6 text-foreground placeholder:text-muted-foreground" imageClassName="h-24 w-24 rounded-[0.95rem] border-[#dbe4ee] bg-[#fbfdff]" onTextChange={onSetAnswerText} onAppendImage={onAppendAnswerImage} onRemoveImage={onRemoveAnswerImage} />
             </div>
             <div className="flex flex-wrap gap-2">

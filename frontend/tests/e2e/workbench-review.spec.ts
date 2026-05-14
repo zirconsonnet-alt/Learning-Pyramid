@@ -156,6 +156,40 @@ test("workbench compose pane hides redundant helper copy", async ({ page }) => {
   expectNoConsoleIssues(consoleIssues)
 })
 
+test("workbench compose pane previews markdown and latex while hovering field labels", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page)
+
+  await gotoWorkbench(page)
+  await page.getByRole("button", { name: instance.materialDisplayName }).click()
+  await page.getByRole("button", { name: "添加" }).click()
+
+  await page.getByPlaceholder("请输入问题/提示语").fill("**正态分布** 的密度函数：$f(x)=\\frac{1}{\\sqrt{2\\pi}\\sigma}$")
+  await page.getByPlaceholder("请输入答案/复述内容").fill("答案满足 $\\mu=0$，且支持 Markdown。")
+
+  const questionPreviewButton = page.getByRole("button", { name: "问题预览" })
+  const answerPreviewButton = page.getByRole("button", { name: "答案预览" })
+  await expect(questionPreviewButton).toBeVisible()
+  await expect(answerPreviewButton).toBeVisible()
+
+  await questionPreviewButton.hover()
+  const questionPreview = page.getByRole("tooltip", { name: "问题渲染预览" })
+  await expect(questionPreview).toBeVisible()
+  await expect(questionPreview.locator(".katex")).toHaveCount(1)
+  await expect(questionPreview.getByText("正态分布")).toBeVisible()
+
+  await answerPreviewButton.hover()
+  const answerPreview = page.getByRole("tooltip", { name: "答案渲染预览" })
+  await expect(answerPreview).toBeVisible()
+  await expect(answerPreview.locator(".katex")).toHaveCount(1)
+  await expect(questionPreview).toBeHidden()
+
+  await page.mouse.move(5, 5)
+  await expect(answerPreview).toBeHidden()
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
 test(journeyIds.review, async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
   await installMockApi(page)
