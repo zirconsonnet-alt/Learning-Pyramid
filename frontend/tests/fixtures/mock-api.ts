@@ -153,7 +153,7 @@ export function createMockGlobalSettings(overrides: Partial<MockGlobalSettings> 
       defaultFocusPrompt: "",
       defaultBreakPrompt: "",
       microBreaks: {
-        enabled: false,
+        enabled: true,
         minIntervalSeconds: 180,
         maxIntervalSeconds: 300,
         durationSeconds: 10,

@@ -32,7 +32,7 @@ DEFAULT_POMODORO_BREAK_MINUTES = 5
 DEFAULT_POMODORO_COUNT = 4
 DEFAULT_POMODORO_START_TIME = "19:00"
 DEFAULT_POMODORO_MICRO_BREAKS = {
-    "enabled": False,
+    "enabled": True,
     "minIntervalSeconds": 180,
     "maxIntervalSeconds": 300,
     "durationSeconds": 10,

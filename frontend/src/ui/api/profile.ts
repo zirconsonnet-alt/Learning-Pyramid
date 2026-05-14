@@ -38,7 +38,7 @@ const UserPomodoroDaySchema = z.union([
 ])
 
 const DEFAULT_USER_POMODORO_MICRO_BREAKS = {
-  enabled: false,
+  enabled: true,
   minIntervalSeconds: 180,
   maxIntervalSeconds: 300,
   durationSeconds: 10,

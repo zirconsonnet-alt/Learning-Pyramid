@@ -119,6 +119,18 @@ test("pomodoro settings shares the pomodoro wallpaper backdrop", async ({ page }
   expectNoConsoleIssues(consoleIssues)
 })
 
+test("pomodoro settings enables random micro breaks by default", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page)
+
+  await page.goto("/pomodoro/settings")
+  await expect(page.getByText("番茄钟设置")).toBeVisible()
+  const microBreakSection = page.getByText("随机微休息").locator("..").locator("..")
+  await expect(microBreakSection.getByRole("checkbox", { name: "启用" })).toBeChecked()
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
 test("pomodoro wallpaper ignores the old browser-global record for signed-in accounts", async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
   await seedPomodoroWallpaper(page, "current")

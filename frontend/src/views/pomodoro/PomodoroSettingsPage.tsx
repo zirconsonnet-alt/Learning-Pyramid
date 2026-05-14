@@ -227,7 +227,7 @@ export function PomodoroSettingsPage() {
       setMicroBreakSettings(nextMicroBreaks)
       setMicroBreakDraft(toMicroBreakDraft(nextMicroBreaks))
       setMicroBreakError("")
-      showInfoFeedback("随机微休息已恢复默认", "默认关闭，间隔 180-300 秒，每次闭眼休息 10 秒。")
+      showInfoFeedback("随机微休息已恢复默认", "默认开启，间隔 180-300 秒，每次闭眼休息 10 秒。")
     } catch (err) {
       showErrorFeedback("恢复随机微休息默认值失败", formatApiError(err))
     }

@@ -144,7 +144,7 @@ export const QUICK_POMODORO_FOCUS_MS = 25 * 60_000
 const QUICK_POMODORO_PLAN_ID = "quick-pomodoro"
 
 export const DEFAULT_RANDOM_MICRO_BREAK_SETTINGS: RandomMicroBreakSettings = {
-  enabled: false,
+  enabled: true,
   minIntervalSeconds: 180,
   maxIntervalSeconds: 300,
   durationSeconds: 10,

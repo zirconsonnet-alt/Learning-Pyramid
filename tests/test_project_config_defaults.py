@@ -33,3 +33,15 @@ def test_new_user_global_settings_default_review_template_is_review_task_then_co
         ("REVIEW_TASK", None),
         ("CONVERGENCE", None),
     )
+
+
+def test_new_user_global_settings_enable_random_micro_breaks_by_default(tmp_path):
+    auth_store = SQLiteAuthStore(tmp_path / "auth.sqlite3")
+    user = auth_store.create_user("micro-break-defaults@example.com", "password-123")
+
+    settings = auth_store.get_user_global_settings(user.user_id)
+
+    assert settings.pomodoro_micro_breaks.enabled is True
+    assert settings.pomodoro_micro_breaks.min_interval_seconds == 180
+    assert settings.pomodoro_micro_breaks.max_interval_seconds == 300
+    assert settings.pomodoro_micro_breaks.duration_seconds == 10

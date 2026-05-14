@@ -159,8 +159,7 @@ export function InstancePage() {
               instanceTitleById={instanceTitleById}
               isLoading={recallPointsLoading}
               error={recallPointsError}
-              title="相关复述点"
-              description="所有锚定到这个实例的复述点都会显示在这里。"
+              title="复述点列表"
             />
           </div>
         </div>

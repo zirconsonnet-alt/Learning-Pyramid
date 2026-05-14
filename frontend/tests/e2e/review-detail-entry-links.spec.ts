@@ -107,6 +107,9 @@ test("instance detail removes opaque ids from the summary card", async ({ page }
   await expect(summaryCard.getByText("对象树绑定")).toHaveCount(0)
   await expect(page.getByRole("link", { name: "查看对象节点" })).toHaveAttribute("href", projectPath(`/learning-object-nodes/${learningObjectNode.nodeId}`))
   await expect(page.getByTestId("video-pane-card")).toHaveAttribute("data-surface", "detail")
+  await expect(page.getByRole("heading", { name: "复述点列表" })).toHaveCount(1)
+  await expect(page.getByRole("heading", { name: "相关复述点" })).toHaveCount(0)
+  await expect(page.getByText("所有锚定到这个实例的复述点都会显示在这里。")).toHaveCount(0)
   await expectNoOpaqueInstanceReferences(page)
 
   expectNoConsoleIssues(consoleIssues)
