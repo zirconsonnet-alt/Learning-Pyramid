@@ -21,9 +21,10 @@ import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/ui/components/ui/dialog"
 import { Input } from "@/ui/components/ui/input"
-import { formatInstanceReference } from "@/ui/displayIdentifiers"
+import { formatRecallAnchorLabel } from "@/ui/displayIdentifiers"
 import { buildScopedProjectPath } from "@/ui/projectPaths"
 import { useAllReviewRecommendations } from "@/ui/queries/reviewRecommendations"
+import { useInstances } from "@/ui/queries/workbench"
 import { cn } from "@/ui/utils"
 
 type SessionAnswer = "remembered" | "forgotten"
@@ -60,9 +61,13 @@ function formatStatValue(value: number | null, suffix = "") {
   return value === null ? "-" : `${value.toFixed(1)}${suffix}`
 }
 
-function formatAnchorLabel(recallPoint: RecallPoint) {
+function formatAnchorLabel(recallPoint: RecallPoint, instanceDisplayName?: string | null) {
   if (!recallPoint.anchor) return "未绑定锚点"
-  return `${formatInstanceReference(recallPoint.anchor.instanceId)} · ${recallPoint.anchor.position}`
+  return formatRecallAnchorLabel({
+    instanceId: recallPoint.anchor.instanceId,
+    displayName: instanceDisplayName,
+    position: recallPoint.anchor.position,
+  })
 }
 
 function clampThresholdPercent(value: number) {
@@ -96,10 +101,20 @@ export function ReviewRecommendationsPage() {
   const [thresholdDraft, setThresholdDraft] = useState("70")
   const [thresholdDialogOpen, setThresholdDialogOpen] = useState(false)
   const allReviewRecommendationsQ = useAllReviewRecommendations(projectScope)
+  const instancesQ = useInstances(projectScope)
   const workspaceRecommendations = useMemo(
     () => workspaceRecommendationsByProjectId[pid] ?? [],
     [pid, workspaceRecommendationsByProjectId],
   )
+  const instanceDisplayNameById = useMemo(() => {
+    const entries = instancesQ.data ?? []
+    const out: Record<string, string> = {}
+    for (const item of entries) {
+      if (!item.instanceId || !item.materialDisplayName) continue
+      out[item.instanceId] = item.materialDisplayName
+    }
+    return out
+  }, [instancesQ.data])
   const effectiveWorkspaceRecommendations = useMemo(() => {
     if (workspaceRecommendations.length > 0 || !allReviewRecommendationsQ.data) return workspaceRecommendations
     const threshold = recommendationThresholdPercent / 100
@@ -311,6 +326,9 @@ export function ReviewRecommendationsPage() {
                 const answerVisible = hasSubmittedWrittenAnswer && (revealedAnswerIds[rpId] ?? false)
                 const insightEditorVisible = showInsightEditor[rpId] || Boolean(insightDrafts[rpId]?.trim())
                 const hasNextRecallPoint = activeReviewEntryIndex >= 0 && activeReviewEntryIndex < reviewWorkspaceEntries.length - 1
+                const anchorDisplayName = activeEntry.recallPoint.anchor
+                  ? instanceDisplayNameById[activeEntry.recallPoint.anchor.instanceId] ?? null
+                  : null
 
                 return (
                   <div className="relative overflow-visible">
@@ -363,10 +381,12 @@ export function ReviewRecommendationsPage() {
                                 className="theme-pill-default rounded-full px-2.5 py-1 font-medium transition hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                                 title="回到锚点"
                               >
-                                {formatAnchorLabel(activeEntry.recallPoint)}
+                                {formatAnchorLabel(activeEntry.recallPoint, anchorDisplayName)}
                               </Link>
                             ) : (
-                              <span className="theme-pill-default rounded-full px-2.5 py-1 font-medium">{formatAnchorLabel(activeEntry.recallPoint)}</span>
+                              <span className="theme-pill-default rounded-full px-2.5 py-1 font-medium">
+                                {formatAnchorLabel(activeEntry.recallPoint, anchorDisplayName)}
+                              </span>
                             )}
                             {activeEntry.recallPoint.insights.length > 0 ? (
                               <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 font-medium text-amber-700">

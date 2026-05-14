@@ -4,43 +4,42 @@
 
 ## 1. 当前用户要求
 
-- 修复右上角学科 / 项目上下文错误显示内部裸 ID（如 `proj_000022`、`proj_000066`）的问题。
-- 当前用户已经明确表示这个显示结果不可接受。
-- 同一工作区里还包含本次尚未提交的 FAQ 精简改动，需要一起保留。
+- 修复推荐复习页锚点文案和工作台复习卡片不一致的问题。
+- 推荐复习页不能显示 `内容实例 #...` 或 `t=...` 这类用户不可读的内部引用。
+- 推荐复习页应和工作台一样展示“实例 / 视频可读名称 + 可读时间”。
 
 ## 2. 本次实际修改文件
 
-- `frontend/src/shell/AppShell.tsx`
-- `frontend/tests/e2e/navigation.spec.ts`
-- `docs/guide-faq.md`
-- `frontend/src/views/home/HomePage.tsx`
+- `frontend/src/ui/displayIdentifiers.ts`
+- `frontend/src/views/recommendations/ReviewRecommendationsPage.tsx`
+- `frontend/src/views/workbench/components/ReviewPane.tsx`
+- `frontend/tests/e2e/workbench-review.spec.ts`
 - `docs/current-change.md`
 
 ## 3. 每个文件为什么修改
 
-- `frontend/src/shell/AppShell.tsx`：修正头部上下文标题生成逻辑。全局页保留当前上下文时，只能展示已解析到的学科/项目名称，不能把原始 `subjectId` / `scopedProjectId` 直接当标题显示。
-- `frontend/tests/e2e/navigation.spec.ts`：补充一个回归用例，覆盖“本地持久化里残留无效上下文时，头部不能外露内部 ID”。
-- `docs/guide-faq.md`：删除“购买会员立刻就能使用AI功能吗？”这一条 FAQ。
-- `frontend/src/views/home/HomePage.tsx`：删除首页 FAQ 中对应的 AI 条目，使首页只保留四条。
-- `docs/current-change.md`：切换为当前真实任务组合，并记录验证状态。
+- `frontend/src/ui/displayIdentifiers.ts`：新增共享锚点展示函数，统一把视频锚点格式化为可读实例名和可读时间。
+- `frontend/src/views/recommendations/ReviewRecommendationsPage.tsx`：加载项目实例列表，用实例名解析推荐复习项的锚点文案。
+- `frontend/src/views/workbench/components/ReviewPane.tsx`：删除本地重复的锚点格式化逻辑，改用共享函数。
+- `frontend/tests/e2e/workbench-review.spec.ts`：把推荐复习页回归测试从接受裸 ID 改为要求显示可读锚点。
+- `docs/current-change.md`：切换为当前任务，并记录修改范围和验证状态。
 
 ## 4. 行为语义是否变化
 
-- 是。右上角在全局页保留上下文时，不再用内部 ID 顶替学科名或项目名。
-- 是。当当前上下文只能解析到 ID、解析不到可读名称时，相关头部下拉入口不会继续拿裸 ID 展示给用户。
-- 是。首页 FAQ 从 5 条变为 4 条，指南 FAQ 文档同步删除同一条 AI 说明。
-- 否。不改变学科/项目真实选择语义，不改变番茄钟拦截语义，不改变 API 或数据结构。
+- 是。推荐复习页锚点从内部引用展示改为用户可读展示。
+- 是。工作台和推荐复习页现在共用同一套锚点文案规则。
+- 否。不改变推荐复习算法、题目顺序、锚点跳转目标、API 或数据结构。
 
 ## 5. 是否做了重构，以及为什么
 
-- 否。
-- 这次是局部修正 `AppShell` 的标题回退逻辑，并补充回归测试；没有改 store 结构，也没有抽新抽象。
+- 是，做了局部重构。
+- 原因是推荐复习页和工作台此前各自维护一套锚点文案逻辑，已经导致 UI 行为分叉；抽到共享展示函数可以消除重复逻辑。
 
 ## 6. 未修改哪些相关内容，以及为什么
 
-- 不修改 `useAppStore` 持久化结构，因为当前根因不是存储 schema，而是显示层把未解析 ID 当成了标题。
-- 不修改项目/学科真实跳转路径，因为目前没有证据表明 URL 参数顺序被写反。
-- 不修改会员页或 AI 使用文档，因为 FAQ 删除不等于功能说明失效。
+- 不修改后端推荐复习接口，因为前端已有实例列表查询能力，根因不在后端响应结构。
+- 不修改工作台复习流程、提交答案流程或推荐阈值逻辑，因为它们不影响本次裸 ID 展示问题。
+- 不修改详情页引用展示，因为本次问题出现在推荐复习页和工作台复习卡片的锚点文案分叉。
 
 ## 7. 是否影响 API、架构、部署、数据结构、UI、测试
 
@@ -48,13 +47,13 @@
 - 架构：否。
 - 部署：否。
 - 数据结构：否。
-- UI：是，右上角上下文不再暴露内部裸 ID；首页 FAQ 少一条卡片。
-- 测试：是，新增一个导航回归测试。
+- UI：是，推荐复习页锚点文案改为用户可读显示。
+- 测试：是，更新推荐复习页 e2e 回归断言。
 
 ## 8. 当前风险点和不确定项
 
-- FAQ 内容仍然是文档和首页前端各维护一份；这次只同步删除，不在本次任务里收敛成单一数据源。
-- 这次修的是“显示层不能暴露未解析 ID”；如果后续发现某处确实把 `subjectId` / `projectId` 写反，那是另一个独立数据污染问题，需要单独追根。
+- 如果实例列表中暂时没有对应实例，页面会显示通用的“内容实例”文案，不再暴露内部 ID。
+- 推荐复习页新增一次已有的实例列表查询；该查询也是工作台现有数据流，不新增 API。
 
 ## 9. 仍需用户确认的问题
 
@@ -72,8 +71,9 @@
 
 ## 11. 验证状态
 
-- `pnpm exec playwright test tests/e2e/navigation.spec.ts -g "global pages do not expose unresolved project identifiers" --reporter=line`（dev server，端口 `4210`）：通过。
-- `pnpm build`：通过。
-- `pnpm exec playwright test tests/e2e/navigation.spec.ts --reporter=line`（preview 形态，新端口 `4211`）：4 passed。
+- 已先运行 `pnpm exec playwright test tests/e2e/workbench-review.spec.ts --reporter=line`，新增断言在推荐复习页失败，确认能复现当前裸 ID 分叉。
+- `LEARNINGPYRAMID_FRONTEND_E2E_USE_DEV_SERVER=1; LEARNINGPYRAMID_FRONTEND_E2E_PORT=4215; pnpm exec playwright test tests/e2e/workbench-review.spec.ts --reporter=line`：7 passed。
 - `pnpm exec tsc -b --noEmit`：通过。
+- `pnpm build`：通过，保留既有 chunk size warning。
+- `LEARNINGPYRAMID_FRONTEND_E2E_PORT=4216; pnpm exec playwright test tests/e2e/workbench-review.spec.ts --reporter=line`（preview 形态）：7 passed。
 - `git diff --check`：通过，仅有 LF/CRLF 提示。

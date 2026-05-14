@@ -34,6 +34,26 @@ export function formatInstanceReference(
   return formatOpaqueReference(instanceId, "内容实例", 6, empty)
 }
 
+export function parseAnchorPositionMs(position: string | null | undefined) {
+  const normalized = position?.trim()
+  if (!normalized) return null
+  const match = normalized.match(/^t=(\d+)$/)
+  if (!match) return null
+  const ms = Number(match[1])
+  return Number.isFinite(ms) ? ms : null
+}
+
+export function formatDurationClock(ms: number) {
+  const totalSec = Math.max(0, Math.floor(ms / 1000))
+  const h = Math.floor(totalSec / 3600)
+  const m = Math.floor((totalSec % 3600) / 60)
+  const s = totalSec % 60
+  const hh = h > 0 ? `${h}:` : ""
+  const mm = h > 0 ? String(m).padStart(2, "0") : String(m)
+  const ss = String(s).padStart(2, "0")
+  return `${hh}${mm}:${ss}`
+}
+
 export function simplifyMaterialDisplayName(value: string | null | undefined, empty = "内容待确认") {
   const normalized = value?.trim()
   if (!normalized) return empty
@@ -43,6 +63,17 @@ export function simplifyMaterialDisplayName(value: string | null | undefined, em
   const extension = leaf.slice(dotIndex + 1)
   if (!/^[a-z0-9]{1,8}$/i.test(extension)) return leaf
   return leaf.slice(0, dotIndex).trim() || leaf
+}
+
+export function formatRecallAnchorLabel(params: {
+  instanceId: string | null | undefined
+  displayName?: string | null
+  position: string | null | undefined
+}) {
+  const title = simplifyMaterialDisplayName(params.displayName, "内容实例")
+  const ms = parseAnchorPositionMs(params.position)
+  const positionLabel = ms === null ? params.position?.trim() : formatDurationClock(ms)
+  return positionLabel ? `${title} · ${positionLabel}` : title
 }
 
 export function formatMaterialReference(materialId: string | null | undefined, empty = "内容待确认") {

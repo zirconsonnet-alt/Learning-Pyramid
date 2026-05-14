@@ -26,7 +26,7 @@ import { RichContentRenderer } from "@/ui/components/RichContentRenderer"
 import { buildScopedProjectPath } from "@/ui/projectPaths"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
-import { formatInstanceReference } from "@/ui/displayIdentifiers"
+import { formatRecallAnchorLabel } from "@/ui/displayIdentifiers"
 import { completeGuideWalkthroughStep } from "@/ui/guideWalkthrough/guideWalkthroughController"
 import { useCommitReviewTask, useReviewBundle } from "@/ui/queries/workbench"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
@@ -44,37 +44,6 @@ function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
   if (err instanceof Error) return err.message
   return "未知错误"
-}
-
-function parseAnchorMs(position: string): number | null {
-  const m = position.match(/^t=(\d+)$/)
-  if (!m) return null
-  const n = Number(m[1])
-  return Number.isFinite(n) ? n : null
-}
-
-function msToClock(ms: number) {
-  const totalSec = Math.floor(ms / 1000)
-  const h = Math.floor(totalSec / 3600)
-  const m = Math.floor((totalSec % 3600) / 60)
-  const s = totalSec % 60
-  const hh = h > 0 ? `${h}:` : ""
-  const mm = h > 0 ? String(m).padStart(2, "0") : String(m)
-  const ss = String(s).padStart(2, "0")
-  return `${hh}${mm}:${ss}`
-}
-
-function simplifyMaterialName(value: string) {
-  const normalized = value.trim()
-  if (!normalized) return "内容待确认"
-  const leaf = normalized.split("/").at(-1)?.split("\\").at(-1) ?? normalized
-  return leaf.replace(/\.[a-z0-9]+$/i, "") || leaf
-}
-
-function formatAnchorLabel(instanceId: string, displayName: string | null | undefined, position: string) {
-  const title = simplifyMaterialName(formatInstanceReference(instanceId, displayName))
-  const ms = parseAnchorMs(position)
-  return `${title} · ${ms === null ? position : msToClock(ms)}`
 }
 
 const REVIEW_ACTIVITY_WINDOW_MS = 75_000
@@ -430,11 +399,11 @@ export function ReviewPane({
               const activeAnchor = activeRecallPoint.anchor
               const inst = activeAnchor ? instances.find((i) => i.instanceId === activeAnchor.instanceId) ?? null : null
               const anchorLabel = activeAnchor
-                ? formatAnchorLabel(
-                    activeAnchor.instanceId,
-                    inst?.materialDisplayName,
-                    activeAnchor.position,
-                  )
+                ? formatRecallAnchorLabel({
+                    instanceId: activeAnchor.instanceId,
+                    displayName: inst?.materialDisplayName,
+                    position: activeAnchor.position,
+                  })
                 : "未绑定锚点"
 
               return (
