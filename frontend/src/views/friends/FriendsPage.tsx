@@ -24,6 +24,7 @@ import {
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { cn } from "@/ui/utils"
 import { formatDateTimeLabel, formatDurationCompact, formatLastStudyText } from "@/views/profile/profileStats"
+import { AccountMenuPageTitle } from "@/views/shared/AccountMenuPageTitle"
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -207,7 +208,7 @@ export function FriendsPage() {
           <CardHeader className="theme-card-header gap-4 pb-4">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
               <div className="space-y-1">
-                <CardTitle className="text-2xl">好友中心</CardTitle>
+                <AccountMenuPageTitle eyebrow="Friend Circle" title="好友中心" />
               </div>
               <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto">
                 <div className="w-full sm:w-72">

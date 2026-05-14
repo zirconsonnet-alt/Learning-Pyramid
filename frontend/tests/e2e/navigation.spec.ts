@@ -23,7 +23,7 @@ test(journeyIds.mainNavigation, async ({ page }) => {
   expectNoConsoleIssues(consoleIssues)
 })
 
-test("global pages do not reuse stale workbench project as current project", async ({ page }) => {
+test("global pages keep the explicitly selected project context in the header", async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
   await installMockApi(page)
   await page.addInitScript(({ subjectId, projectId }) => {
@@ -46,7 +46,26 @@ test("global pages do not reuse stale workbench project as current project", asy
   await page.goto("/pomodoro")
   await expect(page.getByRole("button", { name: /全局/ })).toBeVisible()
   await expect(page.getByRole("button", { name: /系统/ })).toBeVisible()
-  await expect(page.getByRole("button", { name: /当前项目|自动化测试项目/ })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: new RegExp(`学科.*${subject.title}`) })).toBeVisible()
+  await expect(page.getByRole("button", { name: new RegExp(`项目.*${project.title}`) })).toBeVisible()
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
+test("navigating from a project page to guide keeps the current project context in the header", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page)
+
+  await page.goto(`/subjects/${subject.subjectId}/projects/${project.projectId}/settings`)
+  await expect(page.getByText("项目设置")).toBeVisible()
+  await expect(page.getByRole("button", { name: new RegExp(`项目.*${project.title}`) })).toBeVisible()
+
+  await page.getByRole("button", { name: /全局/ }).click()
+  await page.getByText("用户指南").click()
+  await expect(page).toHaveURL(/\/guide$/)
+  await expect(page.getByText("产品指南")).toBeVisible()
+  await expect(page.getByRole("button", { name: new RegExp(`学科.*${subject.title}`) })).toBeVisible()
+  await expect(page.getByRole("button", { name: new RegExp(`项目.*${project.title}`) })).toBeVisible()
 
   expectNoConsoleIssues(consoleIssues)
 })

@@ -42,6 +42,7 @@ import {
   formatMembershipPrice,
   StatusPill,
 } from "@/views/membership/membershipUi"
+import { AccountMenuPageTitle } from "@/views/shared/AccountMenuPageTitle"
 import { readWithdrawalConfirmationToken, requestWechatMerchantTransfer, type WechatMerchantTransferConfirmation } from "@/views/membership/wechatTransfer"
 
 const DEFAULT_MEMBERSHIP_PLAN_ID = "monthly"
@@ -862,9 +863,7 @@ export function MembershipPage() {
           <div className="px-6 py-6 sm:px-8 [background:radial-gradient(circle_at_top_left,hsl(var(--primary)/0.11),transparent_36%),radial-gradient(circle_at_85%_18%,var(--theme-warm-bg),transparent_28%),var(--theme-card-main-bg)]">
             <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
               <div className="max-w-2xl space-y-5">
-                <div className="space-y-2">
-                  <h1 className="text-3xl font-semibold tracking-tight text-foreground">会员中心</h1>
-                </div>
+                <AccountMenuPageTitle eyebrow="Member Center" title="会员中心" titleAs="h1" />
 
                 <div className="flex flex-wrap items-center gap-2">
                   <Button onClick={openPurchaseFlow} disabled={purchaseDisabled}>

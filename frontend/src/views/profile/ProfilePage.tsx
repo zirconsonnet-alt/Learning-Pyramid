@@ -15,6 +15,7 @@ import { getLocalDateKey, loadDailyStudyTotalsByDate } from "@/ui/store/workbenc
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { syncStudyMetricsSnapshot } from "@/ui/studyMetricsSync"
 import { cn } from "@/ui/utils"
+import { AccountMenuPageTitle } from "@/views/shared/AccountMenuPageTitle"
 
 import {
   buildDateKeySpan,
@@ -722,8 +723,7 @@ export function ProfilePage() {
             <div className="theme-card-header px-6 py-5">
               <div className="flex items-start gap-4">
                 <div>
-                  <div className="text-[11px] uppercase tracking-[0.18em] text-[color:var(--theme-subtle-text)]">Profile Card</div>
-                  <div className="mt-2 text-2xl font-semibold tracking-tight text-foreground">账户信息</div>
+                  <AccountMenuPageTitle eyebrow="Profile Card" title="账户信息" />
                 </div>
               </div>
             </div>

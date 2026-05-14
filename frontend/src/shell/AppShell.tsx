@@ -301,7 +301,9 @@ export function AppShell() {
   useGuideWalkthroughController({ navigate: nav, pathname: location.pathname })
   const { scopedProjectId: projectId, subjectId: routeSubjectId } = useParams()
   const pid = projectId ?? ""
+  const selectedSubjectId = useAppStore((state) => state.selectedSubjectId)
   const selectedWorkbenchProjectRef = useAppStore((state) => state.selectedWorkbenchProjectRef)
+  const setSelectedSubjectId = useAppStore((state) => state.setSelectedSubjectId)
   const setSelectedWorkbenchProjectRef = useAppStore((state) => state.setSelectedWorkbenchProjectRef)
   const [globalMenuOpen, setGlobalMenuOpen] = useState(false)
   const [subjectMenuOpen, setSubjectMenuOpen] = useState(false)
@@ -318,13 +320,38 @@ export function AppShell() {
     () => (subjectsQ.data ?? []).find((subject) => subject.subjectId === routeSubjectId) ?? null,
     [routeSubjectId, subjectsQ.data],
   )
-  const effectiveProjectId = pid
   const routeProjectScope = routeSubjectId && pid ? { subjectId: routeSubjectId, scopedProjectId: pid } : null
+  const selectedProjectScope =
+    selectedWorkbenchProjectRef &&
+    (!routeSubjectId || selectedWorkbenchProjectRef.subjectId === routeSubjectId) &&
+    (!selectedSubjectId || selectedWorkbenchProjectRef.subjectId === selectedSubjectId)
+      ? selectedWorkbenchProjectRef
+      : null
+  const selectedSubject = useMemo(
+    () => {
+      const subjectId = selectedSubjectId || selectedProjectScope?.subjectId || ""
+      return subjectId ? (subjectsQ.data ?? []).find((subject) => subject.subjectId === subjectId) ?? null : null
+    },
+    [selectedProjectScope?.subjectId, selectedSubjectId, subjectsQ.data],
+  )
+  const effectiveProjectId = pid
   const isVirtualStudyReviewProject = isVirtualStudyReviewProjectId(effectiveProjectId)
   const isSubjectDashboardScope = Boolean(routeSubjectId) && !pid
   const subjectContextQ = useSubjectContext(routeProjectScope, canAccessApp && Boolean(effectiveProjectId) && !isSubjectDashboardScope)
   const scopedSubjectContextQ = useScopedSubjectContext(routeSubjectId ?? "", pid, canAccessApp && Boolean(routeSubjectId) && Boolean(pid) && !isSubjectDashboardScope)
   const subjectContext = scopedSubjectContextQ.data ?? subjectContextQ.data
+  const selectedProjectMatchesRoute = Boolean(
+    routeProjectScope &&
+      selectedProjectScope &&
+      selectedProjectScope.subjectId === routeProjectScope.subjectId &&
+      selectedProjectScope.scopedProjectId === routeProjectScope.scopedProjectId,
+  )
+  const shouldLoadSelectedProjectContext = canAccessApp && Boolean(selectedProjectScope) && !selectedProjectMatchesRoute
+  const selectedProjectContextQ = useSubjectContext(
+    selectedProjectScope,
+    shouldLoadSelectedProjectContext,
+  )
+  const selectedProjectContext = selectedProjectContextQ.data
   const { projectTitle } = useProject(routeProjectScope, { enabled: canAccessApp && Boolean(effectiveProjectId) && !isVirtualStudyReviewProject })
   const subjectProjectCatalog = useSubjectProjectCatalog(canAccessApp && !isVirtualStudyReviewProject)
   const logout = useLogout()
@@ -334,17 +361,31 @@ export function AppShell() {
   const pomodoroTransitionSoundEnabled = usePomodoroStore((state) => state.transitionSoundEnabled)
   const activePomodoroQuickSession = isQuickPomodoroSessionActive(pomodoroQuickPomodoro) ? pomodoroQuickPomodoro : null
   const pomodoroNow = usePomodoroNow(pomodoroEnabled || Boolean(activePomodoroQuickSession))
-  const resolvedSubjectId = subjectContext?.subject.subjectId ?? routeSubject?.subjectId ?? ""
-  const fallbackSubjectTitle = routeSubject?.title || projectTitle || pid || "当前学科"
-  const subjectTitle = subjectContext?.subject.title ?? fallbackSubjectTitle
-  const fallbackMaterialTitle = projectTitle || pid || "当前项目"
-  const currentMaterialTitle = subjectContext?.currentMaterial.title ?? fallbackMaterialTitle
-  const currentProjectContextId = subjectContext?.currentScopedProjectId ?? pid
-  const currentMaterialProjectId = subjectContext?.currentMaterial.scopedProjectId ?? currentProjectContextId
+  const activeSubjectId = routeSubjectId || selectedSubjectId || selectedProjectScope?.subjectId || ""
+  const activeProjectId = pid || selectedProjectScope?.scopedProjectId || ""
+  const activeSubjectContext = subjectContext ?? selectedProjectContext ?? null
+  const resolvedSubjectId = routeSubject?.subjectId ?? activeSubjectContext?.subject.subjectId ?? selectedSubject?.subjectId ?? activeSubjectId
+  const fallbackSubjectTitle =
+    routeSubject?.title ||
+    selectedSubject?.title ||
+    activeSubjectContext?.subject.title ||
+    activeSubjectId ||
+    "当前学科"
+  const subjectTitle = activeSubjectContext?.subject.title ?? fallbackSubjectTitle
+  const fallbackMaterialTitle =
+    activeProjectId
+      ? (
+          (pid ? projectTitle : "") ||
+          activeProjectId
+        )
+      : "当前项目"
+  const currentMaterialTitle = activeSubjectContext?.currentMaterial.title ?? fallbackMaterialTitle
+  const currentProjectContextId = activeSubjectContext?.currentScopedProjectId ?? activeProjectId
+  const currentMaterialProjectId = activeSubjectContext?.currentMaterial.scopedProjectId ?? currentProjectContextId
   const hasSubjectContext = Boolean(resolvedSubjectId)
-  const hasProjectContext = Boolean(hasSubjectContext && currentMaterialProjectId && !isSubjectDashboardScope)
+  const hasProjectContext = Boolean(hasSubjectContext && currentMaterialProjectId)
   const area = describeArea(location.pathname, {
-    hasProject: Boolean(pid),
+    hasProject: Boolean(currentMaterialProjectId),
     subjectTitle,
     materialTitle: currentMaterialTitle,
   })
@@ -568,6 +609,12 @@ export function AppShell() {
             : pomodoroSnapshot.idleReason === "waiting"
               ? `距离开始 ${formatPomodoroCountdown(pomodoroSnapshot.untilStartMs)}`
               : "已关闭"
+
+  useEffect(() => {
+    if (!routeSubjectId || pid) return
+    if (selectedSubjectId === routeSubjectId) return
+    setSelectedSubjectId(routeSubjectId)
+  }, [pid, routeSubjectId, selectedSubjectId, setSelectedSubjectId])
 
   useEffect(() => {
     if (!routeSubjectId || !pid) return

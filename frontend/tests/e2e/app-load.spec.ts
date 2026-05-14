@@ -67,3 +67,22 @@ test("profile learning view uses scoped audit log endpoint", async ({ page }) =>
 
   expectNoConsoleIssues(consoleIssues)
 })
+
+test("account menu entry pages share the eyebrow title pattern", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page)
+
+  await page.goto("/profile")
+  await expect(page.getByText("Profile Card", { exact: true })).toBeVisible()
+  await expect(page.getByText("账户信息", { exact: true })).toBeVisible()
+
+  await page.goto("/friends")
+  await expect(page.getByText("Friend Circle", { exact: true })).toBeVisible()
+  await expect(page.getByText("好友中心", { exact: true })).toBeVisible()
+
+  await page.goto("/membership")
+  await expect(page.getByText("Member Center", { exact: true })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "会员中心" })).toBeVisible()
+
+  expectNoConsoleIssues(consoleIssues)
+})
