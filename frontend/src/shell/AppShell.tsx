@@ -361,29 +361,20 @@ export function AppShell() {
   const pomodoroTransitionSoundEnabled = usePomodoroStore((state) => state.transitionSoundEnabled)
   const activePomodoroQuickSession = isQuickPomodoroSessionActive(pomodoroQuickPomodoro) ? pomodoroQuickPomodoro : null
   const pomodoroNow = usePomodoroNow(pomodoroEnabled || Boolean(activePomodoroQuickSession))
-  const activeSubjectId = routeSubjectId || selectedSubjectId || selectedProjectScope?.subjectId || ""
   const activeProjectId = pid || selectedProjectScope?.scopedProjectId || ""
   const activeSubjectContext = subjectContext ?? selectedProjectContext ?? null
-  const resolvedSubjectId = routeSubject?.subjectId ?? activeSubjectContext?.subject.subjectId ?? selectedSubject?.subjectId ?? activeSubjectId
-  const fallbackSubjectTitle =
+  const resolvedSubjectId = routeSubject?.subjectId ?? activeSubjectContext?.subject.subjectId ?? selectedSubject?.subjectId ?? ""
+  const subjectTitle =
     routeSubject?.title ||
-    selectedSubject?.title ||
     activeSubjectContext?.subject.title ||
-    activeSubjectId ||
+    selectedSubject?.title ||
     "当前学科"
-  const subjectTitle = activeSubjectContext?.subject.title ?? fallbackSubjectTitle
-  const fallbackMaterialTitle =
-    activeProjectId
-      ? (
-          (pid ? projectTitle : "") ||
-          activeProjectId
-        )
-      : "当前项目"
-  const currentMaterialTitle = activeSubjectContext?.currentMaterial.title ?? fallbackMaterialTitle
-  const currentProjectContextId = activeSubjectContext?.currentScopedProjectId ?? activeProjectId
+  const routeProjectTitle = pid ? projectTitle : ""
+  const currentMaterialTitle = activeSubjectContext?.currentMaterial.title ?? routeProjectTitle
+  const currentProjectContextId = activeSubjectContext?.currentScopedProjectId ?? (currentMaterialTitle ? activeProjectId : "")
   const currentMaterialProjectId = activeSubjectContext?.currentMaterial.scopedProjectId ?? currentProjectContextId
   const hasSubjectContext = Boolean(resolvedSubjectId)
-  const hasProjectContext = Boolean(hasSubjectContext && currentMaterialProjectId)
+  const hasProjectContext = Boolean(hasSubjectContext && currentMaterialProjectId && currentMaterialTitle)
   const area = describeArea(location.pathname, {
     hasProject: Boolean(currentMaterialProjectId),
     subjectTitle,

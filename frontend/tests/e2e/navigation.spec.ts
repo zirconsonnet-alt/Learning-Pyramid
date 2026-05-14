@@ -52,6 +52,34 @@ test("global pages keep the explicitly selected project context in the header", 
   expectNoConsoleIssues(consoleIssues)
 })
 
+test("global pages do not expose unresolved project identifiers in the header", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page)
+  await page.addInitScript(() => {
+    window.localStorage.setItem(
+      "plm-app",
+      JSON.stringify({
+        state: {
+          selectedSubjectId: "proj_000022",
+          selectedWorkbenchProjectId: "proj_000066",
+          selectedWorkbenchProjectRef: { subjectId: "proj_000022", scopedProjectId: "proj_000066" },
+          recentSubjectIds: ["proj_000022"],
+          recentWorkbenchProjectIds: ["proj_000066"],
+          recentWorkbenchProjectRefs: [{ subjectId: "proj_000022", scopedProjectId: "proj_000066" }],
+        },
+        version: 0,
+      }),
+    )
+  })
+
+  await page.goto("/pomodoro")
+  await expect(page.getByRole("button", { name: /全局/ })).toBeVisible()
+  await expect(page.getByText("proj_000022")).toHaveCount(0)
+  await expect(page.getByText("proj_000066")).toHaveCount(0)
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
 test("navigating from a project page to guide keeps the current project context in the header", async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
   await installMockApi(page)

@@ -4,57 +4,43 @@
 
 ## 1. 当前用户要求
 
-- 修复“当前学科 / 当前项目”上下文只跟随 URL 的问题。
-- 正确语义：
-  - 只有用户明确切换学科或项目时，右上角当前上下文才变化。
-  - 点击项目“进入工作台”即使被番茄钟拦截到 `/pomodoro`，右上角仍保留刚选中的学科和项目。
-  - 从项目页跳到全局页（如用户指南、个人中心）后，右上角仍保留当前学科和项目。
-- 头像下拉菜单里的 `个人中心 / 好友中心 / 会员中心` 统一复用“英文眉题 + 中文标题”的页面标题设计。
-- 其他页面不跟进，不把这套设计推广成全站规则。
+- 修复右上角学科 / 项目上下文错误显示内部裸 ID（如 `proj_000022`、`proj_000066`）的问题。
+- 当前用户已经明确表示这个显示结果不可接受。
+- 同一工作区里还包含本次尚未提交的 FAQ 精简改动，需要一起保留。
 
 ## 2. 本次实际修改文件
 
 - `frontend/src/shell/AppShell.tsx`
 - `frontend/tests/e2e/navigation.spec.ts`
-- `frontend/src/views/shared/AccountMenuPageTitle.tsx`
-- `frontend/src/views/profile/ProfilePage.tsx`
-- `frontend/src/views/friends/FriendsPage.tsx`
-- `frontend/src/views/membership/MembershipPage.tsx`
-- `frontend/tests/e2e/app-load.spec.ts`
+- `docs/guide-faq.md`
+- `frontend/src/views/home/HomePage.tsx`
 - `docs/current-change.md`
 
 ## 3. 每个文件为什么修改
 
-- `frontend/src/shell/AppShell.tsx`：把头部上下文从“只看当前路由”调整为“优先路由，缺失时回退到用户当前选择”，并约束项目上下文不能跨学科串用。
-- `frontend/tests/e2e/navigation.spec.ts`：把全局页保留当前学科/项目上下文写成验收用例，并覆盖从项目页跳到用户指南的场景。
-- `frontend/src/views/shared/AccountMenuPageTitle.tsx`：抽出仅供头像菜单三页复用的小标题组件，避免三处各写一套。
-- `frontend/src/views/profile/ProfilePage.tsx`：让“账户信息”标题改为复用共享组件，保留现有语法。
-- `frontend/src/views/friends/FriendsPage.tsx`：把“好友中心”接入同一套标题语法。
-- `frontend/src/views/membership/MembershipPage.tsx`：把“会员中心”接入同一套标题语法，并保留页面主标题的 heading 语义。
-- `frontend/tests/e2e/app-load.spec.ts`：补充头像菜单三个入口页标题一致性的前端验收。
-- `docs/current-change.md`：记录这次整批提交的实际范围。
+- `frontend/src/shell/AppShell.tsx`：修正头部上下文标题生成逻辑。全局页保留当前上下文时，只能展示已解析到的学科/项目名称，不能把原始 `subjectId` / `scopedProjectId` 直接当标题显示。
+- `frontend/tests/e2e/navigation.spec.ts`：补充一个回归用例，覆盖“本地持久化里残留无效上下文时，头部不能外露内部 ID”。
+- `docs/guide-faq.md`：删除“购买会员立刻就能使用AI功能吗？”这一条 FAQ。
+- `frontend/src/views/home/HomePage.tsx`：删除首页 FAQ 中对应的 AI 条目，使首页只保留四条。
+- `docs/current-change.md`：切换为当前真实任务组合，并记录验证状态。
 
 ## 4. 行为语义是否变化
 
-- 是。`/pomodoro`、`/guide` 等全局页现在会保留右上角当前学科/项目上下文，而不是因为 URL 不带参数就丢失展示。
-- 否。番茄钟门禁仍然拦截非学习时段进入工作台；这次不改变门禁语义。
-- 否。不改变学科、项目的真实切换入口，仍以用户明确选择或显式项目路由为准。
-- 是。好友中心和会员中心现在也会显示英文眉题 + 中文标题，和个人中心入口组保持一致。
-- 否。不改变三个头像菜单页面的功能、数据流、交互入口。
+- 是。右上角在全局页保留上下文时，不再用内部 ID 顶替学科名或项目名。
+- 是。当当前上下文只能解析到 ID、解析不到可读名称时，相关头部下拉入口不会继续拿裸 ID 展示给用户。
+- 是。首页 FAQ 从 5 条变为 4 条，指南 FAQ 文档同步删除同一条 AI 说明。
+- 否。不改变学科/项目真实选择语义，不改变番茄钟拦截语义，不改变 API 或数据结构。
 
 ## 5. 是否做了重构，以及为什么
 
-- 做了当前范围内的局部整理。
-- `AppShell` 内部把“页面位置”和“当前选择”拆开，原因是头部 UI 之前把两者耦合在一起，导致全局页丢失项目上下文。
-- 抽了一个头像菜单三页共享的小标题组件，原因是三页属于同一入口组，继续复制样式会留下分叉。
+- 否。
+- 这次是局部修正 `AppShell` 的标题回退逻辑，并补充回归测试；没有改 store 结构，也没有抽新抽象。
 
 ## 6. 未修改哪些相关内容，以及为什么
 
-- 不修改 `PomodoroWorkbenchGate` 拦截逻辑，因为用户已确认“拦到番茄钟页”本身是合理的。
-- 不修改 `SubjectDashboardPage` 的项目按钮行为，因为当前选择写入动作本来就已经存在。
-- 不新增新的全局上下文 store 字段，因为现有 `selectedSubjectId` / `selectedWorkbenchProjectRef` 足以承载正确语义。
-- 不修改学科中心、用户指南、全局设置等其他页面标题，因为用户只要求头像菜单三个入口页复用这套设计。
-- 不改个人中心右侧“学习视图”的现有标题语法，因为这次只针对头像菜单入口页的大标题区域。
+- 不修改 `useAppStore` 持久化结构，因为当前根因不是存储 schema，而是显示层把未解析 ID 当成了标题。
+- 不修改项目/学科真实跳转路径，因为目前没有证据表明 URL 参数顺序被写反。
+- 不修改会员页或 AI 使用文档，因为 FAQ 删除不等于功能说明失效。
 
 ## 7. 是否影响 API、架构、部署、数据结构、UI、测试
 
@@ -62,12 +48,13 @@
 - 架构：否。
 - 部署：否。
 - 数据结构：否。
-- UI：是，右上角头部在全局页会继续显示当前学科/项目；好友中心和会员中心标题样式与个人中心入口组统一。
-- 测试：是，新增并更新 e2e 覆盖全局页上下文和头像菜单三页标题语法。
+- UI：是，右上角上下文不再暴露内部裸 ID；首页 FAQ 少一条卡片。
+- 测试：是，新增一个导航回归测试。
 
 ## 8. 当前风险点和不确定项
 
-- 头部现在会在全局页展示上次明确选择的学科/项目；这是刻意语义变化，不再把“全局页无项目路由”解释成“当前项目为空”。
+- FAQ 内容仍然是文档和首页前端各维护一份；这次只同步删除，不在本次任务里收敛成单一数据源。
+- 这次修的是“显示层不能暴露未解析 ID”；如果后续发现某处确实把 `subjectId` / `projectId` 写反，那是另一个独立数据污染问题，需要单独追根。
 
 ## 9. 仍需用户确认的问题
 
@@ -85,9 +72,8 @@
 
 ## 11. 验证状态
 
-- `pnpm exec tsc -b --noEmit`（在 `frontend/` 下运行）：通过。
-- `pnpm build`（在 `frontend/` 下运行）：通过。
-- `pnpm exec playwright test tests/e2e/navigation.spec.ts --reporter=line`（preview 形态，端口 `4201`）：3 passed。
-- `pnpm exec playwright test tests/e2e/app-load.spec.ts -g "account menu entry pages share the eyebrow title pattern" --reporter=line`（preview 形态，端口 `4202`）：1 passed。
-- `pnpm exec playwright test tests/e2e/pomodoro-settings.spec.ts -g "blocks workbench when enabled" --reporter=line`（preview 形态，端口 `4203`）：1 passed。
+- `pnpm exec playwright test tests/e2e/navigation.spec.ts -g "global pages do not expose unresolved project identifiers" --reporter=line`（dev server，端口 `4210`）：通过。
+- `pnpm build`：通过。
+- `pnpm exec playwright test tests/e2e/navigation.spec.ts --reporter=line`（preview 形态，新端口 `4211`）：4 passed。
+- `pnpm exec tsc -b --noEmit`：通过。
 - `git diff --check`：通过，仅有 LF/CRLF 提示。
