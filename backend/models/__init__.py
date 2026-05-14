@@ -34,6 +34,7 @@ from .constants import MATERIAL_ALLOWLIST_V1
 from .convergence import Convergence
 from .material_allowlist import MaterialAllowlist
 from .review_chain import ReviewChain, ReviewChainItem, ReviewChainItemKind
+from .review_item_binding import ReviewItemBinding, ReviewItemBindingKind
 from .review_task import ReviewTask
 from .review_task_queue import ReviewTaskQueue
 from .layer import Layer
@@ -115,6 +116,8 @@ __all__ = [
     "ReviewChain",
     "ReviewChainItem",
     "ReviewChainItemKind",
+    "ReviewItemBinding",
+    "ReviewItemBindingKind",
     "ReviewTaskQueue",
     "Layer",
     "EntryRegistration",

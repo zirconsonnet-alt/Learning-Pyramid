@@ -1406,6 +1406,18 @@ class PostgresStore(SQLiteSnapshotStore):
             return None
         return self._decode_convergence_index_row(project_id=str(project_id), row=row)
 
+    def list_convergences(self, project_id: str) -> tuple[Convergence, ...]:
+        rows = self._fetchall(
+            """
+            SELECT convergence_id, seed_range_id, rule_id, review_task_ids_json, state
+            FROM convergence_index
+            WHERE project_id = %s
+            ORDER BY convergence_id ASC
+            """,
+            (str(project_id),),
+        )
+        return tuple(self._decode_convergence_index_row(project_id=str(project_id), row=row) for row in rows)
+
     def get_review_chain(self, project_id: str, review_chain_id: str) -> ReviewChain | None:
         row = self._fetchone(
             """
@@ -1418,6 +1430,18 @@ class PostgresStore(SQLiteSnapshotStore):
         if row is None:
             return None
         return self._decode_review_chain_index_row(project_id=str(project_id), row=row)
+
+    def list_review_chains(self, project_id: str) -> tuple[ReviewChain, ...]:
+        rows = self._fetchall(
+            """
+            SELECT review_chain_id, queue_json, head_index, state
+            FROM review_chain_index
+            WHERE project_id = %s
+            ORDER BY review_chain_id ASC
+            """,
+            (str(project_id),),
+        )
+        return tuple(self._decode_review_chain_index_row(project_id=str(project_id), row=row) for row in rows)
 
     def get_range_snapshot(self, project_id: str, range_id: str) -> RangeSnapshot | None:
         row = self._fetchone(

@@ -4,83 +4,87 @@
 
 ## 1. 当前用户要求
 
-- 统一以下详情页左侧概览卡：
-  - 复习任务详情页
-  - 复习链详情页
-  - 收敛详情页
-  - 学习任务详情页
-  - 复述点详情页
-  - 实例详情页
-  - 学习对象详情页
-- 左侧概览卡内删除“返回 xxx”类按钮。
-- 左侧概览卡一级标题统一为“图标 + 名字”，下方加横杠。
-- 名字规则：
-  - 复习任务、复习链、收敛、复述点没有具体名字，分别显示固定名称。
-  - 学习任务、实例、学习对象显示具体名字。
-- 删除这些详情页概览卡内类似“项目：网课材料”的项目归属文案。
+- 复习任务、复习链、收敛、学习任务四个详情页左侧概览卡的相关项排序保持一致。
+- 把“关联内容”统一改为“关联入口”，并做成可点击蓝链。
+- 收敛详情页的关联入口指向所属复习链。
+- 复习任务详情页的关联入口指向所属收敛；如果不是收敛生成的复习任务，则指向所属复习链。
+- 删除收敛详情、复习任务详情、复习链右侧队列中对用户不可读的裸 ID 引用。
+- 删除复习任务详情页“复习结果详情”下方说明文案。
 
 ## 2. 本次实际修改文件
 
-- `frontend/src/views/shared/DetailSummaryCard.tsx`
+- `backend/models/review_item_binding.py`
+- `backend/models/__init__.py`
+- `backend/system/api.py`
+- `backend/system/persistence_store.py`
+- `backend/system/postgres_store.py`
+- `adapter/mappers.py`
+- `adapter/routers/review.py`
+- `frontend/src/ui/api/review.ts`
+- `frontend/src/ui/queries/reviewTasks.ts`
+- `frontend/src/ui/queries/reviewChains.ts`
 - `frontend/src/views/reviewTasks/ReviewTaskPage.tsx`
 - `frontend/src/views/reviewChains/ReviewChainPage.tsx`
 - `frontend/src/views/convergences/ConvergencePage.tsx`
 - `frontend/src/views/learningTasks/LearningTaskNodePage.tsx`
-- `frontend/src/views/recallPoints/RecallPointPage.tsx`
-- `frontend/src/views/instances/InstancePage.tsx`
-- `frontend/src/views/learningObjects/LearningObjectNodePage.tsx`
-- `frontend/tests/e2e/detail-summary-cards.spec.ts`
-- `frontend/tests/fixtures/test-data.ts`
+- `frontend/src/views/recallPoints/components/RecallPointListCard.tsx`
 - `frontend/tests/fixtures/mock-api.ts`
+- `frontend/tests/e2e/review-detail-entry-links.spec.ts`
+- `tests/test_review_item_bindings.py`
 - `docs/current-change.md`
 
 ## 3. 每个文件为什么修改
 
-- `DetailSummaryCard.tsx`：把详情页左卡标题统一为“图标 + 名字 + 下方横杠”，并保留原有统计项卡片结构。
-- `ReviewTaskPage.tsx`：复习任务左卡改用共享标题，删除左卡返回按钮和项目归属文案。
-- `ReviewChainPage.tsx`：复习链左卡改用共享标题，删除左卡返回按钮和项目归属文案。
-- `ConvergencePage.tsx`：收敛左卡改用共享标题，标题从“收敛详情”统一为“收敛”，删除左卡返回按钮和项目归属文案。
-- `LearningTaskNodePage.tsx`：学习任务左卡改用共享标题，保留原有名称编辑能力，删除左卡返回按钮。
-- `RecallPointPage.tsx`：复述点左卡改用共享标题，标题从“复述点详情”统一为“复述点”，删除左卡返回按钮。
-- `InstancePage.tsx`：实例左卡改用共享标题，删除左卡返回按钮和说明文案。
-- `LearningObjectNodePage.tsx`：学习对象左卡改用共享标题，删除左卡返回按钮。
-- `detail-summary-cards.spec.ts`：新增 7 个详情页左卡 e2e，覆盖统一标题、图标、横杠、无左卡返回按钮、无项目归属文案。
-- `test-data.ts`：补齐复习链、收敛、学习任务节点等 e2e 确定性数据。
-- `mock-api.ts`：补齐上述详情页会访问的 mock API。
-- `docs/current-change.md`：覆盖为本次任务工作单。
+- `review_item_binding.py` / `backend/models/__init__.py`：新增只读绑定结果模型，表达“复习任务/收敛属于哪个上级入口”。
+- `backend/system/api.py`：新增 `get_convergence_binding`、`get_review_task_binding`，在后端按真实复习链/收敛关系反查入口。
+- `persistence_store.py` / `postgres_store.py`：给 SQLite/PostgreSQL snapshot store 增加复习链和收敛的项目内只读列表查询，供绑定反查使用。
+- `adapter/mappers.py` / `adapter/routers/review.py`：暴露两个 scoped project 只读接口，并把领域模型映射为前端 DTO。
+- `frontend/src/ui/api/review.ts`：新增绑定 DTO schema 和请求函数。
+- `frontend/src/ui/queries/reviewTasks.ts` / `reviewChains.ts`：接入绑定查询。
+- `ReviewTaskPage.tsx`：左卡新增“关联入口”蓝链，删除当前引用、范围 ID 和结果详情说明文案；逐题结果不再显示复述点/实例裸 ID。
+- `ReviewChainPage.tsx`：左卡排序统一；右侧队列不再显示复习任务、收敛步骤和范围裸 ID。
+- `ConvergencePage.tsx`：左卡新增“关联入口”蓝链，删除当前引用和种子范围裸 ID；轮次列表不再显示复习任务和范围裸 ID。
+- `LearningTaskNodePage.tsx`：把叶子学习任务左卡“关联内容”改为“关联入口”，实例入口显示为可点击蓝链。
+- `RecallPointListCard.tsx`：把缺省锚点标签文案从“关联内容”同步为“关联入口”。
+- `mock-api.ts`：补齐新绑定接口的 e2e mock。
+- `review-detail-entry-links.spec.ts`：覆盖四个详情页左卡顺序、蓝链和裸 ID 清理。
+- `test_review_item_bindings.py`：覆盖后端只读绑定语义，确保复习任务优先归属收敛，否则归属复习链。
 
 ## 4. 行为语义是否变化
 
-- 是，详情页左侧概览卡的可见 UI 层级变化。
-- 不改变详情页路由、API、数据读取或业务行为。
+- 是，新增两个只读 API，用于读取复习任务/收敛的上级关联入口。
+- 是，四个详情页左卡的可见字段、顺序和链接行为变化。
+- 否，不改变复习链、收敛、复习任务的生成、推进、存储结构或调度语义。
 
 ## 5. 是否做了重构，以及为什么
 
-- 是，做了局部共享组件抽取。
-- 原因：7 个详情页左卡标题结构分散实现，如果继续逐页手写会保留重复逻辑和未来分叉风险。
+- 做了局部模型和查询整理。
+- 原因：前端无法可靠从已有详情响应中得知复习任务或收敛的上级入口；如果在前端扫全量数据反查，会留下隐式关系和重复逻辑。
 
 ## 6. 未修改哪些相关内容，以及为什么
 
-- 不修改详情页右侧主体内容，因为用户只要求左侧概览卡。
-- 不修改缺少上下文、未找到数据等空状态里的返回按钮，因为用户限定的是详情页左边卡片。
-- 不修改路由、API、数据结构、部署配置。
+- 不修改数据库 schema，因为所需关系已经存在于 `review_chain_index.queue_json` 和 `convergence_index.review_task_ids_json`。
+- 不修改调度推进逻辑，因为本次只读展示关联入口。
+- 不删除或改名已有详情 API，避免无关公共接口变更。
+- 不清理工作台、设置页等非本次详情页范围内的 ID 文案。
 
 ## 7. 是否影响 API、架构、部署、数据结构、UI、测试
 
-- API：否。
-- 架构：否。
+- API：是，新增两个 scoped project 只读接口。
+- 架构：否，仍由 router 调用公开 `SystemAPI`，不绕过边界。
 - 部署：否。
 - 数据结构：否。
-- UI：是，详情页左侧概览卡标题和局部操作入口变化。
-- 测试：是，新增 e2e 覆盖 7 个详情页左卡，并补齐 e2e mock 数据。
+- UI：是，四个详情页左卡和复习链/收敛/复习任务右侧详情展示变化。
+- 测试：是，新增后端单测和前端 e2e。
 
 ## 8. 当前风险点和不确定项
 
-- 无。
+- `pnpm --dir frontend build` 仍有既有 `hls` chunk 大于 500 kB warning，非本次引入。
+- Browser 插件未暴露可调用 Node REPL/browser 工具，本轮渲染验证使用项目内 Playwright。
 
 ## 9. 仍需用户确认的问题
 
-- 无。用户已确认执行。
+- 无。用户已确认“继续”实现该语义。
 
 ## 10. 污染风险检查
 
@@ -94,9 +98,8 @@
 
 ## 11. 验证状态
 
-- 已先运行新增 e2e，旧实现中 7 个页面均因找不到统一左卡测试标识而失败。
-- `pnpm --dir frontend build`：通过；仍有既有 `hls` chunk 大于 500 kB 的 warning。
-- `pnpm --dir frontend exec playwright test frontend/tests/e2e/detail-summary-cards.spec.ts`：通过，7 个用例全部通过。
-- `pnpm --dir frontend exec playwright test frontend/tests/e2e/subject-project.spec.ts`：通过，6 个用例全部通过。
-- `pnpm --dir frontend exec playwright test frontend/tests/e2e/navigation.spec.ts`：通过，2 个用例全部通过。
-- `pnpm --dir frontend exec playwright test frontend/tests/e2e/workbench-review.spec.ts`：通过，7 个用例全部通过。
+- `python -m pytest tests/test_review_item_bindings.py -q`：通过。
+- `pnpm --dir frontend build`：通过；仍有既有 `hls` chunk warning。
+- `pnpm --dir frontend exec playwright test frontend/tests/e2e/review-detail-entry-links.spec.ts`：通过。
+- `python tools/verify_backend_boundaries.py --report-only`：通过。
+- `git diff --check`：通过。

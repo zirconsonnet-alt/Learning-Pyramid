@@ -10,11 +10,6 @@ import { getConvergence, getReviewTask } from "@/ui/api/review"
 import { ContentEmptyState, ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
-import {
-  formatConvergenceReference,
-  formatRangeReference,
-  formatReviewTaskReference,
-} from "@/ui/displayIdentifiers"
 import { buildScopedProjectPath } from "@/ui/projectPaths"
 import { useReviewChain, useReviewChainBinding } from "@/ui/queries/reviewChains"
 import { cn } from "@/ui/utils"
@@ -53,10 +48,6 @@ function describeConvergenceState(state: string) {
   if (state === "IN_PROGRESS") return "进行中"
   if (state === "TERMINATED") return "已完成"
   return state
-}
-
-function formatQueueItemReference(kind: "CONVERGENCE" | "REVIEW_TASK", id: string) {
-  return kind === "REVIEW_TASK" ? formatReviewTaskReference(id) : formatConvergenceReference(id)
 }
 
 function reviewTaskDetailPath(subjectId: string, projectId: string, reviewTaskId: string) {
@@ -109,7 +100,7 @@ export function ReviewChainPage() {
   const headItem = chainQ.data && chainQ.data.headIndex < queue.length ? queue[chainQ.data.headIndex] : null
   const headReviewTaskPath = headItem?.kind === "REVIEW_TASK" ? reviewTaskDetailPath(subjectId, pid, headItem.id) : null
   const headConvergencePath = headItem?.kind === "CONVERGENCE" ? convergenceDetailPath(subjectId, pid, headItem.id) : null
-  const headLabel = headItem ? `${describeQueueItemKind(headItem.kind)} · ${formatQueueItemReference(headItem.kind, headItem.id)}` : "已完成"
+  const headLabel = headItem ? describeQueueItemKind(headItem.kind) : "已完成"
   const headValue = headItem ? (
     headReviewTaskPath ? (
       <Link className="text-primary underline-offset-4 hover:underline" to={headReviewTaskPath}>
@@ -145,12 +136,12 @@ export function ReviewChainPage() {
         items={[
           { label: "状态", value: describeReviewChainState(chainQ.data.state) },
           { label: "队列长度", value: chainQ.data.queue.length },
-          { label: "当前 head", value: headValue },
-          { label: "关联入口", value: entryValue },
           {
             label: "目标层级",
             value: bindingQ.data ? `L${bindingQ.data.targetLayerIndex}` : bindingQ.isLoading ? "读取中..." : "-",
           },
+          { label: "关联入口", value: entryValue },
+          { label: "当前任务", value: headValue },
         ]}
       />
       {bindingQ.error ? <ErrorNotice title="复习链绑定加载失败" message={formatApiError(bindingQ.error)} /> : null}
@@ -221,27 +212,22 @@ export function ReviewChainPage() {
                           >
                             {isHead ? "当前 head" : isDone ? "已推进" : "待执行"}
                           </span>
-                          <Link className="rounded-full border border-[#dbe4ee] bg-white px-2.5 py-1 font-medium text-primary hover:underline" to={detailPath}>
-                            {formatQueueItemReference(item.kind, item.id)}
-                          </Link>
                         </div>
 
                         {detailQ?.isLoading ? <p className="text-xs text-muted-foreground">加载详情中...</p> : null}
                         {detailQ?.error ? <p className="text-xs text-destructive">{formatApiError(detailQ.error)}</p> : null}
 
                         {item.kind === "REVIEW_TASK" && reviewTask ? (
-                          <div className="grid gap-3 text-xs text-muted-foreground md:grid-cols-3">
+                          <div className="grid gap-3 text-xs text-muted-foreground md:grid-cols-2">
                             <QueueItemMetric label="状态" value={describeReviewTaskState(reviewTask.state)} />
-                            <QueueItemMetric label="输入范围" value={formatRangeReference(reviewTask.inputRangeId)} />
                             <QueueItemMetric label="执行时间" value={formatTs(reviewTask.executedAt)} />
                           </div>
                         ) : null}
 
                         {item.kind === "CONVERGENCE" && convergence ? (
-                          <div className="grid gap-3 text-xs text-muted-foreground md:grid-cols-3">
+                          <div className="grid gap-3 text-xs text-muted-foreground md:grid-cols-2">
                             <QueueItemMetric label="状态" value={describeConvergenceState(convergence.state)} />
                             <QueueItemMetric label="轮次" value={convergence.roundCount} />
-                            <QueueItemMetric label="种子范围" value={formatRangeReference(convergence.seedRangeId)} />
                           </div>
                         ) : null}
                       </div>

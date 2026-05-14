@@ -10,13 +10,8 @@ import { getRangeSnapshot, getReviewTask } from "@/ui/api/review"
 import { ContentEmptyState, ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
-import {
-  formatConvergenceReference,
-  formatRangeReference,
-  formatReviewTaskReference,
-} from "@/ui/displayIdentifiers"
 import { buildScopedProjectPath } from "@/ui/projectPaths"
-import { useConvergence } from "@/ui/queries/reviewChains"
+import { useConvergence, useConvergenceBinding } from "@/ui/queries/reviewChains"
 import { cn } from "@/ui/utils"
 import { DetailSummaryCard } from "@/views/shared/DetailSummaryCard"
 
@@ -60,6 +55,7 @@ export function ConvergencePage() {
   const cid = convergenceId ?? ""
   const projectScope: ScopedProjectRef | null = subjectId && pid ? { subjectId, scopedProjectId: pid } : null
   const convergenceQ = useConvergence(projectScope, cid)
+  const bindingQ = useConvergenceBinding(projectScope, cid)
 
   const reviewTaskQs = useQueries({
     queries:
@@ -122,6 +118,18 @@ export function ConvergencePage() {
     inputRangeQs.find((query) => query.error)?.error ??
     resultRangeQs.find((query) => query.error)?.error ??
     null
+  const entryValue = bindingQ.data ? (
+    <Link
+      className="text-primary underline-offset-4 hover:underline"
+      to={buildScopedProjectPath(subjectId, pid, `/review-chains/${bindingQ.data.reviewChainId}`)}
+    >
+      查看复习链
+    </Link>
+  ) : bindingQ.isLoading ? (
+    "读取中..."
+  ) : (
+    "暂未关联"
+  )
 
   const summaryPanel = convergenceQ.data ? (
     <div className="space-y-3">
@@ -130,12 +138,12 @@ export function ConvergencePage() {
         title="收敛"
         items={[
           { label: "状态", value: describeConvergenceState(convergenceQ.data.state) },
-          { label: "当前引用", value: formatConvergenceReference(cid) },
           { label: "轮次数", value: convergenceQ.data.roundCount },
           { label: "已生成复习任务", value: reviewTaskIds.length },
-          { label: "种子范围", value: formatRangeReference(convergenceQ.data.seedRangeId) },
+          { label: "关联入口", value: entryValue },
         ]}
       />
+      {bindingQ.error ? <ErrorNotice title="关联入口加载失败" message={formatApiError(bindingQ.error)} /> : null}
       <Button variant="outline" className="w-full rounded-full" onClick={() => void convergenceQ.refetch()} disabled={convergenceQ.isFetching}>
         <RefreshCw className="h-4 w-4" />
         {convergenceQ.isFetching ? "刷新中..." : "刷新"}
@@ -229,9 +237,6 @@ function ConvergenceRoundListCard({
                       <span className="rounded-full bg-[#eef5ff] px-2.5 py-1 font-medium text-primary">
                         第 {entry.roundIndex + 1} 轮
                       </span>
-                      <span className="rounded-full border border-[#dbe4ee] bg-white px-2.5 py-1 font-medium text-slate-600">
-                        {formatReviewTaskReference(entry.reviewTaskId)}
-                      </span>
                       <span
                         className={cn(
                           "rounded-full border px-2.5 py-1 font-medium",
@@ -243,13 +248,8 @@ function ConvergenceRoundListCard({
                         {describeReviewTaskState(entry.reviewTask.state)}
                       </span>
                     </div>
-                    <div className="grid gap-3 text-xs text-muted-foreground md:grid-cols-4">
-                      <RoundMetric label="输入范围" value={formatRangeReference(entry.reviewTask.inputRangeId)} />
+                    <div className="grid gap-3 text-xs text-muted-foreground md:grid-cols-3">
                       <RoundMetric label="输入题数" value={entry.inputCount ?? "读取中..."} />
-                      <RoundMetric
-                        label="结果范围"
-                        value={entry.reviewTask.resultRangeId ? formatRangeReference(entry.reviewTask.resultRangeId) : "-"}
-                      />
                       <RoundMetric label="结果题数" value={entry.resultCount ?? (entry.reviewTask.resultRangeId ? "读取中..." : "-")} />
                       <RoundMetric label="执行时间" value={formatTs(entry.reviewTask.executedAt)} />
                     </div>

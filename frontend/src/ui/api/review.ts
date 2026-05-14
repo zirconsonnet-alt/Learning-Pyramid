@@ -58,6 +58,14 @@ export const ReviewChainBindingSchema = z.object({
 })
 export type ReviewChainBinding = z.infer<typeof ReviewChainBindingSchema>
 
+export const ReviewItemBindingSchema = z.object({
+  projectId: z.string(),
+  kind: z.enum(["CONVERGENCE", "REVIEW_CHAIN"]),
+  reviewChainId: z.string(),
+  convergenceId: z.string().nullable(),
+})
+export type ReviewItemBinding = z.infer<typeof ReviewItemBindingSchema>
+
 export const RangeSnapshotSchema = z.object({
   projectId: z.string(),
   rangeId: z.string(),
@@ -124,8 +132,22 @@ export function getReviewTask(scope: ScopedProjectRef, reviewTaskId: string) {
   return apiRequest({ path: projectApiPath(scope, `/review-tasks/${reviewTaskId}`), responseSchema: ReviewTaskSchema })
 }
 
+export function getReviewTaskBinding(scope: ScopedProjectRef, reviewTaskId: string) {
+  return apiRequest({
+    path: projectApiPath(scope, `/review-tasks/${reviewTaskId}/binding`),
+    responseSchema: ReviewItemBindingSchema,
+  })
+}
+
 export function getConvergence(scope: ScopedProjectRef, convergenceId: string) {
   return apiRequest({ path: projectApiPath(scope, `/convergences/${convergenceId}`), responseSchema: ConvergenceSchema })
+}
+
+export function getConvergenceBinding(scope: ScopedProjectRef, convergenceId: string) {
+  return apiRequest({
+    path: projectApiPath(scope, `/convergences/${convergenceId}/binding`),
+    responseSchema: ReviewItemBindingSchema,
+  })
 }
 
 export function getReviewChain(scope: ScopedProjectRef, reviewChainId: string) {

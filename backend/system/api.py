@@ -86,6 +86,7 @@ from backend.models.review_recommendation import (
 from backend.models.recall_point_review_record import RecallPointReviewRecord
 from backend.models.rich_content import RichContent, validate_rich_content_write_time
 from backend.models.review_chain import ReviewChain, ReviewChainItem, ReviewChainItemKind
+from backend.models.review_item_binding import ReviewItemBinding, ReviewItemBindingKind
 from backend.models.review_task import ReviewTask
 from backend.models.review_task_queue import ReviewTaskQueue
 from backend.models.study_material import StudyMaterial, StudyMaterialType
@@ -7772,6 +7773,81 @@ class SystemAPI:
         finally:
             self.sys.rollback(s)
 
+    def get_convergence_binding(self, project_id: ProjectId, convergence_id: ConvergenceId) -> ReviewItemBinding:
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            _ = self.get_convergence(project_id, convergence_id)
+            chains = sql_store.list_review_chains(str(project_id))
+        else:
+            s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
+            try:
+                _ = self.sys.convergence_repo.get(s, convergence_id)
+                chains = self.sys.review_chain_repo.all(s)
+            finally:
+                self.sys.rollback(s)
+
+        convergence_key = id_canonical_text(convergence_id)
+        for chain in chains:
+            for item in chain.queue:
+                if item.kind == ReviewChainItemKind.CONVERGENCE and id_canonical_text(item.id) == convergence_key:
+                    binding = ReviewItemBinding(
+                        project_id=project_id,
+                        kind=ReviewItemBindingKind.REVIEW_CHAIN,
+                        review_chain_id=chain.review_chain_id,
+                        convergence_id=None,
+                    )
+                    binding.validate_local_invariants()
+                    return binding
+        raise NotFound(convergence_id)
+
+    def get_review_task_binding(self, project_id: ProjectId, review_task_id: ReviewTaskId) -> ReviewItemBinding:
+        sql_store = self._sql_store()
+        if sql_store is not None:
+            _ = self.get_review_task(project_id, review_task_id)
+            convergences = sql_store.list_convergences(str(project_id))
+            chains = sql_store.list_review_chains(str(project_id))
+        else:
+            s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
+            try:
+                _ = self.sys.review_task_repo.get(s, review_task_id)
+                convergences = self.sys.convergence_repo.all(s)
+                chains = self.sys.review_chain_repo.all(s)
+            finally:
+                self.sys.rollback(s)
+
+        review_task_key = id_canonical_text(review_task_id)
+        convergence_by_id = {id_canonical_text(item.convergence_id): item for item in convergences}
+        for convergence in convergences:
+            if any(id_canonical_text(item) == review_task_key for item in convergence.review_task_ids):
+                convergence_key = id_canonical_text(convergence.convergence_id)
+                for chain in chains:
+                    for item in chain.queue:
+                        if item.kind == ReviewChainItemKind.CONVERGENCE and id_canonical_text(item.id) == convergence_key:
+                            binding = ReviewItemBinding(
+                                project_id=project_id,
+                                kind=ReviewItemBindingKind.CONVERGENCE,
+                                review_chain_id=chain.review_chain_id,
+                                convergence_id=convergence.convergence_id,
+                            )
+                            binding.validate_local_invariants()
+                            return binding
+                raise NotFound(convergence.convergence_id)
+
+        for chain in chains:
+            for item in chain.queue:
+                if item.kind == ReviewChainItemKind.REVIEW_TASK and id_canonical_text(item.id) == review_task_key:
+                    binding = ReviewItemBinding(
+                        project_id=project_id,
+                        kind=ReviewItemBindingKind.REVIEW_CHAIN,
+                        review_chain_id=chain.review_chain_id,
+                        convergence_id=None,
+                    )
+                    binding.validate_local_invariants()
+                    return binding
+                if item.kind == ReviewChainItemKind.CONVERGENCE and id_canonical_text(item.id) in convergence_by_id:
+                    continue
+        raise NotFound(review_task_id)
+
     def get_range_snapshot(self, project_id: ProjectId, range_id: RangeId) -> object:
         sql_store = self._sql_store()
         if sql_store is not None:
@@ -7966,6 +8042,8 @@ API_WHITELIST: dict[str, SchedulingEffect] = {
     "get_learning_task_entry_registration": SchedulingEffect.NONE,
     "get_learning_task_node_entry_registration": SchedulingEffect.NONE,
     "get_convergence": SchedulingEffect.NONE,
+    "get_convergence_binding": SchedulingEffect.NONE,
+    "get_review_task_binding": SchedulingEffect.NONE,
     "get_review_chain": SchedulingEffect.NONE,
     "get_review_chain_entry_registration": SchedulingEffect.NONE,
     "list_recall_points": SchedulingEffect.NONE,

@@ -26,6 +26,7 @@ from backend.models.review_recommendation import (
 )
 from backend.models.rich_content import ContentBlock, RichContent
 from backend.models.review_chain import ReviewChain
+from backend.models.review_item_binding import ReviewItemBinding
 from backend.models.review_task import ReviewTask
 from backend.models.aggregation_event import AggregationEvent
 from backend.models.audit_log_event import AuditLogEvent
@@ -273,6 +274,15 @@ def review_chain_to_dto(c: ReviewChain, *, public_project_id: str | None = None)
         "headIndex": int(c.head_index),
         "state": _jsonable(c.state),
         "queue": [{"kind": _jsonable(it.kind), "id": str(it.id)} for it in c.queue],
+    }
+
+
+def review_item_binding_to_dto(item: ReviewItemBinding, *, public_project_id: str | None = None) -> Dict[str, Any]:
+    return {
+        "projectId": _project_id(item.project_id, public_project_id),
+        "kind": _jsonable(item.kind),
+        "reviewChainId": str(item.review_chain_id),
+        "convergenceId": None if item.convergence_id is None else str(item.convergence_id),
     }
 
 

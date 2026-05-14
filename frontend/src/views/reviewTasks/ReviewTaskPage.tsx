@@ -7,13 +7,7 @@ import type { ScopedProjectRef } from "@/ui/api/projectScope"
 import { RichContentRenderer } from "@/ui/components/RichContentRenderer"
 import { ContentEmptyState, ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/components/ui/card"
-import {
-  formatInstanceReference,
-  formatRangeReference,
-  formatRecallPointReference,
-  formatReviewTaskReference,
-} from "@/ui/displayIdentifiers"
+import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import { buildScopedProjectPath } from "@/ui/projectPaths"
 import { useReviewTaskDetails } from "@/ui/queries/reviewTasks"
 import { DetailSummaryCard } from "@/views/shared/DetailSummaryCard"
@@ -62,7 +56,7 @@ export function ReviewTaskPage() {
   const pid = scopedProjectId ?? ""
   const rtid = reviewTaskId ?? ""
   const projectScope: ScopedProjectRef | null = subjectId && pid ? { subjectId, scopedProjectId: pid } : null
-  const { reviewTaskQ, inputRangeQ, resultRangeQ, recallPointQs } = useReviewTaskDetails(projectScope, rtid)
+  const { reviewTaskQ, reviewTaskBindingQ, inputRangeQ, resultRangeQ, recallPointQs } = useReviewTaskDetails(projectScope, rtid)
 
   if (!subjectId || !pid || !rtid) {
     return (
@@ -89,6 +83,27 @@ export function ReviewTaskPage() {
     reviewTaskQ.data?.state === "DONE" && inputRangeQ.data ? inputRangeQ.data.recallPointIds.length - failedRecallPointIds.size : null
   const resultSummary =
     reviewTaskQ.data?.state === "DONE" ? `会 ${canRecallCount ?? 0} / 不会 ${cannotRecallCount ?? 0}` : "尚未提交结果"
+  const entryValue = reviewTaskBindingQ.data ? (
+    reviewTaskBindingQ.data.kind === "CONVERGENCE" && reviewTaskBindingQ.data.convergenceId ? (
+      <Link
+        className="text-primary underline-offset-4 hover:underline"
+        to={buildScopedProjectPath(subjectId, pid, `/convergences/${reviewTaskBindingQ.data.convergenceId}`)}
+      >
+        查看收敛
+      </Link>
+    ) : (
+      <Link
+        className="text-primary underline-offset-4 hover:underline"
+        to={buildScopedProjectPath(subjectId, pid, `/review-chains/${reviewTaskBindingQ.data.reviewChainId}`)}
+      >
+        查看复习链
+      </Link>
+    )
+  ) : reviewTaskBindingQ.isLoading ? (
+    "读取中..."
+  ) : (
+    "暂未关联"
+  )
   const summaryPanel = reviewTaskQ.data ? (
     <div className="space-y-3">
       <DetailSummaryCard
@@ -96,15 +111,14 @@ export function ReviewTaskPage() {
         title="复习任务"
         items={[
           { label: "状态", value: describeReviewTaskState(reviewTaskQ.data.state) },
-          { label: "当前引用", value: formatReviewTaskReference(rtid) },
           { label: "复述点", value: inputRecallPointIds.length || "-" },
           { label: "结果摘要", value: resultSummary },
-          { label: "输入范围", value: formatRangeReference(reviewTaskQ.data.inputRangeId) },
-          { label: "结果范围", value: formatRangeReference(reviewTaskQ.data.resultRangeId) },
+          { label: "关联入口", value: entryValue },
           { label: "创建时间", value: formatTs(reviewTaskQ.data.createdAt) },
           { label: "执行时间", value: formatTs(reviewTaskQ.data.executedAt) },
         ]}
       />
+      {reviewTaskBindingQ.error ? <ErrorNotice title="关联入口加载失败" message={formatApiError(reviewTaskBindingQ.error)} /> : null}
       <Button variant="outline" className="w-full rounded-full" onClick={() => void reviewTaskQ.refetch()} disabled={reviewTaskQ.isFetching}>
         <RefreshCw className="h-4 w-4" />
         {reviewTaskQ.isFetching ? "刷新中..." : "刷新"}
@@ -130,7 +144,6 @@ export function ReviewTaskPage() {
           <div className="min-w-0">
             <ReviewTaskResultListCard
               title="复习结果详情"
-              description="按这次复习的输入顺序展开每个复述点，以及对应的会/不会判定。"
               isLoading={detailLoading}
               error={detailError}
               emptyState={
@@ -155,7 +168,7 @@ export function ReviewTaskPage() {
                     if (recallPointQ?.isLoading) {
                       return (
                         <div key={recallPointId} className="rounded-[1rem] border border-[#dbe4ee] bg-[#fbfdff] p-4 text-sm text-muted-foreground">
-                          正在加载 {formatRecallPointReference(recallPointId)} ...
+                          正在加载复述点...
                         </div>
                       )
                     }
@@ -163,7 +176,7 @@ export function ReviewTaskPage() {
                     if (recallPointQ?.error) {
                       return (
                         <div key={recallPointId} className="rounded-[1rem] border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
-                          {formatRecallPointReference(recallPointId)} 加载失败：{formatApiError(recallPointQ.error)}
+                          复述点加载失败：{formatApiError(recallPointQ.error)}
                         </div>
                       )
                     }
@@ -186,17 +199,12 @@ export function ReviewTaskPage() {
                               <span className={`rounded-full border px-2.5 py-1 font-medium ${reviewOutcomeClasses(outcome)}`}>
                                 {describeReviewOutcome(outcome)}
                               </span>
-                              <span className="rounded-full border border-[#dbe4ee] bg-[#f8fafc] px-2.5 py-1 font-medium text-slate-600">
-                                {formatRecallPointReference(recallPointId)}
-                              </span>
                             </div>
 
                             <div className="text-xs text-muted-foreground">
                               {recallPoint.anchor ? (
                                 <>
-                                  锚点：<span className="text-foreground">{formatInstanceReference(recallPoint.anchor.instanceId)}</span>
-                                  <span className="mx-1">·</span>
-                                  <span className="text-foreground">{recallPoint.anchor.position}</span>
+                                  锚点：<span className="text-foreground">{recallPoint.anchor.position}</span>
                                 </>
                               ) : (
                                 <>锚点：<span className="text-foreground">未绑定锚点</span></>
@@ -235,14 +243,12 @@ export function ReviewTaskPage() {
 
 function ReviewTaskResultListCard({
   children,
-  description,
   emptyState,
   error,
   isLoading,
   title,
 }: {
   children: ReactNode
-  description?: string
   emptyState?: ReactNode
   error?: unknown
   isLoading?: boolean
@@ -252,7 +258,6 @@ function ReviewTaskResultListCard({
     <Card>
       <CardHeader className="pb-3">
         <CardTitle>{title}</CardTitle>
-        {description ? <CardDescription>{description}</CardDescription> : null}
       </CardHeader>
       <CardContent>
         {isLoading ? <LoadingNotice title="正在加载复习详情" message="正在读取输入范围和每个复述点内容。" /> : null}

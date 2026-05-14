@@ -2,7 +2,16 @@ import { useQueries, useQuery } from "@tanstack/react-query"
 
 import { getLearningTask } from "@/ui/api/learningTasks"
 import type { ScopedProjectRef } from "@/ui/api/projectScope"
-import { getConvergence, getRangeSnapshot, getRecallPoint, getReviewChain, getReviewTask, type Convergence, type ReviewChain } from "@/ui/api/review"
+import {
+  getConvergence,
+  getRangeSnapshot,
+  getRecallPoint,
+  getReviewChain,
+  getReviewTask,
+  getReviewTaskBinding,
+  type Convergence,
+  type ReviewChain,
+} from "@/ui/api/review"
 
 function collectReviewTaskIdsFromChain(chain: ReviewChain | undefined, convergences: readonly (Convergence | undefined)[]) {
   if (!chain) return [] as string[]
@@ -81,6 +90,12 @@ export function useReviewTaskDetails(scope: ScopedProjectRef | null, reviewTaskI
     enabled: !!scope?.subjectId && !!projectId && !!reviewTaskId,
   })
 
+  const reviewTaskBindingQ = useQuery({
+    queryKey: ["reviewTaskBinding", scope?.subjectId ?? "", projectId, reviewTaskId],
+    queryFn: () => getReviewTaskBinding(scope as ScopedProjectRef, reviewTaskId),
+    enabled: !!scope?.subjectId && !!projectId && !!reviewTaskId,
+  })
+
   const inputRangeId = reviewTaskQ.data?.inputRangeId ?? ""
   const inputRangeQ = useQuery({
     queryKey: ["range", scope?.subjectId ?? "", projectId, inputRangeId],
@@ -106,6 +121,7 @@ export function useReviewTaskDetails(scope: ScopedProjectRef | null, reviewTaskI
 
   return {
     reviewTaskQ,
+    reviewTaskBindingQ,
     inputRangeQ,
     resultRangeQ,
     recallPointQs,

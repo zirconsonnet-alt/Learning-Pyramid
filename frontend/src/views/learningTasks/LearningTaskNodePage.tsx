@@ -71,11 +71,9 @@ export function LearningTaskNodePage() {
   const isContainer = nodeQ.data?.kind === "container"
   const childCount = isContainer ? getLearningTaskNodeDisplayChildIds(nodeQ.data).length : null
   const instanceTitleById = Object.fromEntries((instancesQ.data ?? []).map((instance) => [instance.instanceId, instance.materialDisplayName])) as Record<string, string>
-  const relatedInstanceLabel = (() => {
+  const relatedInstanceIds = (() => {
     const ids = Array.from(new Set((recallPointsQ.data ?? []).flatMap((item) => (item.anchor?.instanceId ? [item.anchor.instanceId] : []))))
-    if (ids.length === 0) return "未绑定内容锚点"
-    if (ids.length === 1) return instanceTitleById[ids[0]] ?? "关联内容"
-    return `${ids.length} 个关联内容`
+    return ids
   })()
   const summaryPanel = nodeQ.data ? (
     <div className="space-y-3">
@@ -117,7 +115,8 @@ export function LearningTaskNodePage() {
           learningTaskId={learningTaskId}
           learningTaskQ={learningTaskQ}
           displayTitle={title}
-          relatedInstanceLabel={relatedInstanceLabel}
+          relatedInstanceIds={relatedInstanceIds}
+          instanceTitleById={instanceTitleById}
           reviewChainId={bindingQ.data?.reviewChainId ?? null}
         />
       ) : null}
@@ -184,10 +183,27 @@ function LeafLearningTaskCard(props: {
   learningTaskId: string
   learningTaskQ: ReturnType<typeof useLearningTask>
   displayTitle: string
-  relatedInstanceLabel: string
+  relatedInstanceIds: string[]
+  instanceTitleById: Record<string, string>
   reviewChainId: string | null
 }) {
-  const { subjectId, projectId, learningTaskId, learningTaskQ, displayTitle, relatedInstanceLabel, reviewChainId } = props
+  const { subjectId, projectId, learningTaskId, learningTaskQ, displayTitle, relatedInstanceIds, instanceTitleById, reviewChainId } = props
+  const relatedEntryValue =
+    relatedInstanceIds.length === 0 ? (
+      "未绑定内容锚点"
+    ) : relatedInstanceIds.length === 1 ? (
+      <Link className="text-primary underline-offset-4 hover:underline" to={buildScopedProjectPath(subjectId, projectId, `/instances/${relatedInstanceIds[0]}`)}>
+        {instanceTitleById[relatedInstanceIds[0]] ?? "查看实例"}
+      </Link>
+    ) : (
+      <span className="inline-flex flex-wrap gap-x-3 gap-y-1">
+        {relatedInstanceIds.map((instanceId, index) => (
+          <Link key={instanceId} className="text-primary underline-offset-4 hover:underline" to={buildScopedProjectPath(subjectId, projectId, `/instances/${instanceId}`)}>
+            {instanceTitleById[instanceId] ?? `入口 ${index + 1}`}
+          </Link>
+        ))}
+      </span>
+    )
   return (
     <DetailSummaryCard
       header={
@@ -214,7 +230,7 @@ function LeafLearningTaskCard(props: {
           label: "层级",
           value: learningTaskQ.data?.targetLayerIndex === null || learningTaskQ.data == null ? "-" : `L${learningTaskQ.data.targetLayerIndex}`,
         },
-        { label: "关联内容", value: relatedInstanceLabel },
+        { label: "关联入口", value: relatedEntryValue },
         {
           label: "复习关系",
           value: reviewChainId ? (

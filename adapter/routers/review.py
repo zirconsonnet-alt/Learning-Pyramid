@@ -6,6 +6,7 @@ from adapter.mappers import (
     recall_point_review_projection_to_dto,
     range_snapshot_to_dto,
     recall_point_to_dto,
+    review_item_binding_to_dto,
     review_chain_binding_to_dto,
     review_chain_to_dto,
     review_task_to_dto,
@@ -51,10 +52,22 @@ def get_review_task(reviewTaskId: str, project: ScopedProject = Depends(resolve_
     return {"ok": True, "data": review_task_to_dto(rt, public_project_id=project.scoped_project_id)}
 
 
+@router.get("/subjects/{subjectId}/projects/{scopedProjectId}/review-tasks/{reviewTaskId}/binding")
+def get_review_task_binding(reviewTaskId: str, project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
+    binding = api.get_review_task_binding(project.internal_project_id, reviewTaskId)  # type: ignore[arg-type]
+    return {"ok": True, "data": review_item_binding_to_dto(binding, public_project_id=project.scoped_project_id)}
+
+
 @router.get("/subjects/{subjectId}/projects/{scopedProjectId}/convergences/{convergenceId}")
 def get_convergence(convergenceId: str, project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
     item = api.get_convergence(project.internal_project_id, ConvergenceId(convergenceId))  # type: ignore[arg-type]
     return {"ok": True, "data": convergence_to_dto(item, public_project_id=project.scoped_project_id)}
+
+
+@router.get("/subjects/{subjectId}/projects/{scopedProjectId}/convergences/{convergenceId}/binding")
+def get_convergence_binding(convergenceId: str, project: ScopedProject = Depends(resolve_scoped_project), api: SystemAPI = Depends(get_api)) -> dict:
+    binding = api.get_convergence_binding(project.internal_project_id, ConvergenceId(convergenceId))  # type: ignore[arg-type]
+    return {"ok": True, "data": review_item_binding_to_dto(binding, public_project_id=project.scoped_project_id)}
 
 
 @router.get("/subjects/{subjectId}/projects/{scopedProjectId}/review-chains/{reviewChainId}")

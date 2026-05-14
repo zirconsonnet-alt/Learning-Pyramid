@@ -497,6 +497,16 @@ export async function installMockApi(
       return
     }
 
+    if (path === `${scopedProjectPath}/review-tasks/${reviewTask.reviewTaskId}/binding`) {
+      await fulfill(route, {
+        projectId: project.projectId,
+        kind: "REVIEW_CHAIN",
+        reviewChainId: reviewChain.reviewChainId,
+        convergenceId: null,
+      })
+      return
+    }
+
     if (path === `${scopedProjectPath}/review-chains/${reviewChain.reviewChainId}`) {
       await fulfill(route, reviewChain)
       return
@@ -519,6 +529,16 @@ export async function installMockApi(
 
     if (path === `${scopedProjectPath}/convergences/${convergence.convergenceId}`) {
       await fulfill(route, convergence)
+      return
+    }
+
+    if (path === `${scopedProjectPath}/convergences/${convergence.convergenceId}/binding`) {
+      await fulfill(route, {
+        projectId: project.projectId,
+        kind: "REVIEW_CHAIN",
+        reviewChainId: reviewChain.reviewChainId,
+        convergenceId: null,
+      })
       return
     }
 
