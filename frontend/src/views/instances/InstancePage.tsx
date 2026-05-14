@@ -1,17 +1,15 @@
 import { useCallback, useMemo } from "react"
-import { useQueries, useQuery } from "@tanstack/react-query"
+import { useQuery } from "@tanstack/react-query"
 import { FileVideoCamera } from "lucide-react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 
 import { ApiError } from "@/ui/api/http"
-import { listInstances, listRecallPointsByInstance } from "@/ui/api/instances"
+import { listInstances } from "@/ui/api/instances"
 import { listLearningObjectNodes } from "@/ui/api/learningObjects"
 import type { ScopedProjectRef } from "@/ui/api/projectScope"
-import { getRecallPoint, type RecallPoint } from "@/ui/api/review"
 import { ContentNotice, ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { buildScopedProjectPath } from "@/ui/projectPaths"
-import { RecallPointListCard } from "@/views/recallPoints/components/RecallPointListCard"
 import { DetailSummaryCard } from "@/views/shared/DetailSummaryCard"
 import { VideoPane } from "@/views/workbench/components/VideoPane"
 
@@ -48,19 +46,6 @@ export function InstancePage() {
     enabled: !!projectScope,
   })
 
-  const recallPointIdsQ = useQuery({
-    queryKey: ["recallPointsByInstance", subjectId, pid, iid],
-    queryFn: () => listRecallPointsByInstance(projectScope as ScopedProjectRef, iid),
-    enabled: !!projectScope && !!iid,
-  })
-  const recallPointQs = useQueries({
-    queries: (recallPointIdsQ.data?.recallPointIds ?? []).map((recallPointId) => ({
-      queryKey: ["recallPoint", subjectId, pid, recallPointId],
-      queryFn: () => getRecallPoint(projectScope as ScopedProjectRef, recallPointId),
-      enabled: !!projectScope && !!recallPointId,
-    })),
-  })
-
   const instance = useMemo(
     () => (instancesQ.data ?? []).find((item) => item.instanceId === iid) ?? null,
     [iid, instancesQ.data],
@@ -71,19 +56,6 @@ export function InstancePage() {
       (objectNodesQ.data ?? []).find((node) => node.kind === "leaf" && node.instanceId === iid) ?? null
     )
   }, [iid, objectNodesQ.data])
-  const recallPoints = useMemo(
-    () => recallPointQs.map((query) => query.data).filter((item): item is RecallPoint => !!item),
-    [recallPointQs],
-  )
-  const instanceTitleById = useMemo(
-    () =>
-      Object.fromEntries(
-        (instancesQ.data ?? []).map((item) => [item.instanceId, item.materialDisplayName]),
-      ) as Record<string, string>,
-    [instancesQ.data],
-  )
-  const recallPointsLoading = recallPointIdsQ.isLoading || recallPointQs.some((query) => query.isLoading)
-  const recallPointsError = recallPointIdsQ.error ?? recallPointQs.find((query) => query.error)?.error ?? null
   const summaryPanel = instance ? (
     <div className="space-y-3">
       <DetailSummaryCard
@@ -91,19 +63,21 @@ export function InstancePage() {
         title={instance.materialDisplayName}
         items={[
           { label: "状态", value: instance.presence === "MISSING" ? "缺失" : "正常" },
-          { label: "复述点", value: recallPointIdsQ.data?.recallPointIds.length ?? "-" },
+          {
+            label: "关联节点",
+            value: boundObjectNode ? (
+              <Link className="text-primary underline-offset-4 hover:underline" to={buildScopedProjectPath(subjectId, pid, `/learning-object-nodes/${boundObjectNode.nodeId}`)}>
+                查看对象节点
+              </Link>
+            ) : objectNodesQ.isLoading ? (
+              "读取对象节点中..."
+            ) : (
+              "未绑定对象节点"
+            ),
+          },
           { label: "最近看到", value: formatTimestamp(instance.lastSeenAt) },
         ]}
       />
-      {boundObjectNode ? (
-        <Button variant="outline" className="w-full rounded-full" asChild>
-          <Link to={buildScopedProjectPath(subjectId, pid, `/learning-object-nodes/${boundObjectNode.nodeId}`)}>查看对象节点</Link>
-        </Button>
-      ) : objectNodesQ.isLoading ? (
-        <Button variant="outline" className="w-full rounded-full" disabled>
-          读取对象节点中...
-        </Button>
-      ) : null}
     </div>
   ) : null
 
@@ -121,10 +95,9 @@ export function InstancePage() {
 
   return (
     <div className="space-y-4">
-      {instancesQ.isLoading ? <LoadingNotice title="正在加载实例详情" message="正在读取内容实例、对象树绑定和复述点引用情况。" /> : null}
+      {instancesQ.isLoading ? <LoadingNotice title="正在加载实例详情" message="正在读取内容实例和对象树绑定情况。" /> : null}
       {instancesQ.error ? <ErrorNotice title="实例详情加载失败" message={formatApiError(instancesQ.error)} /> : null}
       {objectNodesQ.error ? <ErrorNotice title="对象树绑定加载失败" message={formatApiError(objectNodesQ.error)} /> : null}
-      {recallPointIdsQ.error ? <ErrorNotice title="复述点引用加载失败" message={formatApiError(recallPointIdsQ.error)} /> : null}
 
       {!instancesQ.isLoading && !instancesQ.error && !instance ? (
         <ContentNotice
@@ -151,15 +124,6 @@ export function InstancePage() {
               queueHasGate={false}
               allowCaptureDrafts={false}
               surface="detail"
-            />
-            <RecallPointListCard
-              subjectId={subjectId}
-              projectId={pid}
-              items={recallPoints}
-              instanceTitleById={instanceTitleById}
-              isLoading={recallPointsLoading}
-              error={recallPointsError}
-              title="复述点列表"
             />
           </div>
         </div>
