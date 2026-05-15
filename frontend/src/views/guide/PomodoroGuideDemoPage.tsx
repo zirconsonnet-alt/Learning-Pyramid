@@ -10,7 +10,7 @@ export function PomodoroGuideDemoPage() {
   const [enabled, setEnabled] = useState(false)
   const [planCreated, setPlanCreated] = useState(false)
   const [projectBound, setProjectBound] = useState(false)
-  const [webReady, setWebReady] = useState(false)
+  const [focusEntered, setFocusEntered] = useState(false)
 
   function enableClock() {
     setEnabled(true)
@@ -27,8 +27,8 @@ export function PomodoroGuideDemoPage() {
     completeGuideWalkthroughStep("pomodoro-bind-project")
   }
 
-  function enterWeb() {
-    setWebReady(true)
+  function enterWorkbench() {
+    setFocusEntered(true)
     completeGuideWalkthroughStep("pomodoro-enter-web")
   }
 
@@ -39,7 +39,7 @@ export function PomodoroGuideDemoPage() {
           <div>
             <div className="text-sm font-semibold text-foreground">番茄钟引导演示</div>
             <p className="mt-1 text-sm leading-6 text-muted-foreground">
-              这里用虚拟计划演示开启番茄钟、设定计划、绑定项目，以及番茄开始后登录网页进入工作台的完整路径。
+              这里用虚拟计划演示开启番茄钟、设定计划、绑定项目，以及从当前番茄进入工作台的路径。
             </p>
           </div>
         </div>
@@ -56,7 +56,7 @@ export function PomodoroGuideDemoPage() {
                 ["开启番茄钟", enabled],
                 ["设定计划", planCreated],
                 ["绑定项目", projectBound],
-                ["网页就绪", webReady],
+                ["进入工作台", focusEntered],
               ].map(([label, done]) => (
                 <div key={String(label)} className="flex items-center gap-2">
                   <CheckCircle2 className={cn("h-4 w-4", done ? "text-emerald-600" : "text-muted-foreground/50")} />
@@ -118,7 +118,7 @@ export function PomodoroGuideDemoPage() {
                   休息 5m
                 </div>
               </div>
-              <Button type="button" variant={planCreated ? "outline" : "default"} onClick={createPlan}>
+              <Button type="button" data-guide-tour="pomodoro-create-plan-button" variant={planCreated ? "outline" : "default"} onClick={createPlan}>
                 <Plus className="h-4 w-4" />
                 {planCreated ? "计划已设定" : "新建计划"}
               </Button>
@@ -149,14 +149,30 @@ export function PomodoroGuideDemoPage() {
             </CardHeader>
             <CardContent className="space-y-4 pt-4">
               <div className="rounded-[1rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-4 py-3 text-sm leading-6 text-muted-foreground">
-                到点前后保持网页登录并打开；学习时间开始后，从番茄钟进入绑定项目的工作台。
+                学习时间开始后，从番茄钟进入绑定项目的工作台。
               </div>
-              <Button type="button" variant={webReady ? "outline" : "default"} onClick={enterWeb}>
+              <Button type="button" data-guide-tour="pomodoro-workbench-entry" variant={focusEntered ? "outline" : "default"} onClick={enterWorkbench}>
                 <Laptop className="h-4 w-4" />
-                {webReady ? "网页已就绪" : "登录网页进入工作台"}
+                {focusEntered ? "已进入工作台" : "进入工作台"}
               </Button>
             </CardContent>
           </Card>
+
+          {focusEntered ? (
+            <Card className="theme-card-main xl:col-span-2" data-guide-tour="pomodoro-focus-result">
+              <CardHeader className="theme-card-header">
+                <CardTitle>当前学习状态</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 pt-4">
+                <div className="rounded-[1rem] border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm leading-6 text-emerald-900">
+                  当前番茄已绑定到“概率论与数理统计”。
+                </div>
+                <div className="rounded-[1rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-4 py-3 text-sm text-foreground">
+                  工作台已经进入本次学习项目，可以开始观看内容、录入复述点或做复习。
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
         </section>
       </div>
     </div>

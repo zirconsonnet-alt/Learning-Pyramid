@@ -17,9 +17,7 @@ import {
   describePomodoroPhase,
   getActivePomodoroDayPlans,
   getPomodoroSnapshot,
-  hasEnabledPomodoroSchedule,
   usePomodoroStore,
-  type PomodoroSnapshot,
 } from "@/ui/store/pomodoroStore"
 import {
   VIRTUAL_STUDY_REVIEW_PROJECT_ID,
@@ -117,15 +115,6 @@ function getProjectIdFromRouteHint(routeHint: string | undefined) {
   return routeHint?.match(/^\/subjects\/[^/]+\/projects\/([^/]+)/)?.[1] ?? null
 }
 
-function encodeGuidePathPart(value: string) {
-  return encodeURIComponent(value)
-}
-
-function buildProjectGuidePath(projectRef: GuideProjectRef, suffix: string) {
-  const normalizedSuffix = suffix.startsWith("/") ? suffix : `/${suffix}`
-  return `/subjects/${encodeGuidePathPart(projectRef.subjectId)}/projects/${encodeGuidePathPart(projectRef.scopedProjectId)}${normalizedSuffix}`
-}
-
 function createTerminalGuideStep(params: {
   id: string
   title: string
@@ -152,14 +141,6 @@ function createTerminalGuideStep(params: {
 
 function pickGuideProjectRef(context: GuideWalkthroughRuntimeContext) {
   return context.routeProjectRef ?? context.selectedProjectRef ?? context.catalogProjectRefs[0] ?? null
-}
-
-function withAiChatProjectRoute(steps: GuideWalkthroughStep[], projectRef: GuideProjectRef) {
-  const aiChatPath = buildProjectGuidePath(projectRef, "/ai-chat")
-  return steps.map((step) => ({
-    ...step,
-    routeHint: step.routeHint?.includes("/ai-chat") ? aiChatPath : step.routeHint,
-  }))
 }
 
 function buildAiChatSessionPlan(context: GuideWalkthroughRuntimeContext): GuideWalkthroughSessionPlan {
@@ -210,8 +191,8 @@ function buildAiChatSessionPlan(context: GuideWalkthroughRuntimeContext): GuideW
     return { steps: [step], docSlug: "use-ai-chat", initialPathname: step.routeHint ?? null, ready: true }
   }
 
-  const steps = withAiChatProjectRoute(GUIDE_WALKTHROUGH_STEPS_BY_DOC["use-ai-chat"], projectRef)
-  return { steps, docSlug: "use-ai-chat", initialPathname: buildProjectGuidePath(projectRef, "/ai-chat"), ready: true }
+  const steps = GUIDE_WALKTHROUGH_STEPS_BY_DOC["use-ai-chat"]
+  return { steps, docSlug: "use-ai-chat", initialPathname: "/guide/demo/ai-chat", ready: true }
 }
 
 function buildPomodoroSessionPlan(context: GuideWalkthroughRuntimeContext): GuideWalkthroughSessionPlan {
@@ -237,7 +218,7 @@ function buildPomodoroSessionPlan(context: GuideWalkthroughRuntimeContext): Guid
   return {
     steps: resolveGuideWalkthroughSessionSteps("use-pomodoro"),
     docSlug: "use-pomodoro",
-    initialPathname: "/pomodoro",
+    initialPathname: "/guide/demo/pomodoro",
     ready: true,
   }
 }
@@ -251,35 +232,8 @@ export function shouldEndGuideWalkthroughBeforeWorkbench(step: GuideWalkthroughS
   return snapshot.shouldRestrictWorkbench && !snapshot.canUseWorkbench
 }
 
-export function getPomodoroGuideStepIdsForSnapshot(snapshot: PomodoroSnapshot, hasSavedSchedule: boolean) {
-  const stepIds: GuideWalkthroughStep["id"][] = []
-
-  if (snapshot.status === "running" && snapshot.phase === "focus") {
-    stepIds.push("pomodoro-enter-web")
-    return stepIds
-  }
-
-  if (!snapshot.enabled) {
-    stepIds.push("pomodoro-enable-clock")
-  }
-
-  if (!hasSavedSchedule && !snapshot.hasEnabledSchedule) {
-    stepIds.push("pomodoro-create-plan", "pomodoro-bind-project")
-  }
-
-  stepIds.push("pomodoro-enter-web")
-  return stepIds
-}
-
 export function resolveGuideWalkthroughSessionSteps(docSlug: GuideWalkthroughDocSlug) {
-  const steps = getGuideWalkthroughSteps(docSlug)
-  if (docSlug !== "use-pomodoro") return steps
-
-  const state = usePomodoroStore.getState()
-  const snapshot = getPomodoroSnapshot({ enabled: state.enabled, weeklySchedule: state.weeklySchedule, quickPomodoro: state.quickPomodoro })
-  const hasSavedSchedule = hasEnabledPomodoroSchedule(state.weeklySchedule)
-  const stepIds = new Set(getPomodoroGuideStepIdsForSnapshot(snapshot, hasSavedSchedule))
-  return steps.filter((step) => stepIds.has(step.id))
+  return getGuideWalkthroughSteps(docSlug)
 }
 
 export function resolveGuideWalkthroughSessionPlan(
