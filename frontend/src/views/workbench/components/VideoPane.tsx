@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
+import { forwardRef, useCallback, useDeferredValue, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties } from "react"
 import { useQueries, useQuery } from "@tanstack/react-query"
 import Hls from "hls.js"
 import {
@@ -40,8 +40,13 @@ import { MarkdownRichText } from "@/ui/components/MarkdownRichText"
 import { RichContentEditor } from "@/ui/components/RichContentEditor"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent } from "@/ui/components/ui/card"
-import { askCourseAgent } from "@/ui/llm/courseAgent"
+import { askCourseAgent, type CourseAgentRecallContext } from "@/ui/llm/courseAgent"
 import { resolveProjectFile, useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
+import {
+  captureDisplayedVideoFrame,
+  captureDisplayedVideoFrameFile,
+  type CapturedVideoFrame,
+} from "@/ui/media/videoFrameCapture"
 import { playPomodoroMicroBreakReminderSound } from "@/ui/pomodoroAudio"
 import { useMembershipSummary } from "@/ui/queries/membership"
 import { useProjectMaterialSourceBinding } from "@/ui/queries/projects"
@@ -82,6 +87,7 @@ import {
   VIDEO_SUBTITLE_STORAGE_KEY,
 } from "./videoSubtitleState"
 import { useVideoSubtitles } from "./useVideoSubtitles"
+import type { VideoPaneHandle } from "../workbenchAiContext"
 
 const FULLSCREEN_KEYBOARD_SEEK_STEP_MS = 5000
 const CHROME_HIDE_DELAY_MS = 1600
@@ -123,16 +129,6 @@ type CourseAssistantTurn = {
   content: string
   createdAt: number
   evidence?: AiChatCourseEvidence[]
-}
-
-type CapturedVideoFrame = {
-  timeMs: number
-  imageDataUrl: string
-}
-
-type CapturedVideoFrameFile = {
-  timeMs: number
-  file: File
 }
 
 function createIdleMicroBreakState(cancelReason: MicroBreakCancelReason | null = null): PomodoroMicroBreakTimerState {
@@ -252,73 +248,7 @@ async function copyText(text: string) {
   throw new Error("当前环境不支持剪贴板")
 }
 
-async function captureDisplayedVideoFrameBlob(video: HTMLVideoElement, timeMs: number): Promise<{ timeMs: number; blob: Blob }> {
-  const width = video.videoWidth || 0
-  const height = video.videoHeight || 0
-  if (width <= 0 || height <= 0) {
-    throw new Error("当前视频帧尚未就绪")
-  }
-
-  const scale = Math.min(1, 960 / Math.max(width, height))
-  const canvas = document.createElement("canvas")
-  canvas.width = Math.max(1, Math.round(width * scale))
-  canvas.height = Math.max(1, Math.round(height * scale))
-  const context = canvas.getContext("2d")
-  if (!context) throw new Error("无法初始化画布")
-  context.drawImage(video, 0, 0, canvas.width, canvas.height)
-
-  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.78))
-  if (!blob) throw new Error("当前画面编码失败")
-  return {
-    timeMs: Math.max(0, Math.floor(timeMs)),
-    blob,
-  }
-}
-
-async function captureDisplayedVideoFrame(video: HTMLVideoElement, timeMs: number): Promise<CapturedVideoFrame> {
-  const captured = await captureDisplayedVideoFrameBlob(video, timeMs)
-  const imageDataUrl = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      if (typeof reader.result === "string") {
-        resolve(reader.result)
-        return
-      }
-      reject(new Error("当前画面读取失败"))
-    }
-    reader.onerror = () => reject(reader.error ?? new Error("当前画面读取失败"))
-    reader.readAsDataURL(captured.blob)
-  })
-
-  return {
-    timeMs: captured.timeMs,
-    imageDataUrl,
-  }
-}
-
-async function captureDisplayedVideoFrameFile(video: HTMLVideoElement, timeMs: number): Promise<CapturedVideoFrameFile> {
-  const captured = await captureDisplayedVideoFrameBlob(video, timeMs)
-  return {
-    timeMs: captured.timeMs,
-    file: new File([captured.blob], `video-frame-${Math.floor(captured.timeMs / 1000)}s.jpg`, {
-      type: captured.blob.type || "image/jpeg",
-      lastModified: Date.now(),
-    }),
-  }
-}
-
-export function VideoPane({
-  surface = "workbench",
-  subjectId,
-  projectId,
-  instance,
-  setCurrentMs,
-  seekTo,
-  onSeekApplied,
-  onDurationResolved,
-  queueHasGate,
-  allowCaptureDrafts = true,
-}: {
+export const VideoPane = forwardRef<VideoPaneHandle, {
   subjectId: string
   projectId: string
   instance: Instance | null
@@ -329,8 +259,22 @@ export function VideoPane({
   queueHasGate: boolean
   allowCaptureDrafts?: boolean
   surface?: "detail" | "workbench"
-}) {
-  const projectScope: ScopedProjectRef = { subjectId, scopedProjectId: projectId }
+  onAiContextChange?: (context: CourseAgentRecallContext | null) => void
+}>(
+function VideoPane({
+  surface = "workbench",
+  subjectId,
+  projectId,
+  instance,
+  setCurrentMs,
+  seekTo,
+  onSeekApplied,
+  onDurationResolved,
+  queueHasGate,
+  allowCaptureDrafts = true,
+  onAiContextChange,
+}, ref) {
+  const projectScope = useMemo<ScopedProjectRef>(() => ({ subjectId, scopedProjectId: projectId }), [projectId, subjectId])
   const playerShellRef = useRef<HTMLDivElement | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const barrageLayerRef = useRef<HTMLDivElement | null>(null)
@@ -413,10 +357,6 @@ export function VideoPane({
     instance?.playbackKind ??
     (effectiveSourceKind === "BAIDU_NETDISK" ? "HLS" : "FILE")
   const playbackDescriptorUrl = playbackDescriptorQ.data?.url ? resolvePlaybackDescriptorUrl(playbackDescriptorQ.data.url) : null
-  const canCaptureVideoFrame =
-    playbackDescriptorQ.data?.supportsFrameGrab ??
-    (capabilitiesQ.data?.serverMediaStreamEnabled === true ||
-      (effectiveSourceKind === "BROWSER_LOCAL" && directoryBinding.permission === "granted"))
   const displayPlaybackMs = durationMs > 0 ? Math.min(playbackMs, durationMs) : playbackMs
   const progressMax = Math.max(durationMs, 1)
   const playbackProgressPercent = progressMax > 0 ? Math.min(100, Math.max(0, (displayPlaybackMs / progressMax) * 100)) : 0
@@ -436,6 +376,15 @@ export function VideoPane({
     () => recallPointQs.flatMap((query) => (query.data ? [query.data] : [])),
     [recallPointQs],
   )
+  const captureDraftAiContext = useMemo<CourseAgentRecallContext | null>(() => {
+    if (!richContentHasMeaning(questionContent) && !richContentHasMeaning(answerContent) && captureReferenceIds.length === 0) return null
+    return {
+      mode: "capture",
+      questionText: richContentToPlainText(questionContent),
+      answerText: richContentToPlainText(answerContent),
+      referenceIds: captureReferenceIds,
+    }
+  }, [answerContent, captureReferenceIds, questionContent])
   const subtitleSourceKind = effectiveSourceKind
   const canProbeSubtitles =
     !!instanceId &&
@@ -467,6 +416,27 @@ export function VideoPane({
     llmConfigured &&
     !playerAiMemberBlocked &&
     (subtitleSourceKind !== "BROWSER_LOCAL" || directoryBinding.permission === "granted")
+
+  useEffect(() => {
+    onAiContextChange?.(captureDraftAiContext)
+  }, [captureDraftAiContext, onAiContextChange])
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      async captureCurrentFrameForAi() {
+        const video = videoRef.current
+        if (!video || video.readyState < 2) return null
+        const captured = await captureDisplayedVideoFrame(video, clampPlaybackMs(video, Math.floor(video.currentTime * 1000)))
+        return {
+          timeMs: captured.timeMs,
+          imageDataUrl: captured.imageDataUrl,
+          mimeType: "image/jpeg",
+        }
+      },
+    }),
+    [],
+  )
   const deferredCaptureReferenceQuery = useDeferredValue(captureReferencePicker?.query.trim() ?? "")
   const captureReferenceSearchQ = useQuery({
     queryKey: ["recallPointSearch", subjectId, projectId, deferredCaptureReferenceQuery],
@@ -580,7 +550,7 @@ export function VideoPane({
 
       syncVideoWatchProgressRange(projectScope, projectId, instanceId, previousPlaybackMs, nextPlaybackMs, durationMs > 0 ? durationMs : null)
     },
-    [durationMs, instanceId, projectId],
+    [durationMs, instanceId, projectId, projectScope],
   )
 
   const flushPlaybackDuration = useCallback(() => {
@@ -951,6 +921,7 @@ export function VideoPane({
       content: prompt,
       createdAt: Date.now(),
     }
+    const assistantTurnId = newLocalId()
 
     setAssistantTurns((current) => [...current, userTurn])
     setAssistantComposer("")
@@ -975,28 +946,51 @@ export function VideoPane({
         sourceKind: subtitleSourceKind,
         nodeLabel: instance.materialDisplayName || instance.materialId || "当前视频",
         userPrompt: prompt,
+        systemPrompt: "你叫雪豹，是全屏视频助手。",
         anchorMs: captureAnchorMs,
         initialFrame: frame,
-        canCaptureVideoFrame,
-        preferHighDetailFrame: true,
+        recallContext: captureDraftAiContext,
         historyMessages,
         temperature: 0.2,
         signal: controller.signal,
         timeoutMs: 90_000,
         onStatus: (status) => setAssistantStatus(status),
+        onDelta: (_chunk, accumulated) => {
+          setAssistantTurns((current) => {
+            if (current.some((turn) => turn.id === assistantTurnId)) {
+              return current.map((turn) => (turn.id === assistantTurnId ? { ...turn, content: accumulated } : turn))
+            }
+            return [
+              ...current,
+              {
+                id: assistantTurnId,
+                role: "assistant",
+                content: accumulated,
+                createdAt: Date.now(),
+              },
+            ]
+          })
+        },
       })
       if (controller.signal.aborted) return
 
-      setAssistantTurns((current) => [
-        ...current,
-        {
-          id: newLocalId(),
-          role: "assistant",
-          content: result.content,
-          createdAt: Date.now(),
-          evidence: result.evidence,
-        },
-      ])
+      setAssistantTurns((current) => {
+        if (current.some((turn) => turn.id === assistantTurnId)) {
+          return current.map((turn) =>
+            turn.id === assistantTurnId ? { ...turn, content: result.content, evidence: result.evidence } : turn,
+          )
+        }
+        return [
+          ...current,
+          {
+            id: assistantTurnId,
+            role: "assistant",
+            content: result.content,
+            createdAt: Date.now(),
+            evidence: result.evidence,
+          },
+        ]
+      })
       setAssistantStatus(null)
     } catch (error) {
       if (controller.signal.aborted) return
@@ -1011,8 +1005,8 @@ export function VideoPane({
   }, [
     assistantComposer,
     assistantTurns,
-    canCaptureVideoFrame,
     captureAnchorMs,
+    captureDraftAiContext,
     directoryBinding.permission,
     instance,
     instanceId,
@@ -1047,7 +1041,7 @@ export function VideoPane({
     } finally {
       setIsFrameCaptureUploading(false)
     }
-  }, [allowCaptureDrafts, capturePanelMode, isCapturePanelOpen, isFrameCaptureUploading, projectId, projectScope, touchComposeActivity])
+  }, [allowCaptureDrafts, capturePanelMode, isCapturePanelOpen, isFrameCaptureUploading, projectScope, touchComposeActivity])
 
   const saveCaptureDraft = useCallback(() => {
     if (!allowCaptureDrafts) {
@@ -1382,7 +1376,7 @@ export function VideoPane({
       return resolvePlaybackDescriptorUrl(apiUrl(projectApiPath(projectScope, `/media/instances/${instance.instanceId}`)))
     }
     return null
-  }, [effectiveSourceKind, instance, localSrc, playbackDescriptorUrl, playbackKind, projectId, projectScope, serverMediaStreamEnabled])
+  }, [effectiveSourceKind, instance, localSrc, playbackDescriptorUrl, playbackKind, projectScope, serverMediaStreamEnabled])
 
   useEffect(() => {
     let cancelled = false
@@ -2408,7 +2402,7 @@ export function VideoPane({
 
                   {capturePanelMode === "assistant" ? (
                     <div className="mt-3 flex min-h-0 flex-1 flex-col gap-3">
-                      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_8.5rem]">
+                      <div>
                         <label className="block">
                           <div className="mb-1 text-xs text-white/62">问题</div>
                           <textarea
@@ -2443,21 +2437,6 @@ export function VideoPane({
                             className="min-h-[104px] w-full rounded-xl border border-white/10 bg-white/[0.05] px-3 py-2 text-sm text-white outline-none placeholder:text-white/28 focus:border-cyan-200/24 focus:bg-white/[0.08] disabled:cursor-not-allowed disabled:text-white/42"
                           />
                         </label>
-
-                        <div className="overflow-hidden rounded-[1rem] border border-white/10 bg-white/[0.05]">
-                          {assistantFrame ? (
-                            <img
-                              src={assistantFrame.imageDataUrl}
-                              alt={`当前视频帧 ${formatPlaybackClock(assistantFrame.timeMs)}`}
-                              className="h-full min-h-[8.5rem] w-full object-cover"
-                              loading="lazy"
-                            />
-                          ) : (
-                            <div className="flex h-full min-h-[8.5rem] items-center justify-center px-3 text-center text-xs leading-5 text-white/48">
-                              提问时会自动附带当前视频帧
-                            </div>
-                          )}
-                        </div>
                       </div>
 
                       <div
@@ -2478,7 +2457,7 @@ export function VideoPane({
                             </div>
                             <div className="mt-3 text-sm font-medium text-white">直接问这一刻正在讲什么</div>
                             <div className="mt-2 max-w-[28rem] text-xs leading-6 text-white/56">
-                              每次提问都会附带当前视频帧；视频助手也会按需回看当前到前面一段时间的字幕，再给你答案。
+                              视频助手会读取当前画面和附近字幕，再给你答案。
                             </div>
                           </div>
                         ) : (
@@ -2539,7 +2518,7 @@ export function VideoPane({
                       <div className={cn("text-xs leading-5", assistantError ? "text-rose-200" : "text-white/52")}>
                         {assistantError ??
                           (assistantStatus ??
-                            "Enter 提交问题，Shift+Enter / Ctrl+Enter 换行。每次都会附带当前视频帧，并可按需回看当前到前面一段字幕。")}
+                            "Enter 提交问题，Shift+Enter / Ctrl+Enter 换行。视频助手会读取当前画面和附近字幕。")}
                       </div>
 
                       <div className="flex items-center justify-between gap-2">
@@ -2814,4 +2793,4 @@ export function VideoPane({
       </CardContent>
     </Card>
   )
-}
+})

@@ -1472,21 +1472,79 @@ class SystemAPI:
             raise ExternalServiceError(f"External service unavailable: {e}") from e
 
     @staticmethod
-    def _normalize_llm_messages(messages: Sequence[dict[str, str]]) -> list[dict[str, str]]:
+    def _normalize_llm_message_content(content: Any) -> str | list[dict[str, object]]:
+        if isinstance(content, str):
+            normalized = content.strip()
+            if not normalized:
+                raise PreconditionFailure("LLM message.content must be non-empty")
+            return normalized
+
+        if isinstance(content, list):
+            normalized_parts: list[dict[str, object]] = []
+            for part in content:
+                if not isinstance(part, dict):
+                    raise PreconditionFailure("LLM message.content parts must be objects")
+                part_type = str(part.get("type") or "").strip()
+                if part_type == "text":
+                    text = str(part.get("text") or "").strip()
+                    if text:
+                        normalized_parts.append({"type": "text", "text": text})
+                    continue
+                if part_type == "image_url":
+                    image_url = part.get("image_url")
+                    if not isinstance(image_url, dict):
+                        raise PreconditionFailure("LLM image_url part must include image_url object")
+                    url = str(image_url.get("url") or "").strip()
+                    if not url.startswith("data:image/"):
+                        raise PreconditionFailure("LLM image_url part must use a data:image URL")
+                    normalized_parts.append({"type": "image_url", "image_url": {"url": url}})
+                    continue
+                raise PreconditionFailure("LLM message.content part type must be text or image_url")
+            if not normalized_parts:
+                raise PreconditionFailure("LLM message.content must be non-empty")
+            return normalized_parts
+
+        raise PreconditionFailure("LLM message.content must be a string or multimodal part list")
+
+    @staticmethod
+    def _llm_message_content_for_debug(content: Any) -> str:
+        if isinstance(content, str):
+            return content
+        if not isinstance(content, list):
+            return str(content or "")
+
+        parts: list[str] = []
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            part_type = str(part.get("type") or "").strip()
+            if part_type == "text":
+                text = str(part.get("text") or "").strip()
+                if text:
+                    parts.append(text)
+                continue
+            if part_type == "image_url":
+                image_url = part.get("image_url")
+                raw_url = str(image_url.get("url") if isinstance(image_url, dict) else "").strip()
+                mime_type = "image"
+                if raw_url.startswith("data:") and ";" in raw_url:
+                    mime_type = raw_url[5:].split(";", 1)[0].strip() or "image"
+                parts.append(f"[image:{mime_type}]")
+        return "\n".join(parts).strip()
+
+    @staticmethod
+    def _normalize_llm_messages(messages: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
         if not messages:
             raise PreconditionFailure("LLM request must include at least one message")
 
-        normalized_messages: list[dict[str, str]] = []
+        normalized_messages: list[dict[str, Any]] = []
         for message in messages:
             if not isinstance(message, dict):
                 raise PreconditionFailure("LLM message must be an object")
             role = str(message.get("role", "")).strip()
-            content = str(message.get("content", "")).strip()
             if role not in {"system", "user", "assistant"}:
                 raise PreconditionFailure("LLM message.role must be one of system/user/assistant")
-            if not content:
-                raise PreconditionFailure("LLM message.content must be non-empty")
-            normalized_messages.append({"role": role, "content": content})
+            normalized_messages.append({"role": role, "content": SystemAPI._normalize_llm_message_content(message.get("content"))})
         return normalized_messages
 
     def _ensure_startup_fs_sync_done(self, project_id: ProjectId) -> None:
@@ -1701,6 +1759,60 @@ class SystemAPI:
         messages.append({"role": "user", "content": prompt})
         return messages
 
+    @staticmethod
+    def _normalize_project_llm_image_inputs(image_inputs: Sequence[dict[str, Any]] | None) -> list[dict[str, Any]]:
+        normalized: list[dict[str, Any]] = []
+        for index, raw in enumerate(image_inputs or [], start=1):
+            if not isinstance(raw, dict):
+                raise PreconditionFailure("LLM image input must be an object")
+            image_data_url = str(raw.get("imageDataUrl") or "").strip()
+            if not image_data_url:
+                raise PreconditionFailure("LLM image input imageDataUrl must be non-empty")
+            if not image_data_url.startswith("data:image/"):
+                raise PreconditionFailure("LLM image input imageDataUrl must be a data:image URL")
+            mime_type = str(raw.get("mimeType") or "").strip()
+            if not mime_type:
+                mime_type = image_data_url[5:].split(";", 1)[0].strip() or "image"
+            time_ms_value = raw.get("timeMs")
+            if time_ms_value is None:
+                time_ms = None
+            else:
+                try:
+                    time_ms = max(0, int(time_ms_value))
+                except (TypeError, ValueError) as exc:
+                    raise PreconditionFailure("LLM image input timeMs must be an integer") from exc
+            label = str(raw.get("label") or "").strip() or f"image {index}"
+            normalized.append(
+                {
+                    "imageDataUrl": image_data_url,
+                    "mimeType": mime_type,
+                    "timeMs": time_ms,
+                    "label": label,
+                }
+            )
+        return normalized
+
+    @staticmethod
+    def _image_input_debug_label(image_input: dict[str, Any]) -> str:
+        mime_type = str(image_input.get("mimeType") or "image").strip()
+        time_ms = image_input.get("timeMs")
+        if time_ms is None:
+            return f"[image:{mime_type}]"
+        return f"[image:{mime_type} at {int(time_ms)}ms]"
+
+    def _build_project_llm_user_content(
+        self,
+        *,
+        prompt: str,
+        normalized_images: Sequence[dict[str, Any]],
+    ) -> str | list[dict[str, object]]:
+        if not normalized_images:
+            return prompt
+        content: list[dict[str, object]] = [{"type": "text", "text": prompt}]
+        for image in normalized_images:
+            content.append({"type": "image_url", "image_url": {"url": image["imageDataUrl"]}})
+        return content
+
     def _build_project_llm_messages(
         self,
         *,
@@ -1708,30 +1820,37 @@ class SystemAPI:
         context_text: str,
         system_prompt: str | None = None,
         supplemental_context: str | None = None,
+        image_inputs: Sequence[dict[str, Any]] | None = None,
         prompt_assembly_mode: str,
-    ) -> list[dict[str, str]]:
+    ) -> list[dict[str, object]]:
         prompt = str(user_prompt or "").strip()
         if not prompt:
             raise PreconditionFailure("LLM user_prompt must be non-empty")
 
         resolved_mode = normalize_llm_prompt_assembly_mode(prompt_assembly_mode)
+        normalized_images = self._normalize_project_llm_image_inputs(image_inputs)
+        image_notes = "\n".join(self._image_input_debug_label(image) for image in normalized_images)
         if resolved_mode == "user_concat":
             return [
                 {
                     "role": "user",
-                    "content": self._build_user_concat_message(
-                        prompt=prompt,
-                        sections=[
-                            ("系统信息", self._project_llm_system_instruction()),
-                            ("项目上下文", context_text),
-                            ("补充上下文", supplemental_context),
-                            ("页面附加规则", system_prompt),
-                        ],
+                    "content": self._build_project_llm_user_content(
+                        prompt=self._build_user_concat_message(
+                            prompt=prompt,
+                            sections=[
+                                ("系统信息", self._project_llm_system_instruction()),
+                                ("项目上下文", context_text),
+                                ("补充上下文", supplemental_context),
+                                ("图片上下文", image_notes),
+                                ("页面附加规则", system_prompt),
+                            ],
+                        ),
+                        normalized_images=normalized_images,
                     ),
                 }
             ]
 
-        messages: list[dict[str, str]] = [
+        messages: list[dict[str, object]] = [
             {
                 "role": "system",
                 "content": self._project_llm_system_instruction(),
@@ -1742,13 +1861,15 @@ class SystemAPI:
             messages.append({"role": "system", "content": str(supplemental_context).strip()})
         if str(system_prompt or "").strip():
             messages.append({"role": "system", "content": str(system_prompt).strip()})
-        messages.append({"role": "user", "content": prompt})
+        if image_notes:
+            messages.append({"role": "system", "content": f"Image context included in the next user message:\n{image_notes}"})
+        messages.append({"role": "user", "content": self._build_project_llm_user_content(prompt=prompt, normalized_images=normalized_images)})
         return messages
 
     def _build_llm_chat_completion_transport(
         self,
         *,
-        messages: Sequence[dict[str, str]],
+        messages: Sequence[dict[str, Any]],
         model_name: str | None = None,
         temperature: float | None = None,
         stream: bool = False,
@@ -1816,7 +1937,7 @@ class SystemAPI:
                 messages.append(
                     {
                         "role": role,
-                        "content": str(item.get("content") or ""),
+                        "content": self._llm_message_content_for_debug(item.get("content")),
                     }
                 )
 
@@ -2356,6 +2477,7 @@ class SystemAPI:
         user_prompt: str,
         system_prompt: str | None = None,
         supplemental_context: str | None = None,
+        image_inputs: Sequence[dict[str, Any]] | None = None,
         model_name: str | None = None,
         temperature: float | None = None,
         recall_point_id: RecallPointId | None = None,
@@ -2380,6 +2502,7 @@ class SystemAPI:
             context_text=context_text,
             system_prompt=system_prompt,
             supplemental_context=supplemental_context,
+            image_inputs=image_inputs,
             prompt_assembly_mode=self.get_effective_llm_prompt_assembly_mode(
                 auth_store=auth_store,
                 user_id=user_id,
@@ -2428,6 +2551,7 @@ class SystemAPI:
         user_prompt: str,
         system_prompt: str | None = None,
         supplemental_context: str | None = None,
+        image_inputs: Sequence[dict[str, Any]] | None = None,
         model_name: str | None = None,
         temperature: float | None = None,
         recall_point_id: RecallPointId | None = None,
@@ -2452,6 +2576,7 @@ class SystemAPI:
             context_text=context_text,
             system_prompt=system_prompt,
             supplemental_context=supplemental_context,
+            image_inputs=image_inputs,
             prompt_assembly_mode=self.get_effective_llm_prompt_assembly_mode(
                 auth_store=auth_store,
                 user_id=user_id,

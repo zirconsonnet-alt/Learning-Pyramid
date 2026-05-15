@@ -72,7 +72,11 @@ test("workbench review card hides selected memory label and colors memory button
 test("workbench pet assistant stays above the video control bar", async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
   await page.emulateMedia({ reducedMotion: "reduce" })
-  await installMockApi(page, { systemCapabilities: { serverMediaStreamEnabled: true } })
+  const longAssistantAnswer = Array.from({ length: 36 }, (_, index) => `这是第 ${index + 1} 行自动化测试回复，用来验证桌宠弹窗内部滚动。`).join("\n\n")
+  await installMockApi(page, {
+    systemCapabilities: { serverMediaStreamEnabled: true },
+    projectLlmStreamContent: longAssistantAnswer,
+  })
   await page.setViewportSize({ width: 1365, height: 744 })
 
   await gotoWorkbench(page)
@@ -130,6 +134,24 @@ test("workbench pet assistant stays above the video control bar", async ({ page 
   expect(overlap.intersects, JSON.stringify(overlap)).toBe(true)
   expect(overlap.popoverContainsTop, JSON.stringify(overlap)).toBe(true)
   expect(overlap.videoChromeContainsTop, JSON.stringify(overlap)).toBe(false)
+
+  const initialPopoverBounds = await petPopover.boundingBox()
+  expect(initialPopoverBounds).not.toBeNull()
+  expect(initialPopoverBounds!.y).toBeGreaterThanOrEqual(0)
+  expect(initialPopoverBounds!.y + initialPopoverBounds!.height).toBeLessThanOrEqual(744)
+
+  await petPopover.getByPlaceholder("问当前内容、进度或复述点...").fill("解释这里")
+  await petPopover.getByRole("button", { name: "发送" }).click()
+  await expect(petPopover.getByText("这是第 36 行自动化测试回复，用来验证桌宠弹窗内部滚动。")).toBeVisible()
+  const scrollerMetrics = await petPopover.locator(".overflow-y-auto").evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+  }))
+  expect(scrollerMetrics.scrollHeight).toBeGreaterThan(scrollerMetrics.clientHeight)
+  const answeredPopoverBounds = await petPopover.boundingBox()
+  expect(answeredPopoverBounds).not.toBeNull()
+  expect(answeredPopoverBounds!.y).toBeGreaterThanOrEqual(0)
+  expect(answeredPopoverBounds!.y + answeredPopoverBounds!.height).toBeLessThanOrEqual(744)
 
   await page.getByRole("button", { name: "关闭雪豹问答" }).click()
   await expect(petPopover).toBeHidden()

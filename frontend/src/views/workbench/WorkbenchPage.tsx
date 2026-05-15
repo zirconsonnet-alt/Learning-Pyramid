@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useQueries } from "@tanstack/react-query"
 import { FolderTree, RadioTower } from "lucide-react"
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
@@ -43,6 +43,7 @@ import { ReviewPane } from "@/views/workbench/components/ReviewPane"
 import { RollupPane } from "@/views/workbench/components/RollupPane"
 import { VideoPane } from "@/views/workbench/components/VideoPane"
 import { WorkbenchPetAssistant } from "@/views/workbench/components/WorkbenchPetAssistant"
+import type { VideoPaneHandle, WorkbenchAiContextSnapshot } from "@/views/workbench/workbenchAiContext"
 import { estimateProjectStudyTime } from "@/views/workbench/studyEstimate"
 
 function formatApiError(err: unknown) {
@@ -268,7 +269,10 @@ export function WorkbenchPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const pid = projectId ?? ""
-  const projectScope: ScopedProjectRef | null = subjectId && pid ? { subjectId, scopedProjectId: pid } : null
+  const projectScope = useMemo<ScopedProjectRef | null>(
+    () => (subjectId && pid ? { subjectId, scopedProjectId: pid } : null),
+    [pid, subjectId],
+  )
   const isVirtualStudyReviewProject = isVirtualStudyReviewProjectId(pid)
 
   const ensure = useWorkbenchStore((s) => s.ensure)
@@ -280,6 +284,21 @@ export function WorkbenchPage() {
   const [centerPanelMode, setCenterPanelMode] = useState<"main" | "rollup">("main")
   const [petAssistantState, setPetAssistantState] = useState<"idle" | "thinking">("idle")
   const videoPaneRef = useRef<HTMLDivElement | null>(null)
+  const videoPaneHandleRef = useRef<VideoPaneHandle | null>(null)
+  const [aiContextSnapshot, setAiContextSnapshot] = useState<WorkbenchAiContextSnapshot>({
+    captureRecallContext: null,
+    reviewRecallContext: null,
+  })
+  const updateCaptureAiContext = useCallback((captureRecallContext: WorkbenchAiContextSnapshot["captureRecallContext"]) => {
+    setAiContextSnapshot((current) =>
+      current.captureRecallContext === captureRecallContext ? current : { ...current, captureRecallContext },
+    )
+  }, [])
+  const updateReviewAiContext = useCallback((reviewRecallContext: WorkbenchAiContextSnapshot["reviewRecallContext"]) => {
+    setAiContextSnapshot((current) =>
+      current.reviewRecallContext === reviewRecallContext ? current : { ...current, reviewRecallContext },
+    )
+  }, [])
 
   useEffect(() => {
     if (!pid) return
@@ -302,6 +321,7 @@ export function WorkbenchPage() {
   const usesResolvableCourseAnchor = projectTypeUsesResolvableCourseAnchor(projectType)
   const selectedInstanceId = ps?.selectedInstanceId ?? null
   const queueHasGate = !!queueQ.data?.headId
+  const activeAiRecallContext = queueHasGate ? aiContextSnapshot.reviewRecallContext : aiContextSnapshot.captureRecallContext
   const queueLength = queueQ.data?.ids.length ?? 0
   const serverMediaStreamEnabled = capabilitiesQ.data?.serverMediaStreamEnabled ?? false
   const browserLocalMediaEnabled = capabilitiesQ.data?.browserLocalMediaEnabled ?? false
@@ -357,7 +377,7 @@ export function WorkbenchPage() {
       setTodayStats(loadDailyWorkbenchStats(pid))
     }, 1000)
     return () => window.clearInterval(timer)
-  }, [pid])
+  }, [pid, projectScope])
 
   useEffect(() => {
     const scope = projectScope
@@ -377,7 +397,7 @@ export function WorkbenchPage() {
       tracker.stop()
       setTodayStats(loadDailyWorkbenchStats(pid))
     }
-  }, [pid])
+  }, [pid, projectScope])
 
   const todayDateKey = getLocalDateKey()
   const estimateDateFrom = useMemo(() => {
@@ -941,6 +961,7 @@ export function WorkbenchPage() {
           <div ref={videoPaneRef} id="workbench-video-pane" className="shrink-0 scroll-mt-28">
             {usesResolvableCourseAnchor ? (
               <VideoPane
+                ref={videoPaneHandleRef}
                 key={instance?.instanceId ?? "none"}
                 subjectId={subjectId}
                 projectId={pid}
@@ -954,6 +975,7 @@ export function WorkbenchPage() {
                   )
                 }
                 queueHasGate={queueHasGate}
+                onAiContextChange={updateCaptureAiContext}
               />
             ) : (
               <StudyModePane projectType={projectType} instance={instance} />
@@ -998,6 +1020,7 @@ export function WorkbenchPage() {
                   headId={queueQ.data.headId}
                   instances={instancesQ.data ?? []}
                   onOpenAnchor={onOpenAnchor}
+                  onAiContextChange={updateReviewAiContext}
                 />
               ) : (
                 <ComposePane
@@ -1086,6 +1109,8 @@ export function WorkbenchPage() {
               currentMs={currentMs}
               workStatusDetail={workStatusDetail}
               usesResolvableCourseAnchor={usesResolvableCourseAnchor}
+              recallContext={activeAiRecallContext}
+              captureCurrentFrameForAi={() => videoPaneHandleRef.current?.captureCurrentFrameForAi() ?? Promise.resolve(null)}
               onAssistantStateChange={setPetAssistantState}
               onOpenEvidence={(evidence) => {
                 onOpenAnchor({

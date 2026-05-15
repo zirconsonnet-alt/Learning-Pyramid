@@ -17,6 +17,7 @@ import {
   normalizeRichContent,
   removeImageBlockAt,
   richContentHasMeaning,
+  richContentToPlainText,
   richText,
   setRichContentText,
 } from "@/ui/api/richContent"
@@ -34,6 +35,7 @@ import {
 import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
 import { VIRTUAL_STUDY_REVIEW_GUIDE_WRITTEN_REVIEW_ANSWER } from "@/ui/guideWalkthrough/virtualStudyReviewProject"
 import { useCommitReviewTask, useReviewBundle } from "@/ui/queries/workbench"
+import type { CourseAgentRecallContext } from "@/ui/llm/courseAgent"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import {
   EMPTY_REVIEW_SESSION,
@@ -63,12 +65,14 @@ export function ReviewPane({
   headId,
   instances,
   onOpenAnchor,
+  onAiContextChange,
 }: {
   subjectId: string
   projectId: string
   headId: string
   instances: Instance[]
   onOpenAnchor?: (a: { instanceId: string; position: string }) => void
+  onAiContextChange?: (context: CourseAgentRecallContext | null) => void
 }) {
   const projectScope: ScopedProjectRef = { subjectId, scopedProjectId: projectId }
   const { reviewTaskQ, rangeQ, recallPointQs } = useReviewBundle(projectScope, headId)
@@ -140,6 +144,20 @@ export function ReviewPane({
     : (recallPointIds[0] ?? null)
   const activeRecallPointIndex = resolvedActiveRecallPointId ? recallPointIds.findIndex((id) => id === resolvedActiveRecallPointId) : -1
   const activeRecallPoint = resolvedActiveRecallPointId ? recallPointById[resolvedActiveRecallPointId] ?? null : null
+
+  useEffect(() => {
+    if (!onAiContextChange) return
+    if (!activeRecallPoint) {
+      onAiContextChange(null)
+      return
+    }
+    onAiContextChange({
+      mode: "review",
+      questionText: richContentToPlainText(activeRecallPoint.question),
+      answerText: showAnswer[activeRecallPoint.recallPointId] ? richContentToPlainText(activeRecallPoint.answer) : undefined,
+      referenceIds: activeRecallPoint.references,
+    })
+  }, [activeRecallPoint, onAiContextChange, showAnswer])
 
   const updateWrittenAnswerText = useCallback(
     (rpId: string, text: string) => {

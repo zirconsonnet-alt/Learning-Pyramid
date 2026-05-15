@@ -23,10 +23,11 @@ import {
 } from "lucide-react"
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 
-import { ApiError } from "@/ui/api/http"
+import { apiUrl, ApiError } from "@/ui/api/http"
 import type { Instance } from "@/ui/api/instances"
 import { listLearningObjectNodes, listRecallPointsByLearningObjectNode, type LearningObjectNode } from "@/ui/api/learningObjects"
-import type { ScopedProjectRef } from "@/ui/api/projectScope"
+import { getInstancePlaybackDescriptor, resolvePlaybackDescriptorUrl } from "@/ui/api/media"
+import { projectApiPath, type ScopedProjectRef } from "@/ui/api/projectScope"
 import { richContentToPlainText } from "@/ui/api/richContent"
 import { getRecallPoint, type RecallPoint } from "@/ui/api/review"
 import type { MaterialSourceKind } from "@/ui/api/projects"
@@ -38,7 +39,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/ui/component
 import { Input } from "@/ui/components/ui/input"
 import { formatRecallPointReference } from "@/ui/displayIdentifiers"
 import { askCourseAgent } from "@/ui/llm/courseAgent"
-import { useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
+import { resolveProjectFile, useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
+import { captureVideoFrameAt } from "@/ui/media/videoFrameCapture"
 import { useMembershipSummary } from "@/ui/queries/membership"
 import { useProjectMaterialSourceBinding } from "@/ui/queries/projects"
 import { useSystemCapabilities } from "@/ui/queries/system"
@@ -339,6 +341,45 @@ function parseAnchorPositionMs(position: string | null | undefined) {
   if (!match) return null
   const value = Number(match[1])
   return Number.isFinite(value) ? value : null
+}
+
+function isRelativeMaterialId(materialId: string) {
+  const normalized = String(materialId).replace(/\\/g, "/").trim()
+  if (!normalized) return false
+  if (normalized.startsWith("/")) return false
+  if (/^[A-Za-z]:\//.test(normalized)) return false
+  return !normalized.split("/").some((part) => part === "." || part === "..")
+}
+
+function extractReferencedTimeMs(text: string) {
+  const normalized = text.replace(/\s+/g, "")
+  const hmsMatch = normalized.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/)
+  if (hmsMatch) {
+    if (hmsMatch[3] !== undefined) {
+      const hours = Number(hmsMatch[1])
+      const minutes = Number(hmsMatch[2])
+      const seconds = Number(hmsMatch[3])
+      if ([hours, minutes, seconds].every(Number.isFinite)) return (hours * 3600 + minutes * 60 + seconds) * 1000
+    }
+    const minutes = Number(hmsMatch[1])
+    const seconds = Number(hmsMatch[2])
+    if ([minutes, seconds].every(Number.isFinite)) return (minutes * 60 + seconds) * 1000
+  }
+
+  const zhMatch = normalized.match(/(?:(\d{1,2})小时)?(\d{1,3})分(?:钟)?(?:(\d{1,2})秒)?/)
+  if (zhMatch) {
+    const hours = Number(zhMatch[1] ?? 0)
+    const minutes = Number(zhMatch[2] ?? 0)
+    const seconds = Number(zhMatch[3] ?? 0)
+    if ([hours, minutes, seconds].every(Number.isFinite)) return (hours * 3600 + minutes * 60 + seconds) * 1000
+  }
+
+  const minuteOnlyMatch = normalized.match(/(?:^|[^\d])(\d{1,3})(?:分钟|分)(?!钟|秒)/)
+  if (minuteOnlyMatch) {
+    const minutes = Number(minuteOnlyMatch[1])
+    if (Number.isFinite(minutes)) return minutes * 60 * 1000
+  }
+  return null
 }
 
 function formatLearningObjectSidebarTitle(node: LearningObjectNode, depth: number) {
@@ -1036,6 +1077,8 @@ export function AiChatPage() {
       : activeObjectRecallPointsQ.data ?? []
   const llmConfigured = capabilitiesQ.data?.llmConfigured ?? false
   const aiChatMemberBlocked = authEnabled && (membershipQ.isLoading || Boolean(membershipQ.error) || !membershipQ.data?.isActive)
+  const serverMediaStreamEnabled = capabilitiesQ.data?.serverMediaStreamEnabled ?? false
+  const browserLocalMediaEnabled = capabilitiesQ.data?.browserLocalMediaEnabled ?? false
   const todayDateKey = getLocalDateKey()
   const interactionDisabled = !pid || !activeNodeId || !llmConfigured || aiChatMemberBlocked
   const persistedMessages = useMemo(() => selectedConversation?.messages ?? [], [selectedConversation?.messages])
@@ -1231,6 +1274,57 @@ export function AiChatPage() {
     return await loadActiveSubtitleSupplementalContext()
   }
 
+  async function resolveAiChatVideoFrameSrc(instance: Instance, signal: AbortSignal) {
+    if (!projectScope) throw new Error("当前页面缺少项目上下文，无法读取视频帧。")
+
+    if (instance.mediaSourceKind === "BROWSER_LOCAL" && !serverMediaStreamEnabled) {
+      if (!browserLocalMediaEnabled) throw new Error("当前部署未启用浏览器本地媒体访问，无法读取视频帧。")
+      if (directoryBinding.permission !== "granted") {
+        throw new Error("浏览器还没有授予本地素材目录读取权限，无法读取视频帧。")
+      }
+      if (!isRelativeMaterialId(instance.materialId)) {
+        throw new Error("当前实例仍是旧的绝对路径语义，无法在网页模式下读取视频帧。")
+      }
+      const file = await resolveProjectFile(pid, instance.materialId)
+      if (!file) throw new Error("未能在已授权目录下找到该视频文件，无法读取视频帧。")
+      return {
+        src: URL.createObjectURL(file),
+        cleanup: (src: string) => URL.revokeObjectURL(src),
+      }
+    }
+
+    if (instance.playbackKind === "HLS" || instance.mediaSourceKind === "BAIDU_NETDISK") {
+      const playback = await getInstancePlaybackDescriptor(projectScope, instance.instanceId, { signal, timeoutMs: 90_000 })
+      return {
+        src: resolvePlaybackDescriptorUrl(playback.url),
+        cleanup: null,
+      }
+    }
+
+    if (serverMediaStreamEnabled) {
+      return {
+        src: apiUrl(projectApiPath(projectScope, `/media/instances/${instance.instanceId}`)),
+        cleanup: null,
+      }
+    }
+
+    throw new Error("当前视频源不可访问，无法读取视频帧。")
+  }
+
+  async function captureAiChatCourseFrame(params: { instance: Instance; anchorMs: number | null; latestUserInput: string; signal: AbortSignal }) {
+    const timeMs = extractReferencedTimeMs(params.latestUserInput) ?? params.anchorMs ?? 0
+    const resolved = await resolveAiChatVideoFrameSrc(params.instance, params.signal)
+    try {
+      return await captureVideoFrameAt({
+        src: resolved.src,
+        timeMs,
+        signal: params.signal,
+      })
+    } finally {
+      resolved.cleanup?.(resolved.src)
+    }
+  }
+
   async function requestChatCompletionWithContext(params: {
     baseMessages: AiChatMessage[]
     latestUserInput: string
@@ -1256,55 +1350,60 @@ export function AiChatPage() {
 
     const courseContext = resolveActiveCourseAgentContext()
     if (courseContext) {
-      try {
-        const result = await askCourseAgent({
-          subjectId,
-          projectId: pid,
-          instance: courseContext.instance,
-          sourceKind: courseContext.sourceKind,
-          nodeLabel: activeNodeLabel,
-          userPrompt: latestUserInput,
-          systemPrompt,
-          anchorMs: courseContext.anchorMs,
-          canCaptureVideoFrame:
-            courseContext.sourceKind !== "BAIDU_NETDISK" &&
-            (capabilitiesQ.data?.serverMediaStreamEnabled === true ||
-              (courseContext.sourceKind === "BROWSER_LOCAL" && directoryBinding.permission === "granted")),
-          historyMessages: baseMessages
-            .filter((message): message is AiChatMessage & { role: "user" | "assistant" } => message.role === "user" || message.role === "assistant")
-            .map((message) => ({
-              role: message.role,
-              content: message.content,
-            })),
-          temperature: 0.2,
-          signal: controller.signal,
-          timeoutMs: 90_000,
-          onStatus: (status) => {
-            touchQaActivity()
-            setStreamingAssistantMessage((current) => (current ? { ...current, content: status } : { ...assistantDraft, content: status }))
-          },
-        })
+      setStreamingAssistantMessage((current) => (current ? { ...current, content: "正在截取课程视频帧..." } : { ...assistantDraft, content: "正在截取课程视频帧..." }))
+      const initialFrame = await captureAiChatCourseFrame({
+        instance: courseContext.instance,
+        anchorMs: courseContext.anchorMs,
+        latestUserInput,
+        signal: controller.signal,
+      })
+      const result = await askCourseAgent({
+        subjectId,
+        projectId: pid,
+        instance: courseContext.instance,
+        sourceKind: courseContext.sourceKind,
+        nodeLabel: activeNodeLabel,
+        userPrompt: latestUserInput,
+        systemPrompt,
+        anchorMs: initialFrame.timeMs,
+        initialFrame,
+        historyMessages: baseMessages
+          .filter((message): message is AiChatMessage & { role: "user" | "assistant" } => message.role === "user" || message.role === "assistant")
+          .map((message) => ({
+            role: message.role,
+            content: message.content,
+          })),
+        temperature: 0.2,
+        signal: controller.signal,
+        timeoutMs: 90_000,
+        onStatus: (status) => {
+          touchQaActivity()
+          setStreamingAssistantMessage((current) => (current ? { ...current, content: status } : { ...assistantDraft, content: status }))
+        },
+        onDelta: (_chunk, accumulated) => {
+          touchQaActivity()
+          streamingContentRef.current = accumulated
+          setStreamingAssistantMessage((current) => (current ? { ...current, content: accumulated } : { ...assistantDraft, content: accumulated }))
+        },
+      })
 
-        touchQaActivity()
-        streamingContentRef.current = result.content
-        setStreamingAssistantMessage((current) => (current ? { ...current, content: result.content } : { ...assistantDraft, content: result.content }))
+      touchQaActivity()
+      streamingContentRef.current = result.content
+      setStreamingAssistantMessage((current) => (current ? { ...current, content: result.content } : { ...assistantDraft, content: result.content }))
 
-        const hasNodeContentContext = activeNodeRecallPoints.some((item) => item.state === "ACTIVE")
-        const missingContext = hasNodeContentContext ? responseLooksLikeMissingContext(result.content) : false
-        const offTopic = hasNodeContentContext
-          ? responseLooksOffTopic(result.content, {
-              nodeLabel: activeNodeLabel,
-              recallPoints: activeNodeRecallPoints,
-            })
-          : false
+      const hasNodeContentContext = activeNodeRecallPoints.some((item) => item.state === "ACTIVE")
+      const missingContext = hasNodeContentContext ? responseLooksLikeMissingContext(result.content) : false
+      const offTopic = hasNodeContentContext
+        ? responseLooksOffTopic(result.content, {
+            nodeLabel: activeNodeLabel,
+            recallPoints: activeNodeRecallPoints,
+          })
+        : false
 
-        return {
-          content: result.content,
-          modelReliabilityIssue: missingContext || offTopic,
-          courseEvidence: result.evidence,
-        }
-      } catch (error) {
-        if (controller.signal.aborted) throw error
+      return {
+        content: result.content,
+        modelReliabilityIssue: missingContext || offTopic,
+        courseEvidence: result.evidence,
       }
     }
 

@@ -758,7 +758,9 @@
     position: absolute;
     right: calc(100% - 10px);
     bottom: 12px;
+    display: flex;
     width: min(390px, calc(100vw - 42px));
+    height: min(620px, calc(100vh - 96px));
     max-height: min(620px, calc(100vh - 96px));
     visibility: hidden;
     opacity: 0;
@@ -812,6 +814,11 @@
       background-color 150ms ease,
       color 150ms ease,
       border-color 150ms ease;
+  }
+
+  .plm-desktop-pet-popover > section {
+    min-height: 0;
+    width: 100%;
   }
 
   .plm-desktop-pet-popover-close:hover {
@@ -900,6 +907,7 @@
       right: 50%;
       bottom: calc(100% - 16px);
       width: min(390px, calc(100vw - 32px));
+      height: min(560px, calc(100vh - 112px));
       max-height: min(560px, calc(100vh - 112px));
       transform: translate3d(50%, 12px, 0) scale(0.98);
       transform-origin: 50% 100%;

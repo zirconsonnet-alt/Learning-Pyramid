@@ -463,10 +463,18 @@ class AskLlmRequest(BaseModel):
     temperature: Optional[float] = None
 
 
+class ProjectLlmImageInputDTO(BaseModel):
+    imageDataUrl: str = Field(min_length=1, max_length=8_000_000)
+    mimeType: Optional[str] = Field(default=None, max_length=64)
+    timeMs: Optional[int] = Field(default=None, ge=0)
+    label: Optional[str] = Field(default=None, max_length=120)
+
+
 class AskProjectLlmRequest(BaseModel):
     prompt: str = Field(min_length=1)
     systemPrompt: Optional[str] = None
     supplementalContext: Optional[str] = None
+    imageInputs: List[ProjectLlmImageInputDTO] = Field(default_factory=list, max_items=4)
     modelName: Optional[str] = None
     temperature: Optional[float] = None
     recallPointId: Optional[str] = None

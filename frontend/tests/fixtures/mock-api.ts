@@ -182,6 +182,7 @@ export async function installMockApi(
     boundInviteCode?: string | null
     queueHeadId?: string | null
     recallPointReferences?: string[]
+    projectLlmStreamContent?: string
   } = {},
 ) {
   const authState = options.authState ?? "signed-in"
@@ -402,6 +403,20 @@ export async function installMockApi(
       return
     }
 
+    if (path === `${scopedProjectPath}/instances/${instance.instanceId}/subtitle-file`) {
+      await fulfill(route, {
+        found: true,
+        instanceId: instance.instanceId,
+        fileName: "lesson-1.srt",
+        format: "srt",
+        segments: [
+          { startMs: 0, endMs: 10_000, text: "自动化测试关注关键用户流程。" },
+          { startMs: 10_000, endMs: 20_000, text: "它用确定性检查帮助发现回归问题。" },
+        ],
+      })
+      return
+    }
+
     if (path === `${scopedProjectPath}/video-watch-progress`) {
       await fulfill(route, {})
       return
@@ -595,7 +610,7 @@ export async function installMockApi(
       await route.fulfill({
         status: 200,
         contentType: "text/event-stream; charset=utf-8",
-        body: stream("这是自动化测试的确定性 AI 回复。"),
+        body: stream(options.projectLlmStreamContent ?? "这是自动化测试的确定性 AI 回复。"),
       })
       return
     }

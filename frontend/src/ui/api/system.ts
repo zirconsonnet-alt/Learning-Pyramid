@@ -2,7 +2,6 @@ import { z } from "zod"
 
 import { ApiError, apiRequest, apiUrl, getBaseUrl, type ApiRequestExecutionOptions } from "@/ui/api/http"
 import { projectApiPath, type ScopedProjectRef } from "@/ui/api/projectScope"
-import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
 
 export const SystemCapabilitiesSchema = z.object({
   appMode: z.enum(["local", "hosted"]),
@@ -376,8 +375,12 @@ export const AskSystemLlmResultSchema = z.object({
 })
 export type AskSystemLlmResult = z.infer<typeof AskSystemLlmResultSchema>
 
-export const RawChatCompletionResponseSchema = z.object({}).passthrough()
-export type RawChatCompletionResponse = z.infer<typeof RawChatCompletionResponseSchema>
+export type ProjectLlmImageInput = {
+  imageDataUrl: string
+  mimeType?: string
+  timeMs?: number
+  label?: string
+}
 
 export const ProjectLlmDebugMessageSchema = z.object({
   role: z.string(),
@@ -435,6 +438,7 @@ export function askProjectLlm(
     prompt: string
     systemPrompt?: string
     supplementalContext?: string
+    imageInputs?: ProjectLlmImageInput[]
     modelName?: string
     temperature?: number
     recallPointId?: string
@@ -448,36 +452,6 @@ export function askProjectLlm(
     method: "POST",
     body,
     responseSchema: AskSystemLlmResultSchema,
-    signal: options?.signal,
-    timeoutMs: options?.timeoutMs,
-  })
-}
-
-export function askProjectLlmChatCompletion(
-  scope: ScopedProjectRef,
-  body: {
-    messages: Array<Record<string, unknown>>
-    tools?: Array<Record<string, unknown>>
-    toolChoice?: unknown
-    parallelToolCalls?: boolean
-    responseFormat?: Record<string, unknown>
-    modelName?: string
-    temperature?: number
-  },
-  options?: ApiRequestExecutionOptions,
-) {
-  if (isVirtualStudyReviewProjectId(scope.scopedProjectId)) {
-    throw new ApiError("引导示范项目不提供 AI 对话。", {
-      code: "PRECONDITION",
-      status: 400,
-      details: { projectId: scope.scopedProjectId },
-    })
-  }
-  return apiRequest({
-    path: projectApiPath(scope, "/llm/chat-completions"),
-    method: "POST",
-    body,
-    responseSchema: RawChatCompletionResponseSchema,
     signal: options?.signal,
     timeoutMs: options?.timeoutMs,
   })
@@ -498,6 +472,7 @@ export async function askProjectLlmStream(
     prompt: string
     systemPrompt?: string
     supplementalContext?: string
+    imageInputs?: ProjectLlmImageInput[]
     modelName?: string
     temperature?: number
     recallPointId?: string

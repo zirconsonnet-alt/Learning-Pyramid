@@ -5,11 +5,10 @@ import type { Instance } from "@/ui/api/instances"
 import type { MaterialSourceKind } from "@/ui/api/projects"
 import { ApiError } from "@/ui/api/http"
 import type { ScopedProjectRef } from "@/ui/api/projectScope"
-import { askProjectLlmStream } from "@/ui/api/system"
 import { MarkdownRichText } from "@/ui/components/MarkdownRichText"
 import { Button } from "@/ui/components/ui/button"
 import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
-import { askCourseAgent } from "@/ui/llm/courseAgent"
+import { askCourseAgent, type CourseAgentInitialFrame, type CourseAgentRecallContext } from "@/ui/llm/courseAgent"
 import { useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
 import { useMembershipSummary } from "@/ui/queries/membership"
 import { useProjectMaterialSourceBinding } from "@/ui/queries/projects"
@@ -17,7 +16,6 @@ import { useSystemCapabilities } from "@/ui/queries/system"
 import type { AiChatCourseEvidence } from "@/ui/store/aiChatStore"
 import { showInfoFeedback } from "@/ui/store/feedbackStore"
 import { touchDailyStudyActivity } from "@/ui/store/workbenchDailyStats"
-import { buildSubtitleContextText, loadSubtitleDocumentForInstance } from "@/ui/subtitles/subtitleSupport"
 import { cn } from "@/ui/utils"
 
 type WorkbenchPetAssistantTurn = {
@@ -35,6 +33,8 @@ type WorkbenchPetAssistantProps = {
   currentMs: number
   workStatusDetail: string
   usesResolvableCourseAnchor: boolean
+  recallContext?: CourseAgentRecallContext | null
+  captureCurrentFrameForAi?: () => Promise<CourseAgentInitialFrame | null>
   onAssistantStateChange?: (state: "idle" | "thinking") => void
   onOpenEvidence?: (evidence: AiChatCourseEvidence) => void
 }
@@ -66,52 +66,14 @@ function formatEvidenceTimeRange(startMs: number, endMs: number) {
   return startMs === endMs ? formatPlaybackClock(startMs) : `${formatPlaybackClock(startMs)}-${formatPlaybackClock(endMs)}`
 }
 
-function buildConversationPrompt(messages: WorkbenchPetAssistantTurn[], latestUserInput: string) {
-  const recentBlocks: string[] = []
-  let charBudget = 4_000
-
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index]
-    const block = `${message.role === "user" ? "用户" : "雪豹助手"}：\n${message.content.trim()}`
-    if (!block.trim()) continue
-    if (recentBlocks.length > 0 && block.length > charBudget) break
-    recentBlocks.unshift(block)
-    charBudget -= block.length
-  }
-
-  const sections = recentBlocks.length > 0 ? ["以下是同一个工作台弹窗里的最近对话，请延续上下文回答最后一个用户问题。", ...recentBlocks] : []
-  sections.push(`用户：\n${latestUserInput.trim()}`)
-  return sections.join("\n\n")
-}
-
 function buildWorkbenchSystemPrompt(nodeLabel: string) {
   return [
     "请使用简体中文回答。",
-    "你是学习工作台右侧桌宠弹窗里的 AI 问答助手。",
+    "你叫雪豹，是学习工作台右侧桌宠弹窗里的 AI 问答助手。",
     `当前问答围绕“${nodeLabel}”和工作台状态展开。`,
     "优先使用当前内容、播放位置、字幕和项目上下文，不要编造项目内不存在的事实。",
     "回答要直接、可执行；如果上下文不足，请明确说明还缺什么。",
   ].join(" ")
-}
-
-function buildWorkbenchSupplementalContext(params: {
-  instance: Instance | null
-  currentMs: number
-  workStatusDetail: string
-  sourceKind: MaterialSourceKind | null
-}) {
-  const lines = ["Workbench context:"]
-  lines.push(`Status: ${params.workStatusDetail}`)
-  if (params.instance) {
-    lines.push(`Current material: ${params.instance.materialDisplayName || params.instance.materialId}`)
-    lines.push(`Instance ID: ${params.instance.instanceId}`)
-    lines.push(`Material ID: ${params.instance.materialId}`)
-    lines.push(`Playback position: ${formatPlaybackClock(params.currentMs)} (${Math.max(0, Math.floor(params.currentMs))} ms)`)
-  } else {
-    lines.push("Current material: none selected")
-  }
-  if (params.sourceKind) lines.push(`Material source kind: ${params.sourceKind}`)
-  return lines.join("\n")
 }
 
 async function copyText(text: string) {
@@ -130,6 +92,8 @@ export function WorkbenchPetAssistant({
   currentMs,
   workStatusDetail,
   usesResolvableCourseAnchor,
+  recallContext,
+  captureCurrentFrameForAi,
   onAssistantStateChange,
   onOpenEvidence,
 }: WorkbenchPetAssistantProps) {
@@ -179,66 +143,6 @@ export function WorkbenchPetAssistant({
     threadEndRef.current?.scrollIntoView({ block: "nearest" })
   }, [turns, status])
 
-  async function loadSubtitleSupplementalContext() {
-    if (!canUseCourseAgent || !instance || !sourceKind) return null
-    try {
-      const document = await loadSubtitleDocumentForInstance({
-        scope: projectScope,
-        instance,
-        sourceKind,
-      })
-      if (!document) return null
-      return buildSubtitleContextText({
-        nodeLabel,
-        fileName: document.fileName,
-        segments: document.segments,
-        anchorMs: currentMs,
-      })
-    } catch {
-      return null
-    }
-  }
-
-  async function askWithProjectContext(params: {
-    prompt: string
-    historyMessages: WorkbenchPetAssistantTurn[]
-    controller: AbortController
-    assistantTurnId: string
-  }) {
-    setStatus("正在整理工作台上下文...")
-    const subtitleContext = await loadSubtitleSupplementalContext()
-    if (params.controller.signal.aborted) return null
-
-    const supplementalContext = [
-      buildWorkbenchSupplementalContext({ instance, currentMs, workStatusDetail, sourceKind }),
-      subtitleContext,
-    ]
-      .filter((item): item is string => !!item?.trim())
-      .join("\n\n")
-
-    const result = await askProjectLlmStream(
-      projectScope,
-      {
-        prompt: buildConversationPrompt(params.historyMessages, params.prompt),
-        systemPrompt: buildWorkbenchSystemPrompt(nodeLabel),
-        supplementalContext,
-        temperature: 0.2,
-      },
-      {
-        timeoutMs: 90_000,
-        signal: params.controller.signal,
-        onDelta: (_chunk, accumulated) => {
-          touchDailyStudyActivity(projectId, "aiQa", QA_ACTIVITY_WINDOW_MS)
-          setTurns((current) =>
-            current.map((turn) => (turn.id === params.assistantTurnId ? { ...turn, content: accumulated } : turn)),
-          )
-        },
-      },
-    )
-
-    return result.content
-  }
-
   async function submitQuestion() {
     const prompt = composer.trim()
     if (!prompt) {
@@ -270,49 +174,8 @@ export function WorkbenchPetAssistant({
     onAssistantStateChange?.("thinking")
 
     try {
-      if (canUseCourseAgent && instance && sourceKind) {
-        try {
-          setStatus("正在检索当前内容字幕...")
-          const result = await askCourseAgent({
-            subjectId,
-            projectId,
-            instance,
-            sourceKind,
-            nodeLabel,
-            userPrompt: prompt,
-            systemPrompt: buildWorkbenchSystemPrompt(nodeLabel),
-            anchorMs: currentMs,
-            initialFrame: null,
-            canCaptureVideoFrame: false,
-            historyMessages: historyMessages.map((turn) => ({
-              role: turn.role,
-              content: turn.content,
-            })),
-            temperature: 0.2,
-            signal: controller.signal,
-            timeoutMs: 90_000,
-            onStatus: (nextStatus) => {
-              touchDailyStudyActivity(projectId, "aiQa", QA_ACTIVITY_WINDOW_MS)
-              setStatus(nextStatus)
-            },
-          })
-          if (controller.signal.aborted) return
-          setTurns((current) => [
-            ...current,
-            {
-              id: assistantTurnId,
-              role: "assistant",
-              content: result.content,
-              createdAt: Date.now(),
-              evidence: result.evidence,
-            },
-          ])
-          setStatus(null)
-          return
-        } catch {
-          if (controller.signal.aborted) return
-          setStatus("当前内容上下文不足，正在切换到项目问答...")
-        }
+      if (!canUseCourseAgent || !instance || !sourceKind) {
+        throw new Error("当前工作台没有可用的视频上下文。")
       }
 
       setTurns((current) => [
@@ -324,15 +187,47 @@ export function WorkbenchPetAssistant({
           createdAt: Date.now(),
         },
       ])
-      const content = await askWithProjectContext({
-        prompt,
-        historyMessages,
-        controller,
-        assistantTurnId,
+      setStatus("正在截取当前画面...")
+      const initialFrame = await captureCurrentFrameForAi?.()
+      if (controller.signal.aborted) return
+
+      setStatus("正在检索当前内容字幕...")
+      const result = await askCourseAgent({
+        subjectId,
+        projectId,
+        instance,
+        sourceKind,
+        nodeLabel,
+        userPrompt: prompt,
+        systemPrompt: `${buildWorkbenchSystemPrompt(nodeLabel)} 当前工作台状态：${workStatusDetail}。`,
+        anchorMs: initialFrame?.timeMs ?? currentMs,
+        initialFrame,
+        recallContext,
+        historyMessages: historyMessages.map((turn) => ({
+          role: turn.role,
+          content: turn.content,
+        })),
+        temperature: 0.2,
+        signal: controller.signal,
+        timeoutMs: 90_000,
+        onStatus: (nextStatus) => {
+          touchDailyStudyActivity(projectId, "aiQa", QA_ACTIVITY_WINDOW_MS)
+          setStatus(nextStatus)
+        },
+        onDelta: (_chunk, accumulated) => {
+          touchDailyStudyActivity(projectId, "aiQa", QA_ACTIVITY_WINDOW_MS)
+          setTurns((current) =>
+            current.map((turn) => (turn.id === assistantTurnId ? { ...turn, content: accumulated } : turn)),
+          )
+        },
       })
-      if (controller.signal.aborted || content === null) return
+      if (controller.signal.aborted) return
       setTurns((current) =>
-        current.map((turn) => (turn.id === assistantTurnId ? { ...turn, content: content.trim() || "我没有拿到可用回答。" } : turn)),
+        current.map((turn) =>
+          turn.id === assistantTurnId
+            ? { ...turn, content: result.content.trim() || "我没有拿到可用回答。", evidence: result.evidence }
+            : turn,
+        ),
       )
       setStatus(null)
     } catch (requestError) {
@@ -371,7 +266,7 @@ export function WorkbenchPetAssistant({
   const hasConversation = turns.length > 0
 
   return (
-    <section className="flex h-full flex-col rounded-[1.25rem] border border-border/80 bg-background/95 p-3 shadow-[0_24px_70px_-42px_rgba(31,41,55,0.55)] backdrop-blur">
+    <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-[1.25rem] border border-border/80 bg-background/95 p-3 shadow-[0_24px_70px_-42px_rgba(31,41,55,0.55)] backdrop-blur">
       <header className="flex items-start gap-2 border-b border-border/70 pb-2.5">
         <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
           <Sparkles className="h-4 w-4" />
@@ -382,7 +277,7 @@ export function WorkbenchPetAssistant({
         </div>
       </header>
 
-      <div className="mt-3 min-h-[180px] flex-1 space-y-3 overflow-y-auto pr-1">
+      <div className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
         {!hasConversation ? (
           <div className="rounded-[1rem] border border-dashed border-border/80 bg-muted/30 px-3 py-3 text-xs leading-5 text-muted-foreground">
             鼠标停在雪豹身上就能在这里提问。它会优先读取当前内容、播放位置和字幕，再结合工作台状态回答。
