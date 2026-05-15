@@ -1,70 +1,63 @@
-# 当前变更：复述点详情页引用标签改为题面文本
+# 当前变更：首页手机端使用提示
 
 ## 当前用户要求
 
-- 复述点详情页里的引用按钮不要使用悬停展示。
-- 按钮标签直接写对应复述点的题面文本。
-- 题面超长时截断，并在末尾加 `...`。
+- 手机端打开首页时提示用户：
+  - 此产品推荐在电脑上使用。
+  - 视频相关功能无法在手机端使用。
 
 ## 根因
 
-- `frontend/src/views/recallPoints/RecallPointPage.tsx` 的引用列表已经按引用 ID 查询了被引用复述点，但渲染标签仍硬编码为“引用 1 / 引用 2”。
-- 现有页面没有把已查询到的引用复述点题面用于按钮可见文本。
+- 首页当前没有针对手机端访问的能力边界提示。
+- 产品的视频学习、目录绑定、快捷录入等核心路径依赖电脑浏览器体验，手机端直接访问首页时缺少明确预期。
 
 ## 本次实际修改文件
 
-- `frontend/src/views/recallPoints/RecallPointPage.tsx`
-  - 引用按钮标签改为引用复述点题面的纯文本。
-  - 超过固定长度的题面文本截断为 `...` 结尾。
-  - 图片题面不显示 asset id，只显示文本标签。
-- `frontend/tests/fixtures/test-data.ts`
-  - E2E mock 数据增加一条被引用复述点。
-- `frontend/tests/fixtures/mock-api.ts`
-  - E2E mock API 支持读取被引用复述点。
-  - 增加测试选项，允许单条用例临时给主复述点挂引用关系。
-- `frontend/tests/e2e/review-detail-entry-links.spec.ts`
-  - 增加复述点详情页引用按钮显示题面文本的回归测试。
-- `docs/how-to-study-review.md`
-  - 同步说明引用链接会在详情页以被引用复述点题面显示。
+- `frontend/src/views/home/HomePage.tsx`
+  - 在首页 header 后增加手机端使用提示。
+- `frontend/src/index.css`
+  - 通过小屏媒体查询显示提示条，桌面端隐藏。
+- `frontend/tests/e2e/app-load.spec.ts`
+  - 增加 E2E 覆盖手机尺寸显示提示、桌面尺寸不显示提示。
+- `docs/guide-faq.md`
+  - 同步 FAQ 中“如何长期稳定使用？”的说明。
 - `docs/current-change.md`
   - 覆盖为当前任务工作单。
 
 ## 行为语义变化
 
-- 复述点详情页“引用”区域的链接可见文本从序号标签变为被引用复述点题面摘要。
-- 题面包含 Markdown 或 LaTeX 时，按钮显示原始纯文本，不做渲染。
-- 题面只有图片时，按钮显示“图片题面”。
+- 手机尺寸访问首页时，会在首页顶部显示电脑端使用提示。
+- 桌面尺寸访问首页不显示该提示。
+- 不改变登录、注册、会员、FAQ、导览或项目入口行为。
 
 ## 重构说明
 
-- 未做跨模块重构。
-- 只在详情页组件内新增局部格式化函数，因为该需求只影响该页面的引用链接标签。
+- 未做重构。
+- 实现使用现有首页组件与全局样式，不新增设备检测状态或公共抽象。
 
 ## 未修改内容
 
-- 未修改复述点引用的数据结构、API、后端查询逻辑。
-- 未修改录入框和视频全屏录入里的引用选择器。
-- 未增加悬停 tooltip、Markdown/LaTeX 渲染预览或图片缩略图。
+- 未修改视频播放、目录绑定、字幕工具或学习工作台功能逻辑。
+- 未在其他页面增加手机端提示。
+- 未增加弹窗、强制拦截或跳转。
 
 ## 影响范围
 
-- UI：影响复述点详情页“引用”区域。
-- 测试：影响前端 E2E mock 数据和一条详情页回归用例。
-- 文档：影响学习复习文档和当前变更工作单。
+- UI：影响首页小屏显示。
+- 文档：影响用户指南 FAQ 和当前变更工作单。
+- 测试：新增首页移动端 E2E 断言。
 - 不影响 API、架构、部署、数据结构。
 
 ## 当前风险与不确定项
 
-- 按钮文本截断阈值当前由前端固定常量控制，用户只指定了超长截断，没有指定字符数。
-- 引用复述点详情查询完成前，按钮会短暂显示“题面读取中...”；查询没有结果时显示“题面不可用”。
+- 当前按 CSS 小屏宽度显示提示，不做 user agent 判断；平板或窄桌面窗口也会看到该提示。
 
 ## 验证记录
 
-- 已运行：`pnpm --dir frontend exec playwright test tests/e2e/review-detail-entry-links.spec.ts -g "recall point detail names reference links" --workers=1`，修复前失败，修复后通过。
+- 已运行：`pnpm --dir frontend exec playwright test tests/e2e/app-load.spec.ts -g "home shows a mobile device notice" --workers=1`，修复前失败，修复后通过。
+- 已运行：`pnpm --dir frontend exec eslint src/views/home/HomePage.tsx tests/e2e/app-load.spec.ts`，结果通过。
+- 已运行：`pnpm --dir frontend exec playwright test tests/e2e/app-load.spec.ts --workers=1`，结果 6 个测试通过。
 - 已运行：`pnpm --dir frontend build`，结果通过；保留既有大 chunk 警告。
-- 已运行：`pnpm --dir frontend exec eslint src/views/recallPoints/RecallPointPage.tsx tests/e2e/review-detail-entry-links.spec.ts tests/fixtures/test-data.ts tests/fixtures/mock-api.ts`，结果通过。
-- 已运行：`pnpm --dir frontend exec playwright test tests/e2e/review-detail-entry-links.spec.ts --workers=1`，结果 6 个测试通过。
-- 已运行：`$env:LEARNINGPYRAMID_FRONTEND_E2E_PORT='4174'; pnpm --dir frontend exec playwright test tests/e2e/detail-summary-cards.spec.ts --workers=1`，结果 8 个测试通过。
 - 已运行：`pnpm --dir frontend lint`，结果失败；失败点为本次未修改的 `frontend/src/views/pomodoro/PomodoroWallpaperBackdrop.tsx` 既有 lint error，另有既有 hooks warning。
 
 ## 仍需用户确认的问题

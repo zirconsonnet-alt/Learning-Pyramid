@@ -272,6 +272,11 @@ export function HomePage() {
     <div className="lp-showcase-page">
       <ShowcaseSiteHeader />
 
+      <div className="lp-showcase-container lp-showcase-mobile-notice" role="note" aria-label="电脑端使用提示">
+        <strong>此产品推荐在电脑上使用</strong>
+        <span>视频相关功能无法在手机端使用。</span>
+      </div>
+
       <main id="top">
         <section className="lp-showcase-section lp-showcase-carousel-section">
           <div className="lp-showcase-container">

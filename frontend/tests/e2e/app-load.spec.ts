@@ -45,6 +45,23 @@ test("home guide dropdown matches section headings", async ({ page }) => {
   expectNoConsoleIssues(consoleIssues)
 })
 
+test("home shows a mobile device notice only on phone-sized screens", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page)
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto("/")
+  await expectHealthyPage(page, /\/$/)
+  await expect(page.getByRole("note", { name: "电脑端使用提示" })).toContainText("此产品推荐在电脑上使用")
+  await expect(page.getByRole("note", { name: "电脑端使用提示" })).toContainText("视频相关功能无法在手机端使用")
+
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.reload()
+  await expect(page.getByRole("note", { name: "电脑端使用提示" })).toHaveCount(0)
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
 test("home and guide surface the stable-use FAQ and onboarding guide entries", async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
   await installMockApi(page)
