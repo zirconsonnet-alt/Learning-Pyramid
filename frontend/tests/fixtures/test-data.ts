@@ -96,6 +96,19 @@ export const recallPoint = {
   insights: [],
 }
 
+export const referencedRecallPoint = {
+  projectId: project.projectId,
+  recallPointId: "rp_reference_e2e",
+  createdAt: nowIso,
+  state: "ACTIVE",
+  deletedAt: null,
+  question: [{ kind: "TEXT", text: "线性回归的目标是什么？它和损失函数之间的关系为什么会影响训练过程的稳定性与收敛速度？" }],
+  answer: [{ kind: "TEXT", text: "目标是找到能最小化预测误差的参数，损失函数定义了误差的度量方式。" }],
+  anchor: { instanceId: instance.instanceId, position: "t=120000" },
+  references: [],
+  insights: [],
+}
+
 export const reviewTask = {
   projectId: project.projectId,
   reviewTaskId: "review_e2e",

@@ -3,7 +3,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test"
 import { collectConsoleIssues, expectHealthyPage, expectNoConsoleIssues } from "../fixtures/app-checks"
 import { installMockApi } from "../fixtures/mock-api"
 import { projectPath } from "../fixtures/page-objects"
-import { convergence, instance, learningTaskNode, learningObjectNode, reviewChain, reviewTask } from "../fixtures/test-data"
+import { convergence, instance, learningTaskNode, learningObjectNode, recallPoint, referencedRecallPoint, reviewChain, reviewTask } from "../fixtures/test-data"
 
 async function expectSummaryLabelOrder(summaryCard: Locator, labels: string[]) {
   const text = await summaryCard.innerText()
@@ -113,6 +113,20 @@ test("instance detail removes opaque ids from the summary card", async ({ page }
   await expect(page.getByRole("heading", { name: "相关复述点" })).toHaveCount(0)
   await expect(page.getByText("所有锚定到这个实例的复述点都会显示在这里。")).toHaveCount(0)
   await expectNoOpaqueInstanceReferences(page)
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
+test("recall point detail names reference links with referenced question text", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page, { recallPointReferences: [referencedRecallPoint.recallPointId] })
+
+  await page.goto(projectPath(`/recall-points/${recallPoint.recallPointId}`))
+  await expectHealthyPage(page, projectPath(`/recall-points/${recallPoint.recallPointId}`))
+
+  const referencesRegion = page.getByLabel("复述点引用")
+  await expect(referencesRegion.getByRole("link", { name: "线性回归的目标是什么？它和损失函数之间的关系为什么会影响训练过程..." })).toBeVisible()
+  await expect(referencesRegion.getByRole("link", { name: /^引用 1$/ })).toHaveCount(0)
 
   expectNoConsoleIssues(consoleIssues)
 })

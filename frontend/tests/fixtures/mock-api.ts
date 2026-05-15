@@ -11,6 +11,7 @@ import {
   nowIso,
   project,
   recallPoint,
+  referencedRecallPoint,
   reviewChain,
   reviewTask,
   subject,
@@ -180,6 +181,7 @@ export async function installMockApi(
     withdrawalScenario?: MockWithdrawalScenario
     boundInviteCode?: string | null
     queueHeadId?: string | null
+    recallPointReferences?: string[]
   } = {},
 ) {
   const authState = options.authState ?? "signed-in"
@@ -563,7 +565,12 @@ export async function installMockApi(
     }
 
     if (path === `${scopedProjectPath}/recall-points/${recallPoint.recallPointId}`) {
-      await fulfill(route, recallPoint)
+      await fulfill(route, { ...recallPoint, references: options.recallPointReferences ?? recallPoint.references })
+      return
+    }
+
+    if (path === `${scopedProjectPath}/recall-points/${referencedRecallPoint.recallPointId}`) {
+      await fulfill(route, referencedRecallPoint)
       return
     }
 

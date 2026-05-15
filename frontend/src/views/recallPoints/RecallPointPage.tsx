@@ -9,6 +9,7 @@ import {
   appendImageBlock,
   removeImageBlockAt,
   richContentHasMeaning,
+  richContentToPlainText,
   setRichContentText,
   type RichContent,
 } from "@/ui/api/richContent"
@@ -91,6 +92,21 @@ function renderRichContentPreview(subjectId: string, projectId: string, value: R
   ) : (
     <div className="text-sm leading-6 text-muted-foreground">{emptyText}</div>
   )
+}
+
+const REFERENCE_LABEL_MAX_CHARS = 35
+
+function formatReferenceQuestionLabel(reference: { recallPoint: RecallPoint | null; isLoading: boolean }) {
+  const { recallPoint, isLoading } = reference
+  if (!recallPoint) return isLoading ? "题面读取中..." : "题面不可用"
+  const text = richContentToPlainText(recallPoint.question)
+    .replace(/\[IMAGE:[^\]]+\]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+  const imageOnly = recallPoint.question.some((block) => block.kind === "IMAGE")
+  const label = text || (imageOnly ? "图片题面" : "题面为空")
+  if (label.length <= REFERENCE_LABEL_MAX_CHARS) return label
+  return `${label.slice(0, REFERENCE_LABEL_MAX_CHARS - 3).trimEnd()}...`
 }
 
 export function RecallPointPage() {
@@ -187,7 +203,12 @@ function RecallPointDetailLayout({
     })),
   })
   const referenceRecallPoints = useMemo(
-    () => recallPoint.references.map((referenceId, index) => ({ referenceId, recallPoint: referenceRecallPointQs[index]?.data ?? null })),
+    () =>
+      recallPoint.references.map((referenceId, index) => ({
+        referenceId,
+        recallPoint: referenceRecallPointQs[index]?.data ?? null,
+        isLoading: referenceRecallPointQs[index]?.isLoading ?? false,
+      })),
     [recallPoint.references, referenceRecallPointQs],
   )
 
@@ -456,7 +477,7 @@ function RecallPointContentCard({
   onSetQuestionText: (text: string) => void
   projectId: string
   question: RichContent
-  referenceRecallPoints: Array<{ referenceId: string; recallPoint: RecallPoint | null }>
+  referenceRecallPoints: Array<{ referenceId: string; recallPoint: RecallPoint | null; isLoading: boolean }>
   subjectId: string
 }) {
   const referencesCount = referenceRecallPoints.length
@@ -524,20 +545,23 @@ function RecallPointContentCard({
             </div>
 
             {referencesCount > 0 ? (
-              <div className="rounded-[1rem] border border-[#dbe4ee] bg-[#fbfdff] p-4">
+              <div className="rounded-[1rem] border border-[#dbe4ee] bg-[#fbfdff] p-4" aria-label="复述点引用">
                 <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#64748b]">
                   <span>引用</span>
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  {referenceRecallPoints.map((item, index) => (
-                    <Link
-                      key={item.referenceId}
-                      to={buildRecallPointDetailPath(subjectId, projectId, item.referenceId)}
-                      className="rounded-full border border-[#dbe4ee] bg-white px-3 py-1.5 text-sm font-medium text-slate-900 transition hover:bg-primary/5 hover:text-primary"
-                    >
-                      引用 {index + 1}
-                    </Link>
-                  ))}
+                  {referenceRecallPoints.map((item) => {
+                    const referenceLabel = formatReferenceQuestionLabel(item)
+                    return (
+                      <Link
+                        key={item.referenceId}
+                        to={buildRecallPointDetailPath(subjectId, projectId, item.referenceId)}
+                        className="inline-flex max-w-full rounded-full border border-[#dbe4ee] bg-white px-3 py-1.5 text-sm font-medium text-slate-900 transition hover:bg-primary/5 hover:text-primary"
+                      >
+                        <span className="truncate">{referenceLabel}</span>
+                      </Link>
+                    )
+                  })}
                 </div>
               </div>
             ) : null}
