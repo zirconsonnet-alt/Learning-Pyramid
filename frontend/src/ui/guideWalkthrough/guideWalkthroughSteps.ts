@@ -238,24 +238,10 @@ export const STUDY_REVIEW_GUIDE_STEPS: GuideWalkthroughStep[] = [
 
 export const USE_AI_CHAT_GUIDE_STEPS: GuideWalkthroughStep[] = [
   {
-    id: "ai-open-chat",
-    popoverTitle: "第 1 步：进入项目 AI 问答",
-    sourceRef: {
-      heading: "第 1 步：进入项目 AI 问答",
-      itemIndex: 2,
-      extractMode: "item",
-    },
-    routeHint: "/subjects/:subjectId/projects/:scopedProjectId/ai-chat",
-    targetAnchor: "ai-chat-entry",
-    fallbackMode: "centered-popover",
-    advanceOn: "completion-event",
-    popoverSide: "right",
-  },
-  {
     id: "ai-select-node",
-    popoverTitle: "第 2 步：选择提问上下文",
+    popoverTitle: "第 1 步：选择提问上下文",
     sourceRef: {
-      heading: "第 2 步：选择提问上下文",
+      heading: "第 1 步：选择提问上下文",
       itemIndex: 1,
       extractMode: "item",
     },
@@ -267,9 +253,9 @@ export const USE_AI_CHAT_GUIDE_STEPS: GuideWalkthroughStep[] = [
   },
   {
     id: "ai-send-message",
-    popoverTitle: "第 3 步：发送问题",
+    popoverTitle: "第 2 步：发送问题",
     sourceRef: {
-      heading: "第 3 步：发送问题",
+      heading: "第 2 步：发送问题",
       itemIndex: 1,
       extractMode: "item",
     },

@@ -16,7 +16,6 @@ export function AiChatGuideDemoPage() {
 
   function openChat() {
     setChatOpen(true)
-    completeGuideWalkthroughStep("ai-open-chat")
   }
 
   function selectNode(node: string) {

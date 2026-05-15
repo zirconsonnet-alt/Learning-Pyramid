@@ -72,7 +72,7 @@ test("AI chat guide points to LLM settings when the deployment has no LLM", asyn
   expectNoConsoleIssues(consoleIssues)
 })
 
-test("AI chat guide opens the selected project AI chat when membership and LLM are ready", async ({ page }) => {
+test("AI chat guide starts from selecting a node when membership and LLM are ready", async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
   await seedSelectedProject(page)
   await installMockApi(page)
@@ -80,7 +80,8 @@ test("AI chat guide opens the selected project AI chat when membership and LLM a
   await page.goto("/subjects?walkthrough=use-ai-chat")
 
   await expect(page).toHaveURL(new RegExp(projectPath("/ai-chat")))
-  await expectGuideStep(page, "第 1 步：进入项目 AI 问答")
+  await expectGuideStep(page, "第 1 步：选择提问上下文")
+  await expect(page.getByText("点击项目左侧导航里的“AI问答”。")).toHaveCount(0)
   await expect(page.getByText(genericConditionCopy)).toHaveCount(0)
 
   expectNoConsoleIssues(consoleIssues)
