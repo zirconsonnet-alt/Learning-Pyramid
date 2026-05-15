@@ -22,6 +22,7 @@ import methodFocusCompression from "@/assets/method-focus-compression.webp"
 import methodInterleavedReview from "@/assets/method-interleaved-review.webp"
 import methodLayeredReview from "@/assets/method-layered-review.webp"
 import { DesktopPet } from "@/ui/components/DesktopPet"
+import { guideEntryLinks } from "@/ui/guideWalkthrough/guideEntryLinks"
 import { usePageMeta } from "@/ui/seo/usePageMeta"
 import { ShowcaseFooter, ShowcaseSiteHeader, useShowcaseEntryPaths } from "@/views/home/ShowcaseChrome"
 import { MembershipPlanPriceBlock } from "@/views/membership/components/MembershipPlanPriceBlock"
@@ -47,41 +48,6 @@ const mechanismCards = [
   },
 ] as const
 
-const onboardingSteps = [
-  {
-    index: "1",
-    title: "创建学科项目",
-    body: "从新建学科、进入项目，到绑定并导入本地学习材料。",
-    label: "去管理专业课的学习",
-    to: "/subjects?walkthrough=create-subject-project",
-    access: "free",
-  },
-  {
-    index: "2",
-    title: "学习复习",
-    body: "进入工作台后，录入复述点、提交学习并完成复习闭环。",
-    label: "去体验自动复习推送",
-    to: "/subjects?walkthrough=study-review",
-    access: "free",
-  },
-  {
-    index: "3",
-    title: "使用 AI 问答",
-    body: "会员和 LLM 可用后，进入项目 AI 问答，选择学习对象并开始对话。",
-    label: "去感受AI学习赋能",
-    to: "/subjects?walkthrough=use-ai-chat",
-    access: "member",
-  },
-  {
-    index: "4",
-    title: "使用番茄钟",
-    body: "开启番茄钟，设定明早 9 点计划，绑定项目，然后查看计划。",
-    label: "去定明早9点的番茄钟",
-    to: "/pomodoro?walkthrough=use-pomodoro",
-    access: "member",
-  },
-] as const
-
 const inviteBullets = [
   "绑定邀请码获7.5元券",
   "被邀请者有效充值满15元，获5元佣金",
@@ -90,16 +56,16 @@ const inviteBullets = [
 
 const faqItems = [
   {
+    title: "如何长期稳定使用？",
+    body: "使用电脑浏览器访问即可",
+  },
+  {
     title: "创建项目前需要干什么？",
     body: "请在本地准备好你的视频或其他学习资料",
   },
   {
     title: "绑定的视频目录需要符合什么要求？",
     body: "同构上推模式下，请按照章节结构，分层存放视频",
-  },
-  {
-    title: "为什么佣金不立即生效？",
-    body: "用户充值后需要等退款窗口结束，退款窗口过后才视为有效",
   },
   {
     title: "我的视频资料没有字幕怎么办？",
@@ -420,7 +386,7 @@ export function HomePage() {
               <h2>改变，从现在开始</h2>
             </div>
             <div className="lp-showcase-steps-grid">
-              {onboardingSteps.map((item) => (
+              {guideEntryLinks.map((item) => (
                 <article key={item.index} className="lp-showcase-step" data-access={item.access}>
                   <div className="lp-showcase-step-ribbon">{item.access === "free" ? "免费功能" : "会员功能"}</div>
                   <div className="lp-showcase-step-no">{item.index}</div>

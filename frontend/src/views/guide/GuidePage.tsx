@@ -2,7 +2,7 @@ import { useEffect, type ReactNode } from "react"
 import { Copy } from "lucide-react"
 import katex from "katex"
 import "katex/dist/katex.min.css"
-import { useSearchParams } from "react-router-dom"
+import { Link, useSearchParams } from "react-router-dom"
 
 import faqMarkdown from "../../../../docs/guide-faq.md?raw"
 import createSubjectProjectMarkdown from "../../../../docs/how-to-create-subject-project.md?raw"
@@ -11,6 +11,7 @@ import useAiChatMarkdown from "../../../../docs/how-to-use-ai-chat.md?raw"
 import usePomodoroMarkdown from "../../../../docs/how-to-use-pomodoro.md?raw"
 
 import { Button } from "@/ui/components/ui/button"
+import { guideEntryLinks } from "@/ui/guideWalkthrough/guideEntryLinks"
 import {
   getOfficialCommunityCopyLabel,
   getOfficialCommunityCopySuccessMessage,
@@ -493,6 +494,21 @@ function MarkdownContent({ blocks }: { blocks: MarkdownBlock[] }) {
   )
 }
 
+function GuideEntryCard() {
+  return (
+    <section className="theme-card p-4">
+      <div className="text-sm font-semibold text-foreground">快速开始</div>
+      <nav className="mt-3 space-y-2" aria-label="首页指引">
+        {guideEntryLinks.map((item) => (
+          <Button key={item.to} asChild variant="outline" size="sm" className="w-full justify-start whitespace-normal text-left leading-5">
+            <Link to={item.to}>{item.label}</Link>
+          </Button>
+        ))}
+      </nav>
+    </section>
+  )
+}
+
 export function GuidePage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const requestedSlug = searchParams.get("doc")
@@ -519,7 +535,8 @@ export function GuidePage() {
   return (
     <div className="space-y-6">
       <div className="grid gap-6 xl:grid-cols-[18rem_minmax(0,1fr)_18rem]">
-        <aside className="xl:sticky xl:top-28 xl:self-start">
+        <aside className="space-y-4 xl:sticky xl:top-28 xl:self-start">
+          <GuideEntryCard />
           <section className="theme-card p-4">
             <div className="text-sm font-semibold text-foreground">官方群与反馈</div>
             <img

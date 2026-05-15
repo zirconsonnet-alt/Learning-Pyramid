@@ -45,6 +45,31 @@ test("home guide dropdown matches section headings", async ({ page }) => {
   expectNoConsoleIssues(consoleIssues)
 })
 
+test("home and guide surface the stable-use FAQ and onboarding guide entries", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page)
+
+  await page.goto("/")
+  const homeFaq = page.locator("#faq")
+  await expect(homeFaq.locator(".lp-showcase-faq-item")).toHaveCount(4)
+  await expect(homeFaq.getByRole("heading", { name: "如何长期稳定使用？" })).toBeVisible()
+  await expect(homeFaq.getByText("使用电脑浏览器访问即可")).toBeVisible()
+  await expect(homeFaq.getByText("为什么佣金不立即生效？")).toHaveCount(0)
+
+  await page.goto("/guide")
+  await expect(page.locator(".theme-card-main h2").first()).toHaveText("如何长期稳定使用？")
+  await expect(page.getByText("使用电脑浏览器访问即可")).toBeVisible()
+
+  await expect(page.getByRole("navigation", { name: "首页指引" }).getByRole("link")).toHaveText([
+    "去管理专业课的学习",
+    "去体验自动复习推送",
+    "去感受AI学习赋能",
+    "去定明早9点的番茄钟",
+  ])
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
 test("profile learning view uses scoped audit log endpoint", async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
   let oldAuditLogRequested = false
