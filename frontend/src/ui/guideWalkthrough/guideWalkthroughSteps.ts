@@ -15,6 +15,7 @@ export type GuideWalkthroughSourceRef = {
 export type GuideWalkthroughStep = {
   id: string
   popoverTitle?: string
+  popoverDescription?: string
   sourceRef: GuideWalkthroughSourceRef
   routeHint?: string
   targetAnchor?: string
@@ -92,8 +93,23 @@ export const CREATE_SUBJECT_PROJECT_GUIDE_STEPS: GuideWalkthroughStep[] = [
     routeHint: "/subjects/:subjectId/projects/:scopedProjectId/settings",
     targetAnchor: "import-directory-button",
     fallbackMode: "centered-popover",
-    advanceOn: "target-click",
+    advanceOn: "completion-event",
     popoverSide: "left",
+  },
+  {
+    id: "view-imported-workbench",
+    popoverTitle: "第 6 步：查看导入结果",
+    popoverDescription: "左侧是刚导入的内容目录。",
+    sourceRef: {
+      heading: "第 3 步：同步目录内容",
+      itemIndex: 4,
+      extractMode: "item",
+    },
+    routeHint: "/subjects/:subjectId/projects/:scopedProjectId/workbench",
+    targetAnchor: "learning-object-tree",
+    fallbackMode: "centered-popover",
+    advanceOn: "manual",
+    popoverSide: "right",
   },
 ]
 

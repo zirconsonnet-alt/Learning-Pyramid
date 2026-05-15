@@ -35,6 +35,7 @@ const REFRESH_GUIDE_WALKTHROUGH_EVENT = "learningpyramid:refresh-guide-walkthrou
 const GUIDE_WALKTHROUGH_STEP_COMPLETED_EVENT = "learningpyramid:guide-walkthrough-step-completed"
 const SUPPORTED_FALLBACK_MODES = ["centered-popover", "route-hint", "skip-with-explanation"] as const
 const ACTION_STEP_BUTTONS: AllowedButtons[] = ["close"]
+const FINAL_STEP_BUTTONS: AllowedButtons[] = ["next"]
 const TARGET_WAIT_INTERVAL_MS = 50
 const TARGET_WAIT_MAX_ATTEMPTS = 20
 const GUIDE_WALKTHROUGH_POMODORO_NON_FOCUS_TITLE = "当前不是学习时间"
@@ -220,6 +221,12 @@ export function resolveGuideRouteHint(step: GuideWalkthroughStep | undefined, pa
     resolvedRouteHint = resolvedRouteHint.replace(":projectId", encodeURIComponent(projectId))
   }
 
+  if (resolvedRouteHint.includes(":scopedProjectId")) {
+    const projectId = resolveGuideProjectId(pathname)
+    if (!projectId) return null
+    resolvedRouteHint = resolvedRouteHint.replace(":scopedProjectId", encodeURIComponent(projectId))
+  }
+
   if (resolvedRouteHint.includes(":planId")) {
     const planId = resolveGuidePomodoroPlanId(pathname)
     if (!planId) return null
@@ -290,10 +297,10 @@ function completeActiveGuideWalkthroughStep(driverInstance: Driver, stepId: stri
 
 function createPopover(step: GuideWalkthroughStep, stepIndex: number, options: BuildDriverStepsOptions, hasTarget: boolean): DriveStep["popover"] {
   const copy = resolveGuideWalkthroughCopy(step.sourceRef, options.getDocSlug())
-  const showButtons = hasTarget && step.advanceOn && step.advanceOn !== "manual" ? ACTION_STEP_BUTTONS : undefined
+  const showButtons = step.advanceOn === "manual" ? FINAL_STEP_BUTTONS : hasTarget && step.advanceOn ? ACTION_STEP_BUTTONS : undefined
   return {
     title: step.popoverTitle ?? copy.title,
-    description: copy.description,
+    description: step.popoverDescription ?? copy.description,
     side: hasTarget ? step.popoverSide : "over",
     align: "center",
     showButtons,

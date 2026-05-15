@@ -402,6 +402,7 @@ export function ProjectsPage() {
         <DialogContent data-guide-tour="create-subject-submit" className="p-4">
           <DialogHeader>
             <DialogTitle>创建新学科</DialogTitle>
+            <DialogDescription>输入一个学科标题，创建后进入这个学科的项目中心。</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="grid gap-2">

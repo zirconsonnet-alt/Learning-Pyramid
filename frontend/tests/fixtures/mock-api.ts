@@ -183,6 +183,7 @@ export async function installMockApi(
 ) {
   const authState = options.authState ?? "signed-in"
   const contentState = options.contentState ?? "ready"
+  let contentReady = contentState === "ready"
   const membershipProvider = options.membershipProvider ?? "manual_test"
   const withdrawalScenario = options.withdrawalScenario ?? "none"
   const queueHeadId = options.queueHeadId ?? null
@@ -384,7 +385,7 @@ export async function installMockApi(
     }
 
     if (path === `${scopedProjectPath}/instances`) {
-      await fulfill(route, contentState === "empty" ? [] : [instance])
+      await fulfill(route, contentReady ? [instance] : [])
       return
     }
 
@@ -414,7 +415,7 @@ export async function installMockApi(
     }
 
     if (path === `${scopedProjectPath}/learning-task-nodes`) {
-      await fulfill(route, contentState === "empty" ? [] : [learningTaskNode])
+      await fulfill(route, contentReady ? [learningTaskNode] : [])
       return
     }
 
@@ -449,12 +450,25 @@ export async function installMockApi(
     }
 
     if (path === `${scopedProjectPath}/learning-object-roots`) {
-      await fulfill(route, { rootLearningObjectNodeIds: contentState === "empty" ? [] : [learningObjectNode.nodeId] })
+      await fulfill(route, { rootLearningObjectNodeIds: contentReady ? [learningObjectNode.nodeId] : [] })
       return
     }
 
     if (path === `${scopedProjectPath}/learning-object-nodes`) {
-      await fulfill(route, contentState === "empty" ? [] : [learningObjectNode])
+      await fulfill(route, contentReady ? [learningObjectNode] : [])
+      return
+    }
+
+    if (path === `${scopedProjectPath}/import-learning-objects-from-browser` && method === "POST") {
+      const wasReady = contentReady
+      contentReady = true
+      await fulfill(route, {
+        unchanged: wasReady,
+        created_instances_count: wasReady ? 0 : 1,
+        marked_missing_count: 0,
+        replaced_learning_object_nodes_count: 1,
+        warnings: [],
+      })
       return
     }
 

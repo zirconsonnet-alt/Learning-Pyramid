@@ -425,12 +425,14 @@ export function ProjectSettingsPage() {
         if (!silentSuccess) {
           showInfoFeedback("目录已是最新", "当前已授权目录里的媒体文件没有变化。")
         }
+        completeGuideWalkthroughStep("import-directory")
         return
       }
       showSuccessFeedback(
         "目录内容已同步",
         `已同步 ${scan.relativeFilePaths.length} 个媒体文件，新增 ${result.created_instances_count} 个实例。`,
       )
+      completeGuideWalkthroughStep("import-directory")
     } catch (err) {
       showErrorFeedback("同步本地目录失败", formatApiError(err))
     } finally {

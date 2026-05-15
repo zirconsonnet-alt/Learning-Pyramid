@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test"
+import { expect, test, type Page } from "@playwright/test"
 
 import { collectConsoleIssues, expectNoConsoleIssues } from "../fixtures/app-checks"
 import { installMockApi } from "../fixtures/mock-api"
@@ -6,6 +6,71 @@ import { journeyIds } from "../fixtures/journeys"
 import { recordJourney } from "../fixtures/journey-result"
 import { gotoProjects, openSubject, projectPath } from "../fixtures/page-objects"
 import { material, project, subject } from "../fixtures/test-data"
+
+async function seedGrantedProjectDirectory(page: Page) {
+  await page.addInitScript(
+    async ({ subjectId, projectId }) => {
+      const storage = navigator.storage as StorageManager & {
+        getDirectory?: () => Promise<FileSystemDirectoryHandle>
+      }
+      const root = await storage.getDirectory?.()
+      if (!root) return
+      const directory = await root.getDirectoryHandle("learningpyramid-e2e-materials", { create: true })
+      window.showDirectoryPicker = async () => directory
+      const file = await directory.getFileHandle("第一讲 自动化导论.mp4", { create: true })
+      const writable = await file.createWritable()
+      await writable.write(new Blob(["e2e"], { type: "video/mp4" }))
+      await writable.close()
+
+      const dbRequest = indexedDB.open("plm-local-media", 2)
+      await new Promise<void>((resolve, reject) => {
+        dbRequest.onupgradeneeded = () => {
+          const db = dbRequest.result
+          if (!db.objectStoreNames.contains("projectDirectories")) {
+            db.createObjectStore("projectDirectories", { keyPath: "projectId" })
+          }
+          if (!db.objectStoreNames.contains("globalDirectories")) {
+            db.createObjectStore("globalDirectories", { keyPath: "key" })
+          }
+        }
+        dbRequest.onerror = () => reject(dbRequest.error ?? new Error("IndexedDB open failed"))
+        dbRequest.onsuccess = () => {
+          const db = dbRequest.result
+          const tx = db.transaction("projectDirectories", "readwrite")
+          const store = tx.objectStore("projectDirectories")
+          store.put({
+            projectId: `${subjectId}:${projectId}`,
+            handle: directory,
+            savedAt: new Date().toISOString(),
+          })
+          tx.oncomplete = () => {
+            db.close()
+            resolve()
+          }
+          tx.onerror = () => {
+            db.close()
+            reject(tx.error ?? new Error("IndexedDB write failed"))
+          }
+        }
+      })
+    },
+    { subjectId: subject.subjectId, projectId: project.projectId },
+  )
+}
+
+async function completeGuideStep(page: Page, stepId: string) {
+  await page.evaluate((id) => {
+    window.dispatchEvent(new CustomEvent("learningpyramid:guide-walkthrough-step-completed", { detail: { stepId: id } }))
+  }, stepId)
+}
+
+async function expectGuideStep(page: Page, title: string) {
+  await expect(page.getByRole("dialog", { name: title })).toBeVisible()
+}
+
+async function dispatchClick(locator: ReturnType<Page["getByRole"]>) {
+  await locator.dispatchEvent("click")
+}
 
 test(journeyIds.subjectProjectEntry, async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
@@ -18,6 +83,39 @@ test(journeyIds.subjectProjectEntry, async ({ page }) => {
     await expect(page).toHaveURL(new RegExp(projectPath("/workbench")))
     await expect(page.getByText("工作状态")).toBeVisible()
   })
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
+test("create subject guide enters workbench after directory sync", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await seedGrantedProjectDirectory(page)
+  await installMockApi(page, { contentState: "empty" })
+
+  await page.goto("/subjects?walkthrough=create-subject-project")
+  await expectGuideStep(page, "第 1 步：创建学科和项目")
+  await page.getByRole("button", { name: "新建学科" }).click()
+  await completeGuideStep(page, "create-subject")
+  await expectGuideStep(page, "第 2 步：填写标题并创建学科")
+  await page.getByLabel("学科标题").fill(subject.title)
+  await dispatchClick(page.getByRole("button", { name: "创建学科" }))
+  await expect(page).toHaveURL(new RegExp(`/subjects/${subject.subjectId}`))
+  await expectGuideStep(page, "第 3 步：打开项目设置")
+  await dispatchClick(page.getByRole("button", { name: "项目设置" }))
+  await expect(page).toHaveURL(new RegExp(projectPath("/settings")))
+  await expectGuideStep(page, "第 2 步：到“项目设置”绑定目录")
+  await dispatchClick(page.getByRole("button", { name: "更换目录" }))
+  await expectGuideStep(page, "第 3 步：同步目录内容")
+  await expect(page.getByRole("button", { name: "同步目录内容" })).toBeVisible()
+  await dispatchClick(page.getByRole("button", { name: "同步目录内容" }))
+
+  await expect(page).toHaveURL(new RegExp(projectPath("/workbench")))
+  await expectGuideStep(page, "第 6 步：查看导入结果")
+  await expect(page.getByText("左侧是刚导入的内容目录。")).toBeVisible()
+  await expect(page.getByRole("button", { name: "完成" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "上一步" })).toHaveCount(0)
+  await expect(page.getByRole("heading", { name: "内容目录" })).toBeVisible()
+  await expect(page.getByText("第一讲 自动化导论")).toBeVisible()
 
   expectNoConsoleIssues(consoleIssues)
 })

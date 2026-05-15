@@ -385,6 +385,7 @@ export function SubjectDashboardPage() {
         <DialogContent className="p-4">
           <DialogHeader>
             <DialogTitle>创建新项目</DialogTitle>
+            <DialogDescription>选择项目类型并命名，创建后会留在当前学科项目中心。</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="grid gap-2">
