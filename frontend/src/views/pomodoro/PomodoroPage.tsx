@@ -29,6 +29,13 @@ import { useSubjects } from "@/ui/queries/subjects"
 import { useSystemCapabilities } from "@/ui/queries/system"
 import { usePageMeta } from "@/ui/seo/usePageMeta"
 import { GUIDE_WALKTHROUGH_STEP_HIGHLIGHTED_EVENT, completeGuideWalkthroughStep } from "@/ui/guideWalkthrough/guideWalkthroughController"
+import {
+  GUIDE_POMODORO_BREAK_MINUTES,
+  GUIDE_POMODORO_COUNT,
+  GUIDE_POMODORO_FOCUS_MINUTES,
+  GUIDE_POMODORO_START_TIME,
+  getGuidePomodoroWeekday,
+} from "@/ui/guideWalkthrough/pomodoroGuideSchedule"
 import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { listPomodoroActivityRecords, type PomodoroActivityRecord } from "@/ui/store/pomodoroActivityStore"
 import {
@@ -180,17 +187,6 @@ function normalizeDraftSubjectId(
 
 function buildScopedWorkbenchPath(subjectId: string, projectId: string) {
   return subjectId && projectId ? `/subjects/${encodeURIComponent(subjectId)}/projects/${encodeURIComponent(projectId)}/workbench` : ""
-}
-
-function getPomodoroGuideWeekday(now: number): PomodoroWeekday {
-  const day = new Date(now).getDay()
-  if (day === 0) return "sun"
-  return POMODORO_WEEKDAYS[day - 1] ?? "mon"
-}
-
-function getPomodoroGuideStartTime(now: number) {
-  const date = new Date(now)
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
 }
 
 function toPomodoroProjectReference(project: { subjectId: string; projectId: string }): PomodoroProjectReference {
@@ -917,8 +913,7 @@ export function PomodoroPage() {
       const firstProject = availablePomodoroProjects[0]
       if (!firstProject) return
 
-      const guideWeekday = getPomodoroGuideWeekday(now)
-      const guideStartTime = getPomodoroGuideStartTime(Date.now())
+      const guideWeekday = getGuidePomodoroWeekday(now)
       setSelectedSubjectIdByPlanId((prev) => ({
         ...prev,
         [activePlanId]: firstProject.subjectId,
@@ -926,13 +921,13 @@ export function PomodoroPage() {
       setPomodoroDrafts((prev) =>
         prev.map((draft) => {
           if (draft.id !== activePlanId) return draft
-          const nextPomodoroCount = "1"
+          const nextPomodoroCount = String(GUIDE_POMODORO_COUNT)
           return {
             ...draft,
             activeDays: [guideWeekday],
-            startTime: guideStartTime,
-            focusMinutes: "25",
-            breakMinutes: "5",
+            startTime: GUIDE_POMODORO_START_TIME,
+            focusMinutes: String(GUIDE_POMODORO_FOCUS_MINUTES),
+            breakMinutes: String(GUIDE_POMODORO_BREAK_MINUTES),
             pomodoroCount: nextPomodoroCount,
             subjectId: firstProject.subjectId,
             projectRefs: normalizeDraftProjectRefs(draft.projectRefs, normalizeCountInput(nextPomodoroCount, 1)),
@@ -1815,6 +1810,12 @@ export function PomodoroPage() {
               return (
                 <Link
                   key={pomodoroDraft.id}
+                  data-guide-tour={
+                    pomodoroDraft.activeDays.includes(getGuidePomodoroWeekday(now)) &&
+                    normalizePomodoroStartTime(pomodoroDraft.startTime) === GUIDE_POMODORO_START_TIME
+                      ? "pomodoro-guide-plan-card"
+                      : undefined
+                  }
                   to={buildPomodoroPlanPath(pomodoroDraft.id)}
                   className="block space-y-3 rounded-[1.1rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] px-4 py-4 text-foreground shadow-[var(--theme-soft-shadow)] transition hover:-translate-y-px hover:border-primary/25"
                 >

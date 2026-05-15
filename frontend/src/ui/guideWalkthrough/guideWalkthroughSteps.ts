@@ -295,78 +295,91 @@ export const USE_AI_CHAT_GUIDE_STEPS: GuideWalkthroughStep[] = [
   },
 ]
 
-export const USE_POMODORO_GUIDE_STEPS: GuideWalkthroughStep[] = [
-  {
-    id: "pomodoro-create-plan",
-    popoverTitle: "第 1 步：新建番茄计划",
-    sourceRef: {
-      heading: "第 1 步：新建番茄计划",
-      itemIndex: 1,
-      extractMode: "item",
+export function createUsePomodoroGuideSteps(params: { includeEnableStep: boolean }): GuideWalkthroughStep[] {
+  const offset = params.includeEnableStep ? 1 : 0
+  const steps: GuideWalkthroughStep[] = []
+
+  if (params.includeEnableStep) {
+    steps.push({
+      id: "pomodoro-enable-clock",
+      popoverTitle: "第 1 步：开启番茄钟",
+      sourceRef: {
+        heading: "开启番茄钟",
+        itemIndex: 1,
+        extractMode: "item",
+      },
+      routeHint: "/pomodoro",
+      targetAnchor: "pomodoro-session-status",
+      fallbackMode: "centered-popover",
+      advanceOn: "completion-event",
+      popoverSide: "bottom",
+    })
+  }
+
+  steps.push(
+    {
+      id: "pomodoro-create-plan",
+      popoverTitle: `第 ${1 + offset} 步：新建番茄计划`,
+      sourceRef: {
+        heading: "新建番茄计划",
+        itemIndex: 1,
+        extractMode: "item",
+      },
+      routeHint: "/pomodoro",
+      targetAnchor: "pomodoro-create-plan-button",
+      fallbackMode: "centered-popover",
+      advanceOn: "completion-event",
+      popoverSide: "bottom",
     },
-    routeHint: "/pomodoro",
-    targetAnchor: "pomodoro-create-plan-button",
-    fallbackMode: "centered-popover",
-    advanceOn: "completion-event",
-    popoverSide: "bottom",
-  },
-  {
-    id: "pomodoro-bind-project",
-    popoverTitle: "第 2 步：绑定学习项目",
-    sourceRef: {
-      heading: "第 2 步：绑定学习项目",
-      itemIndex: 1,
-      extractMode: "item",
+    {
+      id: "pomodoro-bind-project",
+      popoverTitle: `第 ${2 + offset} 步：绑定学习项目`,
+      sourceRef: {
+        heading: "绑定学习项目",
+        itemIndex: 1,
+        extractMode: "item",
+      },
+      routeHint: "/pomodoro/plans/:planId",
+      targetAnchor: "pomodoro-project-binding",
+      fallbackMode: "centered-popover",
+      advanceOn: "completion-event",
+      popoverSide: "top",
     },
-    routeHint: "/pomodoro/plans/:planId",
-    targetAnchor: "pomodoro-project-binding",
-    fallbackMode: "centered-popover",
-    advanceOn: "completion-event",
-    popoverSide: "top",
-  },
-  {
-    id: "pomodoro-save-plan",
-    popoverTitle: "第 3 步：保存番茄计划",
-    sourceRef: {
-      heading: "第 3 步：保存番茄计划",
-      itemIndex: 1,
-      extractMode: "item",
+    {
+      id: "pomodoro-save-plan",
+      popoverTitle: `第 ${3 + offset} 步：保存番茄计划`,
+      sourceRef: {
+        heading: "保存番茄计划",
+        itemIndex: 1,
+        extractMode: "item",
+      },
+      routeHint: "/pomodoro/plans/:planId",
+      targetAnchor: "pomodoro-save-plan-button",
+      fallbackMode: "centered-popover",
+      advanceOn: "completion-event",
+      popoverSide: "top",
     },
-    routeHint: "/pomodoro/plans/:planId",
-    targetAnchor: "pomodoro-save-plan-button",
-    fallbackMode: "centered-popover",
-    advanceOn: "completion-event",
-    popoverSide: "top",
-  },
-  {
-    id: "pomodoro-enable-clock",
-    popoverTitle: "第 4 步：开启番茄钟",
-    sourceRef: {
-      heading: "第 4 步：开启番茄钟",
-      itemIndex: 1,
-      extractMode: "item",
+    {
+      id: "pomodoro-view-plan",
+      popoverTitle: `第 ${4 + offset} 步：查看明早计划`,
+      popoverDescription: "这里是刚保存的明天上午 9 点番茄计划。",
+      sourceRef: {
+        heading: "查看明早计划",
+        itemIndex: 1,
+        extractMode: "item",
+      },
+      routeHint: "/pomodoro",
+      targetAnchor: "pomodoro-guide-plan-card",
+      fallbackMode: "centered-popover",
+      advanceOn: "manual",
+      popoverSide: "left",
     },
-    routeHint: "/pomodoro",
-    targetAnchor: "pomodoro-session-status",
-    fallbackMode: "centered-popover",
-    advanceOn: "completion-event",
-    popoverSide: "bottom",
-  },
-  {
-    id: "pomodoro-view-workbench",
-    popoverTitle: "第 5 步：查看工作台",
-    popoverDescription: "这里是当前番茄绑定项目的工作台。",
-    sourceRef: {
-      heading: "第 5 步：查看工作台",
-      itemIndex: 1,
-      extractMode: "item",
-    },
-    targetAnchor: "learning-object-tree",
-    fallbackMode: "centered-popover",
-    advanceOn: "manual",
-    popoverSide: "left",
-  },
-]
+  )
+
+  return steps
+}
+
+export const USE_POMODORO_GUIDE_STEPS: GuideWalkthroughStep[] = createUsePomodoroGuideSteps({ includeEnableStep: true })
 
 export const GUIDE_WALKTHROUGH_STEPS_BY_DOC: Record<GuideWalkthroughDocSlug, GuideWalkthroughStep[]> = {
   "create-subject-project": CREATE_SUBJECT_PROJECT_GUIDE_STEPS,

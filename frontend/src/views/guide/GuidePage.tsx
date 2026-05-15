@@ -330,7 +330,7 @@ const docs: DocDefinition[] = [
     slug: "use-pomodoro",
     label: "如何使用番茄钟",
     audience: "面向使用者",
-    summary: "开启番茄钟，设定计划，绑定项目，然后进入工作台学习。",
+    summary: "开启番茄钟，设定明早 9 点计划，绑定项目，然后查看计划。",
     sourcePath: "仓库文档 / 如何使用番茄钟",
     parsed: parseMarkdown(usePomodoroMarkdown),
   },

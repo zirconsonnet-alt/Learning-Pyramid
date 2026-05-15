@@ -6,12 +6,14 @@ import {
   DEFAULT_GUIDE_WALKTHROUGH_DOC_SLUG,
   GUIDE_WALKTHROUGH_STEPS,
   GUIDE_WALKTHROUGH_STEPS_BY_DOC,
+  createUsePomodoroGuideSteps,
   getGuideWalkthroughSteps,
   isGuideWalkthroughDocSlug,
   type GuideWalkthroughDocSlug,
   type GuideWalkthroughSessionStatus,
   type GuideWalkthroughStep,
 } from "./guideWalkthroughSteps"
+import { hasGuidePomodoroScheduleConflict } from "./pomodoroGuideSchedule"
 import { showInfoFeedback } from "@/ui/store/feedbackStore"
 import {
   describePomodoroPhase,
@@ -230,8 +232,21 @@ function buildPomodoroSessionPlan(context: GuideWalkthroughRuntimeContext): Guid
     return { steps: [step], docSlug: "use-pomodoro", initialPathname: step.routeHint ?? null, ready: true }
   }
 
+  const pomodoroState = usePomodoroStore.getState()
+  if (hasGuidePomodoroScheduleConflict(pomodoroState.weeklySchedule)) {
+    const step = createTerminalGuideStep({
+      id: "pomodoro-guide-time-conflict",
+      title: "明天上午已有安排",
+      description: "默认时间是明天上午 9 点。请先调整已有番茄计划。",
+      routeHint: "/pomodoro",
+      sourceHeading: "新建番茄计划",
+    })
+    return { steps: [step], docSlug: "use-pomodoro", initialPathname: step.routeHint ?? null, ready: true }
+  }
+
+  const pomodoroEnabled = pomodoroState.enabled
   return {
-    steps: resolveGuideWalkthroughSessionSteps("use-pomodoro"),
+    steps: createUsePomodoroGuideSteps({ includeEnableStep: !pomodoroEnabled }),
     docSlug: "use-pomodoro",
     initialPathname: "/pomodoro",
     ready: true,

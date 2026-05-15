@@ -75,7 +75,7 @@ const onboardingSteps = [
   {
     index: "4",
     title: "使用番茄钟",
-    body: "开启番茄钟，设定计划，绑定项目，然后进入工作台学习。",
+    body: "开启番茄钟，设定明早 9 点计划，绑定项目，然后查看计划。",
     label: "去定明早9点的番茄钟",
     to: "/pomodoro?walkthrough=use-pomodoro",
     access: "member",

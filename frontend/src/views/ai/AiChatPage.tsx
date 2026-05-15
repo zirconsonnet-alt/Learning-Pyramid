@@ -1817,9 +1817,10 @@ export function AiChatPage() {
 
           <div className="border-t border-[color:var(--theme-soft-border)] px-4 py-4 sm:px-7">
             <div className="mx-auto max-w-3xl">
-              <div data-guide-tour="ai-message-composer" className="rounded-[1.9rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] shadow-[0_28px_64px_-40px_rgba(15,23,42,0.24)]">
+              <div className="rounded-[1.9rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] shadow-[0_28px_64px_-40px_rgba(15,23,42,0.24)]">
                 <textarea
                   ref={composerRef}
+                  data-guide-tour="ai-message-composer"
                   aria-label="提问内容"
                   value={composerValue}
                   onChange={(event) => {

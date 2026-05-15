@@ -5,7 +5,19 @@ import { createMockGlobalSettings, installMockApi } from "../fixtures/mock-api"
 import { membershipSummary, project, subject } from "../fixtures/test-data"
 
 const genericConditionCopy = /使用前先确认|确保满足|满足以下条件/
-const projectRoute = (suffix: string) => `/subjects/${subject.subjectId}/projects/${project.projectId}${suffix.startsWith("/") ? suffix : `/${suffix}`}`
+type MockPomodoroWeekday = keyof ReturnType<typeof createMockGlobalSettings>["pomodoro"]["weeklySchedule"]
+type MockPomodoroWeekSchedule = ReturnType<typeof createMockGlobalSettings>["pomodoro"]["weeklySchedule"]
+
+const pomodoroWeekdays: MockPomodoroWeekday[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+const pomodoroWeekdayByJsDay: Record<number, MockPomodoroWeekday> = {
+  0: "sun",
+  1: "mon",
+  2: "tue",
+  3: "wed",
+  4: "thu",
+  5: "fri",
+  6: "sat",
+}
 
 const inactiveMembershipSummary = {
   ...membershipSummary,
@@ -14,6 +26,33 @@ const inactiveMembershipSummary = {
   currentEndsAt: null,
   isActive: false,
   isFirstOrderEligible: true,
+}
+
+function createEmptyPomodoroWeekSchedule(): MockPomodoroWeekSchedule {
+  return pomodoroWeekdays.reduce((result, day) => {
+    result[day] = { plans: [] }
+    return result
+  }, {} as MockPomodoroWeekSchedule)
+}
+
+function getTomorrowPomodoroWeekday() {
+  const tomorrow = new Date()
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  return pomodoroWeekdayByJsDay[tomorrow.getDay()]
+}
+
+function createPomodoroPlan(startTime: string) {
+  return {
+    id: `plan-${startTime.replace(":", "")}`,
+    enabled: true,
+    startTime,
+    focusMinutes: 25,
+    breakMinutes: 5,
+    pomodoroCount: 1,
+    projectRefs: [{ subjectId: subject.subjectId, scopedProjectId: project.projectId }],
+    breakPrompt: "",
+    focusPrompts: [""],
+  }
 }
 
 async function expectGuideStep(page: Page, title: string | RegExp) {
@@ -41,6 +80,25 @@ async function expectGuideTargetBounds(
   if (expected.maxWidth !== undefined) expect(bounds.width).toBeLessThanOrEqual(expected.maxWidth)
   if (expected.minHeight !== undefined) expect(bounds.height).toBeGreaterThanOrEqual(expected.minHeight)
   if (expected.maxHeight !== undefined) expect(bounds.height).toBeLessThanOrEqual(expected.maxHeight)
+}
+
+async function expectGuideTargetDoesNotOverlapElement(
+  page: Page,
+  anchor: string,
+  elementLocator: ReturnType<Page["getByRole"]>,
+) {
+  const targetBounds = await page.locator(`[data-guide-tour="${anchor}"]`).boundingBox()
+  const elementBounds = await elementLocator.boundingBox()
+  expect(targetBounds, `expected [data-guide-tour="${anchor}"] to have layout bounds`).not.toBeNull()
+  expect(elementBounds, "expected compared element to have layout bounds").not.toBeNull()
+  if (!targetBounds || !elementBounds) return
+
+  const overlaps =
+    targetBounds.x < elementBounds.x + elementBounds.width &&
+    targetBounds.x + targetBounds.width > elementBounds.x &&
+    targetBounds.y < elementBounds.y + elementBounds.height &&
+    targetBounds.y + targetBounds.height > elementBounds.y
+  expect(overlaps, `[data-guide-tour="${anchor}"] should not overlap the compared element`).toBe(false)
 }
 
 async function seedSelectedProject(page: Page) {
@@ -114,6 +172,7 @@ test("AI chat guide walks through the virtual study review project AI question f
   await dispatchClick(page.getByRole("button", { name: "01 向量与线性组合.mp4" }))
   await expectGuideStep(page, "第 2 步：确认问题")
   await expect(page.getByLabel("提问内容")).toHaveValue("请用更容易懂的话解释这个小节。")
+  await expectGuideTargetDoesNotOverlapElement(page, "ai-message-composer", page.getByRole("button", { name: "发送", exact: true }))
   await expect(page.getByRole("button", { name: "下一步", exact: true })).toBeVisible()
   await expect(page.getByRole("button", { name: "上一步", exact: true })).toHaveCount(0)
 
@@ -146,7 +205,7 @@ test("pomodoro guide stops at membership when the account is not active", async 
   expectNoConsoleIssues(consoleIssues)
 })
 
-test("pomodoro guide walks through the real plan and workbench flow", async ({ page }) => {
+test("pomodoro guide walks through the real tomorrow 9 AM plan flow", async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
   await installMockApi(page, {
     globalSettings: createMockGlobalSettings({
@@ -177,7 +236,9 @@ test("pomodoro guide walks through the real plan and workbench flow", async ({ p
   await page.goto("/pomodoro?walkthrough=use-pomodoro")
 
   await expect(page).toHaveURL(/\/pomodoro$/)
-  await expectGuideStep(page, "第 1 步：新建番茄计划")
+  await expectGuideStep(page, "第 1 步：开启番茄钟")
+  await dispatchClick(page.getByRole("button", { name: "开启番茄钟" }))
+  await expectGuideStep(page, "第 2 步：新建番茄计划")
   await expect(page.getByRole("button", { name: "新增计划" })).toBeVisible()
   await expect(page.getByRole("dialog", { name: /番茄钟设置/ })).toHaveCount(0)
   await expect(page.getByText(genericConditionCopy)).toHaveCount(0)
@@ -186,20 +247,102 @@ test("pomodoro guide walks through the real plan and workbench flow", async ({ p
 
   await dispatchClick(page.getByRole("button", { name: "新增计划" }))
   await expect(page).toHaveURL(/\/pomodoro\/plans\/[^/]+$/)
-  await expectGuideStep(page, "第 2 步：绑定学习项目")
+  await expectGuideStep(page, "第 3 步：绑定学习项目")
+  await expect(page.getByLabel("开始时间")).toHaveValue("09:00")
   await expectGuideTargetBounds(page, "pomodoro-project-binding", { minWidth: 300, maxWidth: 430, minHeight: 100 })
+  await page.locator('[data-guide-tour="pomodoro-project-binding"] select').selectOption(project.projectId)
+
+  await expectGuideStep(page, "第 4 步：保存番茄计划")
+  await dispatchClick(page.getByRole("button", { name: "保存" }))
+  await expect(page).toHaveURL(/\/pomodoro$/)
+  await expectGuideStep(page, "第 5 步：查看明早计划")
+  await expect(page.locator('[data-guide-tour="pomodoro-guide-plan-card"]')).toContainText("09:00")
+  await expect(page.getByRole("button", { name: "完成" })).toBeVisible()
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
+test("pomodoro guide stops when tomorrow 9 AM already has a plan", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  const weeklySchedule = createEmptyPomodoroWeekSchedule()
+  const tomorrow = getTomorrowPomodoroWeekday()
+  weeklySchedule[tomorrow].plans = [createPomodoroPlan("09:00")]
+  await installMockApi(page, {
+    globalSettings: createMockGlobalSettings({
+      pomodoro: {
+        enabled: false,
+        transitionSoundEnabled: false,
+        defaultFocusPrompt: "",
+        defaultBreakPrompt: "",
+        microBreaks: {
+          enabled: true,
+          minIntervalSeconds: 180,
+          maxIntervalSeconds: 300,
+          durationSeconds: 10,
+        },
+        weeklySchedule,
+      },
+    }),
+  })
+
+  await page.goto("/pomodoro?walkthrough=use-pomodoro")
+
+  await expect(page).toHaveURL(/\/pomodoro$/)
+  await expectGuideStep(page, "明天上午已有安排")
+  await expect(page.getByText("默认时间是明天上午 9 点。请先调整已有番茄计划。")).toBeVisible()
+  await expect(page.getByText(/计划时间冲突/)).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "完成" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "上一步", exact: true })).toHaveCount(0)
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
+test("pomodoro guide skips the enable step when the clock is already enabled", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page, {
+    globalSettings: createMockGlobalSettings({
+      pomodoro: {
+        enabled: true,
+        transitionSoundEnabled: false,
+        defaultFocusPrompt: "",
+        defaultBreakPrompt: "",
+        microBreaks: {
+          enabled: true,
+          minIntervalSeconds: 180,
+          maxIntervalSeconds: 300,
+          durationSeconds: 10,
+        },
+        weeklySchedule: {
+          mon: { plans: [] },
+          tue: { plans: [] },
+          wed: { plans: [] },
+          thu: { plans: [] },
+          fri: { plans: [] },
+          sat: { plans: [] },
+          sun: { plans: [] },
+        },
+      },
+    }),
+  })
+
+  await page.goto("/pomodoro?walkthrough=use-pomodoro")
+
+  await expect(page).toHaveURL(/\/pomodoro$/)
+  await expectGuideStep(page, "第 1 步：新建番茄计划")
+  await expect(page.getByRole("button", { name: "关闭番茄钟" })).toBeVisible()
+  await expect(page.getByText("开启番茄钟")).toHaveCount(0)
+
+  await dispatchClick(page.getByRole("button", { name: "新增计划" }))
+  await expect(page).toHaveURL(/\/pomodoro\/plans\/[^/]+$/)
+  await expectGuideStep(page, "第 2 步：绑定学习项目")
   await page.locator('[data-guide-tour="pomodoro-project-binding"] select').selectOption(project.projectId)
 
   await expectGuideStep(page, "第 3 步：保存番茄计划")
   await dispatchClick(page.getByRole("button", { name: "保存" }))
   await expect(page).toHaveURL(/\/pomodoro$/)
-
-  await expectGuideStep(page, "第 4 步：开启番茄钟")
-  await dispatchClick(page.getByRole("button", { name: "开启番茄钟" }))
-  await expect(page).toHaveURL(new RegExp(`${projectRoute("/workbench")}$`))
-  await expectGuideStep(page, "第 5 步：查看工作台")
-  await expect(page.locator('[data-guide-tour="learning-object-tree"]')).toBeVisible()
-  await expect(page.getByRole("button", { name: "完成" })).toBeVisible()
+  await expectGuideStep(page, "第 4 步：查看明早计划")
+  await expect(page.locator('[data-guide-tour="pomodoro-guide-plan-card"]')).toContainText("09:00")
+  await expect(page.getByText("第 4 步：开启番茄钟")).toHaveCount(0)
 
   expectNoConsoleIssues(consoleIssues)
 })
