@@ -8,7 +8,6 @@ import { useMembershipSummary } from "@/ui/queries/membership"
 import { useMyLlmSettings, useUpdateMyGlobalSettings, useUpdateMyLlmSettings } from "@/ui/queries/profile"
 import { useGlobalLlmSettings, useSystemCapabilities, useUpdateGlobalLlmSettings } from "@/ui/queries/system"
 import { usePageMeta } from "@/ui/seo/usePageMeta"
-import { completeGuideWalkthroughStep } from "@/ui/guideWalkthrough/guideWalkthroughController"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { usePomodoroStore } from "@/ui/store/pomodoroStore"
 import { useThemeStore } from "@/ui/store/themeStore"
@@ -78,7 +77,7 @@ export function GlobalSettingsPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-      <div data-guide-tour="ai-llm-check" onClick={() => completeGuideWalkthroughStep("ai-confirm-llm")}>
+      <div data-guide-tour="ai-llm-check">
       {authEnabled ? (
         llmSettingsMemberReady ? (
         <UserLlmSettingsCard

@@ -13,6 +13,7 @@ import { useScopedSubjectContext, useSubjectContext, useSubjectProjectCatalog, u
 import { ErrorNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { useCurrentUser, useLogout } from "@/ui/queries/auth"
+import { useMembershipSummary } from "@/ui/queries/membership"
 import { useProject } from "@/ui/queries/projects"
 import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
 import { useSystemCapabilities } from "@/ui/queries/system"
@@ -298,7 +299,6 @@ function AccountMenuActionButton(props: {
 export function AppShell() {
   const nav = useNavigate()
   const location = useLocation()
-  useGuideWalkthroughController({ navigate: nav, pathname: location.pathname })
   const { scopedProjectId: projectId, subjectId: routeSubjectId } = useParams()
   const pid = projectId ?? ""
   const selectedSubjectId = useAppStore((state) => state.selectedSubjectId)
@@ -311,8 +311,11 @@ export function AppShell() {
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
   const capabilitiesQ = useSystemCapabilities()
   const authEnabled = capabilitiesQ.data?.authEnabled ?? false
+  const capabilitiesKnown = capabilitiesQ.data !== undefined
+  const llmConfigured = capabilitiesQ.data?.llmConfigured === true
   const currentUserQ = useCurrentUser(authEnabled)
   const canAccessApp = !authEnabled || Boolean(currentUserQ.data)
+  const membershipQ = useMembershipSummary(authEnabled && Boolean(currentUserQ.data?.userId))
   useBootstrapGlobalSettings(authEnabled && Boolean(currentUserQ.data?.userId), currentUserQ.data?.userId)
   useLearningPlanRemoteSync(authEnabled && Boolean(currentUserQ.data?.userId), currentUserQ.data?.userId)
   const subjectsQ = useSubjects(canAccessApp)
@@ -320,7 +323,10 @@ export function AppShell() {
     () => (subjectsQ.data ?? []).find((subject) => subject.subjectId === routeSubjectId) ?? null,
     [routeSubjectId, subjectsQ.data],
   )
-  const routeProjectScope = routeSubjectId && pid ? { subjectId: routeSubjectId, scopedProjectId: pid } : null
+  const routeProjectScope = useMemo(
+    () => (routeSubjectId && pid ? { subjectId: routeSubjectId, scopedProjectId: pid } : null),
+    [pid, routeSubjectId],
+  )
   const selectedProjectScope =
     selectedWorkbenchProjectRef &&
     (!routeSubjectId || selectedWorkbenchProjectRef.subjectId === routeSubjectId) &&
@@ -354,6 +360,36 @@ export function AppShell() {
   const selectedProjectContext = selectedProjectContextQ.data
   const { projectTitle } = useProject(routeProjectScope, { enabled: canAccessApp && Boolean(effectiveProjectId) && !isVirtualStudyReviewProject })
   const subjectProjectCatalog = useSubjectProjectCatalog(canAccessApp && !isVirtualStudyReviewProject)
+  const guideRuntimeContext = useMemo(
+    () => ({
+      capabilitiesKnown,
+      authEnabled,
+      membershipKnown: !authEnabled || (Boolean(currentUserQ.data?.userId) && !membershipQ.isLoading && !membershipQ.error),
+      membershipActive: !authEnabled || membershipQ.data?.isActive === true,
+      llmConfigured,
+      routeProjectRef: routeProjectScope,
+      selectedProjectRef: selectedProjectScope,
+      catalogProjectRefs: subjectProjectCatalog.projects.map((project) => ({
+        subjectId: project.subjectId,
+        scopedProjectId: project.projectId,
+      })),
+      projectCatalogReady: !subjectProjectCatalog.isLoading,
+    }),
+    [
+      authEnabled,
+      capabilitiesKnown,
+      currentUserQ.data?.userId,
+      llmConfigured,
+      membershipQ.data?.isActive,
+      membershipQ.error,
+      membershipQ.isLoading,
+      routeProjectScope,
+      selectedProjectScope,
+      subjectProjectCatalog.isLoading,
+      subjectProjectCatalog.projects,
+    ],
+  )
+  useGuideWalkthroughController({ navigate: nav, pathname: location.pathname, runtimeContext: guideRuntimeContext })
   const logout = useLogout()
   const pomodoroEnabled = usePomodoroStore((state) => state.enabled)
   const pomodoroWeeklySchedule = usePomodoroStore((state) => state.weeklySchedule)

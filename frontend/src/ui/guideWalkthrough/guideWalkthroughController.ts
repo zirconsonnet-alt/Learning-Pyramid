@@ -5,6 +5,7 @@ import { resolveGuideWalkthroughCopy } from "./guideWalkthroughCopy"
 import {
   DEFAULT_GUIDE_WALKTHROUGH_DOC_SLUG,
   GUIDE_WALKTHROUGH_STEPS,
+  GUIDE_WALKTHROUGH_STEPS_BY_DOC,
   getGuideWalkthroughSteps,
   isGuideWalkthroughDocSlug,
   type GuideWalkthroughDocSlug,
@@ -42,6 +43,24 @@ const TARGET_WAIT_MAX_ATTEMPTS = 20
 const GUIDE_WALKTHROUGH_POMODORO_NON_FOCUS_TITLE = "当前不是学习时间"
 const GUIDE_WALKTHROUGH_POMODORO_NON_FOCUS_MESSAGE = "当前处于{phaseLabel}，工作台会在下一段学习时间重新放行。本次引导先到这里。"
 type GuideNavigate = (to: string, options?: { replace?: boolean }) => void
+type GuideProjectRef = { subjectId: string; scopedProjectId: string }
+type GuideWalkthroughRuntimeContext = {
+  capabilitiesKnown: boolean
+  authEnabled: boolean
+  membershipKnown: boolean
+  membershipActive: boolean
+  llmConfigured: boolean
+  selectedProjectRef: GuideProjectRef | null
+  routeProjectRef: GuideProjectRef | null
+  catalogProjectRefs: GuideProjectRef[]
+  projectCatalogReady: boolean
+}
+type GuideWalkthroughSessionPlan = {
+  steps: GuideWalkthroughStep[]
+  docSlug: GuideWalkthroughDocSlug
+  initialPathname: string | null
+  ready: boolean
+}
 
 const WALKTHROUGH_QUERY_PARAM = "walkthrough"
 
@@ -98,6 +117,131 @@ function getProjectIdFromRouteHint(routeHint: string | undefined) {
   return routeHint?.match(/^\/subjects\/[^/]+\/projects\/([^/]+)/)?.[1] ?? null
 }
 
+function encodeGuidePathPart(value: string) {
+  return encodeURIComponent(value)
+}
+
+function buildProjectGuidePath(projectRef: GuideProjectRef, suffix: string) {
+  const normalizedSuffix = suffix.startsWith("/") ? suffix : `/${suffix}`
+  return `/subjects/${encodeGuidePathPart(projectRef.subjectId)}/projects/${encodeGuidePathPart(projectRef.scopedProjectId)}${normalizedSuffix}`
+}
+
+function createTerminalGuideStep(params: {
+  id: string
+  title: string
+  description: string
+  routeHint: string
+  targetAnchor?: string
+  sourceHeading: string
+}): GuideWalkthroughStep {
+  return {
+    id: params.id,
+    popoverTitle: params.title,
+    popoverDescription: params.description,
+    sourceRef: {
+      heading: params.sourceHeading,
+      extractMode: "heading",
+    },
+    routeHint: params.routeHint,
+    targetAnchor: params.targetAnchor,
+    fallbackMode: "centered-popover",
+    advanceOn: "manual",
+    popoverSide: "bottom",
+  }
+}
+
+function pickGuideProjectRef(context: GuideWalkthroughRuntimeContext) {
+  return context.routeProjectRef ?? context.selectedProjectRef ?? context.catalogProjectRefs[0] ?? null
+}
+
+function withAiChatProjectRoute(steps: GuideWalkthroughStep[], projectRef: GuideProjectRef) {
+  const aiChatPath = buildProjectGuidePath(projectRef, "/ai-chat")
+  return steps.map((step) => ({
+    ...step,
+    routeHint: step.routeHint?.includes("/ai-chat") ? aiChatPath : step.routeHint,
+  }))
+}
+
+function buildAiChatSessionPlan(context: GuideWalkthroughRuntimeContext): GuideWalkthroughSessionPlan {
+  if (!context.capabilitiesKnown) {
+    return { steps: [], docSlug: "use-ai-chat", initialPathname: null, ready: false }
+  }
+
+  if (context.authEnabled && !context.membershipKnown) {
+    return { steps: [], docSlug: "use-ai-chat", initialPathname: null, ready: false }
+  }
+
+  if (context.authEnabled && !context.membershipActive) {
+    const step = createTerminalGuideStep({
+      id: "ai-membership-required",
+      title: "AI 问答是会员专属功能",
+      description: "当前账号还没有有效会员。开通会员后，就可以使用项目 AI 问答。",
+      routeHint: "/membership",
+      sourceHeading: "会员状态",
+    })
+    return { steps: [step], docSlug: "use-ai-chat", initialPathname: step.routeHint ?? null, ready: true }
+  }
+
+  if (!context.llmConfigured) {
+    const step = createTerminalGuideStep({
+      id: "ai-llm-required",
+      title: "先接通 LLM",
+      description: "先在这里保存 Base URL、模型名和 API Key，保存成功后再回到项目使用 AI 问答。",
+      routeHint: "/settings/global",
+      targetAnchor: "ai-llm-check",
+      sourceHeading: "大模型配置",
+    })
+    return { steps: [step], docSlug: "use-ai-chat", initialPathname: step.routeHint ?? null, ready: true }
+  }
+
+  if (!context.projectCatalogReady) {
+    return { steps: [], docSlug: "use-ai-chat", initialPathname: null, ready: false }
+  }
+
+  const projectRef = pickGuideProjectRef(context)
+  if (!projectRef) {
+    const step = createTerminalGuideStep({
+      id: "ai-project-required",
+      title: "先进入一个学科项目",
+      description: "当前还没有可用于提问的学科项目。先创建或进入项目，再使用项目 AI 问答。",
+      routeHint: "/subjects",
+      sourceHeading: "项目上下文",
+    })
+    return { steps: [step], docSlug: "use-ai-chat", initialPathname: step.routeHint ?? null, ready: true }
+  }
+
+  const steps = withAiChatProjectRoute(GUIDE_WALKTHROUGH_STEPS_BY_DOC["use-ai-chat"], projectRef)
+  return { steps, docSlug: "use-ai-chat", initialPathname: buildProjectGuidePath(projectRef, "/ai-chat"), ready: true }
+}
+
+function buildPomodoroSessionPlan(context: GuideWalkthroughRuntimeContext): GuideWalkthroughSessionPlan {
+  if (!context.capabilitiesKnown) {
+    return { steps: [], docSlug: "use-pomodoro", initialPathname: null, ready: false }
+  }
+
+  if (context.authEnabled && !context.membershipKnown) {
+    return { steps: [], docSlug: "use-pomodoro", initialPathname: null, ready: false }
+  }
+
+  if (context.authEnabled && !context.membershipActive) {
+    const step = createTerminalGuideStep({
+      id: "pomodoro-membership-required",
+      title: "番茄钟是会员专属功能",
+      description: "当前账号还没有有效会员。开通会员后，就可以使用番茄钟和项目绑定学习。",
+      routeHint: "/membership",
+      sourceHeading: "会员状态",
+    })
+    return { steps: [step], docSlug: "use-pomodoro", initialPathname: step.routeHint ?? null, ready: true }
+  }
+
+  return {
+    steps: resolveGuideWalkthroughSessionSteps("use-pomodoro"),
+    docSlug: "use-pomodoro",
+    initialPathname: "/pomodoro",
+    ready: true,
+  }
+}
+
 export function shouldEndGuideWalkthroughBeforeWorkbench(step: GuideWalkthroughStep | undefined, now = Date.now()) {
   if (!isWorkbenchGuideStep(step)) return false
   const stepProjectId = getProjectIdFromRouteHint(step?.routeHint)
@@ -108,7 +252,7 @@ export function shouldEndGuideWalkthroughBeforeWorkbench(step: GuideWalkthroughS
 }
 
 export function getPomodoroGuideStepIdsForSnapshot(snapshot: PomodoroSnapshot, hasSavedSchedule: boolean) {
-  const stepIds: GuideWalkthroughStep["id"][] = ["pomodoro-open-settings"]
+  const stepIds: GuideWalkthroughStep["id"][] = []
 
   if (snapshot.status === "running" && snapshot.phase === "focus") {
     stepIds.push("pomodoro-enter-web")
@@ -136,6 +280,20 @@ export function resolveGuideWalkthroughSessionSteps(docSlug: GuideWalkthroughDoc
   const hasSavedSchedule = hasEnabledPomodoroSchedule(state.weeklySchedule)
   const stepIds = new Set(getPomodoroGuideStepIdsForSnapshot(snapshot, hasSavedSchedule))
   return steps.filter((step) => stepIds.has(step.id))
+}
+
+export function resolveGuideWalkthroughSessionPlan(
+  docSlug: GuideWalkthroughDocSlug,
+  context: GuideWalkthroughRuntimeContext,
+): GuideWalkthroughSessionPlan {
+  if (docSlug === "use-ai-chat") return buildAiChatSessionPlan(context)
+  if (docSlug === "use-pomodoro") return buildPomodoroSessionPlan(context)
+  return {
+    steps: resolveGuideWalkthroughSessionSteps(docSlug),
+    docSlug,
+    initialPathname: null,
+    ready: true,
+  }
 }
 
 function notifyGuideWalkthroughEndedBeforeWorkbench(now = Date.now()) {
@@ -383,10 +541,19 @@ export function cleanupGuideWalkthrough(
   if (currentDriver?.isActive()) currentDriver.destroy()
 }
 
-export function useGuideWalkthroughController({ navigate, pathname }: { navigate: GuideNavigate; pathname: string }) {
+export function useGuideWalkthroughController({
+  navigate,
+  pathname,
+  runtimeContext,
+}: {
+  navigate: GuideNavigate
+  pathname: string
+  runtimeContext: GuideWalkthroughRuntimeContext
+}) {
   const driverRef = useRef<Driver | null>(null)
   const statusRef = useRef<GuideWalkthroughSessionStatus>("idle")
   const latestPathnameRef = useRef(pathname)
+  const runtimeContextRef = useRef(runtimeContext)
   const activeDocSlugRef = useRef<GuideWalkthroughDocSlug>(DEFAULT_GUIDE_WALKTHROUGH_DOC_SLUG)
   const activeSessionStepsRef = useRef<GuideWalkthroughStep[]>(getGuideWalkthroughSteps(DEFAULT_GUIDE_WALKTHROUGH_DOC_SLUG))
 
@@ -403,6 +570,10 @@ export function useGuideWalkthroughController({ navigate, pathname }: { navigate
   }, [navigate, pathname])
 
   useEffect(() => {
+    runtimeContextRef.current = runtimeContext
+  }, [runtimeContext])
+
+  useEffect(() => {
     const options: BuildDriverStepsOptions = {
       getPathname: () => getCurrentPathname(latestPathnameRef.current),
       navigate,
@@ -411,13 +582,18 @@ export function useGuideWalkthroughController({ navigate, pathname }: { navigate
     }
 
     function runWalkthroughForDoc(requestedDocSlug: GuideWalkthroughDocSlug) {
+      const sessionPlan = resolveGuideWalkthroughSessionPlan(requestedDocSlug, runtimeContextRef.current)
+      if (!sessionPlan.ready) {
+        window.setTimeout(() => runWalkthroughForDoc(requestedDocSlug), 80)
+        return
+      }
       cleanupVirtualStudyReviewProjectForDoc(activeDocSlugRef.current)
       cleanupGuideWalkthrough(driverRef, statusRef)
       statusRef.current = "running"
 
-      activeDocSlugRef.current = requestedDocSlug
-      activeSessionStepsRef.current = resolveGuideWalkthroughSessionSteps(requestedDocSlug)
-      if (requestedDocSlug === "study-review") {
+      activeDocSlugRef.current = sessionPlan.docSlug
+      activeSessionStepsRef.current = sessionPlan.steps
+      if (sessionPlan.docSlug === "study-review") {
         startVirtualStudyReviewProjectSession()
       }
 
@@ -428,7 +604,13 @@ export function useGuideWalkthroughController({ navigate, pathname }: { navigate
         cleanupGuideWalkthrough(driverRef, statusRef)
         return
       }
-      const didNavigate = handleRouteHint(firstStep, navigate, options.getPathname())
+      let didNavigate = false
+      if (sessionPlan.initialPathname && options.getPathname() !== sessionPlan.initialPathname) {
+        navigate(sessionPlan.initialPathname)
+        didNavigate = true
+      } else {
+        didNavigate = handleRouteHint(firstStep, navigate, options.getPathname())
+      }
 
       window.setTimeout(
         () => {
@@ -483,7 +665,7 @@ export function useGuideWalkthroughController({ navigate, pathname }: { navigate
 
     function refreshActiveWalkthrough() {
       if (!driverRef.current?.isActive()) return
-      activeSessionStepsRef.current = resolveGuideWalkthroughSessionSteps(activeDocSlugRef.current)
+      activeSessionStepsRef.current = resolveGuideWalkthroughSessionPlan(activeDocSlugRef.current, runtimeContextRef.current).steps
       replaceGuideWalkthroughSteps(driverRef.current, options)
       driverRef.current.refresh()
     }

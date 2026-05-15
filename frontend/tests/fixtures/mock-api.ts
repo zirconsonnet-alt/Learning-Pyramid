@@ -175,6 +175,7 @@ export async function installMockApi(
     contentState?: MockContentState
     globalSettings?: MockGlobalSettings
     systemCapabilities?: Partial<MockSystemCapabilities>
+    membershipSummary?: typeof membershipSummary
     membershipProvider?: MockMembershipProvider
     withdrawalScenario?: MockWithdrawalScenario
     boundInviteCode?: string | null
@@ -593,7 +594,7 @@ export async function installMockApi(
     }
 
     if (path === "/membership/me") {
-      await fulfill(route, membershipSummary)
+      await fulfill(route, options.membershipSummary ?? membershipSummary)
       return
     }
 

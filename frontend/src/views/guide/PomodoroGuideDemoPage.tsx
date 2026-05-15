@@ -1,4 +1,4 @@
-import { AlarmClock, CalendarClock, CheckCircle2, Laptop, Play, Plus, Settings2 } from "lucide-react"
+import { AlarmClock, CalendarClock, CheckCircle2, Laptop, Play, Plus } from "lucide-react"
 import { useState } from "react"
 
 import { Button } from "@/ui/components/ui/button"
@@ -7,16 +7,10 @@ import { completeGuideWalkthroughStep } from "@/ui/guideWalkthrough/guideWalkthr
 import { cn } from "@/ui/utils"
 
 export function PomodoroGuideDemoPage() {
-  const [settingsOpen, setSettingsOpen] = useState(false)
   const [enabled, setEnabled] = useState(false)
   const [planCreated, setPlanCreated] = useState(false)
   const [projectBound, setProjectBound] = useState(false)
   const [webReady, setWebReady] = useState(false)
-
-  function openSettings() {
-    setSettingsOpen(true)
-    completeGuideWalkthroughStep("pomodoro-open-settings")
-  }
 
   function enableClock() {
     setEnabled(true)
@@ -59,7 +53,6 @@ export function PomodoroGuideDemoPage() {
             </CardHeader>
             <CardContent className="space-y-3 pt-4 text-sm">
               {[
-                ["打开设置", settingsOpen],
                 ["开启番茄钟", enabled],
                 ["设定计划", planCreated],
                 ["绑定项目", projectBound],
@@ -72,15 +65,10 @@ export function PomodoroGuideDemoPage() {
               ))}
             </CardContent>
           </Card>
-
-          <Button type="button" data-guide-tour="pomodoro-settings-entry" className="w-full justify-center" onClick={openSettings}>
-            <Settings2 className="h-4 w-4" />
-            番茄钟设置
-          </Button>
         </aside>
 
         <section className="grid gap-5 xl:grid-cols-2">
-          <Card className="theme-card-main" data-guide-tour="pomodoro-enable-toggle">
+          <Card className="theme-card-main">
             <CardHeader className="theme-card-header">
               <CardTitle className="flex items-center gap-2">
                 <AlarmClock className="h-5 w-5" />
@@ -93,6 +81,7 @@ export function PomodoroGuideDemoPage() {
               </div>
               <button
                 type="button"
+                data-guide-tour="pomodoro-session-status"
                 className={cn(
                   "flex w-full items-center justify-between rounded-[1rem] border px-4 py-3 text-left text-sm transition-colors",
                   enabled ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] text-foreground",

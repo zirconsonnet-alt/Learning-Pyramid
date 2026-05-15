@@ -67,7 +67,7 @@ const onboardingSteps = [
   {
     index: "3",
     title: "使用 AI 问答",
-    body: "确认目录、学习对象树和第三方 LLM API 后，进入项目 AI 问答开始对话。",
+    body: "会员和 LLM 可用后，进入项目 AI 问答，选择学习对象并开始对话。",
     label: "去感受AI学习赋能",
     to: "/subjects?walkthrough=use-ai-chat",
     access: "member",
@@ -75,7 +75,7 @@ const onboardingSteps = [
   {
     index: "4",
     title: "使用番茄钟",
-    body: "开启番茄钟、设定番茄计划，并在番茄开始后登录网页进入工作台。",
+    body: "开启番茄钟，设定计划，绑定项目，然后进入工作台学习。",
     label: "去定明早9点的番茄钟",
     to: "/pomodoro?walkthrough=use-pomodoro",
     access: "member",

@@ -238,35 +238,10 @@ export const STUDY_REVIEW_GUIDE_STEPS: GuideWalkthroughStep[] = [
 
 export const USE_AI_CHAT_GUIDE_STEPS: GuideWalkthroughStep[] = [
   {
-    id: "ai-confirm-context",
-    sourceRef: {
-      heading: "使用前先确认 3 个条件",
-      itemIndexes: [1, 2],
-      extractMode: "summary-from-items",
-    },
-    routeHint: "/subjects/:subjectId/projects/:scopedProjectId/ai-chat",
-    targetAnchor: "ai-context-check",
-    fallbackMode: "centered-popover",
-    advanceOn: "completion-event",
-    popoverSide: "bottom",
-  },
-  {
-    id: "ai-confirm-llm",
-    sourceRef: {
-      heading: "使用前先确认 3 个条件",
-      itemIndex: 3,
-      extractMode: "item",
-    },
-    routeHint: "/settings/global",
-    targetAnchor: "ai-llm-check",
-    fallbackMode: "centered-popover",
-    advanceOn: "completion-event",
-    popoverSide: "bottom",
-  },
-  {
     id: "ai-open-chat",
+    popoverTitle: "第 1 步：进入项目 AI 问答",
     sourceRef: {
-      heading: "第 3 步：进入项目 AI 问答界面",
+      heading: "第 1 步：进入项目 AI 问答",
       itemIndex: 2,
       extractMode: "item",
     },
@@ -278,9 +253,10 @@ export const USE_AI_CHAT_GUIDE_STEPS: GuideWalkthroughStep[] = [
   },
   {
     id: "ai-select-node",
+    popoverTitle: "第 2 步：选择提问上下文",
     sourceRef: {
-      heading: "第 3 步：进入项目 AI 问答界面",
-      itemIndex: 4,
+      heading: "第 2 步：选择提问上下文",
+      itemIndex: 1,
       extractMode: "item",
     },
     routeHint: "/subjects/:subjectId/projects/:scopedProjectId/ai-chat",
@@ -291,9 +267,10 @@ export const USE_AI_CHAT_GUIDE_STEPS: GuideWalkthroughStep[] = [
   },
   {
     id: "ai-send-message",
+    popoverTitle: "第 3 步：发送问题",
     sourceRef: {
-      heading: "第 3 步：进入项目 AI 问答界面",
-      itemIndex: 5,
+      heading: "第 3 步：发送问题",
+      itemIndex: 1,
       extractMode: "item",
     },
     routeHint: "/subjects/:subjectId/projects/:scopedProjectId/ai-chat",
@@ -306,23 +283,11 @@ export const USE_AI_CHAT_GUIDE_STEPS: GuideWalkthroughStep[] = [
 
 export const USE_POMODORO_GUIDE_STEPS: GuideWalkthroughStep[] = [
   {
-    id: "pomodoro-open-settings",
-    sourceRef: {
-      heading: "第 1 步：先开启番茄钟",
-      itemIndex: 2,
-      extractMode: "item",
-    },
-    routeHint: "/pomodoro",
-    targetAnchor: "pomodoro-settings-entry",
-    fallbackMode: "centered-popover",
-    advanceOn: "target-click",
-    popoverSide: "bottom",
-  },
-  {
     id: "pomodoro-enable-clock",
+    popoverTitle: "第 1 步：开启番茄钟",
     sourceRef: {
-      heading: "第 1 步：先开启番茄钟",
-      itemIndex: 3,
+      heading: "第 1 步：开启番茄钟",
+      itemIndex: 2,
       extractMode: "item",
     },
     routeHint: "/pomodoro",
@@ -333,10 +298,11 @@ export const USE_POMODORO_GUIDE_STEPS: GuideWalkthroughStep[] = [
   },
   {
     id: "pomodoro-create-plan",
+    popoverTitle: "第 2 步：新建番茄计划",
     sourceRef: {
       heading: "第 2 步：设定番茄计划",
-      itemIndexes: [1, 2, 3, 4],
-      extractMode: "summary-from-items",
+      itemIndex: 1,
+      extractMode: "item",
     },
     routeHint: "/pomodoro",
     targetAnchor: "pomodoro-create-plan-button",
@@ -346,9 +312,10 @@ export const USE_POMODORO_GUIDE_STEPS: GuideWalkthroughStep[] = [
   },
   {
     id: "pomodoro-bind-project",
+    popoverTitle: "第 3 步：绑定学习项目",
     sourceRef: {
       heading: "第 2 步：设定番茄计划",
-      itemIndex: 5,
+      itemIndex: 2,
       extractMode: "item",
     },
     routeHint: "/pomodoro/plans/:planId",
@@ -359,9 +326,10 @@ export const USE_POMODORO_GUIDE_STEPS: GuideWalkthroughStep[] = [
   },
   {
     id: "pomodoro-enter-web",
+    popoverTitle: "第 4 步：进入工作台学习",
     sourceRef: {
-      heading: "第 3 步：番茄开始后登录网页",
-      itemIndexes: [1, 2, 3, 4, 5],
+      heading: "第 3 步：进入工作台学习",
+      itemIndexes: [1, 2, 3],
       extractMode: "summary-from-items",
     },
     routeHint: "/pomodoro",

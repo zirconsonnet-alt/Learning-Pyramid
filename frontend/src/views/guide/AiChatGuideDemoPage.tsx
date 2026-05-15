@@ -1,4 +1,4 @@
-import { Bot, CheckCircle2, KeyRound, MessageSquareText, Network, Send, Settings2 } from "lucide-react"
+import { Bot, MessageSquareText, Send } from "lucide-react"
 import { useState } from "react"
 
 import { Button } from "@/ui/components/ui/button"
@@ -9,22 +9,10 @@ import { cn } from "@/ui/utils"
 const SAMPLE_NODES = ["第 2 章 随机变量", "2.1 分布函数.mp4", "2.2 常见分布.mp4"]
 
 export function AiChatGuideDemoPage() {
-  const [contextReady, setContextReady] = useState(false)
-  const [llmReady, setLlmReady] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
   const [selectedNode, setSelectedNode] = useState(SAMPLE_NODES[1])
   const [message, setMessage] = useState("帮我用简单的话解释分布函数。")
   const [sent, setSent] = useState(false)
-
-  function confirmContext() {
-    setContextReady(true)
-    completeGuideWalkthroughStep("ai-confirm-context")
-  }
-
-  function confirmLlm() {
-    setLlmReady(true)
-    completeGuideWalkthroughStep("ai-confirm-llm")
-  }
 
   function openChat() {
     setChatOpen(true)
@@ -48,7 +36,7 @@ export function AiChatGuideDemoPage() {
           <div>
             <div className="text-sm font-semibold text-foreground">AI 问答引导演示</div>
             <p className="mt-1 text-sm leading-6 text-muted-foreground">
-              这里模拟一个已经准备好目录和 LLM 的项目，只演示从检查条件到选择学习对象并发起对话，不会调用真实模型。
+              这里模拟一个会员和 LLM 都可用的项目，只演示进入 AI 问答、选择学习对象并发起对话，不会调用真实模型。
             </p>
           </div>
         </div>
@@ -56,42 +44,6 @@ export function AiChatGuideDemoPage() {
 
       <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
         <aside className="space-y-5 xl:sticky xl:top-28 xl:self-start">
-          <Card className="theme-card-main" data-guide-tour="ai-context-check">
-            <CardHeader className="theme-card-header">
-              <CardTitle className="flex items-center gap-2">
-                <Network className="h-5 w-5" />
-                项目上下文
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 pt-4 text-sm">
-              <div className="rounded-[1rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-4 py-3">
-                已绑定素材目录，并同步出学习对象树。
-              </div>
-              <Button type="button" variant={contextReady ? "outline" : "default"} className="w-full justify-center" onClick={confirmContext}>
-                <CheckCircle2 className="h-4 w-4" />
-                {contextReady ? "上下文已确认" : "确认学习对象树"}
-              </Button>
-            </CardContent>
-          </Card>
-
-          <Card className="theme-card-main" data-guide-tour="ai-llm-check">
-            <CardHeader className="theme-card-header">
-              <CardTitle className="flex items-center gap-2">
-                <KeyRound className="h-5 w-5" />
-                大模型配置
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 pt-4 text-sm">
-              <div className="rounded-[1rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-4 py-3">
-                Base URL、模型名和 API Key 已保存。
-              </div>
-              <Button type="button" variant={llmReady ? "outline" : "default"} className="w-full justify-center" onClick={confirmLlm}>
-                <Settings2 className="h-4 w-4" />
-                {llmReady ? "LLM 已就绪" : "确认 LLM API"}
-              </Button>
-            </CardContent>
-          </Card>
-
           <Button type="button" data-guide-tour="ai-chat-entry" className="w-full justify-center" onClick={openChat}>
             <Bot className="h-4 w-4" />
             进入项目 AI 问答
