@@ -5,6 +5,7 @@ import { createMockGlobalSettings, installMockApi } from "../fixtures/mock-api"
 import { membershipSummary, project, subject } from "../fixtures/test-data"
 
 const genericConditionCopy = /使用前先确认|确保满足|满足以下条件/
+const projectRoute = (suffix: string) => `/subjects/${subject.subjectId}/projects/${project.projectId}${suffix.startsWith("/") ? suffix : `/${suffix}`}`
 
 const inactiveMembershipSummary = {
   ...membershipSummary,
@@ -75,20 +76,20 @@ test("AI chat guide points to LLM settings when the deployment has no LLM", asyn
   expectNoConsoleIssues(consoleIssues)
 })
 
-test("AI chat guide walks through a usable isolated question flow", async ({ page }) => {
+test("AI chat guide walks through the real project AI question flow", async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
   await seedSelectedProject(page)
   await installMockApi(page)
 
   await page.goto("/subjects?walkthrough=use-ai-chat")
 
-  await expect(page).toHaveURL(/\/guide\/demo\/ai-chat$/)
+  await expect(page).toHaveURL(new RegExp(`${projectRoute("/ai-chat")}$`))
   await expectGuideStep(page, "第 1 步：选择提问对象")
   await expect(page.getByText("点击项目左侧导航里的“AI问答”。")).toHaveCount(0)
   await expect(page.getByText(genericConditionCopy)).toHaveCount(0)
   await expect(page.getByRole("button", { name: "上一步", exact: true })).toHaveCount(0)
 
-  await dispatchClick(page.getByRole("button", { name: "2.1 分布函数.mp4" }))
+  await dispatchClick(page.getByRole("button", { name: "第一讲 自动化导论" }))
   await expectGuideStep(page, "第 2 步：确认问题")
   await expect(page.getByLabel("提问内容")).toHaveValue("请用更容易懂的话解释这个小节。")
   await expect(page.getByRole("button", { name: "下一步", exact: true })).toBeVisible()
@@ -96,10 +97,10 @@ test("AI chat guide walks through a usable isolated question flow", async ({ pag
 
   await page.getByRole("button", { name: "下一步", exact: true }).click()
   await expectGuideStep(page, "第 3 步：发送问题")
-  await expect(page.getByRole("button", { name: "发送问题" })).toBeEnabled()
-  await dispatchClick(page.getByRole("button", { name: "发送问题" }))
+  await expect(page.getByRole("button", { name: "发送", exact: true })).toBeEnabled()
+  await dispatchClick(page.getByRole("button", { name: "发送", exact: true }))
   await expectGuideStep(page, "第 4 步：查看回答")
-  await expect(page.getByText("可以把分布函数理解成“随机变量落在某个位置左边的累计概率”。")).toBeVisible()
+  await expect(page.getByText("这是自动化测试的确定性 AI 回复。")).toBeVisible()
   await expect(page.getByRole("button", { name: "完成" })).toBeVisible()
 
   expectNoConsoleIssues(consoleIssues)
@@ -120,7 +121,7 @@ test("pomodoro guide stops at membership when the account is not active", async 
   expectNoConsoleIssues(consoleIssues)
 })
 
-test("pomodoro guide walks through a usable isolated focus flow", async ({ page }) => {
+test("pomodoro guide walks through the real plan and workbench flow", async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
   await installMockApi(page, {
     globalSettings: createMockGlobalSettings({
@@ -150,23 +151,28 @@ test("pomodoro guide walks through a usable isolated focus flow", async ({ page 
 
   await page.goto("/pomodoro?walkthrough=use-pomodoro")
 
-  await expect(page).toHaveURL(/\/guide\/demo\/pomodoro$/)
-  await expectGuideStep(page, "第 1 步：开启番茄钟")
-  await expect(page.getByRole("button", { name: "开启番茄钟" })).toBeVisible()
+  await expect(page).toHaveURL(/\/pomodoro$/)
+  await expectGuideStep(page, "第 1 步：新建番茄计划")
+  await expect(page.getByRole("button", { name: "新增计划" })).toBeVisible()
   await expect(page.getByRole("dialog", { name: /番茄钟设置/ })).toHaveCount(0)
   await expect(page.getByText(genericConditionCopy)).toHaveCount(0)
   await expect(page.getByText(/登录网页|保持浏览器标签页|等待开始/)).toHaveCount(0)
   await expect(page.getByRole("button", { name: "上一步", exact: true })).toHaveCount(0)
 
+  await dispatchClick(page.getByRole("button", { name: "新增计划" }))
+  await expect(page).toHaveURL(/\/pomodoro\/plans\/[^/]+$/)
+  await expectGuideStep(page, "第 2 步：绑定学习项目")
+  await page.locator('[data-guide-tour="pomodoro-project-binding"]').selectOption(project.projectId)
+
+  await expectGuideStep(page, "第 3 步：保存番茄计划")
+  await dispatchClick(page.getByRole("button", { name: "保存" }))
+  await expect(page).toHaveURL(/\/pomodoro$/)
+
+  await expectGuideStep(page, "第 4 步：开启番茄钟")
   await dispatchClick(page.getByRole("button", { name: "开启番茄钟" }))
-  await expectGuideStep(page, "第 2 步：新建番茄计划")
-  await dispatchClick(page.getByRole("button", { name: "新建计划" }))
-  await expectGuideStep(page, "第 3 步：绑定学习项目")
-  await dispatchClick(page.getByRole("button", { name: "绑定到番茄计划" }))
-  await expectGuideStep(page, "第 4 步：进入工作台学习")
-  await dispatchClick(page.getByRole("button", { name: "进入工作台" }))
-  await expectGuideStep(page, "第 5 步：查看学习状态")
-  await expect(page.locator('[data-guide-tour="pomodoro-focus-result"]').getByText("当前番茄已绑定到“概率论与数理统计”。")).toBeVisible()
+  await expect(page).toHaveURL(new RegExp(`${projectRoute("/workbench")}$`))
+  await expectGuideStep(page, "第 5 步：查看工作台")
+  await expect(page.locator('[data-guide-tour="learning-object-tree"]')).toBeVisible()
   await expect(page.getByRole("button", { name: "完成" })).toBeVisible()
 
   expectNoConsoleIssues(consoleIssues)

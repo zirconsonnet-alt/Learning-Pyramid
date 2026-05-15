@@ -43,7 +43,7 @@ import { useMembershipSummary } from "@/ui/queries/membership"
 import { useProjectMaterialSourceBinding } from "@/ui/queries/projects"
 import { useSystemCapabilities } from "@/ui/queries/system"
 import { useInstances } from "@/ui/queries/workbench"
-import { completeGuideWalkthroughStep } from "@/ui/guideWalkthrough/guideWalkthroughController"
+import { GUIDE_WALKTHROUGH_STEP_HIGHLIGHTED_EVENT, completeGuideWalkthroughStep } from "@/ui/guideWalkthrough/guideWalkthroughController"
 import { isSyntheticFilesContainer, sortLearningObjectNodeIdsForDisplay } from "@/ui/learningObjectDisplayOrder"
 import { type AiChatConversation, type AiChatCourseEvidence, type AiChatMessage, useAiChatStore } from "@/ui/store/aiChatStore"
 import { buildScopedProjectPath } from "@/ui/projectPaths"
@@ -90,6 +90,7 @@ const QUICK_CHAT_ACTIONS = [
   },
 ] as const
 
+const GUIDE_AI_CHAT_QUESTION = "请用更容易懂的话解释这个小节。"
 const QA_ACTIVITY_WINDOW_MS = 30_000
 
 function formatApiError(err: unknown) {
@@ -853,15 +854,16 @@ function ChatMessageRow(props: {
   message: AiChatMessage
   pendingAssistant?: boolean
   showActions?: boolean
+  guideTourAnchor?: string
   onCopy?: (content: string) => void
   onRegenerate?: () => void
   onJumpEvidence?: (evidence: AiChatCourseEvidence) => void
 }) {
-  const { message, pendingAssistant, showActions, onCopy, onRegenerate, onJumpEvidence } = props
+  const { message, pendingAssistant, showActions, guideTourAnchor, onCopy, onRegenerate, onJumpEvidence } = props
 
   if (message.role === "user") {
     return (
-      <div className="flex justify-end">
+      <div data-guide-tour={guideTourAnchor} className="flex justify-end">
         <div className="max-w-[min(100%,46rem)] rounded-[1.75rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-soft-bg)] px-5 py-4 text-[15px] leading-7 text-foreground shadow-[var(--theme-soft-shadow)]">
           <div className="whitespace-pre-wrap break-words">{message.content}</div>
         </div>
@@ -871,7 +873,7 @@ function ChatMessageRow(props: {
 
   if (message.role === "system") {
     return (
-      <div className="flex justify-center">
+      <div data-guide-tour={guideTourAnchor} className="flex justify-center">
         <div className="max-w-[min(100%,46rem)] rounded-[1.5rem] border border-amber-200 bg-amber-50 px-5 py-4 text-[14px] leading-7 text-amber-900 shadow-[var(--theme-soft-shadow)]">
           <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-700">系统提示</div>
           <div className="whitespace-pre-wrap break-words">{message.content}</div>
@@ -881,7 +883,7 @@ function ChatMessageRow(props: {
   }
 
   return (
-    <div className="flex gap-4">
+    <div data-guide-tour={guideTourAnchor} className="flex gap-4">
       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,hsl(var(--primary)),hsl(var(--primary)/0.72))] text-primary-foreground shadow-[0_18px_34px_-24px_hsl(var(--primary)/0.55)]">
         <Bot className="h-4 w-4" />
       </div>
@@ -1150,6 +1152,17 @@ export function AiChatPage() {
       touchQaActivity()
     }
   }, [touchQaActivity, visibleMessages])
+
+  useEffect(() => {
+    function autofillGuideQuestion(event: Event) {
+      if (!(event instanceof CustomEvent) || event.detail?.stepId !== "ai-confirm-question") return
+      setComposerValue((current) => (current.trim() ? current : GUIDE_AI_CHAT_QUESTION))
+      window.setTimeout(() => composerRef.current?.focus(), 0)
+    }
+
+    window.addEventListener(GUIDE_WALKTHROUGH_STEP_HIGHLIGHTED_EVENT, autofillGuideQuestion)
+    return () => window.removeEventListener(GUIDE_WALKTHROUGH_STEP_HIGHLIGHTED_EVENT, autofillGuideQuestion)
+  }, [activeNodeId])
 
   function resolveActiveCourseAgentContext():
     | {
@@ -1778,6 +1791,7 @@ export function AiChatPage() {
                       message={message}
                       pendingAssistant={isStreaming && isLatestAssistant}
                       showActions={isLatestAssistant && !isStreaming}
+                      guideTourAnchor={isLatestAssistant ? "ai-answer-result" : undefined}
                       onJumpEvidence={message.courseEvidence && message.courseEvidence.length > 0 ? handleJumpToEvidence : undefined}
                       onCopy={isLatestAssistant ? (content) => void handleCopyResponse(content) : undefined}
                       onRegenerate={isLatestAssistant && canRegenerate ? () => void handleRegenerateLastAnswer() : undefined}
@@ -1793,6 +1807,7 @@ export function AiChatPage() {
               <div data-guide-tour="ai-message-composer" className="rounded-[1.9rem] border border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] shadow-[0_28px_64px_-40px_rgba(15,23,42,0.24)]">
                 <textarea
                   ref={composerRef}
+                  aria-label="提问内容"
                   value={composerValue}
                   onChange={(event) => {
                     touchQaActivity()
@@ -1832,7 +1847,7 @@ export function AiChatPage() {
                       停止生成
                     </Button>
                   ) : (
-                    <Button type="button" onClick={() => void handleSend()} disabled={interactionDisabled || !composerValue.trim()}>
+                    <Button type="button" data-guide-tour="ai-send-message-button" onClick={() => void handleSend()} disabled={interactionDisabled || !composerValue.trim()}>
                       发送
                     </Button>
                   )}

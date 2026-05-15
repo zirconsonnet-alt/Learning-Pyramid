@@ -143,6 +143,15 @@ function pickGuideProjectRef(context: GuideWalkthroughRuntimeContext) {
   return context.routeProjectRef ?? context.selectedProjectRef ?? context.catalogProjectRefs[0] ?? null
 }
 
+function encodeGuidePathPart(value: string) {
+  return encodeURIComponent(value)
+}
+
+function buildProjectGuidePath(projectRef: GuideProjectRef, suffix: string) {
+  const normalizedSuffix = suffix.startsWith("/") ? suffix : `/${suffix}`
+  return `/subjects/${encodeGuidePathPart(projectRef.subjectId)}/projects/${encodeGuidePathPart(projectRef.scopedProjectId)}${normalizedSuffix}`
+}
+
 function buildAiChatSessionPlan(context: GuideWalkthroughRuntimeContext): GuideWalkthroughSessionPlan {
   if (!context.capabilitiesKnown) {
     return { steps: [], docSlug: "use-ai-chat", initialPathname: null, ready: false }
@@ -192,7 +201,7 @@ function buildAiChatSessionPlan(context: GuideWalkthroughRuntimeContext): GuideW
   }
 
   const steps = GUIDE_WALKTHROUGH_STEPS_BY_DOC["use-ai-chat"]
-  return { steps, docSlug: "use-ai-chat", initialPathname: "/guide/demo/ai-chat", ready: true }
+  return { steps, docSlug: "use-ai-chat", initialPathname: buildProjectGuidePath(projectRef, "/ai-chat"), ready: true }
 }
 
 function buildPomodoroSessionPlan(context: GuideWalkthroughRuntimeContext): GuideWalkthroughSessionPlan {
@@ -215,10 +224,25 @@ function buildPomodoroSessionPlan(context: GuideWalkthroughRuntimeContext): Guid
     return { steps: [step], docSlug: "use-pomodoro", initialPathname: step.routeHint ?? null, ready: true }
   }
 
+  if (!context.projectCatalogReady) {
+    return { steps: [], docSlug: "use-pomodoro", initialPathname: null, ready: false }
+  }
+
+  if (context.catalogProjectRefs.length === 0) {
+    const step = createTerminalGuideStep({
+      id: "pomodoro-project-required",
+      title: "先创建一个学科项目",
+      description: "番茄计划需要绑定到具体项目。先在学科中心创建或进入一个项目，再使用番茄钟。",
+      routeHint: "/subjects",
+      sourceHeading: "项目上下文",
+    })
+    return { steps: [step], docSlug: "use-pomodoro", initialPathname: step.routeHint ?? null, ready: true }
+  }
+
   return {
     steps: resolveGuideWalkthroughSessionSteps("use-pomodoro"),
     docSlug: "use-pomodoro",
-    initialPathname: "/guide/demo/pomodoro",
+    initialPathname: "/pomodoro",
     ready: true,
   }
 }

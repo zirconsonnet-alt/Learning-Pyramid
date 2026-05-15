@@ -28,7 +28,7 @@ import { useUpdateMyGlobalSettings } from "@/ui/queries/profile"
 import { useSubjects } from "@/ui/queries/subjects"
 import { useSystemCapabilities } from "@/ui/queries/system"
 import { usePageMeta } from "@/ui/seo/usePageMeta"
-import { completeGuideWalkthroughStep } from "@/ui/guideWalkthrough/guideWalkthroughController"
+import { GUIDE_WALKTHROUGH_STEP_HIGHLIGHTED_EVENT, completeGuideWalkthroughStep } from "@/ui/guideWalkthrough/guideWalkthroughController"
 import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { listPomodoroActivityRecords, type PomodoroActivityRecord } from "@/ui/store/pomodoroActivityStore"
 import {
@@ -180,6 +180,17 @@ function normalizeDraftSubjectId(
 
 function buildScopedWorkbenchPath(subjectId: string, projectId: string) {
   return subjectId && projectId ? `/subjects/${encodeURIComponent(subjectId)}/projects/${encodeURIComponent(projectId)}/workbench` : ""
+}
+
+function getPomodoroGuideWeekday(now: number): PomodoroWeekday {
+  const day = new Date(now).getDay()
+  if (day === 0) return "sun"
+  return POMODORO_WEEKDAYS[day - 1] ?? "mon"
+}
+
+function getPomodoroGuideStartTime(now: number) {
+  const date = new Date(now)
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
 }
 
 function toPomodoroProjectReference(project: { subjectId: string; projectId: string }): PomodoroProjectReference {
@@ -900,6 +911,42 @@ export function PomodoroPage() {
   }, [pomodoroProjectOptionsLoading, selectedSubjectIdByPlanId])
 
   useEffect(() => {
+    function prepareGuidePomodoroDraft(event: Event) {
+      if (!(event instanceof CustomEvent) || event.detail?.stepId !== "pomodoro-bind-project") return
+      if (!activePlanId || pomodoroProjectOptionsLoading) return
+      const firstProject = availablePomodoroProjects[0]
+      if (!firstProject) return
+
+      const guideWeekday = getPomodoroGuideWeekday(now)
+      const guideStartTime = getPomodoroGuideStartTime(Date.now())
+      setSelectedSubjectIdByPlanId((prev) => ({
+        ...prev,
+        [activePlanId]: firstProject.subjectId,
+      }))
+      setPomodoroDrafts((prev) =>
+        prev.map((draft) => {
+          if (draft.id !== activePlanId) return draft
+          const nextPomodoroCount = "1"
+          return {
+            ...draft,
+            activeDays: [guideWeekday],
+            startTime: guideStartTime,
+            focusMinutes: "25",
+            breakMinutes: "5",
+            pomodoroCount: nextPomodoroCount,
+            subjectId: firstProject.subjectId,
+            projectRefs: normalizeDraftProjectRefs(draft.projectRefs, normalizeCountInput(nextPomodoroCount, 1)),
+            focusPrompts: normalizeDraftFocusPrompts(draft.focusPrompts, normalizeCountInput(nextPomodoroCount, 1), defaultFocusPrompt),
+          }
+        }),
+      )
+    }
+
+    window.addEventListener(GUIDE_WALKTHROUGH_STEP_HIGHLIGHTED_EVENT, prepareGuidePomodoroDraft)
+    return () => window.removeEventListener(GUIDE_WALKTHROUGH_STEP_HIGHLIGHTED_EVENT, prepareGuidePomodoroDraft)
+  }, [activePlanId, availablePomodoroProjects, defaultFocusPrompt, now, pomodoroProjectOptionsLoading])
+
+  useEffect(() => {
     if (pomodoroOverviewMode !== "stats") return
     setPomodoroActivityRecords(listPomodoroActivityRecords())
   }, [pomodoroOverviewMode, now])
@@ -1083,6 +1130,7 @@ export function PomodoroPage() {
         "番茄钟排程已保存",
         enabledDayCount > 0 ? `当前在${activeDaySummary}生效。` : "排程已保存，但还没有启用任何日期。",
       )
+      completeGuideWalkthroughStep("pomodoro-save-plan")
       nav(buildPomodoroPath())
     } catch (err) {
       showErrorFeedback("保存番茄钟排程失败", formatApiError(err))
@@ -1580,7 +1628,7 @@ export function PomodoroPage() {
             {activePomodoroDraft ? (
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-5">
                 <div className="flex flex-wrap gap-3">
-                  <Button onClick={savePomodoroConfig} disabled={updateGlobalSettings.isPending || planConflictMessages.length > 0}>
+                  <Button data-guide-tour="pomodoro-save-plan-button" onClick={savePomodoroConfig} disabled={updateGlobalSettings.isPending || planConflictMessages.length > 0}>
                     <Save className="h-4 w-4" />
                     保存
                   </Button>
@@ -1648,20 +1696,12 @@ export function PomodoroPage() {
               </Button>
               {activeWorkbenchPath ? (
                 <Button asChild>
-                  <Link
-                    to={activeWorkbenchPath}
-                    data-guide-tour="pomodoro-web-entry-reminder"
-                    onClick={() => completeGuideWalkthroughStep("pomodoro-enter-web")}
-                  >
+                  <Link to={activeWorkbenchPath}>
                     <PanelsTopLeft className="h-4 w-4" />
                     {activeWorkbenchLabel}
                   </Link>
                 </Button>
-              ) : (
-                <span className="sr-only" data-guide-tour="pomodoro-web-entry-reminder">
-                  番茄开始后登录网页进入工作台
-                </span>
-              )}
+              ) : null}
             </div>
           </div>
           <Button
