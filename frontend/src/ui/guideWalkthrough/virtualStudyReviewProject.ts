@@ -12,6 +12,7 @@ import type { RichContent } from "@/ui/api/richContent"
 import {
   VIRTUAL_STUDY_REVIEW_MATERIAL_ID,
   VIRTUAL_STUDY_REVIEW_PROJECT_ID,
+  VIRTUAL_STUDY_REVIEW_SUBJECT_PROJECT_ID,
   VIRTUAL_STUDY_REVIEW_SUBJECT_ID,
 } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
 import { getBaseUrl } from "@/ui/api/http"
@@ -64,6 +65,17 @@ const VIRTUAL_STUDY_REVIEW_STORAGE_PREFIXES = [
   `plm-video-watch-coverage:${VIRTUAL_STUDY_REVIEW_PROJECT_ID}:`,
   `plm-playback-resume:${VIRTUAL_STUDY_REVIEW_PROJECT_ID}:`,
 ]
+const VIRTUAL_STUDY_REVIEW_SUBJECT_IDS = [
+  VIRTUAL_STUDY_REVIEW_SUBJECT_ID,
+  VIRTUAL_STUDY_REVIEW_PROJECT_ID,
+]
+const VIRTUAL_STUDY_REVIEW_PROJECT_IDS = [
+  VIRTUAL_STUDY_REVIEW_PROJECT_ID,
+  VIRTUAL_STUDY_REVIEW_SUBJECT_PROJECT_ID,
+]
+const VIRTUAL_STUDY_REVIEW_PROJECT_REFS = VIRTUAL_STUDY_REVIEW_SUBJECT_IDS.flatMap((subjectId) =>
+  VIRTUAL_STUDY_REVIEW_PROJECT_IDS.map((scopedProjectId) => ({ subjectId, scopedProjectId })),
+)
 
 let virtualStudyReviewState: VirtualStudyReviewState | null = null
 
@@ -276,24 +288,20 @@ function cloneVirtualStudyReviewState() {
 
 export function startVirtualStudyReviewProjectSession() {
   virtualStudyReviewState = createBaseVirtualStudyReviewState()
-  useAppStore.getState().setSelectedSubjectId(VIRTUAL_STUDY_REVIEW_SUBJECT_ID)
-  useAppStore.getState().setSelectedWorkbenchProjectRef({
-    subjectId: VIRTUAL_STUDY_REVIEW_SUBJECT_ID,
-    scopedProjectId: VIRTUAL_STUDY_REVIEW_PROJECT_ID,
-  })
   return virtualStudyReviewState
 }
 
 export function clearVirtualStudyReviewProjectSession() {
   virtualStudyReviewState = null
   useWorkbenchStore.getState().resetProject(VIRTUAL_STUDY_REVIEW_PROJECT_ID)
-  useAppStore.getState().removeRecentWorkbenchProjectId(VIRTUAL_STUDY_REVIEW_PROJECT_ID)
-  useAppStore.getState().removeRecentWorkbenchProjectRef({
-    subjectId: VIRTUAL_STUDY_REVIEW_SUBJECT_ID,
-    scopedProjectId: VIRTUAL_STUDY_REVIEW_PROJECT_ID,
-  })
-  if (useAppStore.getState().selectedSubjectId === VIRTUAL_STUDY_REVIEW_SUBJECT_ID) {
-    useAppStore.getState().setSelectedSubjectId(null)
+  for (const projectId of VIRTUAL_STUDY_REVIEW_PROJECT_IDS) {
+    useAppStore.getState().removeRecentWorkbenchProjectId(projectId)
+  }
+  for (const projectRef of VIRTUAL_STUDY_REVIEW_PROJECT_REFS) {
+    useAppStore.getState().removeRecentWorkbenchProjectRef(projectRef)
+  }
+  for (const subjectId of VIRTUAL_STUDY_REVIEW_SUBJECT_IDS) {
+    useAppStore.getState().removeRecentSubjectId(subjectId)
   }
   removeVirtualStudyReviewLocalStorage()
 }

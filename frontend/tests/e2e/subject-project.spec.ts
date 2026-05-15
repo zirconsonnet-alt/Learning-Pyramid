@@ -160,6 +160,14 @@ test("study review guide auto-fills recall question learning answer and review a
   await expect(page.getByPlaceholder("先写下自己的答案，提交后会自动展开标准答案。")).toHaveValue("线性组合可以用基向量和系数表示目标向量。")
   await expect(page.getByRole("button", { name: "下一步", exact: true })).toBeVisible()
   await expect(page.getByRole("button", { name: "上一步", exact: true })).toHaveCount(0)
+  const reviewAnswerTargetBox = await page.locator('[data-guide-tour="review-answer-editor"]').boundingBox()
+  const submitReviewAnswerButtonBox = await page.getByRole("button", { name: "提交答案", exact: true }).boundingBox()
+  expect(reviewAnswerTargetBox).not.toBeNull()
+  expect(submitReviewAnswerButtonBox).not.toBeNull()
+  const guideStagePadding = 8
+  expect((reviewAnswerTargetBox?.y ?? 0) + (reviewAnswerTargetBox?.height ?? 0) + guideStagePadding).toBeLessThanOrEqual(
+    (submitReviewAnswerButtonBox?.y ?? 0) - 1,
+  )
   await completeGuideStep(page, "fill-review-answer")
   await expectGuideStep(page, "第 6 步：填写复习答案")
 
@@ -168,6 +176,33 @@ test("study review guide auto-fills recall question learning answer and review a
   await expect(page.getByRole("button", { name: "提交答案", exact: true })).toBeEnabled()
   await expect(page.getByText("系统会")).toHaveCount(0)
   await expect(page.getByText("引导会")).toHaveCount(0)
+  await dispatchClick(page.getByRole("button", { name: "提交答案", exact: true }))
+  await expectGuideStep(page, "第 6 步：做复习")
+  await dispatchClick(page.getByRole("button", { name: "记得", exact: true }))
+  await expectGuideStep(page, "第 6 步：做复习")
+  await dispatchClick(page.getByRole("button", { name: "提交本轮复习", exact: true }))
+  await expect(page).toHaveURL(/\/subjects$/)
+  await expect(page.getByText("学习复习引导示范学科")).toHaveCount(0)
+  await expect(page.getByText("学习复习引导示范项目")).toHaveCount(0)
+  const persistedAppState = await page.evaluate(() => JSON.parse(window.localStorage.getItem("plm-app") || "{}").state ?? {})
+  expect(persistedAppState.selectedSubjectId).not.toBe("guide-virtual-study-review-subject")
+  expect(persistedAppState.selectedSubjectId).not.toBe("guide-virtual-study-review")
+  expect(persistedAppState.selectedWorkbenchProjectId).not.toBe("guide-virtual-study-review")
+  const selectedWorkbenchProjectRefKey = persistedAppState.selectedWorkbenchProjectRef
+    ? `${persistedAppState.selectedWorkbenchProjectRef.subjectId}:${persistedAppState.selectedWorkbenchProjectRef.scopedProjectId}`
+    : ""
+  expect(selectedWorkbenchProjectRefKey).not.toBe("guide-virtual-study-review:guide-virtual-study-review")
+  expect(selectedWorkbenchProjectRefKey).not.toBe("guide-virtual-study-review-subject:guide-virtual-study-review")
+  expect(persistedAppState.recentSubjectIds ?? []).not.toContain("guide-virtual-study-review")
+  expect(persistedAppState.recentSubjectIds ?? []).not.toContain("guide-virtual-study-review-subject")
+  expect(persistedAppState.recentWorkbenchProjectRefs ?? []).not.toContainEqual({
+    subjectId: "guide-virtual-study-review",
+    scopedProjectId: "guide-virtual-study-review",
+  })
+  expect(persistedAppState.recentWorkbenchProjectRefs ?? []).not.toContainEqual({
+    subjectId: "guide-virtual-study-review-subject",
+    scopedProjectId: "guide-virtual-study-review",
+  })
 
   expectNoConsoleIssues(consoleIssues)
 })

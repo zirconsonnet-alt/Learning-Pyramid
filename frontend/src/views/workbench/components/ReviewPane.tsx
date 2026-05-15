@@ -508,24 +508,26 @@ export function ReviewPane({
                         </div>
                       </div>
 
-                      <div className="mt-4" data-guide-tour="review-answer-editor">
+                      <div className="mt-4">
                         <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">你的答案</div>
-                        <RichContentEditor
-                          subjectId={subjectId}
-                          projectId={projectId}
-                          field="answer"
-                          value={writtenAnswerDraft}
-                          disabled={hasSubmittedWrittenAnswer}
-                          placeholder="先写下自己的答案，提交后会自动展开标准答案。"
-                          onTextChange={(text) => updateWrittenAnswerText(rpId, text)}
-                          onAppendImage={(assetId) => appendWrittenAnswerImage(rpId, assetId)}
-                          onRemoveImage={(imageIndex) => removeWrittenAnswerImage(rpId, imageIndex)}
-                          onUserActivity={touchReviewActivity}
-                          textareaClassName="min-h-[140px] resize-y rounded-xl [border-color:var(--theme-subtle-border)] [background:var(--theme-subtle-bg)] text-foreground outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:cursor-not-allowed disabled:opacity-75"
-                          imageClassName="h-28 w-full max-w-[220px] rounded-xl border [border-color:var(--theme-subtle-border)] [background:var(--theme-subtle-bg)] object-cover"
-                        />
+                        <div data-guide-tour="review-answer-editor">
+                          <RichContentEditor
+                            subjectId={subjectId}
+                            projectId={projectId}
+                            field="answer"
+                            value={writtenAnswerDraft}
+                            disabled={hasSubmittedWrittenAnswer}
+                            placeholder="先写下自己的答案，提交后会自动展开标准答案。"
+                            onTextChange={(text) => updateWrittenAnswerText(rpId, text)}
+                            onAppendImage={(assetId) => appendWrittenAnswerImage(rpId, assetId)}
+                            onRemoveImage={(imageIndex) => removeWrittenAnswerImage(rpId, imageIndex)}
+                            onUserActivity={touchReviewActivity}
+                            textareaClassName="min-h-[140px] resize-y rounded-xl [border-color:var(--theme-subtle-border)] [background:var(--theme-subtle-bg)] text-foreground outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:cursor-not-allowed disabled:opacity-75"
+                            imageClassName="h-28 w-full max-w-[220px] rounded-xl border [border-color:var(--theme-subtle-border)] [background:var(--theme-subtle-bg)] object-cover"
+                          />
+                        </div>
                         {!hasSubmittedWrittenAnswer ? (
-                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <div className="mt-4 flex flex-wrap items-center gap-2">
                             <Button
                               data-guide-tour="submit-review-answer-button"
                               type="button"

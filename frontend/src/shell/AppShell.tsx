@@ -603,12 +603,14 @@ export function AppShell() {
 
   useEffect(() => {
     if (!routeSubjectId || pid) return
+    if (isVirtualStudyReviewProjectId(routeSubjectId)) return
     if (selectedSubjectId === routeSubjectId) return
     setSelectedSubjectId(routeSubjectId)
   }, [pid, routeSubjectId, selectedSubjectId, setSelectedSubjectId])
 
   useEffect(() => {
     if (!routeSubjectId || !pid) return
+    if (isVirtualStudyReviewProjectId(routeSubjectId) || isVirtualStudyReviewProjectId(pid)) return
     if (selectedWorkbenchProjectRef?.subjectId === routeSubjectId && selectedWorkbenchProjectRef.scopedProjectId === pid) return
     setSelectedWorkbenchProjectRef({ subjectId: routeSubjectId, scopedProjectId: pid })
   }, [pid, routeSubjectId, selectedWorkbenchProjectRef?.scopedProjectId, selectedWorkbenchProjectRef?.subjectId, setSelectedWorkbenchProjectRef])
