@@ -27,7 +27,12 @@ import { buildScopedProjectPath } from "@/ui/projectPaths"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
 import { formatRecallAnchorLabel } from "@/ui/displayIdentifiers"
-import { completeGuideWalkthroughStep } from "@/ui/guideWalkthrough/guideWalkthroughController"
+import {
+  GUIDE_WALKTHROUGH_STEP_HIGHLIGHTED_EVENT,
+  completeGuideWalkthroughStep,
+} from "@/ui/guideWalkthrough/guideWalkthroughController"
+import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
+import { VIRTUAL_STUDY_REVIEW_GUIDE_WRITTEN_REVIEW_ANSWER } from "@/ui/guideWalkthrough/virtualStudyReviewProject"
 import { useCommitReviewTask, useReviewBundle } from "@/ui/queries/workbench"
 import { showErrorFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import {
@@ -89,7 +94,7 @@ export function ReviewPane({
     setSessionStateByHeadId(loadReviewSessionStateByHeadId(projectId))
   }, [projectId])
 
-  function updateSessionState(updater: (current: ReviewSessionState) => ReviewSessionState) {
+  const updateSessionState = useCallback((updater: (current: ReviewSessionState) => ReviewSessionState) => {
     setSessionStateByHeadId((state) => {
       const current = state[headId] ?? EMPTY_REVIEW_SESSION
       const nextState = {
@@ -99,7 +104,7 @@ export function ReviewPane({
       saveReviewSessionStateByHeadId(projectId, nextState)
       return nextState
     })
-  }
+  }, [headId, projectId])
 
   function hasUnlockedAnswer(rpId: string) {
     return submittedWrittenAnswers[rpId] !== undefined || skippedWrittenAnswers[rpId] === true
@@ -136,6 +141,33 @@ export function ReviewPane({
   const activeRecallPointIndex = resolvedActiveRecallPointId ? recallPointIds.findIndex((id) => id === resolvedActiveRecallPointId) : -1
   const activeRecallPoint = resolvedActiveRecallPointId ? recallPointById[resolvedActiveRecallPointId] ?? null : null
 
+  const updateWrittenAnswerText = useCallback(
+    (rpId: string, text: string) => {
+      updateSessionState((current) => ({
+        ...current,
+        writtenAnswerDrafts: {
+          ...current.writtenAnswerDrafts,
+          [rpId]: setRichContentText(current.writtenAnswerDrafts[rpId] ?? [], text),
+        },
+      }))
+    },
+    [updateSessionState],
+  )
+
+  useEffect(() => {
+    if (!isVirtualStudyReviewProjectId(projectId) || !resolvedActiveRecallPointId) return
+    const activeGuideRecallPointId = resolvedActiveRecallPointId
+
+    function autofillGuideReviewAnswer(event: Event) {
+      if (!(event instanceof CustomEvent)) return
+      if (event.detail?.stepId !== "fill-review-answer") return
+      updateWrittenAnswerText(activeGuideRecallPointId, VIRTUAL_STUDY_REVIEW_GUIDE_WRITTEN_REVIEW_ANSWER)
+    }
+
+    window.addEventListener(GUIDE_WALKTHROUGH_STEP_HIGHLIGHTED_EVENT, autofillGuideReviewAnswer)
+    return () => window.removeEventListener(GUIDE_WALKTHROUGH_STEP_HIGHLIGHTED_EVENT, autofillGuideReviewAnswer)
+  }, [projectId, resolvedActiveRecallPointId, updateWrittenAnswerText])
+
   useEffect(() => {
     if (!resolvedActiveRecallPointId || totalCount <= 0 || loading || error) return
     touchReviewActivity()
@@ -170,16 +202,6 @@ export function ReviewPane({
     if (activeRecallPointIndex >= 0 && activeRecallPointIndex < totalCount - 1) {
       goToRecallPoint(activeRecallPointIndex + 1)
     }
-  }
-
-  function updateWrittenAnswerText(rpId: string, text: string) {
-    updateSessionState((current) => ({
-      ...current,
-      writtenAnswerDrafts: {
-        ...current.writtenAnswerDrafts,
-        [rpId]: setRichContentText(current.writtenAnswerDrafts[rpId] ?? [], text),
-      },
-    }))
   }
 
   function appendWrittenAnswerImage(rpId: string, assetId: string) {
@@ -486,7 +508,7 @@ export function ReviewPane({
                         </div>
                       </div>
 
-                      <div className="mt-4">
+                      <div className="mt-4" data-guide-tour="review-answer-editor">
                         <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">你的答案</div>
                         <RichContentEditor
                           subjectId={subjectId}

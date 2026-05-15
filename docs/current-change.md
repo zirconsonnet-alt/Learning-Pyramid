@@ -1,74 +1,63 @@
-# 当前变更：学习复习引导第 4/5 步自动填写
+# 当前变更：学习复习引导补齐复习答案填写
 
 ## 当前用户要求
 
-- “如何学习复习”引导第 4 步、第 5 步自动填写问题和答案。
-- 自动填写后显示“下一步”按钮。
-- 只有这两个步骤显式显示“下一步”。
-- 引导中不出现“上一步”按钮。
+- “如何学习复习”导引进入做复习时，在提交答案之前应先自动填写“你的答案”。
+- 这个复习答案填写步骤和录入复述点的问题、答案步骤一样，自动填写后显示“下一步”。
+- 引导文本中不要出现“系统会”“引导会”这类运行说明性质文字。
 
 ## 根因
 
-- 学习复习引导的 `fill-recall-question`、`fill-recall-answer` 原本使用 `completion-event`，依赖用户手动输入触发完成。
-- 导引控制器缺少“普通步骤由下一步按钮推进”的显式模式。
-- 虚拟学习复习工作台没有在导引步骤进入时写入示例问题/答案。
+- 学习复习导引从提交学习后直接进入 `submit-review-answer` 步骤。
+- 真实复习提交按钮依赖“你的答案”有内容；导引没有先填内容，导致按钮禁用。
+- 当前文档句子包含“系统会”“引导会”这类说明口吻，并被导引弹窗复用。
 
 ## 本次实际修改文件
 
 - `frontend/src/ui/guideWalkthrough/guideWalkthroughSteps.ts`
-  - 新增 `next-button` 推进模式。
-  - 只把学习复习导引的 `fill-recall-question`、`fill-recall-answer` 改为 `next-button`。
-- `frontend/src/ui/guideWalkthrough/guideWalkthroughController.ts`
-  - `manual` 与 `next-button` 步骤只显示 `next` 按钮。
-  - 全局默认按钮只保留 `close`，避免 driver.js 默认带出 `previous`。
-  - 新增导引步骤高亮事件，供虚拟工作台在步骤进入时执行自动填充。
-  - 完成事件只推进 `completion-event` 和既有 `target-click` 步骤，不推进 `next-button` 步骤。
+  - 在提交答案前新增 `fill-review-answer` 导引步骤。
+  - 该步骤高亮“你的答案”编辑区，并使用 `next-button` 推进。
 - `frontend/src/ui/guideWalkthrough/virtualStudyReviewProject.ts`
-  - 提取学习复习引导示例问题、答案常量。
-- `frontend/src/views/workbench/components/ComposePane.tsx`
-  - 仅在虚拟学习复习项目中监听导引高亮事件。
-  - 第 4 步写入示例问题，第 5 步写入示例答案。
+  - 新增虚拟学习复习导引用的复习答案示例常量。
+- `frontend/src/views/workbench/components/ReviewPane.tsx`
+  - 给“你的答案”区域补充导引锚点。
+  - 仅在虚拟学习复习项目中监听导引高亮事件，进入 `fill-review-answer` 时写入示例答案。
+  - 将本组件的 session 更新函数局部收敛为 `useCallback`，让新增 effect 依赖明确。
 - `frontend/tests/e2e/subject-project.spec.ts`
-  - 新增学习复习导引 e2e，覆盖自动填充、第 4/5 步显示“下一步”、无“上一步”、completion-event 不会绕过 next-button。
+  - 扩展学习复习导引回归用例，覆盖复习答案自动填写、下一步按钮、无上一步按钮、提交答案按钮可用、导引文案不出现“系统会 / 引导会”。
 - `docs/how-to-study-review.md`
-  - 同步第 4/5 步导引文案，说明问题和答案由引导自动填写后点击“下一步”。
+  - 同步第 6 步复习流程文案。
+  - 去掉导引相关文案中的运行说明口吻。
 - `docs/current-change.md`
   - 覆盖为当前任务工作单。
 
 ## 行为语义变化
 
-- 学习复习导引第 4/5 步由“用户手动填写后自动进入下一步”改为“系统自动填示例内容，用户点击下一步继续”。
-- 导引弹窗不再出现“上一步”按钮。
+- 学习复习导引提交学习后，会先高亮“你的答案”输入区并自动填入一条回忆答案。
+- 用户点击“下一步”后，再进入“提交答案”步骤。
+- 真实项目普通复习流程不变。
 
 ## 重构说明
 
-- 做了小范围抽象补充：新增 `next-button` 推进模式，避免在控制器里硬编码具体 step id。
+- 做了小范围局部整理：`ReviewPane` 的 `updateSessionState` 改为 `useCallback`，原因是新增导引高亮监听需要稳定、明确的 hook 依赖。
 - 未改公共 API、数据库、协议、部署配置或后端行为。
+- 不新增 fallback / shim / legacy 兼容层。
 
 ## 未修改内容
 
-- 未改变真实项目普通复述点录入流程。
-- 未改变学习任务提交、复习提交的数据结构和接口。
-- 未增加 fallback / shim / legacy 兼容层。
-
-## 影响范围
-
-- API：否。
-- 架构：否。
-- 部署：否。
-- 数据结构：否。
-- UI：是，仅导引弹窗按钮和虚拟学习复习引导自动填充。
-- 文档：是，同步 `docs/how-to-study-review.md`。
-- 测试：是，新增 e2e 回归。
+- 未改变真实项目普通复习校验：提交答案仍然需要“你的答案”有内容。
+- 未改变后端复习任务提交接口。
+- 未改变导引控制器的推进语义。
 
 ## 验证记录
 
-- `LEARNINGPYRAMID_FRONTEND_E2E_USE_DEV_SERVER=1; LEARNINGPYRAMID_FRONTEND_E2E_PORT=4259; pnpm exec playwright test tests/e2e/subject-project.spec.ts -g "study review guide auto-fills" --reporter=line`：失败，确认修复前第 4 步问题输入框为空。
-- `LEARNINGPYRAMID_FRONTEND_E2E_USE_DEV_SERVER=1; LEARNINGPYRAMID_FRONTEND_E2E_PORT=4265; pnpm exec playwright test tests/e2e/subject-project.spec.ts -g "study review guide auto-fills" --reporter=line`：失败，确认修复前 completion-event 可绕过 next-button。
+- `LEARNINGPYRAMID_FRONTEND_E2E_USE_DEV_SERVER=1; LEARNINGPYRAMID_FRONTEND_E2E_PORT=4274; pnpm exec playwright test tests/e2e/subject-project.spec.ts -g "study review guide auto-fills" --reporter=line`：1 passed。
 - `pnpm exec tsc -b --noEmit`：通过。
-- `LEARNINGPYRAMID_FRONTEND_E2E_USE_DEV_SERVER=1; LEARNINGPYRAMID_FRONTEND_E2E_PORT=4268; pnpm exec playwright test tests/e2e/subject-project.spec.ts -g "create subject guide enters workbench|study review guide auto-fills" --workers=1 --reporter=line`：2 passed。
-- `LEARNINGPYRAMID_FRONTEND_E2E_USE_DEV_SERVER=1; LEARNINGPYRAMID_FRONTEND_E2E_PORT=4269; pnpm exec playwright test tests/e2e/subject-project.spec.ts --workers=1 --reporter=line`：8 passed。
+- `pnpm exec eslint src/views/workbench/components/ReviewPane.tsx src/ui/guideWalkthrough/guideWalkthroughSteps.ts src/ui/guideWalkthrough/virtualStudyReviewProject.ts tests/e2e/subject-project.spec.ts`：通过。
+- `rg -n "系统|引导会|系统会" docs/how-to-study-review.md frontend/src/ui/guideWalkthrough`：无匹配。
+- `LEARNINGPYRAMID_FRONTEND_E2E_USE_DEV_SERVER=1; LEARNINGPYRAMID_FRONTEND_E2E_PORT=4276; pnpm exec playwright test tests/e2e/subject-project.spec.ts -g "create subject guide enters workbench|study review guide auto-fills" --workers=1 --reporter=line`：2 passed。
 - `git diff --check`：通过，仅有仓库换行符提示。
+- `rg -n "from __future__ import annotations" -g "*.py"`：无匹配。
 
 ## 当前风险与不确定项
 

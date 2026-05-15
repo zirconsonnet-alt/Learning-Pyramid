@@ -182,6 +182,20 @@ export const STUDY_REVIEW_GUIDE_STEPS: GuideWalkthroughStep[] = [
     popoverSide: "top",
   },
   {
+    id: "fill-review-answer",
+    popoverTitle: "第 6 步：填写复习答案",
+    sourceRef: {
+      heading: "第 6 步：做复习",
+      itemIndex: 2,
+      extractMode: "item",
+    },
+    routeHint: "/subjects/guide-virtual-study-review/projects/guide-virtual-study-review/workbench",
+    targetAnchor: "review-answer-editor",
+    fallbackMode: "centered-popover",
+    advanceOn: "next-button",
+    popoverSide: "left",
+  },
+  {
     id: "submit-review-answer",
     sourceRef: {
       heading: "第 6 步：做复习",

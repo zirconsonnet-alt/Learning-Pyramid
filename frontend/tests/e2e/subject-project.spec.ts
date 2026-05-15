@@ -120,7 +120,7 @@ test("create subject guide enters workbench after directory sync", async ({ page
   expectNoConsoleIssues(consoleIssues)
 })
 
-test("study review guide auto-fills recall question and answer before next steps", async ({ page }) => {
+test("study review guide auto-fills recall question learning answer and review answer", async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
   await installMockApi(page)
 
@@ -153,6 +153,21 @@ test("study review guide auto-fills recall question and answer before next steps
   await expectGuideStep(page, "第 5 步：在工作台录入复述点")
   await expect(page.getByRole("button", { name: "下一步", exact: true })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "上一步", exact: true })).toHaveCount(0)
+
+  await expect(page.getByRole("button", { name: "提交学习", exact: true })).toBeEnabled()
+  await dispatchClick(page.getByRole("button", { name: "提交学习", exact: true }))
+  await expectGuideStep(page, "第 6 步：填写复习答案")
+  await expect(page.getByPlaceholder("先写下自己的答案，提交后会自动展开标准答案。")).toHaveValue("线性组合可以用基向量和系数表示目标向量。")
+  await expect(page.getByRole("button", { name: "下一步", exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "上一步", exact: true })).toHaveCount(0)
+  await completeGuideStep(page, "fill-review-answer")
+  await expectGuideStep(page, "第 6 步：填写复习答案")
+
+  await page.getByRole("button", { name: "下一步", exact: true }).click()
+  await expectGuideStep(page, "第 6 步：做复习")
+  await expect(page.getByRole("button", { name: "提交答案", exact: true })).toBeEnabled()
+  await expect(page.getByText("系统会")).toHaveCount(0)
+  await expect(page.getByText("引导会")).toHaveCount(0)
 
   expectNoConsoleIssues(consoleIssues)
 })
