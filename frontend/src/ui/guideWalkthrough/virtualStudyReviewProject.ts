@@ -53,6 +53,8 @@ type CommitReviewTaskInput = {
 
 const VIRTUAL_STUDY_REVIEW_VIDEO_PATH = "/guide/demo-media/study-review"
 const VIRTUAL_STUDY_REVIEW_VIDEO_URL = `${getBaseUrl()}${VIRTUAL_STUDY_REVIEW_VIDEO_PATH}`
+export const VIRTUAL_STUDY_REVIEW_GUIDE_RECALL_QUESTION = "线性组合的目标是什么？"
+export const VIRTUAL_STUDY_REVIEW_GUIDE_RECALL_ANSWER = "用一组基向量和对应系数表示目标向量。"
 const VIRTUAL_STUDY_REVIEW_STORAGE_PREFIXES = [
   `plm-review-session:${VIRTUAL_STUDY_REVIEW_PROJECT_ID}`,
   `plm-workbench-daily-stats:${VIRTUAL_STUDY_REVIEW_PROJECT_ID}:`,

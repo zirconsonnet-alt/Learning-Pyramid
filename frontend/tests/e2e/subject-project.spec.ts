@@ -120,6 +120,43 @@ test("create subject guide enters workbench after directory sync", async ({ page
   expectNoConsoleIssues(consoleIssues)
 })
 
+test("study review guide auto-fills recall question and answer before next steps", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page)
+
+  await page.goto("/subjects?walkthrough=study-review")
+  await expect(page).toHaveURL(/\/subjects\/guide-virtual-study-review\/projects\/guide-virtual-study-review\/workbench/)
+  await expectGuideStep(page, "第 5 步：在工作台录入复述点")
+  await expect(page.getByRole("button", { name: "上一步", exact: true })).toHaveCount(0)
+
+  await dispatchClick(page.getByRole("button", { name: "01 向量与线性组合" }))
+  await expectGuideStep(page, "第 5 步：在工作台录入复述点")
+  await expect(page.getByRole("button", { name: "上一步", exact: true })).toHaveCount(0)
+
+  await dispatchClick(page.getByRole("button", { name: "添加", exact: true }))
+  await expectGuideStep(page, "第 4 步：填写问题")
+  await expect(page.getByPlaceholder("请输入问题/提示语")).toHaveValue("线性组合的目标是什么？")
+  await expect(page.getByRole("button", { name: "下一步", exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "上一步", exact: true })).toHaveCount(0)
+  await completeGuideStep(page, "fill-recall-question")
+  await expectGuideStep(page, "第 4 步：填写问题")
+
+  await page.getByRole("button", { name: "下一步", exact: true }).click()
+  await expectGuideStep(page, "第 5 步：填写答案")
+  await expect(page.getByPlaceholder("请输入答案/复述内容")).toHaveValue("用一组基向量和对应系数表示目标向量。")
+  await expect(page.getByRole("button", { name: "下一步", exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "上一步", exact: true })).toHaveCount(0)
+  await completeGuideStep(page, "fill-recall-answer")
+  await expectGuideStep(page, "第 5 步：填写答案")
+
+  await page.getByRole("button", { name: "下一步", exact: true }).click()
+  await expectGuideStep(page, "第 5 步：在工作台录入复述点")
+  await expect(page.getByRole("button", { name: "下一步", exact: true })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "上一步", exact: true })).toHaveCount(0)
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
 test("project settings shows concise convergence template copy", async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
   await installMockApi(page)

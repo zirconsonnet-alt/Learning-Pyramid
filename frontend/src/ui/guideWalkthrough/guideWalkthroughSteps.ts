@@ -2,7 +2,7 @@ export type GuideWalkthroughExtractMode = "heading" | "item" | "paragraph" | "su
 export type GuideWalkthroughFallbackMode = "centered-popover" | "route-hint" | "skip-with-explanation"
 export type GuideWalkthroughPopoverSide = "top" | "right" | "bottom" | "left"
 export type GuideWalkthroughSessionStatus = "idle" | "running" | "closed"
-export type GuideWalkthroughAdvanceMode = "manual" | "target-click" | "completion-event"
+export type GuideWalkthroughAdvanceMode = "manual" | "next-button" | "target-click" | "completion-event"
 export type GuideWalkthroughDocSlug = "create-subject-project" | "study-review" | "use-ai-chat" | "use-pomodoro"
 
 export type GuideWalkthroughSourceRef = {
@@ -151,7 +151,7 @@ export const STUDY_REVIEW_GUIDE_STEPS: GuideWalkthroughStep[] = [
     routeHint: "/subjects/guide-virtual-study-review/projects/guide-virtual-study-review/workbench",
     targetAnchor: "recall-question-editor",
     fallbackMode: "centered-popover",
-    advanceOn: "completion-event",
+    advanceOn: "next-button",
     popoverSide: "top",
   },
   {
@@ -165,7 +165,7 @@ export const STUDY_REVIEW_GUIDE_STEPS: GuideWalkthroughStep[] = [
     routeHint: "/subjects/guide-virtual-study-review/projects/guide-virtual-study-review/workbench",
     targetAnchor: "recall-answer-editor",
     fallbackMode: "centered-popover",
-    advanceOn: "completion-event",
+    advanceOn: "next-button",
     popoverSide: "top",
   },
   {

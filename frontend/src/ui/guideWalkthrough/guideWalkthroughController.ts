@@ -33,9 +33,10 @@ const START_GUIDE_WALKTHROUGH_EVENT = "learningpyramid:start-guide-walkthrough"
 const DESTROY_GUIDE_WALKTHROUGH_EVENT = "learningpyramid:destroy-guide-walkthrough"
 const REFRESH_GUIDE_WALKTHROUGH_EVENT = "learningpyramid:refresh-guide-walkthrough"
 const GUIDE_WALKTHROUGH_STEP_COMPLETED_EVENT = "learningpyramid:guide-walkthrough-step-completed"
+export const GUIDE_WALKTHROUGH_STEP_HIGHLIGHTED_EVENT = "learningpyramid:guide-walkthrough-step-highlighted"
 const SUPPORTED_FALLBACK_MODES = ["centered-popover", "route-hint", "skip-with-explanation"] as const
 const ACTION_STEP_BUTTONS: AllowedButtons[] = ["close"]
-const FINAL_STEP_BUTTONS: AllowedButtons[] = ["next"]
+const NEXT_STEP_BUTTONS: AllowedButtons[] = ["next"]
 const TARGET_WAIT_INTERVAL_MS = 50
 const TARGET_WAIT_MAX_ATTEMPTS = 20
 const GUIDE_WALKTHROUGH_POMODORO_NON_FOCUS_TITLE = "当前不是学习时间"
@@ -289,15 +290,22 @@ function advanceGuideWalkthroughFromIndex(driverInstance: Driver, stepIndex: num
   )
 }
 
-function completeActiveGuideWalkthroughStep(driverInstance: Driver, stepId: string, fallbackIndex: number, options: BuildDriverStepsOptions) {
+function completeActiveGuideWalkthroughStep(
+  driverInstance: Driver,
+  stepId: string,
+  fallbackIndex: number,
+  options: BuildDriverStepsOptions,
+  allowedAdvanceOn: GuideWalkthroughStep["advanceOn"][],
+) {
   const active = getActiveGuideWalkthroughStep(driverInstance, fallbackIndex, options.getSteps())
   if (!active || active.step.id !== stepId) return
+  if (!allowedAdvanceOn.includes(active.step.advanceOn)) return
   advanceGuideWalkthroughFromIndex(driverInstance, active.activeIndex, options)
 }
 
 function createPopover(step: GuideWalkthroughStep, stepIndex: number, options: BuildDriverStepsOptions, hasTarget: boolean): DriveStep["popover"] {
   const copy = resolveGuideWalkthroughCopy(step.sourceRef, options.getDocSlug())
-  const showButtons = step.advanceOn === "manual" ? FINAL_STEP_BUTTONS : hasTarget && step.advanceOn ? ACTION_STEP_BUTTONS : undefined
+  const showButtons = step.advanceOn === "manual" || step.advanceOn === "next-button" ? NEXT_STEP_BUTTONS : ACTION_STEP_BUTTONS
   return {
     title: step.popoverTitle ?? copy.title,
     description: step.popoverDescription ?? copy.description,
@@ -328,6 +336,7 @@ function buildDriverStep(step: GuideWalkthroughStep, stepIndex: number, options:
   return {
     element: target,
     onHighlighted: (element, _driverStep, opts) => {
+      dispatchGuideWalkthroughCustomEvent(GUIDE_WALKTHROUGH_STEP_HIGHLIGHTED_EVENT, { stepId: step.id })
       if (step.advanceOn !== "target-click" || !element) return
       element.addEventListener(
         "click",
@@ -340,7 +349,7 @@ function buildDriverStep(step: GuideWalkthroughStep, stepIndex: number, options:
             opts.driver.destroy()
             return
           }
-          completeActiveGuideWalkthroughStep(opts.driver, step.id, stepIndex, options)
+          completeActiveGuideWalkthroughStep(opts.driver, step.id, stepIndex, options, ["target-click"])
         },
         { once: true, capture: true },
       )
@@ -432,8 +441,8 @@ export function useGuideWalkthroughController({ navigate, pathname }: { navigate
               nextBtnText: "下一步",
               overlayClickBehavior: "close",
               popoverClass: "guide-walkthrough-popover",
-              prevBtnText: "上一步",
               progressText: "{{current}} / {{total}}",
+              showButtons: ACTION_STEP_BUTTONS,
               showProgress: true,
               stagePadding: 8,
               stageRadius: 12,
@@ -483,7 +492,7 @@ export function useGuideWalkthroughController({ navigate, pathname }: { navigate
       if (!driverRef.current?.isActive() || !(event instanceof CustomEvent)) return
       const stepId = typeof event.detail?.stepId === "string" ? event.detail.stepId : ""
       if (!stepId) return
-      completeActiveGuideWalkthroughStep(driverRef.current, stepId, driverRef.current.getActiveIndex() ?? 0, options)
+      completeActiveGuideWalkthroughStep(driverRef.current, stepId, driverRef.current.getActiveIndex() ?? 0, options, ["completion-event", "target-click"])
     }
 
     window.addEventListener(START_GUIDE_WALKTHROUGH_EVENT, runWalkthrough)

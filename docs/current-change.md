@@ -1,71 +1,84 @@
-# Current Change
+# 当前变更：学习复习引导第 4/5 步自动填写
 
-更新时间：2026-05-15
+## 当前用户要求
 
-## 1. 当前用户要求
+- “如何学习复习”引导第 4 步、第 5 步自动填写问题和答案。
+- 自动填写后显示“下一步”按钮。
+- 只有这两个步骤显式显示“下一步”。
+- 引导中不出现“上一步”按钮。
 
-- 创建学科导引在项目设置页同步完目录后，不应停在当前页。
-- 同步完成后应跳转到工作台，并展示导入后的学习对象效果。
+## 根因
 
-## 2. 本次实际修改文件
+- 学习复习引导的 `fill-recall-question`、`fill-recall-answer` 原本使用 `completion-event`，依赖用户手动输入触发完成。
+- 导引控制器缺少“普通步骤由下一步按钮推进”的显式模式。
+- 虚拟学习复习工作台没有在导引步骤进入时写入示例问题/答案。
 
-- `frontend/tests/e2e/subject-project.spec.ts`
-- `frontend/tests/fixtures/mock-api.ts`
-- `frontend/src/ui/guideWalkthrough/guideWalkthroughController.ts`
+## 本次实际修改文件
+
 - `frontend/src/ui/guideWalkthrough/guideWalkthroughSteps.ts`
-- `frontend/src/views/settings/ProjectSettingsPage.tsx`
-- `frontend/src/views/projects/ProjectsPage.tsx`
-- `frontend/src/views/subjects/SubjectDashboardPage.tsx`
-- `docs/how-to-create-subject-project.md`
+  - 新增 `next-button` 推进模式。
+  - 只把学习复习导引的 `fill-recall-question`、`fill-recall-answer` 改为 `next-button`。
+- `frontend/src/ui/guideWalkthrough/guideWalkthroughController.ts`
+  - `manual` 与 `next-button` 步骤只显示 `next` 按钮。
+  - 全局默认按钮只保留 `close`，避免 driver.js 默认带出 `previous`。
+  - 新增导引步骤高亮事件，供虚拟工作台在步骤进入时执行自动填充。
+  - 完成事件只推进 `completion-event` 和既有 `target-click` 步骤，不推进 `next-button` 步骤。
+- `frontend/src/ui/guideWalkthrough/virtualStudyReviewProject.ts`
+  - 提取学习复习引导示例问题、答案常量。
+- `frontend/src/views/workbench/components/ComposePane.tsx`
+  - 仅在虚拟学习复习项目中监听导引高亮事件。
+  - 第 4 步写入示例问题，第 5 步写入示例答案。
+- `frontend/tests/e2e/subject-project.spec.ts`
+  - 新增学习复习导引 e2e，覆盖自动填充、第 4/5 步显示“下一步”、无“上一步”、completion-event 不会绕过 next-button。
+- `docs/how-to-study-review.md`
+  - 同步第 4/5 步导引文案，说明问题和答案由引导自动填写后点击“下一步”。
 - `docs/current-change.md`
+  - 覆盖为当前任务工作单。
 
-## 3. 每个文件为什么修改
+## 行为语义变化
 
-- `frontend/tests/e2e/subject-project.spec.ts`：新增回归用例，覆盖创建学科导引从“同步目录内容”进入工作台并看到导入学习对象。
-- `frontend/tests/fixtures/mock-api.ts`：让 e2e mock 的目录导入接口返回结构化结果，并在导入后把内容状态切到可展示。
-- `frontend/src/ui/guideWalkthrough/guideWalkthroughController.ts`：补齐 `:scopedProjectId` route hint 解析，让学科材料项目导引步骤能从当前 scoped project 路由继续导航；支持步骤级弹窗正文覆盖，避免把长期文档说明直接当作短弹窗文案；导引结束步只显示“完成”，不再暴露没有业务撤销语义的“上一步”。
-- `frontend/src/ui/guideWalkthrough/guideWalkthroughSteps.ts`：把“同步目录内容”改为等待同步完成事件推进，并新增“查看导入结果”工作台步骤；第 6 步正文改为“左侧是刚导入的内容目录。”。
-- `frontend/src/views/settings/ProjectSettingsPage.tsx`：目录同步成功或已是最新后通知创建学科导引推进；失败时不推进。
-- `frontend/src/views/projects/ProjectsPage.tsx`：为创建学科弹窗补充 `DialogDescription`，消除该导引路径暴露的可访问性 warning。
-- `frontend/src/views/subjects/SubjectDashboardPage.tsx`：为创建项目弹窗补充 `DialogDescription`，保持创建类弹窗结构一致。
-- `docs/how-to-create-subject-project.md`：同步创建学科导引完成后的工作台展示语义。
-- `docs/current-change.md`：覆盖为当前任务工作单。
+- 学习复习导引第 4/5 步由“用户手动填写后自动进入下一步”改为“系统自动填示例内容，用户点击下一步继续”。
+- 导引弹窗不再出现“上一步”按钮。
 
-## 4. 行为语义是否变化
+## 重构说明
 
-- 是。创建学科导引在目录同步成功后会继续进入当前项目工作台，并高亮内容目录，让用户看到导入结果。
-- 是。第 6 步弹窗正文改为更短的结果说明：“左侧是刚导入的内容目录。”。
-- 是。导引结束步只保留“完成”按钮，不提供“上一步”。
-- 普通手动同步目录流程不应被强制跳转。
+- 做了小范围抽象补充：新增 `next-button` 推进模式，避免在控制器里硬编码具体 step id。
+- 未改公共 API、数据库、协议、部署配置或后端行为。
 
-## 5. 是否做了重构，以及为什么
+## 未修改内容
 
-- 否。仅调整既有导引步骤配置、route hint 解析和同步成功后的既有导引事件调用。
+- 未改变真实项目普通复述点录入流程。
+- 未改变学习任务提交、复习提交的数据结构和接口。
+- 未增加 fallback / shim / legacy 兼容层。
 
-## 6. 未修改哪些相关内容，以及为什么
-
-- 未修改后端 API、持久化和数据结构，因为根因位于前端导引步骤定义与同步成功推进方式。
-- 未给普通同步按钮直接加导航，因为跳转语义只属于创建学科导引。
-
-## 7. 是否影响 API、架构、部署、数据结构、UI、测试
+## 影响范围
 
 - API：否。
 - 架构：否。
 - 部署：否。
 - 数据结构：否。
-- UI：是，创建学科导引会多走一步工作台展示。
-- UI：是，创建学科/项目弹窗增加屏幕阅读器描述，不新增可见操作。
-- 测试：是，新增 e2e 回归，并断言第 6 步弹窗正文和结束步按钮。
+- UI：是，仅导引弹窗按钮和虚拟学习复习引导自动填充。
+- 文档：是，同步 `docs/how-to-study-review.md`。
+- 测试：是，新增 e2e 回归。
 
-## 8. 当前风险点和不确定项
+## 验证记录
 
-- 无已知未解决风险。
+- `LEARNINGPYRAMID_FRONTEND_E2E_USE_DEV_SERVER=1; LEARNINGPYRAMID_FRONTEND_E2E_PORT=4259; pnpm exec playwright test tests/e2e/subject-project.spec.ts -g "study review guide auto-fills" --reporter=line`：失败，确认修复前第 4 步问题输入框为空。
+- `LEARNINGPYRAMID_FRONTEND_E2E_USE_DEV_SERVER=1; LEARNINGPYRAMID_FRONTEND_E2E_PORT=4265; pnpm exec playwright test tests/e2e/subject-project.spec.ts -g "study review guide auto-fills" --reporter=line`：失败，确认修复前 completion-event 可绕过 next-button。
+- `pnpm exec tsc -b --noEmit`：通过。
+- `LEARNINGPYRAMID_FRONTEND_E2E_USE_DEV_SERVER=1; LEARNINGPYRAMID_FRONTEND_E2E_PORT=4268; pnpm exec playwright test tests/e2e/subject-project.spec.ts -g "create subject guide enters workbench|study review guide auto-fills" --workers=1 --reporter=line`：2 passed。
+- `LEARNINGPYRAMID_FRONTEND_E2E_USE_DEV_SERVER=1; LEARNINGPYRAMID_FRONTEND_E2E_PORT=4269; pnpm exec playwright test tests/e2e/subject-project.spec.ts --workers=1 --reporter=line`：8 passed。
+- `git diff --check`：通过，仅有仓库换行符提示。
 
-## 9. 仍需用户确认的问题
+## 当前风险与不确定项
+
+- 未发现影响本次改动正确性的未解决风险。
+
+## 仍需用户确认的问题
 
 - 无。
 
-## 10. 污染风险检查
+## 污染风险检查
 
 - 是否新增特殊分支：否
 - 是否新增隐式约定：否
@@ -74,20 +87,3 @@
 - 是否修改无关代码：否
 - 是否破坏现有抽象边界：否
 - 是否可能误导未来维护：否
-
-## 11. 验证状态
-
-- `LEARNINGPYRAMID_FRONTEND_E2E_USE_DEV_SERVER=1; LEARNINGPYRAMID_FRONTEND_E2E_PORT=4241; pnpm exec playwright test tests/e2e/subject-project.spec.ts -g "create subject guide enters workbench" --reporter=line`：失败，确认修复前同步目录后仍停在项目设置页。
-- `LEARNINGPYRAMID_FRONTEND_E2E_USE_DEV_SERVER=1; LEARNINGPYRAMID_FRONTEND_E2E_PORT=4252; pnpm exec playwright test tests/e2e/subject-project.spec.ts -g "create subject guide enters workbench" --reporter=line`：1 passed。
-- `pnpm exec tsc -b --noEmit`：通过。
-- `LEARNINGPYRAMID_FRONTEND_E2E_USE_DEV_SERVER=1; LEARNINGPYRAMID_FRONTEND_E2E_PORT=4253; pnpm exec playwright test tests/e2e/subject-project.spec.ts --workers=1 --reporter=line`：7 passed。
-- `pnpm build`：通过，保留既有 Vite chunk size warning。
-- `git diff --check`：通过，仅有 LF/CRLF 提示。
-- `LEARNINGPYRAMID_FRONTEND_E2E_USE_DEV_SERVER=1; LEARNINGPYRAMID_FRONTEND_E2E_PORT=4254; pnpm exec playwright test tests/e2e/subject-project.spec.ts -g "create subject guide enters workbench" --reporter=line`：失败，确认第 6 步旧正文不满足新文案要求。
-- `LEARNINGPYRAMID_FRONTEND_E2E_USE_DEV_SERVER=1; LEARNINGPYRAMID_FRONTEND_E2E_PORT=4255; pnpm exec playwright test tests/e2e/subject-project.spec.ts -g "create subject guide enters workbench" --reporter=line`：1 passed。
-- `pnpm exec tsc -b --noEmit`：通过。
-- `LEARNINGPYRAMID_FRONTEND_E2E_USE_DEV_SERVER=1; LEARNINGPYRAMID_FRONTEND_E2E_PORT=4256; pnpm exec playwright test tests/e2e/subject-project.spec.ts -g "create subject guide enters workbench" --reporter=line`：失败，确认第 6 步旧按钮组仍显示“上一步”。
-- `LEARNINGPYRAMID_FRONTEND_E2E_USE_DEV_SERVER=1; LEARNINGPYRAMID_FRONTEND_E2E_PORT=4257; pnpm exec playwright test tests/e2e/subject-project.spec.ts -g "create subject guide enters workbench" --reporter=line`：1 passed。
-- `pnpm exec tsc -b --noEmit`：通过。
-- `git diff --check`：通过，仅有 LF/CRLF 提示。
-- `pnpm build`：通过，刷新 `frontend/dist`，确认静态服务不再使用旧前端 bundle。

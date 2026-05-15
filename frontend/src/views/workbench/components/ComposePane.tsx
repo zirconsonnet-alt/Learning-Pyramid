@@ -17,7 +17,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/car
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
 import { formatInstanceReference, formatRecallPointReference, simplifyMaterialDisplayName } from "@/ui/displayIdentifiers"
-import { completeGuideWalkthroughStep } from "@/ui/guideWalkthrough/guideWalkthroughController"
+import {
+  GUIDE_WALKTHROUGH_STEP_HIGHLIGHTED_EVENT,
+  completeGuideWalkthroughStep,
+} from "@/ui/guideWalkthrough/guideWalkthroughController"
+import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
+import {
+  VIRTUAL_STUDY_REVIEW_GUIDE_RECALL_ANSWER,
+  VIRTUAL_STUDY_REVIEW_GUIDE_RECALL_QUESTION,
+} from "@/ui/guideWalkthrough/virtualStudyReviewProject"
 import {
   projectTypeRequiresAnchor,
   projectTypeRequiresLearningObjectTree,
@@ -287,6 +295,27 @@ export function ComposePane({
     : drafts[0]?.localId ?? null
   const activeDraftIndex = resolvedActiveDraftId ? drafts.findIndex((draft) => draft.localId === resolvedActiveDraftId) : -1
   const activeDraft = activeDraftIndex >= 0 ? drafts[activeDraftIndex] : null
+
+  useEffect(() => {
+    if (!isVirtualStudyReviewProjectId(projectId) || !activeDraft) return
+    const activeDraftId = activeDraft.localId
+
+    function autofillGuideRecallField(event: Event) {
+      if (!(event instanceof CustomEvent)) return
+      const stepId = event.detail?.stepId
+      if (stepId === "fill-recall-question") {
+        updateDraftText(projectId, activeDraftId, "question", VIRTUAL_STUDY_REVIEW_GUIDE_RECALL_QUESTION)
+        return
+      }
+      if (stepId === "fill-recall-answer") {
+        updateDraftText(projectId, activeDraftId, "answer", VIRTUAL_STUDY_REVIEW_GUIDE_RECALL_ANSWER)
+      }
+    }
+
+    window.addEventListener(GUIDE_WALKTHROUGH_STEP_HIGHLIGHTED_EVENT, autofillGuideRecallField)
+    return () => window.removeEventListener(GUIDE_WALKTHROUGH_STEP_HIGHLIGHTED_EVENT, autofillGuideRecallField)
+  }, [activeDraft, projectId, updateDraftText])
+
   const effectiveReferencePicker = referencePicker?.draftId === resolvedActiveDraftId ? referencePicker : null
   const deferredReferenceQuery = useDeferredValue(effectiveReferencePicker?.query.trim() ?? "")
   const referenceSearchQ = useQuery({
