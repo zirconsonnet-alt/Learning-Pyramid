@@ -44,6 +44,7 @@ import { useProjectMaterialSourceBinding } from "@/ui/queries/projects"
 import { useSystemCapabilities } from "@/ui/queries/system"
 import { useInstances } from "@/ui/queries/workbench"
 import { GUIDE_WALKTHROUGH_STEP_HIGHLIGHTED_EVENT, completeGuideWalkthroughStep } from "@/ui/guideWalkthrough/guideWalkthroughController"
+import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
 import { isSyntheticFilesContainer, sortLearningObjectNodeIdsForDisplay } from "@/ui/learningObjectDisplayOrder"
 import { type AiChatConversation, type AiChatCourseEvidence, type AiChatMessage, useAiChatStore } from "@/ui/store/aiChatStore"
 import { buildScopedProjectPath } from "@/ui/projectPaths"
@@ -91,6 +92,7 @@ const QUICK_CHAT_ACTIONS = [
 ] as const
 
 const GUIDE_AI_CHAT_QUESTION = "请用更容易懂的话解释这个小节。"
+const GUIDE_AI_CHAT_ANSWER = "线性组合就是把几个基向量按系数加起来，用它们表示目标向量。看这类内容时，可以先分清“基向量是什么”和“系数怎么取”。"
 const QA_ACTIVITY_WINDOW_MS = 30_000
 
 function formatApiError(err: unknown) {
@@ -943,6 +945,7 @@ export function AiChatPage() {
   const pid = scopedProjectId ?? ""
   const projectScope: ScopedProjectRef | null = subjectId && pid ? { subjectId, scopedProjectId: pid } : null
   const globalSettingsPath = buildGlobalSettingsPath()
+  const isVirtualStudyReviewProject = isVirtualStudyReviewProjectId(pid)
 
   const touchQaActivity = useCallback(() => {
     touchDailyStudyActivity(pid, "aiQa", QA_ACTIVITY_WINDOW_MS)
@@ -1240,6 +1243,16 @@ export function AiChatPage() {
 
     streamingContentRef.current = ""
     setStreamingAssistantMessage((current) => (current ? { ...current, content: "" } : { ...assistantDraft, content: "" }))
+
+    if (isVirtualStudyReviewProject) {
+      touchQaActivity()
+      streamingContentRef.current = GUIDE_AI_CHAT_ANSWER
+      setStreamingAssistantMessage((current) => (current ? { ...current, content: GUIDE_AI_CHAT_ANSWER } : { ...assistantDraft, content: GUIDE_AI_CHAT_ANSWER }))
+      return {
+        content: GUIDE_AI_CHAT_ANSWER,
+        modelReliabilityIssue: false,
+      }
+    }
 
     const courseContext = resolveActiveCourseAgentContext()
     if (courseContext) {

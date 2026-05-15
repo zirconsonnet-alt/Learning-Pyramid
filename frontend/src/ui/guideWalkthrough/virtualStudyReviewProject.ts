@@ -378,6 +378,15 @@ export function getVirtualStudyReviewRecallPointsForTaskNode(nodeId: string) {
     .filter((item): item is RecallPoint => Boolean(item))
 }
 
+export function getVirtualStudyReviewRecallPointsForLearningObjectNode(nodeId: string) {
+  const state = ensureVirtualStudyReviewState()
+  const node = state.learningObjectNodes.find((item) => item.nodeId === nodeId)
+  if (!node || node.kind !== "leaf") return []
+  return (state.recallPointIdsByInstanceId[node.instanceId] ?? [])
+    .map((recallPointId) => state.recallPointsById[recallPointId])
+    .filter((item): item is RecallPoint => Boolean(item))
+}
+
 export function searchVirtualStudyReviewRecallPoints(query: string) {
   const normalized = query.trim().toLowerCase()
   return Object.values(ensureVirtualStudyReviewState().recallPointsById).filter((item) => {

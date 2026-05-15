@@ -24,6 +24,25 @@ async function dispatchClick(locator: ReturnType<Page["getByRole"]>) {
   await locator.dispatchEvent("click")
 }
 
+async function expectGuideTargetBounds(
+  page: Page,
+  anchor: string,
+  expected: {
+    minWidth?: number
+    maxWidth?: number
+    minHeight?: number
+    maxHeight?: number
+  },
+) {
+  const bounds = await page.locator(`[data-guide-tour="${anchor}"]`).boundingBox()
+  expect(bounds, `expected [data-guide-tour="${anchor}"] to have layout bounds`).not.toBeNull()
+  if (!bounds) return
+  if (expected.minWidth !== undefined) expect(bounds.width).toBeGreaterThanOrEqual(expected.minWidth)
+  if (expected.maxWidth !== undefined) expect(bounds.width).toBeLessThanOrEqual(expected.maxWidth)
+  if (expected.minHeight !== undefined) expect(bounds.height).toBeGreaterThanOrEqual(expected.minHeight)
+  if (expected.maxHeight !== undefined) expect(bounds.height).toBeLessThanOrEqual(expected.maxHeight)
+}
+
 async function seedSelectedProject(page: Page) {
   await page.addInitScript(({ subjectId, projectId }) => {
     window.localStorage.setItem(
@@ -76,20 +95,23 @@ test("AI chat guide points to LLM settings when the deployment has no LLM", asyn
   expectNoConsoleIssues(consoleIssues)
 })
 
-test("AI chat guide walks through the real project AI question flow", async ({ page }) => {
+test("AI chat guide walks through the virtual study review project AI question flow", async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
   await seedSelectedProject(page)
   await installMockApi(page)
 
   await page.goto("/subjects?walkthrough=use-ai-chat")
 
-  await expect(page).toHaveURL(new RegExp(`${projectRoute("/ai-chat")}$`))
+  await expect(page).toHaveURL(/\/subjects\/guide-virtual-study-review\/projects\/guide-virtual-study-review\/ai-chat$/)
   await expectGuideStep(page, "第 1 步：选择提问对象")
+  await expect(page.locator(".guide-walkthrough-fallback")).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "学科 学习复习引导示范学科" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "项目 线性代数导论示范视频" })).toBeVisible()
   await expect(page.getByText("点击项目左侧导航里的“AI问答”。")).toHaveCount(0)
   await expect(page.getByText(genericConditionCopy)).toHaveCount(0)
   await expect(page.getByRole("button", { name: "上一步", exact: true })).toHaveCount(0)
 
-  await dispatchClick(page.getByRole("button", { name: "第一讲 自动化导论" }))
+  await dispatchClick(page.getByRole("button", { name: "01 向量与线性组合.mp4" }))
   await expectGuideStep(page, "第 2 步：确认问题")
   await expect(page.getByLabel("提问内容")).toHaveValue("请用更容易懂的话解释这个小节。")
   await expect(page.getByRole("button", { name: "下一步", exact: true })).toBeVisible()
@@ -100,8 +122,11 @@ test("AI chat guide walks through the real project AI question flow", async ({ p
   await expect(page.getByRole("button", { name: "发送", exact: true })).toBeEnabled()
   await dispatchClick(page.getByRole("button", { name: "发送", exact: true }))
   await expectGuideStep(page, "第 4 步：查看回答")
-  await expect(page.getByText("这是自动化测试的确定性 AI 回复。")).toBeVisible()
+  await expect(page.getByText("看这类内容时，可以先分清“基向量是什么”和“系数怎么取”。")).toBeVisible()
   await expect(page.getByRole("button", { name: "完成" })).toBeVisible()
+  await page.getByRole("button", { name: "完成" }).click()
+  await expect(page).toHaveURL(/\/subjects$/)
+  await expect(page.getByText("学习复习引导示范项目")).toHaveCount(0)
 
   expectNoConsoleIssues(consoleIssues)
 })
@@ -162,7 +187,8 @@ test("pomodoro guide walks through the real plan and workbench flow", async ({ p
   await dispatchClick(page.getByRole("button", { name: "新增计划" }))
   await expect(page).toHaveURL(/\/pomodoro\/plans\/[^/]+$/)
   await expectGuideStep(page, "第 2 步：绑定学习项目")
-  await page.locator('[data-guide-tour="pomodoro-project-binding"]').selectOption(project.projectId)
+  await expectGuideTargetBounds(page, "pomodoro-project-binding", { minWidth: 300, maxWidth: 430, minHeight: 100 })
+  await page.locator('[data-guide-tour="pomodoro-project-binding"] select').selectOption(project.projectId)
 
   await expectGuideStep(page, "第 3 步：保存番茄计划")
   await dispatchClick(page.getByRole("button", { name: "保存" }))

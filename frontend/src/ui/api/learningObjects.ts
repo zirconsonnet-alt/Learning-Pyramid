@@ -4,6 +4,11 @@ import { AsrArtifactSchema } from "@/ui/api/asr"
 import { apiRequest, type ApiRequestExecutionOptions } from "@/ui/api/http"
 import { projectApiPath, type ScopedProjectRef } from "@/ui/api/projectScope"
 import { RecallPointSchema } from "@/ui/api/review"
+import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
+import {
+  getVirtualStudyReviewLearningObjectNodes,
+  getVirtualStudyReviewRecallPointsForLearningObjectNode,
+} from "@/ui/guideWalkthrough/virtualStudyReviewProject"
 
 export const LearningObjectLeafSchema = z.object({
   kind: z.literal("leaf"),
@@ -122,6 +127,9 @@ export function listLearningObjectRoots(scope: ScopedProjectRef) {
 }
 
 export function listLearningObjectNodes(scope: ScopedProjectRef, options?: ApiRequestExecutionOptions) {
+  if (isVirtualStudyReviewProjectId(scope.scopedProjectId)) {
+    return Promise.resolve(getVirtualStudyReviewLearningObjectNodes())
+  }
   return apiRequest({
     path: projectApiPath(scope, "/learning-object-nodes"),
     responseSchema: z.array(LearningObjectNodeSchema),
@@ -164,6 +172,9 @@ export function importLearningObjectsFromBaiduNetdisk(
 }
 
 export function listRecallPointsByLearningObjectNode(scope: ScopedProjectRef, nodeId: string) {
+  if (isVirtualStudyReviewProjectId(scope.scopedProjectId)) {
+    return Promise.resolve(getVirtualStudyReviewRecallPointsForLearningObjectNode(nodeId))
+  }
   return apiRequest({
     path: projectApiPath(scope, `/learning-objects/${nodeId}/recall-points`),
     responseSchema: z.array(RecallPointSchema),

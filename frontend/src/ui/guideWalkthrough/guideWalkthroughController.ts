@@ -80,7 +80,7 @@ function dispatchGuideWalkthroughCustomEvent(name: string, detail: Record<string
 }
 
 function cleanupVirtualStudyReviewProjectForDoc(docSlug: GuideWalkthroughDocSlug) {
-  if (docSlug !== "study-review") return
+  if (docSlug !== "study-review" && docSlug !== "use-ai-chat") return
   clearVirtualStudyReviewProjectSession()
 }
 
@@ -139,10 +139,6 @@ function createTerminalGuideStep(params: {
   }
 }
 
-function pickGuideProjectRef(context: GuideWalkthroughRuntimeContext) {
-  return context.routeProjectRef ?? context.selectedProjectRef ?? context.catalogProjectRefs[0] ?? null
-}
-
 function encodeGuidePathPart(value: string) {
   return encodeURIComponent(value)
 }
@@ -184,24 +180,19 @@ function buildAiChatSessionPlan(context: GuideWalkthroughRuntimeContext): GuideW
     return { steps: [step], docSlug: "use-ai-chat", initialPathname: step.routeHint ?? null, ready: true }
   }
 
-  if (!context.projectCatalogReady) {
-    return { steps: [], docSlug: "use-ai-chat", initialPathname: null, ready: false }
-  }
-
-  const projectRef = pickGuideProjectRef(context)
-  if (!projectRef) {
-    const step = createTerminalGuideStep({
-      id: "ai-project-required",
-      title: "先进入一个学科项目",
-      description: "当前还没有可用于提问的学科项目。先创建或进入项目，再使用项目 AI 问答。",
-      routeHint: "/subjects",
-      sourceHeading: "项目上下文",
-    })
-    return { steps: [step], docSlug: "use-ai-chat", initialPathname: step.routeHint ?? null, ready: true }
-  }
-
   const steps = GUIDE_WALKTHROUGH_STEPS_BY_DOC["use-ai-chat"]
-  return { steps, docSlug: "use-ai-chat", initialPathname: buildProjectGuidePath(projectRef, "/ai-chat"), ready: true }
+  return {
+    steps,
+    docSlug: "use-ai-chat",
+    initialPathname: buildProjectGuidePath(
+      {
+        subjectId: VIRTUAL_STUDY_REVIEW_PROJECT_ID,
+        scopedProjectId: VIRTUAL_STUDY_REVIEW_PROJECT_ID,
+      },
+      "/ai-chat",
+    ),
+    ready: true,
+  }
 }
 
 function buildPomodoroSessionPlan(context: GuideWalkthroughRuntimeContext): GuideWalkthroughSessionPlan {
@@ -571,7 +562,7 @@ export function useGuideWalkthroughController({
 
       activeDocSlugRef.current = sessionPlan.docSlug
       activeSessionStepsRef.current = sessionPlan.steps
-      if (sessionPlan.docSlug === "study-review") {
+      if (sessionPlan.docSlug === "study-review" || sessionPlan.docSlug === "use-ai-chat") {
         startVirtualStudyReviewProjectSession()
       }
 

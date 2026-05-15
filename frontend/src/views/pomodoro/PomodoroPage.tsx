@@ -1507,13 +1507,13 @@ export function PomodoroPage() {
                         return (
                           <div
                             key={`${pomodoroDraft.id}-project-${index}`}
-                            className="min-w-[20rem] flex-1 basis-[20rem] shrink-0 space-y-3 border-t border-border/60 pt-3 sm:min-w-[22rem] sm:basis-[22rem] lg:min-w-[24rem] lg:basis-[24rem]"
+                            data-guide-tour={index === 0 ? "pomodoro-project-binding" : undefined}
+                            className="w-[20rem] shrink-0 space-y-3 border-t border-border/60 pt-3 sm:w-[22rem] lg:w-[24rem]"
                           >
                             <div className="space-y-2">
                               <Label htmlFor={`pomodoro-project-${pomodoroDraft.id}-${index}`}>番茄 {index + 1}</Label>
                               <select
                                 id={`pomodoro-project-${pomodoroDraft.id}-${index}`}
-                                data-guide-tour={index === 0 ? "pomodoro-project-binding" : undefined}
                                 className="theme-select h-10 w-full rounded-xl px-3 text-sm"
                                 value={projectRef && validPomodoroProjectRefs.has(pomodoroProjectRefKey(projectRef)) ? projectRef.scopedProjectId : ""}
                                 disabled={!draftSubjectId}
