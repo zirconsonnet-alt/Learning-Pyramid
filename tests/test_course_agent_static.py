@@ -57,18 +57,34 @@ class CourseAgentStaticTest(unittest.TestCase):
         self.assertIn("未使用视频帧", source)
         self.assertIn("本轮回答未使用视频帧", source)
 
-    def test_workbench_pet_can_export_self_contained_html_context_without_llm(self) -> None:
+    def test_workbench_pet_can_copy_text_and_image_context_without_llm(self) -> None:
         course_source = (ROOT / "frontend" / "src" / "ui" / "llm" / "courseAgent.ts").read_text(encoding="utf-8")
         pet_source = (
             ROOT / "frontend" / "src" / "views" / "workbench" / "components" / "WorkbenchPetAssistant.tsx"
         ).read_text(encoding="utf-8")
 
         self.assertIn("buildCourseAgentContextPackage", course_source)
-        self.assertIn("buildCourseAgentContextHtml", course_source)
-        self.assertIn("获取上下文", pet_source)
-        self.assertIn("downloadContextHtml", pet_source)
-        self.assertIn("contextExportMode", pet_source)
-        self.assertIn("已整理当前上下文，未调用 LLM", pet_source)
+        self.assertIn("buildCourseAgentContextText", course_source)
+        self.assertNotIn("buildCourseAgentContextHtml", course_source)
+        self.assertIn("复制文本", pet_source)
+        self.assertIn("复制图片", pet_source)
+        self.assertIn("copyContextText", pet_source)
+        self.assertIn("copyContextImage", pet_source)
+        self.assertNotIn("downloadContextHtml", pet_source)
+        self.assertNotIn("contextExportMode", pet_source)
+        self.assertNotIn("获取上下文", pet_source)
+
+    def test_context_text_is_task_first_and_does_not_repeat_html_export_language(self) -> None:
+        source = (ROOT / "frontend" / "src" / "ui" / "llm" / "courseAgent.ts").read_text(encoding="utf-8")
+
+        self.assertIn("请直接回答用户问题", source)
+        self.assertIn("buildCourseAgentContextText", source)
+        self.assertIn("复述点上下文", source)
+        self.assertIn("相关字幕", source)
+        self.assertNotIn("HTML 文件", source)
+        self.assertNotIn("buildCourseAgentContextHtml", source)
+        self.assertNotIn("可复制给模型的完整提示", source)
+        self.assertNotIn("<h2>引用片段</h2>", source)
 
 
 if __name__ == "__main__":

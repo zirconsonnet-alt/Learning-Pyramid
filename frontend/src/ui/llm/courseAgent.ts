@@ -190,96 +190,36 @@ export async function buildCourseAgentContextPackage(params: Pick<
   }
 }
 
-export function buildCourseAgentContextHtml(contextPackage: CourseAgentContextPackage) {
-  const playbackText = contextPackage.anchorMs === null ? "无" : `${formatTimestamp(contextPackage.anchorMs)} (${contextPackage.anchorMs} ms)`
-  const frameSection = contextPackage.initialFrame?.imageDataUrl
-    ? [
-        "<section>",
-        "<h2>当前视频帧</h2>",
-        `<p>截取时间：${escapeHtml(formatTimestamp(contextPackage.initialFrame.timeMs))} (${contextPackage.initialFrame.timeMs} ms)</p>`,
-        `<img class="frame" src="${escapeHtml(contextPackage.initialFrame.imageDataUrl)}" alt="当前视频帧" />`,
-        "</section>",
-      ].join("\n")
-    : [
-        "<section>",
-        "<h2>当前视频帧</h2>",
-        "<p>本次没有截取到视频帧，以下内容只包含文本上下文。</p>",
-        "</section>",
-      ].join("\n")
-  const recallText = contextPackage.recallContextText || "无"
-  const transcriptText = contextPackage.transcriptContextText || "无"
-  const evidenceText = contextPackage.evidence.length
-    ? contextPackage.evidence
-        .map((item) => `${formatTimestamp(item.startMs)}-${formatTimestamp(item.endMs)} ${item.title}\n${item.preview}`)
-        .join("\n\n")
-    : "无"
-  const modelPrompt = [
-    "请扮演视频学习助手，基于以下上下文回答用户问题。",
-    "如果图片、字幕、复述点之间存在冲突，请说明你依据的是哪一类证据。",
-    "如果证据不足，请直接说还缺什么，不要编造。",
-    "",
-    "系统提示：",
-    contextPackage.systemPrompt,
-    "",
-    "上下文：",
-    contextPackage.supplementalContext,
-    "",
-    "对话提示：",
-    contextPackage.prompt,
-  ].join("\n")
+export function buildCourseAgentContextText(contextPackage: CourseAgentContextPackage) {
+  const playbackText =
+    contextPackage.anchorMs === null ? "无" : `${formatTimestamp(contextPackage.anchorMs)} (${contextPackage.anchorMs} ms)`
+  const frameText = contextPackage.initialFrame?.imageDataUrl
+    ? `截图时间：${formatTimestamp(contextPackage.initialFrame.timeMs)} (${contextPackage.initialFrame.timeMs} ms)`
+    : "本次没有截取到视频帧。"
 
   return [
-    "<!doctype html>",
-    '<html lang="zh-CN">',
-    "<head>",
-    '<meta charset="utf-8" />',
-    '<meta name="viewport" content="width=device-width, initial-scale=1" />',
-    `<title>${escapeHtml(contextPackage.nodeLabel)} - 雪豹上下文包</title>`,
-    "<style>",
-    "body{margin:0;background:#f5f7fb;color:#152033;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;line-height:1.65}",
-    "main{max-width:960px;margin:0 auto;padding:32px 20px 48px}",
-    "section{margin-top:18px;border:1px solid #d8e2ef;background:#fff;border-radius:14px;padding:18px}",
-    "h1{font-size:26px;margin:0 0 6px}h2{font-size:18px;margin:0 0 10px}",
-    "p{margin:0 0 8px}.meta{color:#5c6f86}.frame{display:block;max-width:100%;border-radius:10px;border:1px solid #d8e2ef}",
-    "pre{margin:0;white-space:pre-wrap;word-break:break-word;font:14px/1.7 ui-monospace,SFMono-Regular,Consolas,monospace}",
-    "</style>",
-    "</head>",
-    "<body>",
-    "<main>",
-    "<h1>雪豹上下文包</h1>",
-    '<p class="meta">这个文件由桌宠“获取上下文”模式生成，生成过程未调用 LLM。</p>',
-    "<section>",
-    "<h2>基本信息</h2>",
-    `<p>当前节点：${escapeHtml(contextPackage.nodeLabel)}</p>`,
-    `<p>播放位置：${escapeHtml(playbackText)}</p>`,
-    `<p>实例 ID：${escapeHtml(contextPackage.instance.instanceId)}</p>`,
-    `<p>材料 ID：${escapeHtml(contextPackage.instance.materialId)}</p>`,
-    `<p>材料来源：${escapeHtml(contextPackage.sourceKind)}</p>`,
-    "</section>",
-    frameSection,
-    "<section>",
-    "<h2>用户问题</h2>",
-    `<pre>${escapeHtml(contextPackage.userPrompt)}</pre>`,
-    "</section>",
-    "<section>",
-    "<h2>复述点上下文</h2>",
-    `<pre>${escapeHtml(recallText)}</pre>`,
-    "</section>",
-    "<section>",
-    "<h2>相关字幕</h2>",
-    `<pre>${escapeHtml(transcriptText)}</pre>`,
-    "</section>",
-    "<section>",
-    "<h2>引用片段</h2>",
-    `<pre>${escapeHtml(evidenceText)}</pre>`,
-    "</section>",
-    "<section>",
-    "<h2>可复制给模型的完整提示</h2>",
-    `<pre>${escapeHtml(modelPrompt)}</pre>`,
-    "</section>",
-    "</main>",
-    "</body>",
-    "</html>",
+    "任务",
+    "请直接回答用户问题，不要解释这段文本。",
+    "优先使用当前视频帧、复述点和字幕；如信息不足，请明确说明缺少什么。",
+    "",
+    "用户问题",
+    contextPackage.userPrompt.trim() || "无",
+    "",
+    "基本信息",
+    `当前节点：${contextPackage.nodeLabel}`,
+    `播放位置：${playbackText}`,
+    `实例 ID：${contextPackage.instance.instanceId}`,
+    `材料 ID：${contextPackage.instance.materialId}`,
+    `材料来源：${contextPackage.sourceKind}`,
+    "",
+    "当前视频帧",
+    frameText,
+    "",
+    "复述点上下文",
+    contextPackage.recallContextText || "无",
+    "",
+    "相关字幕",
+    contextPackage.transcriptContextText || "无",
   ].join("\n")
 }
 
@@ -617,23 +557,4 @@ function stripExplicitTimeExpressions(text: string) {
     .replace(/\d{1,2}小时\d{1,3}分(?:钟)?\d{0,2}秒?/g, " ")
     .replace(/\d{1,3}分(?:钟)?\d{0,2}秒?/g, " ")
     .replace(/\d{1,3}(?:分钟|分)/g, " ")
-}
-
-function escapeHtml(text: string) {
-  return text.replace(/[&<>"']/g, (character) => {
-    switch (character) {
-      case "&":
-        return "&amp;"
-      case "<":
-        return "&lt;"
-      case ">":
-        return "&gt;"
-      case '"':
-        return "&quot;"
-      case "'":
-        return "&#39;"
-      default:
-        return character
-    }
-  })
 }

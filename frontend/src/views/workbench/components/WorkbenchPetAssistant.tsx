@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Copy, Download, Send, Sparkles, Square } from "lucide-react"
+import { Copy, Image as ImageIcon, Send, Sparkles, Square } from "lucide-react"
 
 import type { Instance } from "@/ui/api/instances"
 import type { MaterialSourceKind } from "@/ui/api/projects"
@@ -10,8 +10,9 @@ import { Button } from "@/ui/components/ui/button"
 import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
 import {
   askCourseAgent,
-  buildCourseAgentContextHtml,
   buildCourseAgentContextPackage,
+  buildCourseAgentContextText,
+  type CourseAgentContextPackage,
   type CourseAgentInitialFrame,
   type CourseAgentRecallContext,
 } from "@/ui/llm/courseAgent"
@@ -30,11 +31,6 @@ type WorkbenchPetAssistantTurn = {
   content: string
   createdAt: number
   evidence?: AiChatCourseEvidence[]
-  download?: {
-    filename: string
-    mimeType: string
-    content: string
-  }
 }
 
 type WorkbenchPetAssistantProps = {
@@ -77,11 +73,6 @@ function formatEvidenceTimeRange(startMs: number, endMs: number) {
   return startMs === endMs ? formatPlaybackClock(startMs) : `${formatPlaybackClock(startMs)}-${formatPlaybackClock(endMs)}`
 }
 
-function sanitizeFilenamePart(value: string) {
-  const normalized = value.trim().replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, "-")
-  return normalized || "xuebao"
-}
-
 function buildWorkbenchSystemPrompt(nodeLabel: string) {
   return [
     "请使用简体中文回答。",
@@ -90,6 +81,47 @@ function buildWorkbenchSystemPrompt(nodeLabel: string) {
     "优先使用当前内容、播放位置、字幕和项目上下文，不要编造项目内不存在的事实。",
     "回答要直接、可执行；如果上下文不足，请明确说明还缺什么。",
   ].join(" ")
+}
+
+async function copyContextText(params: {
+  subjectId: string
+  projectId: string
+  instance: Instance
+  sourceKind: MaterialSourceKind
+  nodeLabel: string
+  userPrompt: string
+  systemPrompt: string
+  currentMs: number
+  recallContext?: CourseAgentRecallContext | null
+  historyMessages: Array<{ role: "user" | "assistant"; content: string }>
+  captureCurrentFrameForAi?: () => Promise<CourseAgentInitialFrame | null>
+}) {
+  const initialFrame = await params.captureCurrentFrameForAi?.()
+  const contextPackage: CourseAgentContextPackage = await buildCourseAgentContextPackage({
+    subjectId: params.subjectId,
+    projectId: params.projectId,
+    instance: params.instance,
+    sourceKind: params.sourceKind,
+    nodeLabel: params.nodeLabel,
+    userPrompt: params.userPrompt,
+    systemPrompt: params.systemPrompt,
+    anchorMs: initialFrame?.timeMs ?? params.currentMs,
+    initialFrame,
+    recallContext: params.recallContext,
+    historyMessages: params.historyMessages,
+  })
+  await copyText(buildCourseAgentContextText(contextPackage))
+}
+
+async function copyContextImage(params: {
+  captureCurrentFrameForAi?: () => Promise<CourseAgentInitialFrame | null>
+}) {
+  const initialFrame = await params.captureCurrentFrameForAi?.()
+  if (!initialFrame?.imageDataUrl) {
+    throw new Error("当前视频帧无法复制。")
+  }
+  await copyImageDataUrl(initialFrame.imageDataUrl)
+  return initialFrame
 }
 
 async function copyText(text: string) {
@@ -101,16 +133,38 @@ async function copyText(text: string) {
   throw new Error("当前环境不支持剪贴板")
 }
 
-function downloadContextHtml(filename: string, content: string, mimeType = "text/html;charset=utf-8") {
-  const blob = new Blob([content], { type: mimeType })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement("a")
-  link.href = url
-  link.download = filename
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
-  URL.revokeObjectURL(url)
+async function copyImageDataUrl(imageDataUrl: string) {
+  if (!imageDataUrl.trim()) return
+  if (typeof navigator === "undefined" || !navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
+    throw new Error("当前浏览器不支持图片剪贴板")
+  }
+
+  const image = new Image()
+  image.decoding = "async"
+  image.src = imageDataUrl
+  await new Promise<void>((resolve, reject) => {
+    image.onload = () => resolve()
+    image.onerror = () => reject(new Error("当前视频帧无法复制"))
+  })
+
+  const canvas = document.createElement("canvas")
+  canvas.width = image.naturalWidth || image.width
+  canvas.height = image.naturalHeight || image.height
+  const context = canvas.getContext("2d")
+  if (!context) throw new Error("当前浏览器不支持图片剪贴板")
+  context.drawImage(image, 0, 0)
+
+  const blob = await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((nextBlob) => {
+      if (nextBlob) {
+        resolve(nextBlob)
+        return
+      }
+      reject(new Error("当前视频帧无法复制"))
+    }, "image/png")
+  })
+
+  await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })])
 }
 
 export function WorkbenchPetAssistant({
@@ -131,7 +185,6 @@ export function WorkbenchPetAssistant({
   const [status, setStatus] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isAsking, setIsAsking] = useState(false)
-  const [contextExportMode, setContextExportMode] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   const threadEndRef = useRef<HTMLDivElement | null>(null)
 
@@ -237,32 +290,6 @@ export function WorkbenchPetAssistant({
         })),
       }
 
-      if (contextExportMode) {
-        setStatus("正在整理当前上下文...")
-        const contextPackage = await buildCourseAgentContextPackage(commonParams)
-        if (controller.signal.aborted) return
-        const html = buildCourseAgentContextHtml(contextPackage)
-        const filename = `${sanitizeFilenamePart(nodeLabel)}-${formatPlaybackClock(contextPackage.anchorMs ?? currentMs).replace(/:/g, "-")}-xuebao-context.html`
-        setTurns((current) =>
-          current.map((turn) =>
-            turn.id === assistantTurnId
-              ? {
-                  ...turn,
-                  content: "已整理当前上下文，未调用 LLM。下载 HTML 后可以直接发给支持文件或图片理解的模型。",
-                  evidence: contextPackage.evidence,
-                  download: {
-                    filename,
-                    mimeType: "text/html;charset=utf-8",
-                    content: html,
-                  },
-                }
-              : turn,
-          ),
-        )
-        setStatus(null)
-        return
-      }
-
       setStatus("正在检索当前内容字幕...")
       const result = await askCourseAgent({
         ...commonParams,
@@ -362,19 +389,6 @@ export function WorkbenchPetAssistant({
                 <span className="whitespace-pre-wrap">{turn.content}</span>
               )}
             </div>
-            {turn.download ? (
-              <div className="flex justify-start">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => downloadContextHtml(turn.download!.filename, turn.download!.content, turn.download!.mimeType)}
-                >
-                  <Download className="h-3.5 w-3.5" />
-                  下载上下文 HTML
-                </Button>
-              </div>
-            ) : null}
             {turn.evidence?.length ? (
               <div className="flex flex-wrap gap-1.5">
                 {turn.evidence.slice(0, 4).map((evidence, index) => (
@@ -432,19 +446,78 @@ export function WorkbenchPetAssistant({
             >
               <Copy className="h-4 w-4" />
             </Button>
-            <button
+            <Button
               type="button"
-              className={cn(
-                "rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
-                contextExportMode
-                  ? "border-primary/30 bg-primary/10 text-primary"
-                  : "border-border/80 bg-background text-muted-foreground hover:border-primary/30 hover:text-primary",
-              )}
-              aria-pressed={contextExportMode}
-              onClick={() => setContextExportMode((current) => !current)}
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                const prompt = composer.trim()
+                if (!prompt) {
+                  setError("先输入一个问题，再复制文本。")
+                  return
+                }
+                if (!canUseCourseAgent || !instance || !sourceKind) {
+                  setError("当前工作台没有可用的视频上下文。")
+                  return
+                }
+                setStatus("正在整理可复制文本...")
+                void (async () => {
+                  try {
+                    await copyContextText({
+                      subjectId,
+                      projectId,
+                      instance,
+                      sourceKind,
+                      nodeLabel,
+                      userPrompt: prompt,
+                      systemPrompt: `${buildWorkbenchSystemPrompt(nodeLabel)} 当前工作台状态：${workStatusDetail}。`,
+                      currentMs,
+                      recallContext,
+                      historyMessages: turns.map((turn) => ({ role: turn.role, content: turn.content })),
+                      captureCurrentFrameForAi,
+                    })
+                    showInfoFeedback("文本已复制", "当前问题和上下文已经复制到剪贴板。")
+                    setStatus(null)
+                  } catch (copyError) {
+                    setError(formatAssistantError(copyError))
+                    setStatus(null)
+                  }
+                })()
+              }}
+              disabled={!composer.trim() || !canUseCourseAgent || !instance || !sourceKind}
             >
-              获取上下文
-            </button>
+              <Copy className="h-4 w-4" />
+              复制文本
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                if (!canUseCourseAgent || !instance || !sourceKind) {
+                  setError("当前工作台没有可用的视频上下文。")
+                  return
+                }
+                setStatus("正在复制当前视频帧...")
+                void (async () => {
+                  try {
+                    const initialFrame = await copyContextImage({ captureCurrentFrameForAi })
+                    if (!initialFrame?.imageDataUrl) {
+                      throw new Error("当前视频帧无法复制。")
+                    }
+                    showInfoFeedback("图片已复制", `当前视频帧（${formatPlaybackClock(initialFrame.timeMs)}）已经复制到剪贴板。`)
+                    setStatus(null)
+                  } catch (copyError) {
+                    setError(formatAssistantError(copyError))
+                    setStatus(null)
+                  }
+                })()
+              }}
+              disabled={!canUseCourseAgent || !instance || !sourceKind}
+            >
+              <ImageIcon className="h-4 w-4" />
+              复制图片
+            </Button>
           </div>
           {isAsking ? (
             <Button type="button" variant="outline" size="sm" onClick={stopQuestion}>
@@ -453,8 +526,8 @@ export function WorkbenchPetAssistant({
             </Button>
           ) : (
             <Button type="submit" size="sm" disabled={!!disabledReason || !composer.trim()}>
-              {contextExportMode ? <Download className="mr-1.5 h-3.5 w-3.5" /> : <Send className="mr-1.5 h-3.5 w-3.5" />}
-              {contextExportMode ? "生成" : "发送"}
+              <Send className="mr-1.5 h-3.5 w-3.5" />
+              发送
             </Button>
           )}
         </div>
