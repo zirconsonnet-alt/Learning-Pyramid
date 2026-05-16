@@ -46,6 +46,11 @@ import { AccountMenuPageTitle } from "@/views/shared/AccountMenuPageTitle"
 import { readWithdrawalConfirmationToken, requestWechatMerchantTransfer, type WechatMerchantTransferConfirmation } from "@/views/membership/wechatTransfer"
 
 const DEFAULT_MEMBERSHIP_PLAN_ID = "monthly"
+const MEMBERSHIP_PLAN_GRADUATE_EXAM = "graduate_exam"
+
+function membershipPlanAllowsCoupon(planId: string) {
+  return planId !== MEMBERSHIP_PLAN_GRADUATE_EXAM
+}
 
 function getMembershipState(summary: ReturnType<typeof useMembershipSummary>["data"]) {
   if (summary?.isActive) return "会员有效"
@@ -347,7 +352,9 @@ export function MembershipPage() {
   const latestPendingCheckout = latestCheckout?.order.status === "pending" ? latestCheckout : null
   const paymentOrder = pendingOrder ?? latestPendingCheckout?.order
   const effectiveSelectedPlanId = pendingOrder?.planId || selectedPlanId
-  const previewQ = useMembershipOrderPreview(selectedCouponId || undefined, effectiveSelectedPlanId)
+  const selectedPlanAllowsCoupon = membershipPlanAllowsCoupon(effectiveSelectedPlanId)
+  const effectiveSelectedCouponId = selectedPlanAllowsCoupon ? selectedCouponId : ""
+  const previewQ = useMembershipOrderPreview(effectiveSelectedCouponId || undefined, effectiveSelectedPlanId)
   const createOrder = useCreateMembershipOrder()
   const confirmPayment = useConfirmMembershipPayment()
   const syncPayment = useSyncMembershipPayment()
@@ -359,6 +366,7 @@ export function MembershipPage() {
   const coupons = useMemo(() => couponsQ.data ?? [], [couponsQ.data])
   const visibleCoupons = useMemo(() => coupons.filter((coupon) => coupon.status !== "used"), [coupons])
   const availableCoupons = useMemo(() => coupons.filter((item) => item.status === "available"), [coupons])
+  const selectableCoupons = useMemo(() => (selectedPlanAllowsCoupon ? availableCoupons : []), [availableCoupons, selectedPlanAllowsCoupon])
   const supportedProviders = useMemo(() => summaryQ.data?.supportedPaymentProviders ?? [], [summaryQ.data?.supportedPaymentProviders])
   const effectiveSelectedProvider = supportedProviders.includes(selectedProvider)
     ? selectedProvider
@@ -384,8 +392,8 @@ export function MembershipPage() {
         activeWithdrawalConfirmation.status === "needs_attention")
     )
   const selectedCoupon = useMemo(
-    () => availableCoupons.find((item) => item.couponId === selectedCouponId) ?? null,
-    [availableCoupons, selectedCouponId],
+    () => selectableCoupons.find((item) => item.couponId === effectiveSelectedCouponId) ?? null,
+    [selectableCoupons, effectiveSelectedCouponId],
   )
   const recentInvites = useMemo(() => inviteSummaryQ.data?.recentInvites ?? [], [inviteSummaryQ.data?.recentInvites])
   const availableCouponCount = availableCoupons.length
@@ -548,7 +556,7 @@ export function MembershipPage() {
       const result = await createOrder.mutateAsync({
         provider,
         planId: effectiveSelectedPlanId,
-        couponId: selectedCouponId || undefined,
+        couponId: effectiveSelectedCouponId || undefined,
       })
       setCheckoutByOrderId((current) => ({ ...current, [result.order.orderId]: result }))
       setPurchaseOpen(false)
@@ -574,6 +582,13 @@ export function MembershipPage() {
     }
     setPurchaseOpen(true)
   }
+
+  const handleSelectPlan = useCallback((planId: string) => {
+    setSelectedPlanId(planId)
+    if (!membershipPlanAllowsCoupon(planId)) {
+      setSelectedCouponId("")
+    }
+  }, [])
 
   async function onConfirmPayment(order: MembershipOrder) {
     try {
@@ -835,10 +850,10 @@ export function MembershipPage() {
         selectedPlanId={effectiveSelectedPlanId}
         selectedProvider={effectiveSelectedProvider}
         supportedProviders={supportedProviders}
-        availableCoupons={availableCoupons}
+        availableCoupons={selectableCoupons}
         createPending={createOrder.isPending}
         onSelectCoupon={setSelectedCouponId}
-        onSelectPlan={setSelectedPlanId}
+        onSelectPlan={handleSelectPlan}
         onSelectProvider={setSelectedProvider}
         onConfirm={() => void onCreateOrder()}
       />

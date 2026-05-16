@@ -59,6 +59,7 @@ from backend.system.membership_payment_service import (
     current_wechat_payout_config,
 )
 from backend.system.membership_store import (
+    MEMBERSHIP_PLAN_COUPON_UNSUPPORTED_MESSAGE,
     MembershipOrderCloseResult,
     MembershipCreateOrderResult,
     MembershipOrder,
@@ -67,6 +68,7 @@ from backend.system.membership_store import (
     MembershipPaymentSyncResult,
     MembershipStore,
     MembershipSummary,
+    membership_plan_allows_coupon,
 )
 
 router = APIRouter()
@@ -596,10 +598,13 @@ def _resolve_coupon_aware_preview(
     membership_store: MembershipStore,
     membership_marketing_store: MembershipMarketingStore,
 ) -> MembershipOrderPreview:
+    normalized_coupon_id = str(coupon_id or "").strip()
+    if normalized_coupon_id and not membership_plan_allows_coupon(plan_id):
+        raise PreconditionFailure(MEMBERSHIP_PLAN_COUPON_UNSUPPORTED_MESSAGE)
     base_preview = membership_store.preview_order(user_id, plan_id=plan_id)
     resolved_coupon_id, coupon_discount_cent = membership_marketing_store.resolve_coupon_discount(
         user_id,
-        coupon_id=coupon_id,
+        coupon_id=normalized_coupon_id,
         order_amount_cent=base_preview.payable_amount_cent,
     )
     return membership_store.preview_order(

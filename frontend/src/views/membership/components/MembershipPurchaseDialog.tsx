@@ -42,6 +42,8 @@ const MEMBERSHIP_PLAN_OPTIONS = [
   },
 ] as const
 
+const MEMBERSHIP_PLAN_GRADUATE_EXAM = "graduate_exam"
+
 function CouponOptionCard(props: {
   coupon: CouponRecord
   selected: boolean
@@ -231,6 +233,7 @@ export function MembershipPurchaseDialog(props: {
     onSelectProvider,
     onConfirm,
   } = props
+  const selectedPlanAllowsCoupon = selectedPlanId !== MEMBERSHIP_PLAN_GRADUATE_EXAM
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -243,7 +246,9 @@ export function MembershipPurchaseDialog(props: {
                 <StatusPill tone="warm">确认购买</StatusPill>
               </div>
               <DialogTitle className="text-2xl tracking-tight text-foreground">开通会员套餐</DialogTitle>
-              <DialogDescription className="sr-only">选择会员套餐、支付方式和优惠券。</DialogDescription>
+              <DialogDescription className="sr-only">
+                {selectedPlanAllowsCoupon ? "选择会员套餐、支付方式和优惠券。" : "选择会员套餐和支付方式。"}
+              </DialogDescription>
             </DialogHeader>
 
             <div className="mt-6 grid gap-3 sm:grid-cols-2">
@@ -319,7 +324,7 @@ export function MembershipPurchaseDialog(props: {
           <div className="p-6">
             <div className="flex items-center gap-2">
               <Ticket className="h-4 w-4 text-primary" />
-              <div className="text-sm font-semibold text-foreground">选择支付方式与优惠券</div>
+              <div className="text-sm font-semibold text-foreground">{selectedPlanAllowsCoupon ? "选择支付方式与优惠券" : "选择支付方式"}</div>
             </div>
 
             <div className="mt-5 space-y-3">
@@ -353,41 +358,47 @@ export function MembershipPurchaseDialog(props: {
               ))}
             </div>
 
-            <div className="mt-5 space-y-3 border-t border-[color:var(--theme-soft-border)] pt-5">
-              <button
-                type="button"
-                onClick={() => onSelectCoupon("")}
-                className={cn(
-                  "w-full rounded-[1.25rem] border p-4 text-left transition",
-                  selectedCouponId
-                    ? "theme-soft-surface hover:border-primary/20"
-                    : "border-primary/20 bg-[hsl(var(--primary)/0.08)] shadow-[0_18px_36px_-30px_hsl(var(--primary)/0.35)]",
-                )}
-              >
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <div className="text-sm font-semibold text-foreground">不使用优惠券</div>
-                    <div className="mt-1 text-xs text-muted-foreground">按当前会员价格直接结算。</div>
+            {selectedPlanAllowsCoupon ? (
+              <div className="mt-5 space-y-3 border-t border-[color:var(--theme-soft-border)] pt-5">
+                <button
+                  type="button"
+                  onClick={() => onSelectCoupon("")}
+                  className={cn(
+                    "w-full rounded-[1.25rem] border p-4 text-left transition",
+                    selectedCouponId
+                      ? "theme-soft-surface hover:border-primary/20"
+                      : "border-primary/20 bg-[hsl(var(--primary)/0.08)] shadow-[0_18px_36px_-30px_hsl(var(--primary)/0.35)]",
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <div className="text-sm font-semibold text-foreground">不使用优惠券</div>
+                      <div className="mt-1 text-xs text-muted-foreground">按当前会员价格直接结算。</div>
+                    </div>
+                    {!selectedCouponId ? <StatusPill tone="accent">当前方案</StatusPill> : null}
                   </div>
-                  {!selectedCouponId ? <StatusPill tone="accent">当前方案</StatusPill> : null}
-                </div>
-              </button>
+                </button>
 
-              {availableCoupons.map((coupon) => (
-                <CouponOptionCard
-                  key={coupon.couponId}
-                  coupon={coupon}
-                  selected={selectedCouponId === coupon.couponId}
-                  onSelect={() => onSelectCoupon(coupon.couponId)}
-                />
-              ))}
+                {availableCoupons.map((coupon) => (
+                  <CouponOptionCard
+                    key={coupon.couponId}
+                    coupon={coupon}
+                    selected={selectedCouponId === coupon.couponId}
+                    onSelect={() => onSelectCoupon(coupon.couponId)}
+                  />
+                ))}
 
-              {availableCoupons.length === 0 ? (
-                <div className="theme-subtle-surface border-dashed px-4 py-8 text-center text-sm leading-6">
-                  当前没有可用优惠券。绑定好友邀请码后，你会收到 7.5 折会员券。
-                </div>
-              ) : null}
-            </div>
+                {availableCoupons.length === 0 ? (
+                  <div className="theme-subtle-surface border-dashed px-4 py-8 text-center text-sm leading-6">
+                    当前没有可用优惠券。绑定好友邀请码后，你会收到 7.5 折会员券。
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <div className="mt-5 border-t border-[color:var(--theme-soft-border)] pt-5 text-sm leading-6 text-muted-foreground">
+                考研套餐为专项价格，不参与优惠券折扣。
+              </div>
+            )}
 
             <DialogFooter className="mt-6">
               <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={createPending}>

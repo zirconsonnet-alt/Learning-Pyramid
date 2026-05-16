@@ -1,50 +1,60 @@
-# 当前变更：移除课程助手提示词内部材料标识
+# 当前变更：考研套餐禁用优惠券
 
 ## 当前用户要求
 
-- 继续完成上次要求：从 LLM 提示词中去掉以下三类无意义内容：
-  - `实例 ID`
-  - `材料 ID`
-  - `材料来源`
+- 将优惠券规则改为不能用于考研套餐。
+- 已确认采用“考研套餐禁用所有优惠券”，不是只限制 7.5 折邀请码券。
 
 ## 根因
 
-- `frontend/src/ui/llm/courseAgent.ts` 在课程助手上下文中仍输出内部实例标识、材料标识和材料来源类型。
-- 中文上下文复制文本和英文 `supplementalContext` 都存在同类字段；前者已有静态测试约束，后者此前没有测试守卫。
+- 会员订单预览和创建流程只按 `couponId`、用户、券状态、最低消费和订单金额计算优惠券抵扣。
+- 原逻辑没有套餐适用规则，导致考研套餐也可以叠加优惠券，压低专项价格。
 
 ## 本次实际修改文件
 
-- `frontend/src/ui/llm/courseAgent.ts`
-  - 从 `buildCourseAgentContextText()` 的“基本信息”中移除 `实例 ID`、`材料 ID`、`材料来源`。
-  - 从 `buildSupplementalContext()` 的 `Video learning context` 中移除 `Instance ID`、`Material ID`、`Material source kind`。
-  - 保留 `instance` 和 `sourceKind` 在上下文包中的内部数据用途，不改变字幕加载、证据生成或调用方传参。
-- `tests/test_course_agent_static.py`
-  - 在已有中文上下文静态检查基础上，增加英文 LLM supplemental context 字段的禁止断言。
+- `backend/system/membership_store.py`
+  - 增加考研套餐不支持优惠券的业务规则和统一错误文案。
+  - 在订单预览、创建复用预览、支付确认入口阻止带券考研套餐订单。
+- `adapter/routers/membership.py`
+  - 在会员预览/创建的券感知预览入口提前拒绝考研套餐带券请求，返回准确错误。
+- `frontend/src/views/membership/MembershipPage.tsx`
+  - 考研套餐下清空已选优惠券。
+  - 考研套餐预览和创建订单时不提交 `couponId`。
+  - 购买弹窗收到的可选券在考研套餐下为空。
+- `frontend/src/views/membership/components/MembershipPurchaseDialog.tsx`
+  - 考研套餐下不展示优惠券选择区。
+  - 增加短提示：考研套餐为专项价格，不参与优惠券折扣。
+- `tests/test_membership_coupon_plan_rules.py`
+  - 新增会员套餐与优惠券适用规则测试。
+- `docs/guide-faq.md`
+  - 增加考研套餐不能使用优惠券的用户说明。
 - `docs/current-change.md`
   - 覆盖为当前变更工作单。
 
 ## 行为语义变化
 
-- 课程助手发给 LLM 的补充上下文不再包含内部实例 ID、材料 ID、材料来源类型。
-- 桌宠“获取上下文”生成的可复制文本不再包含这些内部定位字段。
-- 不改变用户问题、节点标题、播放位置、当前帧、复述点上下文、相关字幕或证据片段。
+- 考研套餐不能使用任何优惠券。
+- 月会员仍可正常使用可用优惠券。
+- 已存在的带券考研套餐待支付订单不会被继续确认支付。
+- 订单接口、DTO 和数据库结构不变。
 
 ## 重构说明
 
-- 未做重构。
-- 本次是 prompt 文本内容清理和静态守卫补齐，不改变模块边界。
+- 未做跨模块重构。
+- 仅增加套餐优惠券适用判断，保持规则源头在 `MembershipStore`，路由和前端只做提前拦截与体验同步。
 
 ## 未修改内容
 
-- 未修改字幕选择、字幕搜索、证据生成、图片输入、LLM 请求接口或后端 API。
-- 未修改 `CourseAgentContextPackage` 暴露的内部字段，避免牵动调用方和现有数据流。
-- 未修改长期文档；本次只是移除无意义 prompt 字段，不改变架构、部署或用户文档中的稳定行为说明。
+- 未修改优惠券发放、券状态、券过期、券退款恢复逻辑。
+- 未修改考研套餐定价、有效期和购买截止日计算。
+- 未修改支付 provider、佣金、提现或退款窗口逻辑。
 
 ## 影响范围
 
-- UI/LLM：课程助手的 LLM supplemental context 和桌宠上下文复制文本。
-- 测试：课程助手静态测试新增英文字段守卫。
-- 不影响后端 API、数据库、部署、数据结构或公共接口。
+- 后端业务：会员订单预览、创建、支付确认。
+- 前端 UI：会员购买弹窗的券选择区和提交参数。
+- 文档：FAQ 中的考研套餐优惠券说明。
+- 不影响 API 结构、数据库结构、部署配置或公共路由。
 
 ## 当前风险与不确定项
 
@@ -52,11 +62,10 @@
 
 ## 验证记录
 
-- 已运行：`rg -n "实例 ID|材料 ID|材料来源|Instance ID:|Material ID:|Material source kind:" frontend\src\ui\llm\courseAgent.ts tests\test_course_agent_static.py docs\current-change.md`，结果只剩测试断言和当前工作单说明，`courseAgent.ts` 无残留。
-- 已运行：`python -m pytest tests/test_course_agent_static.py -q`，10 个测试通过。
-- 已运行：`pnpm --dir frontend exec eslint src/ui/llm/courseAgent.ts`，通过。
-- 已运行：`pnpm --dir frontend build`，通过；仍有既有 chunk size warning。
-- 已运行：`git diff --check -- frontend/src/ui/llm/courseAgent.ts tests/test_course_agent_static.py docs/current-change.md`，通过；仅提示这些工作区文件后续可能被 Git 转换为 CRLF。
+- 已运行：`python -m pytest tests/test_membership_coupon_plan_rules.py -q`，5 个测试通过。
+- 已运行：`pnpm -C frontend exec eslint src/views/membership/MembershipPage.tsx src/views/membership/components/MembershipPurchaseDialog.tsx`，通过。
+- 已运行：`pnpm -C frontend build`，通过；仍有既有 chunk size warning。
+- 已运行：`git diff --check -- adapter/routers/membership.py backend/system/membership_store.py frontend/src/views/membership/MembershipPage.tsx frontend/src/views/membership/components/MembershipPurchaseDialog.tsx tests/test_membership_coupon_plan_rules.py docs/guide-faq.md docs/current-change.md`，通过；仅提示这些工作区文件后续可能被 Git 转换为 CRLF。
 
 ## 仍需用户确认的问题
 

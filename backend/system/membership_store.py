@@ -44,6 +44,7 @@ MEMBERSHIP_PLAN_NAMES = {
     MEMBERSHIP_PLAN_MONTHLY: "月会员",
     MEMBERSHIP_PLAN_GRADUATE_EXAM: "考研套餐",
 }
+MEMBERSHIP_PLAN_COUPON_UNSUPPORTED_MESSAGE = "考研套餐不支持使用优惠券"
 GRADUATE_EXAM_DAILY_PRICE_CENT = 50
 GRADUATE_EXAM_CUTOFF_MONTH = 11
 GRADUATE_EXAM_CUTOFF_DAY = 21
@@ -110,6 +111,10 @@ def _normalize_membership_plan_id(plan_id: str | None) -> str:
 def _membership_plan_name(plan_id: str | None) -> str:
     normalized_plan_id = _normalize_membership_plan_id(plan_id)
     return MEMBERSHIP_PLAN_NAMES[normalized_plan_id]
+
+
+def membership_plan_allows_coupon(plan_id: str | None) -> bool:
+    return _normalize_membership_plan_id(plan_id) != MEMBERSHIP_PLAN_GRADUATE_EXAM
 
 
 def _graduate_exam_plan_days_and_amount(now: datetime) -> tuple[int, int]:
@@ -610,13 +615,16 @@ class MembershipStore:
     ) -> MembershipOrderPreview:
         is_first = self._is_first_order_eligible(conn, user_id)
         normalized_plan_id = _normalize_membership_plan_id(plan_id)
+        normalized_coupon_id = str(coupon_id or "").strip()
+        normalized_coupon_discount_cent = max(0, int(coupon_discount_cent))
+        if not membership_plan_allows_coupon(normalized_plan_id) and (normalized_coupon_id or normalized_coupon_discount_cent > 0):
+            raise PreconditionFailure(MEMBERSHIP_PLAN_COUPON_UNSUPPORTED_MESSAGE)
         if normalized_plan_id == MEMBERSHIP_PLAN_GRADUATE_EXAM:
             period_days, list_amount_cent = _graduate_exam_plan_days_and_amount(now or _utc_now())
         else:
             period_days = MEMBERSHIP_PERIOD_DAYS
             list_amount_cent = BASE_MONTHLY_PRICE_CENT
         first_order_discount_cent = 0
-        normalized_coupon_discount_cent = max(0, int(coupon_discount_cent))
         payable_amount_cent = max(0, list_amount_cent - first_order_discount_cent - normalized_coupon_discount_cent)
         return MembershipOrderPreview(
             user_id=str(user_id),
@@ -628,7 +636,7 @@ class MembershipStore:
             first_order_discount_cent=first_order_discount_cent,
             coupon_discount_cent=normalized_coupon_discount_cent,
             payable_amount_cent=payable_amount_cent,
-            coupon_id=None if not coupon_id else str(coupon_id),
+            coupon_id=None if not normalized_coupon_id else normalized_coupon_id,
         )
 
     def _row_to_order(self, row: sqlite3.Row) -> MembershipOrder:
@@ -1852,6 +1860,8 @@ class MembershipStore:
             )
             conn.commit()
             raise PreconditionFailure("membership order has expired")
+        if (order.coupon_id or order.coupon_discount_cent > 0) and not membership_plan_allows_coupon(order.plan_id):
+            raise PreconditionFailure(MEMBERSHIP_PLAN_COUPON_UNSUPPORTED_MESSAGE)
         if order.coupon_id:
             if not self._table_exists(conn, "coupons"):
                 raise PreconditionFailure("membership coupon storage is unavailable")
