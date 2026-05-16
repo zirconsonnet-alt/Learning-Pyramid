@@ -49,6 +49,14 @@ class CourseAgentStaticTest(unittest.TestCase):
         self.assertIn("initialFrame", course_block)
         self.assertNotIn("catch (error)", course_block)
 
+    def test_course_agent_explicitly_retries_text_when_image_input_is_unsupported(self) -> None:
+        source = (ROOT / "frontend" / "src" / "ui" / "llm" / "courseAgent.ts").read_text(encoding="utf-8")
+
+        self.assertIn("isImageInputUnsupportedError", source)
+        self.assertIn("retryWithoutImageInputs", source)
+        self.assertIn("未使用视频帧", source)
+        self.assertIn("本轮回答未使用视频帧", source)
+
 
 if __name__ == "__main__":
     unittest.main()

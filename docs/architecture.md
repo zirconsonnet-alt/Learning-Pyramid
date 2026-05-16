@@ -66,7 +66,7 @@
 6. `SystemAPI` 执行业务行为并读写当前持久化 store。
 7. router 把结果映射成 HTTP 响应。
 
-项目 LLM 问答使用 `/subjects/{subjectId}/projects/{scopedProjectId}/llm/ask` 和 `/llm/ask/stream`。这两个入口可以接收可选 `imageInputs`，由 `SystemAPI` 组装为多模态 user message；debug 记录只保留图片类型和时间标签，不写入图片 data URL。scoped raw `/llm/chat-completions` 不是前端功能入口。
+项目 LLM 问答使用 `/subjects/{subjectId}/projects/{scopedProjectId}/llm/ask` 和 `/llm/ask/stream`。这两个入口可以接收可选 `imageInputs`，由 `SystemAPI` 组装为多模态 user message；debug 记录只保留图片类型和时间标签，不写入图片 data URL。课程助手在外部模型明确拒绝 `image_url` 图片输入时，会在前端以显式文本模式重试，并向用户说明本轮未使用视频帧。scoped raw `/llm/chat-completions` 不是前端功能入口。
 
 ## 边界规则
 

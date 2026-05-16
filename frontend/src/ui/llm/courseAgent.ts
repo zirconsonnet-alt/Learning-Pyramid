@@ -1,4 +1,5 @@
 import type { Instance } from "@/ui/api/instances"
+import { ApiError } from "@/ui/api/http"
 import type { MaterialSourceKind } from "@/ui/api/projects"
 import { askProjectLlmStream, type ProjectLlmImageInput } from "@/ui/api/system"
 import type { AiChatCourseEvidence } from "@/ui/store/aiChatStore"
@@ -50,6 +51,7 @@ type TranscriptWindow = {
 }
 
 const DEFAULT_TOOL_TIMEOUT_MS = 90_000
+const TEXT_ONLY_FRAME_NOTICE = "提示：本轮回答未使用视频帧，因为当前大模型服务不支持图片输入；已改用字幕、复述点和时间上下文回答。"
 
 export async function askCourseAgent(params: AskCourseAgentParams): Promise<{ content: string; evidence: AiChatCourseEvidence[] }> {
   const scope = { subjectId: params.subjectId, scopedProjectId: params.projectId }
@@ -100,28 +102,84 @@ export async function askCourseAgent(params: AskCourseAgentParams): Promise<{ co
       ]
     : []
 
-  params.onStatus?.(hasTranscriptContext ? "正在基于当前视频、字幕和复述点生成回答..." : "正在基于当前画面和复述点生成回答...")
-  const result = await askProjectLlmStream(
-    scope,
-    {
+  const baseStatus = hasTranscriptContext ? "正在基于当前视频、字幕和复述点生成回答..." : "正在基于当前画面和复述点生成回答..."
+  params.onStatus?.(baseStatus)
+  let result: Awaited<ReturnType<typeof askProjectLlmStream>>
+  let usedImageInputs = imageInputs.length > 0
+  try {
+    result = await askCourseAgentStream({
+      scope,
       prompt,
       systemPrompt,
       supplementalContext,
       imageInputs,
-      modelName: params.modelName,
-      temperature: params.temperature,
-    },
-    {
-      signal: params.signal,
-      timeoutMs: params.timeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS,
-      onDelta: params.onDelta,
-    },
-  )
+      params,
+    })
+  } catch (error) {
+    if (imageInputs.length === 0 || !isImageInputUnsupportedError(error)) throw error
+    usedImageInputs = false
+    params.onStatus?.("当前模型不支持视频帧，正在改用字幕和复述点文本回答...")
+    result = await retryWithoutImageInputs({
+      scope,
+      prompt,
+      systemPrompt,
+      supplementalContext: [
+        supplementalContext,
+        `Video frame note: ${TEXT_ONLY_FRAME_NOTICE}`,
+      ].join("\n\n"),
+      params,
+    })
+  }
 
   return {
-    content: result.content,
+    content: usedImageInputs ? result.content : `${TEXT_ONLY_FRAME_NOTICE}\n\n${result.content}`,
     evidence: selectedContext.evidence.slice(0, 8),
   }
+}
+
+function askCourseAgentStream(params: {
+  scope: { subjectId: string; scopedProjectId: string }
+  prompt: string
+  systemPrompt: string
+  supplementalContext: string
+  imageInputs: ProjectLlmImageInput[]
+  params: AskCourseAgentParams
+}) {
+  return askProjectLlmStream(
+    params.scope,
+    {
+      prompt: params.prompt,
+      systemPrompt: params.systemPrompt,
+      supplementalContext: params.supplementalContext,
+      imageInputs: params.imageInputs,
+      modelName: params.params.modelName,
+      temperature: params.params.temperature,
+    },
+    {
+      signal: params.params.signal,
+      timeoutMs: params.params.timeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS,
+      onDelta: params.params.onDelta,
+    },
+  )
+}
+
+function retryWithoutImageInputs(params: {
+  scope: { subjectId: string; scopedProjectId: string }
+  prompt: string
+  systemPrompt: string
+  supplementalContext: string
+  params: AskCourseAgentParams
+}) {
+  return askCourseAgentStream({
+    ...params,
+    imageInputs: [],
+  })
+}
+
+function isImageInputUnsupportedError(error: unknown) {
+  if (!(error instanceof ApiError)) return false
+  const message = `${error.message} ${JSON.stringify(error.details ?? "")}`.toLowerCase()
+  return message.includes("image_url") && (message.includes("unknown variant") || message.includes("expected") || message.includes("deserialize"))
 }
 
 function buildConversationPrompt(messages: CourseAgentHistoryMessage[], latestUserInput: string) {
