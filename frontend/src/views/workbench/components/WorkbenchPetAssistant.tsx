@@ -12,7 +12,6 @@ import {
   askCourseAgent,
   buildCourseAgentContextPackage,
   buildCourseAgentContextText,
-  type CourseAgentContextPackage,
   type CourseAgentInitialFrame,
   type CourseAgentRecallContext,
 } from "@/ui/llm/courseAgent"
@@ -31,6 +30,11 @@ type WorkbenchPetAssistantTurn = {
   content: string
   createdAt: number
   evidence?: AiChatCourseEvidence[]
+  contextCopy?: {
+    text: string
+    imageDataUrl?: string
+    imageTimeMs?: number
+  }
 }
 
 type WorkbenchPetAssistantProps = {
@@ -81,47 +85,6 @@ function buildWorkbenchSystemPrompt(nodeLabel: string) {
     "优先使用当前内容、播放位置、字幕和项目上下文，不要编造项目内不存在的事实。",
     "回答要直接、可执行；如果上下文不足，请明确说明还缺什么。",
   ].join(" ")
-}
-
-async function copyContextText(params: {
-  subjectId: string
-  projectId: string
-  instance: Instance
-  sourceKind: MaterialSourceKind
-  nodeLabel: string
-  userPrompt: string
-  systemPrompt: string
-  currentMs: number
-  recallContext?: CourseAgentRecallContext | null
-  historyMessages: Array<{ role: "user" | "assistant"; content: string }>
-  captureCurrentFrameForAi?: () => Promise<CourseAgentInitialFrame | null>
-}) {
-  const initialFrame = await params.captureCurrentFrameForAi?.()
-  const contextPackage: CourseAgentContextPackage = await buildCourseAgentContextPackage({
-    subjectId: params.subjectId,
-    projectId: params.projectId,
-    instance: params.instance,
-    sourceKind: params.sourceKind,
-    nodeLabel: params.nodeLabel,
-    userPrompt: params.userPrompt,
-    systemPrompt: params.systemPrompt,
-    anchorMs: initialFrame?.timeMs ?? params.currentMs,
-    initialFrame,
-    recallContext: params.recallContext,
-    historyMessages: params.historyMessages,
-  })
-  await copyText(buildCourseAgentContextText(contextPackage))
-}
-
-async function copyContextImage(params: {
-  captureCurrentFrameForAi?: () => Promise<CourseAgentInitialFrame | null>
-}) {
-  const initialFrame = await params.captureCurrentFrameForAi?.()
-  if (!initialFrame?.imageDataUrl) {
-    throw new Error("当前视频帧无法复制。")
-  }
-  await copyImageDataUrl(initialFrame.imageDataUrl)
-  return initialFrame
 }
 
 async function copyText(text: string) {
@@ -225,6 +188,32 @@ export function WorkbenchPetAssistant({
     threadEndRef.current?.scrollIntoView({ block: "nearest" })
   }, [turns, status])
 
+  async function buildCurrentCourseAgentParams(
+    prompt: string,
+    historyMessages: WorkbenchPetAssistantTurn[],
+  ) {
+    if (!canUseCourseAgent || !instance || !sourceKind) {
+      throw new Error("当前工作台没有可用的视频上下文。")
+    }
+    const initialFrame = await captureCurrentFrameForAi?.()
+    return {
+      subjectId,
+      projectId,
+      instance,
+      sourceKind,
+      nodeLabel,
+      userPrompt: prompt,
+      systemPrompt: `${buildWorkbenchSystemPrompt(nodeLabel)} 当前工作台状态：${workStatusDetail}。`,
+      anchorMs: initialFrame?.timeMs ?? currentMs,
+      initialFrame,
+      recallContext,
+      historyMessages: historyMessages.map((turn) => ({
+        role: turn.role,
+        content: turn.content,
+      })),
+    }
+  }
+
   async function submitQuestion() {
     const prompt = composer.trim()
     if (!prompt) {
@@ -256,10 +245,6 @@ export function WorkbenchPetAssistant({
     onAssistantStateChange?.("thinking")
 
     try {
-      if (!canUseCourseAgent || !instance || !sourceKind) {
-        throw new Error("当前工作台没有可用的视频上下文。")
-      }
-
       setTurns((current) => [
         ...current,
         {
@@ -270,25 +255,8 @@ export function WorkbenchPetAssistant({
         },
       ])
       setStatus("正在截取当前画面...")
-      const initialFrame = await captureCurrentFrameForAi?.()
+      const commonParams = await buildCurrentCourseAgentParams(prompt, historyMessages)
       if (controller.signal.aborted) return
-
-      const commonParams = {
-        subjectId,
-        projectId,
-        instance,
-        sourceKind,
-        nodeLabel,
-        userPrompt: prompt,
-        systemPrompt: `${buildWorkbenchSystemPrompt(nodeLabel)} 当前工作台状态：${workStatusDetail}。`,
-        anchorMs: initialFrame?.timeMs ?? currentMs,
-        initialFrame,
-        recallContext,
-        historyMessages: historyMessages.map((turn) => ({
-          role: turn.role,
-          content: turn.content,
-        })),
-      }
 
       setStatus("正在检索当前内容字幕...")
       const result = await askCourseAgent({
@@ -330,23 +298,88 @@ export function WorkbenchPetAssistant({
     }
   }
 
+  async function prepareContext() {
+    const prompt = composer.trim()
+    if (!prompt) {
+      setError("先输入一个问题，再获取上下文。")
+      return
+    }
+    if (interactionDisabled) {
+      setError(disabledReason ?? "雪豹助手正在处理上一个问题。")
+      return
+    }
+
+    touchDailyStudyActivity(projectId, "aiQa", QA_ACTIVITY_WINDOW_MS)
+    const controller = new AbortController()
+    abortRef.current = controller
+    const historyMessages = turns
+    const userTurn: WorkbenchPetAssistantTurn = {
+      id: createLocalId(),
+      role: "user",
+      content: prompt,
+      createdAt: Date.now(),
+    }
+    const assistantTurnId = createLocalId()
+
+    setTurns((current) => [
+      ...current,
+      userTurn,
+      {
+        id: assistantTurnId,
+        role: "assistant",
+        content: "",
+        createdAt: Date.now(),
+      },
+    ])
+    setComposer("")
+    setError(null)
+    setStatus("正在截取当前画面...")
+    setIsAsking(true)
+    onAssistantStateChange?.("thinking")
+
+    try {
+      const commonParams = await buildCurrentCourseAgentParams(prompt, historyMessages)
+      if (controller.signal.aborted) return
+      setStatus("正在根据这条问题整理字幕和上下文...")
+      const contextPackage = await buildCourseAgentContextPackage(commonParams)
+      if (controller.signal.aborted) return
+      setTurns((current) =>
+        current.map((turn) =>
+          turn.id === assistantTurnId
+            ? {
+                ...turn,
+                content: "已整理当前上下文，未调用 LLM。",
+                evidence: contextPackage.evidence,
+                contextCopy: {
+                  text: buildCourseAgentContextText(contextPackage),
+                  imageDataUrl: contextPackage.initialFrame?.imageDataUrl,
+                  imageTimeMs: contextPackage.initialFrame?.timeMs,
+                },
+              }
+            : turn,
+        ),
+      )
+      setStatus(null)
+    } catch (requestError) {
+      if (controller.signal.aborted) return
+      setError(formatAssistantError(requestError))
+      setStatus(null)
+      setTurns((current) => current.filter((turn) => turn.id !== assistantTurnId || turn.content.trim()))
+    } finally {
+      if (abortRef.current === controller) {
+        abortRef.current = null
+      }
+      setIsAsking(false)
+      onAssistantStateChange?.("idle")
+    }
+  }
+
   function stopQuestion() {
     abortRef.current?.abort()
     abortRef.current = null
     setIsAsking(false)
     setStatus(null)
     onAssistantStateChange?.("idle")
-  }
-
-  async function copyLatestAnswer() {
-    const latestAssistantTurn = [...turns].reverse().find((turn) => turn.role === "assistant" && turn.content.trim())
-    if (!latestAssistantTurn) return
-    try {
-      await copyText(latestAssistantTurn.content)
-      showInfoFeedback("回答已复制", "雪豹助手的最新回答已经复制到剪贴板。")
-    } catch (copyError) {
-      setError(formatAssistantError(copyError))
-    }
   }
 
   const hasConversation = turns.length > 0
@@ -403,6 +436,52 @@ export function WorkbenchPetAssistant({
                 ))}
               </div>
             ) : null}
+            {turn.contextCopy ? (
+              <div className="flex flex-wrap gap-1.5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    void (async () => {
+                      try {
+                        await copyText(turn.contextCopy!.text)
+                        showInfoFeedback("文本已复制", "这轮问题对应的上下文已经复制到剪贴板。")
+                      } catch (copyError) {
+                        setError(formatAssistantError(copyError))
+                      }
+                    })()
+                  }}
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  复制文本
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={!turn.contextCopy.imageDataUrl}
+                  onClick={() => {
+                    void (async () => {
+                      try {
+                        if (!turn.contextCopy?.imageDataUrl) throw new Error("这轮上下文没有可复制的视频帧。")
+                        await copyImageDataUrl(turn.contextCopy.imageDataUrl)
+                        const timeText =
+                          typeof turn.contextCopy.imageTimeMs === "number"
+                            ? `（${formatPlaybackClock(turn.contextCopy.imageTimeMs)}）`
+                            : ""
+                        showInfoFeedback("图片已复制", `这轮上下文的视频帧${timeText}已经复制到剪贴板。`)
+                      } catch (copyError) {
+                        setError(formatAssistantError(copyError))
+                      }
+                    })()
+                  }}
+                >
+                  <ImageIcon className="h-3.5 w-3.5" />
+                  复制图片
+                </Button>
+              </div>
+            ) : null}
           </article>
         ))}
         <div ref={threadEndRef} />
@@ -438,85 +517,12 @@ export function WorkbenchPetAssistant({
             <Button
               type="button"
               variant="ghost"
-              size="icon"
-              aria-label="复制最新回答"
-              title="复制最新回答"
-              onClick={() => void copyLatestAnswer()}
-              disabled={!turns.some((turn) => turn.role === "assistant" && turn.content.trim())}
+              size="sm"
+              onClick={() => void prepareContext()}
+              disabled={!!disabledReason || isAsking || !composer.trim()}
             >
               <Copy className="h-4 w-4" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                const prompt = composer.trim()
-                if (!prompt) {
-                  setError("先输入一个问题，再复制文本。")
-                  return
-                }
-                if (!canUseCourseAgent || !instance || !sourceKind) {
-                  setError("当前工作台没有可用的视频上下文。")
-                  return
-                }
-                setStatus("正在整理可复制文本...")
-                void (async () => {
-                  try {
-                    await copyContextText({
-                      subjectId,
-                      projectId,
-                      instance,
-                      sourceKind,
-                      nodeLabel,
-                      userPrompt: prompt,
-                      systemPrompt: `${buildWorkbenchSystemPrompt(nodeLabel)} 当前工作台状态：${workStatusDetail}。`,
-                      currentMs,
-                      recallContext,
-                      historyMessages: turns.map((turn) => ({ role: turn.role, content: turn.content })),
-                      captureCurrentFrameForAi,
-                    })
-                    showInfoFeedback("文本已复制", "当前问题和上下文已经复制到剪贴板。")
-                    setStatus(null)
-                  } catch (copyError) {
-                    setError(formatAssistantError(copyError))
-                    setStatus(null)
-                  }
-                })()
-              }}
-              disabled={!composer.trim() || !canUseCourseAgent || !instance || !sourceKind}
-            >
-              <Copy className="h-4 w-4" />
-              复制文本
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                if (!canUseCourseAgent || !instance || !sourceKind) {
-                  setError("当前工作台没有可用的视频上下文。")
-                  return
-                }
-                setStatus("正在复制当前视频帧...")
-                void (async () => {
-                  try {
-                    const initialFrame = await copyContextImage({ captureCurrentFrameForAi })
-                    if (!initialFrame?.imageDataUrl) {
-                      throw new Error("当前视频帧无法复制。")
-                    }
-                    showInfoFeedback("图片已复制", `当前视频帧（${formatPlaybackClock(initialFrame.timeMs)}）已经复制到剪贴板。`)
-                    setStatus(null)
-                  } catch (copyError) {
-                    setError(formatAssistantError(copyError))
-                    setStatus(null)
-                  }
-                })()
-              }}
-              disabled={!canUseCourseAgent || !instance || !sourceKind}
-            >
-              <ImageIcon className="h-4 w-4" />
-              复制图片
+              获取上下文
             </Button>
           </div>
           {isAsking ? (

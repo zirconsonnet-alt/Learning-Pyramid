@@ -57,7 +57,7 @@ class CourseAgentStaticTest(unittest.TestCase):
         self.assertIn("未使用视频帧", source)
         self.assertIn("本轮回答未使用视频帧", source)
 
-    def test_workbench_pet_can_copy_text_and_image_context_without_llm(self) -> None:
+    def test_workbench_pet_can_prepare_context_after_user_message_without_llm(self) -> None:
         course_source = (ROOT / "frontend" / "src" / "ui" / "llm" / "courseAgent.ts").read_text(encoding="utf-8")
         pet_source = (
             ROOT / "frontend" / "src" / "views" / "workbench" / "components" / "WorkbenchPetAssistant.tsx"
@@ -66,13 +66,16 @@ class CourseAgentStaticTest(unittest.TestCase):
         self.assertIn("buildCourseAgentContextPackage", course_source)
         self.assertIn("buildCourseAgentContextText", course_source)
         self.assertNotIn("buildCourseAgentContextHtml", course_source)
+        self.assertIn("获取上下文", pet_source)
+        self.assertIn("contextCopy", pet_source)
+        self.assertIn("已整理当前上下文，未调用 LLM", pet_source)
         self.assertIn("复制文本", pet_source)
         self.assertIn("复制图片", pet_source)
-        self.assertIn("copyContextText", pet_source)
-        self.assertIn("copyContextImage", pet_source)
+        self.assertNotIn("copyContextText", pet_source)
+        self.assertNotIn("copyContextImage", pet_source)
+        self.assertNotIn("先输入一个问题，再复制文本。", pet_source)
         self.assertNotIn("downloadContextHtml", pet_source)
         self.assertNotIn("contextExportMode", pet_source)
-        self.assertNotIn("获取上下文", pet_source)
 
     def test_context_text_is_task_first_and_does_not_repeat_html_export_language(self) -> None:
         source = (ROOT / "frontend" / "src" / "ui" / "llm" / "courseAgent.ts").read_text(encoding="utf-8")
