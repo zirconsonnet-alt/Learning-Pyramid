@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Copy, Send, Sparkles, Square } from "lucide-react"
+import { Copy, Download, Send, Sparkles, Square } from "lucide-react"
 
 import type { Instance } from "@/ui/api/instances"
 import type { MaterialSourceKind } from "@/ui/api/projects"
@@ -8,7 +8,13 @@ import type { ScopedProjectRef } from "@/ui/api/projectScope"
 import { MarkdownRichText } from "@/ui/components/MarkdownRichText"
 import { Button } from "@/ui/components/ui/button"
 import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
-import { askCourseAgent, type CourseAgentInitialFrame, type CourseAgentRecallContext } from "@/ui/llm/courseAgent"
+import {
+  askCourseAgent,
+  buildCourseAgentContextHtml,
+  buildCourseAgentContextPackage,
+  type CourseAgentInitialFrame,
+  type CourseAgentRecallContext,
+} from "@/ui/llm/courseAgent"
 import { useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
 import { useMembershipSummary } from "@/ui/queries/membership"
 import { useProjectMaterialSourceBinding } from "@/ui/queries/projects"
@@ -24,6 +30,11 @@ type WorkbenchPetAssistantTurn = {
   content: string
   createdAt: number
   evidence?: AiChatCourseEvidence[]
+  download?: {
+    filename: string
+    mimeType: string
+    content: string
+  }
 }
 
 type WorkbenchPetAssistantProps = {
@@ -66,6 +77,11 @@ function formatEvidenceTimeRange(startMs: number, endMs: number) {
   return startMs === endMs ? formatPlaybackClock(startMs) : `${formatPlaybackClock(startMs)}-${formatPlaybackClock(endMs)}`
 }
 
+function sanitizeFilenamePart(value: string) {
+  const normalized = value.trim().replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, "-")
+  return normalized || "xuebao"
+}
+
 function buildWorkbenchSystemPrompt(nodeLabel: string) {
   return [
     "请使用简体中文回答。",
@@ -83,6 +99,18 @@ async function copyText(text: string) {
     return
   }
   throw new Error("当前环境不支持剪贴板")
+}
+
+function downloadContextHtml(filename: string, content: string, mimeType = "text/html;charset=utf-8") {
+  const blob = new Blob([content], { type: mimeType })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement("a")
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
 }
 
 export function WorkbenchPetAssistant({
@@ -103,6 +131,7 @@ export function WorkbenchPetAssistant({
   const [status, setStatus] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isAsking, setIsAsking] = useState(false)
+  const [contextExportMode, setContextExportMode] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   const threadEndRef = useRef<HTMLDivElement | null>(null)
 
@@ -191,8 +220,7 @@ export function WorkbenchPetAssistant({
       const initialFrame = await captureCurrentFrameForAi?.()
       if (controller.signal.aborted) return
 
-      setStatus("正在检索当前内容字幕...")
-      const result = await askCourseAgent({
+      const commonParams = {
         subjectId,
         projectId,
         instance,
@@ -207,6 +235,37 @@ export function WorkbenchPetAssistant({
           role: turn.role,
           content: turn.content,
         })),
+      }
+
+      if (contextExportMode) {
+        setStatus("正在整理当前上下文...")
+        const contextPackage = await buildCourseAgentContextPackage(commonParams)
+        if (controller.signal.aborted) return
+        const html = buildCourseAgentContextHtml(contextPackage)
+        const filename = `${sanitizeFilenamePart(nodeLabel)}-${formatPlaybackClock(contextPackage.anchorMs ?? currentMs).replace(/:/g, "-")}-xuebao-context.html`
+        setTurns((current) =>
+          current.map((turn) =>
+            turn.id === assistantTurnId
+              ? {
+                  ...turn,
+                  content: "已整理当前上下文，未调用 LLM。下载 HTML 后可以直接发给支持文件或图片理解的模型。",
+                  evidence: contextPackage.evidence,
+                  download: {
+                    filename,
+                    mimeType: "text/html;charset=utf-8",
+                    content: html,
+                  },
+                }
+              : turn,
+          ),
+        )
+        setStatus(null)
+        return
+      }
+
+      setStatus("正在检索当前内容字幕...")
+      const result = await askCourseAgent({
+        ...commonParams,
         temperature: 0.2,
         signal: controller.signal,
         timeoutMs: 90_000,
@@ -303,6 +362,19 @@ export function WorkbenchPetAssistant({
                 <span className="whitespace-pre-wrap">{turn.content}</span>
               )}
             </div>
+            {turn.download ? (
+              <div className="flex justify-start">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => downloadContextHtml(turn.download!.filename, turn.download!.content, turn.download!.mimeType)}
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  下载上下文 HTML
+                </Button>
+              </div>
+            ) : null}
             {turn.evidence?.length ? (
               <div className="flex flex-wrap gap-1.5">
                 {turn.evidence.slice(0, 4).map((evidence, index) => (
@@ -348,17 +420,32 @@ export function WorkbenchPetAssistant({
           placeholder="问当前内容、进度或复述点..."
         />
         <div className="flex items-center justify-between gap-2">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label="复制最新回答"
-            title="复制最新回答"
-            onClick={() => void copyLatestAnswer()}
-            disabled={!turns.some((turn) => turn.role === "assistant" && turn.content.trim())}
-          >
-            <Copy className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center gap-1.5">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label="复制最新回答"
+              title="复制最新回答"
+              onClick={() => void copyLatestAnswer()}
+              disabled={!turns.some((turn) => turn.role === "assistant" && turn.content.trim())}
+            >
+              <Copy className="h-4 w-4" />
+            </Button>
+            <button
+              type="button"
+              className={cn(
+                "rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
+                contextExportMode
+                  ? "border-primary/30 bg-primary/10 text-primary"
+                  : "border-border/80 bg-background text-muted-foreground hover:border-primary/30 hover:text-primary",
+              )}
+              aria-pressed={contextExportMode}
+              onClick={() => setContextExportMode((current) => !current)}
+            >
+              获取上下文
+            </button>
+          </div>
           {isAsking ? (
             <Button type="button" variant="outline" size="sm" onClick={stopQuestion}>
               <Square className="mr-1.5 h-3.5 w-3.5" />
@@ -366,8 +453,8 @@ export function WorkbenchPetAssistant({
             </Button>
           ) : (
             <Button type="submit" size="sm" disabled={!!disabledReason || !composer.trim()}>
-              <Send className="mr-1.5 h-3.5 w-3.5" />
-              发送
+              {contextExportMode ? <Download className="mr-1.5 h-3.5 w-3.5" /> : <Send className="mr-1.5 h-3.5 w-3.5" />}
+              {contextExportMode ? "生成" : "发送"}
             </Button>
           )}
         </div>

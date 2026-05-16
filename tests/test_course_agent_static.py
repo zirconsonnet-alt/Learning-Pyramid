@@ -57,6 +57,19 @@ class CourseAgentStaticTest(unittest.TestCase):
         self.assertIn("未使用视频帧", source)
         self.assertIn("本轮回答未使用视频帧", source)
 
+    def test_workbench_pet_can_export_self_contained_html_context_without_llm(self) -> None:
+        course_source = (ROOT / "frontend" / "src" / "ui" / "llm" / "courseAgent.ts").read_text(encoding="utf-8")
+        pet_source = (
+            ROOT / "frontend" / "src" / "views" / "workbench" / "components" / "WorkbenchPetAssistant.tsx"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("buildCourseAgentContextPackage", course_source)
+        self.assertIn("buildCourseAgentContextHtml", course_source)
+        self.assertIn("获取上下文", pet_source)
+        self.assertIn("downloadContextHtml", pet_source)
+        self.assertIn("contextExportMode", pet_source)
+        self.assertIn("已整理当前上下文，未调用 LLM", pet_source)
+
 
 if __name__ == "__main__":
     unittest.main()
