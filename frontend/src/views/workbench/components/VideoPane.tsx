@@ -2516,9 +2516,7 @@ function VideoPane({
                       </div>
 
                       <div className={cn("text-xs leading-5", assistantError ? "text-rose-200" : "text-white/52")}>
-                        {assistantError ??
-                          (assistantStatus ??
-                            "Enter 提交问题，Shift+Enter / Ctrl+Enter 换行。视频助手会读取当前画面和附近字幕。")}
+                        {assistantError ?? "Enter 提交问题，Shift+Enter 换行。视频助手会读取当前画面和附近字幕。"}
                       </div>
 
                       <div className="flex items-center justify-between gap-2">

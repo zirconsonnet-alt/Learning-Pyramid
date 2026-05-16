@@ -423,17 +423,20 @@ export function WorkbenchPetAssistant({
               )}
             </div>
             {turn.evidence?.length ? (
-              <div className="flex flex-wrap gap-1.5">
-                {turn.evidence.slice(0, 4).map((evidence, index) => (
-                  <button
-                    key={`${evidence.kind}-${evidence.startMs}-${index}`}
-                    type="button"
-                    className="rounded-full border border-border/80 bg-background px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary"
-                    onClick={() => onOpenEvidence?.(evidence)}
-                  >
-                    {formatEvidenceTimeRange(evidence.startMs, evidence.endMs)} · {evidence.title}
-                  </button>
-                ))}
+              <div className="space-y-1.5">
+                <div className="text-[11px] font-semibold text-muted-foreground">依据片段</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {turn.evidence.slice(0, 4).map((evidence, index) => (
+                    <button
+                      key={`${evidence.kind}-${evidence.startMs}-${index}`}
+                      type="button"
+                      className="rounded-full border border-border/80 bg-background px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary"
+                      onClick={() => onOpenEvidence?.(evidence)}
+                    >
+                      {formatEvidenceTimeRange(evidence.startMs, evidence.endMs)} · {evidence.title}
+                    </button>
+                  ))}
+                </div>
               </div>
             ) : null}
             {turn.contextCopy ? (

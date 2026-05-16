@@ -30,6 +30,17 @@ class CourseAgentStaticTest(unittest.TestCase):
         self.assertIn("你叫雪豹", video_source)
         self.assertIn("你叫雪豹", pet_source)
 
+    def test_workbench_course_evidence_sections_use_consistent_label(self) -> None:
+        video_source = (ROOT / "frontend" / "src" / "views" / "workbench" / "components" / "VideoPane.tsx").read_text(
+            encoding="utf-8"
+        )
+        pet_source = (
+            ROOT / "frontend" / "src" / "views" / "workbench" / "components" / "WorkbenchPetAssistant.tsx"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("依据片段", video_source)
+        self.assertIn("依据片段", pet_source)
+
     def test_video_frame_capture_is_shared(self) -> None:
         video_source = (ROOT / "frontend" / "src" / "views" / "workbench" / "components" / "VideoPane.tsx").read_text(
             encoding="utf-8"
@@ -88,6 +99,15 @@ class CourseAgentStaticTest(unittest.TestCase):
         self.assertNotIn("buildCourseAgentContextHtml", source)
         self.assertNotIn("可复制给模型的完整提示", source)
         self.assertNotIn("<h2>引用片段</h2>", source)
+
+    def test_video_assistant_shortcut_hint_only_lists_supported_newline_shortcut(self) -> None:
+        source = (ROOT / "frontend" / "src" / "views" / "workbench" / "components" / "VideoPane.tsx").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("Enter 提交问题，Shift+Enter 换行。视频助手会读取当前画面和附近字幕。", source)
+        self.assertNotIn("Shift+Enter / Ctrl+Enter 换行", source)
+        self.assertNotIn("assistantStatus ??\n                            \"Enter 提交问题", source)
 
 
 if __name__ == "__main__":
