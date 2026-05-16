@@ -1,69 +1,62 @@
-# 当前变更：视频助手提示与桌宠证据标签
+# 当前变更：移除课程助手提示词内部材料标识
 
 ## 当前用户要求
 
-- 视频助手底部提示写了 `Shift+Enter / Ctrl+Enter 换行`，但实际 `Ctrl+Enter` 不能换行，属于误导。
-- 视频助手底部提示不要被“当前模型不支持图片”等运行状态替换；这类提示已经在回答文本里出现。
-- 桌宠回答里有依据片段按钮，但没有“依据片段”标签，和视频助手不一致。
-- 将全部待提交改动提交，并同步到线上服务器。
+- 继续完成上次要求：从 LLM 提示词中去掉以下三类无意义内容：
+  - `实例 ID`
+  - `材料 ID`
+  - `材料来源`
 
 ## 根因
 
-- 视频助手输入框实际只拦截纯 `Enter` 提交，`Shift+Enter` 走 textarea 默认换行；`Ctrl+Enter` 不是已实现的换行路径。
-- 视频助手底部提示复用了 `assistantStatus`，导致运行状态会覆盖固定帮助提示，并和回答文本里的模型能力提示重复。
-- 桌宠复用同类 `evidence` 数据，但只渲染按钮列表，没有像视频助手一样渲染“依据片段”标题。
-- 这些都是展示层问题，不是证据生成、字幕选择、视频截帧或 LLM 调用链路问题。
+- `frontend/src/ui/llm/courseAgent.ts` 在课程助手上下文中仍输出内部实例标识、材料标识和材料来源类型。
+- 中文上下文复制文本和英文 `supplementalContext` 都存在同类字段；前者已有静态测试约束，后者此前没有测试守卫。
 
 ## 本次实际修改文件
 
-- `frontend/src/views/workbench/components/VideoPane.tsx`
-  - 将视频助手提示改为 `Enter 提交问题，Shift+Enter 换行。视频助手会读取当前画面和附近字幕。`
-  - 视频助手底部固定提示不再显示 `assistantStatus`；加载状态仍显示在原回答加载区域。
-- `frontend/src/views/workbench/components/WorkbenchPetAssistant.tsx`
-  - 在桌宠 `turn.evidence` 按钮列表上方增加“依据片段”标签。
-  - 保留原有证据按钮、时间范围、标题和点击跳转逻辑。
+- `frontend/src/ui/llm/courseAgent.ts`
+  - 从 `buildCourseAgentContextText()` 的“基本信息”中移除 `实例 ID`、`材料 ID`、`材料来源`。
+  - 从 `buildSupplementalContext()` 的 `Video learning context` 中移除 `Instance ID`、`Material ID`、`Material source kind`。
+  - 保留 `instance` 和 `sourceKind` 在上下文包中的内部数据用途，不改变字幕加载、证据生成或调用方传参。
 - `tests/test_course_agent_static.py`
-  - 增加视频助手快捷键提示静态检查。
-  - 增加视频助手和桌宠证据区标签一致性静态检查。
+  - 在已有中文上下文静态检查基础上，增加英文 LLM supplemental context 字段的禁止断言。
 - `docs/current-change.md`
-  - 覆盖为当前待提交变更工作单。
+  - 覆盖为当前变更工作单。
 
 ## 行为语义变化
 
-- 视频助手底部提示不再承诺未实现的 `Ctrl+Enter` 换行。
-- 视频助手底部提示保持固定帮助文案，不再被运行状态覆盖。
-- 桌宠证据区新增可见标签“依据片段”。
-- 不改变快捷键处理、证据数据结构、证据数量、排序、点击跳转、字幕检索、视频截帧或 LLM 调用。
+- 课程助手发给 LLM 的补充上下文不再包含内部实例 ID、材料 ID、材料来源类型。
+- 桌宠“获取上下文”生成的可复制文本不再包含这些内部定位字段。
+- 不改变用户问题、节点标题、播放位置、当前帧、复述点上下文、相关字幕或证据片段。
 
 ## 重构说明
 
 - 未做重构。
-- 本次是两个单点 UI 展示修正。
+- 本次是 prompt 文本内容清理和静态守卫补齐，不改变模块边界。
 
 ## 未修改内容
 
-- 未修改快捷键处理逻辑。
-- 未修改桌宠回答、复制上下文、提问提交或状态展示逻辑。
-- 未修改 AI 问答页、后端 API、数据库、部署配置或字幕解析逻辑。
+- 未修改字幕选择、字幕搜索、证据生成、图片输入、LLM 请求接口或后端 API。
+- 未修改 `CourseAgentContextPackage` 暴露的内部字段，避免牵动调用方和现有数据流。
+- 未修改长期文档；本次只是移除无意义 prompt 字段，不改变架构、部署或用户文档中的稳定行为说明。
 
 ## 影响范围
 
-- UI：视频助手底部帮助提示；桌宠回答中的证据片段区域。
-- 测试：静态检查新增两条约束。
-- 不影响 AI、后端 API、部署、数据库结构。
+- UI/LLM：课程助手的 LLM supplemental context 和桌宠上下文复制文本。
+- 测试：课程助手静态测试新增英文字段守卫。
+- 不影响后端 API、数据库、部署、数据结构或公共接口。
 
 ## 当前风险与不确定项
 
-- 如果未来要支持 `Ctrl+Enter` 换行，需要单独确认键盘语义后改输入逻辑和提示。
 - 无当前阻塞风险。
 
 ## 验证记录
 
-- 已运行：`python -m pytest tests/test_course_agent_static.py::CourseAgentStaticTest::test_workbench_course_evidence_sections_use_consistent_label -q`，新增证据标签测试在生产代码修改前按预期失败。
+- 已运行：`rg -n "实例 ID|材料 ID|材料来源|Instance ID:|Material ID:|Material source kind:" frontend\src\ui\llm\courseAgent.ts tests\test_course_agent_static.py docs\current-change.md`，结果只剩测试断言和当前工作单说明，`courseAgent.ts` 无残留。
 - 已运行：`python -m pytest tests/test_course_agent_static.py -q`，10 个测试通过。
-- 已运行：`pnpm --dir frontend exec eslint src/views/workbench/components/WorkbenchPetAssistant.tsx src/views/workbench/components/VideoPane.tsx`，通过。
+- 已运行：`pnpm --dir frontend exec eslint src/ui/llm/courseAgent.ts`，通过。
 - 已运行：`pnpm --dir frontend build`，通过；仍有既有 chunk size warning。
-- 已运行：`git diff --check`，通过；仅提示工作区文件后续可能被 Git 转换为 CRLF。
+- 已运行：`git diff --check -- frontend/src/ui/llm/courseAgent.ts tests/test_course_agent_static.py docs/current-change.md`，通过；仅提示这些工作区文件后续可能被 Git 转换为 CRLF。
 
 ## 仍需用户确认的问题
 

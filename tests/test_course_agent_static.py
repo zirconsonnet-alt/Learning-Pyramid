@@ -90,11 +90,20 @@ class CourseAgentStaticTest(unittest.TestCase):
 
     def test_context_text_is_task_first_and_does_not_repeat_html_export_language(self) -> None:
         source = (ROOT / "frontend" / "src" / "ui" / "llm" / "courseAgent.ts").read_text(encoding="utf-8")
+        context_text_block = source[
+            source.index("export function buildCourseAgentContextText") : source.index("function askCourseAgentStream")
+        ]
 
         self.assertIn("请直接回答用户问题", source)
         self.assertIn("buildCourseAgentContextText", source)
         self.assertIn("复述点上下文", source)
         self.assertIn("相关字幕", source)
+        self.assertNotIn("实例 ID", context_text_block)
+        self.assertNotIn("材料 ID", context_text_block)
+        self.assertNotIn("材料来源", context_text_block)
+        self.assertNotIn("Instance ID:", source)
+        self.assertNotIn("Material ID:", source)
+        self.assertNotIn("Material source kind:", source)
         self.assertNotIn("HTML 文件", source)
         self.assertNotIn("buildCourseAgentContextHtml", source)
         self.assertNotIn("可复制给模型的完整提示", source)

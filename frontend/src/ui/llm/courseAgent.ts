@@ -149,8 +149,6 @@ export async function buildCourseAgentContextPackage(params: Pick<
 
   const supplementalContext = buildSupplementalContext({
     nodeLabel: params.nodeLabel,
-    instance: params.instance,
-    sourceKind: params.sourceKind,
     anchorMs,
     recallContextText,
     transcriptContextText: selectedContext.contextText,
@@ -208,9 +206,6 @@ export function buildCourseAgentContextText(contextPackage: CourseAgentContextPa
     "基本信息",
     `当前节点：${contextPackage.nodeLabel}`,
     `播放位置：${playbackText}`,
-    `实例 ID：${contextPackage.instance.instanceId}`,
-    `材料 ID：${contextPackage.instance.materialId}`,
-    `材料来源：${contextPackage.sourceKind}`,
     "",
     "当前视频帧",
     frameText,
@@ -299,8 +294,6 @@ function buildRecallContextText(context: CourseAgentRecallContext | null | undef
 
 function buildSupplementalContext(params: {
   nodeLabel: string
-  instance: Pick<Instance, "instanceId" | "materialId">
-  sourceKind: MaterialSourceKind
   anchorMs: number | null
   recallContextText: string
   transcriptContextText: string
@@ -310,9 +303,6 @@ function buildSupplementalContext(params: {
     [
       "Video learning context:",
       `Current node: ${params.nodeLabel}`,
-      `Instance ID: ${params.instance.instanceId}`,
-      `Material ID: ${params.instance.materialId}`,
-      `Material source kind: ${params.sourceKind}`,
       params.anchorMs === null ? "Playback anchor: none" : `Playback anchor: ${formatTimestamp(params.anchorMs)} (${params.anchorMs} ms)`,
     ].join("\n"),
   ]
