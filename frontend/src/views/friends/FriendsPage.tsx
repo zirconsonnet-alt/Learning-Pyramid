@@ -32,9 +32,14 @@ function formatApiError(err: unknown) {
   return "未知错误"
 }
 
-function FriendAvatar(props: { user: { avatarUrl: string | null; nickname: string }; size?: "md" | "lg" }) {
+function FriendAvatar(props: { user: { avatarUrl: string | null; nickname: string }; size?: "sm" | "md" | "lg" }) {
   const { user, size = "md" } = props
-  const sizeClass = size === "lg" ? "h-16 w-16 rounded-3xl text-lg" : "h-12 w-12 rounded-2xl text-base"
+  const sizeClass =
+    size === "lg"
+      ? "h-16 w-16 rounded-3xl text-lg"
+      : size === "sm"
+        ? "h-10 w-10 rounded-2xl text-sm"
+        : "h-12 w-12 rounded-2xl text-base"
   return (
     <div
       className={cn(
@@ -45,6 +50,36 @@ function FriendAvatar(props: { user: { avatarUrl: string | null; nickname: strin
       {user.avatarUrl ? <img src={user.avatarUrl} alt={user.nickname} className="h-full w-full object-cover" /> : user.nickname.slice(0, 1).toUpperCase()}
     </div>
   )
+}
+
+type FriendLeaderboardRow = {
+  key: string
+  rank: number
+  entry: FriendLeaderboardEntry
+  displayName: string
+  activeStudyText: string
+  watchText: string
+  composeText: string
+  reviewText: string
+  qaText: string
+  lastStudy: ReturnType<typeof formatLastStudyText>
+  lastStudyAtText: string | null
+}
+
+function buildFriendLeaderboardRows(entries: FriendLeaderboardEntry[]): FriendLeaderboardRow[] {
+  return entries.map((entry, index) => ({
+    key: `${entry.user.userId}:${entry.isSelf ? "self" : "friend"}`,
+    rank: index + 1,
+    entry,
+    displayName: entry.isSelf ? `${entry.user.nickname}（我）` : entry.user.nickname,
+    activeStudyText: formatDurationCompact(entry.stats.effectiveMs),
+    watchText: formatDurationCompact(entry.stats.watchMs),
+    composeText: formatDurationCompact(entry.stats.composeMs),
+    reviewText: formatDurationCompact(entry.stats.reviewMs),
+    qaText: formatDurationCompact(entry.stats.qaMs),
+    lastStudy: formatLastStudyText(entry.stats.lastStudyAt),
+    lastStudyAtText: entry.stats.lastStudyAt ? formatDateTimeLabel(entry.stats.lastStudyAt) : null,
+  }))
 }
 
 function MetaTag(props: { children: ReactNode; tone?: "default" | "accent" | "danger" }) {
@@ -540,6 +575,7 @@ function FriendLeaderboard(props: {
   error: unknown
 }) {
   const { entries, loading, error } = props
+  const rows = buildFriendLeaderboardRows(entries)
 
   return (
     <Card className="theme-card-main overflow-hidden">
@@ -561,57 +597,118 @@ function FriendLeaderboard(props: {
           />
         ) : null}
 
-        {entries.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs uppercase tracking-[0.18em] text-[color:var(--theme-subtle-text)]">
-                  <th className="pb-3 pr-3">排名</th>
-                  <th className="pb-3 pr-3">好友</th>
-                  <th className="pb-3 pr-3">活跃学习</th>
-                  <th className="pb-3 pr-3">学习动作</th>
-                  <th className="pb-3 pr-3">活跃天数</th>
-                  <th className="pb-3">上次学习</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[color:var(--theme-soft-border)]">
-                {entries.map((entry, index) => {
-                  const lastStudy = formatLastStudyText(entry.stats.lastStudyAt)
-                  return (
-                    <tr key={`${entry.user.userId}:${entry.isSelf ? "self" : "friend"}`} className="text-sm text-foreground">
-                      <td className="py-3 pr-3 align-middle font-semibold">#{index + 1}</td>
-                      <td className="py-3 pr-3 align-middle">
-                        <div className="flex items-center gap-2">
-                          <FriendAvatar user={entry.user} />
+        {rows.length > 0 ? (
+          <>
+            <div className="hidden md:block" data-friend-leaderboard-desktop>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm" aria-label="好友学习排行榜表格">
+                  <thead>
+                    <tr className="text-left text-xs uppercase tracking-[0.18em] text-[color:var(--theme-subtle-text)]">
+                      <th className="pb-3 pr-3">排名</th>
+                      <th className="pb-3 pr-3">好友</th>
+                      <th className="pb-3 pr-3">活跃学习</th>
+                      <th className="pb-3 pr-3">学习动作</th>
+                      <th className="pb-3 pr-3">活跃天数</th>
+                      <th className="pb-3">上次学习</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[color:var(--theme-soft-border)]">
+                    {rows.map((row) => (
+                      <tr key={row.key} className="text-sm text-foreground">
+                        <td className="py-3 pr-3 align-middle font-semibold">#{row.rank}</td>
+                        <td className="py-3 pr-3 align-middle">
+                          <div className="flex items-center gap-2">
+                            <FriendAvatar user={row.entry.user} />
+                            <div className="min-w-0">
+                              <div className="truncate font-medium">{row.displayName}</div>
+                              <div className="text-xs text-muted-foreground">UID {row.entry.user.publicUid}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-3 pr-3 align-middle">
+                          <div className="font-semibold text-primary">{row.activeStudyText}</div>
+                          <div className="text-xs text-muted-foreground">
+                            看 {row.watchText} · 构 {row.composeText} · 复 {row.reviewText} · 问 {row.qaText}
+                          </div>
+                        </td>
+                        <td className="py-3 pr-3 align-middle">
+                          <div className="font-medium">{row.entry.stats.totalActions}</div>
+                          <div className="text-xs text-muted-foreground">
+                            任务 {row.entry.stats.learningCount} · 复习 {row.entry.stats.reviewCount}
+                          </div>
+                        </td>
+                        <td className="py-3 pr-3 align-middle">{row.entry.stats.studyDays}</td>
+                        <td className="py-3 align-middle">
+                          <div className={row.lastStudy.className}>{row.lastStudy.text}</div>
+                          {row.lastStudyAtText ? <div className="text-xs text-muted-foreground">{row.lastStudyAtText}</div> : null}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div
+              className="overflow-hidden rounded-[1rem] border border-[color:var(--theme-soft-border)] md:hidden"
+              role="list"
+              aria-label="好友学习排行榜"
+              data-friend-leaderboard-mobile-list
+            >
+              {rows.map((row) => (
+                <article
+                  key={row.key}
+                  role="listitem"
+                  className="border-b border-[color:var(--theme-soft-border)] px-3 py-3 last:border-b-0"
+                  data-friend-leaderboard-mobile-item
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">#{row.rank}</div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <FriendAvatar user={row.entry.user} size="sm" />
                           <div className="min-w-0">
-                            <div className="truncate font-medium">{entry.isSelf ? `${entry.user.nickname}（我）` : entry.user.nickname}</div>
-                            <div className="text-xs text-muted-foreground">UID {entry.user.publicUid}</div>
+                            <div className="truncate text-sm font-semibold text-foreground">{row.displayName}</div>
+                            <div className="truncate text-xs text-muted-foreground">UID {row.entry.user.publicUid}</div>
                           </div>
                         </div>
-                      </td>
-                      <td className="py-3 pr-3 align-middle">
-                        <div className="font-semibold text-primary">{formatDurationCompact(entry.stats.effectiveMs)}</div>
-                        <div className="text-xs text-muted-foreground">
-                          看 {formatDurationCompact(entry.stats.watchMs)} · 构 {formatDurationCompact(entry.stats.composeMs)} · 复 {formatDurationCompact(entry.stats.reviewMs)} · 问 {formatDurationCompact(entry.stats.qaMs)}
+                        <div className="shrink-0 text-right">
+                          <div className="text-base font-semibold leading-5 text-primary">{row.activeStudyText}</div>
+                          <div className="text-[11px] leading-4 text-muted-foreground">活跃学习</div>
                         </div>
-                      </td>
-                      <td className="py-3 pr-3 align-middle">
-                        <div className="font-medium">{entry.stats.totalActions}</div>
-                        <div className="text-xs text-muted-foreground">
-                          任务 {entry.stats.learningCount} · 复习 {entry.stats.reviewCount}
+                      </div>
+
+                      <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                        <span>{row.entry.stats.studyDays} 天活跃</span>
+                        <span>{row.entry.stats.totalActions} 动作</span>
+                        <span className={row.lastStudy.className}>{row.lastStudy.text}</span>
+                      </div>
+
+                      <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 border-t border-[color:var(--theme-soft-border)] pt-2 text-xs">
+                        <div className="flex min-w-0 justify-between gap-2">
+                          <span className="text-muted-foreground">看</span>
+                          <span className="font-medium text-foreground">{row.watchText}</span>
                         </div>
-                      </td>
-                      <td className="py-3 pr-3 align-middle">{entry.stats.studyDays}</td>
-                      <td className="py-3 align-middle">
-                        <div className={lastStudy.className}>{lastStudy.text}</div>
-                        {entry.stats.lastStudyAt ? <div className="text-xs text-muted-foreground">{formatDateTimeLabel(entry.stats.lastStudyAt)}</div> : null}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
+                        <div className="flex min-w-0 justify-between gap-2">
+                          <span className="text-muted-foreground">构</span>
+                          <span className="font-medium text-foreground">{row.composeText}</span>
+                        </div>
+                        <div className="flex min-w-0 justify-between gap-2">
+                          <span className="text-muted-foreground">复</span>
+                          <span className="font-medium text-foreground">{row.reviewText}</span>
+                        </div>
+                        <div className="flex min-w-0 justify-between gap-2">
+                          <span className="text-muted-foreground">问</span>
+                          <span className="font-medium text-foreground">{row.qaText}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </>
         ) : null}
       </CardContent>
     </Card>

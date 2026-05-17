@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { type PointerEvent, useEffect, useRef, useState } from "react"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import { Link } from "react-router-dom"
 
@@ -53,6 +53,8 @@ const inviteBullets = [
   "被邀请者有效充值满15元，获5元佣金",
   "已结算佣金满20，随时提现",
 ] as const
+
+const REASON_CAROUSEL_SWIPE_THRESHOLD = 48
 
 const faqItems = [
   {
@@ -247,6 +249,8 @@ export function HomePage() {
   const membershipEntryLabel = isLoggedIn || !authEnabled ? "去会员中心查看" : "登录后在会员中心查看"
   const [activeReasonIndex, setActiveReasonIndex] = useState(0)
   const [isReasonCarouselPaused, setIsReasonCarouselPaused] = useState(false)
+  const reasonPointerStartXRef = useRef<number | null>(null)
+  const reasonPointerLastXRef = useRef<number | null>(null)
 
   useEffect(() => {
     if (isReasonCarouselPaused) {
@@ -268,6 +272,43 @@ export function HomePage() {
     setActiveReasonIndex((current) => (current + 1) % graduateReasons.length)
   }
 
+  function onReasonCarouselPointerDown(event: PointerEvent<HTMLDivElement>) {
+    if (event.pointerType === "mouse") return
+    reasonPointerStartXRef.current = event.clientX
+    reasonPointerLastXRef.current = event.clientX
+    setIsReasonCarouselPaused(true)
+  }
+
+  function onReasonCarouselPointerMove(event: PointerEvent<HTMLDivElement>) {
+    if (event.pointerType === "mouse" || reasonPointerStartXRef.current === null) return
+    reasonPointerLastXRef.current = event.clientX
+  }
+
+  function onReasonCarouselPointerUp(event: PointerEvent<HTMLDivElement>) {
+    if (event.pointerType === "mouse") return
+    const startX = reasonPointerStartXRef.current
+    const lastX = reasonPointerLastXRef.current
+    reasonPointerStartXRef.current = null
+    reasonPointerLastXRef.current = null
+    setIsReasonCarouselPaused(false)
+    if (startX === null || lastX === null) return
+
+    const deltaX = lastX - startX
+    if (Math.abs(deltaX) < REASON_CAROUSEL_SWIPE_THRESHOLD) return
+    if (deltaX < 0) {
+      showNextReason()
+      return
+    }
+    showPrevReason()
+  }
+
+  function onReasonCarouselPointerCancel(event: PointerEvent<HTMLDivElement>) {
+    if (event.pointerType === "mouse") return
+    reasonPointerStartXRef.current = null
+    reasonPointerLastXRef.current = null
+    setIsReasonCarouselPaused(false)
+  }
+
   return (
     <div className="lp-showcase-page">
       <ShowcaseSiteHeader />
@@ -284,6 +325,10 @@ export function HomePage() {
                 className="lp-showcase-carousel-viewport"
                 onMouseEnter={() => setIsReasonCarouselPaused(true)}
                 onMouseLeave={() => setIsReasonCarouselPaused(false)}
+                onPointerDown={onReasonCarouselPointerDown}
+                onPointerMove={onReasonCarouselPointerMove}
+                onPointerUp={onReasonCarouselPointerUp}
+                onPointerCancel={onReasonCarouselPointerCancel}
               >
                 <button
                   type="button"

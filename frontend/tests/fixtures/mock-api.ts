@@ -183,6 +183,7 @@ export async function installMockApi(
     queueHeadId?: string | null
     recallPointReferences?: string[]
     projectLlmStreamContent?: string
+    friendLeaderboard?: unknown[]
   } = {},
 ) {
   const authState = options.authState ?? "signed-in"
@@ -300,6 +301,11 @@ export async function installMockApi(
 
     if (path === "/profile/me") {
       await fulfill(route, testUser)
+      return
+    }
+
+    if (path === "/friends/leaderboard") {
+      await fulfill(route, options.friendLeaderboard ?? [])
       return
     }
 

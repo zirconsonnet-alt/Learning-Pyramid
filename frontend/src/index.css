@@ -2840,7 +2840,6 @@
     .lp-showcase-hero-grid,
     .lp-showcase-pricing-grid,
     .lp-showcase-quote-panel,
-    .lp-showcase-carousel-points,
     .lp-showcase-grid-3,
     .lp-showcase-steps-grid,
     .lp-showcase-faq-grid {
@@ -3006,31 +3005,35 @@
     }
 
     .lp-showcase-carousel-slide {
-      padding: 24px 58px;
+      padding: 16px;
+    }
+
+    .lp-showcase-carousel-points {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .lp-showcase-carousel-point {
+      padding: 12px;
+      border-radius: 14px;
     }
 
     .lp-showcase-carousel-point-with-image {
       grid-template-columns: 1fr;
       align-items: stretch;
+      min-height: 0;
     }
 
     .lp-showcase-carousel-point-visual {
       width: 100%;
-      max-width: 190px;
-      margin: 6px auto 0;
+      max-width: 132px;
+      border-radius: 12px;
+      margin: 8px auto 0;
     }
 
     .lp-showcase-carousel-edge {
-      width: 42px;
-      height: 128px;
-    }
-
-    .lp-showcase-carousel-edge-left {
-      left: 8px;
-    }
-
-    .lp-showcase-carousel-edge-right {
-      right: 8px;
+      display: none;
     }
 
     .lp-showcase-carousel-title-row {
@@ -3040,6 +3043,34 @@
 
     .lp-showcase-carousel-title-main {
       gap: 10px;
+    }
+
+    .lp-showcase-carousel-slide h3 {
+      font-size: 22px;
+    }
+
+    .lp-showcase-carousel-tag {
+      min-height: 28px;
+      padding: 0 10px;
+      font-size: 12px;
+    }
+
+    .lp-showcase-carousel-count {
+      font-size: 12px;
+    }
+
+    .lp-showcase-carousel-point h4 {
+      margin-bottom: 8px;
+      font-size: 15px;
+    }
+
+    .lp-showcase-carousel-point-lines {
+      gap: 6px;
+    }
+
+    .lp-showcase-carousel-point-lines p {
+      font-size: 12px;
+      line-height: 1.58;
     }
   }
 }
