@@ -1,61 +1,64 @@
-# 当前变更：手机端顶栏单行导航
+# 当前变更：首页移除手机端提示框并修正移动导航弹层
 
 ## 当前用户要求
 
-- 全面优化手机端体验。
-- 手机端顶栏所有导航项收进品牌左侧三横线菜单。
-- 菜单通过选择一级、二级定位页面。
-- 首页和项目内顶栏都按同一思路处理。
-- 首页“进入项目”放到品牌右侧。
-- 项目内账号/头像放到品牌右侧。
-- 最终手机端顶栏压缩为一行。
+- 把手机端首页的“此产品推荐在电脑上使用 / 视频相关功能无法在手机端使用”提示框去掉。
+- 修正手机端项目内三横线下拉框歪斜、导致页面可以左右滑动的问题。
+- 修正手机端个人中心顶栏和正文卡片不对齐、页面可左右滑动的问题。
 
 ## 根因
 
-- 首页移动端沿用桌面导航布局，只是在窄屏下改成纵向排布，导致“导览 / 字幕工具 / 进入项目”占用多行。
-- 项目内顶栏在同一行放置全局、学科、项目三个桌面下拉入口，移动端没有统一收起入口，窄屏会拥挤或换行。
+- 首页 `HomePage` 单独渲染了 `lp-showcase-mobile-notice` 提示节点。
+- `index.css` 在手机断点下把该节点显示为提示框，导致手机端首页顶栏下方出现额外提示。
+- 项目内移动导航弹层定位在三横线按钮自身上，弹层宽度接近视口宽度；当按钮距离视口左边有偏移时，弹层向右溢出，造成视觉歪斜和横向滚动。
+- 个人中心正文使用 CSS grid，grid item 默认最小尺寸会受内部内容影响；学习视图选择器、账户信息卡内头像/昵称/按钮行在手机端形成较大的最小内容宽度，把正文卡片撑到顶栏容器之外，导致横向滚动。
 
 ## 本次实际修改文件
 
-- `frontend/src/shell/AppShell.tsx`
-  - 增加移动端三横线导航入口。
-  - 将全局、学科、项目导航作为一级分组，组内页面作为二级链接。
-  - 手机端隐藏桌面导航按钮和 logo 图标，只保留一行：三横线、品牌/当前区域、账号头像。
-  - 桌面端保留原有导航与账号菜单行为。
-- `frontend/src/views/home/ShowcaseChrome.tsx`
-  - 增加首页移动端三横线菜单。
-  - 将首页导览与工具入口作为一级分组，组内链接作为二级项。
-  - 手机端新增品牌右侧“进入项目 / 登录”入口。
-  - 桌面端保留原有导览下拉、字幕工具和入口按钮。
+- `frontend/src/views/home/HomePage.tsx`
+  - 删除首页移动端电脑使用提示框节点。
 - `frontend/src/index.css`
-  - 补充首页移动端菜单、单行顶栏、品牌截断和右侧入口样式。
-  - 移动端隐藏首页桌面导航与桌面行动按钮。
+  - 删除 `lp-showcase-mobile-notice` 的基础和手机端样式。
+- `frontend/tests/e2e/app-load.spec.ts`
+  - 将首页移动端提示框测试更新为手机端和桌面端都不显示该提示。
+  - 增加项目内手机端移动导航弹层边界测试，防止弹层再次导致横向滚动。
+  - 增加个人中心手机端布局测试，覆盖正文卡片不超过顶栏边界且页面不产生横向滚动。
+- `frontend/src/shell/AppShell.tsx`
+  - 将项目内移动导航弹层改为相对整行 header 定位，宽度限制在 header 行内。
+- `frontend/src/views/profile/ProfilePage.tsx`
+  - 允许个人中心根 grid、section、aside 和卡片在手机端收缩。
+  - 调整学习视图筛选 select 的最小宽度只在 `sm` 及以上生效。
+  - 调整账户信息头像区在手机端改为纵向布局，并降低手机端头像固定尺寸。
 - `docs/current-change.md`
   - 覆盖为当前变更工作单。
 
 ## 行为语义变化
 
-- 移动端首页顶栏从多行导航改为一行导航。
-- 移动端应用内顶栏从多个导航按钮改为一个三横线导航菜单。
-- 路由、导航目标、认证逻辑、账号菜单逻辑不变。
-- 桌面端顶栏语义和展示不变。
+- 手机端首页不再显示“此产品推荐在电脑上使用 / 视频相关功能无法在手机端使用”提示框。
+- 手机端项目内三横线下拉框不再从按钮位置向右溢出。
+- 手机端个人中心正文卡片和顶栏左右边界对齐，不再产生横向滚动。
+- 桌面端原本不显示该框，行为不变。
+- 首页导航、路由、认证、页面主体业务语义和后端行为不变。
 
 ## 重构说明
 
-- 未做跨模块重构。
-- 仅在现有 header 组件内增加移动端专用结构，复用已有导航数据和 `MainNav` 渲染二级链接。
+- 未做重构。
+- 这是删除单一首页提示 UI、修正移动端布局边界的局部变更。
 
 ## 未修改内容
 
-- 未修改路由配置。
-- 未修改后端 API、认证、权限、数据结构或部署配置。
-- 未修改首页主体内容、项目页面内容和账号菜单条目。
-- 未修改测试断言语义。
+- 未修改 FAQ 文档中“建议电脑端使用”的长期说明。
+- 未修改首页主体内容、导航、会员、字幕工具入口。
+- 未通过 `overflow-x: hidden` 掩盖横向溢出问题。
+- 未修改后端 API、数据结构、部署配置或公共路由。
 
 ## 影响范围
 
-- UI：公开首页、字幕工具页共享的展示型顶栏；登录后应用内顶栏。
-- 不影响 API、架构、部署、数据结构或后端测试。
+- UI：首页手机端。
+- UI：项目内手机端顶栏移动导航弹层。
+- UI：个人中心手机端正文卡片布局。
+- 测试：首页加载 e2e 中关于该提示框、项目内移动导航弹层边界和个人中心手机端横向滚动的断言。
+- 不影响 API、架构、部署、数据结构或页面主体业务内容。
 
 ## 当前风险与不确定项
 
@@ -70,10 +73,12 @@
 
 ## 验证记录
 
-- 已运行：`pnpm -C frontend exec eslint src/shell/AppShell.tsx src/views/home/ShowcaseChrome.tsx`，0 个错误；仍有 1 个与本次移动端导航无关的既有 hook dependency warning。
+- 已运行：`rg -n "此产品推荐在电脑上使用|电脑端使用提示|视频相关功能无法在手机端使用|lp-showcase-mobile-notice" frontend\src frontend\tests`，源码中不再存在首页提示节点或样式，测试中仅保留“不显示该提示”的断言。
+- 已运行：`pnpm -C frontend exec eslint src/shell/AppShell.tsx src/views/home/HomePage.tsx src/views/profile/ProfilePage.tsx tests/e2e/app-load.spec.ts`，0 个错误；仍有 1 个与本次改动无关的既有 hook dependency warning。
 - 已运行：`pnpm -C frontend build`，通过；仍有既有 chunk size warning。
-- 已运行：`git diff --check -- frontend/src/shell/AppShell.tsx frontend/src/views/home/ShowcaseChrome.tsx frontend/src/index.css docs/current-change.md`，通过；仅提示这些工作区文件后续可能被 Git 转换为 CRLF。
-- 已运行：Playwright 临时脚本访问 `http://127.0.0.1:4173/`，390px 视口验证首页移动顶栏一行、首页移动菜单一级/二级可用、项目内移动顶栏一行、项目内移动菜单默认落到项目分组且二级链接可见。测得首页顶栏高度 60px，项目内顶栏高度 40px。
+- 已运行：`pnpm -C frontend exec playwright test tests/e2e/app-load.spec.ts --project=chromium`，8 个测试通过；新增测试覆盖 390px 手机视口下项目内移动导航弹层不越出视口、个人中心正文卡片不超过顶栏边界，且页面不产生横向滚动。
+- 已运行：`LEARNINGPYRAMID_FRONTEND_E2E_USE_DEV_SERVER=1 LEARNINGPYRAMID_FRONTEND_E2E_PORT=4183 pnpm -C frontend exec playwright test tests/e2e/app-load.spec.ts --project=chromium --grep "profile mobile layout"`，通过；验证 390px 手机视口下个人中心正文卡片不超过顶栏边界且页面 `scrollWidth` 不超过视口宽度。
+- 已运行：`git diff --check -- docs/current-change.md frontend/src/index.css frontend/src/shell/AppShell.tsx frontend/src/views/home/HomePage.tsx frontend/src/views/profile/ProfilePage.tsx frontend/tests/e2e/app-load.spec.ts`，通过；仅提示这些工作区文件后续可能被 Git 转换为 CRLF。
 
 ## 仍需用户确认的问题
 

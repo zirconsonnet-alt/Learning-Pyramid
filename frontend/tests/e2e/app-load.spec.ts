@@ -45,19 +45,42 @@ test("home guide dropdown matches section headings", async ({ page }) => {
   expectNoConsoleIssues(consoleIssues)
 })
 
-test("home shows a mobile device notice only on phone-sized screens", async ({ page }) => {
+test("home does not show the mobile device notice", async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
   await installMockApi(page)
 
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto("/")
   await expectHealthyPage(page, /\/$/)
-  await expect(page.getByRole("note", { name: "电脑端使用提示" })).toContainText("此产品推荐在电脑上使用")
-  await expect(page.getByRole("note", { name: "电脑端使用提示" })).toContainText("视频相关功能无法在手机端使用")
+  await expect(page.getByRole("note", { name: "电脑端使用提示" })).toHaveCount(0)
 
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.reload()
   await expect(page.getByRole("note", { name: "电脑端使用提示" })).toHaveCount(0)
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
+test("project mobile navigation stays within the viewport", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page)
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(`/subjects/${subject.subjectId}/projects/${project.projectId}/workbench`)
+  await expectHealthyPage(page, new RegExp(`/subjects/${subject.subjectId}/projects/${project.projectId}/workbench$`))
+
+  const header = page.locator("header.theme-shell-header")
+  await header.getByRole("button", { name: "打开导航" }).click()
+
+  const mobileNav = page.getByRole("navigation", { name: "移动导航" })
+  await expect(mobileNav).toBeVisible()
+  const navBox = await mobileNav.boundingBox()
+  if (!navBox) throw new Error("mobile navigation menu did not render")
+  expect(Math.floor(navBox.x)).toBeGreaterThanOrEqual(0)
+  expect(Math.ceil(navBox.x + navBox.width)).toBeLessThanOrEqual(390)
+
+  const scrollWidth = await page.evaluate(() => Math.max(document.body.scrollWidth, document.documentElement.scrollWidth))
+  expect(scrollWidth).toBeLessThanOrEqual(390)
 
   expectNoConsoleIssues(consoleIssues)
 })
@@ -106,6 +129,44 @@ test("profile learning view uses scoped audit log endpoint", async ({ page }) =>
   await expect(page.getByText("学习视图", { exact: true })).toBeVisible()
   await expect.poll(() => scopedAuditLogRequested).toBe(true)
   expect(oldAuditLogRequested).toBe(false)
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
+test("profile mobile layout aligns with the header without horizontal overflow", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page)
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto("/profile")
+  await expect(page.getByText("账户信息", { exact: true })).toBeVisible()
+
+  const layout = await page.evaluate(() => {
+    const viewportWidth = window.innerWidth
+    const headerRow = document.querySelector("header.theme-shell-header .container > .relative")?.getBoundingClientRect()
+    const cards = Array.from(document.querySelectorAll(".theme-card-main")).map((element) => {
+      const rect = element.getBoundingClientRect()
+      return {
+        className: element.className,
+        left: Math.floor(rect.left),
+        right: Math.ceil(rect.right),
+        width: Math.ceil(rect.width),
+      }
+    })
+    return {
+      viewportWidth,
+      scrollWidth: Math.max(document.body.scrollWidth, document.documentElement.scrollWidth),
+      headerLeft: headerRow ? Math.floor(headerRow.left) : null,
+      headerRight: headerRow ? Math.ceil(headerRow.right) : null,
+      cards,
+    }
+  })
+
+  expect(layout.scrollWidth, JSON.stringify(layout, null, 2)).toBeLessThanOrEqual(layout.viewportWidth)
+  for (const card of layout.cards) {
+    expect(card.left).toBeGreaterThanOrEqual(layout.headerLeft ?? 0)
+    expect(card.right).toBeLessThanOrEqual(layout.headerRight ?? layout.viewportWidth)
+  }
 
   expectNoConsoleIssues(consoleIssues)
 })

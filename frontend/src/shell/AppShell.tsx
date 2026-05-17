@@ -191,7 +191,7 @@ function MobileHeaderNav(props: {
   const activeSection = sections.find((section) => section.key === activeSectionKey) ?? sections[0] ?? null
 
   return (
-    <div className="relative shrink-0 md:hidden">
+    <div className="shrink-0 md:hidden">
       <button
         ref={buttonRef}
         type="button"
@@ -208,7 +208,7 @@ function MobileHeaderNav(props: {
       </button>
 
       {isOpen && activeSection ? (
-        <div ref={menuRef} className="absolute left-0 top-full z-30 w-[min(22rem,calc(100vw-1rem))] pt-2.5">
+        <div ref={menuRef} className="absolute inset-x-0 top-full z-30 pt-2.5">
           <nav aria-label="移动导航" className="overflow-hidden rounded-[1.25rem] border [border-color:var(--theme-soft-border)] [background:var(--theme-card-main-bg)] shadow-[0_24px_60px_-30px_rgba(15,23,42,0.24)] backdrop-blur-2xl">
             <div className="max-h-[min(72vh,calc(100dvh-5.5rem))] overflow-y-auto overscroll-contain p-3 [-webkit-overflow-scrolling:touch]">
               <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${sections.length}, minmax(0, 1fr))` }}>

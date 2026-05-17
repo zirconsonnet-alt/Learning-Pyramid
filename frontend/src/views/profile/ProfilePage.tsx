@@ -206,9 +206,9 @@ function LearningViewSelect(props: {
   const { id, label, value, disabled, onChange, options } = props
 
   return (
-    <label htmlFor={id} className="space-y-1">
+    <label htmlFor={id} className="block min-w-0 space-y-1">
       <div className="text-[10px] uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">{label}</div>
-      <div className="relative min-w-[8.5rem]">
+      <div className="relative min-w-0 sm:min-w-[8.5rem]">
         <select
           id={id}
           value={value}
@@ -634,21 +634,21 @@ export function ProfilePage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl">
-      <div className="grid gap-6 xl:grid-cols-[minmax(21rem,25rem)_minmax(0,1fr)] xl:items-start">
-        <section className="order-2 xl:order-2">
+    <div className="mx-auto min-w-0 max-w-6xl">
+      <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(21rem,25rem)_minmax(0,1fr)] xl:items-start">
+        <section className="order-2 min-w-0 xl:order-2">
           <div className="space-y-6">
-            <div className="theme-card-main overflow-hidden">
-              <div className="theme-card-header px-6 py-5">
-                <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                  <div>
+            <div className="theme-card-main min-w-0 overflow-hidden">
+              <div className="theme-card-header px-4 py-5 sm:px-6">
+                <div className="flex min-w-0 flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                  <div className="min-w-0">
                     <div className="text-[11px] uppercase tracking-[0.18em] text-[color:var(--theme-subtle-text)]">Learning View</div>
                     <div className="mt-2 flex items-center gap-2 text-2xl font-semibold tracking-tight text-foreground">
                       <Activity className="h-5 w-5 text-primary" />
                       学习视图
                     </div>
                   </div>
-                  <div className="grid gap-2 sm:grid-cols-3">
+                  <div className="grid min-w-0 gap-2 sm:grid-cols-3">
                     <LearningViewSelect
                       id="learning-project-scope"
                       label="项目"
@@ -686,7 +686,7 @@ export function ProfilePage() {
                 </div>
               </div>
 
-              <div className="space-y-5 px-6 py-6">
+              <div className="space-y-5 px-4 py-5 sm:px-6 sm:py-6">
                 {learningViewError ? (
                   <div className="theme-warm-surface rounded-[1.3rem] px-4 py-3 text-sm leading-6">
                     学习视图加载失败：{formatApiError(learningViewError)}
@@ -718,9 +718,9 @@ export function ProfilePage() {
           </div>
         </section>
 
-        <aside className="order-1 xl:order-1 xl:sticky xl:top-28 xl:self-start">
-          <div className="theme-card-main overflow-hidden">
-            <div className="theme-card-header px-6 py-5">
+        <aside className="order-1 min-w-0 xl:order-1 xl:sticky xl:top-28 xl:self-start">
+          <div className="theme-card-main min-w-0 overflow-hidden">
+            <div className="theme-card-header px-4 py-5 sm:px-6">
               <div className="flex items-start gap-4">
                 <div>
                   <AccountMenuPageTitle eyebrow="Profile Card" title="账户信息" />
@@ -728,15 +728,15 @@ export function ProfilePage() {
               </div>
             </div>
 
-            <div className="space-y-6 px-6 py-6">
-              <div className="theme-soft-surface rounded-[1.8rem] p-5">
-                <div className="flex items-start gap-4">
+            <div className="space-y-6 px-4 py-5 sm:px-6 sm:py-6">
+              <div className="theme-soft-surface rounded-[1.8rem] p-4 sm:p-5">
+                <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start">
                   <input ref={avatarInputRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={onSelectAvatar} />
                   <button
                     type="button"
                     onClick={() => avatarInputRef.current?.click()}
                     disabled={uploadAvatar.isPending}
-                    className="group relative flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-[1.7rem] border border-[color:var(--theme-subtle-border)] bg-[color:var(--theme-subtle-bg)] text-3xl font-semibold text-[color:var(--theme-subtle-text)] transition hover:border-primary/20 hover:shadow-[var(--theme-soft-shadow)] disabled:cursor-wait"
+                    className="group relative flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-[1.45rem] border border-[color:var(--theme-subtle-border)] bg-[color:var(--theme-subtle-bg)] text-2xl font-semibold text-[color:var(--theme-subtle-text)] transition hover:border-primary/20 hover:shadow-[var(--theme-soft-shadow)] disabled:cursor-wait sm:h-24 sm:w-24 sm:rounded-[1.7rem] sm:text-3xl"
                     aria-label={uploadAvatar.isPending ? "头像上传中" : "点击修改头像"}
                     title={uploadAvatar.isPending ? "头像上传中..." : "点击修改头像"}
                   >
@@ -751,7 +751,7 @@ export function ProfilePage() {
                     </div>
                   </button>
                   <div className="min-w-0 flex-1 space-y-2">
-                    <div className="flex items-start justify-between gap-4">
+                    <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
                       <div className="min-w-0 flex-1">
                         {isProfileEditing ? (
                           <Input
@@ -759,13 +759,13 @@ export function ProfilePage() {
                             onChange={(event) => updateDraft("nickname", event.target.value)}
                             onKeyDown={onProfileFieldKeyDown}
                             maxLength={40}
-                            className="inline-flex h-auto min-w-[8rem] max-w-full rounded-none border-0 bg-transparent px-0 py-0 text-2xl font-semibold tracking-tight text-foreground shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                            className="inline-flex h-auto min-w-0 max-w-full rounded-none border-0 bg-transparent px-0 py-0 text-2xl font-semibold tracking-tight text-foreground shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 sm:min-w-[8rem]"
                           />
                         ) : (
                           <div className="truncate text-2xl font-semibold tracking-tight text-foreground">{nickname || "未设置昵称"}</div>
                         )}
                         <div className="mt-2 font-mono text-sm font-medium text-[color:var(--theme-subtle-text)]">UID {profile.publicUid}</div>
-                        <div className="mt-1 whitespace-nowrap text-sm leading-6 text-muted-foreground">
+                        <div className="mt-1 text-sm leading-6 text-muted-foreground sm:whitespace-nowrap">
                           注册时间 {formatDateTimeLabel(profile.createdAt).split(" ")[0]}
                         </div>
                       </div>
