@@ -163,10 +163,11 @@ export function buildCurveGeometry<T extends { dateKey: string }>(
   width: number,
   height: number,
   getValue: (point: T) => number,
+  options: { paddingX?: number; paddingTop?: number; paddingBottom?: number } = {},
 ) {
-  const paddingX = 44
-  const paddingTop = 16
-  const paddingBottom = 34
+  const paddingX = options.paddingX ?? 44
+  const paddingTop = options.paddingTop ?? 16
+  const paddingBottom = options.paddingBottom ?? 34
   const innerWidth = width - paddingX * 2
   const innerHeight = height - paddingTop - paddingBottom
   const maxValue = Math.max(...points.map((point) => Math.max(0, getValue(point))), 1)

@@ -85,6 +85,41 @@ test("project mobile navigation stays within the viewport", async ({ page }) => 
   expectNoConsoleIssues(consoleIssues)
 })
 
+test("mobile account menu aligns with the header row", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page)
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto("/profile")
+  await expectHealthyPage(page, /\/profile$/)
+
+  const header = page.locator("header.theme-shell-header")
+  await header.getByRole("button", { name: "打开账号菜单" }).click()
+
+  const accountMenu = header.locator("[aria-label='账号菜单']")
+  await expect(accountMenu).toBeVisible()
+
+  const layout = await page.evaluate(() => {
+    const viewportWidth = window.innerWidth
+    const headerRow = document.querySelector("header.theme-shell-header .container > .relative")?.getBoundingClientRect()
+    const menu = document.querySelector("header.theme-shell-header [aria-label='账号菜单']")?.getBoundingClientRect()
+    return {
+      viewportWidth,
+      scrollWidth: Math.max(document.body.scrollWidth, document.documentElement.scrollWidth),
+      headerLeft: headerRow ? Math.floor(headerRow.left) : null,
+      headerRight: headerRow ? Math.ceil(headerRow.right) : null,
+      menuLeft: menu ? Math.floor(menu.left) : null,
+      menuRight: menu ? Math.ceil(menu.right) : null,
+    }
+  })
+
+  expect(layout.scrollWidth, JSON.stringify(layout, null, 2)).toBeLessThanOrEqual(layout.viewportWidth)
+  expect(layout.menuLeft).toBe(layout.headerLeft)
+  expect(layout.menuRight).toBe(layout.headerRight)
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
 test("home and guide surface the stable-use FAQ and onboarding guide entries", async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
   await installMockApi(page)
@@ -140,6 +175,50 @@ test("profile mobile layout aligns with the header without horizontal overflow",
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto("/profile")
   await expect(page.getByText("账户信息", { exact: true })).toBeVisible()
+  await expect(page.locator("[data-profile-learning-chart]")).toBeVisible()
+
+  await expect.poll(async () => {
+    return page.evaluate(() => {
+      const chart = document.querySelector("[data-profile-learning-chart]") as SVGSVGElement | null
+      const chartBox = chart?.getBoundingClientRect()
+      const chartFrame = chart?.parentElement
+      const frameStyle = chartFrame ? window.getComputedStyle(chartFrame) : null
+      const renderedWidth = chartBox ? Math.round(chartBox.width) : 0
+      const frameContentWidth =
+        chartFrame && frameStyle
+          ? Math.floor(
+              chartFrame.clientWidth - Number.parseFloat(frameStyle.paddingLeft) - Number.parseFloat(frameStyle.paddingRight),
+            )
+          : 0
+      const viewBoxWidth = chart?.viewBox.baseVal.width ?? 0
+      return Boolean(
+        renderedWidth > 0 &&
+        viewBoxWidth < 640 &&
+        Math.abs(viewBoxWidth - frameContentWidth) <= 4 &&
+        chart?.getAttribute("preserveAspectRatio") === "xMidYMid meet",
+      )
+    })
+  }).toBe(true)
+
+  const chartLayout = await page.evaluate(() => {
+    const chart = document.querySelector("[data-profile-learning-chart]") as SVGSVGElement | null
+    const chartBox = chart?.getBoundingClientRect()
+    const chartFrame = chart?.parentElement
+    const frameStyle = chartFrame ? window.getComputedStyle(chartFrame) : null
+    return {
+      renderedWidth: chartBox ? Math.round(chartBox.width) : 0,
+      frameContentWidth:
+        chartFrame && frameStyle
+          ? Math.floor(
+              chartFrame.clientWidth - Number.parseFloat(frameStyle.paddingLeft) - Number.parseFloat(frameStyle.paddingRight),
+            )
+          : 0,
+      viewBoxWidth: chart?.viewBox.baseVal.width ?? 0,
+    }
+  })
+  expect(chartLayout.renderedWidth, JSON.stringify(chartLayout, null, 2)).toBeGreaterThan(0)
+  expect(chartLayout.viewBoxWidth, JSON.stringify(chartLayout, null, 2)).toBeLessThan(640)
+  expect(Math.abs(chartLayout.viewBoxWidth - chartLayout.frameContentWidth), JSON.stringify(chartLayout, null, 2)).toBeLessThanOrEqual(4)
 
   const layout = await page.evaluate(() => {
     const viewportWidth = window.innerWidth
@@ -163,9 +242,13 @@ test("profile mobile layout aligns with the header without horizontal overflow",
   })
 
   expect(layout.scrollWidth, JSON.stringify(layout, null, 2)).toBeLessThanOrEqual(layout.viewportWidth)
+  expect(layout.headerLeft).toBe(16)
+  expect(layout.headerRight).toBe(layout.viewportWidth - 16)
   for (const card of layout.cards) {
     expect(card.left).toBeGreaterThanOrEqual(layout.headerLeft ?? 0)
     expect(card.right).toBeLessThanOrEqual(layout.headerRight ?? layout.viewportWidth)
+    expect(card.left).toBeLessThanOrEqual(16)
+    expect(card.right).toBeGreaterThanOrEqual(layout.viewportWidth - 16)
   }
 
   expectNoConsoleIssues(consoleIssues)

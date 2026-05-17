@@ -938,7 +938,7 @@ export function AppShell() {
         />
       ) : null}
       <header className="theme-shell-header sticky top-0 z-20 backdrop-blur-2xl">
-        <div className="container py-2.5">
+        <div className="container px-4 py-2.5 sm:px-8">
           <div className="relative flex w-full items-center gap-3 sm:gap-4">
             <MobileHeaderNav
               sections={mobileNavSections}
@@ -1050,7 +1050,7 @@ export function AppShell() {
 
               {authEnabled && currentUserQ.data ? (
                 <div
-                  className="relative shrink-0"
+                  className="shrink-0 sm:relative"
                   onMouseEnter={openAccountMenu}
                   onMouseLeave={() => setAccountMenuOpen(false)}
                   onFocusCapture={openAccountMenu}
@@ -1080,7 +1080,8 @@ export function AppShell() {
                   {accountMenuOpen ? (
                     <div
                       ref={accountMenuRef}
-                      className="absolute right-0 top-full z-30 w-[min(18rem,calc(100vw-1rem))] pt-2.5"
+                      aria-label="账号菜单"
+                      className="absolute inset-x-0 top-full z-30 pt-2.5 sm:inset-x-auto sm:right-0 sm:w-[min(18rem,calc(100vw-1rem))]"
                     >
                       <div className="overflow-hidden rounded-[1.6rem] border [border-color:var(--theme-soft-border)] [background:radial-gradient(circle_at_top_left,hsl(var(--primary)/0.08),transparent_34%),var(--theme-card-main-bg)] shadow-[0_24px_60px_-30px_rgba(15,23,42,0.24)] backdrop-blur-2xl">
                         <div className="p-4">
@@ -1125,7 +1126,7 @@ export function AppShell() {
         </div>
       </header>
 
-      <main className="container relative z-10 py-5 lg:py-6">
+      <main className="container relative z-10 px-4 py-5 sm:px-8 lg:py-6">
         {outletContent}
       </main>
     </div>

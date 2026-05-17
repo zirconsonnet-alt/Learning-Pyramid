@@ -1,4 +1,4 @@
-import { type ChangeEvent, type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react"
+import { type ChangeEvent, type KeyboardEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useQueries } from "@tanstack/react-query"
 import { Activity, Camera, ChevronDown, KeyRound, Mail, Save } from "lucide-react"
 
@@ -237,15 +237,40 @@ function LearningCurve(props: {
   onSelectMetric: (metric: LearningMetric) => void
 }) {
   const { points, metric, range, onSelectMetric } = props
-  const chartWidth = 640
-  const chartHeight = 236
+  const chartFrameRef = useRef<HTMLDivElement | null>(null)
+  const [chartFrameWidth, setChartFrameWidth] = useState(0)
+  const chartWidth = chartFrameWidth > 0 ? Math.max(240, Math.round(chartFrameWidth)) : 640
+  const chartHeight = chartWidth < 420 ? 220 : 236
+  const chartPaddingX = chartWidth < 420 ? 30 : 44
+  const chartAxisLabelX = chartPaddingX - 8
   const selectedOption = getLearningMetricOption(metric)
   const metricLabel = selectedOption.label
   const selectedMaxValue = Math.max(...points.map((point) => Math.max(0, getLearningMetricValue(point, metric))), 1)
+
+  useLayoutEffect(() => {
+    const frame = chartFrameRef.current
+    if (!frame) return
+    const frameElement = frame
+
+    function updateWidth() {
+      const style = window.getComputedStyle(frameElement)
+      const horizontalPadding = Number.parseFloat(style.paddingLeft) + Number.parseFloat(style.paddingRight)
+      setChartFrameWidth(Math.max(0, Math.floor(frameElement.clientWidth - horizontalPadding)))
+    }
+
+    updateWidth()
+
+    const observer = new ResizeObserver(updateWidth)
+    observer.observe(frameElement)
+    return () => observer.disconnect()
+  }, [])
+
   const geometryByMetric = Object.fromEntries(
     learningMetricOptions.map((option) => [
       option.value,
-      buildCurveGeometry(points, chartWidth, chartHeight, (point) => getLearningMetricValue(point, option.value)),
+      buildCurveGeometry(points, chartWidth, chartHeight, (point) => getLearningMetricValue(point, option.value), {
+        paddingX: chartPaddingX,
+      }),
     ]),
   ) as Record<LearningMetric, ReturnType<typeof buildCurveGeometry<DailyStatPoint>>>
   const selectedGeometry = geometryByMetric[metric]
@@ -256,8 +281,14 @@ function LearningCurve(props: {
 
   return (
     <div className="space-y-4">
-      <div className="theme-subtle-surface overflow-hidden rounded-[1.4rem] px-3 py-4">
-        <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="h-56 w-full" preserveAspectRatio="none" aria-hidden="true">
+      <div ref={chartFrameRef} className="theme-subtle-surface overflow-hidden rounded-[1.4rem] px-2 py-4 sm:px-3">
+        <svg
+          viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+          className="h-[220px] w-full sm:h-56"
+          preserveAspectRatio="xMidYMid meet"
+          aria-hidden="true"
+          data-profile-learning-chart
+        >
           <defs>
             <linearGradient id={selectedGradientId} x1="0%" y1="0%" x2="0%" y2="100%">
               <stop offset="0%" stopColor={selectedOption.fillStart} />
@@ -268,14 +299,14 @@ function LearningCurve(props: {
           {selectedGeometry.gridLines.map((lineY, index) => (
             <g key={`grid-${index}`}>
               <line
-                x1="44"
-                x2={chartWidth - 44}
+                x1={chartPaddingX}
+                x2={chartWidth - chartPaddingX}
                 y1={lineY}
                 y2={lineY}
                 stroke="var(--theme-soft-border)"
                 strokeDasharray="6 8"
               />
-              <text x="36" y={lineY + 4} textAnchor="end" fontSize="11" fill="var(--theme-subtle-text)">
+              <text x={chartAxisLabelX} y={lineY + 4} textAnchor="end" fontSize="11" fill="var(--theme-subtle-text)">
                 {gridLabels[index]}
               </text>
             </g>
