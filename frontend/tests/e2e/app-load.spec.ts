@@ -98,6 +98,7 @@ test("home mobile carousel uses swipe and two compact columns", async ({ page })
   expect(mobileCarouselLayout.scrollWidth, JSON.stringify(mobileCarouselLayout, null, 2)).toBeLessThanOrEqual(mobileCarouselLayout.viewportWidth)
   expect(mobileCarouselLayout.slideWidth, JSON.stringify(mobileCarouselLayout, null, 2)).toBe(mobileCarouselLayout.viewportWidthPx)
   expect(mobileCarouselLayout.firstRowCount, JSON.stringify(mobileCarouselLayout, null, 2)).toBe(2)
+  await expect(carousel).toHaveCSS("touch-action", "pan-y")
   for (const pointWidth of mobileCarouselLayout.pointWidths) {
     expect(pointWidth, JSON.stringify(mobileCarouselLayout, null, 2)).toBeLessThanOrEqual(170)
   }
@@ -105,46 +106,32 @@ test("home mobile carousel uses swipe and two compact columns", async ({ page })
   await expect(page.getByText("01 / 04")).toBeVisible()
   const box = await carousel.boundingBox()
   if (!box) throw new Error("home carousel did not render")
-  await page.evaluate(({ startX, endX, y }) => {
-    const viewport = document.querySelector(".lp-showcase-carousel-viewport") as HTMLElement | null
-    if (!viewport) throw new Error("home carousel did not render")
-    const pointerId = 7
-    viewport.dispatchEvent(
-      new PointerEvent("pointerdown", {
-        bubbles: true,
-        cancelable: true,
-        clientX: startX,
-        clientY: y,
-        pointerId,
-        pointerType: "touch",
-      }),
-    )
-    viewport.dispatchEvent(
-      new PointerEvent("pointermove", {
-        bubbles: true,
-        cancelable: true,
-        clientX: endX,
-        clientY: y,
-        pointerId,
-        pointerType: "touch",
-      }),
-    )
-    viewport.dispatchEvent(
-      new PointerEvent("pointerup", {
-        bubbles: true,
-        cancelable: true,
-        clientX: endX,
-        clientY: y,
-        pointerId,
-        pointerType: "touch",
-      }),
-    )
-  }, {
-    startX: box.x + box.width * 0.72,
-    endX: box.x + box.width * 0.22,
-    y: box.y + box.height * 0.5,
-  })
+  const touchClient = await page.context().newCDPSession(page)
+  const y = Math.round(box.y + box.height * 0.5)
+  async function swipeCarousel(startRatio: number, endRatio: number) {
+    const startX = Math.round(box.x + box.width * startRatio)
+    const endX = Math.round(box.x + box.width * endRatio)
+    await touchClient.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [{ x: startX, y, id: 1 }],
+    })
+    for (let step = 1; step <= 8; step += 1) {
+      const x = Math.round(startX + ((endX - startX) * step) / 8)
+      await touchClient.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [{ x, y, id: 1 }],
+      })
+    }
+    await touchClient.send("Input.dispatchTouchEvent", {
+      type: "touchEnd",
+      touchPoints: [],
+    })
+  }
+
+  await swipeCarousel(0.72, 0.22)
   await expect(page.getByText("02 / 04")).toBeVisible()
+  await swipeCarousel(0.22, 0.72)
+  await expect(page.getByText("01 / 04")).toBeVisible()
 
   expectNoConsoleIssues(consoleIssues)
 })

@@ -276,6 +276,7 @@ export function HomePage() {
     if (event.pointerType === "mouse") return
     reasonPointerStartXRef.current = event.clientX
     reasonPointerLastXRef.current = event.clientX
+    event.currentTarget.setPointerCapture(event.pointerId)
     setIsReasonCarouselPaused(true)
   }
 
@@ -290,6 +291,9 @@ export function HomePage() {
     const lastX = reasonPointerLastXRef.current
     reasonPointerStartXRef.current = null
     reasonPointerLastXRef.current = null
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
     setIsReasonCarouselPaused(false)
     if (startX === null || lastX === null) return
 
@@ -306,6 +310,9 @@ export function HomePage() {
     if (event.pointerType === "mouse") return
     reasonPointerStartXRef.current = null
     reasonPointerLastXRef.current = null
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
     setIsReasonCarouselPaused(false)
   }
 
