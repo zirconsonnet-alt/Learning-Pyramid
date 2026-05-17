@@ -2918,18 +2918,141 @@
       box-shadow: 0 16px 34px -24px hsl(var(--primary) / 0.5);
     }
 
+    .lp-showcase-method-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .lp-showcase-method-grid .lp-showcase-method-card {
+      padding: 10px;
+      border-radius: 16px;
+    }
+
     .lp-showcase-method-card-head {
       flex-direction: column;
+      gap: 8px;
+      height: 100%;
+    }
+
+    .lp-showcase-method-card-copy {
+      gap: 6px;
+      min-width: 0;
+    }
+
+    .lp-showcase-method-card-copy .lp-showcase-feature-icon {
+      display: none;
+    }
+
+    .lp-showcase-method-card-copy h3 {
+      margin: 0;
+      font-size: 14px;
+      line-height: 1.25;
+    }
+
+    .lp-showcase-method-card-copy p {
+      font-size: 11px;
+      line-height: 1.38;
+      display: -webkit-box;
+      overflow: hidden;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
     }
 
     .lp-showcase-method-card-visual {
       width: 100%;
-      max-width: none;
+      max-width: 82px;
       min-width: 0;
+      margin: auto auto 0;
+      border-radius: 12px;
     }
 
     .lp-showcase-membership-plan-grid {
-      grid-template-columns: 1fr;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .lp-showcase-membership-plans {
+      gap: 16px;
+    }
+
+    .lp-showcase-membership-price-block {
+      padding: 12px;
+      border-radius: 16px;
+    }
+
+    .lp-showcase-membership-price-block h3 {
+      margin-bottom: 8px;
+      font-size: 16px;
+      line-height: 1.25;
+    }
+
+    .lp-showcase-membership-price-block .lp-showcase-price {
+      gap: 6px;
+      margin: 8px 0 6px;
+      flex-wrap: wrap;
+    }
+
+    .lp-showcase-membership-price-block .lp-showcase-price strong {
+      font-size: 32px;
+    }
+
+    .lp-showcase-membership-price-block .lp-showcase-price span {
+      font-size: 12px;
+    }
+
+    .lp-showcase-membership-plan-note {
+      font-size: 11px;
+      line-height: 1.35;
+    }
+
+    .lp-showcase-onboarding-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .lp-showcase-onboarding-grid .lp-showcase-step {
+      padding: 14px;
+      border-radius: 16px;
+    }
+
+    .lp-showcase-onboarding-grid .lp-showcase-step-no {
+      display: none;
+    }
+
+    .lp-showcase-onboarding-grid .lp-showcase-step-ribbon {
+      position: static;
+      transform: none;
+      width: fit-content;
+      margin-bottom: 8px;
+      padding: 4px 7px;
+      border-radius: 999px;
+      font-size: 10px;
+      line-height: 1;
+      box-shadow: none;
+    }
+
+    .lp-showcase-onboarding-grid .lp-showcase-step h3 {
+      margin-bottom: 6px;
+      font-size: 15px;
+      line-height: 1.28;
+    }
+
+    .lp-showcase-onboarding-grid .lp-showcase-step p {
+      font-size: 12px;
+      line-height: 1.45;
+      display: -webkit-box;
+      overflow: hidden;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+    }
+
+    .lp-showcase-onboarding-grid .lp-showcase-step-action {
+      min-height: 34px;
+      margin-top: 12px;
+      padding: 0 10px;
+      border-radius: 12px;
+      font-size: 12px;
+      line-height: 1;
     }
 
     .lp-showcase-nav-links {

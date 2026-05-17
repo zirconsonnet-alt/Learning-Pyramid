@@ -136,6 +136,73 @@ test("home mobile carousel uses swipe and two compact columns", async ({ page })
   expectNoConsoleIssues(consoleIssues)
 })
 
+test("home mobile content sections use compact grids", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page)
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto("/")
+  await expectHealthyPage(page, /\/$/)
+
+  const methodGrid = page.locator(".lp-showcase-method-grid")
+  const onboardingGrid = page.locator(".lp-showcase-onboarding-grid")
+  const membershipPlanGrid = page.locator(".lp-showcase-membership-plan-grid")
+  await expect(methodGrid).toBeVisible()
+  await expect(onboardingGrid).toBeVisible()
+  await expect(membershipPlanGrid).toBeVisible()
+
+  const compactLayout = await page.evaluate(() => {
+    function allHidden(selector: string) {
+      const items = Array.from(document.querySelectorAll(selector))
+      return items.length > 0 && items.every((element) => window.getComputedStyle(element).display === "none")
+    }
+
+    function firstRowCount(selector: string) {
+      const items = Array.from(document.querySelectorAll(selector)).map((element) => {
+        const rect = element.getBoundingClientRect()
+        return {
+          left: Math.round(rect.left),
+          right: Math.round(rect.right),
+          top: Math.round(rect.top),
+          width: Math.round(rect.width),
+        }
+      })
+      return {
+        items,
+        count: items.filter((item) => item.top === items[0]?.top).length,
+      }
+    }
+
+    const method = firstRowCount(".lp-showcase-method-grid > .lp-showcase-method-card")
+    const onboarding = firstRowCount(".lp-showcase-onboarding-grid > .lp-showcase-step")
+    const membershipPlans = firstRowCount(".lp-showcase-membership-plan-grid > .lp-showcase-membership-price-block")
+    return {
+      viewportWidth: window.innerWidth,
+      scrollWidth: Math.max(document.body.scrollWidth, document.documentElement.scrollWidth),
+      methodIconsHidden: allHidden(".lp-showcase-method-grid .lp-showcase-feature-icon"),
+      onboardingNumbersHidden: allHidden(".lp-showcase-onboarding-grid .lp-showcase-step-no"),
+      method,
+      onboarding,
+      membershipPlans,
+    }
+  })
+
+  expect(compactLayout.scrollWidth, JSON.stringify(compactLayout, null, 2)).toBeLessThanOrEqual(compactLayout.viewportWidth)
+  expect(compactLayout.methodIconsHidden, JSON.stringify(compactLayout, null, 2)).toBe(true)
+  expect(compactLayout.onboardingNumbersHidden, JSON.stringify(compactLayout, null, 2)).toBe(true)
+  expect(compactLayout.method.count, JSON.stringify(compactLayout, null, 2)).toBe(3)
+  expect(compactLayout.onboarding.count, JSON.stringify(compactLayout, null, 2)).toBe(2)
+  expect(compactLayout.membershipPlans.count, JSON.stringify(compactLayout, null, 2)).toBe(2)
+  for (const item of compactLayout.method.items) {
+    expect(item.width, JSON.stringify(compactLayout, null, 2)).toBeLessThanOrEqual(120)
+  }
+  for (const item of compactLayout.membershipPlans.items) {
+    expect(item.width, JSON.stringify(compactLayout, null, 2)).toBeGreaterThanOrEqual(130)
+  }
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
 test("project mobile navigation stays within the viewport", async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
   await installMockApi(page)

@@ -413,7 +413,7 @@ export function HomePage() {
             <div className="lp-showcase-section-head">
               <h2>方法</h2>
             </div>
-            <div className="lp-showcase-grid-3">
+            <div className="lp-showcase-grid-3 lp-showcase-method-grid">
               {mechanismCards.map((item) => (
                 <article key={item.title} className="lp-showcase-feature lp-showcase-method-card">
                   <div className="lp-showcase-method-card-head">
@@ -437,7 +437,7 @@ export function HomePage() {
             <div className="lp-showcase-section-head">
               <h2>改变，从现在开始</h2>
             </div>
-            <div className="lp-showcase-steps-grid">
+            <div className="lp-showcase-steps-grid lp-showcase-onboarding-grid">
               {guideEntryLinks.map((item) => (
                 <article key={item.index} className="lp-showcase-step" data-access={item.access}>
                   <div className="lp-showcase-step-ribbon">{item.access === "free" ? "免费功能" : "会员功能"}</div>
