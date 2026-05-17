@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react"
-import { ChevronDown, CreditCard, LogOut, Sparkles, TimerReset, User, UsersRound, type LucideIcon } from "lucide-react"
+import { ChevronDown, CreditCard, LogOut, Menu, Sparkles, TimerReset, User, UsersRound, type LucideIcon } from "lucide-react"
 import { Link, Navigate, NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router-dom"
 import "driver.js/dist/driver.css"
 
@@ -167,6 +167,79 @@ function isNavGroupActive(pathname: string, items: NavItem[]) {
   return items.some((item) => matchesNavPath(pathname, item.to))
 }
 
+type MobileNavSectionKey = "global" | "subject" | "project"
+
+type MobileNavSection = {
+  key: MobileNavSectionKey
+  label: string
+  title: string
+  items: NavItem[]
+  isActive: boolean
+}
+
+function MobileHeaderNav(props: {
+  sections: MobileNavSection[]
+  activeSectionKey: MobileNavSectionKey
+  isOpen: boolean
+  buttonRef: RefObject<HTMLButtonElement>
+  menuRef: RefObject<HTMLDivElement>
+  onToggle: () => void
+  onSelectSection: (key: MobileNavSectionKey) => void
+  onClose: () => void
+}) {
+  const { sections, activeSectionKey, isOpen, buttonRef, menuRef, onToggle, onSelectSection, onClose } = props
+  const activeSection = sections.find((section) => section.key === activeSectionKey) ?? sections[0] ?? null
+
+  return (
+    <div className="relative shrink-0 md:hidden">
+      <button
+        ref={buttonRef}
+        type="button"
+        className={cn(
+          "inline-flex h-10 w-10 items-center justify-center rounded-xl border [border-color:var(--theme-soft-border)] [background:var(--theme-soft-bg)] [box-shadow:var(--theme-soft-shadow)] transition-colors",
+          isOpen ? "text-foreground" : "text-[color:var(--theme-soft-text-strong)]",
+        )}
+        onClick={onToggle}
+        aria-expanded={isOpen}
+        aria-haspopup="menu"
+        aria-label="打开导航"
+      >
+        <Menu className="h-5 w-5" />
+      </button>
+
+      {isOpen && activeSection ? (
+        <div ref={menuRef} className="absolute left-0 top-full z-30 w-[min(22rem,calc(100vw-1rem))] pt-2.5">
+          <nav aria-label="移动导航" className="overflow-hidden rounded-[1.25rem] border [border-color:var(--theme-soft-border)] [background:var(--theme-card-main-bg)] shadow-[0_24px_60px_-30px_rgba(15,23,42,0.24)] backdrop-blur-2xl">
+            <div className="max-h-[min(72vh,calc(100dvh-5.5rem))] overflow-y-auto overscroll-contain p-3 [-webkit-overflow-scrolling:touch]">
+              <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${sections.length}, minmax(0, 1fr))` }}>
+                {sections.map((section) => (
+                  <button
+                    key={section.key}
+                    type="button"
+                    className={cn(
+                      "min-h-10 rounded-xl border px-2 text-center text-[13px] font-medium transition-colors",
+                      activeSection.key === section.key
+                        ? "border-primary/15 bg-[hsl(var(--primary)/0.08)] text-foreground"
+                        : "border-transparent text-[color:var(--theme-subtle-text)] hover:bg-[color:var(--theme-soft-bg)] hover:text-foreground",
+                    )}
+                    onClick={() => onSelectSection(section.key)}
+                  >
+                    {section.label}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-3 border-t border-border/60 pt-3">
+                <div className="mb-1 truncate px-1 text-sm font-medium text-foreground">{activeSection.title}</div>
+                <MainNav items={activeSection.items} onNavigate={onClose} />
+              </div>
+            </div>
+          </nav>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function HeaderNavDropdown(props: {
   section: string
   title: string
@@ -308,6 +381,8 @@ export function AppShell() {
   const [globalMenuOpen, setGlobalMenuOpen] = useState(false)
   const [subjectMenuOpen, setSubjectMenuOpen] = useState(false)
   const [projectMenuOpen, setProjectMenuOpen] = useState(false)
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const [mobileNavSectionKey, setMobileNavSectionKey] = useState<MobileNavSectionKey>("global")
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
   const capabilitiesQ = useSystemCapabilities()
   const authEnabled = capabilitiesQ.data?.authEnabled ?? false
@@ -426,6 +501,8 @@ export function AppShell() {
   const subjectMenuButtonRef = useRef<HTMLButtonElement | null>(null)
   const projectMenuRef = useRef<HTMLDivElement | null>(null)
   const projectMenuButtonRef = useRef<HTMLButtonElement | null>(null)
+  const mobileNavRef = useRef<HTMLDivElement | null>(null)
+  const mobileNavButtonRef = useRef<HTMLButtonElement | null>(null)
   const accountMenuRef = useRef<HTMLDivElement | null>(null)
   const accountMenuButtonRef = useRef<HTMLButtonElement | null>(null)
   const completedPomodoroSegmentKeyRef = useRef("")
@@ -455,6 +532,27 @@ export function AppShell() {
   const globalMenuActive = isNavGroupActive(location.pathname, globalNavItems)
   const subjectMenuActive = isNavGroupActive(location.pathname, subjectNavItems)
   const projectMenuActive = isNavGroupActive(location.pathname, projectNavItems)
+  const mobileNavSections = useMemo(() => {
+    const sections: MobileNavSection[] = [
+      { key: "global", label: "全局", title: "系统", items: globalNavItems, isActive: globalMenuActive },
+    ]
+    if (subjectNavItems.length > 0) {
+      sections.push({ key: "subject", label: "学科", title: subjectTitle, items: subjectNavItems, isActive: subjectMenuActive })
+    }
+    if (projectNavItems.length > 0) {
+      sections.push({ key: "project", label: "项目", title: currentMaterialTitle, items: projectNavItems, isActive: projectMenuActive })
+    }
+    return sections
+  }, [currentMaterialTitle, globalMenuActive, globalNavItems, projectMenuActive, projectNavItems, subjectMenuActive, subjectNavItems, subjectTitle])
+  const routeMobileNavSectionKey = useMemo(() => {
+    if (projectMenuActive && mobileNavSections.some((section) => section.key === "project")) return "project"
+    if (subjectMenuActive && mobileNavSections.some((section) => section.key === "subject")) return "subject"
+    return mobileNavSections.find((section) => section.isActive)?.key ?? mobileNavSections[0]?.key ?? "global"
+  }, [mobileNavSections, projectMenuActive, subjectMenuActive])
+  const activeMobileNavSectionKey = useMemo(() => {
+    if (mobileNavOpen && mobileNavSections.some((section) => section.key === mobileNavSectionKey)) return mobileNavSectionKey
+    return routeMobileNavSectionKey
+  }, [mobileNavOpen, mobileNavSectionKey, mobileNavSections, routeMobileNavSectionKey])
   const pomodoroSnapshot = useMemo(
     () => getPomodoroSnapshot({ enabled: pomodoroEnabled, weeklySchedule: pomodoroWeeklySchedule, quickPomodoro: pomodoroQuickPomodoro }, pomodoroNow),
     [pomodoroEnabled, pomodoroNow, pomodoroQuickPomodoro, pomodoroWeeklySchedule],
@@ -659,13 +757,14 @@ export function AppShell() {
       setGlobalMenuOpen(false)
       setSubjectMenuOpen(false)
       setProjectMenuOpen(false)
+      setMobileNavOpen(false)
       setAccountMenuOpen(false)
     })
     return () => window.cancelAnimationFrame(frame)
   }, [locationToken])
 
   useEffect(() => {
-    if (!globalMenuOpen && !subjectMenuOpen && !projectMenuOpen && !accountMenuOpen) return
+    if (!globalMenuOpen && !subjectMenuOpen && !projectMenuOpen && !mobileNavOpen && !accountMenuOpen) return
 
     function onPointerDown(event: MouseEvent | TouchEvent) {
       const target = event.target
@@ -673,11 +772,13 @@ export function AppShell() {
       const withinGlobalMenu = globalMenuRef.current?.contains(target) || globalMenuButtonRef.current?.contains(target)
       const withinSubjectMenu = subjectMenuRef.current?.contains(target) || subjectMenuButtonRef.current?.contains(target)
       const withinProjectMenu = projectMenuRef.current?.contains(target) || projectMenuButtonRef.current?.contains(target)
+      const withinMobileNav = mobileNavRef.current?.contains(target) || mobileNavButtonRef.current?.contains(target)
       const withinAccountMenu = accountMenuRef.current?.contains(target) || accountMenuButtonRef.current?.contains(target)
-      if (withinGlobalMenu || withinSubjectMenu || withinProjectMenu || withinAccountMenu) return
+      if (withinGlobalMenu || withinSubjectMenu || withinProjectMenu || withinMobileNav || withinAccountMenu) return
       setGlobalMenuOpen(false)
       setSubjectMenuOpen(false)
       setProjectMenuOpen(false)
+      setMobileNavOpen(false)
       setAccountMenuOpen(false)
     }
 
@@ -686,6 +787,7 @@ export function AppShell() {
         setGlobalMenuOpen(false)
         setSubjectMenuOpen(false)
         setProjectMenuOpen(false)
+        setMobileNavOpen(false)
         setAccountMenuOpen(false)
       }
     }
@@ -698,7 +800,7 @@ export function AppShell() {
       document.removeEventListener("touchstart", onPointerDown)
       document.removeEventListener("keydown", onKeyDown)
     }
-  }, [accountMenuOpen, globalMenuOpen, projectMenuOpen, subjectMenuOpen])
+  }, [accountMenuOpen, globalMenuOpen, mobileNavOpen, projectMenuOpen, subjectMenuOpen])
 
   async function onLogout() {
     await logout.mutateAsync()
@@ -709,6 +811,7 @@ export function AppShell() {
     setGlobalMenuOpen(false)
     setSubjectMenuOpen(false)
     setProjectMenuOpen(false)
+    setMobileNavOpen(false)
     setAccountMenuOpen(true)
   }
 
@@ -716,6 +819,7 @@ export function AppShell() {
     setGlobalMenuOpen(false)
     setSubjectMenuOpen(false)
     setProjectMenuOpen(false)
+    setMobileNavOpen(false)
     if (typeof window !== "undefined" && window.matchMedia("(hover: hover)").matches) {
       setAccountMenuOpen(true)
       return
@@ -836,9 +940,26 @@ export function AppShell() {
       <header className="theme-shell-header sticky top-0 z-20 backdrop-blur-2xl">
         <div className="container py-2.5">
           <div className="relative flex w-full items-center gap-3 sm:gap-4">
+            <MobileHeaderNav
+              sections={mobileNavSections}
+              activeSectionKey={activeMobileNavSectionKey}
+              isOpen={mobileNavOpen}
+              buttonRef={mobileNavButtonRef}
+              menuRef={mobileNavRef}
+              onToggle={() => {
+                setGlobalMenuOpen(false)
+                setSubjectMenuOpen(false)
+                setProjectMenuOpen(false)
+                setAccountMenuOpen(false)
+                if (!mobileNavOpen) setMobileNavSectionKey(routeMobileNavSectionKey)
+                setMobileNavOpen((current) => !current)
+              }}
+              onSelectSection={setMobileNavSectionKey}
+              onClose={() => setMobileNavOpen(false)}
+            />
             <Link
               to="/"
-              className="inline-flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-[1.05rem] border border-white/75 bg-white p-1 shadow-[0_16px_34px_-26px_hsl(var(--primary)/0.4)] transition-all hover:-translate-y-px hover:shadow-[0_20px_40px_-26px_hsl(var(--primary)/0.46)]"
+              className="hidden h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-[1.05rem] border border-white/75 bg-white p-1 shadow-[0_16px_34px_-26px_hsl(var(--primary)/0.4)] transition-all hover:-translate-y-px hover:shadow-[0_20px_40px_-26px_hsl(var(--primary)/0.46)] sm:inline-flex"
               aria-label="查看公开首页"
               title="查看公开首页"
             >
@@ -847,12 +968,12 @@ export function AppShell() {
 
             <div className="min-w-0 flex-1">
               <div className="min-w-0">
-                <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                  <span className="text-[13px] font-semibold tracking-[0.04em] text-[color:var(--theme-soft-text-strong)]">LearningPyramid</span>
-                  <span className="text-xs text-muted-foreground">/</span>
+                <div className="flex min-w-0 items-center gap-x-2">
+                  <span className="min-w-0 shrink-0 text-[13px] font-semibold tracking-[0.04em] text-[color:var(--theme-soft-text-strong)]">LearningPyramid</span>
+                  <span className="hidden text-xs text-muted-foreground sm:inline">/</span>
                   <div className="min-w-0 truncate text-sm font-medium tracking-tight text-foreground sm:text-[15px]">{area.title}</div>
                 </div>
-                <div className="mt-0.5 min-w-0 truncate text-xs text-muted-foreground">{area.context}</div>
+                <div className="mt-0.5 hidden min-w-0 truncate text-xs text-muted-foreground sm:block">{area.context}</div>
               </div>
             </div>
 
@@ -870,7 +991,7 @@ export function AppShell() {
                 <span>{pomodoroShortcutText}</span>
               </Link>
 
-              <div className="flex min-w-0 items-center gap-2">
+              <div className="hidden min-w-0 items-center gap-2 md:flex">
                 <HeaderNavDropdown
                   section="全局"
                   title="系统"

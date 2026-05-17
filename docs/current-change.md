@@ -1,71 +1,79 @@
-# 当前变更：考研套餐禁用优惠券
+# 当前变更：手机端顶栏单行导航
 
 ## 当前用户要求
 
-- 将优惠券规则改为不能用于考研套餐。
-- 已确认采用“考研套餐禁用所有优惠券”，不是只限制 7.5 折邀请码券。
+- 全面优化手机端体验。
+- 手机端顶栏所有导航项收进品牌左侧三横线菜单。
+- 菜单通过选择一级、二级定位页面。
+- 首页和项目内顶栏都按同一思路处理。
+- 首页“进入项目”放到品牌右侧。
+- 项目内账号/头像放到品牌右侧。
+- 最终手机端顶栏压缩为一行。
 
 ## 根因
 
-- 会员订单预览和创建流程只按 `couponId`、用户、券状态、最低消费和订单金额计算优惠券抵扣。
-- 原逻辑没有套餐适用规则，导致考研套餐也可以叠加优惠券，压低专项价格。
+- 首页移动端沿用桌面导航布局，只是在窄屏下改成纵向排布，导致“导览 / 字幕工具 / 进入项目”占用多行。
+- 项目内顶栏在同一行放置全局、学科、项目三个桌面下拉入口，移动端没有统一收起入口，窄屏会拥挤或换行。
 
 ## 本次实际修改文件
 
-- `backend/system/membership_store.py`
-  - 增加考研套餐不支持优惠券的业务规则和统一错误文案。
-  - 在订单预览、创建复用预览、支付确认入口阻止带券考研套餐订单。
-- `adapter/routers/membership.py`
-  - 在会员预览/创建的券感知预览入口提前拒绝考研套餐带券请求，返回准确错误。
-- `frontend/src/views/membership/MembershipPage.tsx`
-  - 考研套餐下清空已选优惠券。
-  - 考研套餐预览和创建订单时不提交 `couponId`。
-  - 购买弹窗收到的可选券在考研套餐下为空。
-- `frontend/src/views/membership/components/MembershipPurchaseDialog.tsx`
-  - 考研套餐下不展示优惠券选择区。
-  - 增加短提示：考研套餐为专项价格，不参与优惠券折扣。
-- `tests/test_membership_coupon_plan_rules.py`
-  - 新增会员套餐与优惠券适用规则测试。
-- `docs/guide-faq.md`
-  - 增加考研套餐不能使用优惠券的用户说明。
+- `frontend/src/shell/AppShell.tsx`
+  - 增加移动端三横线导航入口。
+  - 将全局、学科、项目导航作为一级分组，组内页面作为二级链接。
+  - 手机端隐藏桌面导航按钮和 logo 图标，只保留一行：三横线、品牌/当前区域、账号头像。
+  - 桌面端保留原有导航与账号菜单行为。
+- `frontend/src/views/home/ShowcaseChrome.tsx`
+  - 增加首页移动端三横线菜单。
+  - 将首页导览与工具入口作为一级分组，组内链接作为二级项。
+  - 手机端新增品牌右侧“进入项目 / 登录”入口。
+  - 桌面端保留原有导览下拉、字幕工具和入口按钮。
+- `frontend/src/index.css`
+  - 补充首页移动端菜单、单行顶栏、品牌截断和右侧入口样式。
+  - 移动端隐藏首页桌面导航与桌面行动按钮。
 - `docs/current-change.md`
   - 覆盖为当前变更工作单。
 
 ## 行为语义变化
 
-- 考研套餐不能使用任何优惠券。
-- 月会员仍可正常使用可用优惠券。
-- 已存在的带券考研套餐待支付订单不会被继续确认支付。
-- 订单接口、DTO 和数据库结构不变。
+- 移动端首页顶栏从多行导航改为一行导航。
+- 移动端应用内顶栏从多个导航按钮改为一个三横线导航菜单。
+- 路由、导航目标、认证逻辑、账号菜单逻辑不变。
+- 桌面端顶栏语义和展示不变。
 
 ## 重构说明
 
 - 未做跨模块重构。
-- 仅增加套餐优惠券适用判断，保持规则源头在 `MembershipStore`，路由和前端只做提前拦截与体验同步。
+- 仅在现有 header 组件内增加移动端专用结构，复用已有导航数据和 `MainNav` 渲染二级链接。
 
 ## 未修改内容
 
-- 未修改优惠券发放、券状态、券过期、券退款恢复逻辑。
-- 未修改考研套餐定价、有效期和购买截止日计算。
-- 未修改支付 provider、佣金、提现或退款窗口逻辑。
+- 未修改路由配置。
+- 未修改后端 API、认证、权限、数据结构或部署配置。
+- 未修改首页主体内容、项目页面内容和账号菜单条目。
+- 未修改测试断言语义。
 
 ## 影响范围
 
-- 后端业务：会员订单预览、创建、支付确认。
-- 前端 UI：会员购买弹窗的券选择区和提交参数。
-- 文档：FAQ 中的考研套餐优惠券说明。
-- 不影响 API 结构、数据库结构、部署配置或公共路由。
+- UI：公开首页、字幕工具页共享的展示型顶栏；登录后应用内顶栏。
+- 不影响 API、架构、部署、数据结构或后端测试。
 
 ## 当前风险与不确定项
 
 - 无当前阻塞风险。
 
+## 本次发现但未自动修复的问题
+
+- 文件路径：`frontend/src/shell/AppShell.tsx`
+- 问题：`eslint react-hooks/exhaustive-deps` 提示既有番茄钟记录 effect 缺少 `hasAccessiblePomodoroProjectRef` 依赖。
+- 风险等级：低
+- 是否影响本次改动：否
+
 ## 验证记录
 
-- 已运行：`python -m pytest tests/test_membership_coupon_plan_rules.py -q`，5 个测试通过。
-- 已运行：`pnpm -C frontend exec eslint src/views/membership/MembershipPage.tsx src/views/membership/components/MembershipPurchaseDialog.tsx`，通过。
+- 已运行：`pnpm -C frontend exec eslint src/shell/AppShell.tsx src/views/home/ShowcaseChrome.tsx`，0 个错误；仍有 1 个与本次移动端导航无关的既有 hook dependency warning。
 - 已运行：`pnpm -C frontend build`，通过；仍有既有 chunk size warning。
-- 已运行：`git diff --check -- adapter/routers/membership.py backend/system/membership_store.py frontend/src/views/membership/MembershipPage.tsx frontend/src/views/membership/components/MembershipPurchaseDialog.tsx tests/test_membership_coupon_plan_rules.py docs/guide-faq.md docs/current-change.md`，通过；仅提示这些工作区文件后续可能被 Git 转换为 CRLF。
+- 已运行：`git diff --check -- frontend/src/shell/AppShell.tsx frontend/src/views/home/ShowcaseChrome.tsx frontend/src/index.css docs/current-change.md`，通过；仅提示这些工作区文件后续可能被 Git 转换为 CRLF。
+- 已运行：Playwright 临时脚本访问 `http://127.0.0.1:4173/`，390px 视口验证首页移动顶栏一行、首页移动菜单一级/二级可用、项目内移动顶栏一行、项目内移动菜单默认落到项目分组且二级链接可见。测得首页顶栏高度 60px，项目内顶栏高度 40px。
 
 ## 仍需用户确认的问题
 

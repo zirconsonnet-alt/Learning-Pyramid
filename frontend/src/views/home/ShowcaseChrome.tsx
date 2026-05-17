@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useEffect, useMemo, useRef, useState } from "react"
-import { ChevronDown } from "lucide-react"
+import { ChevronDown, Menu } from "lucide-react"
 import { Link, useLocation } from "react-router-dom"
 
 import { useCurrentUser } from "@/ui/queries/auth"
@@ -110,9 +110,16 @@ export function ShowcaseSiteHeader(props: { homeSectionPrefix?: string }) {
     open: false,
     routeKey: `${location.pathname}${location.hash}`,
   })
+  const [mobileMenuState, setMobileMenuState] = useState<{ open: boolean; routeKey: string }>({
+    open: false,
+    routeKey: `${location.pathname}${location.hash}`,
+  })
+  const [mobileNavLevel, setMobileNavLevel] = useState<"home" | "tools">("home")
   const currentRouteKey = `${location.pathname}${location.hash}`
   const sectionMenuOpen = sectionMenuState.open && sectionMenuState.routeKey === currentRouteKey
+  const mobileMenuOpen = mobileMenuState.open && mobileMenuState.routeKey === currentRouteKey
   const sectionMenuRef = useRef<HTMLDivElement | null>(null)
+  const mobileMenuRef = useRef<HTMLDivElement | null>(null)
   const homeSectionMenuLabel =
     location.pathname === "/" ? (activeHomeSectionLabel ? `导览 · ${activeHomeSectionLabel}` : "导览") : "首页导览"
 
@@ -122,6 +129,10 @@ export function ShowcaseSiteHeader(props: { homeSectionPrefix?: string }) {
 
   function closeSectionMenu() {
     setSectionMenuState((current) => ({ ...current, open: false }))
+  }
+
+  function closeMobileMenu() {
+    setMobileMenuState((current) => ({ ...current, open: false }))
   }
 
   useEffect(() => {
@@ -167,17 +178,22 @@ export function ShowcaseSiteHeader(props: { homeSectionPrefix?: string }) {
   }, [homeSectionIds, location.hash, location.pathname])
 
   useEffect(() => {
-    if (!sectionMenuOpen) return
+    if (!sectionMenuOpen && !mobileMenuOpen) return
 
     const onPointerDown = (event: MouseEvent | TouchEvent) => {
       const target = event.target
       if (!(target instanceof Node)) return
       if (sectionMenuRef.current?.contains(target)) return
+      if (mobileMenuRef.current?.contains(target)) return
       setSectionMenuState((current) => ({ ...current, open: false }))
+      setMobileMenuState((current) => ({ ...current, open: false }))
     }
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setSectionMenuState((current) => ({ ...current, open: false }))
+      if (event.key === "Escape") {
+        setSectionMenuState((current) => ({ ...current, open: false }))
+        setMobileMenuState((current) => ({ ...current, open: false }))
+      }
     }
 
     document.addEventListener("mousedown", onPointerDown)
@@ -188,11 +204,69 @@ export function ShowcaseSiteHeader(props: { homeSectionPrefix?: string }) {
       document.removeEventListener("touchstart", onPointerDown)
       document.removeEventListener("keydown", onKeyDown)
     }
-  }, [sectionMenuOpen])
+  }, [mobileMenuOpen, sectionMenuOpen])
 
   return (
     <header className="lp-showcase-site-header theme-shell-header">
       <div className="lp-showcase-container lp-showcase-nav">
+        <div ref={mobileMenuRef} className="lp-showcase-mobile-menu">
+          <button
+            type="button"
+            className={cn("lp-showcase-icon-button", mobileMenuOpen && "is-active")}
+            aria-haspopup="menu"
+            aria-expanded={mobileMenuOpen}
+            aria-label="打开导航"
+            onClick={() => {
+              closeSectionMenu()
+              setMobileMenuState({ open: !mobileMenuOpen, routeKey: currentRouteKey })
+            }}
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+
+          {mobileMenuOpen ? (
+            <div className="lp-showcase-mobile-menu-popover">
+              <nav className="lp-showcase-mobile-menu-panel" aria-label="移动导航">
+                <div className="lp-showcase-mobile-menu-levels" role="tablist" aria-label="导航分类">
+                  <button
+                    type="button"
+                    className={cn("lp-showcase-mobile-menu-level", mobileNavLevel === "home" && "is-active")}
+                    onClick={() => setMobileNavLevel("home")}
+                  >
+                    导览
+                  </button>
+                  <button
+                    type="button"
+                    className={cn("lp-showcase-mobile-menu-level", mobileNavLevel === "tools" && "is-active")}
+                    onClick={() => setMobileNavLevel("tools")}
+                  >
+                    工具
+                  </button>
+                </div>
+                <div className="lp-showcase-mobile-menu-items">
+                  {(mobileNavLevel === "home" ? navItems : primaryNavItems).map((item) => {
+                    const sectionId = getSectionIdFromHref(item.href)
+                    const isPageLink = item.href.startsWith("/") && !item.href.includes("#")
+                    const isActive = isPageLink
+                      ? location.pathname === item.href || location.pathname.startsWith(`${item.href}/`)
+                      : location.pathname === "/" && sectionId === activeHomeSectionId
+
+                    return (
+                      <ShowcaseNavLink
+                        key={`mobile-${item.label}-${item.href}`}
+                        {...item}
+                        isActive={isActive}
+                        className="lp-showcase-mobile-menu-item"
+                        onNavigate={closeMobileMenu}
+                      />
+                    )
+                  })}
+                </div>
+              </nav>
+            </div>
+          ) : null}
+        </div>
+
         <Link className="lp-showcase-brand" to="/">
           <img
             className="lp-showcase-brand-mark"
@@ -204,6 +278,12 @@ export function ShowcaseSiteHeader(props: { homeSectionPrefix?: string }) {
           />
           <span>LearningPyramid</span>
         </Link>
+
+        <div className="lp-showcase-mobile-entry">
+          <Link className="lp-showcase-mobile-entry-link" to={navActionHref}>
+            {navActionLabel}
+          </Link>
+        </div>
 
         <nav className="lp-showcase-nav-links" aria-label="主导航">
           <div
