@@ -959,7 +959,7 @@ export function AppShell() {
             />
             <Link
               to="/"
-              className="hidden h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-[1.05rem] border border-white/75 bg-white p-1 shadow-[0_16px_34px_-26px_hsl(var(--primary)/0.4)] transition-all hover:-translate-y-px hover:shadow-[0_20px_40px_-26px_hsl(var(--primary)/0.46)] sm:inline-flex"
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-[1.05rem] border border-white/75 bg-white p-1 shadow-[0_16px_34px_-26px_hsl(var(--primary)/0.4)] transition-all hover:-translate-y-px hover:shadow-[0_20px_40px_-26px_hsl(var(--primary)/0.46)]"
               aria-label="查看公开首页"
               title="查看公开首页"
             >
@@ -968,9 +968,7 @@ export function AppShell() {
 
             <div className="min-w-0 flex-1">
               <div className="min-w-0">
-                <div className="flex min-w-0 items-center gap-x-2">
-                  <span className="min-w-0 shrink-0 text-[13px] font-semibold tracking-[0.04em] text-[color:var(--theme-soft-text-strong)]">LearningPyramid</span>
-                  <span className="hidden text-xs text-muted-foreground sm:inline">/</span>
+                <div className="flex min-w-0 items-center">
                   <div className="min-w-0 truncate text-sm font-medium tracking-tight text-foreground sm:text-[15px]">{area.title}</div>
                 </div>
                 <div className="mt-0.5 hidden min-w-0 truncate text-xs text-muted-foreground sm:block">{area.context}</div>

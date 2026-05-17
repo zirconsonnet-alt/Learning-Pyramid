@@ -182,6 +182,7 @@ export async function installMockApi(
     boundInviteCode?: string | null
     queueHeadId?: string | null
     recallPointReferences?: string[]
+    learningObjectNodes?: unknown[]
     projectLlmStreamContent?: string
     friendLeaderboard?: unknown[]
   } = {},
@@ -192,6 +193,7 @@ export async function installMockApi(
   const membershipProvider = options.membershipProvider ?? "manual_test"
   const withdrawalScenario = options.withdrawalScenario ?? "none"
   const queueHeadId = options.queueHeadId ?? null
+  const learningObjectNodes = options.learningObjectNodes ?? [learningObjectNode]
   let globalSettings = options.globalSettings ?? createMockGlobalSettings()
   let membershipOrders: MockMembershipOrder[] = []
   let llmSettings: MockLlmSettings = {
@@ -474,12 +476,15 @@ export async function installMockApi(
     }
 
     if (path === `${scopedProjectPath}/learning-object-roots`) {
-      await fulfill(route, { rootLearningObjectNodeIds: contentReady ? [learningObjectNode.nodeId] : [] })
+      const rootLearningObjectNodeIds = learningObjectNodes
+        .filter((node) => typeof node === "object" && node !== null && "parentId" in node && node.parentId === null && "nodeId" in node)
+        .map((node) => String(node.nodeId))
+      await fulfill(route, { rootLearningObjectNodeIds: contentReady ? rootLearningObjectNodeIds : [] })
       return
     }
 
     if (path === `${scopedProjectPath}/learning-object-nodes`) {
-      await fulfill(route, contentReady ? [learningObjectNode] : [])
+      await fulfill(route, contentReady ? learningObjectNodes : [])
       return
     }
 

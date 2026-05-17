@@ -18,6 +18,9 @@ import { useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
 import { cn } from "@/ui/utils"
 
 const LEARNING_OBJECT_TREE_QUERY_TIMEOUT_MS = 90_000
+const MAX_TREE_INDENT_DEPTH = 4
+const TREE_INDENT_STEP_PX = 12
+const TREE_INDENT_BASE_PX = 10
 
 function formatApiError(err: unknown) {
   if (err instanceof ApiError) return `${err.code}: ${err.message}`
@@ -64,6 +67,7 @@ function TreeNode({
 }) {
   const data = nodeById[nodeId]
   if (!data) return null
+  const indentPx = Math.min(depth, MAX_TREE_INDENT_DEPTH) * TREE_INDENT_STEP_PX + TREE_INDENT_BASE_PX
 
   if (data.kind === "container") {
     if (isSyntheticFilesContainer(data)) {
@@ -91,10 +95,10 @@ function TreeNode({
         <button
           type="button"
           className={cn(
-            "group flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm transition-colors",
+            "group flex w-full min-w-0 items-center gap-2 rounded-xl py-2 pr-3 text-left text-sm transition-colors",
             isOpen ? "bg-[#f7f9fc] text-[#20354b]" : "text-[#4a5d73] hover:bg-[#f7f9fc] hover:text-[#20354b]",
           )}
-          style={{ paddingLeft: depth * 14 + 10 }}
+          style={{ paddingLeft: indentPx }}
           onClick={() => toggle(nodeId)}
           aria-expanded={isOpen}
         >
@@ -106,10 +110,10 @@ function TreeNode({
           >
             <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", isOpen && "rotate-90")} />
           </span>
-          <span className="truncate font-medium">{data.title}</span>
+          <span className="min-w-0 truncate font-medium">{data.title}</span>
         </button>
         {isOpen ? (
-          <div className="ml-3 space-y-1 border-l border-[#edf2f7] pl-3">
+          <div className="space-y-1 border-l border-[#edf2f7]">
             {data.children.map((childId) => (
               <TreeNode
                 key={childId}
@@ -135,10 +139,10 @@ function TreeNode({
     <button
       type="button"
       className={cn(
-        "group relative flex w-full items-center gap-3 overflow-hidden rounded-xl px-3 py-2.5 text-left transition-colors",
+        "group relative flex w-full min-w-0 items-center gap-2 overflow-hidden rounded-xl py-2.5 pr-3 text-left transition-colors",
         isSelected ? "bg-[#eef5ff] text-[#153f74]" : "text-[#33475b] hover:bg-[#f6f8fb]",
       )}
-      style={{ paddingLeft: depth * 14 + 10 }}
+      style={{ paddingLeft: indentPx }}
       data-guide-tour="learning-object-tree-item"
       onClick={() => {
         onSelectInstance(data.instanceId)
@@ -148,7 +152,7 @@ function TreeNode({
     >
       <span className={cn("absolute inset-y-1.5 left-0 w-[3px] rounded-r-full", isSelected ? "bg-[#3b82f6]" : "bg-transparent")} />
       <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", isSelected ? "bg-[#60a5fa]" : "bg-[#c9d3de]")} />
-      <span className="min-w-0">
+      <span className="min-w-0 flex-1">
         <span className={cn("block truncate text-sm font-medium", isSelected ? "text-[#153f74]" : "text-[#2f4358]")}>{title}</span>
       </span>
     </button>

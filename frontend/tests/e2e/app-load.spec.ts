@@ -4,7 +4,7 @@ import { expectHealthyPage, expectNoConsoleIssues, collectConsoleIssues } from "
 import { installMockApi } from "../fixtures/mock-api"
 import { journeyIds } from "../fixtures/journeys"
 import { recordJourney } from "../fixtures/journey-result"
-import { project, subject } from "../fixtures/test-data"
+import { instance, project, subject } from "../fixtures/test-data"
 
 test(journeyIds.appLoad, async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
@@ -164,6 +164,7 @@ test("home mobile content sections use compact grids", async ({ page }) => {
           left: Math.round(rect.left),
           right: Math.round(rect.right),
           top: Math.round(rect.top),
+          height: Math.round(rect.height),
           width: Math.round(rect.width),
         }
       })
@@ -176,6 +177,8 @@ test("home mobile content sections use compact grids", async ({ page }) => {
     const method = firstRowCount(".lp-showcase-method-grid > .lp-showcase-method-card")
     const onboarding = firstRowCount(".lp-showcase-onboarding-grid > .lp-showcase-step")
     const membershipPlans = firstRowCount(".lp-showcase-membership-plan-grid > .lp-showcase-membership-price-block")
+    const membershipPanels = firstRowCount(".lp-showcase-membership-grid > .lp-showcase-membership-panel")
+    const faq = firstRowCount(".lp-showcase-faq-grid > .lp-showcase-faq-item")
     return {
       viewportWidth: window.innerWidth,
       scrollWidth: Math.max(document.body.scrollWidth, document.documentElement.scrollWidth),
@@ -184,6 +187,8 @@ test("home mobile content sections use compact grids", async ({ page }) => {
       method,
       onboarding,
       membershipPlans,
+      membershipPanels,
+      faq,
     }
   })
 
@@ -193,6 +198,12 @@ test("home mobile content sections use compact grids", async ({ page }) => {
   expect(compactLayout.method.count, JSON.stringify(compactLayout, null, 2)).toBe(3)
   expect(compactLayout.onboarding.count, JSON.stringify(compactLayout, null, 2)).toBe(2)
   expect(compactLayout.membershipPlans.count, JSON.stringify(compactLayout, null, 2)).toBe(2)
+  expect(compactLayout.membershipPanels.count, JSON.stringify(compactLayout, null, 2)).toBe(2)
+  expect(compactLayout.faq.count, JSON.stringify(compactLayout, null, 2)).toBe(2)
+  expect(
+    Math.abs(compactLayout.membershipPanels.items[0].height - compactLayout.membershipPanels.items[1].height),
+    JSON.stringify(compactLayout, null, 2),
+  ).toBeLessThanOrEqual(1)
   for (const item of compactLayout.method.items) {
     expect(item.width, JSON.stringify(compactLayout, null, 2)).toBeLessThanOrEqual(120)
   }
@@ -212,6 +223,8 @@ test("project mobile navigation stays within the viewport", async ({ page }) => 
   await expectHealthyPage(page, new RegExp(`/subjects/${subject.subjectId}/projects/${project.projectId}/workbench$`))
 
   const header = page.locator("header.theme-shell-header")
+  await expect(header.getByRole("link", { name: "查看公开首页" })).toBeVisible()
+  await expect(header.getByText("LearningPyramid")).toHaveCount(0)
   await header.getByRole("button", { name: "打开导航" }).click()
 
   const mobileNav = page.getByRole("navigation", { name: "移动导航" })
@@ -223,6 +236,139 @@ test("project mobile navigation stays within the viewport", async ({ page }) => 
 
   const scrollWidth = await page.evaluate(() => Math.max(document.body.scrollWidth, document.documentElement.scrollWidth))
   expect(scrollWidth).toBeLessThanOrEqual(390)
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
+test("workbench mobile learning object tree keeps deep nesting within the viewport", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  const deepLearningObjectNodes = [
+    {
+      kind: "container",
+      projectId: project.projectId,
+      nodeId: "deep_root",
+      parentId: null,
+      children: ["deep_level_1"],
+      title: "第一部分：一个很长很长的根目录标题",
+    },
+    ...Array.from({ length: 7 }, (_, index) => {
+      const level = index + 1
+      return {
+        kind: "container",
+        projectId: project.projectId,
+        nodeId: `deep_level_${level}`,
+        parentId: level === 1 ? "deep_root" : `deep_level_${level - 1}`,
+        children: [level === 7 ? "deep_leaf" : `deep_level_${level + 1}`],
+        title: `第 ${level} 层目录：这是一段用于验证手机端不会横向溢出的长标题`,
+      }
+    }),
+    {
+      kind: "leaf",
+      projectId: project.projectId,
+      nodeId: "deep_leaf",
+      parentId: "deep_level_7",
+      instanceId: instance.instanceId,
+      relativePath: "很深/很深/很深/很深/第一讲 自动化导论.mp4",
+      source: "browser",
+      title: "很深层级下的第一讲自动化导论，标题足够长用于截断验证",
+    },
+  ]
+  await installMockApi(page, { learningObjectNodes: deepLearningObjectNodes })
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(`/subjects/${subject.subjectId}/projects/${project.projectId}/workbench`)
+  await expectHealthyPage(page, new RegExp(`/subjects/${subject.subjectId}/projects/${project.projectId}/workbench$`))
+
+  await expect(page.locator("#workbench-mobile-content-tree")).toBeHidden()
+  await page.getByRole("button", { name: /内容目录/ }).click()
+  const tree = page.locator("[data-guide-tour='learning-object-tree']")
+  await expect(tree).toBeVisible()
+
+  const layout = await page.evaluate(() => {
+    const viewportWidth = window.innerWidth
+    const buttons = Array.from(document.querySelectorAll("[data-guide-tour='learning-object-tree'] button")).map((element) => {
+      const rect = element.getBoundingClientRect()
+      return {
+        left: Math.floor(rect.left),
+        right: Math.ceil(rect.right),
+        width: Math.round(rect.width),
+      }
+    })
+    return {
+      viewportWidth,
+      scrollWidth: Math.max(document.body.scrollWidth, document.documentElement.scrollWidth),
+      buttons,
+    }
+  })
+
+  expect(layout.scrollWidth, JSON.stringify(layout, null, 2)).toBeLessThanOrEqual(layout.viewportWidth)
+  expect(layout.buttons.length, JSON.stringify(layout, null, 2)).toBeGreaterThanOrEqual(8)
+  for (const button of layout.buttons) {
+    expect(button.left, JSON.stringify(layout, null, 2)).toBeGreaterThanOrEqual(0)
+    expect(button.right, JSON.stringify(layout, null, 2)).toBeLessThanOrEqual(layout.viewportWidth)
+  }
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
+test("workbench mobile puts compact status and folded directory below the player", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page)
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(`/subjects/${subject.subjectId}/projects/${project.projectId}/workbench`)
+  await expectHealthyPage(page, new RegExp(`/subjects/${subject.subjectId}/projects/${project.projectId}/workbench$`))
+
+  const videoPane = page.locator("#workbench-video-pane")
+  const statusCard = page.locator("#workbench-status-card")
+  const contentTreeCard = page.locator("#workbench-content-tree")
+  const centerPanel = page.locator("#workbench-center-panel")
+  await expect(videoPane).toBeVisible()
+  await expect(statusCard).toBeVisible()
+  await expect(contentTreeCard).toBeVisible()
+  await expect(centerPanel).toBeVisible()
+
+  await expect(page.locator("#workbench-status-detail")).toBeHidden()
+  await expect(page.locator("#workbench-mobile-content-tree")).toBeHidden()
+  await expect(page.locator("[data-guide-tour='learning-object-tree']")).toBeHidden()
+
+  const closedLayout = await page.evaluate(() => {
+    function top(selector: string) {
+      const rect = document.querySelector(selector)?.getBoundingClientRect()
+      return rect ? Math.round(rect.top + window.scrollY) : null
+    }
+    return {
+      viewportWidth: window.innerWidth,
+      scrollWidth: Math.max(document.body.scrollWidth, document.documentElement.scrollWidth),
+      videoTop: top("#workbench-video-pane"),
+      statusTop: top("#workbench-status-card"),
+      directoryTop: top("#workbench-content-tree"),
+      centerTop: top("#workbench-center-panel"),
+    }
+  })
+
+  expect(closedLayout.scrollWidth, JSON.stringify(closedLayout, null, 2)).toBeLessThanOrEqual(closedLayout.viewportWidth)
+  expect(closedLayout.videoTop, JSON.stringify(closedLayout, null, 2)).not.toBeNull()
+  expect(closedLayout.statusTop, JSON.stringify(closedLayout, null, 2)).not.toBeNull()
+  expect(closedLayout.directoryTop, JSON.stringify(closedLayout, null, 2)).not.toBeNull()
+  expect(closedLayout.centerTop, JSON.stringify(closedLayout, null, 2)).not.toBeNull()
+  expect(closedLayout.statusTop, JSON.stringify(closedLayout, null, 2)).toBeGreaterThan(closedLayout.videoTop ?? 0)
+  expect(closedLayout.directoryTop, JSON.stringify(closedLayout, null, 2)).toBeGreaterThan(closedLayout.statusTop ?? 0)
+  expect(closedLayout.centerTop, JSON.stringify(closedLayout, null, 2)).toBeGreaterThan(closedLayout.directoryTop ?? 0)
+
+  await page.getByRole("button", { name: /工作状态/ }).click()
+  await expect(page.locator("#workbench-status-detail")).toBeVisible()
+  await page.getByRole("button", { name: /内容目录/ }).click()
+  await expect(page.locator("#workbench-mobile-content-tree")).toBeVisible()
+
+  await page.getByRole("button", { name: /第一讲 自动化导论/ }).click()
+  await expect(page.locator("#workbench-mobile-content-tree")).toBeHidden()
+
+  const openLayout = await page.evaluate(() => ({
+    viewportWidth: window.innerWidth,
+    scrollWidth: Math.max(document.body.scrollWidth, document.documentElement.scrollWidth),
+  }))
+  expect(openLayout.scrollWidth, JSON.stringify(openLayout, null, 2)).toBeLessThanOrEqual(openLayout.viewportWidth)
 
   expectNoConsoleIssues(consoleIssues)
 })

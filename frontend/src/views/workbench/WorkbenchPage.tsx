@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useQueries } from "@tanstack/react-query"
-import { FolderTree, RadioTower } from "lucide-react"
+import { ChevronDown, FolderTree, RadioTower } from "lucide-react"
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 
 import { apiUrl } from "@/ui/api/http"
@@ -282,6 +282,8 @@ export function WorkbenchPage() {
   const [currentMs, setCurrentMs] = useState(0)
   const [seekTo, setSeekTo] = useState<{ instanceId: string; ms: number; nonce: number } | null>(null)
   const [centerPanelMode, setCenterPanelMode] = useState<"main" | "rollup">("main")
+  const [mobileDirectoryOpen, setMobileDirectoryOpen] = useState(false)
+  const [mobileStatusOpen, setMobileStatusOpen] = useState(false)
   const [petAssistantState, setPetAssistantState] = useState<"idle" | "thinking">("idle")
   const videoPaneRef = useRef<HTMLDivElement | null>(null)
   const videoPaneHandleRef = useRef<VideoPaneHandle | null>(null)
@@ -851,6 +853,19 @@ export function WorkbenchPage() {
         : projectType === "LOOSE_POINTS"
           ? "可直接录入"
           : "等待开始"
+  const currentDirectoryLabel = instance?.materialDisplayName ?? (projectType === "BOOK" ? "未选择书本节点" : "未选择内容")
+  const compactStatusSummary = [
+    workStatusDetail,
+    studyEstimatePresentation ? `预计 ${studyEstimatePresentation.value}` : null,
+    usesResolvableCourseAnchor ? `覆盖 ${Math.round(videoProgressPercent)}%` : null,
+  ].filter(Boolean).join(" · ")
+
+  function selectWorkbenchInstance(instanceId: string) {
+    setSelectedInstanceId(pid, instanceId)
+    setSeekTo(null)
+    setCurrentMs(0)
+    setMobileDirectoryOpen(false)
+  }
 
   if (!pid) {
     return (
@@ -920,17 +935,37 @@ export function WorkbenchPage() {
       {workbenchGuideNotice}
       <div
         className={cn(
-          "grid gap-5 xl:items-start",
+          "grid min-w-0 gap-4 xl:gap-5 xl:items-start",
           requiresLearningObjectTree ? "xl:grid-cols-[300px_minmax(0,1.2fr)_320px]" : "xl:grid-cols-[minmax(0,1.2fr)_320px]",
         )}
       >
         {requiresLearningObjectTree ? (
-          <aside className="xl:sticky xl:top-28 xl:self-start">
+          <aside className="order-3 min-w-0 xl:order-none xl:col-start-1 xl:row-span-2 xl:row-start-1 xl:sticky xl:top-28 xl:self-start">
             <Card
               id="workbench-content-tree"
-              className="theme-card-main xl:flex xl:max-h-[calc(100dvh-9rem)] xl:min-h-0 xl:flex-col xl:overflow-hidden"
+              className="theme-card-main min-w-0 xl:flex xl:max-h-[calc(100dvh-9rem)] xl:min-h-0 xl:flex-col xl:overflow-hidden"
             >
-              <CardHeader className="theme-card-header">
+              <CardHeader className="theme-card-header xl:hidden">
+                <button
+                  type="button"
+                  className="flex w-full min-w-0 items-center justify-between gap-3 text-left"
+                  onClick={() => setMobileDirectoryOpen((current) => !current)}
+                  aria-expanded={mobileDirectoryOpen}
+                  aria-controls="workbench-mobile-content-tree"
+                >
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="theme-icon-surface h-9 w-9 shrink-0">
+                      <FolderTree className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <CardTitle>内容目录</CardTitle>
+                      <div className="mt-1 truncate text-xs font-medium text-[color:var(--theme-soft-text-strong)]">当前：{currentDirectoryLabel}</div>
+                    </div>
+                  </div>
+                  <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", mobileDirectoryOpen && "rotate-180")} />
+                </button>
+              </CardHeader>
+              <CardHeader className="theme-card-header hidden xl:block">
                 <div className="flex items-center gap-3">
                   <div className="theme-icon-surface h-10 w-10">
                     <FolderTree className="h-5 w-5" />
@@ -940,25 +975,33 @@ export function WorkbenchPage() {
                   </div>
                 </div>
               </CardHeader>
-              <CardContent className="pt-2 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:overscroll-contain xl:pr-3">
+              <CardContent
+                id="workbench-mobile-content-tree"
+                className={cn(
+                  "pt-2",
+                  mobileDirectoryOpen ? "block" : "hidden",
+                  "xl:block xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:overscroll-contain xl:pr-3",
+                )}
+              >
                 <LearningObjectTree
                   subjectId={subjectId}
                   projectId={pid}
                   projectType={projectType}
                   selectedInstanceId={selectedInstanceId}
-                  onSelectInstance={(instanceId) => {
-                    setSelectedInstanceId(pid, instanceId)
-                    setSeekTo(null)
-                    setCurrentMs(0)
-                  }}
+                  onSelectInstance={selectWorkbenchInstance}
                 />
               </CardContent>
             </Card>
           </aside>
         ) : null}
 
-        <section className="space-y-4 xl:min-w-0">
-          <div ref={videoPaneRef} id="workbench-video-pane" className="shrink-0 scroll-mt-28">
+        <section
+          className={cn(
+            "order-1 min-w-0",
+            requiresLearningObjectTree ? "xl:col-start-2 xl:row-start-1" : "xl:col-start-1 xl:row-start-1",
+          )}
+        >
+          <div ref={videoPaneRef} id="workbench-video-pane" className="min-w-0 shrink-0 scroll-mt-28">
             {usesResolvableCourseAnchor ? (
               <VideoPane
                 ref={videoPaneHandleRef}
@@ -981,87 +1024,41 @@ export function WorkbenchPage() {
               <StudyModePane projectType={projectType} instance={instance} />
             )}
           </div>
-          <div className="theme-subtle-surface shrink-0 p-1">
-            <div className="grid grid-cols-2 gap-1">
-              <button
-                type="button"
-                className={cn(
-                  "rounded-[1rem] border px-4 py-2.5 text-sm font-medium transition-colors",
-                  centerPanelMode === "main"
-                    ? "border-primary/20 bg-[var(--theme-card-main-bg)] text-primary shadow-[0_10px_22px_-20px_hsl(var(--primary)/0.28)]"
-                    : "border-transparent bg-transparent text-[color:var(--theme-subtle-text)] hover:[border-color:var(--theme-soft-border)] hover:[background:var(--theme-soft-bg)]",
-                )}
-                onClick={() => setCenterPanelMode("main")}
-              >
-                {queueQ.data?.headId ? "复习任务" : "复述点录入"}
-              </button>
-              <button
-                type="button"
-                className={cn(
-                  "rounded-[1rem] border px-4 py-2.5 text-sm font-medium transition-colors",
-                  centerPanelMode === "rollup"
-                    ? "border-primary/20 bg-[var(--theme-card-main-bg)] text-primary shadow-[0_10px_22px_-20px_hsl(var(--primary)/0.28)]"
-                    : "border-transparent bg-transparent text-[color:var(--theme-subtle-text)] hover:[border-color:var(--theme-soft-border)] hover:[background:var(--theme-soft-bg)]",
-                )}
-                onClick={() => setCenterPanelMode("rollup")}
-              >
-                层推进与学习任务
-              </button>
-            </div>
-          </div>
-
-          {centerPanelMode === "main" ? (
-            <div id={queueQ.data?.headId ? "workbench-review-pane" : "workbench-compose-pane"} className="shrink-0">
-              {queueQ.data?.headId ? (
-                <ReviewPane
-                  subjectId={subjectId}
-                  key={queueQ.data.headId}
-                  projectId={pid}
-                  headId={queueQ.data.headId}
-                  instances={instancesQ.data ?? []}
-                  onOpenAnchor={onOpenAnchor}
-                  onAiContextChange={updateReviewAiContext}
-                />
-              ) : (
-                <ComposePane
-                  subjectId={subjectId}
-                  projectId={pid}
-                  projectType={projectType}
-                  selectedInstanceId={selectedInstanceId}
-                  instance={instance}
-                  currentMs={currentMs}
-                  queueHasGate={queueHasGate}
-                  actionableMissingGate={actionableMissingGate}
-                  actionableMissingInstanceCount={actionableMissingInstanceCount}
-                />
-              )}
-            </div>
-          ) : (
-            <RollupPane
-              subjectId={subjectId}
-              projectId={pid}
-              layers={layersQ.data ?? []}
-              layersLoading={layersQ.isLoading}
-              layersError={layersQ.error}
-              learningTaskNodesById={learningTaskNodesById}
-              learningTaskNodesLoading={learningTaskNodesQ.isLoading}
-              queueHasGate={queueHasGate}
-              actionableMissingGate={actionableMissingGate}
-              actionableMissingInstanceCount={actionableMissingInstanceCount}
-              isRollingUp={rollUpM.isPending}
-              isThresholdRollUpUpdating={setLayerConfigM.isPending}
-              rollUpStrategy={currentRollUpStrategy}
-              onRollUp={(layerIndex) => void onManualRollUp(layerIndex)}
-              onToggleThresholdRollUp={(layerIndex, enabled) => void onToggleThresholdRollUp(layerIndex, enabled)}
-              rollUpError={rollUpM.error}
-              thresholdRollUpEnabledByLayerIndex={thresholdRollUpEnabledByLayerIndex}
-            />
-          )}
         </section>
 
-        <aside className="xl:sticky xl:top-28 xl:z-30 xl:self-start">
-            <Card className="theme-card-main xl:flex xl:max-h-[calc(100dvh-9rem)] xl:min-h-0 xl:flex-col xl:overflow-hidden">
-            <CardHeader className="theme-card-header">
+        <aside
+          className={cn(
+            "order-2 min-w-0 xl:row-span-2 xl:row-start-1 xl:sticky xl:top-28 xl:z-30 xl:self-start",
+            requiresLearningObjectTree ? "xl:col-start-3" : "xl:col-start-2",
+          )}
+        >
+          <Card
+            id="workbench-status-card"
+            className="theme-card-main min-w-0 xl:flex xl:max-h-[calc(100dvh-9rem)] xl:min-h-0 xl:flex-col xl:overflow-hidden"
+          >
+            <CardHeader className="theme-card-header xl:hidden">
+              <button
+                type="button"
+                className="flex w-full min-w-0 items-center justify-between gap-3 text-left"
+                onClick={() => setMobileStatusOpen((current) => !current)}
+                aria-expanded={mobileStatusOpen}
+                aria-controls="workbench-status-detail"
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="theme-icon-surface h-9 w-9 shrink-0">
+                    <RadioTower className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <CardTitle>工作状态</CardTitle>
+                    <div className="mt-1 truncate text-xs font-medium text-[color:var(--theme-soft-text-strong)]">
+                      {compactStatusSummary}
+                    </div>
+                  </div>
+                </div>
+                <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", mobileStatusOpen && "rotate-180")} />
+              </button>
+            </CardHeader>
+            <CardHeader className="theme-card-header hidden xl:block">
               <div className="flex items-center gap-3">
                 <div className="theme-icon-surface h-10 w-10">
                   <RadioTower className="h-5 w-5" />
@@ -1072,7 +1069,14 @@ export function WorkbenchPage() {
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="space-y-5 pt-4 text-sm xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:overscroll-contain xl:pr-3">
+            <CardContent
+              id="workbench-status-detail"
+              className={cn(
+                "space-y-5 pt-4 text-sm",
+                mobileStatusOpen ? "block" : "hidden",
+                "xl:block xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:overscroll-contain xl:pr-3",
+              )}
+            >
               {studyEstimatePresentation ? (
                 <section className="space-y-3">
                   <SidebarSectionTitle title="预计剩余学习时长" />
@@ -1121,6 +1125,91 @@ export function WorkbenchPage() {
             />
           </DesktopPet>
         </aside>
+
+        <section
+          id="workbench-center-panel"
+          className={cn(
+            "order-4 min-w-0 space-y-4",
+            requiresLearningObjectTree ? "xl:col-start-2 xl:row-start-2" : "xl:col-start-1 xl:row-start-2",
+          )}
+        >
+          <div className="theme-subtle-surface shrink-0 p-1">
+            <div className="grid grid-cols-2 gap-1">
+              <button
+                type="button"
+                className={cn(
+                  "rounded-[1rem] border px-4 py-2.5 text-sm font-medium transition-colors",
+                  centerPanelMode === "main"
+                    ? "border-primary/20 bg-[var(--theme-card-main-bg)] text-primary shadow-[0_10px_22px_-20px_hsl(var(--primary)/0.28)]"
+                    : "border-transparent bg-transparent text-[color:var(--theme-subtle-text)] hover:[border-color:var(--theme-soft-border)] hover:[background:var(--theme-soft-bg)]",
+                )}
+                onClick={() => setCenterPanelMode("main")}
+              >
+                {queueQ.data?.headId ? "复习任务" : "复述点录入"}
+              </button>
+              <button
+                type="button"
+                className={cn(
+                  "rounded-[1rem] border px-4 py-2.5 text-sm font-medium transition-colors",
+                  centerPanelMode === "rollup"
+                    ? "border-primary/20 bg-[var(--theme-card-main-bg)] text-primary shadow-[0_10px_22px_-20px_hsl(var(--primary)/0.28)]"
+                    : "border-transparent bg-transparent text-[color:var(--theme-subtle-text)] hover:[border-color:var(--theme-soft-border)] hover:[background:var(--theme-soft-bg)]",
+                )}
+                onClick={() => setCenterPanelMode("rollup")}
+              >
+                层推进与学习任务
+              </button>
+            </div>
+          </div>
+
+          {centerPanelMode === "main" ? (
+            <div id={queueQ.data?.headId ? "workbench-review-pane" : "workbench-compose-pane"} className="min-w-0 shrink-0">
+              {queueQ.data?.headId ? (
+                <ReviewPane
+                  subjectId={subjectId}
+                  key={queueQ.data.headId}
+                  projectId={pid}
+                  headId={queueQ.data.headId}
+                  instances={instancesQ.data ?? []}
+                  onOpenAnchor={onOpenAnchor}
+                  onAiContextChange={updateReviewAiContext}
+                />
+              ) : (
+                <ComposePane
+                  subjectId={subjectId}
+                  projectId={pid}
+                  projectType={projectType}
+                  selectedInstanceId={selectedInstanceId}
+                  instance={instance}
+                  currentMs={currentMs}
+                  queueHasGate={queueHasGate}
+                  actionableMissingGate={actionableMissingGate}
+                  actionableMissingInstanceCount={actionableMissingInstanceCount}
+                />
+              )}
+            </div>
+          ) : (
+            <RollupPane
+              subjectId={subjectId}
+              projectId={pid}
+              layers={layersQ.data ?? []}
+              layersLoading={layersQ.isLoading}
+              layersError={layersQ.error}
+              learningTaskNodesById={learningTaskNodesById}
+              learningTaskNodesLoading={learningTaskNodesQ.isLoading}
+              queueHasGate={queueHasGate}
+              actionableMissingGate={actionableMissingGate}
+              actionableMissingInstanceCount={actionableMissingInstanceCount}
+              isRollingUp={rollUpM.isPending}
+              isThresholdRollUpUpdating={setLayerConfigM.isPending}
+              rollUpStrategy={currentRollUpStrategy}
+              onRollUp={(layerIndex) => void onManualRollUp(layerIndex)}
+              onToggleThresholdRollUp={(layerIndex, enabled) => void onToggleThresholdRollUp(layerIndex, enabled)}
+              rollUpError={rollUpM.error}
+              thresholdRollUpEnabledByLayerIndex={thresholdRollUpEnabledByLayerIndex}
+            />
+          )}
+        </section>
       </div>
     </div>
   )
