@@ -149,6 +149,38 @@ describe("MobileWorkbenchScreen", () => {
     expect(onAddDraft).toHaveBeenCalled()
   })
 
+  it("updates and removes draft through draft controls", () => {
+    const onRemoveDraft = jest.fn()
+    const onUpdateDraft = jest.fn()
+    const screen = renderWorkbench({
+      onRemoveDraft,
+      onUpdateDraft,
+    })
+
+    fireEvent.changeText(screen.getByDisplayValue("草稿题面"), "新题面")
+    expect(onUpdateDraft).toHaveBeenCalledWith("draft_1", { questionText: "新题面" })
+
+    fireEvent.changeText(screen.getByDisplayValue("草稿答案"), "新答案")
+    expect(onUpdateDraft).toHaveBeenCalledWith("draft_1", { answerText: "新答案" })
+
+    fireEvent.press(screen.getByText("删除"))
+    expect(onRemoveDraft).toHaveBeenCalledWith("draft_1")
+  })
+
+  it("submits complete drafts when review gate is clear", () => {
+    const onSubmitDrafts = jest.fn()
+    const screen = renderWorkbench({
+      onSubmitDrafts,
+      reviewHeadId: null,
+      reviewQueueLoading: false,
+      submitting: false,
+    })
+
+    fireEvent.press(screen.getByText("提交学习"))
+
+    expect(onSubmitDrafts).toHaveBeenCalled()
+  })
+
   it("when reviewQueueLoading={true}, pressing 提交学习 does not call onSubmitDrafts", () => {
     const onSubmitDrafts = jest.fn()
     const screen = renderWorkbench({
