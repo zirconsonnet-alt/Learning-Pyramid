@@ -1,73 +1,76 @@
-# 当前变更：React Native 移动端 App MVP
+# 当前变更：移动端 Expo 工程骨架
 
 ## 当前用户要求
 
-- 开始做 Android 和 iPhone 上的 App 软件。
-- 技术路线已确认使用 React Native。
-- React Native 基座已确认使用 Expo-managed。
-- 第一版 MVP 已确认只连接线上后端，先做登录、项目列表、学习/复习、视频播放。
-- 第一版不做手机本机文件导入，也不做离线缓存。
+- 在 `mobile/` 创建 Expo-managed React Native 移动端工程骨架。
+- 默认后端为 `https://plm.xuebao.chat/api`，但本任务只创建骨架。
+- 第一版不做手机本机文件导入、离线缓存、WebView 包壳。
+- 本任务只允许修改或创建 `mobile/`、`.gitignore`、`docs/current-change.md`。
+- 完成后只暂存并提交上述允许范围。
 
 ## 根因
 
-- 当前仓库已有 FastAPI 后端、React Web 前端和 Windows Tauri 桌面端，但没有 Android / iOS 移动端工程。
-- 移动端是新客户端边界，不能把现有 Web UI 当作 WebView 包壳，也不能把 Windows Tauri 的 `NATIVE_LOCAL` 本机路径语义直接迁移到手机端。
-- 移动端 MVP 应复用现有公开 API 语义，而不是新增临时移动端专用协议或兼容层。
+- 仓库已有后端、Web 前端和 Windows Tauri 桌面端，但缺少独立 Android / iOS 移动端工程。
+- 移动端 MVP 需要独立 React Native 客户端边界，不能复用 WebView 包壳或桌面端本机文件语义。
 
 ## 本次实际修改文件
 
-- `docs/mobile-client.md`
-  - 新增移动端客户端长期边界文档，记录当前阶段、功能边界、数据流、认证边界、媒体边界、工程边界和验证边界。
-- `docs/superpowers/specs/2026-05-18-mobile-client-design.md`
-  - 新增已确认的移动端 MVP 设计文档，用于后续实施计划。
-- `docs/superpowers/plans/2026-05-18-mobile-client-mvp.md`
-  - 新增移动端 MVP 实施计划，明确 `mobile/` 工程、API client、认证、页面、媒体播放、复习和验证任务。
+- `mobile/`
+  - 使用 `npx create-expo-app@latest mobile --template default@sdk-55 --no-install --no-agents-md` 创建 Expo SDK 55 默认工程骨架。
+  - 通过 pnpm 安装模板依赖、移动端运行时依赖和测试依赖。
+  - 新增 `mobile/global.d.ts`，为模板中的 CSS module 引用提供 TypeScript 声明。
+- `.gitignore`
+  - 只追加缺失的移动端忽略项：`mobile/node_modules/`、`mobile/.expo/`、`mobile/dist/`、`mobile/coverage/`、`mobile/*.tsbuildinfo`。
 - `docs/current-change.md`
-  - 覆盖并维护当前移动端任务工作单。
+  - 覆盖为当前 Task 1 工作单，记录本次修改范围、行为语义、验证结果和风险。
 
 ## 行为语义是否变化
 
-- 当前只修改文档，不改变运行时代码行为。
-- 已确认未来移动端 MVP 的产品边界：真实 React Native App，默认连接 `https://plm.xuebao.chat/api`，不做 WebView 包壳。
-- 已生成实施计划，但尚未创建 `mobile/` 工程。
+- 当前只新增移动端工程骨架和忽略规则，不改变现有后端、Web 前端、桌面端或部署行为。
+- 未实现登录、API client、视频播放、离线缓存、本机文件导入或 WebView 包壳。
+- `mobile/global.d.ts` 只影响 TypeScript 对 `*.module.css` 的类型识别，不改变运行时行为。
 
 ## 重构说明
 
-- 当前未做代码重构。
-- 文档层面把移动端与 Web/Tauri 客户端边界分开，避免后续实现时引入错误复用或隐式兼容。
+- 未做代码重构。
+- 本任务是新增独立移动端工程边界，不改变现有模块抽象。
 
 ## 未修改内容
 
-- 未创建 `mobile/` 工程；需要用户选择执行方式后再进入脚手架。
-- 未修改后端 API；当前 MVP 应先尝试复用现有公开 API。
-- 未修改 `frontend/`；移动端不直接复用 React DOM UI。
-- 未修改 Windows Tauri 桌面端；桌面端 `NATIVE_LOCAL` 语义不迁移到手机端。
-- 未修改 README；当前阶段尚未新增可运行移动端工程，README 入口应在工程创建后同步。
+- 未修改后端、`frontend/`、`desktop/`、测试文件、部署配置或长期文档。
+- 未更新 README 和 `docs/mobile-client.md`，因为用户本轮明确限制只允许修改 `mobile/`、`.gitignore`、`docs/current-change.md`。
 
 ## 影响范围
 
-- API：无当前代码影响。
-- 架构：新增已确认的移动端客户端边界文档。
-- 部署：无当前代码影响。
+- API：无影响。
+- 架构：新增 `mobile/` 独立 Expo 工程骨架。
+- 部署：无影响。
 - 数据结构：无影响。
-- UI：无当前代码影响。
-- 测试：无当前代码影响。
+- UI：仅包含 Expo 模板默认移动端 UI 骨架，未做业务 UI。
+- 测试：安装测试依赖，未新增测试用例。
 
 ## 当前风险点和不确定项
 
-- React Native 对现有 cookie 会话的承载方式可能与浏览器不同；如果实现阶段发现阻塞，必须暂停确认认证策略。
-- Expo 默认媒体能力可能无法覆盖所有现有播放描述符；不能用未确认 fallback 隐藏该限制。
-- 未来如果要共享 Web API 类型，需要先确认共享包边界，不能直接从移动端引用 Vite 或 React DOM 专用模块。
+- `pnpm --dir mobile add -D ...` 成功但输出 peer dependency 警告：
+  - `react-test-renderer 19.2.6` 期望 `react@^19.2.6`，模板当前为 `react 19.2.0`。
+  - `jest-expo` 的子依赖 `jest-watch-typeahead` 提示 peer 范围不包含当前安装的 `jest 30.4.2`。
+- 上述警告来自指定安装命令和 Expo SDK 55 当前依赖解析结果，本任务未自行替换技术路线或引入兼容层。
+- 首次运行 `pnpm --dir mobile exec tsc --noEmit` 时，模板内 `src/components/animated-icon.web.tsx` 无法识别已有 `animated-icon.module.css` 的类型声明；已用 `mobile/global.d.ts` 做最小类型配置修复。
 
 ## 仍需用户确认的问题
 
-- 请用户选择实施计划执行方式：Subagent-Driven 或 Inline Execution。
+- 无。
 
 ## 验证记录
 
-- 已运行未决占位扫描，未发现需要补齐的占位内容。
-- 已运行 `git diff --check` 检查文档变更，未发现 whitespace error。
-- 当前只做文档变更，尚未运行构建或测试。
+- `Test-Path mobile`：输出 `False`。
+- `npx create-expo-app@latest mobile --template default@sdk-55 --no-install --no-agents-md`：成功创建工程；未生成嵌套 `.git`，未生成 `mobile/AGENTS.md`。
+- `pnpm --dir mobile install`：成功。
+- `pnpm --dir mobile add zod @tanstack/react-query`：成功。
+- `pnpm --dir mobile exec expo install expo-secure-store expo-video`：成功。
+- `pnpm --dir mobile add -D jest jest-expo @types/jest @testing-library/react-native react-test-renderer`：成功，带 peer dependency 警告。
+- `pnpm --dir mobile exec expo --version`：成功，输出 `55.0.30`。
+- `pnpm --dir mobile exec tsc --noEmit`：首次失败，报错 `Cannot find module './animated-icon.module.css' or its corresponding type declarations.`；新增 `mobile/global.d.ts` 后重新运行成功。
 
 ## 污染风险检查
 

@@ -26,6 +26,11 @@ frontend/*.tsbuildinfo
 frontend/playwright-report/
 frontend/test-results/
 frontend/blob-report/
+mobile/node_modules/
+mobile/.expo/
+mobile/dist/
+mobile/coverage/
+mobile/*.tsbuildinfo
 .env
 .env*
 .env.selfhost.sync
