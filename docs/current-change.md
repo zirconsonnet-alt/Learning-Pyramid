@@ -20,13 +20,16 @@
   - 新增移动端客户端长期边界文档，记录当前阶段、功能边界、数据流、认证边界、媒体边界、工程边界和验证边界。
 - `docs/superpowers/specs/2026-05-18-mobile-client-design.md`
   - 新增已确认的移动端 MVP 设计文档，用于后续实施计划。
+- `docs/superpowers/plans/2026-05-18-mobile-client-mvp.md`
+  - 新增移动端 MVP 实施计划，明确 `mobile/` 工程、API client、认证、页面、媒体播放、复习和验证任务。
 - `docs/current-change.md`
-  - 覆盖为当前移动端任务工作单，不保留上一轮桌面端过程记录。
+  - 覆盖并维护当前移动端任务工作单。
 
 ## 行为语义是否变化
 
 - 当前只修改文档，不改变运行时代码行为。
 - 已确认未来移动端 MVP 的产品边界：真实 React Native App，默认连接 `https://plm.xuebao.chat/api`，不做 WebView 包壳。
+- 已生成实施计划，但尚未创建 `mobile/` 工程。
 
 ## 重构说明
 
@@ -35,7 +38,7 @@
 
 ## 未修改内容
 
-- 未创建 `mobile/` 工程；需要用户确认设计文档后再进入实施计划和脚手架。
+- 未创建 `mobile/` 工程；需要用户选择执行方式后再进入脚手架。
 - 未修改后端 API；当前 MVP 应先尝试复用现有公开 API。
 - 未修改 `frontend/`；移动端不直接复用 React DOM UI。
 - 未修改 Windows Tauri 桌面端；桌面端 `NATIVE_LOCAL` 语义不迁移到手机端。
@@ -58,10 +61,12 @@
 
 ## 仍需用户确认的问题
 
-- 请用户 review `docs/superpowers/specs/2026-05-18-mobile-client-design.md` 后确认是否进入实施计划。
+- 请用户选择实施计划执行方式：Subagent-Driven 或 Inline Execution。
 
 ## 验证记录
 
+- 已运行未决占位扫描，未发现需要补齐的占位内容。
+- 已运行 `git diff --check` 检查文档变更，未发现 whitespace error。
 - 当前只做文档变更，尚未运行构建或测试。
 
 ## 污染风险检查
