@@ -1,52 +1,65 @@
-# 当前变更：移动端工作台测试覆盖修复
+# 当前变更：Task 5 移动端项目路由接入原生工作台
 
 ## 当前用户要求
 
-- 修复 Task 4 代码质量 review 未通过的问题。
-- 给 `MobileWorkbenchScreen` 补充草稿编辑、草稿删除和完整草稿提交主路径测试。
-- 若当前实现已经满足新增测试，不强行修改生产代码。
+- 将移动端 project route 从旧 `ProjectScreen` 列表页替换为 query-driven native workbench container。
+- 保留 `ProjectScreen` 组件级覆盖。
+- 新增 route 集成测试，覆盖默认首个 leaf、草稿创建、提交 learning task、提交后清空草稿与 query invalidation。
+- 不修改后端 API、数据库、部署、Web/Tauri，不新增协议或持久化。
 
 ## 根因
 
-- `mobile/__tests__/mobile-workbench-screen.test.tsx` 已覆盖工作台展示、目录选择、复习门禁、播放时间回调、添加草稿和提交阻止路径。
-- 测试缺少对草稿输入 `onUpdateDraft`、删除 `onRemoveDraft` 和可提交主路径 `onSubmitDrafts` 的直接断言。
-- 现有 `MobileWorkbenchScreen` 实现已具备这些行为，本次问题是测试覆盖缺口，不是生产实现缺陷。
+- `mobile/src/app/project/[subjectId]/[scopedProjectId].tsx` 仍渲染旧 `ProjectScreen` 列表页，并通过 `openNode` 跳转到 learning-object 详情页。
+- 已有 `MobileWorkbenchScreen`、draft builder、learning task API 和播放器时间回调，但项目入口没有把它们接到移动端学习主流程。
 
 ## 本次实际修改文件
 
-- `mobile/__tests__/mobile-workbench-screen.test.tsx`
-  - 新增草稿控件测试，验证题面和答案输入变更会以 `draft_1` 调用 `onUpdateDraft`，删除按钮会以 `draft_1` 调用 `onRemoveDraft`。
-  - 新增完整草稿提交主路径测试，验证无复习门禁、复习队列未加载、非提交中时点击 `提交学习` 会调用 `onSubmitDrafts`。
+- `mobile/src/app/project/[subjectId]/[scopedProjectId].tsx`
+  - 替换为 query-driven native workbench container。
+  - 读取 scoped route params，加载 learning object nodes、review queue、active leaf playback 和 active node recall points。
+  - 默认选择首个 leaf，支持目录切换 leaf、播放时间回调、本地草稿创建/编辑/删除和提交 learning task。
+  - 提交成功后清除当前 instance 草稿，并 invalidate review queue、active node recall points、project recall points 和 nodes。
+- `mobile/__tests__/project-route-workbench.test.tsx`
+  - 新增 project route 集成测试，mock `expo-router` 参数和 `MobileWorkbenchScreen`，验证 workbench 容器提交当前学习对象草稿并 invalidates 相关 query。
+  - 测试 QueryClient 显式关闭测试期 GC timer，并在断言后卸载和清理，避免测试进程残留异步句柄。
+- `mobile/__tests__/learning-navigation.test.tsx`
+  - 已确认保留 `ProjectScreen` 学习对象标题和加载错误覆盖；文件无需实际修改。
 - `docs/current-change.md`
-  - 更新为当前 Task 4 review 修复工作单。
+  - 覆盖为当前 Task 5 工作单和验证记录。
 
 ## 行为语义是否变化
 
-- 无。仅补充测试覆盖。
+- 是。进入移动端项目 route 现在直接进入 native workbench，而不是旧学习对象列表页。
+- project route 默认选择首个 leaf 作为 active learning object。
+- 当前 active leaf 支持本地草稿、按播放时间生成 `t=<ms>` 锚点、提交 `learningTasks.submitLearningTask`。
+- review queue loading 或存在 `headId` 时，route 容器会阻止提交草稿。
 
 ## 重构说明
 
-- 无。
+- 仅做 route 内部容器替换，没有跨模块重构。
+- 未改变 `MobileWorkbenchScreen` presentational 边界、API client、后端 API 或数据结构。
 
 ## 未修改内容
 
-- 未修改 `mobile/src/screens/MobileWorkbenchScreen.tsx`，因为新增测试在当前实现下自然通过。
-- 未修改 API client、后端 API、数据库、部署、Web/Tauri 工作台或移动端路由。
-- 未新增持久化、网络请求、fallback、shim、legacy、临时兼容逻辑或特殊分支。
+- 未修改 `MobileWorkbenchScreen` presentational 实现。
+- 未修改 API client、后端 API、数据库、部署、Web/Tauri 工作台。
+- 未保留旧 `openNode` learning-object detail navigation 入口。
+- 未新增持久化、fallback、shim、legacy、临时兼容逻辑或特殊分支。
 - 未修改测试去适配错误实现。
+- 未更新长期文档；本任务文件范围限定为 route/tests/current-change，长期移动端文档更新应在后续文档任务中处理。
 
 ## 影响范围
 
 - API：无变化。
-- 架构：无变化。
+- 架构：仅移动端 route 容器接线变化。
 - 部署：无影响。
 - 数据结构：无影响。
-- UI：无变化。
-- 测试：补充移动端工作台草稿更新、删除和提交主路径测试。
+- UI：移动端项目入口改为原生工作台。
+- 测试：新增 project route 集成覆盖；保留 ProjectScreen 覆盖。
 
 ## 当前风险点和不确定项
 
-- 新增测试自然通过，无法提供新增测试先失败的 RED 证据；按用户要求需回报 `DONE_WITH_CONCERNS`。
+- 无已知影响本次改动正确性的风险。
 
 ## 仍需用户确认的问题
 
@@ -54,10 +67,10 @@
 
 ## 验证记录
 
-- RED 尝试已运行：`pnpm --dir mobile test -- mobile-workbench-screen.test.tsx`
-  - 结果：通过，1 个测试套件、7 个测试通过；新增测试在当前实现下自然通过，未形成 RED。
-- GREEN 已运行：`pnpm --dir mobile test -- mobile-workbench-screen.test.tsx`
-  - 结果：通过，1 个测试套件、7 个测试通过。
+- RED 已运行：`pnpm --dir mobile test -- learning-navigation.test.tsx project-route-workbench.test.tsx mobile-workbench-screen.test.tsx workbench-drafts.test.ts domain-api.test.ts`
+  - 结果：失败符合预期。关键错误：`Unable to find an element with text: active:第一课`，实际渲染旧 `ProjectScreen` 的“学习对象”列表。
+- GREEN 已运行：`pnpm --dir mobile test -- learning-navigation.test.tsx project-route-workbench.test.tsx mobile-workbench-screen.test.tsx workbench-drafts.test.ts domain-api.test.ts`
+  - 结果：通过，5 个测试套件、16 个测试通过。
 - GREEN 已运行：`pnpm --dir mobile typecheck`
   - 结果：通过。
 
