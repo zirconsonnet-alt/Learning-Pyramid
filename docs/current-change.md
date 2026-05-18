@@ -1,90 +1,68 @@
-# 当前变更：手机端工作台播放器下方紧凑状态与折叠目录
+# 当前变更：React Native 移动端 App MVP
 
 ## 当前用户要求
 
-- 手机端工作台不要沿用桌面三列顺序导致目录先占第一屏。
-- 手机端播放器/书本定位区后先显示紧凑工作状态，再显示默认折叠的内容目录，随后是复述点录入与层推进区域。
-- 桌面端三列布局保持不变。
-- 目录仍属于工作台页面层，不放进全局顶栏，也不塞进 `VideoPane`。
-- 不动后端、API、数据结构，不用横向隐藏掩盖溢出。
+- 开始做 Android 和 iPhone 上的 App 软件。
+- 技术路线已确认使用 React Native。
+- React Native 基座已确认使用 Expo-managed。
+- 第一版 MVP 已确认只连接线上后端，先做登录、项目列表、学习/复习、视频播放。
+- 第一版不做手机本机文件导入，也不做离线缓存。
 
 ## 根因
 
-- 工作台原布局主要服务桌面三列，在手机端按 DOM 顺序堆叠时，内容目录和完整工作状态区域会占据播放器后的大量空间。
-- 内容目录是树形结构，深层缩进与 grid 子项最小宽度若不受约束，会在手机端撑出视口。
+- 当前仓库已有 FastAPI 后端、React Web 前端和 Windows Tauri 桌面端，但没有 Android / iOS 移动端工程。
+- 移动端是新客户端边界，不能把现有 Web UI 当作 WebView 包壳，也不能把 Windows Tauri 的 `NATIVE_LOCAL` 本机路径语义直接迁移到手机端。
+- 移动端 MVP 应复用现有公开 API 语义，而不是新增临时移动端专用协议或兼容层。
 
 ## 本次实际修改文件
 
-- `frontend/src/views/workbench/WorkbenchPage.tsx`
-  - 手机端重排工作台内容顺序为：播放器/书本定位、紧凑工作状态、默认折叠目录、主工作区。
-  - 手机端工作状态只展示一行摘要，详情默认折叠，点击后展开。
-  - 手机端内容目录默认折叠，点击后展开；选择目录节点后自动收起。
-  - 桌面端继续保持目录 / 主工作区 / 工作状态三列，并保留桌面目录与状态详情常驻显示。
-  - 为工作台关键区域补充稳定 DOM id，用于 e2e 验证布局顺序和折叠状态。
-- `frontend/src/views/workbench/components/LearningObjectTree.tsx`
-  - 为目录树缩进增加上限，只保留有限层级的视觉缩进。
-  - 移除递归子容器额外左缩进，保留左侧层级线。
-  - 为树节点和标题文本增加 `min-w-0`，长标题截断而不是撑宽页面。
-- `frontend/tests/fixtures/mock-api.ts`
-  - 允许 e2e 按需注入学习对象树节点，用于构造深层目录测试数据。
-- `frontend/tests/e2e/app-load.spec.ts`
-  - 新增手机端工作台顺序、默认折叠、展开、选择后收起、无横向溢出的 e2e。
-  - 调整深层目录测试：先确认手机端目录默认折叠，再展开目录验证深层节点不会越界。
+- `docs/mobile-client.md`
+  - 新增移动端客户端长期边界文档，记录当前阶段、功能边界、数据流、认证边界、媒体边界、工程边界和验证边界。
+- `docs/superpowers/specs/2026-05-18-mobile-client-design.md`
+  - 新增已确认的移动端 MVP 设计文档，用于后续实施计划。
 - `docs/current-change.md`
-  - 覆盖为当前变更工作单。
+  - 覆盖为当前移动端任务工作单，不保留上一轮桌面端过程记录。
 
-## 行为语义变化
+## 行为语义是否变化
 
-- 手机端工作台首屏优先展示播放器/书本定位区。
-- 手机端工作状态详情和内容目录默认折叠，需要用户点击展开。
-- 手机端选择内容目录节点后，目录会自动收起，让用户回到播放器和主工作流。
-- 桌面端工作台布局和内容常驻语义不变。
-- 目录选择、实例切换、复述点录入、复习、层推进、AI 助手、后端数据语义不变。
+- 当前只修改文档，不改变运行时代码行为。
+- 已确认未来移动端 MVP 的产品边界：真实 React Native App，默认连接 `https://plm.xuebao.chat/api`，不做 WebView 包壳。
 
 ## 重构说明
 
-- 做了当前需求范围内的局部结构整理：把工作台页面中的目录、播放器、状态、主工作区分成响应式顺序明确的兄弟区域。
-- 没有跨模块重构，没有改变 `VideoPane` 职责，没有修改公共接口。
+- 当前未做代码重构。
+- 文档层面把移动端与 Web/Tauri 客户端边界分开，避免后续实现时引入错误复用或隐式兼容。
 
 ## 未修改内容
 
-- 未修改全局顶栏。
-- 未修改 `VideoPane` 内部逻辑。
-- 未修改后端、API、数据库、数据结构、部署配置。
-- 未用 `overflow-x: hidden` 掩盖横向溢出。
-- 未修改无关页面的 UI 行为。
+- 未创建 `mobile/` 工程；需要用户确认设计文档后再进入实施计划和脚手架。
+- 未修改后端 API；当前 MVP 应先尝试复用现有公开 API。
+- 未修改 `frontend/`；移动端不直接复用 React DOM UI。
+- 未修改 Windows Tauri 桌面端；桌面端 `NATIVE_LOCAL` 语义不迁移到手机端。
+- 未修改 README；当前阶段尚未新增可运行移动端工程，README 入口应在工程创建后同步。
 
 ## 影响范围
 
-- UI：仅影响工作台页面的响应式布局与目录树宽度约束。
-- 测试：补充工作台手机端 e2e 覆盖。
-- 文档：更新当前变更工作单。
-- 不影响 API、架构、部署、后端数据结构。
+- API：无当前代码影响。
+- 架构：新增已确认的移动端客户端边界文档。
+- 部署：无当前代码影响。
+- 数据结构：无影响。
+- UI：无当前代码影响。
+- 测试：无当前代码影响。
 
-## 当前风险与不确定项
+## 当前风险点和不确定项
 
-- 手机端工作状态详情默认折叠后，用户需要点击才能看到今日回看统计图和详细覆盖数据；这是为了把工作状态提前到播放器下方且减少第一屏占用。
-- 第 4 层之后目录不再继续增加视觉缩进，深层结构主要依靠左侧层级线、展开图标和节点顺序表达。
-- 当前工作区还包含同一轮手机端优化的首页、顶栏、个人中心、排行榜等未提交改动；本次没有回滚或扩大这些改动。
-
-## 本次发现但未自动修复的问题
-
-- `frontend/src/shell/AppShell.tsx:712`：`eslint` 报告既有 `react-hooks/exhaustive-deps` warning，提示 `hasAccessiblePomodoroProjectRef` 未列入依赖。
-- 风险等级：低。
-- 是否影响本次改动：否。
-
-## 验证记录
-
-- 已运行：`pnpm -C frontend exec eslint src/views/workbench/WorkbenchPage.tsx tests/e2e/app-load.spec.ts`，通过。
-- 已运行：`LEARNINGPYRAMID_FRONTEND_E2E_USE_DEV_SERVER=1 LEARNINGPYRAMID_FRONTEND_E2E_PORT=4216 pnpm -C frontend exec playwright test tests/e2e/app-load.spec.ts --project=chromium --grep "workbench mobile"`，通过，2 个用例全部通过。
-- 已运行：`pnpm -C frontend exec eslint src/views/workbench/WorkbenchPage.tsx src/views/workbench/components/LearningObjectTree.tsx tests/fixtures/mock-api.ts tests/e2e/app-load.spec.ts`，通过。
-- 已运行：`git diff --check -- docs/current-change.md frontend/src/index.css frontend/src/shell/AppShell.tsx frontend/src/views/workbench/WorkbenchPage.tsx frontend/src/views/workbench/components/LearningObjectTree.tsx frontend/tests/e2e/app-load.spec.ts frontend/tests/fixtures/mock-api.ts`，通过；仅提示这些工作区文件后续可能被 Git 转换为 CRLF。
-- 已运行：`pnpm -C frontend exec eslint src/shell/AppShell.tsx src/views/workbench/WorkbenchPage.tsx src/views/workbench/components/LearningObjectTree.tsx tests/fixtures/mock-api.ts tests/e2e/app-load.spec.ts`，无错误；存在既有 `react-hooks/exhaustive-deps` warning，未修改。
-- 已运行：`pnpm -C frontend build`，通过；仍有既有 chunk size warning。
+- React Native 对现有 cookie 会话的承载方式可能与浏览器不同；如果实现阶段发现阻塞，必须暂停确认认证策略。
+- Expo 默认媒体能力可能无法覆盖所有现有播放描述符；不能用未确认 fallback 隐藏该限制。
+- 未来如果要共享 Web API 类型，需要先确认共享包边界，不能直接从移动端引用 Vite 或 React DOM 专用模块。
 
 ## 仍需用户确认的问题
 
-- 无。
+- 请用户 review `docs/superpowers/specs/2026-05-18-mobile-client-design.md` 后确认是否进入实施计划。
+
+## 验证记录
+
+- 当前只做文档变更，尚未运行构建或测试。
 
 ## 污染风险检查
 
