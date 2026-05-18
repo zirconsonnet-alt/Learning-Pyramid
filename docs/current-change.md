@@ -17,9 +17,11 @@
 
 - `mobile/__tests__/project-route-workbench.test.tsx`
   - 新增 route callback 级提交门禁覆盖：queue refetch/fetching 和 stale queue error 状态下，直接调用 mocked screen 的 `onSubmitDrafts` 不会调用 `submitLearningTask`。
+  - 新增 queue refetch 时 UI 侧 `reviewQueueLoading` 状态覆盖，确保 presentational disabled 状态与 route callback 门禁一致。
   - 新增 active selection reconcile 覆盖：当前 selected leaf 从 nodes 中消失后，route 切到首个剩余 leaf，下一次新增草稿使用新 leaf 的 instance/title 和重置后的 `t=0` 锚点。
 - `mobile/src/app/project/[subjectId]/[scopedProjectId].tsx`
   - 新增统一 `canSubmitDrafts`，并让 `submitDrafts` 使用同一个 boolean。
+  - 新增统一 `reviewQueueBlocksSubmit`，同时驱动 route callback 门禁和传给 `MobileWorkbenchScreen` 的 `reviewQueueLoading`。
   - 显式 reconcile resolved active leaf：当 `activeNode` 与 `activeNodeId` 不一致时同步 `activeNodeId`；当 active instance 改变或 active leaf 消失时重置 `currentMs`。
 - `docs/current-change.md`
   - 覆盖为本次 review fix 工作单和验证记录。
@@ -27,6 +29,7 @@
 ## 行为语义是否变化
 
 - 是。route callback 现在会在 review queue 正在 fetching、处于 error、已有 head、提交中、无 active leaf 或无草稿时拒绝提交草稿。
+- 是。review queue 正在 fetching 或处于 error 时，route 传给 screen 的 `reviewQueueLoading` 也会进入阻断状态，避免 UI 看似可提交但 callback 拒绝。
 - 是。当前 selected leaf 失效后，route 会同步选择当前首个可用 leaf；active instance 变化后新草稿锚点从 `t=0` 开始。
 
 ## 重构说明
@@ -62,6 +65,8 @@
 
 - RED 已运行：`pnpm --dir mobile test -- project-route-workbench.test.tsx`
   - 结果：失败符合预期。关键失败包括 queue fetching/error 时仍调用 `submitLearningTask`，以及 leaf 切换后新草稿 anchor 仍为旧 `t=12000`。
+- RED 已运行：`pnpm --dir mobile test -- project-route-workbench.test.tsx`
+  - 结果：失败符合预期。新增 UI 状态断言失败，queue refetch 时仍显示 `review:none`，未进入 `review:loading`。
 - GREEN 已运行：`pnpm --dir mobile test -- project-route-workbench.test.tsx`
   - 结果：通过，1 个测试套件、4 个测试通过。
 - GREEN 已运行：`pnpm --dir mobile test -- learning-navigation.test.tsx project-route-workbench.test.tsx mobile-workbench-screen.test.tsx workbench-drafts.test.ts domain-api.test.ts`

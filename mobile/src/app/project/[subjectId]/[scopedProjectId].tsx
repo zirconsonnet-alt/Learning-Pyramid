@@ -109,13 +109,11 @@ export default function ProjectRoute() {
   })
 
   const activeDrafts = drafts.filter((draft) => draft.instanceId === activeInstanceId)
+  const reviewQueueBlocksSubmit = queueQ.isLoading || queueQ.isFetching || queueQ.isError || Boolean(queueQ.data?.headId)
   const canSubmitDrafts =
     activeNode?.kind === "leaf" &&
     activeDrafts.length > 0 &&
-    !queueQ.isLoading &&
-    !queueQ.isFetching &&
-    !queueQ.isError &&
-    !queueQ.data?.headId &&
+    !reviewQueueBlocksSubmit &&
     !submitLearningTask.isPending
   const loading = nodesQ.isLoading
   const errorMessage =
@@ -197,7 +195,7 @@ export default function ProjectRoute() {
       recallPointsErrorMessage={recallPointsQ.isError ? toErrorMessage(recallPointsQ.error, "复述点加载失败") : null}
       recallPointsLoading={recallPointsQ.isLoading}
       reviewHeadId={queueQ.data?.headId ?? null}
-      reviewQueueLoading={queueQ.isLoading}
+      reviewQueueLoading={reviewQueueBlocksSubmit}
       sessionCookie={runtime.getSessionCookie()}
       submitting={submitLearningTask.isPending}
     />

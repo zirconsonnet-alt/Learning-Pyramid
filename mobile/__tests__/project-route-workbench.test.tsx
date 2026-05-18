@@ -216,6 +216,7 @@ describe("ProjectRoute mobile workbench", () => {
     await waitFor(() =>
       expect(screen.queryClient.getQueryState(["review-queue", "subj_1", "proj_1"])?.fetchStatus).toBe("fetching"),
     )
+    await waitFor(() => expect(screen.getByText("review:loading")).toBeTruthy())
     await waitFor(() => expect(mockWorkbenchProps?.onSubmitDrafts).not.toBe(submitBeforeRefetch))
     await act(async () => {
       mockWorkbenchProps?.onSubmitDrafts()
