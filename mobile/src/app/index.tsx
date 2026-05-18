@@ -1,16 +1,25 @@
 import { useState } from "react"
-import { StyleSheet, Text, View } from "react-native"
+import { router } from "expo-router"
+import { useQuery } from "@tanstack/react-query"
 
+import { useLearningPyramidApi } from "../api/ApiProvider"
+import { toErrorMessage } from "../api/errorMessage"
 import { useAuth } from "../auth/AuthProvider"
-import { AppButton } from "../components/AppButton"
 import { LoadingState } from "../components/LoadingState"
 import { Screen } from "../components/Screen"
 import { LoginScreen } from "../screens/LoginScreen"
+import { SubjectsScreen } from "../screens/SubjectsScreen"
 
 export default function HomeScreen() {
+  const api = useLearningPyramidApi()
   const auth = useAuth()
   const [signingIn, setSigningIn] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const subjectsQ = useQuery({
+    queryKey: ["subjects"],
+    queryFn: () => api.subjects.listSubjects(),
+    enabled: auth.status === "signedIn",
+  })
 
   if (auth.status === "loading") {
     return (
@@ -40,18 +49,12 @@ export default function HomeScreen() {
   }
 
   return (
-    <Screen>
-      <View style={styles.header}>
-        <Text style={styles.title}>学习项目</Text>
-        <Text style={styles.user}>{auth.user?.nickname || auth.user?.email}</Text>
-      </View>
-      <AppButton label="退出" onPress={() => void auth.signOut()} />
-    </Screen>
+    <SubjectsScreen
+      errorMessage={subjectsQ.isError ? toErrorMessage(subjectsQ.error, "学科加载失败") : null}
+      loading={subjectsQ.isLoading}
+      openSubject={(subjectId) => router.push({ pathname: "/subject/[subjectId]", params: { subjectId } })}
+      signOut={() => void auth.signOut()}
+      subjects={subjectsQ.data ?? []}
+    />
   )
 }
-
-const styles = StyleSheet.create({
-  header: { gap: 6 },
-  title: { color: "#0f172a", fontSize: 24, fontWeight: "700" },
-  user: { color: "#475569", fontSize: 14 },
-})

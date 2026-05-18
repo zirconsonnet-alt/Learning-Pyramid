@@ -3,6 +3,7 @@ import { Slot } from "expo-router"
 import { useState } from "react"
 
 import { createApiClient } from "../api/http"
+import { ApiProvider } from "../api/ApiProvider"
 import { createLearningPyramidApi } from "../api/types"
 import { AuthProvider } from "../auth/AuthProvider"
 import { createSessionCookieStore } from "../auth/sessionCookieStore"
@@ -24,9 +25,11 @@ export default function RootLayout() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider api={api} cookieStore={cookieStore} storage={secureSessionStorage}>
-        <Slot />
-      </AuthProvider>
+      <ApiProvider api={api}>
+        <AuthProvider api={api} cookieStore={cookieStore} storage={secureSessionStorage}>
+          <Slot />
+        </AuthProvider>
+      </ApiProvider>
     </QueryClientProvider>
   )
 }
