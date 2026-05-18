@@ -5,13 +5,13 @@ import type { ApiRequester } from "./types"
 export const AuthUserSchema = z.object({
   userId: z.string(),
   email: z.string(),
-  createdAt: z.unknown(),
+  createdAt: z.string(),
   publicUid: z.string(),
-  nickname: z.string().nullable().optional(),
-  bio: z.string().nullable().optional(),
-  avatarUrl: z.string().nullable().optional(),
+  nickname: z.string(),
+  bio: z.string(),
+  avatarUrl: z.string().nullable(),
   status: z.string(),
-  updatedAt: z.unknown(),
+  updatedAt: z.string(),
   roles: z.array(z.string()),
 })
 

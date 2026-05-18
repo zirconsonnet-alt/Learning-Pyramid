@@ -4,11 +4,11 @@ import { projectApiPath, type ApiRequester, type ScopedProjectRef } from "./type
 
 export const PlaybackDescriptorSchema = z.object({
   instanceId: z.string(),
-  sourceKind: z.string(),
-  playbackKind: z.string(),
+  sourceKind: z.enum(["SERVER_FS", "BROWSER_LOCAL", "NATIVE_LOCAL", "MANUAL", "BAIDU_NETDISK"]),
+  playbackKind: z.enum(["FILE", "HLS"]),
   url: z.string(),
   mimeType: z.string(),
-  durationMs: z.number().nullable(),
+  durationMs: z.number().int().nonnegative().nullable(),
   supportsFrameGrab: z.boolean(),
   supportsServerAsr: z.boolean(),
 })

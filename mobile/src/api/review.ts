@@ -10,13 +10,13 @@ const AnchorSchema = z.object({
 export const RecallPointSchema = z.object({
   projectId: z.string(),
   recallPointId: z.string(),
-  createdAt: z.unknown(),
-  state: z.string(),
-  deletedAt: z.unknown().nullable().optional(),
+  createdAt: z.string(),
+  state: z.enum(["ACTIVE", "DELETED"]),
+  deletedAt: z.string().nullable(),
   question: z.unknown(),
   answer: z.unknown(),
   anchor: AnchorSchema.nullable(),
-  references: z.array(z.string()),
+  references: z.array(z.string()).default([]),
   insights: z.array(z.unknown()),
 })
 
@@ -25,17 +25,17 @@ export const ReviewRecommendationItemSchema = z.object({
   reviewRecommendationIndex: z.number(),
   estimatedMemoryStrength: z.number(),
   weightedSuccessRatio: z.number(),
-  lastReviewedAt: z.unknown().nullable(),
-  lastReviewResult: z.unknown().nullable(),
-  reviewCount: z.number(),
+  lastReviewedAt: z.string().nullable(),
+  lastReviewResult: z.enum(["CAN_RECALL", "CANNOT_RECALL"]).nullable(),
+  reviewCount: z.number().int(),
 })
 
 export const ReviewRecommendationPageSchema = z.object({
   items: z.array(ReviewRecommendationItemSchema),
-  totalCount: z.number(),
-  offset: z.number(),
-  limit: z.number(),
-  nextOffset: z.number().nullable(),
+  totalCount: z.number().int(),
+  offset: z.number().int(),
+  limit: z.number().int(),
+  nextOffset: z.number().int().nullable(),
 })
 
 export type RecallPoint = z.infer<typeof RecallPointSchema>
