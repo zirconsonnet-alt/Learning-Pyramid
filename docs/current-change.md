@@ -1,68 +1,74 @@
-# 当前变更：移动端领域 API client 契约收紧
+# 当前变更：移动端认证状态与登录页
 
 ## 当前用户要求
 
 - 继续 React Native 移动端 App MVP。
-- 当前处于 Task 4 质量审查修复。
-- 收紧移动端领域 API client schema，使其对齐现有 Web API / 后端 DTO。
-- 补全 auth、subjects、learningObjects、media、review 的公开路径测试。
+- 当前执行 Task 5：实现认证状态、session cookie 存储桥和登录页。
+- 不修改后端认证策略，不新增 token/custom header。
 
 ## 根因
 
-- Task 4 初始领域 API client 为快速接入放宽了部分字段类型，例如时间字段使用 `z.unknown()`、枚举字段使用 `z.string()`。
-- 这会把真实 API 契约变成隐式约定，后续 UI 可能误判字段形状。
-- `subjects` 列表方法命名为 `list`，不如 `listSubjects` 清晰，容易在后续页面实现中造成误用。
+- 移动端已有通用 API client 和领域 API client，但还没有本地认证状态边界。
+- React Native 需要把内存中的 `plm_session` 与 `expo-secure-store` 持久化连接起来，否则登录态无法在 App 重启后恢复。
+- Expo 模板首页仍是示例入口，不是 LearningPyramid 移动端登录入口。
 
 ## 本次实际修改文件
 
-- `mobile/src/api/auth.ts`
-  - 对齐现有 AuthUser DTO，将时间、昵称、简介等字段收紧为实际字符串/nullable 语义。
-- `mobile/src/api/subjects.ts`
-  - 对齐现有 Subject/StudyMaterial DTO，新增 `StudyMaterialTypeSchema`，收紧时间、标题和材料类型字段。
-  - 将 `subjects.list` 改为 `subjects.listSubjects`。
-- `mobile/src/api/media.ts`
-  - 对齐现有 playback descriptor，收紧 source/playback 枚举和 duration 非负整数。
-- `mobile/src/api/review.ts`
-  - 对齐现有 recall/review recommendation DTO，收紧状态、时间、计数字段。
-  - `question` / `answer` 仍保持 `z.unknown()`，不发明 rich content 模型。
-- `mobile/__tests__/domain-api.test.ts`
-  - 补全 auth、subjects、learningObjects、media、review 的公开 API 路径和提交 body 测试。
+- `mobile/__tests__/auth-provider.test.tsx`
+  - 新增认证状态测试，覆盖无 session 恢复为 signedOut，以及登录后持久化 session cookie。
+- `mobile/__tests__/login-screen.test.tsx`
+  - 新增登录页提交邮箱和密码的测试。
+- `mobile/src/auth/sessionStorage.ts`
+  - 新增 `expo-secure-store` session cookie 持久化边界。
+- `mobile/src/auth/sessionCookieStore.ts`
+  - 新增内存 session cookie store，供同步 API client 读取。
+- `mobile/src/auth/AuthProvider.tsx`
+  - 新增认证上下文，负责恢复 session、登录、退出和持久化 cookie。
+  - 恢复 `/auth/me` 请求失败时回到 signedOut，不清除本地 cookie；明确返回 null 时清理失效 cookie。
+- `mobile/src/screens/LoginScreen.tsx`
+  - 新增移动端登录页。
+- `mobile/src/components/Screen.tsx`
+  - 改用 `react-native-safe-area-context` 的 `SafeAreaView`，避免登录页测试触发 React Native 弃用 warning。
+- `mobile/src/app/_layout.tsx`
+  - 将 Expo 根入口接入 `QueryClientProvider`、`AuthProvider` 和移动端 API client。
+- `mobile/src/app/index.tsx`
+  - 替换模板首页为登录/已登录入口。
 - `docs/current-change.md`
   - 更新当前工作单。
 
 ## 行为语义是否变化
 
-- 移动端领域 API client 的解析语义更严格，会更早暴露与现有 API DTO 不一致的问题。
-- 不改变后端 API、部署、数据结构或 Web/Tauri 运行行为。
-- 不新增移动端专用协议。
-- 不使用、发明或持久化内部 backend project id。
+- 移动端新增认证状态管理和登录入口。
+- 登录成功后必须拿到 `plm_session` 才会持久化并进入 signedIn，避免隐藏认证不可用问题。
+- 已有 session 恢复失败不会卡在 loading。
+- 不改变后端 API、认证协议、部署、数据结构或 Web/Tauri 行为。
 
 ## 重构说明
 
 - 未做跨模块重构。
-- 仅在移动端 API client 内部做当前任务范围内的 schema 收紧和测试补强。
+- 仅替换移动端模板入口，使 App 首屏进入 LearningPyramid 认证流。
 
 ## 未修改内容
 
-- 未修改后端 API。
-- 未修改移动端 HTTP envelope 和 cookie helper。
-- 未发明移动端 rich content 模型。
+- 未修改后端认证策略。
+- 未新增 token、自定义认证 header 或移动端专用认证协议。
+- 未删除 Expo 模板的 reset 脚本和其它模板文件。
 - 未修改 Web、桌面端、部署或数据结构。
-- 未更新长期文档；本次是移动端内部 API client 契约收紧，长期边界仍与 `docs/mobile-client.md` 一致。
+- 未更新长期文档；当前仍处实现阶段，长期文档将在移动端预览可运行后统一同步。
 
 ## 影响范围
 
-- API：不改变后端 API，仅收紧移动端解析契约。
-- 架构：无影响。
+- API：不改变后端 API，仅移动端开始调用 auth client。
+- 架构：移动端新增认证上下文和 session 存储边界。
 - 部署：无影响。
 - 数据结构：无影响。
-- UI：无影响。
-- 测试：补全移动端领域 API 路径和 body 测试。
+- UI：移动端首屏从 Expo 模板页变为 LearningPyramid 登录/已登录入口。
+- 测试：新增认证和登录页测试。
 
 ## 当前风险点和不确定项
 
-- `question` / `answer` 暂用 `z.unknown()` 是已确认边界；后续如要移动端编辑 rich content，需单独确认模型。
-- Task 8 复习提交仍可能受后端 review task id 可获取性影响；不能伪造 task id。
+- 真实 React Native 运行环境是否稳定暴露 `Set-Cookie` 仍需后续登录/logout smoke 验证；如果不通，必须暂停确认认证策略。
+- 当前 signedIn 首页只是认证入口占位，完整学科/材料列表在 Task 6 实现。
 
 ## 仍需用户确认的问题
 
@@ -70,9 +76,11 @@
 
 ## 验证记录
 
-- 已运行：`pnpm --dir mobile test -- domain-api.test.ts`，通过，1 个测试套件、1 个测试通过。
+- RED：`pnpm --dir mobile test -- auth-provider.test.tsx login-screen.test.tsx` 失败，摘要：`../src/auth/AuthProvider` 和 `../src/screens/LoginScreen` 不存在。
+- GREEN：首次实现后 `pnpm --dir mobile test -- auth-provider.test.tsx login-screen.test.tsx` 失败，原因是测试未模拟 API client 登录后写入内存 cookie；同时登录页测试触发 `SafeAreaView` 弃用 warning。
+- 已运行：`pnpm --dir mobile test -- auth-provider.test.tsx login-screen.test.tsx`，通过，2 个测试套件、3 个测试通过。
 - 已运行：`pnpm --dir mobile typecheck`，通过。
-- 已运行：`git diff --check -- mobile/src/api/auth.ts mobile/src/api/subjects.ts mobile/src/api/media.ts mobile/src/api/review.ts mobile/__tests__/domain-api.test.ts docs/current-change.md`，通过；仅有 Git 换行转换 warning，无 whitespace error。
+- 已运行：`git diff --check -- mobile/src/auth mobile/src/screens/LoginScreen.tsx mobile/src/app/_layout.tsx mobile/src/app/index.tsx mobile/src/components/Screen.tsx mobile/__tests__/auth-provider.test.tsx mobile/__tests__/login-screen.test.tsx docs/current-change.md`，通过；仅有 Git 换行转换 warning，无 whitespace error。
 
 ## 污染风险检查
 

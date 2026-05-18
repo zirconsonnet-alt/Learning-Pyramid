@@ -1,16 +1,32 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import React from 'react';
-import { useColorScheme } from 'react-native';
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { Slot } from "expo-router"
+import { useState } from "react"
 
-import { AnimatedSplashOverlay } from '@/components/animated-icon';
-import AppTabs from '@/components/app-tabs';
+import { createApiClient } from "../api/http"
+import { createLearningPyramidApi } from "../api/types"
+import { AuthProvider } from "../auth/AuthProvider"
+import { createSessionCookieStore } from "../auth/sessionCookieStore"
+import { secureSessionStorage } from "../auth/sessionStorage"
 
-export default function TabLayout() {
-  const colorScheme = useColorScheme();
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? "https://plm.xuebao.chat/api"
+
+export default function RootLayout() {
+  const [queryClient] = useState(() => new QueryClient())
+  const [cookieStore] = useState(() => createSessionCookieStore())
+  const [api] = useState(() => {
+    const client = createApiClient({
+      baseUrl: API_BASE_URL,
+      getSessionCookie: () => cookieStore.getSessionCookie(),
+      setSessionCookie: (cookie) => cookieStore.setSessionCookie(cookie),
+    })
+    return createLearningPyramidApi(client)
+  })
+
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <AnimatedSplashOverlay />
-      <AppTabs />
-    </ThemeProvider>
-  );
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider api={api} cookieStore={cookieStore} storage={secureSessionStorage}>
+        <Slot />
+      </AuthProvider>
+    </QueryClientProvider>
+  )
 }

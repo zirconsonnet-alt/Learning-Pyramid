@@ -1,5 +1,6 @@
 import type { ReactNode } from "react"
-import { SafeAreaView, ScrollView, StyleSheet, View } from "react-native"
+import { ScrollView, StyleSheet, View } from "react-native"
+import { SafeAreaView } from "react-native-safe-area-context"
 
 export function Screen({ children, scroll = true }: { children: ReactNode; scroll?: boolean }) {
   if (!scroll) {
