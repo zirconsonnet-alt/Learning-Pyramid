@@ -1,58 +1,52 @@
-# 当前变更：移动端播放器播放时间回传
+# 当前变更：移动端工作台展示屏
 
 ## 当前用户要求
 
-- 当前执行 mobile native workbench Task 3：给移动端播放器增加播放时间回调。
-- `LearningMediaPlayer` 需要在实际可播放视频内部监听 `expo-video` 的 `timeUpdate`，通过可选 `onPlaybackTimeChange` 回传当前播放时间毫秒数。
-- 该时间用于后续工作台复述点草稿生成 `t=<毫秒>` 锚点。
-- 不修改播放来源、媒体 URL/cookie 语义、后端 API、数据库、部署、Web 或 `LearningObjectScreen` 行为。
+- 当前执行 mobile native workbench Task 4：新增移动端工作台 presentational screen。
+- 展示层需要通过 props 渲染当前学习对象、媒体播放器、目录、已有复述点、复述点草稿、复习门禁和提交按钮。
+- 不接 API、不做路由、不新增持久化、不修改后端协议。
 
 ## 根因
 
-- 当前 `LearningMediaPlayer` 只渲染 `expo-video`，没有对外暴露播放时间回调。
-- 当前 `PlayableVideo` 没有设置 `timeUpdateEventInterval`，也没有订阅 `timeUpdate` 事件。
+- 移动端已有学习对象详情、播放器、复习队列和草稿模型，但项目入口缺少学习优先工作台展示层。
+- 需要一个只消费上层状态和回调的屏幕组件，把这些已存在能力组合成移动端工作台 UI。
 
 ## 本次实际修改文件
 
-- `mobile/__tests__/learning-object-detail.test.tsx`
-  - 新增播放器播放时间回调用例，验证可播放 descriptor 会设置 `timeUpdateEventInterval = 0.5`、订阅 `timeUpdate`，并将秒转换为毫秒回调。
-  - 将测试中的复述点锚点更新为 `t=10000`，匹配移动端复述点草稿锚点格式。
-- `mobile/src/screens/LearningMediaPlayer.tsx`
-  - 新增可选 prop `onPlaybackTimeChange?: (currentMs: number) => void`。
-  - 在 `PlayableVideo` 内通过 `useEffect` 订阅 `timeUpdate`，忽略非有限时间，并以 `Math.max(0, Math.floor(currentTime * 1000))` 回传毫秒数。
-  - 清理订阅时调用 `remove()`，并把 `timeUpdateEventInterval` 重置为 `0`。
+- `mobile/__tests__/mobile-workbench-screen.test.tsx`
+  - 新增工作台展示屏行为测试，覆盖 active learning object、mocked media player、existing recall point、draft inputs、目录选择、复习门禁、播放时间回调、添加草稿回调和 review queue loading 提交保护。
+- `mobile/src/screens/MobileWorkbenchScreen.tsx`
+  - 新增 `MobileWorkbenchScreen` 和 `MobileWorkbenchScreenProps`。
+  - 使用 `Screen`、`LoadingState`、`EmptyState`、`AppButton`、`AppTextInput`、`LearningMediaPlayer` 组合展示工作台。
+  - 通过 props 注入所有数据和回调，提交前用 `getIncompleteDraftReason` 和复习门禁状态保护 `onSubmitDrafts`。
 - `docs/current-change.md`
-  - 更新为当前 Task 3 工作单。
+  - 更新为当前 Task 4 工作单。
 
 ## 行为语义是否变化
 
-- 是。支持播放的移动端 `PlaybackDescriptor` 现在可以通过可选 `onPlaybackTimeChange` 回传当前播放时间毫秒数。
-- 未传入该回调时，播放器行为保持不变。
-- 不支持播放的 descriptor 仍显示既有明确不可播放状态。
-- 原生播放器请求的 URL 解析和 Cookie header 行为不变。
+- 是。移动端现在有可复用的工作台展示屏，能渲染当前学习内容、媒体、目录、复述点、草稿、复习门禁和提交动作。
+- UI 可以触发目录选择、打开复习入口、播放时间回传、添加草稿、删除草稿、编辑草稿和提交草稿回调。
+- 提交学习会在无草稿、复习队列加载中、存在队列头复习任务、草稿不完整或提交中时被阻止。
 
 ## 重构说明
 
 - 无跨模块重构。
-- 仅在现有播放器组件内部增加必要事件订阅，保持组件职责和媒体边界不变。
+- 仅新增展示屏组件，复用已有基础组件、播放器、富内容纯文本转换和草稿校验函数。
 
 ## 未修改内容
 
-- 未修改播放来源选择。
-- 未修改媒体 URL 或 session cookie 语义。
-- 未修改后端 API、数据库结构、部署配置、Web/Tauri 代码或 `LearningObjectScreen` 行为。
-- 未新增草稿持久化。
-- 未修改测试去适配错误实现。
-- 未新增 fallback、shim、legacy、临时兼容逻辑或特殊分支。
+- 未修改 API client、后端 API、数据库、部署、Web/Tauri 工作台或移动端路由。
+- 未新增持久化、网络请求、fallback、shim、legacy、临时兼容逻辑或特殊分支。
+- 未修改既有测试去适配错误实现。
 
 ## 影响范围
 
-- API：无后端 API 变化。
-- 架构：无跨层架构变化。
+- API：无变化。
+- 架构：移动端仍独立于 `frontend/`，本次新增组件为 props-driven presentational screen。
 - 部署：无影响。
-- 数据结构：无数据库或协议结构变化。
-- UI：无可见 UI 变化。
-- 测试：补充移动端播放器播放时间回传测试。
+- 数据结构：无影响。
+- UI：新增移动端工作台展示层。
+- 测试：新增 `mobile/__tests__/mobile-workbench-screen.test.tsx`。
 
 ## 当前风险点和不确定项
 
@@ -64,9 +58,9 @@
 
 ## 验证记录
 
-- RED 已运行：`pnpm --dir mobile test -- learning-object-detail.test.tsx`
-  - 结果：失败，符合预期；新增测试 `reports playback time updates in milliseconds` 失败，原因为当前实现未设置 `timeUpdateEventInterval`，收到值仍为 `0`。
-- GREEN 已运行：`pnpm --dir mobile test -- learning-object-detail.test.tsx`
+- RED 已运行：`pnpm --dir mobile test -- mobile-workbench-screen.test.tsx`
+  - 结果：失败，符合预期；原因为 `../src/screens/MobileWorkbenchScreen` 模块不存在。
+- GREEN 已运行：`pnpm --dir mobile test -- mobile-workbench-screen.test.tsx`
   - 结果：通过，1 个测试套件、5 个测试通过。
 - GREEN 已运行：`pnpm --dir mobile typecheck`
   - 结果：通过。
