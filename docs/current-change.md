@@ -1,61 +1,77 @@
-# 当前变更：Task 5 移动端工作台 route review 修复
+# 当前变更：移动端原生工作台
 
 ## 当前用户要求
 
-- 修复 Task 5 代码质量 review 指出的两个 route container 缺口。
-- `submitDrafts` 的提交门禁必须不弱于 UI 状态，直接调用 route callback 时也要阻止 queue refetch、queue error、已有 head、无 active leaf、无草稿和提交中重复提交。
-- active selected leaf 从节点列表消失后，route 必须显式切到当前首个剩余 leaf，并在 active instance 改变时重置 `currentMs`。
-- 按 TDD 先补失败测试，再改实现。
-- 不修改后端 API、数据库、部署、Web/Tauri、API client 或 `MobileWorkbenchScreen` presentational 语义。
-
-## 根因
-
-- `mobile/src/app/project/[subjectId]/[scopedProjectId].tsx` 中 `submitDrafts` 只检查 `queueQ.isLoading` 和 `queueQ.data?.headId`，没有复用一个包含 fetching、error 和 mutation pending 的统一提交条件。
-- `activeNode` 会在 `activeNodeId` 指向的 leaf 消失后派生为 `firstLeaf(nodes)`，但 `activeNodeId` 和 `currentMs` 没有同步到这个 resolved active leaf，导致新草稿可能使用旧播放时间。
+- Expo Go Android 原生移动端补齐学习主流程，继续 React Native 路线，并按桌面/网页工作台语义实现学习优先工作台。
+- 本轮文档收尾只同步移动端原生工作台最终状态，不修改代码、测试、配置、锁文件、后端/API/部署/Web/Tauri 语义。
 
 ## 本次实际修改文件
 
-- `mobile/__tests__/project-route-workbench.test.tsx`
-  - 新增 route callback 级提交门禁覆盖：queue refetch/fetching 和 stale queue error 状态下，直接调用 mocked screen 的 `onSubmitDrafts` 不会调用 `submitLearningTask`。
-  - 新增 queue refetch 时 UI 侧 `reviewQueueLoading` 状态覆盖，确保 presentational disabled 状态与 route callback 门禁一致。
-  - 新增 active selection reconcile 覆盖：当前 selected leaf 从 nodes 中消失后，route 切到首个剩余 leaf，下一次新增草稿使用新 leaf 的 instance/title 和重置后的 `t=0` 锚点。
+- `mobile/src/api/learningTasks.ts`
+  - 新增移动端 `POST /learning-tasks` client，复用 scoped project 路径和既有后端 API。
+- `mobile/src/api/types.ts`
+  - 将 `learningTasks` 纳入移动端聚合 API。
+- `mobile/__tests__/domain-api.test.ts`
+  - 覆盖移动端领域 API 路径、方法和 `learning task` 提交 body。
+- `mobile/src/workbench/recallDrafts.ts`
+  - 新增纯函数草稿模型、校验和提交 payload 构造。
+- `mobile/__tests__/workbench-drafts.test.ts`
+  - 覆盖草稿创建、校验、锚点和提交 payload。
+- `mobile/src/screens/LearningMediaPlayer.tsx`
+  - 将播放器当前时间以毫秒回传给工作台。
+- `mobile/__tests__/learning-object-detail.test.tsx`
+  - 覆盖播放器 `timeUpdate` 到毫秒回调的连接。
+- `mobile/src/screens/MobileWorkbenchScreen.tsx`
+  - 新增原生移动工作台 presentational screen，展示当前学习对象、目录、媒体、已有复述点、草稿和复习门禁。
+- `mobile/__tests__/mobile-workbench-screen.test.tsx`
+  - 覆盖工作台渲染、目录选择、草稿交互、提交门禁和复习入口。
 - `mobile/src/app/project/[subjectId]/[scopedProjectId].tsx`
-  - 新增统一 `canSubmitDrafts`，并让 `submitDrafts` 使用同一个 boolean。
-  - 新增统一 `reviewQueueBlocksSubmit`，同时驱动 route callback 门禁和传给 `MobileWorkbenchScreen` 的 `reviewQueueLoading`。
-  - 显式 reconcile resolved active leaf：当 `activeNode` 与 `activeNodeId` 不一致时同步 `activeNodeId`；当 active instance 改变或 active leaf 消失时重置 `currentMs`。
+  - 将项目路由接到 query-driven 移动工作台，处理 active leaf、播放时间、草稿提交、query invalidation 和 queue gate。
+- `mobile/__tests__/project-route-workbench.test.tsx`
+  - 覆盖 route 层草稿提交、当前节点草稿清理、query invalidation、提交门禁和 active leaf reconcile。
+- `docs/mobile-client.md`
+  - 同步移动端原生工作台能力、功能边界和工程边界。
 - `docs/current-change.md`
-  - 覆盖为本次 review fix 工作单和验证记录。
+  - 覆盖为本次移动端原生工作台最终状态。
+- `mobile/__tests__/learning-navigation.test.tsx`
+  - 未修改；学科和材料导航相关覆盖保留，项目路由行为由工作台 screen/API/route 测试覆盖。
 
 ## 行为语义是否变化
 
-- 是。route callback 现在会在 review queue 正在 fetching、处于 error、已有 head、提交中、无 active leaf 或无草稿时拒绝提交草稿。
-- 是。review queue 正在 fetching 或处于 error 时，route 传给 screen 的 `reviewQueueLoading` 也会进入阻断状态，避免 UI 看似可提交但 callback 拒绝。
-- 是。当前 selected leaf 失效后，route 会同步选择当前首个可用 leaf；active instance 变化后新草稿锚点从 `t=0` 开始。
+- 是。移动端项目入口从只浏览学习对象列表，变为默认进入学习优先的原生工作台。
+- 是。移动端支持目录切换当前学习对象、查看已有复述点、基于当前播放时间创建文本复述点草稿，并提交为一个 `learning task`。
+- 是。移动端工作台在 review queue 有队列头、加载、刷新、错误、无 active leaf、无草稿或提交中时阻止草稿提交。
+- 是。移动端播放器继续只播放后端 playback descriptor 支持的来源；`NATIVE_LOCAL`、`BROWSER_LOCAL` 和 `MANUAL` 明确不可播放。
+- 否。后端 API、数据库结构、部署方式、认证协议、Web/Tauri 工作台语义未变化。
 
 ## 重构说明
 
-- 仅做 route container 内部状态与门禁整理。
-- 未改变 `MobileWorkbenchScreen` props/API、presentational 语义、API client、后端 API、数据结构或部署方式。
+- 做了移动端范围内的局部结构补齐：新增 `recallDrafts` 纯函数模块承载草稿与 payload 构造，避免将草稿校验和提交体拼装散落在 screen 或 route 中。
+- 做了 route container 内部状态整理：统一提交门禁、review queue 阻断状态和 active leaf reconcile。
+- 未做跨模块重构，未改变公共后端接口、共享协议或 Web/Tauri 边界。
 
 ## 未修改内容
 
-- 未修改 `MobileWorkbenchScreen`。
-- 未修改 API client、后端 API、数据库、部署、Web/Tauri。
-- 未修改测试去适配错误实现；新增测试先 RED 后实现。
-- 未更新长期文档；本次是 Task 5 review fix，长期移动端能力边界没有新增。
+- 未修改后端 API、数据库、部署配置、认证协议。
+- 未修改 Web/Tauri 工作台实现或语义。
+- 未新增移动端专用学习协议。
+- 未从 `frontend/` 复用 React DOM 工作台组件。
+- 未实现手机本机文件导入、离线缓存、移动端本机路径播放、推送、支付或发布渠道能力。
+- 未修改 `mobile/__tests__/learning-navigation.test.tsx`，其导航覆盖保留。
 
 ## 影响范围
 
-- API：无变化。
-- 架构：无跨模块变化，仅 route container 内部状态 reconcile。
+- API：移动端 client 新增对既有 `POST /learning-tasks` 的调用；不新增后端 API。
+- 架构：`mobile/` 仍是独立 Expo-managed React Native 应用；不引入共享包或 Web 组件依赖。
 - 部署：无影响。
 - 数据结构：无影响。
-- UI：无 presentational API 或文案变化。
-- 测试：扩展 project route 集成测试覆盖 review fix。
+- UI：移动端项目入口升级为学习优先工作台，交互布局为原生移动端实现。
+- 测试：新增和更新移动端 API、草稿、媒体、工作台、项目路由相关测试；导航覆盖保留。
 
 ## 当前风险点和不确定项
 
-- 无已知影响本次改动正确性的风险。
+- Expo 原生播放器携带 Cookie header 播放受保护媒体仍需 Android/iOS 真机或 emulator smoke 验证。
+- 本次 Task 6 未运行 Android smoke；文档只记录 Tasks 1-5 已完成的自动化验证和本次文档 diff 检查。
 
 ## 仍需用户确认的问题
 
@@ -63,15 +79,9 @@
 
 ## 验证记录
 
-- RED 已运行：`pnpm --dir mobile test -- project-route-workbench.test.tsx`
-  - 结果：失败符合预期。关键失败包括 queue fetching/error 时仍调用 `submitLearningTask`，以及 leaf 切换后新草稿 anchor 仍为旧 `t=12000`。
-- RED 已运行：`pnpm --dir mobile test -- project-route-workbench.test.tsx`
-  - 结果：失败符合预期。新增 UI 状态断言失败，queue refetch 时仍显示 `review:none`，未进入 `review:loading`。
-- GREEN 已运行：`pnpm --dir mobile test -- project-route-workbench.test.tsx`
-  - 结果：通过，1 个测试套件、4 个测试通过。
-- GREEN 已运行：`pnpm --dir mobile test -- learning-navigation.test.tsx project-route-workbench.test.tsx mobile-workbench-screen.test.tsx workbench-drafts.test.ts domain-api.test.ts`
-  - 结果：通过，5 个测试套件、19 个测试通过。
-- GREEN 已运行：`pnpm --dir mobile typecheck`
+- Tasks 1-5 已运行并通过目标 mobile test suites，覆盖 mobile domain API、workbench drafts、media time update、mobile workbench screen、project route workbench 和保留的 learning navigation。
+- Tasks 1-5 已运行并通过 `pnpm --dir mobile typecheck`。
+- Task 6 已运行：`git diff --check -- docs/mobile-client.md docs/current-change.md`
   - 结果：通过。
 
 ## 污染风险检查
