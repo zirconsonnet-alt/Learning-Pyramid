@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-import { buildCookieHeader, extractSessionCookie } from "../auth/sessionCookie"
+import { buildCookieHeader, extractSessionCookieUpdate } from "../auth/sessionCookie"
 
 const ApiOkEnvelopeSchema = z.object({ ok: z.literal(true), data: z.unknown() })
 const ApiErrEnvelopeSchema = z.object({
@@ -36,10 +36,19 @@ export function parseApiEnvelope<T>(json: unknown, responseSchema: z.ZodType<T>,
 
 export type ApiClientOptions = {
   baseUrl: string
-  fetchImpl?: typeof fetch
+  fetchImpl?: ApiFetch
   getSessionCookie?: () => string | null | undefined
   setSessionCookie?: (cookie: string | null) => void
 }
+
+export type ApiFetch = (
+  input: string,
+  init: { method: string; headers: Record<string, string>; body?: string },
+) => Promise<{
+  status: number
+  headers: { get: (name: string) => string | null }
+  text: () => Promise<string>
+}>
 
 export type ApiRequestOptions<T> = {
   path: string
@@ -68,8 +77,9 @@ export function createApiClient(options: ApiClientOptions) {
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
     })
-    const nextCookie = extractSessionCookie(response.headers.get("set-cookie"))
-    if (nextCookie) options.setSessionCookie?.(nextCookie)
+    const cookieUpdate = extractSessionCookieUpdate(response.headers.get("set-cookie"))
+    if (cookieUpdate.kind === "set") options.setSessionCookie?.(cookieUpdate.cookie)
+    if (cookieUpdate.kind === "clear") options.setSessionCookie?.(null)
 
     const text = await response.text()
     const json = JSON.parse(text)
