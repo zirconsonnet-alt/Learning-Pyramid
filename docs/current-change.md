@@ -1,61 +1,54 @@
-# 当前变更：Task 5 移动端项目路由接入原生工作台
+# 当前变更：Task 5 移动端工作台 route review 修复
 
 ## 当前用户要求
 
-- 将移动端 project route 从旧 `ProjectScreen` 列表页替换为 query-driven native workbench container。
-- 保留 `ProjectScreen` 组件级覆盖。
-- 新增 route 集成测试，覆盖默认首个 leaf、草稿创建、提交 learning task、提交后清空草稿与 query invalidation。
-- 不修改后端 API、数据库、部署、Web/Tauri，不新增协议或持久化。
+- 修复 Task 5 代码质量 review 指出的两个 route container 缺口。
+- `submitDrafts` 的提交门禁必须不弱于 UI 状态，直接调用 route callback 时也要阻止 queue refetch、queue error、已有 head、无 active leaf、无草稿和提交中重复提交。
+- active selected leaf 从节点列表消失后，route 必须显式切到当前首个剩余 leaf，并在 active instance 改变时重置 `currentMs`。
+- 按 TDD 先补失败测试，再改实现。
+- 不修改后端 API、数据库、部署、Web/Tauri、API client 或 `MobileWorkbenchScreen` presentational 语义。
 
 ## 根因
 
-- `mobile/src/app/project/[subjectId]/[scopedProjectId].tsx` 仍渲染旧 `ProjectScreen` 列表页，并通过 `openNode` 跳转到 learning-object 详情页。
-- 已有 `MobileWorkbenchScreen`、draft builder、learning task API 和播放器时间回调，但项目入口没有把它们接到移动端学习主流程。
+- `mobile/src/app/project/[subjectId]/[scopedProjectId].tsx` 中 `submitDrafts` 只检查 `queueQ.isLoading` 和 `queueQ.data?.headId`，没有复用一个包含 fetching、error 和 mutation pending 的统一提交条件。
+- `activeNode` 会在 `activeNodeId` 指向的 leaf 消失后派生为 `firstLeaf(nodes)`，但 `activeNodeId` 和 `currentMs` 没有同步到这个 resolved active leaf，导致新草稿可能使用旧播放时间。
 
 ## 本次实际修改文件
 
-- `mobile/src/app/project/[subjectId]/[scopedProjectId].tsx`
-  - 替换为 query-driven native workbench container。
-  - 读取 scoped route params，加载 learning object nodes、review queue、active leaf playback 和 active node recall points。
-  - 默认选择首个 leaf，支持目录切换 leaf、播放时间回调、本地草稿创建/编辑/删除和提交 learning task。
-  - 提交成功后清除当前 instance 草稿，并 invalidate review queue、active node recall points、project recall points 和 nodes。
 - `mobile/__tests__/project-route-workbench.test.tsx`
-  - 新增 project route 集成测试，mock `expo-router` 参数和 `MobileWorkbenchScreen`，验证 workbench 容器提交当前学习对象草稿并 invalidates 相关 query。
-  - 测试 QueryClient 显式关闭测试期 GC timer，并在断言后卸载和清理，避免测试进程残留异步句柄。
-- `mobile/__tests__/learning-navigation.test.tsx`
-  - 已确认保留 `ProjectScreen` 学习对象标题和加载错误覆盖；文件无需实际修改。
+  - 新增 route callback 级提交门禁覆盖：queue refetch/fetching 和 stale queue error 状态下，直接调用 mocked screen 的 `onSubmitDrafts` 不会调用 `submitLearningTask`。
+  - 新增 active selection reconcile 覆盖：当前 selected leaf 从 nodes 中消失后，route 切到首个剩余 leaf，下一次新增草稿使用新 leaf 的 instance/title 和重置后的 `t=0` 锚点。
+- `mobile/src/app/project/[subjectId]/[scopedProjectId].tsx`
+  - 新增统一 `canSubmitDrafts`，并让 `submitDrafts` 使用同一个 boolean。
+  - 显式 reconcile resolved active leaf：当 `activeNode` 与 `activeNodeId` 不一致时同步 `activeNodeId`；当 active instance 改变或 active leaf 消失时重置 `currentMs`。
 - `docs/current-change.md`
-  - 覆盖为当前 Task 5 工作单和验证记录。
+  - 覆盖为本次 review fix 工作单和验证记录。
 
 ## 行为语义是否变化
 
-- 是。进入移动端项目 route 现在直接进入 native workbench，而不是旧学习对象列表页。
-- project route 默认选择首个 leaf 作为 active learning object。
-- 当前 active leaf 支持本地草稿、按播放时间生成 `t=<ms>` 锚点、提交 `learningTasks.submitLearningTask`。
-- review queue loading 或存在 `headId` 时，route 容器会阻止提交草稿。
+- 是。route callback 现在会在 review queue 正在 fetching、处于 error、已有 head、提交中、无 active leaf 或无草稿时拒绝提交草稿。
+- 是。当前 selected leaf 失效后，route 会同步选择当前首个可用 leaf；active instance 变化后新草稿锚点从 `t=0` 开始。
 
 ## 重构说明
 
-- 仅做 route 内部容器替换，没有跨模块重构。
-- 未改变 `MobileWorkbenchScreen` presentational 边界、API client、后端 API 或数据结构。
+- 仅做 route container 内部状态与门禁整理。
+- 未改变 `MobileWorkbenchScreen` props/API、presentational 语义、API client、后端 API、数据结构或部署方式。
 
 ## 未修改内容
 
-- 未修改 `MobileWorkbenchScreen` presentational 实现。
-- 未修改 API client、后端 API、数据库、部署、Web/Tauri 工作台。
-- 未保留旧 `openNode` learning-object detail navigation 入口。
-- 未新增持久化、fallback、shim、legacy、临时兼容逻辑或特殊分支。
-- 未修改测试去适配错误实现。
-- 未更新长期文档；本任务文件范围限定为 route/tests/current-change，长期移动端文档更新应在后续文档任务中处理。
+- 未修改 `MobileWorkbenchScreen`。
+- 未修改 API client、后端 API、数据库、部署、Web/Tauri。
+- 未修改测试去适配错误实现；新增测试先 RED 后实现。
+- 未更新长期文档；本次是 Task 5 review fix，长期移动端能力边界没有新增。
 
 ## 影响范围
 
 - API：无变化。
-- 架构：仅移动端 route 容器接线变化。
+- 架构：无跨模块变化，仅 route container 内部状态 reconcile。
 - 部署：无影响。
 - 数据结构：无影响。
-- UI：移动端项目入口改为原生工作台。
-- 测试：新增 project route 集成覆盖；保留 ProjectScreen 覆盖。
+- UI：无 presentational API 或文案变化。
+- 测试：扩展 project route 集成测试覆盖 review fix。
 
 ## 当前风险点和不确定项
 
@@ -67,10 +60,12 @@
 
 ## 验证记录
 
-- RED 已运行：`pnpm --dir mobile test -- learning-navigation.test.tsx project-route-workbench.test.tsx mobile-workbench-screen.test.tsx workbench-drafts.test.ts domain-api.test.ts`
-  - 结果：失败符合预期。关键错误：`Unable to find an element with text: active:第一课`，实际渲染旧 `ProjectScreen` 的“学习对象”列表。
+- RED 已运行：`pnpm --dir mobile test -- project-route-workbench.test.tsx`
+  - 结果：失败符合预期。关键失败包括 queue fetching/error 时仍调用 `submitLearningTask`，以及 leaf 切换后新草稿 anchor 仍为旧 `t=12000`。
+- GREEN 已运行：`pnpm --dir mobile test -- project-route-workbench.test.tsx`
+  - 结果：通过，1 个测试套件、4 个测试通过。
 - GREEN 已运行：`pnpm --dir mobile test -- learning-navigation.test.tsx project-route-workbench.test.tsx mobile-workbench-screen.test.tsx workbench-drafts.test.ts domain-api.test.ts`
-  - 结果：通过，5 个测试套件、16 个测试通过。
+  - 结果：通过，5 个测试套件、19 个测试通过。
 - GREEN 已运行：`pnpm --dir mobile typecheck`
   - 结果：通过。
 

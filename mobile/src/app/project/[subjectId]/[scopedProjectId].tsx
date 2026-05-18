@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { router, useLocalSearchParams } from "expo-router"
 
@@ -33,6 +33,7 @@ export default function ProjectRoute() {
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null)
   const [currentMs, setCurrentMs] = useState(0)
   const [drafts, setDrafts] = useState<MobileRecallDraft[]>([])
+  const previousActiveInstanceIdRef = useRef<string | null>(null)
 
   const nodesQ = useQuery({
     queryKey: ["learning-object-nodes", subjectId, scopedProjectId],
@@ -51,7 +52,23 @@ export default function ProjectRoute() {
   const activeInstanceId = activeNode?.kind === "leaf" ? activeNode.instanceId : ""
 
   useEffect(() => {
-    if (!activeNodeId && activeNode?.kind === "leaf") setActiveNodeId(activeNode.nodeId)
+    if (activeNode?.kind !== "leaf") {
+      if (activeNodeId !== null) setActiveNodeId(null)
+      if (previousActiveInstanceIdRef.current !== null) {
+        previousActiveInstanceIdRef.current = null
+        setCurrentMs(0)
+      }
+      return
+    }
+
+    if (activeNodeId !== activeNode.nodeId) setActiveNodeId(activeNode.nodeId)
+    if (
+      previousActiveInstanceIdRef.current !== null &&
+      previousActiveInstanceIdRef.current !== activeNode.instanceId
+    ) {
+      setCurrentMs(0)
+    }
+    previousActiveInstanceIdRef.current = activeNode.instanceId
   }, [activeNode, activeNodeId])
 
   const queueQ = useQuery({
@@ -92,6 +109,14 @@ export default function ProjectRoute() {
   })
 
   const activeDrafts = drafts.filter((draft) => draft.instanceId === activeInstanceId)
+  const canSubmitDrafts =
+    activeNode?.kind === "leaf" &&
+    activeDrafts.length > 0 &&
+    !queueQ.isLoading &&
+    !queueQ.isFetching &&
+    !queueQ.isError &&
+    !queueQ.data?.headId &&
+    !submitLearningTask.isPending
   const loading = nodesQ.isLoading
   const errorMessage =
     (nodesQ.isError ? toErrorMessage(nodesQ.error, "学习对象加载失败") : null) ??
@@ -131,7 +156,7 @@ export default function ProjectRoute() {
   }
 
   function submitDrafts() {
-    if (!activeNode || activeNode.kind !== "leaf" || activeDrafts.length === 0 || queueQ.isLoading || queueQ.data?.headId) return
+    if (!canSubmitDrafts) return
     submitLearningTask.mutate({
       nodeId: activeNode.nodeId,
       instanceId: activeNode.instanceId,
