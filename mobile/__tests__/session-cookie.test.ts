@@ -21,6 +21,14 @@ describe("session cookie helpers", () => {
     ).toEqual({ kind: "set", cookie: "plm_session=abc123" })
   })
 
+  it("does not split Expires commas while finding plm_session", () => {
+    expect(
+      extractSessionCookieUpdate(
+        "other=1; Expires=Wed, 21 Oct 2030 07:28:00 GMT; Path=/, plm_session=abc123; Path=/; HttpOnly",
+      ),
+    ).toEqual({ kind: "set", cookie: "plm_session=abc123" })
+  })
+
   it("does not match similarly named cookies", () => {
     expect(extractSessionCookieUpdate("plm_session_backup=abc123; Path=/")).toEqual({
       kind: "missing",
