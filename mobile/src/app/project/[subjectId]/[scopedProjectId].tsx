@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
-import { useLocalSearchParams } from "expo-router"
+import { router, useLocalSearchParams } from "expo-router"
 
 import { useLearningPyramidApi } from "../../../api/ApiProvider"
 import { toErrorMessage } from "../../../api/errorMessage"
@@ -23,7 +23,12 @@ export default function ProjectRoute() {
       errorMessage={nodesQ.isError ? toErrorMessage(nodesQ.error, "学习对象加载失败") : null}
       loading={nodesQ.isLoading}
       nodes={nodesQ.data ?? []}
-      openNode={() => undefined}
+      openNode={(node) =>
+        router.push({
+          pathname: "/learning-object/[subjectId]/[scopedProjectId]/[nodeId]",
+          params: { subjectId, scopedProjectId, nodeId: node.nodeId },
+        })
+      }
     />
   )
 }

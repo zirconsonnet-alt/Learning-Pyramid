@@ -1,79 +1,85 @@
-# 当前变更：移动端学科、材料与学习对象浏览
+# 当前变更：移动端学习对象详情与媒体播放
 
 ## 当前用户要求
 
 - 继续 React Native 移动端 App MVP。
-- 当前执行 Task 6：实现学科列表、材料列表和学习对象浏览。
-- 继续只使用现有公开 API，不新增移动端专用协议。
+- 当前执行 Task 7：实现学习对象详情、媒体播放和节点复述点查看。
+- 继续只使用现有公开 API，不迁移 Windows Tauri `NATIVE_LOCAL` 数据流。
 
 ## 根因
 
-- 移动端已有认证和领域 API client，但登录后仍没有学科/材料/学习对象的浏览入口。
-- 页面如果各自创建 API client，会产生重复 client 和 session 状态分裂；需要移动端内部 `ApiProvider` 统一提供同一个 API 实例。
+- 移动端已能浏览学习对象列表，但节点点击尚未进入详情。
+- 移动端 API client 缺少节点详情和节点级复述点方法。
+- 媒体播放不能复用 Web/Tauri 的 DOM、HLS.js、本地目录或 Tauri 代理能力，需要只消费后端 playback descriptor，并对不支持来源给出明确状态。
 
 ## 本次实际修改文件
 
-- `mobile/__tests__/learning-navigation.test.tsx`
-  - 新增 `ProjectScreen` 渲染学习对象标题的 RED 测试。
+- `mobile/__tests__/learning-object-detail.test.tsx`
+  - 新增学习对象详情、播放器和 API runtime RED/GREEN 测试。
+- `mobile/__tests__/domain-api.test.ts`
+  - 覆盖节点详情和节点复述点公开 scoped API 路径。
 - `mobile/src/api/ApiProvider.tsx`
-  - 新增移动端内部 API context，供页面复用 `_layout` 创建的 API 实例。
-- `mobile/src/api/errorMessage.ts`
-  - 新增统一错误消息转换，避免请求失败被列表页误显示为空状态。
-- `mobile/src/routing/params.ts`
-  - 新增 Expo Router 动态参数归一化 helper，避免动态路由重复处理 `string | string[] | undefined`。
-- `mobile/src/screens/SubjectsScreen.tsx`
-  - 新增学科列表页面。
-- `mobile/src/screens/SubjectMaterialsScreen.tsx`
-  - 新增材料列表页面。
-- `mobile/src/screens/ProjectScreen.tsx`
-  - 新增学习对象浏览页面。
-- `mobile/src/app/_layout.tsx`
-  - 增加 `ApiProvider` 包裹。
-- `mobile/src/app/index.tsx`
-  - signedIn 状态下加载并展示学科列表。
-- `mobile/src/app/subject/[subjectId].tsx`
-  - 新增学科材料路由。
+  - 在移动端 API context 中增加 `apiBaseUrl` 和当前 session cookie reader，供媒体请求构建原生播放器 headers。
+- `mobile/src/api/config.ts`
+  - 集中移动端 API base URL 默认值。
+- `mobile/src/api/http.ts`
+  - 新增 playback descriptor URL 解析 helper。
+- `mobile/src/api/learningObjects.ts`
+  - 新增 `getNode` 和 `listRecallPointsByNode`。
+- `mobile/src/api/richContent.ts`
+  - 新增移动端复述点富文本 schema 与纯文本展示 helper。
+- `mobile/src/api/review.ts`
+  - 将 `RecallPoint` 的 question/answer 收紧为结构化富文本。
+- `mobile/src/screens/LearningMediaPlayer.tsx`
+  - 新增基于 `expo-video` 的移动端媒体播放器。
+  - 对 `NATIVE_LOCAL`、`BROWSER_LOCAL`、`MANUAL` 显示明确不支持或不可播放状态。
+- `mobile/src/screens/LearningObjectScreen.tsx`
+  - 新增学习对象详情页，展示标题、媒体和复述点。
+- `mobile/src/app/learning-object/[subjectId]/[scopedProjectId]/[nodeId].tsx`
+  - 新增学习对象详情路由。
 - `mobile/src/app/project/[subjectId]/[scopedProjectId].tsx`
-  - 新增项目学习对象路由。
+  - 将学习对象列表点击接入详情路由。
+- `mobile/src/app/_layout.tsx`
+  - 向 `ApiProvider` 注入 API base URL 和 session cookie reader。
 - `docs/current-change.md`
-  - 更新当前工作单。
+  - 覆盖为当前 Task 7 工作单。
 
 ## 行为语义是否变化
 
-- 移动端登录后显示学科列表。
-- 用户可进入某个学科的材料列表，并进入材料对应的 scoped project 学习对象列表。
-- 学科、材料和学习对象加载失败时显示错误状态，不伪装为“暂无”。
-- 学习对象详情仍未实现，`ProjectScreen` 当前只浏览列表；详情在 Task 7 实现。
-- 不改变后端 API、部署、数据结构或 Web/Tauri 行为。
+- 移动端学习对象列表点击后进入对象详情。
+- leaf 节点详情会加载后端 playback descriptor，并通过 `expo-video` 播放支持的 `SERVER_FS` / `BAIDU_NETDISK` descriptor URL。
+- 原生播放器请求会携带当前 `plm_session` Cookie header。
+- `NATIVE_LOCAL` 不迁移到移动端，显示“移动端不支持桌面本地媒体”。
+- 详情页显示节点级复述点问题和答案。
+- 不改变后端 API、部署、数据库结构或 Web/Tauri 行为。
 
 ## 重构说明
 
 - 做了当前需求范围内的局部结构整理。
-- 新增 `ApiProvider` 是为了避免页面重复创建 API client 和 session 状态分裂。
-- 新增 `firstRouteParam` 是为了消除两个动态路由的重复参数归一化逻辑。
+- `apiBaseUrl` 从 `_layout` 局部常量迁移到 `mobile/src/api/config.ts`，避免路由和播放器重复配置。
+- `ApiProvider` 增加运行时信息，是为了避免媒体播放器依赖全局状态或重复创建 session 边界。
 
 ## 未修改内容
 
-- 未修改后端 API。
-- 未新增移动端专用协议。
-- 未引入或持久化内部 backend project id。
-- 未实现学习对象详情、媒体播放或复习提交。
-- 未删除 Expo 模板其它文件。
-- 未更新长期文档；移动端预览整体完成后统一同步。
+- 未修改后端 API、认证协议、部署或数据结构。
+- 未新增移动端专用媒体协议。
+- 未新增本地代理、转码、WebView、Tauri bridge 或手机本机文件导入。
+- 未实现复习提交；Task 8 处理。
+- 未更新长期文档；移动端 MVP 预览整体完成后统一同步。
 
 ## 影响范围
 
-- API：仅移动端调用现有公开 API。
-- 架构：移动端内部新增 API context。
+- API：仅移动端 client 新增对现有公开 scoped endpoints 的调用。
+- 架构：移动端内部 API context 增加运行时信息。
 - 部署：无影响。
 - 数据结构：无影响。
-- UI：移动端新增学科、材料、学习对象列表。
-- 测试：新增学习对象列表渲染测试。
+- UI：新增移动端学习对象详情与媒体/复述点展示。
+- 测试：新增详情页与播放器测试，扩展领域 API 路径测试。
 
 ## 当前风险点和不确定项
 
-- `ProjectScreen` 的节点点击在 Task 6 中暂不导航，避免指向尚未实现的详情路由；Task 7 会接入。
-- 材料没有 `scopedProjectId` 时禁用进入，不伪造项目身份。
+- 真实 Android/iOS 原生播放器是否能稳定携带 Cookie header 访问受保护 HLS/文件资源，仍需后续 emulator/device smoke 验证。
+- Expo 默认媒体能力之外的 descriptor 会显示不支持，不做隐藏 fallback。
 
 ## 仍需用户确认的问题
 
@@ -81,11 +87,13 @@
 
 ## 验证记录
 
-- RED：`pnpm --dir mobile test -- learning-navigation.test.tsx` 失败，摘要：`../src/screens/ProjectScreen` 不存在。
-- RED：补充错误态测试后失败，摘要：`ProjectScreen` 将加载失败显示为 `暂无学习对象`。
-- GREEN：`pnpm --dir mobile test -- learning-navigation.test.tsx` 通过，1 个测试套件、2 个测试通过。
+- RED：`pnpm --dir mobile test -- learning-object-detail.test.tsx` 失败，摘要：`../src/screens/LearningMediaPlayer` 不存在。
+- RED：`pnpm --dir mobile test -- domain-api.test.ts` 失败，摘要：`api.learningObjects.getNode is not a function`。
+- GREEN：`pnpm --dir mobile test -- learning-object-detail.test.tsx` 通过，1 个测试套件、4 个测试通过。
+- GREEN：`pnpm --dir mobile test -- domain-api.test.ts` 通过，1 个测试套件、1 个测试通过。
+- 已运行：`pnpm --dir mobile test`，通过，8 个测试套件、25 个测试通过。
 - 已运行：`pnpm --dir mobile typecheck`，通过。
-- 已运行：`git diff --check -- mobile/src/api/ApiProvider.tsx mobile/src/api/errorMessage.ts mobile/src/routing/params.ts mobile/src/screens/SubjectsScreen.tsx mobile/src/screens/SubjectMaterialsScreen.tsx mobile/src/screens/ProjectScreen.tsx mobile/src/app/_layout.tsx mobile/src/app/index.tsx mobile/src/app/subject mobile/src/app/project mobile/__tests__/learning-navigation.test.tsx docs/current-change.md`，通过；仅有 Git 换行转换 warning，无 whitespace error。
+- 已运行：`git diff --check -- docs/current-change.md mobile/__tests__/learning-object-detail.test.tsx mobile/__tests__/domain-api.test.ts mobile/src/api/ApiProvider.tsx mobile/src/api/config.ts mobile/src/api/http.ts mobile/src/api/learningObjects.ts mobile/src/api/richContent.ts mobile/src/api/review.ts mobile/src/screens/LearningMediaPlayer.tsx mobile/src/screens/LearningObjectScreen.tsx mobile/src/app/_layout.tsx mobile/src/app/project mobile/src/app/learning-object`，通过；仅有 Git 换行转换 warning，无 whitespace error。
 
 ## 污染风险检查
 

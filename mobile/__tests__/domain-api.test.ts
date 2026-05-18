@@ -18,6 +18,8 @@ describe("mobile domain api", () => {
     await api.subjects.listSubjects()
     await api.subjects.listMaterials("subj_1")
     await api.learningObjects.listNodes(scope)
+    await api.learningObjects.getNode(scope, "node_1")
+    await api.learningObjects.listRecallPointsByNode(scope, "node_1")
     await api.media.getPlayback(scope, "inst_1")
     await api.review.listRecallPoints(scope)
     await api.review.listRecommendations(scope, { offset: 10, limit: 20 })
@@ -30,6 +32,8 @@ describe("mobile domain api", () => {
       { path: "/subjects", method: undefined, body: undefined },
       { path: "/subjects/subj_1/materials", method: undefined, body: undefined },
       { path: "/subjects/subj_1/projects/proj_1/learning-object-nodes", method: undefined, body: undefined },
+      { path: "/subjects/subj_1/projects/proj_1/learning-objects/node_1", method: undefined, body: undefined },
+      { path: "/subjects/subj_1/projects/proj_1/learning-objects/node_1/recall-points", method: undefined, body: undefined },
       { path: "/subjects/subj_1/projects/proj_1/media/instances/inst_1/playback", method: undefined, body: undefined },
       { path: "/subjects/subj_1/projects/proj_1/recall-points", method: undefined, body: undefined },
       { path: "/subjects/subj_1/projects/proj_1/review-recommendations?offset=10&limit=20", method: undefined, body: undefined },

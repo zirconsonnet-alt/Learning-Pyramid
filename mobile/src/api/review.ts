@@ -1,5 +1,6 @@
 import { z } from "zod"
 
+import { RichContentSchema } from "./richContent"
 import { projectApiPath, type ApiRequester, type ScopedProjectRef } from "./types"
 
 const AnchorSchema = z.object({
@@ -13,8 +14,8 @@ export const RecallPointSchema = z.object({
   createdAt: z.string(),
   state: z.enum(["ACTIVE", "DELETED"]),
   deletedAt: z.string().nullable(),
-  question: z.unknown(),
-  answer: z.unknown(),
+  question: RichContentSchema,
+  answer: RichContentSchema,
   anchor: AnchorSchema.nullable(),
   references: z.array(z.string()).default([]),
   insights: z.array(z.unknown()),

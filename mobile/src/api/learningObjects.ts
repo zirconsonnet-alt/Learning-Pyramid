@@ -1,5 +1,6 @@
 import { z } from "zod"
 
+import { RecallPointSchema } from "./review"
 import { projectApiPath, type ApiRequester, type ScopedProjectRef } from "./types"
 
 const LearningObjectNodeBaseSchema = z.object({
@@ -34,6 +35,16 @@ export function createLearningObjectsApi(requester: ApiRequester) {
       requester.request({
         path: projectApiPath(scope, "/learning-object-nodes"),
         responseSchema: z.array(LearningObjectNodeSchema),
+      }),
+    getNode: (scope: ScopedProjectRef, nodeId: string) =>
+      requester.request({
+        path: projectApiPath(scope, `/learning-objects/${encodeURIComponent(nodeId)}`),
+        responseSchema: LearningObjectNodeSchema,
+      }),
+    listRecallPointsByNode: (scope: ScopedProjectRef, nodeId: string) =>
+      requester.request({
+        path: projectApiPath(scope, `/learning-objects/${encodeURIComponent(nodeId)}/recall-points`),
+        responseSchema: z.array(RecallPointSchema),
       }),
   }
 }

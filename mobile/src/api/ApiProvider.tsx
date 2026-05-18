@@ -4,14 +4,34 @@ import type { createLearningPyramidApi } from "./types"
 
 type LearningPyramidApi = ReturnType<typeof createLearningPyramidApi>
 
-const ApiContext = createContext<LearningPyramidApi | null>(null)
+type ApiContextValue = {
+  api: LearningPyramidApi
+  apiBaseUrl: string
+  getSessionCookie(): string | null
+}
 
-export function ApiProvider({ api, children }: { api: LearningPyramidApi; children: ReactNode }) {
-  return <ApiContext.Provider value={api}>{children}</ApiContext.Provider>
+const ApiContext = createContext<ApiContextValue | null>(null)
+
+export function ApiProvider({
+  api,
+  apiBaseUrl,
+  getSessionCookie = () => null,
+  children,
+}: {
+  api: LearningPyramidApi
+  apiBaseUrl: string
+  getSessionCookie?: () => string | null
+  children: ReactNode
+}) {
+  return <ApiContext.Provider value={{ api, apiBaseUrl, getSessionCookie }}>{children}</ApiContext.Provider>
+}
+
+export function useApiRuntime() {
+  const value = useContext(ApiContext)
+  if (!value) throw new Error("useApiRuntime must be used within ApiProvider")
+  return value
 }
 
 export function useLearningPyramidApi() {
-  const api = useContext(ApiContext)
-  if (!api) throw new Error("useLearningPyramidApi must be used within ApiProvider")
-  return api
+  return useApiRuntime().api
 }

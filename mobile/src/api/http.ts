@@ -57,6 +57,14 @@ export type ApiRequestOptions<T> = {
   responseSchema: z.ZodType<T>
 }
 
+export function resolveApiResourceUrl(baseUrl: string, resourceUrl: string) {
+  const rawUrl = resourceUrl.trim()
+  if (/^https?:\/\//i.test(rawUrl)) return rawUrl
+  const normalizedBaseUrl = baseUrl.replace(/\/$/, "")
+  if (rawUrl.startsWith("/")) return new URL(rawUrl, normalizedBaseUrl).toString()
+  return `${normalizedBaseUrl}/${rawUrl}`
+}
+
 export function createApiClient(options: ApiClientOptions) {
   const baseUrl = options.baseUrl.replace(/\/$/, "")
   const fetchImpl = options.fetchImpl ?? fetch
