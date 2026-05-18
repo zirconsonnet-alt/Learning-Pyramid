@@ -25,6 +25,26 @@ describe("mobile workbench recall drafts", () => {
     })
   })
 
+  it("rejects non-finite playback time before creating a draft", () => {
+    expect(() =>
+      createRecallDraft({
+        instanceId: "inst_1",
+        currentMs: Number.NaN,
+        localId: "draft_1",
+        now: 1710000000000,
+      }),
+    ).toThrow("播放时间无效")
+
+    expect(() =>
+      createRecallDraft({
+        instanceId: "inst_1",
+        currentMs: Number.POSITIVE_INFINITY,
+        localId: "draft_2",
+        now: 1710000000000,
+      }),
+    ).toThrow("播放时间无效")
+  })
+
   it("builds learning task items from complete text drafts", () => {
     const draft = {
       localId: "draft_1",

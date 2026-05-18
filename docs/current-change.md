@@ -1,32 +1,31 @@
-# 当前变更：移动端复述点草稿模型
+# 当前变更：移动端复述点草稿播放时间校验
 
 ## 当前用户要求
 
-- 当前执行 mobile native workbench Task 2：新增 recall draft model。
-- 只新增移动端本地纯函数草稿模型和测试。
+- 当前执行 mobile native workbench Task 2 review 修复：补齐 recall draft model 的非法播放时间校验。
+- `createRecallDraft` 必须拒绝 `NaN` / `Infinity` 等非有限播放时间，避免生成 `t=NaN` 或 `t=Infinity` 锚点。
 - 不修改 UI、路由、后端 API、数据库、部署或草稿持久化。
 
 ## 根因
 
-- 移动端后续工作台需要新增复述点草稿。
-- 当前没有纯草稿模型；如果后续在 UI 或 route 中直接拼提交 payload，会产生重复逻辑和错误边界。
+- `createRecallDraft` 原先只对 `currentMs` 做 `Math.floor` 和 `Math.max(0, ...)`。
+- `NaN` / `Infinity` 不是有效播放时间，但会被拼成非空 `position` 字符串。
+- `getIncompleteDraftReason` 只检查锚点非空，因此非法锚点可能进入提交 payload。
 
 ## 本次实际修改文件
 
 - `mobile/__tests__/workbench-drafts.test.ts`
-  - 新增复述点草稿模型测试，覆盖创建草稿、完整草稿转提交 items、不完整草稿拒绝提交、文本转 `RichContent` 时 trim。
+  - 新增非法播放时间测试，覆盖 `Number.NaN` 和 `Number.POSITIVE_INFINITY` 必须在创建草稿前抛出“播放时间无效”。
 - `mobile/src/workbench/recallDrafts.ts`
-  - 新增 `MobileRecallDraft`、`CreateRecallDraftInput` 类型。
-  - 新增 `createRecallDraft`、`recallDraftTextToRichContent`、`getIncompleteDraftReason`、`buildSubmitLearningTaskItems` 纯函数。
+  - 在 `createRecallDraft` 中使用 `Number.isFinite(input.currentMs)` 显式拒绝非有限播放时间。
 - `docs/current-change.md`
-  - 覆盖为当前 Task 2 工作单。
+  - 更新为当前 Task 2 review 修复工作单。
 
 ## 行为语义是否变化
 
-- 是。移动端现在具备本地文本复述点草稿模型：
-  - 草稿可用当前播放毫秒生成 `t=<毫秒>` 锚点。
-  - 完整草稿可转换为 `SubmitLearningTaskItem`。
-  - 不完整草稿会在生成提交 payload 前返回或抛出明确原因。
+- 是。移动端创建复述点草稿时现在会拒绝非有限播放时间：
+  - `NaN`、`Infinity` 等输入会抛出“播放时间无效”。
+  - 有限播放时间仍按既有语义取整、下限截到 0，并生成 `t=<毫秒>` 锚点。
 - 后端 API 语义未变化。
 - 数据库结构未变化。
 - 部署语义未变化。
@@ -36,7 +35,7 @@
 ## 重构说明
 
 - 无跨模块重构。
-- 新增独立 `mobile/src/workbench/recallDrafts.ts`，把草稿到提交 payload 的转换集中在移动端 workbench 边界内，避免后续 UI/route 重复拼装。
+- 仅在现有 `createRecallDraft` 入口增加必要校验，保持草稿模型边界不变。
 
 ## 未修改内容
 
@@ -50,9 +49,9 @@
 - API：无后端 API 变化；仅复用移动端已有 `SubmitLearningTaskItem` 类型。
 - 架构：无跨层架构变化。
 - 部署：无影响。
-- 数据结构：无数据库或协议结构变化；新增移动端本地草稿类型。
+- 数据结构：无数据库或协议结构变化；未新增或修改公开协议类型。
 - UI：无影响。
-- 测试：新增移动端 workbench draft 单元测试。
+- 测试：补充移动端 workbench draft 非法播放时间单元测试。
 
 ## 当前风险点和不确定项
 
@@ -65,9 +64,9 @@
 ## 验证记录
 
 - RED 已运行：`pnpm --dir mobile test -- workbench-drafts.test.ts`
-  - 结果：失败，符合预期；失败原因为 `../src/workbench/recallDrafts` 模块不存在。
+  - 结果：失败，符合预期；新增测试 `rejects non-finite playback time before creating a draft` 失败，原因为当前实现未抛出“播放时间无效”。
 - GREEN 已运行：`pnpm --dir mobile test -- workbench-drafts.test.ts`
-  - 结果：通过，1 个测试套件、4 个测试通过。
+  - 结果：通过，1 个测试套件、5 个测试通过。
 - GREEN 已运行：`pnpm --dir mobile typecheck`
   - 结果：通过。
 

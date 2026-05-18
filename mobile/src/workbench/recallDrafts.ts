@@ -19,6 +19,7 @@ export type CreateRecallDraftInput = {
 }
 
 export function createRecallDraft(input: CreateRecallDraftInput): MobileRecallDraft {
+  if (!Number.isFinite(input.currentMs)) throw new Error("播放时间无效")
   const anchorMs = Math.max(0, Math.floor(input.currentMs))
   return {
     localId: input.localId,
