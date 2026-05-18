@@ -3,7 +3,7 @@
 ## 当前用户要求
 
 - Expo Go Android 原生移动端补齐学习主流程，继续 React Native 路线，并按桌面/网页工作台语义实现学习优先工作台。
-- 本轮文档收尾只同步移动端原生工作台最终状态，不修改代码、测试、配置、锁文件、后端/API/部署/Web/Tauri 语义。
+- 本轮最终验证记录自动化检查结果；不修改代码、测试、配置、锁文件、后端/API/部署/Web/Tauri 语义。
 
 ## 本次实际修改文件
 
@@ -32,7 +32,7 @@
 - `docs/mobile-client.md`
   - 同步移动端原生工作台能力、功能边界和工程边界。
 - `docs/current-change.md`
-  - 覆盖为本次移动端原生工作台最终状态。
+  - 覆盖为本次移动端原生工作台最终状态，并记录最终验证结果。
 - `mobile/__tests__/learning-navigation.test.tsx`
   - 未修改；学科和材料导航相关覆盖保留，项目路由行为由工作台 screen/API/route 测试覆盖。
 
@@ -71,7 +71,7 @@
 ## 当前风险点和不确定项
 
 - Expo 原生播放器携带 Cookie header 播放受保护媒体仍需 Android/iOS 真机或 emulator smoke 验证。
-- 本次 Task 6 未运行 Android smoke；文档只记录 Tasks 1-5 已完成的自动化验证和本次文档 diff 检查。
+- 未运行 Android 启动 smoke，原因：当前环境没有可用 `adb` 命令，无法确认连接的 Android 设备或模拟器。
 
 ## 仍需用户确认的问题
 
@@ -83,6 +83,16 @@
 - Tasks 1-5 已运行并通过 `pnpm --dir mobile typecheck`。
 - Task 6 已运行：`git diff --check -- docs/mobile-client.md docs/current-change.md`
   - 结果：通过。
+- Task 7 已运行：`pnpm --dir mobile test`
+  - 结果：通过，12 个测试套件、44 个测试通过。
+- Task 7 已运行：`pnpm --dir mobile typecheck`
+  - 结果：通过。
+- Task 7 已运行：`pnpm --dir mobile exec expo --version`
+  - 结果：通过，输出 `55.0.30`。
+- Task 7 已运行：`git diff --check -- docs/mobile-client.md docs/current-change.md mobile`
+  - 结果：通过。
+- Task 7 已运行：`adb devices`
+  - 结果：失败，当前环境未识别 `adb` 命令；未运行 Android 启动 smoke。
 
 ## 污染风险检查
 
