@@ -8,6 +8,27 @@ const AnchorSchema = z.object({
   position: z.string(),
 })
 
+export const QueueSchema = z.object({
+  headId: z.string().nullable(),
+  ids: z.array(z.string()),
+})
+
+export const ReviewTaskSchema = z.object({
+  projectId: z.string(),
+  reviewTaskId: z.string(),
+  inputRangeId: z.string(),
+  createdAt: z.string(),
+  state: z.string(),
+  executedAt: z.string().nullable(),
+  resultRangeId: z.string().nullable(),
+})
+
+export const RangeSnapshotSchema = z.object({
+  projectId: z.string(),
+  rangeId: z.string(),
+  recallPointIds: z.array(z.string()),
+})
+
 export const RecallPointSchema = z.object({
   projectId: z.string(),
   recallPointId: z.string(),
@@ -40,6 +61,9 @@ export const ReviewRecommendationPageSchema = z.object({
 })
 
 export type RecallPoint = z.infer<typeof RecallPointSchema>
+export type Queue = z.infer<typeof QueueSchema>
+export type ReviewTask = z.infer<typeof ReviewTaskSchema>
+export type RangeSnapshot = z.infer<typeof RangeSnapshotSchema>
 export type ReviewRecommendationItem = z.infer<typeof ReviewRecommendationItemSchema>
 export type ReviewRecommendationPage = z.infer<typeof ReviewRecommendationPageSchema>
 
@@ -66,6 +90,21 @@ function reviewRecommendationsPath(scope: ScopedProjectRef, query?: ReviewRecomm
 
 export function createReviewApi(requester: ApiRequester) {
   return {
+    getQueue: (scope: ScopedProjectRef) =>
+      requester.request({
+        path: projectApiPath(scope, "/queue"),
+        responseSchema: QueueSchema,
+      }),
+    getReviewTask: (scope: ScopedProjectRef, reviewTaskId: string) =>
+      requester.request({
+        path: projectApiPath(scope, `/review-tasks/${encodeURIComponent(reviewTaskId)}`),
+        responseSchema: ReviewTaskSchema,
+      }),
+    getRangeSnapshot: (scope: ScopedProjectRef, rangeId: string) =>
+      requester.request({
+        path: projectApiPath(scope, `/ranges/${encodeURIComponent(rangeId)}`),
+        responseSchema: RangeSnapshotSchema,
+      }),
     listRecallPoints: (scope: ScopedProjectRef) =>
       requester.request({
         path: projectApiPath(scope, "/recall-points"),

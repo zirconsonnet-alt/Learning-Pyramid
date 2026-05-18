@@ -1,85 +1,71 @@
-# 当前变更：移动端学习对象详情与媒体播放
+# 当前变更：移动端复习队列提交
 
 ## 当前用户要求
 
 - 继续 React Native 移动端 App MVP。
-- 当前执行 Task 7：实现学习对象详情、媒体播放和节点复述点查看。
-- 继续只使用现有公开 API，不迁移 Windows Tauri `NATIVE_LOCAL` 数据流。
+- 当前执行 Task 8：实现基础复习队列查看与复习结果提交。
+- 不能伪造 `reviewTaskId`，不能从推荐复习项隐式推导提交入口。
 
 ## 根因
 
-- 移动端已能浏览学习对象列表，但节点点击尚未进入详情。
-- 移动端 API client 缺少节点详情和节点级复述点方法。
-- 媒体播放不能复用 Web/Tauri 的 DOM、HLS.js、本地目录或 Tauri 代理能力，需要只消费后端 playback descriptor，并对不支持来源给出明确状态。
+- 移动端已有学习对象详情和复述点查看，但还不能执行复习闭环。
+- `/review-recommendations` 返回的是推荐复述点，不包含当前可提交的 `reviewTaskId`。
+- 现有公开 `/queue` 能返回严格 FIFO 队列头 `headId`，可作为干净的复习任务提交入口。
 
 ## 本次实际修改文件
 
-- `mobile/__tests__/learning-object-detail.test.tsx`
-  - 新增学习对象详情、播放器和 API runtime RED/GREEN 测试。
+- `mobile/__tests__/review-queue.test.tsx`
+  - 新增复习队列提交 RED/GREEN 测试，覆盖 `canRecall` 按 range 顺序提交和无 queue head 时不暴露提交。
 - `mobile/__tests__/domain-api.test.ts`
-  - 覆盖节点详情和节点复述点公开 scoped API 路径。
-- `mobile/src/api/ApiProvider.tsx`
-  - 在移动端 API context 中增加 `apiBaseUrl` 和当前 session cookie reader，供媒体请求构建原生播放器 headers。
-- `mobile/src/api/config.ts`
-  - 集中移动端 API base URL 默认值。
-- `mobile/src/api/http.ts`
-  - 新增 playback descriptor URL 解析 helper。
-- `mobile/src/api/learningObjects.ts`
-  - 新增 `getNode` 和 `listRecallPointsByNode`。
-- `mobile/src/api/richContent.ts`
-  - 新增移动端复述点富文本 schema 与纯文本展示 helper。
+  - 覆盖 `/queue`、`/review-tasks/{reviewTaskId}`、`/ranges/{rangeId}` 公开 scoped API 路径。
 - `mobile/src/api/review.ts`
-  - 将 `RecallPoint` 的 question/answer 收紧为结构化富文本。
-- `mobile/src/screens/LearningMediaPlayer.tsx`
-  - 新增基于 `expo-video` 的移动端媒体播放器。
-  - 对 `NATIVE_LOCAL`、`BROWSER_LOCAL`、`MANUAL` 显示明确不支持或不可播放状态。
-- `mobile/src/screens/LearningObjectScreen.tsx`
-  - 新增学习对象详情页，展示标题、媒体和复述点。
-- `mobile/src/app/learning-object/[subjectId]/[scopedProjectId]/[nodeId].tsx`
-  - 新增学习对象详情路由。
+  - 新增 `Queue`、`ReviewTask`、`RangeSnapshot` schema 和 `getQueue`、`getReviewTask`、`getRangeSnapshot`。
+- `mobile/src/screens/ReviewQueueScreen.tsx`
+  - 新增移动端复习队列屏，按 range 顺序作答并提交 `canRecall`。
+- `mobile/src/app/review/[subjectId]/[scopedProjectId].tsx`
+  - 新增复习路由：读取队列头、任务、范围和复述点，并提交队列头复习任务。
+- `mobile/src/screens/ProjectScreen.tsx`
+  - 在学习对象列表页增加复习入口。
 - `mobile/src/app/project/[subjectId]/[scopedProjectId].tsx`
-  - 将学习对象列表点击接入详情路由。
-- `mobile/src/app/_layout.tsx`
-  - 向 `ApiProvider` 注入 API base URL 和 session cookie reader。
+  - 将复习入口接入 `/review/[subjectId]/[scopedProjectId]`。
 - `docs/current-change.md`
-  - 覆盖为当前 Task 7 工作单。
+  - 覆盖为当前 Task 8 工作单。
 
 ## 行为语义是否变化
 
-- 移动端学习对象列表点击后进入对象详情。
-- leaf 节点详情会加载后端 playback descriptor，并通过 `expo-video` 播放支持的 `SERVER_FS` / `BAIDU_NETDISK` descriptor URL。
-- 原生播放器请求会携带当前 `plm_session` Cookie header。
-- `NATIVE_LOCAL` 不迁移到移动端，显示“移动端不支持桌面本地媒体”。
-- 详情页显示节点级复述点问题和答案。
+- 移动端项目页可进入复习。
+- 如果队列为空，显示“暂无复习任务”，不允许提交。
+- 如果存在 queue head，移动端按该 review task 的 input range 展示复述点。
+- 用户逐题选择“记得 / 不记得”后，提交 `canRecall` 数组，顺序严格跟随 range 的 `recallPointIds`。
+- 不使用 `/review-recommendations` 作为提交来源，不伪造 `reviewTaskId`。
 - 不改变后端 API、部署、数据库结构或 Web/Tauri 行为。
 
 ## 重构说明
 
-- 做了当前需求范围内的局部结构整理。
-- `apiBaseUrl` 从 `_layout` 局部常量迁移到 `mobile/src/api/config.ts`，避免路由和播放器重复配置。
-- `ApiProvider` 增加运行时信息，是为了避免媒体播放器依赖全局状态或重复创建 session 边界。
+- 未做跨模块重构。
+- 仅在移动端 review API client 中补齐当前任务必需的公开 endpoints。
 
 ## 未修改内容
 
-- 未修改后端 API、认证协议、部署或数据结构。
-- 未新增移动端专用媒体协议。
-- 未新增本地代理、转码、WebView、Tauri bridge 或手机本机文件导入。
-- 未实现复习提交；Task 8 处理。
+- 未修改后端复习协议。
+- 未新增移动端专用复习协议。
+- 未实现推荐复习的独立移动端界面。
+- 未实现追加理解 `appendedInsights`；当前只提交基础 `canRecall`。
 - 未更新长期文档；移动端 MVP 预览整体完成后统一同步。
 
 ## 影响范围
 
-- API：仅移动端 client 新增对现有公开 scoped endpoints 的调用。
-- 架构：移动端内部 API context 增加运行时信息。
+- API：仅移动端 client 调用现有公开 scoped endpoints。
+- 架构：无跨模块架构变化。
 - 部署：无影响。
 - 数据结构：无影响。
-- UI：新增移动端学习对象详情与媒体/复述点展示。
-- 测试：新增详情页与播放器测试，扩展领域 API 路径测试。
+- UI：新增移动端复习队列和项目页复习入口。
+- 测试：新增复习队列测试，扩展领域 API 路径测试。
 
 ## 当前风险点和不确定项
 
-- 真实 Android/iOS 原生播放器是否能稳定携带 Cookie header 访问受保护 HLS/文件资源，仍需后续 emulator/device smoke 验证。
-- Expo 默认媒体能力之外的 descriptor 会显示不支持，不做隐藏 fallback。
+- 真实数据中如果 range 的 `recallPointIds` 与复述点列表不一致，移动端会显示“复习内容加载不完整”并阻止提交。
+- 当前只覆盖基础 `canRecall` 提交，不覆盖追加理解。
 
 ## 仍需用户确认的问题
 
@@ -87,13 +73,14 @@
 
 ## 验证记录
 
-- RED：`pnpm --dir mobile test -- learning-object-detail.test.tsx` 失败，摘要：`../src/screens/LearningMediaPlayer` 不存在。
-- RED：`pnpm --dir mobile test -- domain-api.test.ts` 失败，摘要：`api.learningObjects.getNode is not a function`。
-- GREEN：`pnpm --dir mobile test -- learning-object-detail.test.tsx` 通过，1 个测试套件、4 个测试通过。
+- RED：`pnpm --dir mobile test -- review-queue.test.tsx` 失败，摘要：`../src/screens/ReviewQueueScreen` 不存在。
+- RED：`pnpm --dir mobile test -- domain-api.test.ts` 失败，摘要：`api.review.getQueue is not a function`。
+- GREEN：`pnpm --dir mobile test -- review-queue.test.tsx` 通过，1 个测试套件、2 个测试通过。
 - GREEN：`pnpm --dir mobile test -- domain-api.test.ts` 通过，1 个测试套件、1 个测试通过。
-- 已运行：`pnpm --dir mobile test`，通过，8 个测试套件、25 个测试通过。
+- 已运行：`pnpm --dir mobile test -- review-queue.test.tsx domain-api.test.ts`，通过，2 个测试套件、3 个测试通过。
+- 已运行：`pnpm --dir mobile test`，通过，9 个测试套件、27 个测试通过。
 - 已运行：`pnpm --dir mobile typecheck`，通过。
-- 已运行：`git diff --check -- docs/current-change.md mobile/__tests__/learning-object-detail.test.tsx mobile/__tests__/domain-api.test.ts mobile/src/api/ApiProvider.tsx mobile/src/api/config.ts mobile/src/api/http.ts mobile/src/api/learningObjects.ts mobile/src/api/richContent.ts mobile/src/api/review.ts mobile/src/screens/LearningMediaPlayer.tsx mobile/src/screens/LearningObjectScreen.tsx mobile/src/app/_layout.tsx mobile/src/app/project mobile/src/app/learning-object`，通过；仅有 Git 换行转换 warning，无 whitespace error。
+- 已运行：`git diff --check -- docs/current-change.md mobile/__tests__/review-queue.test.tsx mobile/__tests__/domain-api.test.ts mobile/src/api/review.ts mobile/src/screens/ReviewQueueScreen.tsx mobile/src/screens/ProjectScreen.tsx mobile/src/app/project mobile/src/app/review`，通过；仅有 Git 换行转换 warning，无 whitespace error。
 
 ## 污染风险检查
 

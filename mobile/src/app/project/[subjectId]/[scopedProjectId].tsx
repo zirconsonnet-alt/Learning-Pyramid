@@ -29,6 +29,12 @@ export default function ProjectRoute() {
           params: { subjectId, scopedProjectId, nodeId: node.nodeId },
         })
       }
+      openReviewQueue={() =>
+        router.push({
+          pathname: "/review/[subjectId]/[scopedProjectId]",
+          params: { subjectId, scopedProjectId },
+        })
+      }
     />
   )
 }
