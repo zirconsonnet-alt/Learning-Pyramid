@@ -10,11 +10,12 @@ import { MobileWorkbenchScreen } from "../../../screens/MobileWorkbenchScreen"
 import {
   buildSubmitLearningTaskItems,
   createRecallDraft,
+  getIncompleteDraftReason,
   type MobileRecallDraft,
 } from "../../../workbench/recallDrafts"
 
 function createLocalId() {
-  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}_${Math.random().toString(16).slice(2)}`
+  return globalThis.crypto.randomUUID()
 }
 
 function firstLeaf(nodes: LearningObjectNode[]) {
@@ -90,13 +91,20 @@ export default function ProjectRoute() {
   })
 
   const submitLearningTask = useMutation({
-    mutationFn: (input: { nodeId: string; instanceId: string; title: string; drafts: MobileRecallDraft[] }) =>
+    mutationFn: (input: {
+      nodeId: string
+      instanceId: string
+      title: string
+      drafts: MobileRecallDraft[]
+      submittedLocalIds: string[]
+    }) =>
       api.learningTasks.submitLearningTask(scope, {
         title: input.title,
         items: buildSubmitLearningTaskItems(input.drafts),
       }),
     onSuccess: async (_result, variables) => {
-      setDrafts((current) => current.filter((draft) => draft.instanceId !== variables.instanceId))
+      const submittedLocalIds = new Set(variables.submittedLocalIds)
+      setDrafts((current) => current.filter((draft) => !submittedLocalIds.has(draft.localId)))
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["review-queue", subjectId, scopedProjectId] }),
         queryClient.invalidateQueries({
@@ -109,10 +117,14 @@ export default function ProjectRoute() {
   })
 
   const activeDrafts = drafts.filter((draft) => draft.instanceId === activeInstanceId)
+  const firstIncompleteDraftReason = activeDrafts
+    .map(getIncompleteDraftReason)
+    .find((reason): reason is string => Boolean(reason))
   const reviewQueueBlocksSubmit = queueQ.isLoading || queueQ.isFetching || queueQ.isError || Boolean(queueQ.data?.headId)
   const canSubmitDrafts =
     activeNode?.kind === "leaf" &&
     activeDrafts.length > 0 &&
+    !firstIncompleteDraftReason &&
     !reviewQueueBlocksSubmit &&
     !submitLearningTask.isPending
   const loading = nodesQ.isLoading
@@ -160,6 +172,7 @@ export default function ProjectRoute() {
       instanceId: activeNode.instanceId,
       title: activeNode.title,
       drafts: activeDrafts,
+      submittedLocalIds: activeDrafts.map((draft) => draft.localId),
     })
   }
 

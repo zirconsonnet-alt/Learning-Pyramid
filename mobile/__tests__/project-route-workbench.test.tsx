@@ -149,6 +149,104 @@ describe("ProjectRoute mobile workbench", () => {
     mockWorkbenchProps = null
   })
 
+  it("keeps drafts added while submit is pending and submits only the original draft set", async () => {
+    const submitGate = { release: null as null | ((value: { entryNodeId: string }) => void) }
+    const api = createApi()
+    ;(api.learningTasks.submitLearningTask as jest.Mock).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          submitGate.release = resolve
+        }),
+    )
+    const screen = renderRoute(api)
+
+    await waitFor(() => expect(screen.getByText("active:第一课")).toBeTruthy())
+    await waitFor(() => expect(screen.getByText("review:none")).toBeTruthy())
+    fireEvent.press(screen.getByText("add draft"))
+    await waitFor(() => expect(screen.getByText("drafts:1")).toBeTruthy())
+    fireEvent.changeText(screen.getByLabelText(/question-/), "旧题")
+    fireEvent.changeText(screen.getByLabelText(/answer-/), "旧答")
+    fireEvent.press(screen.getByText("submit drafts"))
+
+    await waitFor(() => expect(api.learningTasks.submitLearningTask).toHaveBeenCalledTimes(1))
+    expect(api.learningTasks.submitLearningTask).toHaveBeenCalledWith(
+      { subjectId: "subj_1", scopedProjectId: "proj_1" },
+      {
+        title: "第一课",
+        items: [
+          {
+            question: [{ kind: "TEXT", text: "旧题" }],
+            answer: [{ kind: "TEXT", text: "旧答" }],
+            anchor: { instanceId: "inst_1", position: "t=0" },
+            references: [],
+          },
+        ],
+      },
+    )
+
+    fireEvent.press(screen.getByText("add draft"))
+    await waitFor(() => expect(screen.getByText("drafts:2")).toBeTruthy())
+    const questionInputs = screen.getAllByLabelText(/question-/)
+    const answerInputs = screen.getAllByLabelText(/answer-/)
+    fireEvent.changeText(questionInputs[1], "新题")
+    fireEvent.changeText(answerInputs[1], "新答")
+
+    await act(async () => {
+      submitGate.release?.({ entryNodeId: "entry_1" })
+      await Promise.resolve()
+    })
+
+    await waitFor(() => expect(screen.getByText("drafts:1")).toBeTruthy())
+    expect(api.learningTasks.submitLearningTask).toHaveBeenCalledTimes(1)
+    expect(screen.getByDisplayValue("新题")).toBeTruthy()
+    expect(screen.getByDisplayValue("新答")).toBeTruthy()
+    screen.unmount()
+    screen.queryClient.clear()
+  })
+
+  it("does not call submitLearningTask when a direct submit callback sees incomplete drafts", async () => {
+    const screen = renderRoute()
+
+    await waitFor(() => expect(screen.getByText("active:第一课")).toBeTruthy())
+    await waitFor(() => expect(screen.getByText("review:none")).toBeTruthy())
+    fireEvent.press(screen.getByText("add draft"))
+    await waitFor(() => expect(screen.getByText("drafts:1")).toBeTruthy())
+
+    await act(async () => {
+      mockWorkbenchProps?.onSubmitDrafts()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(screen.api.learningTasks.submitLearningTask).not.toHaveBeenCalled()
+    expect(screen.queryClient.getMutationCache().getAll()).toHaveLength(0)
+    expect(screen.getByText("error:none")).toBeTruthy()
+    screen.unmount()
+    screen.queryClient.clear()
+  })
+
+  it("uses crypto.randomUUID as the required local draft id source", async () => {
+    const randomUUID = jest.fn(() => "draft_uuid")
+    const originalCrypto = globalThis.crypto
+    Object.defineProperty(globalThis, "crypto", {
+      configurable: true,
+      value: { ...originalCrypto, randomUUID },
+    })
+    const screen = renderRoute()
+
+    await waitFor(() => expect(screen.getByText("active:第一课")).toBeTruthy())
+    fireEvent.press(screen.getByText("add draft"))
+
+    await waitFor(() => expect(randomUUID).toHaveBeenCalledTimes(1))
+    expect(screen.getByLabelText("question-draft_uuid")).toBeTruthy()
+    screen.unmount()
+    screen.queryClient.clear()
+    Object.defineProperty(globalThis, "crypto", {
+      configurable: true,
+      value: originalCrypto,
+    })
+  })
+
   it("submits current learning object drafts and invalidates affected queries", async () => {
     const screen = renderRoute()
 
