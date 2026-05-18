@@ -64,6 +64,25 @@ If you want to recreate that packaging venv from scratch:
 python tools/build_windows_standalone.py --bootstrap-packaging-venv --refresh-packaging-venv
 ```
 
+## Mobile app preview
+
+The Android and iPhone client uses Expo-managed React Native and lives in `mobile/`. The current MVP connects to the existing API, uses the scoped project routes, and covers login, subject/material browsing, learning object detail, existing media playback descriptors, recall point viewing, and queue-head review submission.
+
+```powershell
+pnpm --dir mobile install
+$env:EXPO_PUBLIC_API_BASE_URL = "https://plm.xuebao.chat/api"
+pnpm --dir mobile start
+```
+
+For local verification:
+
+```powershell
+pnpm --dir mobile test
+pnpm --dir mobile typecheck
+```
+
+See [docs/mobile-client.md](docs/mobile-client.md) for the current mobile boundary, unsupported media sources, and validation notes.
+
 ## Build Windows installer package
 
 To generate an installable bundle with `Install-LearningPyramid.bat`:

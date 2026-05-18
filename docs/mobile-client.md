@@ -12,6 +12,14 @@
 - 复用现有 FastAPI API envelope、认证语义和 scoped project 语义。
 - 使用移动端原生 UI 重新实现核心学习流程。
 
+当前仓库已包含 `mobile/` Expo 应用预览。当前实现包含：
+
+- 登录、会话恢复和退出。
+- 学科列表、材料列表和 scoped project 学习对象浏览。
+- 学习对象详情、后端 playback descriptor 媒体播放和节点复述点查看。
+- 队列头复习任务展示和基础 `canRecall` 提交。
+- 移动端 API client、认证状态、领域 API、导航、详情、媒体和复习队列测试。
+
 当前阶段不包含：
 
 - 手机本机文件导入。
@@ -67,6 +75,25 @@ React Native App -> HTTPS -> FastAPI /api -> SystemAPI -> 持久化 store
 - 离线缓存。
 
 如果某类 `PlaybackDescriptor` 的 `url` 或 `playbackKind` 在移动端播放器中不可用，应上报为媒体能力缺口，不应在前端添加未确认的 fallback 播放路径。
+
+当前移动端播放器使用 `expo-video`。支持路径仅限后端 descriptor 能直接给出的 `SERVER_FS` / `BAIDU_NETDISK` URL；`NATIVE_LOCAL`、`BROWSER_LOCAL` 和 `MANUAL` 会显示明确不可播放状态。原生播放器请求会携带当前 `plm_session` Cookie header。
+
+真实 Android/iOS 环境中，受保护 HLS/文件资源是否能稳定通过原生播放器 header 访问，仍需要 emulator 或真机 smoke 验证。
+
+## 本地运行
+
+```powershell
+pnpm --dir mobile install
+$env:EXPO_PUBLIC_API_BASE_URL = "https://plm.xuebao.chat/api"
+pnpm --dir mobile start
+```
+
+常用验证：
+
+```powershell
+pnpm --dir mobile test
+pnpm --dir mobile typecheck
+```
 
 ## 工程边界
 
