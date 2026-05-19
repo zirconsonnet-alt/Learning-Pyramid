@@ -7,6 +7,7 @@ import { RouterProvider } from "react-router-dom"
 import { DevtoolsSlot } from "@/DevtoolsSlot"
 import { router } from "@/router"
 import { FeedbackViewport } from "@/ui/components/FeedbackViewport"
+import { installAppRuntimeMarker } from "@/ui/runtime/appRuntime"
 import { installFrontendFreshnessMonitor } from "@/ui/runtime/frontendFreshness"
 import { ThemeController } from "@/ui/theme/ThemeController"
 
@@ -21,6 +22,7 @@ const queryClient = new QueryClient({
 })
 
 installFrontendFreshnessMonitor()
+installAppRuntimeMarker()
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

@@ -48,6 +48,28 @@ class PlaybackDescriptor:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class BaiduDirectPlaybackDescriptor:
+    instance_id: str
+    source_kind: str
+    playback_kind: str
+    playlist_text: str
+    upstream_url: str
+    mime_type: str
+    duration_ms: int | None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "instanceId": self.instance_id,
+            "sourceKind": self.source_kind,
+            "playbackKind": self.playback_kind,
+            "playlistText": self.playlist_text,
+            "upstreamUrl": self.upstream_url,
+            "mimeType": self.mime_type,
+            "durationMs": self.duration_ms,
+        }
+
+
 class InstanceMediaService:
     def __init__(
         self,
@@ -256,6 +278,37 @@ class InstanceMediaService:
             media_base_path=base_path,
             upstream_url=playlist.upstream_url,
             text=playlist.text,
+        )
+
+    def build_baidu_direct_playback_descriptor(
+        self,
+        project_id: str,
+        instance_id: str,
+        *,
+        auth_store: AuthStore,
+    ) -> BaiduDirectPlaybackDescriptor:
+        instance = self.get_instance(project_id, instance_id)
+        binding = self.get_instance_media_binding(project_id, instance_id)
+        if binding is None or binding.source_kind != MaterialSourceKind.BAIDU_NETDISK:
+            raise PreconditionFailure("当前实例不是百度网盘视频")
+        if not binding.account_id or not binding.remote_path:
+            raise PreconditionFailure("百度网盘媒体绑定缺少 account_id 或 remote_path")
+        playlist = self._run_with_cloud_account(
+            auth_store,
+            binding.account_id,
+            lambda _account, access_token: self.baidu_client.fetch_direct_hls_playlist(
+                access_token,
+                remote_path=binding.remote_path,
+            ),
+        )
+        return BaiduDirectPlaybackDescriptor(
+            instance_id=str(instance.instance_id),
+            source_kind=MaterialSourceKind.BAIDU_NETDISK.value,
+            playback_kind="HLS",
+            playlist_text=playlist.text,
+            upstream_url=playlist.upstream_url,
+            mime_type="application/vnd.apple.mpegurl",
+            duration_ms=binding.duration_ms,
         )
 
     def stream_baidu_segment(

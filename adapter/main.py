@@ -88,6 +88,7 @@ def _is_public_api_path(path: str) -> bool:
 
 def _public_api_path_supports_optional_auth(path: str) -> bool:
     return path in {
+        "/api/auth/baidu-netdisk/callback",
         "/api/system/capabilities",
         "/api/commissions/payout-identity/wechat/withdrawal-confirmation/complete",
     }

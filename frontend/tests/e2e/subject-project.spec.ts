@@ -81,7 +81,7 @@ test(journeyIds.subjectProjectEntry, async ({ page }) => {
     await expect(page.getByText(project.title)).toBeVisible()
     await page.getByRole("button", { name: "进入工作台" }).click()
     await expect(page).toHaveURL(new RegExp(projectPath("/workbench")))
-    await expect(page.getByText("工作状态")).toBeVisible()
+    await expect(page.getByRole("heading", { name: "学习统计" })).toBeVisible()
   })
 
   expectNoConsoleIssues(consoleIssues)

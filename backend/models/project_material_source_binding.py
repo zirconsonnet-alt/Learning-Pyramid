@@ -49,6 +49,7 @@ class ProjectMaterialSourceBinding:
             MaterialSourceKind.SERVER_FS,
             MaterialSourceKind.BROWSER_LOCAL,
             MaterialSourceKind.NATIVE_LOCAL,
+            MaterialSourceKind.BAIDU_NETDISK,
             MaterialSourceKind.MANUAL,
         }:
             raise PreconditionFailure("ProjectMaterialSourceBinding.source_kind is not supported")

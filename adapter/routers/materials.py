@@ -17,6 +17,7 @@ from adapter.schemas import (
     BulkRemapRecallPointsInstanceRequest,
     ImportLearningObjectsFromBaiduNetdiskRequest,
     ImportBrowserDirectoryRequest,
+    ImportNativeLocalDirectoryRequest,
     InitializeBookLearningObjectsRequest,
     InitializeBookLearningObjectsFromMaterialRequest,
     VideoWatchProgressCompletedRequest,
@@ -98,6 +99,21 @@ def import_learning_objects_from_browser(
     return {"ok": True, "data": report}
 
 
+@router.post("/subjects/{subjectId}/projects/{scopedProjectId}/import-learning-objects-from-native-local")
+def import_learning_objects_from_native_local(
+    req: ImportNativeLocalDirectoryRequest,
+    project: ScopedProject = Depends(resolve_scoped_project),
+    api: SystemAPI = Depends(get_api),
+) -> dict:
+    report = api.import_learning_objects_from_native_local_scan(  # type: ignore[arg-type]
+        project.internal_project_id,
+        project_root=req.projectRoot,
+        root_title=req.rootTitle,
+        relative_file_paths=req.relativeFilePaths,
+    )
+    return {"ok": True, "data": report}
+
+
 @router.get("/subjects/{subjectId}/projects/{scopedProjectId}/baidu-netdisk/files")
 def list_baidu_netdisk_files(
     request: Request,
@@ -136,7 +152,7 @@ def import_learning_objects_from_baidu_netdisk(
         auth_store=auth_store,
         user_id=user.user_id,
         account_id=req.accountId,
-        items=[item.model_dump() for item in req.items],
+        items=[item.dict() for item in req.items],
     )
     return {"ok": True, "data": report}
 

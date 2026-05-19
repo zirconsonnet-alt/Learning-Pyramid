@@ -33,7 +33,7 @@ scoped project 的公开身份解析属于 adapter 边界：公开 `{subjectId, 
 
 - `LearningObjectContainer` 是目录或分组节点。
 - `LearningObjectLeaf` 是叶子节点，并绑定一个 `instance_id`。
-- 节点 `source` 当前为 `FILESYSTEM` 或 `MANUAL`。
+- 节点 `source` 当前为 `FILESYSTEM`、`MANUAL` 或 `BAIDU_NETDISK`。
 - 节点路径必须是相对路径，不能是绝对路径，不能包含 `..`。
 - 容器子节点允许为空；双向一致、无环、同质等结构校验由提交期逻辑保证。
 

@@ -1,0 +1,31 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "LearningPyramid",
+  "version": "0.1.0-beta.3",
+  "identifier": "chat.xuebao.learningpyramid.desktop",
+  "build": {
+    "beforeDevCommand": "pnpm --dir ../frontend dev --host 127.0.0.1 --port 1420",
+    "beforeBuildCommand": "pnpm --dir ../frontend build",
+    "devUrl": "http://127.0.0.1:1420",
+    "frontendDist": "../../frontend/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "学习金字塔",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 1024,
+        "minHeight": 720
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "icon": ["../../frontend/public/favicon.ico"],
+    "targets": ["nsis"]
+  }
+}

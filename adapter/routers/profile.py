@@ -318,10 +318,11 @@ def list_my_baidu_netdisk_accounts(
 @router.post("/profile/me/cloud-accounts/baidu-netdisk/connect")
 def begin_baidu_netdisk_connect(
     request: Request,
+    auth_store: AuthStore = Depends(get_auth_store),
     api: SystemAPI = Depends(get_api),
 ) -> dict:
     user = require_request_auth_user(request)
-    return {"ok": True, "data": api.begin_baidu_netdisk_connect(user_id=user.user_id)}
+    return {"ok": True, "data": api.begin_baidu_netdisk_connect(auth_store=auth_store, user_id=user.user_id)}
 
 
 @router.delete("/profile/me/cloud-accounts/baidu-netdisk/{accountId}")

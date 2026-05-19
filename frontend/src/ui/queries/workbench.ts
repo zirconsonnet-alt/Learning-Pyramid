@@ -6,10 +6,11 @@ import {
   getLearningObjectNode,
   importLearningObjectsFromBaiduNetdisk,
   importLearningObjectsFromBrowser,
+  importLearningObjectsFromNativeLocal,
   initializeBookLearningObjects,
   initializeBookLearningObjectsFromSubjectMaterial,
 } from "@/ui/api/learningObjects"
-import { getInstancePlaybackDescriptor } from "@/ui/api/media"
+import { getInstanceBaiduDirectPlaybackDescriptor, getInstancePlaybackDescriptor } from "@/ui/api/media"
 import { addInstance, bulkRemapRecallPointsInstance, listInstances, listMissingInstances, listRecallPointsByInstance } from "@/ui/api/instances"
 import { submitLearningTask } from "@/ui/api/learningTasks"
 import { getProjectConfig, setLayerConfig, setProjectRollUpStrategy, setReviewRecommendationConfig } from "@/ui/api/projectConfig"
@@ -35,6 +36,7 @@ import {
 } from "@/ui/guideWalkthrough/virtualStudyReviewProject"
 
 const WORKBENCH_QUERY_TIMEOUT_MS = 90_000
+const BAIDU_NETDISK_IMPORT_TIMEOUT_MS = 5 * 60_000
 
 function scopeProjectId(scope: ScopedProjectRef | null) {
   return scope?.scopedProjectId ?? ""
@@ -91,6 +93,16 @@ export function useInstancePlaybackDescriptor(scope: ScopedProjectRef | null, in
         : getInstancePlaybackDescriptor(scope as ScopedProjectRef, instanceId, { signal, timeoutMs: WORKBENCH_QUERY_TIMEOUT_MS }),
     enabled: enabled && hasProjectScope(scope) && !!instanceId,
     staleTime: 15_000,
+  })
+}
+
+export function useInstanceBaiduDirectPlaybackDescriptor(scope: ScopedProjectRef | null, instanceId: string, enabled = true) {
+  const projectId = scopeProjectId(scope)
+  return useQuery({
+    queryKey: ["instanceBaiduDirectPlaybackDescriptor", scopeSubjectId(scope), projectId, instanceId],
+    queryFn: ({ signal }) => getInstanceBaiduDirectPlaybackDescriptor(scope as ScopedProjectRef, instanceId, { signal, timeoutMs: WORKBENCH_QUERY_TIMEOUT_MS }),
+    enabled: enabled && hasProjectScope(scope) && !!instanceId,
+    staleTime: 5 * 60_000,
   })
 }
 
@@ -408,6 +420,25 @@ export function useImportLearningObjectsFromBrowser(scope: ScopedProjectRef | nu
   })
 }
 
+export function useImportLearningObjectsFromNativeLocal(scope: ScopedProjectRef | null) {
+  const projectId = scopeProjectId(scope)
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (p: { projectRoot: string; rootTitle?: string; relativeFilePaths: string[] }) =>
+      importLearningObjectsFromNativeLocal(scope as ScopedProjectRef, p),
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["instances", scopeSubjectId(scope), projectId] }),
+        qc.invalidateQueries({ queryKey: ["missingInstances", scopeSubjectId(scope), projectId] }),
+        qc.invalidateQueries({ queryKey: ["learningObjectNodes", scopeSubjectId(scope), projectId] }),
+        qc.invalidateQueries({ queryKey: ["projectStorageConfig", scopeSubjectId(scope), projectId] }),
+        qc.invalidateQueries({ queryKey: ["projectMaterialSourceBinding", scopeSubjectId(scope), projectId] }),
+        qc.invalidateQueries({ queryKey: ["instancePlaybackDescriptor", scopeSubjectId(scope), projectId] }),
+      ])
+    },
+  })
+}
+
 export function useImportLearningObjectsFromBaiduNetdisk(scope: ScopedProjectRef | null) {
   const projectId = scopeProjectId(scope)
   const qc = useQueryClient()
@@ -423,7 +454,7 @@ export function useImportLearningObjectsFromBaiduNetdisk(scope: ScopedProjectRef
         mimeType?: string | null
         durationMs?: number | null
       }>
-    }) => importLearningObjectsFromBaiduNetdisk(scope as ScopedProjectRef, params),
+    }) => importLearningObjectsFromBaiduNetdisk(scope as ScopedProjectRef, params, { timeoutMs: BAIDU_NETDISK_IMPORT_TIMEOUT_MS }),
     onSuccess: async () => {
       await Promise.all([
         qc.invalidateQueries({ queryKey: ["instances", scopeSubjectId(scope), projectId] }),

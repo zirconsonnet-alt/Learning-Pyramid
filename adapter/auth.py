@@ -48,6 +48,11 @@ def _secure_cookies_enabled() -> bool:
     return (os.getenv("LEARNINGPYRAMID_SECURE_COOKIES") or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _auth_cookie_samesite() -> str:
+    value = (os.getenv("LEARNINGPYRAMID_AUTH_COOKIE_SAMESITE") or "lax").strip().lower()
+    return value if value in {"lax", "strict", "none"} else "lax"
+
+
 def _base64url_encode(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
@@ -172,7 +177,7 @@ def set_auth_cookie(response: Response, session_token: str) -> None:
         value=str(session_token),
         max_age=_session_ttl_seconds(),
         httponly=True,
-        samesite="lax",
+        samesite=_auth_cookie_samesite(),
         secure=_secure_cookies_enabled(),
         path="/",
     )
@@ -182,7 +187,7 @@ def clear_auth_cookie(response: Response) -> None:
     response.delete_cookie(
         key=SESSION_COOKIE_NAME,
         httponly=True,
-        samesite="lax",
+        samesite=_auth_cookie_samesite(),
         secure=_secure_cookies_enabled(),
         path="/",
     )
@@ -194,7 +199,7 @@ def set_pending_email_verification_cookie(response: Response, wait_token: str) -
         value=str(wait_token),
         max_age=_pending_email_verification_ttl_seconds(),
         httponly=True,
-        samesite="lax",
+        samesite=_auth_cookie_samesite(),
         secure=_secure_cookies_enabled(),
         path="/",
     )
@@ -204,7 +209,7 @@ def clear_pending_email_verification_cookie(response: Response) -> None:
     response.delete_cookie(
         key=PENDING_EMAIL_VERIFICATION_COOKIE_NAME,
         httponly=True,
-        samesite="lax",
+        samesite=_auth_cookie_samesite(),
         secure=_secure_cookies_enabled(),
         path="/",
     )

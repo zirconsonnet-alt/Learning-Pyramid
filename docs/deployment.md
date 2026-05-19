@@ -83,13 +83,28 @@ docker compose -f docker-compose.selfhost.yml --env-file .env up --build
 - `LEARNINGPYRAMID_BIND_HOST`
 - `LEARNINGPYRAMID_PUBLIC_HOST`
 - `LEARNINGPYRAMID_PUBLIC_ORIGIN`
-- `LEARNINGPYRAMID_ALLOWED_ORIGINS`
+- `LEARNINGPYRAMID_ALLOWED_ORIGINS`：显式 CORS 允许来源；配置后会覆盖 `LEARNINGPYRAMID_PUBLIC_ORIGIN` 的默认推导。Windows Tauri 生产客户端访问线上 API 时，生产环境应同时包含 Web 站点来源和桌面客户端来源，例如 `https://plm.xuebao.chat,http://tauri.localhost`。
 - `LEARNINGPYRAMID_TRUSTED_HOSTS`
 - `LEARNINGPYRAMID_PROXY_HEADERS`
 - `LEARNINGPYRAMID_FORWARDED_ALLOW_IPS`
 - `LEARNINGPYRAMID_ENABLE_API_DOCS`：生产默认关闭；设为 `true` 时暴露 `/api/docs`、`/api/openapi.json` 和 `/api/redoc`。
+- `LEARNINGPYRAMID_AUTH_COOKIE_SAMESITE`：认证 cookie 的 SameSite 策略，允许 `lax`、`strict`、`none`，默认 `lax`。Windows Tauri 客户端从 `http://tauri.localhost` 跨站访问线上 API 时，应设置为 `none`，并保持 `LEARNINGPYRAMID_SECURE_COOKIES=true`。
+- `LEARNINGPYRAMID_ALTCHA_CHALLENGE_URL`：注册人机校验挑战地址。仅同源 Web 时可以使用默认 `/api/auth/human-check/challenge`；Windows Tauri 客户端访问线上 API 时应配置为公开 HTTPS 绝对地址，例如 `https://plm.xuebao.chat/api/auth/human-check/challenge`，避免桌面端把相对路径解析到 `http://tauri.localhost`。
 - `LEARNINGPYRAMID_MEMBERSHIP_REFUND_WINDOW_MINUTES`：会员订单可发起退款窗口，默认 1440 分钟。
 - `LEARNINGPYRAMID_MEMBERSHIP_COMMISSION_REFUND_WINDOW_MINUTES`：邀请佣金退款等待窗口，默认 1440 分钟。
+
+## 百度网盘 OAuth 接入
+
+百度网盘视频导入由运行时能力开关控制。自托管线上启用时需要同时配置：
+
+- `LEARNINGPYRAMID_ENABLE_BAIDU_NETDISK=true`
+- `LEARNINGPYRAMID_BAIDU_NETDISK_CLIENT_ID`：百度网盘开放平台应用的 `AppKey`。
+- `LEARNINGPYRAMID_BAIDU_NETDISK_CLIENT_SECRET`：百度网盘开放平台应用的 `SecretKey`。
+- `LEARNINGPYRAMID_BAIDU_NETDISK_REDIRECT_URI`：公开 HTTPS 回调地址，当前固定路由为 `https://<public-host>/api/auth/baidu-netdisk/callback`。
+- `LEARNINGPYRAMID_BAIDU_NETDISK_SCOPE`：默认 `basic,netdisk`。
+- `LEARNINGPYRAMID_TOKEN_ENCRYPTION_KEY`：用于加密保存云账号 access token / refresh token 的部署密钥，必须配置且长期保持稳定；轮换后，旧密钥加密过的云账号 token 将无法解密。
+
+百度开放平台应用里的授权回调地址必须与 `LEARNINGPYRAMID_BAIDU_NETDISK_REDIRECT_URI` 完全一致；协议、域名、路径和末尾斜杠都不应产生差异。功能开启后，个人中心会显示百度网盘账号连接入口，项目设置会显示“从百度网盘导入”入口。每个用户同时只能保留一个启用的百度网盘账号绑定；需要换号时先在个人中心解绑当前账号，再重新连接。
 
 健康检查：
 
@@ -151,7 +166,7 @@ python tools/apply_postgres_migrations.py --postgres-dsn postgresql://user:pass@
 python tools/apply_postgres_migrations.py --postgres-dsn postgresql://user:pass@localhost:5432/learningpyramid --check
 ```
 
-当前 store 迁移会补齐学科材料关系表、把 `subject_material_collection_index.initialized` 规范为 BOOLEAN，并确保 `project_snapshots.snapshot_json` 非空壳列存在。迁移 12 会对已应用早期 relationship migration 的数据库再次幂等规范 `initialized`。迁移前仍必须备份目标 PostgreSQL。
+当前 store 迁移会补齐学科材料关系表、把 `subject_material_collection_index.initialized` 规范为 BOOLEAN，确保 `project_snapshots.snapshot_json` 非空壳列存在，并用 `video_watch_progress_index` 持久化视频播放进度。迁移 12 会对已应用早期 relationship migration 的数据库再次幂等规范 `initialized`，迁移 13 会补齐播放进度索引表。迁移前仍必须备份目标 PostgreSQL。
 
 从 SQLite 导出或迁移到 PostgreSQL：
 

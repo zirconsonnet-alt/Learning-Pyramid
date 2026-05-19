@@ -21,6 +21,7 @@ GLOBAL_ROLES = {"super_admin", "admin"}
 FRIEND_REQUEST_STATUSES = {"pending", "accepted", "rejected", "cancelled"}
 USER_SERVICE_KINDS = {"llm", "asr"}
 CLOUD_ACCOUNT_PROVIDERS = {"baidu_netdisk"}
+SINGLE_BINDING_CLOUD_ACCOUNT_PROVIDERS = {"baidu_netdisk"}
 STUDY_DATE_KEY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 REVIEW_CHAIN_TEMPLATE_KINDS = {"CONVERGENCE", "REVIEW_TASK"}
 LEARNING_PLAN_TARGET_KINDS = {"PROJECT", "LEARNING_OBJECT_NODES"}
@@ -2687,6 +2688,18 @@ class SQLiteAuthStore(_AuthStoreImpl):
                 ).fetchone()
                 account_id = str(existing["account_id"]) if existing is not None else f"account_{uuid.uuid4().hex}"
                 created_at = str(existing["created_at"]) if existing is not None else now_text
+                if normalized_provider in SINGLE_BINDING_CLOUD_ACCOUNT_PROVIDERS:
+                    active_other = conn.execute(
+                        """
+                        SELECT account_id
+                        FROM user_cloud_accounts
+                        WHERE user_id = ? AND provider = ? AND disabled_at IS NULL AND account_id <> ?
+                        LIMIT 1
+                        """,
+                        (str(user_id), normalized_provider, account_id),
+                    ).fetchone()
+                    if active_other is not None:
+                        raise PreconditionFailure("每个账号同时只能绑定一个百度网盘账号，请先解绑当前账号")
                 conn.execute(
                     """
                     INSERT INTO user_cloud_accounts (
@@ -4859,6 +4872,18 @@ class PostgresAuthStore(_AuthStoreImpl):
                 ).fetchone()
                 account_id = str(existing["account_id"]) if existing is not None else f"account_{uuid.uuid4().hex}"
                 created_at = str(existing["created_at"]) if existing is not None else now_text
+                if normalized_provider in SINGLE_BINDING_CLOUD_ACCOUNT_PROVIDERS:
+                    active_other = conn.execute(
+                        """
+                        SELECT account_id
+                        FROM user_cloud_accounts
+                        WHERE user_id = %s AND provider = %s AND disabled_at IS NULL AND account_id <> %s
+                        LIMIT 1
+                        """,
+                        (str(user_id), normalized_provider, account_id),
+                    ).fetchone()
+                    if active_other is not None:
+                        raise PreconditionFailure("每个账号同时只能绑定一个百度网盘账号，请先解绑当前账号")
                 conn.execute(
                     """
                     INSERT INTO user_cloud_accounts (

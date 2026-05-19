@@ -135,6 +135,23 @@ def get_instance_hls_playlist(
     return Response(content=playlist, media_type="application/vnd.apple.mpegurl")
 
 
+@router.get("/subjects/{subjectId}/projects/{scopedProjectId}/media/instances/{instanceId}/baidu-direct-playback")
+def get_instance_baidu_direct_playback(
+    instanceId: str,
+    project: ScopedProject = Depends(resolve_scoped_project),
+    api: SystemAPI = Depends(get_api),
+    auth_store: AuthStore = Depends(get_auth_store),
+) -> dict:
+    return {
+        "ok": True,
+        "data": api.get_instance_baidu_direct_playback_descriptor(  # type: ignore[arg-type]
+            project.internal_project_id,
+            instanceId,
+            auth_store=auth_store,
+        ),
+    }
+
+
 @router.get("/subjects/{subjectId}/projects/{scopedProjectId}/media/instances/{instanceId}/segments/{segmentPath:path}")
 def get_instance_hls_segment(
     instanceId: str,

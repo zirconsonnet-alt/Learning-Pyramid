@@ -161,6 +161,14 @@ class ScopedAuthBoundaryTest(unittest.TestCase):
 
         self.assertEqual([], offenders)
 
+    def test_baidu_netdisk_oauth_callback_resolves_optional_auth(self) -> None:
+        from adapter.main import _is_public_api_path, _public_api_path_supports_optional_auth
+
+        callback_path = "/api/auth/baidu-netdisk/callback"
+
+        self.assertTrue(_is_public_api_path(callback_path))
+        self.assertTrue(_public_api_path_supports_optional_auth(callback_path))
+
     def test_membership_withdrawal_confirmation_api_routes_do_not_use_binding_paths(self) -> None:
         root = Path(__file__).resolve().parents[1]
         files = [

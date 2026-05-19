@@ -474,6 +474,27 @@ class SQLiteSnapshotStore:
                 )
                 conn.execute(
                     """
+                    CREATE TABLE IF NOT EXISTS video_watch_progress_index (
+                        project_id TEXT NOT NULL,
+                        instance_id TEXT NOT NULL,
+                        duration_ms INTEGER NULL,
+                        ranges_json TEXT NOT NULL,
+                        completed_at_ms INTEGER NULL,
+                        updated_at_ms INTEGER NOT NULL,
+                        PRIMARY KEY (project_id, instance_id),
+                        FOREIGN KEY(project_id) REFERENCES project_snapshots(project_id) ON DELETE CASCADE,
+                        FOREIGN KEY(project_id, instance_id) REFERENCES instance_index(project_id, instance_id) ON DELETE CASCADE
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_video_watch_progress_index_project
+                    ON video_watch_progress_index (project_id, updated_at_ms DESC)
+                    """
+                )
+                conn.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS learning_object_node_index (
                         project_id TEXT NOT NULL,
                         node_id TEXT NOT NULL,
@@ -932,6 +953,18 @@ class SQLiteSnapshotStore:
         )
         cls._validate_required_columns(
             conn,
+            "video_watch_progress_index",
+            {
+                "project_id",
+                "instance_id",
+                "duration_ms",
+                "ranges_json",
+                "completed_at_ms",
+                "updated_at_ms",
+            },
+        )
+        cls._validate_required_columns(
+            conn,
             "layer_state_index",
             {
                 "project_id",
@@ -1044,6 +1077,7 @@ class SQLiteSnapshotStore:
         conn.execute("DELETE FROM project_config_index WHERE project_id = ?", (project_id,))
         conn.execute("DELETE FROM instance_index WHERE project_id = ?", (project_id,))
         conn.execute("DELETE FROM instance_media_binding_index WHERE project_id = ?", (project_id,))
+        conn.execute("DELETE FROM video_watch_progress_index WHERE project_id = ?", (project_id,))
         conn.execute("DELETE FROM learning_object_node_index WHERE project_id = ?", (project_id,))
         conn.execute("DELETE FROM recall_point_index WHERE project_id = ?", (project_id,))
         conn.execute("DELETE FROM learning_task_index WHERE project_id = ?", (project_id,))
@@ -1217,6 +1251,31 @@ class SQLiteSnapshotStore:
                     None if binding_payload.get("durationMs") is None else int(binding_payload.get("durationMs")),
                     json.dumps(source_payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
                     int(binding_payload.get("updatedAtMs", 0)),
+                ),
+            )
+
+        for instance_id, raw_progress in dict(project_payload.get("videoWatchProgress", {})).items():
+            progress_payload = dict(raw_progress)
+            ranges = list(progress_payload.get("ranges", []))
+            conn.execute(
+                """
+                INSERT INTO video_watch_progress_index (
+                    project_id,
+                    instance_id,
+                    duration_ms,
+                    ranges_json,
+                    completed_at_ms,
+                    updated_at_ms
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    project_id,
+                    str(instance_id),
+                    None if progress_payload.get("durationMs") is None else int(progress_payload.get("durationMs")),
+                    json.dumps(ranges, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
+                    None if progress_payload.get("completedAtMs") is None else int(progress_payload.get("completedAtMs")),
+                    int(progress_payload.get("updatedAtMs", 0)),
                 ),
             )
 
@@ -2248,6 +2307,23 @@ class SQLiteSnapshotStore:
             for row in instance_media_binding_rows
         }
 
+        progress_rows = conn.execute(
+            """
+            SELECT instance_id, duration_ms, ranges_json, completed_at_ms, updated_at_ms
+            FROM video_watch_progress_index
+            WHERE project_id = ?
+            ORDER BY instance_id ASC
+            """,
+            (str(project_id),),
+        ).fetchall()
+        hydrated["videoWatchProgress"] = {
+            str(row["instance_id"]): self._video_watch_progress_payload_from_index_row(
+                project_id=str(project_id),
+                row=row,
+            )
+            for row in progress_rows
+        }
+
         node_rows = conn.execute(
             """
             SELECT node_id, node_kind, source, relative_path, parent_id, instance_id, title, children_json
@@ -2600,6 +2676,21 @@ class SQLiteSnapshotStore:
                 "scopedProjectId": None if row["scoped_project_id"] is None else str(row["scoped_project_id"]),
                 "projectSequence": int(row["project_sequence"] or 0),
             }
+        }
+
+    @staticmethod
+    def _video_watch_progress_payload_from_index_row(*, project_id: str, row: Any) -> dict[str, Any]:
+        raw_ranges = row["ranges_json"] if "ranges_json" in row.keys() else "[]"
+        ranges = json.loads(str(raw_ranges))
+        if not isinstance(ranges, list):
+            raise ValueError("VideoWatchProgress.ranges_json must decode to a list")
+        return {
+            "projectId": str(project_id),
+            "instanceId": str(row["instance_id"]),
+            "durationMs": None if row["duration_ms"] is None else int(row["duration_ms"]),
+            "ranges": ranges,
+            "completedAtMs": None if row["completed_at_ms"] is None else int(row["completed_at_ms"]),
+            "updatedAtMs": int(row["updated_at_ms"]),
         }
 
     def _load_global_llm_settings_payload(self, conn: sqlite3.Connection) -> dict[str, Any] | None:

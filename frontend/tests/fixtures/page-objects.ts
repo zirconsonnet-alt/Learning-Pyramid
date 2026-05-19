@@ -21,5 +21,5 @@ export async function openSubject(page: Page) {
 
 export async function gotoWorkbench(page: Page) {
   await page.goto(projectPath("/workbench"))
-  await expect(page.getByText("工作状态")).toBeVisible()
+  await expect(page.getByRole("heading", { name: "学习统计" })).toBeVisible()
 }

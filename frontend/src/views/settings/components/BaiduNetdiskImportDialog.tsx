@@ -10,7 +10,6 @@ import { Button } from "@/ui/components/ui/button"
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -55,6 +54,10 @@ function isVideoItem(item: BaiduNetdiskFileItem) {
   return /\.(mp4|m4v|mkv|webm|mov|avi|flv|ts|m2ts)$/i.test(item.name)
 }
 
+function isImportableItem(item: BaiduNetdiskFileItem) {
+  return item.isDir || isVideoItem(item)
+}
+
 function buildParentDir(path: string) {
   if (!path || path === "/") return "/"
   const segments = path.split("/").filter(Boolean)
@@ -73,6 +76,17 @@ function buildPathSegments(path: string) {
   ]
 }
 
+function normalizeBaiduPath(path: string) {
+  const segments = path.split("/").filter(Boolean)
+  return segments.length > 0 ? `/${segments.join("/")}` : "/"
+}
+
+function isSameOrDescendantPath(path: string, maybeAncestor: string) {
+  const normalizedPath = normalizeBaiduPath(path)
+  const normalizedAncestor = normalizeBaiduPath(maybeAncestor)
+  return normalizedPath === normalizedAncestor || normalizedPath.startsWith(`${normalizedAncestor}/`)
+}
+
 export function BaiduNetdiskImportDialog({
   subjectId,
   projectId,
@@ -88,17 +102,15 @@ export function BaiduNetdiskImportDialog({
   const projectScope: ScopedProjectRef | null = subjectId && projectId ? { subjectId, scopedProjectId: projectId } : null
   const importMutation = useImportLearningObjectsFromBaiduNetdisk(projectScope)
 
-  const [selectedAccountId, setSelectedAccountId] = useState("")
   const [dirPath, setDirPath] = useState("/")
-  const [selectedItemsByScope, setSelectedItemsByScope] = useState<Record<string, Record<string, BaiduNetdiskFileItem>>>({})
-  const accountId =
-    accountsQ.data?.some((account) => account.accountId === selectedAccountId)
-      ? selectedAccountId
-      : accountsQ.data?.[0]?.accountId ?? ""
-  const selectionScopeKey = `${open ? "open" : "closed"}:${accountId}`
+  const [openSessionSeq, setOpenSessionSeq] = useState(0)
+  const [selectedItemsBySession, setSelectedItemsBySession] = useState<Record<string, Record<string, BaiduNetdiskFileItem>>>({})
+  const accountId = accountsQ.data?.[0]?.accountId ?? ""
+  const hasAccount = (accountsQ.data?.length ?? 0) > 0
+  const selectionSessionKey = `${subjectId}:${projectId}:${accountId}:${openSessionSeq}`
   const selectedItemsByPath = useMemo(
-    () => selectedItemsByScope[selectionScopeKey] ?? {},
-    [selectedItemsByScope, selectionScopeKey],
+    () => selectedItemsBySession[selectionSessionKey] ?? {},
+    [selectedItemsBySession, selectionSessionKey],
   )
 
   const filesQ = useQuery({
@@ -121,23 +133,31 @@ export function BaiduNetdiskImportDialog({
     })
   }, [filesQ.data?.items])
 
-  const selectedItems = useMemo(() => Object.values(selectedItemsByPath), [selectedItemsByPath])
+  const selectedItems = useMemo(
+    () => Object.values(selectedItemsByPath).sort((left, right) => left.path.localeCompare(right.path, "zh-CN")),
+    [selectedItemsByPath],
+  )
   const pathSegments = useMemo(() => buildPathSegments(dirPath), [dirPath])
-  const currentAccount = accountsQ.data?.find((item) => item.accountId === accountId) ?? null
 
   function toggleItem(item: BaiduNetdiskFileItem) {
-    if (!isVideoItem(item)) return
-    setSelectedItemsByScope((current) => {
-      const currentSelection = current[selectionScopeKey] ?? {}
+    if (!isImportableItem(item)) return
+    const itemPath = normalizeBaiduPath(item.path)
+    setSelectedItemsBySession((current) => {
+      const currentSelection = current[selectionSessionKey] ?? {}
       const nextSelection = { ...currentSelection }
-      if (nextSelection[item.path]) {
-        delete nextSelection[item.path]
+      if (nextSelection[itemPath]) {
+        delete nextSelection[itemPath]
       } else {
-        nextSelection[item.path] = item
+        for (const selectedPath of Object.keys(nextSelection)) {
+          if (isSameOrDescendantPath(selectedPath, itemPath) || isSameOrDescendantPath(itemPath, selectedPath)) {
+            delete nextSelection[selectedPath]
+          }
+        }
+        nextSelection[itemPath] = item
       }
       const next = { ...current }
-      if (Object.keys(nextSelection).length > 0) next[selectionScopeKey] = nextSelection
-      else delete next[selectionScopeKey]
+      if (Object.keys(nextSelection).length > 0) next[selectionSessionKey] = nextSelection
+      else delete next[selectionSessionKey]
       return next
     })
   }
@@ -168,7 +188,16 @@ export function BaiduNetdiskImportDialog({
   }
 
   function handleOpenChange(nextOpen: boolean) {
-    if (nextOpen) setDirPath("/")
+    if (nextOpen) {
+      setDirPath("/")
+      setOpenSessionSeq((current) => current + 1)
+    } else {
+      setSelectedItemsBySession((current) => {
+        const next = { ...current }
+        delete next[selectionSessionKey]
+        return next
+      })
+    }
     onOpenChange(nextOpen)
   }
 
@@ -177,10 +206,11 @@ export function BaiduNetdiskImportDialog({
       <DialogContent className="max-w-4xl">
         <DialogHeader>
           <DialogTitle>从百度网盘导入视频</DialogTitle>
-          <DialogDescription>选择已绑定账号，浏览目录并勾选要导入到当前项目的视频文件。</DialogDescription>
         </DialogHeader>
 
-        {!accountsQ.isLoading && (accountsQ.data?.length ?? 0) <= 0 ? (
+        {accountsQ.isLoading ? <div className="px-1 py-8 text-sm text-muted-foreground">正在加载已绑定账号...</div> : null}
+
+        {!accountsQ.isLoading && !accountsQ.error && !hasAccount ? (
           <div className="rounded-[1.2rem] border border-dashed border-border/70 bg-muted/15 px-4 py-5 text-sm leading-6 text-muted-foreground">
             当前还没有可用的百度网盘账号。请先到{" "}
             <Link to="/profile" className="font-medium text-primary underline underline-offset-4">
@@ -192,52 +222,7 @@ export function BaiduNetdiskImportDialog({
 
         {accountsQ.error ? <div className="rounded-[1.2rem] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{formatApiError(accountsQ.error)}</div> : null}
 
-        <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
-          <div className="space-y-3">
-            <div className="rounded-[1.2rem] border border-border/70 bg-muted/15 p-4">
-              <div className="text-xs uppercase tracking-[0.14em] text-muted-foreground">账号</div>
-              <div className="mt-3 space-y-2">
-                {accountsQ.isLoading ? (
-                  <div className="text-sm text-muted-foreground">正在加载已绑定账号...</div>
-                ) : (
-                  (accountsQ.data ?? []).map((account) => {
-                    const active = account.accountId === accountId
-                    return (
-                      <button
-                        key={account.accountId}
-                        type="button"
-                        onClick={() => {
-                          setSelectedAccountId(account.accountId)
-                          setDirPath("/")
-                        }}
-                        className={cn(
-                          "w-full rounded-[1rem] border px-3 py-3 text-left transition",
-                          active
-                            ? "border-sky-300 bg-sky-50 shadow-[0_12px_30px_-24px_rgba(2,132,199,0.45)]"
-                            : "border-border/70 bg-background hover:border-sky-200 hover:bg-sky-50/40",
-                        )}
-                      >
-                        <div className="text-sm font-semibold text-foreground">{account.displayName}</div>
-                        <div className="mt-1 text-xs text-muted-foreground">{account.providerUserId}</div>
-                        {account.expiresAt ? <div className="mt-1 text-xs text-muted-foreground">授权到期：{new Date(account.expiresAt).toLocaleString()}</div> : null}
-                      </button>
-                    )
-                  })
-                )}
-              </div>
-            </div>
-
-            <div className="rounded-[1.2rem] border border-border/70 bg-muted/15 p-4 text-sm text-muted-foreground">
-              <div className="font-medium text-foreground">已选 {selectedItems.length} 个视频</div>
-              <div className="mt-2 leading-6">
-                {selectedItems.length > 0
-                  ? selectedItems.slice(0, 5).map((item) => item.name).join("，")
-                  : "勾选视频后，这里会显示待导入的文件。"}
-              </div>
-              {selectedItems.length > 5 ? <div className="mt-1">以及另外 {selectedItems.length - 5} 个文件。</div> : null}
-            </div>
-          </div>
-
+        {!accountsQ.isLoading && !accountsQ.error && hasAccount ? (
           <div className="space-y-3">
             <div className="rounded-[1.2rem] border border-border/70 bg-muted/15 p-4">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -281,21 +266,33 @@ export function BaiduNetdiskImportDialog({
               {!filesQ.isLoading &&
                 !filesQ.error &&
                 visibleItems.map((item) => {
-                  const selected = Boolean(selectedItemsByPath[item.path])
-                  const selectable = isVideoItem(item)
+                  const itemPath = normalizeBaiduPath(item.path)
+                  const selected = Boolean(selectedItemsByPath[itemPath])
+                  const selectable = isImportableItem(item)
                   return (
                     <div key={item.path} className="flex items-center gap-3 border-t border-border/60 px-4 py-3 first:border-t-0">
                       {item.isDir ? (
-                        <button type="button" onClick={() => setDirPath(item.path)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
-                          <div className="theme-icon-surface h-10 w-10 shrink-0">
-                            <FolderOpen className="h-4 w-4" />
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="truncate text-sm font-medium text-foreground">{item.name}</div>
-                            <div className="mt-1 text-xs text-muted-foreground">打开文件夹</div>
-                          </div>
-                          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-                        </button>
+                        <>
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 shrink-0"
+                            checked={selected}
+                            aria-label={`选择文件夹 ${item.name}`}
+                            onChange={() => toggleItem(item)}
+                          />
+                          <button type="button" className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={() => setDirPath(item.path)}>
+                            <div className="theme-icon-surface h-10 w-10 shrink-0">
+                              <FolderOpen className="h-4 w-4" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate text-sm font-medium text-foreground">{item.name}</div>
+                              <div className="mt-1 text-xs text-muted-foreground">导入整个文件夹</div>
+                            </div>
+                          </button>
+                          <Button type="button" variant="ghost" size="icon" onClick={() => setDirPath(item.path)} aria-label={`打开 ${item.name}`}>
+                            <ChevronRight className="h-4 w-4" />
+                          </Button>
+                        </>
                       ) : (
                         <>
                           <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
@@ -318,13 +315,36 @@ export function BaiduNetdiskImportDialog({
                 })}
             </div>
 
-            {currentAccount ? (
-              <div className="rounded-[1.2rem] border border-border/70 bg-muted/15 px-4 py-3 text-sm text-muted-foreground">
-                当前账号：<span className="font-medium text-foreground">{currentAccount.displayName}</span>
+            {selectedItems.length > 0 ? (
+              <div className="space-y-2 text-xs text-muted-foreground">
+                <div className="flex items-center justify-between gap-3">
+                  <span>已选 {selectedItems.length} 项</span>
+                  <button
+                    type="button"
+                    className="font-medium text-primary"
+                    onClick={() =>
+                      setSelectedItemsBySession((current) => {
+                        const next = { ...current }
+                        delete next[selectionSessionKey]
+                        return next
+                      })
+                    }
+                  >
+                    清空
+                  </button>
+                </div>
+                <div className="max-h-20 space-y-1 overflow-y-auto">
+                  {selectedItems.slice(0, 5).map((item) => (
+                    <div key={item.path} className="truncate">
+                      {item.isDir ? "文件夹" : "视频"} · {item.path}
+                    </div>
+                  ))}
+                  {selectedItems.length > 5 ? <div>还有 {selectedItems.length - 5} 项</div> : null}
+                </div>
               </div>
             ) : null}
           </div>
-        </div>
+        ) : null}
 
         <DialogFooter>
           <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={importMutation.isPending}>
@@ -332,7 +352,7 @@ export function BaiduNetdiskImportDialog({
           </Button>
           <Button type="button" onClick={() => void onImport()} disabled={!accountId || selectedItems.length <= 0 || importMutation.isPending}>
             <HardDriveDownload className="h-4 w-4" />
-            {importMutation.isPending ? "导入中..." : "导入所选视频"}
+            {importMutation.isPending ? "导入中..." : selectedItems.length > 0 ? `导入 ${selectedItems.length} 项` : "导入所选内容"}
           </Button>
         </DialogFooter>
       </DialogContent>

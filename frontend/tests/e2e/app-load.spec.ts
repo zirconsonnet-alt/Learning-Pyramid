@@ -281,12 +281,13 @@ test("workbench mobile learning object tree keeps deep nesting within the viewpo
 
   await expect(page.locator("#workbench-mobile-content-tree")).toBeHidden()
   await page.getByRole("button", { name: /内容目录/ }).click()
-  const tree = page.locator("[data-guide-tour='learning-object-tree']")
+  await expect(page.getByRole("dialog", { name: "内容目录" })).toBeVisible()
+  const tree = page.locator("#workbench-mobile-content-tree [data-guide-tour='learning-object-tree']")
   await expect(tree).toBeVisible()
 
   const layout = await page.evaluate(() => {
     const viewportWidth = window.innerWidth
-    const buttons = Array.from(document.querySelectorAll("[data-guide-tour='learning-object-tree'] button")).map((element) => {
+    const buttons = Array.from(document.querySelectorAll("#workbench-mobile-content-tree [data-guide-tour='learning-object-tree'] button")).map((element) => {
       const rect = element.getBoundingClientRect()
       return {
         left: Math.floor(rect.left),
@@ -311,7 +312,7 @@ test("workbench mobile learning object tree keeps deep nesting within the viewpo
   expectNoConsoleIssues(consoleIssues)
 })
 
-test("workbench mobile puts compact status and folded directory below the player", async ({ page }) => {
+test("workbench mobile opens study stats and directory dialogs above the player", async ({ page }) => {
   const consoleIssues = collectConsoleIssues(page)
   await installMockApi(page)
 
@@ -319,18 +320,18 @@ test("workbench mobile puts compact status and folded directory below the player
   await page.goto(`/subjects/${subject.subjectId}/projects/${project.projectId}/workbench`)
   await expectHealthyPage(page, new RegExp(`/subjects/${subject.subjectId}/projects/${project.projectId}/workbench$`))
 
+  const toolButtons = page.locator("#workbench-mobile-tool-buttons")
   const videoPane = page.locator("#workbench-video-pane")
-  const statusCard = page.locator("#workbench-status-card")
-  const contentTreeCard = page.locator("#workbench-content-tree")
   const centerPanel = page.locator("#workbench-center-panel")
+  await expect(toolButtons).toBeVisible()
   await expect(videoPane).toBeVisible()
-  await expect(statusCard).toBeVisible()
-  await expect(contentTreeCard).toBeVisible()
   await expect(centerPanel).toBeVisible()
+  await expect(page.locator("#workbench-status-card")).toBeHidden()
+  await expect(page.locator("#workbench-content-tree")).toBeHidden()
 
-  await expect(page.locator("#workbench-status-detail")).toBeHidden()
-  await expect(page.locator("#workbench-mobile-content-tree")).toBeHidden()
-  await expect(page.locator("[data-guide-tour='learning-object-tree']")).toBeHidden()
+  await expect(page.locator("#workbench-mobile-study-stats-dialog")).toBeHidden()
+  await expect(page.locator("#workbench-mobile-directory-dialog")).toBeHidden()
+  await expect(page.locator("#workbench-mobile-content-tree [data-guide-tour='learning-object-tree']")).toBeHidden()
 
   const closedLayout = await page.evaluate(() => {
     function top(selector: string) {
@@ -340,25 +341,27 @@ test("workbench mobile puts compact status and folded directory below the player
     return {
       viewportWidth: window.innerWidth,
       scrollWidth: Math.max(document.body.scrollWidth, document.documentElement.scrollWidth),
+      toolTop: top("#workbench-mobile-tool-buttons"),
       videoTop: top("#workbench-video-pane"),
-      statusTop: top("#workbench-status-card"),
-      directoryTop: top("#workbench-content-tree"),
       centerTop: top("#workbench-center-panel"),
     }
   })
 
   expect(closedLayout.scrollWidth, JSON.stringify(closedLayout, null, 2)).toBeLessThanOrEqual(closedLayout.viewportWidth)
+  expect(closedLayout.toolTop, JSON.stringify(closedLayout, null, 2)).not.toBeNull()
   expect(closedLayout.videoTop, JSON.stringify(closedLayout, null, 2)).not.toBeNull()
-  expect(closedLayout.statusTop, JSON.stringify(closedLayout, null, 2)).not.toBeNull()
-  expect(closedLayout.directoryTop, JSON.stringify(closedLayout, null, 2)).not.toBeNull()
   expect(closedLayout.centerTop, JSON.stringify(closedLayout, null, 2)).not.toBeNull()
-  expect(closedLayout.statusTop, JSON.stringify(closedLayout, null, 2)).toBeGreaterThan(closedLayout.videoTop ?? 0)
-  expect(closedLayout.directoryTop, JSON.stringify(closedLayout, null, 2)).toBeGreaterThan(closedLayout.statusTop ?? 0)
-  expect(closedLayout.centerTop, JSON.stringify(closedLayout, null, 2)).toBeGreaterThan(closedLayout.directoryTop ?? 0)
+  expect(closedLayout.videoTop, JSON.stringify(closedLayout, null, 2)).toBeGreaterThan(closedLayout.toolTop ?? 0)
+  expect(closedLayout.centerTop, JSON.stringify(closedLayout, null, 2)).toBeGreaterThan(closedLayout.videoTop ?? 0)
 
-  await page.getByRole("button", { name: /工作状态/ }).click()
+  await page.getByRole("button", { name: /学习统计/ }).click()
+  await expect(page.getByRole("dialog", { name: "学习统计" })).toBeVisible()
   await expect(page.locator("#workbench-status-detail")).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(page.locator("#workbench-mobile-study-stats-dialog")).toBeHidden()
+
   await page.getByRole("button", { name: /内容目录/ }).click()
+  await expect(page.getByRole("dialog", { name: "内容目录" })).toBeVisible()
   await expect(page.locator("#workbench-mobile-content-tree")).toBeVisible()
 
   await page.getByRole("button", { name: /第一讲 自动化导论/ }).click()

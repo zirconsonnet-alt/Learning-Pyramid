@@ -11,7 +11,7 @@ export const BaiduNetdiskFileItemSchema = z.object({
   sizeBytes: z.number().int().nonnegative().nullable(),
   mimeType: z.string().nullable(),
   durationMs: z.number().int().nonnegative().nullable(),
-  category: z.string().nullable(),
+  category: z.number().int().nullable(),
 })
 export type BaiduNetdiskFileItem = z.infer<typeof BaiduNetdiskFileItemSchema>
 

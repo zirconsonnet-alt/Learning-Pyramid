@@ -1,6 +1,6 @@
 import { type ChangeEvent, type KeyboardEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useQueries } from "@tanstack/react-query"
-import { Activity, Camera, ChevronDown, KeyRound, Mail, Save } from "lucide-react"
+import { Activity, Camera, ChevronDown, Cloud, KeyRound, Mail, Save } from "lucide-react"
 
 import { type AuditLogEvent, listAuditLogEvents } from "@/ui/api/auditLog"
 import { ApiError } from "@/ui/api/http"
@@ -8,6 +8,7 @@ import { ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
+import { useBaiduNetdiskCloudAccounts, useBeginBaiduNetdiskConnect, useDisconnectBaiduNetdiskAccount } from "@/ui/queries/cloudAccounts"
 import { useChangeMyPassword, useMyProfile, useUpdateMyProfile, useUploadMyAvatar } from "@/ui/queries/profile"
 import { useSubjectProjectCatalog } from "@/ui/queries/subjects"
 import { useSystemCapabilities } from "@/ui/queries/system"
@@ -38,6 +39,12 @@ type ProfileDraft = {
 
 type LearningMetric = "effective" | "watch" | "compose" | "review" | "qa"
 type LearningRange = "week" | "month" | "history"
+
+type BaiduNetdiskConnectMessage = {
+  type?: unknown
+  ok?: unknown
+  message?: unknown
+}
 
 type LearningMetricOption = {
   value: LearningMetric
@@ -385,6 +392,10 @@ export function ProfilePage() {
   const profileQ = useMyProfile()
   const projectCatalog = useSubjectProjectCatalog()
   const capabilitiesQ = useSystemCapabilities()
+  const baiduNetdiskEnabled = capabilitiesQ.data?.baiduNetdiskEnabled ?? false
+  const baiduNetdiskAccountsQ = useBaiduNetdiskCloudAccounts(baiduNetdiskEnabled)
+  const beginBaiduNetdiskConnect = useBeginBaiduNetdiskConnect()
+  const disconnectBaiduNetdiskAccount = useDisconnectBaiduNetdiskAccount()
   const updateProfile = useUpdateMyProfile()
   const changePassword = useChangeMyPassword()
   const uploadAvatar = useUploadMyAvatar()
@@ -545,6 +556,29 @@ export function ProfilePage() {
 
   const learningViewLoading = projectCatalog.isLoading || auditLogQs.some((query) => query.isLoading)
   const learningViewError = projectCatalog.error ?? auditLogQs.find((query) => query.error)?.error ?? null
+  const baiduNetdiskAccounts = baiduNetdiskAccountsQ.data ?? []
+  const refetchBaiduNetdiskAccounts = baiduNetdiskAccountsQ.refetch
+
+  useEffect(() => {
+    if (!baiduNetdiskEnabled) return
+
+    function onMessage(event: MessageEvent<BaiduNetdiskConnectMessage>) {
+      if (event.origin !== window.location.origin) return
+      const payload = event.data
+      if (!payload || typeof payload !== "object" || payload.type !== "learningpyramid:baidu-netdisk-connect") return
+
+      void refetchBaiduNetdiskAccounts()
+      if (payload.ok) {
+        showSuccessFeedback("百度网盘已连接", "现在可以在项目设置里导入网盘视频。")
+        return
+      }
+
+      showErrorFeedback("百度网盘授权失败", typeof payload.message === "string" ? payload.message : "授权没有完成，请稍后重试。")
+    }
+
+    window.addEventListener("message", onMessage)
+    return () => window.removeEventListener("message", onMessage)
+  }, [baiduNetdiskEnabled, refetchBaiduNetdiskAccounts])
 
   function openProfileEditor() {
     if (!profile) return
@@ -653,6 +687,27 @@ export function ProfilePage() {
       showSuccessFeedback("头像已更新", "新的头像已经上传完成。")
     } catch (err) {
       showErrorFeedback("上传头像失败", formatApiError(err))
+    }
+  }
+
+  async function onConnectBaiduNetdisk() {
+    try {
+      const result = await beginBaiduNetdiskConnect.mutateAsync()
+      const authWindow = window.open(result.authorizeUrl, "learningpyramid-baidu-netdisk-connect", "width=720,height=760")
+      if (!authWindow) {
+        showErrorFeedback("无法打开授权窗口", "请允许浏览器弹出窗口后重试。")
+      }
+    } catch (err) {
+      showErrorFeedback("连接百度网盘失败", formatApiError(err))
+    }
+  }
+
+  async function onDisconnectBaiduNetdisk(accountId: string) {
+    try {
+      await disconnectBaiduNetdiskAccount.mutateAsync(accountId)
+      showSuccessFeedback("百度网盘已解绑", "这个账号不会再用于导入网盘视频。")
+    } catch (err) {
+      showErrorFeedback("解绑百度网盘失败", formatApiError(err))
     }
   }
 
@@ -868,6 +923,53 @@ export function ProfilePage() {
                     ) : null}
                   </div>
                 </div>
+
+                {baiduNetdiskEnabled ? (
+                  <div className="theme-soft-surface rounded-[1.4rem] p-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex min-w-0 items-start gap-3">
+                        <div className="theme-icon-surface mt-0.5 h-10 w-10">
+                          <Cloud className="h-4 w-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-xs uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">百度网盘</div>
+                          {baiduNetdiskAccountsQ.isLoading ? (
+                            <div className="mt-1 text-sm text-muted-foreground">正在读取账号...</div>
+                          ) : baiduNetdiskAccountsQ.error ? (
+                            <div className="mt-1 text-sm text-destructive">{formatApiError(baiduNetdiskAccountsQ.error)}</div>
+                          ) : baiduNetdiskAccounts.length > 0 ? (
+                            <div className="mt-2 space-y-2">
+                              {baiduNetdiskAccounts.map((account) => (
+                                <div key={account.accountId} className="flex min-w-0 items-center justify-between gap-3">
+                                  <div className="min-w-0 truncate text-sm font-medium text-foreground">{account.displayName}</div>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="ghost"
+                                    className="shrink-0"
+                                    onClick={() => void onDisconnectBaiduNetdisk(account.accountId)}
+                                    disabled={disconnectBaiduNetdiskAccount.isPending}
+                                  >
+                                    解绑
+                                  </Button>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="mt-1 text-sm text-muted-foreground">未连接</div>
+                          )}
+                        </div>
+                      </div>
+                      {!baiduNetdiskAccountsQ.isLoading && !baiduNetdiskAccountsQ.error && baiduNetdiskAccounts.length <= 0 ? (
+                        <div className="shrink-0">
+                          <Button type="button" size="sm" variant="outline" onClick={() => void onConnectBaiduNetdisk()} disabled={beginBaiduNetdiskConnect.isPending}>
+                            连接
+                          </Button>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
               </div>
 
               <div className="space-y-4 pt-1">

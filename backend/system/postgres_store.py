@@ -399,6 +399,23 @@ class PostgresStore(SQLiteSnapshotStore):
             for row in instance_media_binding_rows
         }
 
+        progress_rows = conn.execute(
+            """
+            SELECT instance_id, duration_ms, ranges_json, completed_at_ms, updated_at_ms
+            FROM video_watch_progress_index
+            WHERE project_id = %s
+            ORDER BY instance_id ASC
+            """,
+            (str(project_id),),
+        ).fetchall()
+        hydrated["videoWatchProgress"] = {
+            str(row["instance_id"]): self._video_watch_progress_payload_from_index_row(
+                project_id=str(project_id),
+                row=row,
+            )
+            for row in progress_rows
+        }
+
         node_rows = conn.execute(
             """
             SELECT node_id, node_kind, source, relative_path, parent_id, instance_id, title, children_json

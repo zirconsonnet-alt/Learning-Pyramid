@@ -19,6 +19,8 @@ import { useProjectDirectoryBinding } from "@/ui/localMedia/projectDirectory"
 import { useMembershipSummary } from "@/ui/queries/membership"
 import { useProjectMaterialSourceBinding } from "@/ui/queries/projects"
 import { useSystemCapabilities } from "@/ui/queries/system"
+import { useProjectStorageConfig } from "@/ui/queries/workbench"
+import { isDesktopRuntime } from "@/ui/runtime/appRuntime"
 import type { AiChatCourseEvidence } from "@/ui/store/aiChatStore"
 import { showInfoFeedback } from "@/ui/store/feedbackStore"
 import { touchDailyStudyActivity } from "@/ui/store/workbenchDailyStats"
@@ -158,6 +160,18 @@ export function WorkbenchPetAssistant({
   const directoryBinding = useProjectDirectoryBinding(projectId)
 
   const sourceKind = (instance?.mediaSourceKind ?? materialSourceBindingQ.data?.sourceKind ?? null) as MaterialSourceKind | null
+  const usesDesktopNativeMedia = isDesktopRuntime() && sourceKind === "NATIVE_LOCAL"
+  const projectStorageConfigQ = useProjectStorageConfig(usesDesktopNativeMedia ? projectScope : null)
+  const desktopNativeStorage = useMemo(() => {
+    const projectRoot = projectStorageConfigQ.data?.projectRoot
+    const learningObjectRoot = projectStorageConfigQ.data?.learningObjectRoot
+    if (!usesDesktopNativeMedia || !projectRoot || !learningObjectRoot) return null
+    return { projectRoot, learningObjectRoot }
+  }, [
+    projectStorageConfigQ.data?.learningObjectRoot,
+    projectStorageConfigQ.data?.projectRoot,
+    usesDesktopNativeMedia,
+  ])
   const llmConfigured = capabilitiesQ.data?.llmConfigured ?? false
   const memberBlocked = authEnabled && (membershipQ.isLoading || Boolean(membershipQ.error) || !membershipQ.data?.isActive)
   const virtualProjectBlocked = isVirtualStudyReviewProjectId(projectId)
@@ -166,7 +180,11 @@ export function WorkbenchPetAssistant({
     usesResolvableCourseAnchor &&
     !!instance &&
     !!sourceKind &&
-    (sourceKind !== "BROWSER_LOCAL" || directoryBinding.permission === "granted")
+    (
+      usesDesktopNativeMedia
+        ? !!desktopNativeStorage
+        : sourceKind !== "BROWSER_LOCAL" || directoryBinding.permission === "granted"
+    )
 
   const disabledReason = useMemo(() => {
     if (virtualProjectBlocked) return "引导示范项目不提供 AI 对话。"
@@ -201,6 +219,7 @@ export function WorkbenchPetAssistant({
       projectId,
       instance,
       sourceKind,
+      desktopNativeStorage,
       nodeLabel,
       userPrompt: prompt,
       systemPrompt: `${buildWorkbenchSystemPrompt(nodeLabel)} 当前工作台状态：${workStatusDetail}。`,

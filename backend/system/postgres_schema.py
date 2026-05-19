@@ -19,6 +19,7 @@ STORE_TABLE_ORDER: tuple[str, ...] = (
     "project_config_index",
     "instance_index",
     "instance_media_binding_index",
+    "video_watch_progress_index",
     "learning_object_node_index",
     "recall_point_index",
     "learning_task_index",
@@ -438,6 +439,27 @@ def _store_project_snapshot_json_shell_sql() -> str:
             "-- Keep the legacy project snapshot shell column required by the repository contract",
             "ALTER TABLE project_snapshots",
             "ADD COLUMN IF NOT EXISTS snapshot_json TEXT NOT NULL DEFAULT '{}';",
+        )
+    )
+
+
+def _store_video_watch_progress_index_sql() -> str:
+    return "\n".join(
+        (
+            "-- Add durable video watch progress index",
+            "CREATE TABLE IF NOT EXISTS video_watch_progress_index (",
+            "    project_id TEXT NOT NULL,",
+            "    instance_id TEXT NOT NULL,",
+            "    duration_ms BIGINT NULL,",
+            "    ranges_json TEXT NOT NULL,",
+            "    completed_at_ms BIGINT NULL,",
+            "    updated_at_ms BIGINT NOT NULL,",
+            "    PRIMARY KEY(project_id, instance_id),",
+            "    FOREIGN KEY(project_id) REFERENCES project_snapshots(project_id) ON DELETE CASCADE,",
+            "    FOREIGN KEY(project_id, instance_id) REFERENCES instance_index(project_id, instance_id) ON DELETE CASCADE",
+            ");",
+            "CREATE INDEX IF NOT EXISTS idx_video_watch_progress_index_project",
+            "ON video_watch_progress_index (project_id, updated_at_ms DESC);",
         )
     )
 
@@ -978,6 +1000,12 @@ POSTGRES_MIGRATIONS: tuple[PostgresMigration, ...] = (
         version=12,
         name="subject_material_collection_initialized_boolean",
         sql_factory=_store_subject_material_collection_initialized_boolean_sql,
+    ),
+    PostgresMigration(
+        scope="store",
+        version=13,
+        name="video_watch_progress_index",
+        sql_factory=_store_video_watch_progress_index_sql,
     ),
     PostgresMigration(scope="auth", version=1, name="initial_auth_schema", sql_factory=_bootstrap_auth_schema_sql),
     PostgresMigration(scope="auth", version=2, name="auth_user_profiles", sql_factory=_auth_user_profiles_sql),

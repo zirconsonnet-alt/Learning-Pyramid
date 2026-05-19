@@ -54,6 +54,7 @@ const ImportLearningObjectsFromBrowserResultSchema = z.object({
   replaced_learning_object_nodes_count: z.number().int(),
   warnings: z.array(z.unknown()),
 })
+const ImportLearningObjectsFromNativeLocalResultSchema = ImportLearningObjectsFromBrowserResultSchema
 const BaiduNetdiskImportItemSchema = z.object({
   fileId: z.string(),
   path: z.string(),
@@ -64,10 +65,14 @@ const BaiduNetdiskImportItemSchema = z.object({
   durationMs: z.number().int().nonnegative().nullable().optional(),
 })
 const ImportLearningObjectsFromBaiduNetdiskResultSchema = z.object({
+  unchanged: z.boolean(),
   created_instances_count: z.number().int(),
   reused_instances_count: z.number().int(),
+  marked_missing_count: z.number().int(),
   created_learning_object_nodes_count: z.number().int(),
+  replaced_learning_object_nodes_count: z.number().int(),
   imported_count: z.number().int(),
+  warnings: z.array(z.unknown()),
 })
 
 export function addLearningObjectLeaf(
@@ -153,12 +158,29 @@ export function importLearningObjectsFromBrowser(
   })
 }
 
+export function importLearningObjectsFromNativeLocal(
+  scope: ScopedProjectRef,
+  params: { projectRoot: string; rootTitle?: string; relativeFilePaths: string[] },
+) {
+  return apiRequest({
+    path: projectApiPath(scope, "/import-learning-objects-from-native-local"),
+    method: "POST",
+    body: {
+      projectRoot: params.projectRoot,
+      rootTitle: params.rootTitle,
+      relativeFilePaths: params.relativeFilePaths,
+    },
+    responseSchema: ImportLearningObjectsFromNativeLocalResultSchema,
+  })
+}
+
 export function importLearningObjectsFromBaiduNetdisk(
   scope: ScopedProjectRef,
   params: {
     accountId: string
     items: Array<z.input<typeof BaiduNetdiskImportItemSchema>>
   },
+  options?: ApiRequestExecutionOptions,
 ) {
   return apiRequest({
     path: projectApiPath(scope, "/import-learning-objects-from-baidu-netdisk"),
@@ -168,6 +190,8 @@ export function importLearningObjectsFromBaiduNetdisk(
       items: params.items.map((item) => BaiduNetdiskImportItemSchema.parse(item)),
     },
     responseSchema: ImportLearningObjectsFromBaiduNetdiskResultSchema,
+    signal: options?.signal,
+    timeoutMs: options?.timeoutMs,
   })
 }
 

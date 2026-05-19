@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useQueries } from "@tanstack/react-query"
-import { ChevronDown, FolderTree, RadioTower } from "lucide-react"
+import { FolderTree, RadioTower } from "lucide-react"
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 
 import { apiUrl } from "@/ui/api/http"
@@ -15,6 +15,7 @@ import { ContentNotice } from "@/ui/components/contentEmptyState"
 import { DesktopPet } from "@/ui/components/DesktopPet"
 import { Button } from "@/ui/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/components/ui/card"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/ui/components/ui/dialog"
 import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
 import { projectTypeRequiresLearningObjectTree, projectTypeUsesResolvableCourseAnchor } from "@/ui/projectTypes"
 import { buildProjectSettingsPath } from "@/ui/projectPaths"
@@ -283,7 +284,7 @@ export function WorkbenchPage() {
   const [seekTo, setSeekTo] = useState<{ instanceId: string; ms: number; nonce: number } | null>(null)
   const [centerPanelMode, setCenterPanelMode] = useState<"main" | "rollup">("main")
   const [mobileDirectoryOpen, setMobileDirectoryOpen] = useState(false)
-  const [mobileStatusOpen, setMobileStatusOpen] = useState(false)
+  const [mobileStudyStatsOpen, setMobileStudyStatsOpen] = useState(false)
   const [petAssistantState, setPetAssistantState] = useState<"idle" | "thinking">("idle")
   const videoPaneRef = useRef<HTMLDivElement | null>(null)
   const videoPaneHandleRef = useRef<VideoPaneHandle | null>(null)
@@ -854,17 +855,81 @@ export function WorkbenchPage() {
           ? "可直接录入"
           : "等待开始"
   const currentDirectoryLabel = instance?.materialDisplayName ?? (projectType === "BOOK" ? "未选择书本节点" : "未选择内容")
-  const compactStatusSummary = [
-    workStatusDetail,
-    studyEstimatePresentation ? `预计 ${studyEstimatePresentation.value}` : null,
-    usesResolvableCourseAnchor ? `覆盖 ${Math.round(videoProgressPercent)}%` : null,
-  ].filter(Boolean).join(" · ")
 
   function selectWorkbenchInstance(instanceId: string) {
     setSelectedInstanceId(pid, instanceId)
     setSeekTo(null)
     setCurrentMs(0)
     setMobileDirectoryOpen(false)
+  }
+
+  function renderLearningObjectTree() {
+    return (
+      <LearningObjectTree
+        subjectId={subjectId}
+        projectId={pid}
+        projectType={projectType}
+        selectedInstanceId={selectedInstanceId}
+        onSelectInstance={selectWorkbenchInstance}
+      />
+    )
+  }
+
+  function renderStudyStatsContent() {
+    return (
+      <>
+        {studyEstimatePresentation ? (
+          <section className="space-y-3">
+            <SidebarSectionTitle title="预计剩余学习时长" />
+            <div className="text-[17px] font-semibold tracking-[-0.02em] text-[color:var(--theme-soft-text-strong)]">
+              {studyEstimatePresentation.value}
+            </div>
+          </section>
+        ) : null}
+
+        {usesResolvableCourseAnchor ? (
+          <section className="space-y-3">
+            <SidebarSectionTitle title="观看覆盖" />
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-[17px] font-semibold tracking-[-0.02em] text-[color:var(--theme-soft-text-strong)]">
+                {formatDurationCompact(videoProgress.watchedMs)} / {formatDurationCompact(videoProgress.totalMs)}
+              </div>
+              <div className="text-[13px] font-semibold text-[color:var(--theme-soft-text-strong)]">{Math.round(videoProgressPercent)}%</div>
+            </div>
+          </section>
+        ) : null}
+
+        <section>
+          <SidebarSectionTitle title="今日回看" />
+          <TodayReviewStatsChart stats={todayStats} />
+        </section>
+        {queueQ.error ? <p className="text-sm text-destructive">{formatApiError(queueQ.error)}</p> : null}
+      </>
+    )
+  }
+
+  function renderWorkbenchPet() {
+    return (
+      <DesktopPet page="workbench" assistantState={petAssistantState}>
+        <WorkbenchPetAssistant
+          subjectId={subjectId}
+          projectId={pid}
+          instance={instance}
+          currentMs={currentMs}
+          workStatusDetail={workStatusDetail}
+          usesResolvableCourseAnchor={usesResolvableCourseAnchor}
+          recallContext={activeAiRecallContext}
+          captureCurrentFrameForAi={() => videoPaneHandleRef.current?.captureCurrentFrameForAi() ?? Promise.resolve(null)}
+          onAssistantStateChange={setPetAssistantState}
+          onOpenEvidence={(evidence) => {
+            onOpenAnchor({
+              instanceId: evidence.instanceId,
+              position: `t=${Math.max(0, Math.floor((evidence.startMs + evidence.endMs) / 2))}`,
+            })
+          }}
+        />
+      </DesktopPet>
+    )
   }
 
   if (!pid) {
@@ -933,6 +998,36 @@ export function WorkbenchPage() {
   return (
     <div className="space-y-5">
       {workbenchGuideNotice}
+      <Dialog open={mobileStudyStatsOpen} onOpenChange={setMobileStudyStatsOpen}>
+        <DialogContent
+          id="workbench-mobile-study-stats-dialog"
+          className="!left-4 !right-4 max-h-[86dvh] !w-auto !max-w-none !translate-x-0 rounded-[1.25rem] border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] p-0 sm:!left-1/2 sm:!right-auto sm:!w-[28rem] sm:!max-w-[calc(100vw-2rem)] sm:!-translate-x-1/2 xl:hidden"
+        >
+          <DialogHeader className="border-b border-[color:var(--theme-soft-border)] px-5 py-4 text-left">
+            <DialogTitle>学习统计</DialogTitle>
+            <DialogDescription className="sr-only">查看当前工作台学习统计。</DialogDescription>
+          </DialogHeader>
+          <div id="workbench-status-detail" className="space-y-5 overflow-y-auto px-5 py-4 text-sm">
+            {renderStudyStatsContent()}
+          </div>
+        </DialogContent>
+      </Dialog>
+      {requiresLearningObjectTree ? (
+        <Dialog open={mobileDirectoryOpen} onOpenChange={setMobileDirectoryOpen}>
+          <DialogContent
+            id="workbench-mobile-directory-dialog"
+            className="!left-4 !right-4 max-h-[86dvh] !w-auto !max-w-none !translate-x-0 rounded-[1.25rem] border-[color:var(--theme-soft-border)] bg-[color:var(--theme-card-main-bg)] p-0 sm:!left-1/2 sm:!right-auto sm:!w-[28rem] sm:!max-w-[calc(100vw-2rem)] sm:!-translate-x-1/2 xl:hidden"
+          >
+            <DialogHeader className="border-b border-[color:var(--theme-soft-border)] px-5 py-4 text-left">
+              <DialogTitle>内容目录</DialogTitle>
+              <DialogDescription className="truncate text-xs text-[color:var(--theme-soft-text-strong)]">当前：{currentDirectoryLabel}</DialogDescription>
+            </DialogHeader>
+            <div id="workbench-mobile-content-tree" className="max-h-[calc(86dvh-4.5rem)] overflow-y-auto px-4 py-3">
+              {renderLearningObjectTree()}
+            </div>
+          </DialogContent>
+        </Dialog>
+      ) : null}
       <div
         className={cn(
           "grid min-w-0 gap-4 xl:gap-5 xl:items-start",
@@ -940,32 +1035,12 @@ export function WorkbenchPage() {
         )}
       >
         {requiresLearningObjectTree ? (
-          <aside className="order-3 min-w-0 xl:order-none xl:col-start-1 xl:row-span-2 xl:row-start-1 xl:sticky xl:top-28 xl:self-start">
+          <aside className="hidden min-w-0 xl:order-none xl:col-start-1 xl:row-span-2 xl:row-start-1 xl:block xl:sticky xl:top-28 xl:self-start">
             <Card
               id="workbench-content-tree"
               className="theme-card-main min-w-0 xl:flex xl:max-h-[calc(100dvh-9rem)] xl:min-h-0 xl:flex-col xl:overflow-hidden"
             >
-              <CardHeader className="theme-card-header xl:hidden">
-                <button
-                  type="button"
-                  className="flex w-full min-w-0 items-center justify-between gap-3 text-left"
-                  onClick={() => setMobileDirectoryOpen((current) => !current)}
-                  aria-expanded={mobileDirectoryOpen}
-                  aria-controls="workbench-mobile-content-tree"
-                >
-                  <div className="flex min-w-0 items-center gap-3">
-                    <div className="theme-icon-surface h-9 w-9 shrink-0">
-                      <FolderTree className="h-4 w-4" />
-                    </div>
-                    <div className="min-w-0">
-                      <CardTitle>内容目录</CardTitle>
-                      <div className="mt-1 truncate text-xs font-medium text-[color:var(--theme-soft-text-strong)]">当前：{currentDirectoryLabel}</div>
-                    </div>
-                  </div>
-                  <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", mobileDirectoryOpen && "rotate-180")} />
-                </button>
-              </CardHeader>
-              <CardHeader className="theme-card-header hidden xl:block">
+              <CardHeader className="theme-card-header">
                 <div className="flex items-center gap-3">
                   <div className="theme-icon-surface h-10 w-10">
                     <FolderTree className="h-5 w-5" />
@@ -975,21 +1050,8 @@ export function WorkbenchPage() {
                   </div>
                 </div>
               </CardHeader>
-              <CardContent
-                id="workbench-mobile-content-tree"
-                className={cn(
-                  "pt-2",
-                  mobileDirectoryOpen ? "block" : "hidden",
-                  "xl:block xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:overscroll-contain xl:pr-3",
-                )}
-              >
-                <LearningObjectTree
-                  subjectId={subjectId}
-                  projectId={pid}
-                  projectType={projectType}
-                  selectedInstanceId={selectedInstanceId}
-                  onSelectInstance={selectWorkbenchInstance}
-                />
+              <CardContent className="pt-2 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:overscroll-contain xl:pr-3">
+                {renderLearningObjectTree()}
               </CardContent>
             </Card>
           </aside>
@@ -997,10 +1059,36 @@ export function WorkbenchPage() {
 
         <section
           className={cn(
-            "order-1 min-w-0",
+            "order-1 min-w-0 space-y-3",
             requiresLearningObjectTree ? "xl:col-start-2 xl:row-start-1" : "xl:col-start-1 xl:row-start-1",
           )}
         >
+          <div id="workbench-mobile-tool-buttons" className="grid grid-cols-2 gap-2 xl:hidden">
+            <Button
+              type="button"
+              variant="outline"
+              className="h-10 justify-start px-3"
+              onClick={() => setMobileStudyStatsOpen(true)}
+              aria-haspopup="dialog"
+            >
+              <RadioTower className="h-4 w-4" />
+              学习统计
+            </Button>
+            {requiresLearningObjectTree ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10 justify-start px-3"
+                onClick={() => setMobileDirectoryOpen(true)}
+                aria-haspopup="dialog"
+              >
+                <FolderTree className="h-4 w-4" />
+                内容目录
+              </Button>
+            ) : (
+              <span aria-hidden="true" />
+            )}
+          </div>
           <div ref={videoPaneRef} id="workbench-video-pane" className="min-w-0 shrink-0 scroll-mt-28">
             {usesResolvableCourseAnchor ? (
               <VideoPane
@@ -1028,7 +1116,7 @@ export function WorkbenchPage() {
 
         <aside
           className={cn(
-            "order-2 min-w-0 xl:row-span-2 xl:row-start-1 xl:sticky xl:top-28 xl:z-30 xl:self-start",
+            "hidden min-w-0 xl:row-span-2 xl:row-start-1 xl:block xl:sticky xl:top-28 xl:z-30 xl:self-start",
             requiresLearningObjectTree ? "xl:col-start-3" : "xl:col-start-2",
           )}
         >
@@ -1036,100 +1124,27 @@ export function WorkbenchPage() {
             id="workbench-status-card"
             className="theme-card-main min-w-0 xl:flex xl:max-h-[calc(100dvh-9rem)] xl:min-h-0 xl:flex-col xl:overflow-hidden"
           >
-            <CardHeader className="theme-card-header xl:hidden">
-              <button
-                type="button"
-                className="flex w-full min-w-0 items-center justify-between gap-3 text-left"
-                onClick={() => setMobileStatusOpen((current) => !current)}
-                aria-expanded={mobileStatusOpen}
-                aria-controls="workbench-status-detail"
-              >
-                <div className="flex min-w-0 items-center gap-3">
-                  <div className="theme-icon-surface h-9 w-9 shrink-0">
-                    <RadioTower className="h-4 w-4" />
-                  </div>
-                  <div className="min-w-0">
-                    <CardTitle>工作状态</CardTitle>
-                    <div className="mt-1 truncate text-xs font-medium text-[color:var(--theme-soft-text-strong)]">
-                      {compactStatusSummary}
-                    </div>
-                  </div>
-                </div>
-                <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", mobileStatusOpen && "rotate-180")} />
-              </button>
-            </CardHeader>
-            <CardHeader className="theme-card-header hidden xl:block">
+            <CardHeader className="theme-card-header">
               <div className="flex items-center gap-3">
                 <div className="theme-icon-surface h-10 w-10">
                   <RadioTower className="h-5 w-5" />
                 </div>
                 <div>
-                  <CardTitle>工作状态</CardTitle>
+                  <CardTitle>学习统计</CardTitle>
                   <div className="mt-1 text-[15px] font-medium text-[color:var(--theme-soft-text-strong)]">{workStatusDetail}</div>
                 </div>
               </div>
             </CardHeader>
-            <CardContent
-              id="workbench-status-detail"
-              className={cn(
-                "space-y-5 pt-4 text-sm",
-                mobileStatusOpen ? "block" : "hidden",
-                "xl:block xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:overscroll-contain xl:pr-3",
-              )}
-            >
-              {studyEstimatePresentation ? (
-                <section className="space-y-3">
-                  <SidebarSectionTitle title="预计剩余学习时长" />
-                  <div className="text-[17px] font-semibold tracking-[-0.02em] text-[color:var(--theme-soft-text-strong)]">
-                    {studyEstimatePresentation.value}
-                  </div>
-                </section>
-              ) : null}
-
-              {usesResolvableCourseAnchor ? (
-                <section className="space-y-3">
-                  <SidebarSectionTitle title="观看覆盖" />
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="text-[17px] font-semibold tracking-[-0.02em] text-[color:var(--theme-soft-text-strong)]">
-                      {formatDurationCompact(videoProgress.watchedMs)} / {formatDurationCompact(videoProgress.totalMs)}
-                    </div>
-                    <div className="text-[13px] font-semibold text-[color:var(--theme-soft-text-strong)]">{Math.round(videoProgressPercent)}%</div>
-                  </div>
-                </section>
-              ) : null}
-
-              <section>
-                <SidebarSectionTitle title="今日回看" />
-                <TodayReviewStatsChart stats={todayStats} />
-              </section>
-              {queueQ.error ? <p className="text-sm text-destructive">{formatApiError(queueQ.error)}</p> : null}
+            <CardContent className="space-y-5 pt-4 text-sm xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:overscroll-contain xl:pr-3">
+              {renderStudyStatsContent()}
             </CardContent>
           </Card>
-          <DesktopPet page="workbench" assistantState={petAssistantState}>
-            <WorkbenchPetAssistant
-              subjectId={subjectId}
-              projectId={pid}
-              instance={instance}
-              currentMs={currentMs}
-              workStatusDetail={workStatusDetail}
-              usesResolvableCourseAnchor={usesResolvableCourseAnchor}
-              recallContext={activeAiRecallContext}
-              captureCurrentFrameForAi={() => videoPaneHandleRef.current?.captureCurrentFrameForAi() ?? Promise.resolve(null)}
-              onAssistantStateChange={setPetAssistantState}
-              onOpenEvidence={(evidence) => {
-                onOpenAnchor({
-                  instanceId: evidence.instanceId,
-                  position: `t=${Math.max(0, Math.floor((evidence.startMs + evidence.endMs) / 2))}`,
-                })
-              }}
-            />
-          </DesktopPet>
         </aside>
 
         <section
           id="workbench-center-panel"
           className={cn(
-            "order-4 min-w-0 space-y-4",
+            "order-2 min-w-0 space-y-4",
             requiresLearningObjectTree ? "xl:col-start-2 xl:row-start-2" : "xl:col-start-1 xl:row-start-2",
           )}
         >
@@ -1211,6 +1226,7 @@ export function WorkbenchPage() {
           )}
         </section>
       </div>
+      {renderWorkbenchPet()}
     </div>
   )
 }

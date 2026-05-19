@@ -26,6 +26,10 @@ frontend/*.tsbuildinfo
 frontend/playwright-report/
 frontend/test-results/
 frontend/blob-report/
+desktop/node_modules/
+desktop/src-tauri/target/
+desktop/src-tauri/target-codex-build/
+desktop/src-tauri/gen/
 mobile/node_modules/
 mobile/.expo/
 mobile/dist/

@@ -44,7 +44,9 @@ import { captureVideoFrameAt } from "@/ui/media/videoFrameCapture"
 import { useMembershipSummary } from "@/ui/queries/membership"
 import { useProjectMaterialSourceBinding } from "@/ui/queries/projects"
 import { useSystemCapabilities } from "@/ui/queries/system"
-import { useInstances } from "@/ui/queries/workbench"
+import { useInstances, useProjectStorageConfig } from "@/ui/queries/workbench"
+import { isDesktopRuntime } from "@/ui/runtime/appRuntime"
+import { createDesktopNativeMediaUrl } from "@/ui/runtime/desktopMedia"
 import { GUIDE_WALKTHROUGH_STEP_HIGHLIGHTED_EVENT, completeGuideWalkthroughStep } from "@/ui/guideWalkthrough/guideWalkthroughController"
 import { isVirtualStudyReviewProjectId } from "@/ui/guideWalkthrough/guideVirtualProjectIds"
 import { isSyntheticFilesContainer, sortLearningObjectNodeIdsForDisplay } from "@/ui/learningObjectDisplayOrder"
@@ -1079,6 +1081,20 @@ export function AiChatPage() {
   const aiChatMemberBlocked = authEnabled && (membershipQ.isLoading || Boolean(membershipQ.error) || !membershipQ.data?.isActive)
   const serverMediaStreamEnabled = capabilitiesQ.data?.serverMediaStreamEnabled ?? false
   const browserLocalMediaEnabled = capabilitiesQ.data?.browserLocalMediaEnabled ?? false
+  const hasDesktopNativeInstance = useMemo(
+    () => isDesktopRuntime() && (instancesQ.data ?? []).some((instance) => (instance.mediaSourceKind ?? materialSourceBindingQ.data?.sourceKind) === "NATIVE_LOCAL"),
+    [instancesQ.data, materialSourceBindingQ.data?.sourceKind],
+  )
+  const projectStorageConfigQ = useProjectStorageConfig(hasDesktopNativeInstance ? projectScope : null)
+  const desktopNativeStorage = useMemo(() => {
+    const projectRoot = projectStorageConfigQ.data?.projectRoot
+    const learningObjectRoot = projectStorageConfigQ.data?.learningObjectRoot
+    if (!projectRoot || !learningObjectRoot) return null
+    return { projectRoot, learningObjectRoot }
+  }, [
+    projectStorageConfigQ.data?.learningObjectRoot,
+    projectStorageConfigQ.data?.projectRoot,
+  ])
   const todayDateKey = getLocalDateKey()
   const interactionDisabled = !pid || !activeNodeId || !llmConfigured || aiChatMemberBlocked
   const persistedMessages = useMemo(() => selectedConversation?.messages ?? [], [selectedConversation?.messages])
@@ -1215,6 +1231,10 @@ export function AiChatPage() {
         instance: Instance
         anchorMs: number | null
         sourceKind: MaterialSourceKind
+        desktopNativeStorage?: {
+          projectRoot: string
+          learningObjectRoot: string
+        } | null
       }
     | null {
     if (!pid || !activeNodeId) return null
@@ -1239,11 +1259,13 @@ export function AiChatPage() {
     if (!instance) return null
     const sourceKind = instance.mediaSourceKind ?? materialSourceBindingQ.data?.sourceKind
     if (!sourceKind) return null
+    if (isDesktopRuntime() && sourceKind === "NATIVE_LOCAL" && !desktopNativeStorage) return null
 
     return {
       instance,
       anchorMs,
       sourceKind,
+      desktopNativeStorage: sourceKind === "NATIVE_LOCAL" ? desktopNativeStorage : null,
     }
   }
 
@@ -1257,6 +1279,7 @@ export function AiChatPage() {
         scope: projectScope,
         instance: courseContext.instance,
         sourceKind: courseContext.sourceKind,
+        desktopNativeStorage: courseContext.desktopNativeStorage,
       })
       if (!document) return null
       return buildSubtitleContextText({
@@ -1274,10 +1297,24 @@ export function AiChatPage() {
     return await loadActiveSubtitleSupplementalContext()
   }
 
-  async function resolveAiChatVideoFrameSrc(instance: Instance, signal: AbortSignal) {
+  async function resolveAiChatVideoFrameSrc(instance: Instance, sourceKind: MaterialSourceKind, signal: AbortSignal) {
     if (!projectScope) throw new Error("当前页面缺少项目上下文，无法读取视频帧。")
 
-    if (instance.mediaSourceKind === "BROWSER_LOCAL" && !serverMediaStreamEnabled) {
+    if (isDesktopRuntime() && sourceKind === "NATIVE_LOCAL") {
+      if (!desktopNativeStorage) throw new Error("当前项目缺少本地存储配置，无法读取本机视频帧。")
+      const playback = await createDesktopNativeMediaUrl({
+        projectRoot: desktopNativeStorage.projectRoot,
+        learningObjectRoot: desktopNativeStorage.learningObjectRoot,
+        materialId: instance.materialId,
+      })
+      if (!playback) throw new Error("当前运行环境不是桌面客户端，无法读取本机视频帧。")
+      return {
+        src: playback.url,
+        cleanup: null,
+      }
+    }
+
+    if (sourceKind === "BROWSER_LOCAL" && !serverMediaStreamEnabled) {
       if (!browserLocalMediaEnabled) throw new Error("当前部署未启用浏览器本地媒体访问，无法读取视频帧。")
       if (directoryBinding.permission !== "granted") {
         throw new Error("浏览器还没有授予本地素材目录读取权限，无法读取视频帧。")
@@ -1293,7 +1330,7 @@ export function AiChatPage() {
       }
     }
 
-    if (instance.playbackKind === "HLS" || instance.mediaSourceKind === "BAIDU_NETDISK") {
+    if (instance.playbackKind === "HLS" || sourceKind === "BAIDU_NETDISK") {
       const playback = await getInstancePlaybackDescriptor(projectScope, instance.instanceId, { signal, timeoutMs: 90_000 })
       return {
         src: resolvePlaybackDescriptorUrl(playback.url),
@@ -1313,7 +1350,9 @@ export function AiChatPage() {
 
   async function captureAiChatCourseFrame(params: { instance: Instance; anchorMs: number | null; latestUserInput: string; signal: AbortSignal }) {
     const timeMs = extractReferencedTimeMs(params.latestUserInput) ?? params.anchorMs ?? 0
-    const resolved = await resolveAiChatVideoFrameSrc(params.instance, params.signal)
+    const sourceKind = params.instance.mediaSourceKind ?? materialSourceBindingQ.data?.sourceKind
+    if (!sourceKind) throw new Error("当前视频源不可访问，无法读取视频帧。")
+    const resolved = await resolveAiChatVideoFrameSrc(params.instance, sourceKind, params.signal)
     try {
       return await captureVideoFrameAt({
         src: resolved.src,
@@ -1362,6 +1401,7 @@ export function AiChatPage() {
         projectId: pid,
         instance: courseContext.instance,
         sourceKind: courseContext.sourceKind,
+        desktopNativeStorage: courseContext.desktopNativeStorage,
         nodeLabel: activeNodeLabel,
         userPrompt: latestUserInput,
         systemPrompt,

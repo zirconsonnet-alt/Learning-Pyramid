@@ -20,6 +20,10 @@ type UseVideoSubtitlesParams = {
   detectionEnabled: boolean
   sourceKind: MaterialSourceKind | null | undefined
   subtitleDelayMs: number
+  desktopNativeStorage?: {
+    projectRoot: string
+    learningObjectRoot: string
+  } | null
 }
 
 type SubtitleLoadState = {
@@ -30,7 +34,7 @@ type SubtitleLoadState = {
 }
 
 export function useVideoSubtitles(params: UseVideoSubtitlesParams) {
-  const { subjectId, projectId, instance, playbackMs, subtitlesEnabled, detectionEnabled, sourceKind, subtitleDelayMs } = params
+  const { subjectId, projectId, instance, playbackMs, subtitlesEnabled, detectionEnabled, sourceKind, subtitleDelayMs, desktopNativeStorage } = params
   const projectScope: ScopedProjectRef = useMemo(() => ({ subjectId, scopedProjectId: projectId }), [projectId, subjectId])
   const [loadState, setLoadState] = useState<SubtitleLoadState>({
     document: null,
@@ -64,7 +68,7 @@ export function useVideoSubtitles(params: UseVideoSubtitlesParams) {
       errorText: null,
     }))
 
-    void loadSubtitleDocumentForInstance({ scope: projectScope, instance, sourceKind })
+    void loadSubtitleDocumentForInstance({ scope: projectScope, instance, sourceKind, desktopNativeStorage })
       .then((nextDocument) => {
         if (cancelled) return
         setLoadState({
@@ -87,7 +91,14 @@ export function useVideoSubtitles(params: UseVideoSubtitlesParams) {
     return () => {
       cancelled = true
     }
-  }, [detectionEnabled, instance, projectScope, retryNonce, sourceKind])
+  }, [
+    desktopNativeStorage,
+    detectionEnabled,
+    instance,
+    projectScope,
+    retryNonce,
+    sourceKind,
+  ])
 
   const text = useMemo(() => {
     if (!subtitlesEnabled || !document) return null

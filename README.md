@@ -64,6 +64,20 @@ If you want to recreate that packaging venv from scratch:
 python tools/build_windows_standalone.py --bootstrap-packaging-venv --refresh-packaging-venv
 ```
 
+## Windows desktop client preview
+
+The Windows desktop client uses Tauri and reuses the existing React frontend. The current preview lives in `desktop/` and includes desktop runtime detection, native local folder import, a local media service for `NATIVE_LOCAL` file playback, same-directory same-stem subtitle reading for local desktop videos, and Baidu Netdisk HLS playback through a localhost Tauri proxy so video segments are fetched by the user's Windows client instead of the cloud server. Offline cache and cloud-hosted video are not implemented in this stage.
+
+```powershell
+pnpm --dir frontend install
+pnpm --dir desktop install
+rustup toolchain install 1.88.0
+$env:VITE_API_BASE_URL = "https://plm.xuebao.chat/api"
+pnpm --dir desktop dev
+```
+
+See [docs/desktop-client.md](docs/desktop-client.md) for the current desktop boundary and follow-up plan.
+
 ## Mobile app preview
 
 The Android and iPhone client uses Expo-managed React Native and lives in `mobile/`. The current MVP connects to the existing API, uses the scoped project routes, and covers login, subject/material browsing, learning object detail, existing media playback descriptors, recall point viewing, and queue-head review submission.

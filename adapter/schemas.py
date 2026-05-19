@@ -214,6 +214,12 @@ class ImportBrowserDirectoryRequest(BaseModel):
     relativeFilePaths: List[str] = Field(default_factory=list)
 
 
+class ImportNativeLocalDirectoryRequest(BaseModel):
+    projectRoot: str = Field(min_length=1)
+    rootTitle: Optional[str] = None
+    relativeFilePaths: List[str] = Field(default_factory=list)
+
+
 class BaiduNetdiskImportItemDTO(BaseModel):
     fileId: str = Field(min_length=1)
     path: str = Field(min_length=1)

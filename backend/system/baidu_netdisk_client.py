@@ -2,7 +2,7 @@ import json
 import os
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 import requests
 
@@ -125,6 +125,16 @@ def _json_or_none(response: requests.Response) -> dict[str, Any] | None:
 
 def _looks_like_playlist(text: str) -> bool:
     return str(text or "").lstrip().startswith("#EXTM3U")
+
+
+def _looks_like_signed_baidu_media_url(query: dict[str, str]) -> bool:
+    if "access_token" in query:
+        return False
+    if "sign" in query and ("fid" in query or "fsid" in query):
+        return True
+    if "xcode" in query and ("fid" in query or "fsid" in query):
+        return True
+    return False
 
 
 def _error_from_response(response: requests.Response, *, default_message: str) -> BaiduNetdiskApiError:
@@ -268,7 +278,7 @@ class BaiduNetdiskClient:
                 "dir": str(dir_path or "/").strip() or "/",
                 "start": max(0, (int(page) - 1) * int(limit)),
                 "limit": max(1, min(int(limit), 200)),
-                "folder": 1,
+                "folder": 0,
                 "web": 1,
                 "showempty": 0,
             },
@@ -359,6 +369,34 @@ class BaiduNetdiskClient:
             raise last_error
         raise BaiduNetdiskApiError("百度网盘转码播放失败", kind="transcode_failed")
 
+    def fetch_direct_hls_playlist(
+        self,
+        access_token: str,
+        *,
+        remote_path: str,
+        profile: str = DEFAULT_PLAYBACK_PROFILE,
+    ) -> BaiduNetdiskHlsPlaylist:
+        playlist = self.fetch_hls_playlist(access_token, remote_path=remote_path, profile=profile)
+        return BaiduNetdiskHlsPlaylist(
+            text=self._rewrite_hls_playlist_for_direct_access(
+                access_token=access_token,
+                upstream_url=playlist.upstream_url,
+                text=playlist.text,
+            ),
+            upstream_url=playlist.upstream_url,
+        )
+
+    def _rewrite_hls_playlist_for_direct_access(self, *, access_token: str, upstream_url: str, text: str) -> str:
+        lines = []
+        for raw_line in str(text or "").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                lines.append(raw_line)
+                continue
+            target = urljoin(upstream_url, line)
+            lines.append(self._attach_access_token_if_needed(target, access_token))
+        return "\n".join(lines) + ("\n" if text.endswith("\n") else "")
+
     def _fetch_playlist_from_url(self, access_token: str, playlist_url: str) -> BaiduNetdiskHlsPlaylist:
         response = requests.get(self._attach_access_token_if_needed(playlist_url, access_token), timeout=self.timeout_sec)
         if response.status_code >= 400:
@@ -432,6 +470,8 @@ class BaiduNetdiskClient:
             return url
         query = dict(parse_qsl(parsed.query, keep_blank_values=True))
         if "access_token" in query or not access_token:
+            return url
+        if _looks_like_signed_baidu_media_url(query):
             return url
         query["access_token"] = access_token
         return urlunparse(parsed._replace(query=urlencode(query)))

@@ -30,6 +30,7 @@ import { useSystemCapabilities } from "@/ui/queries/system"
 import {
   useBulkRemapRecallPointsInstance,
   useImportLearningObjectsFromBrowser,
+  useImportLearningObjectsFromNativeLocal,
   useInitializeBookLearningObjects,
   useInitializeBookLearningObjectsFromSubjectMaterial,
   useInstances,
@@ -38,6 +39,8 @@ import {
   useSetProjectRollUpStrategy,
   useSetLayerConfig,
 } from "@/ui/queries/workbench"
+import { isDesktopRuntime } from "@/ui/runtime/appRuntime"
+import { chooseDesktopLocalDirectory } from "@/ui/runtime/desktopLocalDirectory"
 import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { formatStudyMaterialTypeLabel } from "@/ui/subjects/studyMaterials"
 import { cn } from "@/ui/utils"
@@ -207,6 +210,7 @@ export function ProjectSettingsPage() {
   const projectConfigQ = useProjectConfig(projectScope)
   const instancesQ = useInstances(projectScope)
   const importLearningObjectsM = useImportLearningObjectsFromBrowser(projectScope)
+  const importNativeLocalM = useImportLearningObjectsFromNativeLocal(projectScope)
   const initializeBookLearningObjectsM = useInitializeBookLearningObjects(projectScope)
   const initializeBookFromMaterialM = useInitializeBookLearningObjectsFromSubjectMaterial(projectScope)
   const setLayerConfigM = useSetLayerConfig(projectScope)
@@ -262,7 +266,7 @@ export function ProjectSettingsPage() {
   const layerConfigVersion = `${currentRollUpStrategy}:${effectiveConfigLayerIndex}:${effectiveLayerConfig.aggregationKNode}:${effectiveLayerConfig.aggregationKPoint}:${effectiveLayerConfig.thresholdRollUpEnabled}:${templateConfigSignature}`
 
   const [remapTargets, setRemapTargets] = useState<Record<string, string>>({})
-  const [directoryAction, setDirectoryAction] = useState<"authorize" | "request" | "clear" | "import" | null>(null)
+  const [directoryAction, setDirectoryAction] = useState<"authorize" | "request" | "clear" | "import" | "native" | null>(null)
   const [bookOutlineDraft, setBookOutlineDraft] = useState("")
   const [isBaiduImportDialogOpen, setIsBaiduImportDialogOpen] = useState(false)
 
@@ -306,6 +310,7 @@ export function ProjectSettingsPage() {
     !!pid && !directoryBinding.loading && (directoryPermission === "prompt" || directoryPermission === "denied")
   const canClearDirectory = !!pid && !directoryBinding.loading && directoryPermission !== "missing"
   const directoryBusy = directoryAction !== null
+  const desktopRuntime = isDesktopRuntime()
   const [activePanel, setActivePanel] = useState<SettingsPanelKey>("basic")
   const supportsMissingInstanceRepair = projectType !== "LOOSE_POINTS"
 
@@ -458,6 +463,28 @@ export function ProjectSettingsPage() {
     }
   }
 
+  async function onImportNativeLocalDirectory() {
+    if (!pid || directoryBusy || !desktopRuntime) return
+    setDirectoryAction("native")
+    try {
+      const scan = await chooseDesktopLocalDirectory()
+      if (!scan) return
+      const result = await importNativeLocalM.mutateAsync(scan)
+      if (result.unchanged) {
+        showInfoFeedback("本机文件夹已是最新", "当前本机文件夹里的媒体文件没有变化。")
+        return
+      }
+      showSuccessFeedback(
+        "本机文件夹已导入",
+        `已导入 ${scan.relativeFilePaths.length} 个媒体文件，新增 ${result.created_instances_count} 个实例。`,
+      )
+    } catch (err) {
+      showErrorFeedback("导入本机文件夹失败", formatApiError(err))
+    } finally {
+      setDirectoryAction(null)
+    }
+  }
+
   async function onInitializeBookOutline() {
     if (projectType !== "BOOK") return
     if (bookOutlineValidationMessage) {
@@ -564,6 +591,7 @@ export function ProjectSettingsPage() {
               canChooseDirectory={canChooseDirectory}
               canClearDirectory={canClearDirectory}
               canRequestDirectoryPermission={canRequestDirectoryPermission}
+              desktopRuntime={desktopRuntime}
               directoryAction={directoryAction}
               directoryBinding={directoryBinding}
               directoryBusy={directoryBusy}
@@ -573,6 +601,7 @@ export function ProjectSettingsPage() {
               entitySaveLabel="保存项目名称"
               entityTitle={currentMaterialTitle}
               importError={importLearningObjectsM.error}
+              nativeImportError={importNativeLocalM.error}
               isLoading={projectQ.isLoading || subjectContextQ.isLoading}
               isPending={renameMutationPending}
               materialType={currentMaterialType}
@@ -600,6 +629,7 @@ export function ProjectSettingsPage() {
                 }
               }}
               onClearDirectoryBinding={onClearDirectoryBinding}
+              onImportNativeLocalDirectory={onImportNativeLocalDirectory}
               onOpenBaiduImport={() => setIsBaiduImportDialogOpen(true)}
               onImportAuthorizedDirectory={onImportAuthorizedDirectory}
               onRequestDirectoryPermission={onRequestDirectoryPermission}
@@ -992,6 +1022,7 @@ function BasicInfoCard({
   canChooseDirectory,
   canClearDirectory,
   canRequestDirectoryPermission,
+  desktopRuntime,
   directoryAction,
   directoryBinding,
   directoryBusy,
@@ -1001,6 +1032,7 @@ function BasicInfoCard({
   entitySaveLabel,
   entityTitle,
   importError,
+  nativeImportError,
   isLoading,
   isPending,
   materialType,
@@ -1015,6 +1047,7 @@ function BasicInfoCard({
   onAuthorizeDirectory,
   onChangeRollUpStrategy,
   onClearDirectoryBinding,
+  onImportNativeLocalDirectory,
   onOpenBaiduImport,
   onImportAuthorizedDirectory,
   onRequestDirectoryPermission,
@@ -1026,7 +1059,8 @@ function BasicInfoCard({
   canChooseDirectory: boolean
   canClearDirectory: boolean
   canRequestDirectoryPermission: boolean
-  directoryAction: "authorize" | "request" | "clear" | "import" | null
+  desktopRuntime: boolean
+  directoryAction: "authorize" | "request" | "clear" | "import" | "native" | null
   directoryBinding: ReturnType<typeof useProjectDirectoryBinding>
   directoryBusy: boolean
   directoryPermission: "unsupported" | "missing" | "prompt" | "granted" | "denied"
@@ -1035,6 +1069,7 @@ function BasicInfoCard({
   entitySaveLabel: string
   entityTitle: string
   importError: unknown
+  nativeImportError: unknown
   isLoading: boolean
   isPending: boolean
   materialType: StudyMaterial["materialType"]
@@ -1049,6 +1084,7 @@ function BasicInfoCard({
   onAuthorizeDirectory: () => Promise<void>
   onChangeRollUpStrategy: (nextStrategy: RollUpStrategy) => Promise<void>
   onClearDirectoryBinding: () => Promise<void>
+  onImportNativeLocalDirectory: () => Promise<void>
   onOpenBaiduImport: () => void
   onImportAuthorizedDirectory: (silentSuccess?: boolean) => Promise<void>
   onRequestDirectoryPermission: () => Promise<void>
@@ -1144,6 +1180,30 @@ function BasicInfoCard({
 
           {projectType === "COURSE" ? (
             <div className="space-y-3">
+              {desktopRuntime ? (
+                <div className="theme-status-surface rounded-[1.35rem] border border-border/70 p-4">
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <span className="theme-meta-strong">本机文件夹</span>
+                        <span className="theme-pill-accent inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold">
+                          桌面端
+                        </span>
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        使用 Windows 原生文件夹选择器导入本机视频，播放时由桌面客户端读取文件。
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2 lg:justify-end">
+                      <Button type="button" onClick={() => void onImportNativeLocalDirectory()} disabled={directoryBusy}>
+                        {directoryAction === "native" ? "导入中..." : "导入本机文件夹"}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
               {browserLocalMediaEnabled ? (
                 <div className="theme-status-surface rounded-[1.35rem] border border-border/70 p-4">
                   <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -1257,6 +1317,7 @@ function BasicInfoCard({
             <p className="text-sm text-muted-foreground">当前浏览器不支持目录授权。首版建议使用桌面 Chrome 或 Edge。</p>
           ) : null}
           {projectType === "COURSE" && importError ? <p className="text-sm text-destructive">{formatApiError(importError)}</p> : null}
+          {projectType === "COURSE" && nativeImportError ? <p className="text-sm text-destructive">{formatApiError(nativeImportError)}</p> : null}
         </section>
 
         <div className="border-t border-border/60" />

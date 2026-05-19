@@ -77,6 +77,17 @@ class PostgresProjectSnapshotRepositoryTest(unittest.TestCase):
         self.assertIn("ALTER TABLE project_snapshots", sql)
         self.assertIn("ADD COLUMN IF NOT EXISTS snapshot_json TEXT NOT NULL DEFAULT '{}'", sql)
 
+    def test_video_watch_progress_index_migration_is_current_store_migration(self):
+        migration = next(item for item in POSTGRES_MIGRATIONS if item.name == "video_watch_progress_index")
+
+        sql = migration.sql_factory()
+
+        self.assertEqual("store", migration.scope)
+        self.assertEqual(13, migration.version)
+        self.assertIn("CREATE TABLE IF NOT EXISTS video_watch_progress_index", sql)
+        self.assertIn("ranges_json TEXT NOT NULL", sql)
+        self.assertIn("PRIMARY KEY(project_id, instance_id)", sql)
+
     def test_upsert_writes_empty_snapshot_shell_for_non_null_legacy_column(self):
         conn = _Connection()
         session = _Session(conn)

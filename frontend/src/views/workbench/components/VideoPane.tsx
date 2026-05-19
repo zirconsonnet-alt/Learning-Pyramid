@@ -53,8 +53,7 @@ import { useProjectMaterialSourceBinding } from "@/ui/queries/projects"
 import { useSystemCapabilities } from "@/ui/queries/system"
 import type { AiChatCourseEvidence } from "@/ui/store/aiChatStore"
 import { formatPomodoroCountdown, getPomodoroSnapshot, getPomodoroUpcomingSegmentPreview, isQuickPomodoroSessionActive, usePomodoroNow, usePomodoroStore } from "@/ui/store/pomodoroStore"
-import { useRecallPointsByInstance } from "@/ui/queries/workbench"
-import { useInstancePlaybackDescriptor } from "@/ui/queries/workbench"
+import { useInstanceBaiduDirectPlaybackDescriptor, useInstancePlaybackDescriptor, useProjectStorageConfig, useRecallPointsByInstance } from "@/ui/queries/workbench"
 import { showInfoFeedback } from "@/ui/store/feedbackStore"
 import { formatRecallPointReference } from "@/ui/displayIdentifiers"
 import { SUPPORTED_SUBTITLE_EXTENSIONS_LABEL } from "@/ui/subtitles/subtitleSupport"
@@ -71,6 +70,9 @@ import { markVideoWatchProgressCompleted, syncVideoWatchProgressRange } from "@/
 import { useWorkbenchStore } from "@/ui/store/workbenchStore"
 import { cn } from "@/ui/utils"
 import { MemberOnlyFeatureNotice } from "@/views/membership/membershipUi"
+import { isDesktopRuntime } from "@/ui/runtime/appRuntime"
+import { createDesktopBaiduHlsUrl } from "@/ui/runtime/desktopBaiduMedia"
+import { createDesktopNativeMediaUrl } from "@/ui/runtime/desktopMedia"
 import {
   VideoBarrageDetailCard,
   VideoBarrageLayer,
@@ -235,6 +237,12 @@ function formatPlaybackError(error: unknown) {
   return "当前视频暂时不可用。"
 }
 
+function formatRuntimeError(error: unknown, fallback: string) {
+  if (error instanceof Error) return error.message
+  if (typeof error === "string" && error.trim()) return error
+  return fallback
+}
+
 function formatEvidenceTimeRange(startMs: number, endMs: number) {
   return startMs === endMs ? formatPlaybackClock(startMs) : `${formatPlaybackClock(startMs)}-${formatPlaybackClock(endMs)}`
 }
@@ -306,6 +314,10 @@ function VideoPane({
   const [playbackRate, setPlaybackRate] = useState(() => loadVideoPlaybackRate())
   const [localSrc, setLocalSrc] = useState<string | null>(null)
   const [localError, setLocalError] = useState<string | null>(null)
+  const [desktopNativeSrc, setDesktopNativeSrc] = useState<string | null>(null)
+  const [desktopNativeError, setDesktopNativeError] = useState<string | null>(null)
+  const [desktopBaiduSrc, setDesktopBaiduSrc] = useState<string | null>(null)
+  const [desktopBaiduError, setDesktopBaiduError] = useState<string | null>(null)
   const [mediaElementError, setMediaElementError] = useState<string | null>(null)
   const [isShellFullscreen, setIsShellFullscreen] = useState(false)
   const [isChromeAwake, setIsChromeAwake] = useState(true)
@@ -343,20 +355,38 @@ function VideoPane({
   const pomodoroNow = usePomodoroNow(pomodoroEnabled || pomodoroQuickClockActive)
 
   const instanceId = instance?.instanceId ?? null
+  const instanceMaterialId = instance?.materialId ?? null
   const capabilitiesQ = useSystemCapabilities()
   const authEnabled = capabilitiesQ.data?.authEnabled ?? false
   const membershipQ = useMembershipSummary(authEnabled)
   const materialSourceBindingQ = useProjectMaterialSourceBinding(projectScope)
-  const playbackDescriptorQ = useInstancePlaybackDescriptor(projectScope, instanceId ?? "", !!instanceId)
   const directoryBinding = useProjectDirectoryBinding(projectId)
   const serverMediaStreamEnabled = capabilitiesQ.data?.serverMediaStreamEnabled ?? false
   const browserLocalMediaEnabled = capabilitiesQ.data?.browserLocalMediaEnabled ?? false
   const effectiveSourceKind = instance?.mediaSourceKind ?? materialSourceBindingQ.data?.sourceKind ?? null
+  const usesDesktopNativeMedia = isDesktopRuntime() && effectiveSourceKind === "NATIVE_LOCAL"
+  const usesDesktopBaiduMedia = isDesktopRuntime() && effectiveSourceKind === "BAIDU_NETDISK"
+  const playbackDescriptorQ = useInstancePlaybackDescriptor(projectScope, instanceId ?? "", !!instanceId && !usesDesktopNativeMedia && !usesDesktopBaiduMedia)
+  const baiduDirectPlaybackQ = useInstanceBaiduDirectPlaybackDescriptor(projectScope, instanceId ?? "", !!instanceId && usesDesktopBaiduMedia)
+  const projectStorageConfigQ = useProjectStorageConfig(usesDesktopNativeMedia ? projectScope : null)
+  const desktopNativeStorage = useMemo(() => {
+    const projectRoot = projectStorageConfigQ.data?.projectRoot
+    const learningObjectRoot = projectStorageConfigQ.data?.learningObjectRoot
+    if (!usesDesktopNativeMedia || !projectRoot || !learningObjectRoot) return null
+    return { projectRoot, learningObjectRoot }
+  }, [
+    projectStorageConfigQ.data?.learningObjectRoot,
+    projectStorageConfigQ.data?.projectRoot,
+    usesDesktopNativeMedia,
+  ])
   const playbackKind =
+    (usesDesktopNativeMedia ? "FILE" : undefined) ??
+    (usesDesktopBaiduMedia ? baiduDirectPlaybackQ.data?.playbackKind : undefined) ??
     playbackDescriptorQ.data?.playbackKind ??
     instance?.playbackKind ??
     (effectiveSourceKind === "BAIDU_NETDISK" ? "HLS" : "FILE")
-  const playbackDescriptorUrl = playbackDescriptorQ.data?.url ? resolvePlaybackDescriptorUrl(playbackDescriptorQ.data.url) : null
+  const playbackDescriptorUrl =
+    !usesDesktopNativeMedia && !usesDesktopBaiduMedia && playbackDescriptorQ.data?.url ? resolvePlaybackDescriptorUrl(playbackDescriptorQ.data.url) : null
   const displayPlaybackMs = durationMs > 0 ? Math.min(playbackMs, durationMs) : playbackMs
   const progressMax = Math.max(durationMs, 1)
   const playbackProgressPercent = progressMax > 0 ? Math.min(100, Math.max(0, (displayPlaybackMs / progressMax) * 100)) : 0
@@ -389,7 +419,11 @@ function VideoPane({
   const canProbeSubtitles =
     !!instanceId &&
     !!subtitleSourceKind &&
-    (subtitleSourceKind !== "BROWSER_LOCAL" || directoryBinding.permission === "granted")
+    (
+      usesDesktopNativeMedia
+        ? !!desktopNativeStorage
+        : subtitleSourceKind !== "BROWSER_LOCAL" || directoryBinding.permission === "granted"
+    )
   const subtitleState = useVideoSubtitles({
     subjectId,
     projectId,
@@ -399,6 +433,7 @@ function VideoPane({
     detectionEnabled: canProbeSubtitles,
     sourceKind: subtitleSourceKind,
     subtitleDelayMs,
+    desktopNativeStorage,
   })
   const subtitleMissingText = subtitleState.missingText
   const subtitleErrorText = subtitleState.errorText
@@ -415,7 +450,11 @@ function VideoPane({
     !!subtitleSourceKind &&
     llmConfigured &&
     !playerAiMemberBlocked &&
-    (subtitleSourceKind !== "BROWSER_LOCAL" || directoryBinding.permission === "granted")
+    (
+      usesDesktopNativeMedia
+        ? !!desktopNativeStorage
+        : subtitleSourceKind !== "BROWSER_LOCAL" || directoryBinding.permission === "granted"
+    )
 
   useEffect(() => {
     onAiContextChange?.(captureDraftAiContext)
@@ -790,6 +829,10 @@ function VideoPane({
       showInfoFeedback("字幕暂不可用", "浏览器还没有本地目录读取权限，暂时无法检查视频同目录下的字幕文件。")
       return
     }
+    if (usesDesktopNativeMedia && !desktopNativeStorage) {
+      showInfoFeedback("字幕暂不可用", "当前项目缺少本地存储配置，无法读取本机字幕文件。")
+      return
+    }
     if (subtitleErrorText && !subtitleHasFile) {
       retrySubtitleLookup()
     }
@@ -800,7 +843,20 @@ function VideoPane({
       }
       return next
     })
-  }, [directoryBinding.permission, effectiveSourceKind, instanceId, materialSourceBindingQ.error, materialSourceBindingQ.isLoading, retrySubtitleLookup, subtitleErrorText, subtitleHasFile, subtitleMissing, subtitleSourceKind])
+  }, [
+    desktopNativeStorage,
+    directoryBinding.permission,
+    effectiveSourceKind,
+    instanceId,
+    materialSourceBindingQ.error,
+    materialSourceBindingQ.isLoading,
+    retrySubtitleLookup,
+    subtitleErrorText,
+    subtitleHasFile,
+    subtitleMissing,
+    subtitleSourceKind,
+    usesDesktopNativeMedia,
+  ])
 
   const closeCapturePanel = useCallback(() => {
     assistantAbortRef.current?.abort()
@@ -908,6 +964,10 @@ function VideoPane({
       setAssistantError("浏览器还没有本地目录读取权限，视频助手暂时无法读取视频与字幕。")
       return
     }
+    if (usesDesktopNativeMedia && !desktopNativeStorage) {
+      setAssistantError("当前项目缺少本地存储配置，视频助手无法读取本机字幕。")
+      return
+    }
     if (isAssistantAsking) return
 
     touchQaActivity()
@@ -944,6 +1004,7 @@ function VideoPane({
         projectId,
         instance,
         sourceKind: subtitleSourceKind,
+        desktopNativeStorage,
         nodeLabel: instance.materialDisplayName || instance.materialId || "当前视频",
         userPrompt: prompt,
         systemPrompt: "你叫雪豹，是全屏视频助手。",
@@ -1008,6 +1069,7 @@ function VideoPane({
     captureAnchorMs,
     captureDraftAiContext,
     directoryBinding.permission,
+    desktopNativeStorage,
     instance,
     instanceId,
     isAssistantAsking,
@@ -1017,6 +1079,7 @@ function VideoPane({
     subjectId,
     subtitleSourceKind,
     touchQaActivity,
+    usesDesktopNativeMedia,
   ])
 
   const captureCurrentFrameIntoAnswer = useCallback(async () => {
@@ -1174,7 +1237,7 @@ function VideoPane({
     lastPlaybackTrackedPositionRef.current = null
     lastPlaybackTrackedPositionClockRef.current = null
     clearChromeHideTimer()
-  }, [clearChromeHideTimer, flushPlaybackDuration, instance?.instanceId, localSrc, resetPlaybackCoverageAnchor, serverMediaStreamEnabled, syncPlaybackClock])
+  }, [clearChromeHideTimer, desktopBaiduSrc, desktopNativeSrc, flushPlaybackDuration, instance?.instanceId, localSrc, resetPlaybackCoverageAnchor, serverMediaStreamEnabled, syncPlaybackClock])
 
   useEffect(() => {
     async function syncFullscreenState() {
@@ -1364,8 +1427,118 @@ function VideoPane({
     }
   }, [browserLocalMediaEnabled, directoryBinding.permission, effectiveSourceKind, instance, projectId, serverMediaStreamEnabled])
 
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadDesktopNativeMedia() {
+      if (!instanceId || !instanceMaterialId || !usesDesktopNativeMedia) {
+        if (!cancelled) {
+          setDesktopNativeSrc(null)
+          setDesktopNativeError(null)
+        }
+        return
+      }
+      const projectRoot = projectStorageConfigQ.data?.projectRoot
+      const learningObjectRoot = projectStorageConfigQ.data?.learningObjectRoot
+      if (!projectRoot || !learningObjectRoot) {
+        setDesktopNativeSrc(null)
+        setDesktopNativeError(projectStorageConfigQ.isLoading ? null : "当前项目缺少本地存储配置。")
+        return
+      }
+
+      try {
+        const playback = await createDesktopNativeMediaUrl({
+          projectRoot,
+          learningObjectRoot,
+          materialId: instanceMaterialId,
+        })
+        if (cancelled) return
+        if (!playback) {
+          setDesktopNativeSrc(null)
+          setDesktopNativeError("当前运行环境不是桌面客户端，无法读取本机素材。")
+          return
+        }
+        setDesktopNativeSrc(playback.url)
+        setDesktopNativeError(null)
+      } catch (err) {
+        if (cancelled) return
+        setDesktopNativeSrc(null)
+        setDesktopNativeError(formatRuntimeError(err, "读取桌面端本地视频失败"))
+      }
+    }
+
+    void loadDesktopNativeMedia()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    instanceId,
+    instanceMaterialId,
+    projectStorageConfigQ.data?.learningObjectRoot,
+    projectStorageConfigQ.data?.projectRoot,
+    projectStorageConfigQ.isLoading,
+    usesDesktopNativeMedia,
+  ])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadDesktopBaiduMedia() {
+      if (!instanceId || !usesDesktopBaiduMedia) {
+        if (!cancelled) {
+          setDesktopBaiduSrc(null)
+          setDesktopBaiduError(null)
+        }
+        return
+      }
+      const playlistText = baiduDirectPlaybackQ.data?.playlistText
+      const upstreamUrl = baiduDirectPlaybackQ.data?.upstreamUrl
+      if (!playlistText || !upstreamUrl) {
+        setDesktopBaiduSrc(null)
+        setDesktopBaiduError(baiduDirectPlaybackQ.isLoading || baiduDirectPlaybackQ.isFetching ? null : "百度网盘播放信息暂不可用。")
+        return
+      }
+
+      try {
+        const playback = await createDesktopBaiduHlsUrl({ playlistText, upstreamUrl })
+        if (cancelled) return
+        if (!playback) {
+          setDesktopBaiduSrc(null)
+          setDesktopBaiduError("当前运行环境不是桌面客户端，无法直连百度网盘视频。")
+          return
+        }
+        setDesktopBaiduSrc(playback.url)
+        setDesktopBaiduError(null)
+      } catch (err) {
+        if (cancelled) return
+        setDesktopBaiduSrc(null)
+        setDesktopBaiduError(formatRuntimeError(err, "连接百度网盘视频流失败"))
+      }
+    }
+
+    void loadDesktopBaiduMedia()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    baiduDirectPlaybackQ.data?.playlistText,
+    baiduDirectPlaybackQ.data?.upstreamUrl,
+    baiduDirectPlaybackQ.isFetching,
+    baiduDirectPlaybackQ.isLoading,
+    instanceId,
+    usesDesktopBaiduMedia,
+  ])
+
   const src = useMemo(() => {
     if (!instance) return null
+    if (usesDesktopNativeMedia) {
+      return desktopNativeSrc
+    }
+    if (usesDesktopBaiduMedia) {
+      return desktopBaiduSrc
+    }
     if (effectiveSourceKind === "BROWSER_LOCAL" && !serverMediaStreamEnabled) {
       return localSrc
     }
@@ -1376,7 +1549,7 @@ function VideoPane({
       return resolvePlaybackDescriptorUrl(apiUrl(projectApiPath(projectScope, `/media/instances/${instance.instanceId}`)))
     }
     return null
-  }, [effectiveSourceKind, instance, localSrc, playbackDescriptorUrl, playbackKind, projectScope, serverMediaStreamEnabled])
+  }, [desktopBaiduSrc, desktopNativeSrc, effectiveSourceKind, instance, localSrc, playbackDescriptorUrl, playbackKind, projectScope, serverMediaStreamEnabled, usesDesktopBaiduMedia, usesDesktopNativeMedia])
 
   useEffect(() => {
     let cancelled = false
@@ -1393,7 +1566,7 @@ function VideoPane({
       try {
         const response = await fetch(src, {
           method: "GET",
-          credentials: "include",
+          credentials: usesDesktopBaiduMedia ? "omit" : "include",
         })
         const text = await response.text()
         if (cancelled) return
@@ -1410,35 +1583,35 @@ function VideoPane({
           setMediaElementError(message)
           return
         }
+        if (Hls.isSupported()) {
+          const hls = new Hls({
+            enableWorker: true,
+            xhrSetup: (xhr) => {
+              xhr.withCredentials = !usesDesktopBaiduMedia
+            },
+          })
+          hlsRef.current = hls
+          hls.on(Hls.Events.ERROR, (_event, data) => {
+            if (!data.fatal || cancelled) return
+            setMediaElementError(
+              data.type === Hls.ErrorTypes.NETWORK_ERROR
+                ? "百度网盘视频流加载失败，请稍后重试。"
+                : "百度网盘视频播放失败，请刷新后重试。",
+            )
+            hls.destroy()
+            if (hlsRef.current === hls) {
+              hlsRef.current = null
+            }
+          })
+          hls.loadSource(src)
+          hls.attachMedia(video)
+          return
+        }
         if (video.canPlayType("application/vnd.apple.mpegurl")) {
           video.src = src
           return
         }
-        if (!Hls.isSupported()) {
-          setMediaElementError("当前浏览器不支持 HLS 视频播放。")
-          return
-        }
-        const hls = new Hls({
-          enableWorker: true,
-          xhrSetup: (xhr) => {
-            xhr.withCredentials = true
-          },
-        })
-        hlsRef.current = hls
-        hls.on(Hls.Events.ERROR, (_event, data) => {
-          if (!data.fatal || cancelled) return
-          setMediaElementError(
-            data.type === Hls.ErrorTypes.NETWORK_ERROR
-              ? "百度网盘视频流加载失败，请稍后重试。"
-              : "百度网盘视频播放失败，请刷新后重试。",
-          )
-          hls.destroy()
-          if (hlsRef.current === hls) {
-            hlsRef.current = null
-          }
-        })
-        hls.loadSource(src)
-        hls.attachMedia(video)
+        setMediaElementError("当前浏览器不支持 HLS 视频播放。")
       } catch (error) {
         if (cancelled) return
         setMediaElementError(formatPlaybackError(error))
@@ -1454,7 +1627,7 @@ function VideoPane({
         hlsRef.current = null
       }
     }
-  }, [playbackKind, src])
+  }, [playbackKind, src, usesDesktopBaiduMedia])
 
   const { hoveredBarrage } = useVideoBarrage({
     subjectId,
@@ -1471,11 +1644,26 @@ function VideoPane({
 
   const playbackError = useMemo(() => {
     if (!instance) return null
-    if (playbackDescriptorQ.error) return formatPlaybackError(playbackDescriptorQ.error)
+    if (!usesDesktopNativeMedia && !usesDesktopBaiduMedia && playbackDescriptorQ.error) return formatPlaybackError(playbackDescriptorQ.error)
+    if (usesDesktopBaiduMedia && baiduDirectPlaybackQ.error) return formatPlaybackError(baiduDirectPlaybackQ.error)
     if (mediaElementError) return mediaElementError
+    if (usesDesktopNativeMedia) return desktopNativeError
+    if (usesDesktopBaiduMedia) return desktopBaiduError
     if (effectiveSourceKind === "BROWSER_LOCAL" && !serverMediaStreamEnabled) return localError
     return null
-  }, [effectiveSourceKind, instance, localError, mediaElementError, playbackDescriptorQ.error, serverMediaStreamEnabled])
+  }, [
+    baiduDirectPlaybackQ.error,
+    desktopBaiduError,
+    desktopNativeError,
+    effectiveSourceKind,
+    instance,
+    localError,
+    mediaElementError,
+    playbackDescriptorQ.error,
+    serverMediaStreamEnabled,
+    usesDesktopBaiduMedia,
+    usesDesktopNativeMedia,
+  ])
 
   useEffect(() => {
     if (!seekTo) return
@@ -1708,7 +1896,12 @@ function VideoPane({
 
   const shouldRenderVideo = Boolean(src)
   const videoElementSrc = playbackKind === "HLS" ? undefined : (src ?? undefined)
-  const videoCrossOrigin = src?.startsWith("http") ? "use-credentials" : undefined
+  const videoCrossOrigin =
+    src?.startsWith("http") && (usesDesktopNativeMedia || usesDesktopBaiduMedia)
+      ? "anonymous"
+      : src?.startsWith("http")
+        ? "use-credentials"
+        : undefined
   const isBaiduConnecting = Boolean(instance && effectiveSourceKind === "BAIDU_NETDISK" && !src && !playbackError)
   const latestAssistantTurn = useMemo(
     () => [...assistantTurns].reverse().find((turn) => turn.role === "assistant") ?? null,
@@ -2780,6 +2973,8 @@ function VideoPane({
                         ? "正在连接百度网盘视频流..."
                         : !serverMediaStreamEnabled && effectiveSourceKind === "BROWSER_LOCAL"
                           ? "正在准备播放资源..."
+                          : effectiveSourceKind === "NATIVE_LOCAL"
+                            ? "正在准备桌面端本地视频..."
                           : "当前视频暂时不可用。")
                     : "请先在左侧选择一个视频实例。"}
                 </div>

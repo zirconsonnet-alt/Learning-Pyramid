@@ -28,6 +28,10 @@ type AskCourseAgentParams = {
   projectId: string
   instance: Pick<Instance, "instanceId" | "materialId">
   sourceKind: MaterialSourceKind
+  desktopNativeStorage?: {
+    projectRoot: string
+    learningObjectRoot: string
+  } | null
   initialFrame?: CourseAgentInitialFrame | null
   recallContext?: CourseAgentRecallContext | null
   nodeLabel: string
@@ -115,6 +119,7 @@ export async function buildCourseAgentContextPackage(params: Pick<
   | "projectId"
   | "instance"
   | "sourceKind"
+  | "desktopNativeStorage"
   | "initialFrame"
   | "recallContext"
   | "nodeLabel"
@@ -128,6 +133,7 @@ export async function buildCourseAgentContextPackage(params: Pick<
     scope,
     instance: params.instance,
     sourceKind: params.sourceKind,
+    desktopNativeStorage: params.desktopNativeStorage,
   })
   const hasTranscriptContext = !!document && document.segments.length > 0
   const hasInitialFrame = !!params.initialFrame?.imageDataUrl

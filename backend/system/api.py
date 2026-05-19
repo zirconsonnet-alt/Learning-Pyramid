@@ -2,6 +2,7 @@ import json
 import hashlib
 import math
 import os
+import posixpath
 import secrets
 import shutil
 import subprocess
@@ -122,7 +123,12 @@ from backend.repositories.persistence_interfaces import ProjectSnapshotRecord, S
 from backend.system.local_whisper import ensure_local_whisper_runtime, is_builtin_whisper_base_url
 from backend.system.material_paths import resolve_material_file_path
 from backend.system.auth_store import AuthStore, encrypt_secret_value
-from backend.system.baidu_netdisk_client import BAIDU_NETDISK_PROVIDER, BaiduNetdiskApiError, BaiduNetdiskClient
+from backend.system.baidu_netdisk_client import (
+    BAIDU_NETDISK_PROVIDER,
+    BaiduNetdiskApiError,
+    BaiduNetdiskClient,
+    BaiduNetdiskFileItem,
+)
 from backend.system.http_runtime_config import current_http_runtime_config
 from backend.system.instance_media import InstanceMediaService
 from backend.system.persistence_json import (
@@ -159,6 +165,27 @@ class TickAttemptResult(str, Enum):
     GATE_BLOCKED = "GATE_BLOCKED"
 
 MAX_ASR_WINDOW_MS: int = 5 * 60 * 1000
+BAIDU_NETDISK_IMPORTABLE_VIDEO_EXTENSIONS: frozenset[str] = frozenset(
+    {".mp4", ".m4v", ".mkv", ".webm", ".mov", ".avi", ".flv", ".ts", ".m2ts"}
+)
+
+
+def _baidu_netdisk_hash32(path: PurePosixPath) -> str:
+    return hashlib.sha256(path.as_posix().encode("utf-8")).hexdigest()[:32]
+
+
+def _baidu_netdisk_instance_id_from_remote_path(remote_path: PurePosixPath) -> InstanceId:
+    return InstanceId(f"instbd_{_baidu_netdisk_hash32(remote_path)}")
+
+
+def _baidu_netdisk_node_id_from_rel_path(rel_path: PurePosixPath, kind: str) -> LearningObjectNodeId:
+    if kind == "LEAF":
+        prefix = "lonbd_leaf"
+    elif kind == "DIR":
+        prefix = "lonbd_dir"
+    else:
+        raise ValueError("kind must be 'LEAF' or 'DIR'")
+    return LearningObjectNodeId(f"{prefix}_{_baidu_netdisk_hash32(rel_path)}")
 
 
 def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
@@ -1566,7 +1593,7 @@ class SystemAPI:
         finally:
             self.sys.rollback(s)
 
-        if binding.source_kind in {MaterialSourceKind.BROWSER_LOCAL, MaterialSourceKind.MANUAL}:
+        if binding.source_kind not in {MaterialSourceKind.SERVER_FS, MaterialSourceKind.NATIVE_LOCAL}:
             self._startup_fs_sync_done.add(pid_k)
             return
 
@@ -2977,8 +3004,18 @@ class SystemAPI:
             for item in auth_store.list_user_cloud_accounts(user_id, provider=provider, include_disabled=False)
         ]
 
-    def begin_baidu_netdisk_connect(self, *, user_id: str) -> dict[str, str]:
+    def _ensure_can_connect_baidu_netdisk_account(self, *, auth_store: AuthStore, user_id: str) -> None:
+        existing_accounts = auth_store.list_user_cloud_accounts(
+            str(user_id),
+            provider=BAIDU_NETDISK_PROVIDER,
+            include_disabled=False,
+        )
+        if existing_accounts:
+            raise PreconditionFailure("每个账号同时只能绑定一个百度网盘账号，请先解绑当前账号")
+
+    def begin_baidu_netdisk_connect(self, *, auth_store: AuthStore, user_id: str) -> dict[str, str]:
         self._baidu_netdisk_client.require_enabled()
+        self._ensure_can_connect_baidu_netdisk_account(auth_store=auth_store, user_id=user_id)
         state = self._new_cloud_oauth_state(user_id=str(user_id), provider=BAIDU_NETDISK_PROVIDER)
         return {
             "provider": BAIDU_NETDISK_PROVIDER,
@@ -2997,6 +3034,7 @@ class SystemAPI:
         payload = self._consume_cloud_oauth_state(state)
         if payload.get("provider") != BAIDU_NETDISK_PROVIDER or payload.get("user_id") != str(user_id):
             raise PreconditionFailure("云账号授权状态与当前用户不匹配")
+        self._ensure_can_connect_baidu_netdisk_account(auth_store=auth_store, user_id=user_id)
         try:
             token_bundle = self._baidu_netdisk_client.exchange_code(code)
             profile = self._baidu_netdisk_client.get_account_profile(token_bundle.access_token)
@@ -3067,6 +3105,53 @@ class SystemAPI:
             ],
         }
 
+    @staticmethod
+    def _baidu_netdisk_item_is_importable_video(item: BaiduNetdiskFileItem) -> bool:
+        if item.is_dir:
+            return False
+        if str(item.mime_type or "").lower().startswith("video/"):
+            return True
+        return PurePosixPath(item.name or item.path).suffix.lower() in BAIDU_NETDISK_IMPORTABLE_VIDEO_EXTENSIONS
+
+    def _list_baidu_netdisk_import_files_in_dir(
+        self,
+        *,
+        auth_store: AuthStore,
+        account_id: str,
+        dir_path: str,
+    ) -> tuple[BaiduNetdiskFileItem, ...]:
+        media_service = self._instance_media_service()
+        pending_dirs: list[str] = [dir_path]
+        seen_dirs: set[str] = set()
+        files_by_path: dict[str, BaiduNetdiskFileItem] = {}
+        while pending_dirs:
+            current_dir = pending_dirs.pop()
+            normalized_dir = PurePosixPath(str(current_dir or "/")).as_posix() or "/"
+            if not normalized_dir.startswith("/"):
+                normalized_dir = f"/{normalized_dir}"
+            if normalized_dir in seen_dirs:
+                continue
+            seen_dirs.add(normalized_dir)
+
+            page = 1
+            while True:
+                items, has_more = media_service.list_baidu_files(
+                    auth_store=auth_store,
+                    account_id=account_id,
+                    dir_path=normalized_dir,
+                    page=page,
+                    limit=200,
+                )
+                for item in items:
+                    if item.is_dir:
+                        pending_dirs.append(item.path)
+                    elif self._baidu_netdisk_item_is_importable_video(item):
+                        files_by_path[item.path] = item
+                if not has_more:
+                    break
+                page += 1
+        return tuple(files_by_path[path] for path in sorted(files_by_path))
+
     def import_learning_objects_from_baidu_netdisk(
         self,
         project_id: ProjectId,
@@ -3078,28 +3163,60 @@ class SystemAPI:
     ) -> dict[str, object]:
         account = auth_store.get_user_cloud_account(user_id, account_id=account_id, provider=BAIDU_NETDISK_PROVIDER)
         normalized_items: list[dict[str, Any]] = []
+        common_parent_candidates: list[str] = []
         for raw_item in items:
             row = dict(raw_item)
             remote_path = str(row.get("path") or "").strip()
             if not remote_path or not remote_path.startswith("/"):
                 raise PreconditionFailure("百度网盘导入项缺少合法 path")
             if bool(row.get("isDir")):
-                raise PreconditionFailure("一期仅支持导入百度网盘视频文件，不支持直接导入文件夹")
+                common_parent_candidates.append(remote_path)
+                for item in self._list_baidu_netdisk_import_files_in_dir(
+                    auth_store=auth_store,
+                    account_id=account_id,
+                    dir_path=remote_path,
+                ):
+                    normalized_items.append(
+                        {
+                            "fileId": item.file_id,
+                            "path": item.path,
+                            "name": item.name,
+                            "mimeType": item.mime_type,
+                            "sizeBytes": item.size_bytes,
+                            "durationMs": item.duration_ms,
+                        }
+                    )
+                continue
             file_id = str(row.get("fileId") or "").strip()
             if not file_id:
                 raise PreconditionFailure("百度网盘导入项缺少 fileId")
+            name = str(row.get("name") or PurePosixPath(remote_path).name).strip() or file_id
+            mime_type = None if row.get("mimeType") is None else str(row.get("mimeType"))
+            if not (
+                str(mime_type or "").lower().startswith("video/")
+                or PurePosixPath(name or remote_path).suffix.lower() in BAIDU_NETDISK_IMPORTABLE_VIDEO_EXTENSIONS
+            ):
+                raise PreconditionFailure("百度网盘导入项必须是视频文件或文件夹")
             normalized_items.append(
                 {
                     "fileId": file_id,
                     "path": remote_path,
-                    "name": str(row.get("name") or PurePosixPath(remote_path).name).strip() or file_id,
-                    "mimeType": None if row.get("mimeType") is None else str(row.get("mimeType")),
+                    "name": name,
+                    "mimeType": mime_type,
                     "sizeBytes": None if row.get("sizeBytes") is None else int(row.get("sizeBytes")),
                     "durationMs": None if row.get("durationMs") is None else int(row.get("durationMs")),
                 }
             )
+            common_parent_candidates.append(PurePosixPath(remote_path).parent.as_posix())
+        normalized_items = [
+            item
+            for _, item in sorted(
+                {str(item["path"]): item for item in normalized_items}.items(),
+                key=lambda pair: pair[0],
+            )
+        ]
         if not normalized_items:
-            raise PreconditionFailure("请选择至少一个百度网盘视频文件")
+            raise PreconditionFailure("所选百度网盘文件夹中没有找到可导入的视频文件")
 
         s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
         try:
@@ -3113,65 +3230,83 @@ class SystemAPI:
                 for binding in existing_bindings
                 if binding.source_kind == MaterialSourceKind.BAIDU_NETDISK and binding.remote_path
             }
-            leaf_by_instance_id = {
-                id_canonical_text(node.instance_id): node
-                for node in self.sys.learning_object_repo.all(s)
-                if isinstance(node, LearningObjectLeaf)
-            }
+            existing_binding_by_instance_id = {id_canonical_text(binding.instance_id): binding for binding in existing_bindings}
             instances_by_id = {id_canonical_text(item.instance_id): item for item in existing_instances}
 
-            parent_paths = [PurePosixPath(item["path"]).parent.as_posix() for item in normalized_items]
-            common_parent = PurePosixPath(os.path.commonpath(parent_paths) if parent_paths else "/")
+            common_parent = PurePosixPath(posixpath.commonpath(common_parent_candidates) if common_parent_candidates else "/")
             root_title = common_parent.name or account.display_name or "百度网盘导入"
 
-            container_id_by_rel_dir: dict[str, LearningObjectNodeId] = {}
-            new_nodes: list[LearningObjectContainer | LearningObjectLeaf] = []
             created_instances = 0
-            created_leaf_nodes = 0
             reused_instances = 0
+            updated_instances = 0
 
-            root_id = self.idgen.new_learning_object_node_id(project_id)
-            container_id_by_rel_dir["."] = root_id
-            child_ids_by_container: dict[str, list[LearningObjectNodeId]] = {"." : []}
-
-            def ensure_container(rel_dir: PurePosixPath) -> LearningObjectNodeId:
-                rel_key = rel_dir.as_posix() or "."
-                existing = container_id_by_rel_dir.get(rel_key)
-                if existing is not None:
-                    return existing
-                parent_rel = rel_dir.parent if rel_dir.parent != rel_dir else PurePosixPath(".")
-                parent_id = ensure_container(parent_rel)
-                current_id = self.idgen.new_learning_object_node_id(project_id)
-                container_id_by_rel_dir[rel_key] = current_id
-                child_ids_by_container.setdefault(rel_key, [])
-                child_ids_by_container.setdefault(parent_rel.as_posix() or ".", []).append(current_id)
-                return current_id
-
-            imported_instance_ids: list[InstanceId] = []
-            binding_by_instance_id: dict[str, InstanceMediaBinding] = {}
+            file_rel: list[PurePosixPath] = []
+            dir_rel_set: set[PurePosixPath] = {PurePosixPath(".")}
+            instance_id_by_file: dict[PurePosixPath, InstanceId] = {}
+            item_by_file: dict[PurePosixPath, dict[str, Any]] = {}
 
             for item in normalized_items:
                 remote_path = PurePosixPath(item["path"])
+                try:
+                    rel = remote_path.relative_to(common_parent)
+                except Exception:
+                    rel = PurePosixPath(remote_path.name or item["name"])
+                if rel.as_posix() in {"", "."} or rel.is_absolute() or ".." in rel.parts:
+                    raise PreconditionFailure("百度网盘导入项无法生成合法相对路径")
+
                 existing_iid = existing_instance_by_remote_path.get(remote_path.as_posix())
                 if existing_iid is None:
-                    iid = self.idgen.new_instance_id(project_id)
-                    created_instances += 1
+                    candidate_iid = _baidu_netdisk_instance_id_from_remote_path(remote_path)
+                    if id_canonical_text(candidate_iid) in instances_by_id:
+                        raise PreconditionFailure("百度网盘导入实例 ID 冲突")
+                    iid = candidate_iid
                 else:
                     iid = existing_iid
-                    reused_instances += 1
-                imported_instance_ids.append(iid)
+                file_rel.append(rel)
+                instance_id_by_file[rel] = iid
+                item_by_file[rel] = item
+                parent = rel.parent
+                while True:
+                    dir_rel_set.add(parent)
+                    if parent == PurePosixPath("."):
+                        break
+                    parent = parent.parent
+
+            scanned_instance_keys = {id_canonical_text(x) for x in instance_id_by_file.values()}
+            now = now_utc_ms()
+            instances_to_add: list[Instance] = []
+            instances_to_update: list[Instance] = []
+            bindings_to_set: list[InstanceMediaBinding] = []
+            for rel in file_rel:
+                iid = instance_id_by_file[rel]
+                item = item_by_file[rel]
+                remote_path = PurePosixPath(item["path"])
+                inst_key = id_canonical_text(iid)
+                existing = instances_by_id.get(inst_key)
+                last_seen_at = (
+                    existing.last_seen_at
+                    if existing is not None
+                    and existing.material_id.as_posix() == remote_path.as_posix()
+                    and existing.presence == InstancePresence.PRESENT
+                    else now
+                )
                 desired_instance = Instance.create(
                     project_id,
                     iid,
                     remote_path.as_posix(),
                     presence=InstancePresence.PRESENT,
-                    last_seen_at=now_utc_ms(),
+                    last_seen_at=last_seen_at,
                 )
-                if id_canonical_text(iid) in instances_by_id:
-                    self.sys.instance_repo.update(s, desired_instance)
+                if existing is None:
+                    instances_to_add.append(desired_instance)
+                    created_instances += 1
+                elif existing != desired_instance:
+                    instances_to_update.append(desired_instance)
+                    updated_instances += 1
+                    reused_instances += 1
                 else:
-                    self.sys.instance_repo.add(s, desired_instance)
-                binding_by_instance_id[id_canonical_text(iid)] = InstanceMediaBinding.create(
+                    reused_instances += 1
+                desired_binding = InstanceMediaBinding.create(
                     project_id,
                     iid,
                     source_kind=MaterialSourceKind.BAIDU_NETDISK,
@@ -3183,62 +3318,126 @@ class SystemAPI:
                     size_bytes=item["sizeBytes"],
                     duration_ms=item["durationMs"],
                     source_payload={"provider": BAIDU_NETDISK_PROVIDER},
+                    updated_at=now,
                 )
+                existing_binding = existing_binding_by_instance_id.get(inst_key)
+                if existing_binding is not None and replace(desired_binding, updated_at=existing_binding.updated_at) == existing_binding:
+                    desired_binding = existing_binding
+                if existing_binding != desired_binding:
+                    bindings_to_set.append(desired_binding)
 
-                if id_canonical_text(iid) in leaf_by_instance_id:
+            marked_missing_instances = 0
+            for inst in existing_instances:
+                if id_canonical_text(inst.instance_id) in scanned_instance_keys:
                     continue
-                rel_dir = PurePosixPath(".")
-                try:
-                    rel_dir = remote_path.parent.relative_to(common_parent)
-                except Exception:
-                    rel_dir = PurePosixPath(".")
-                parent_id = ensure_container(rel_dir)
-                leaf_id = self.idgen.new_learning_object_node_id(project_id)
-                child_ids_by_container.setdefault(rel_dir.as_posix() or ".", []).append(leaf_id)
-                new_nodes.append(
+                if inst.presence == InstancePresence.MISSING:
+                    continue
+                desired = Instance.create(
+                    project_id,
+                    inst.instance_id,
+                    inst.material_id,
+                    presence=InstancePresence.MISSING,
+                    last_seen_at=inst.last_seen_at,
+                )
+                if inst != desired:
+                    instances_to_update.append(desired)
+                    updated_instances += 1
+                marked_missing_instances += 1
+
+            dir_rel = sorted(dir_rel_set, key=lambda p: p.as_posix())
+            leaf_id_by_file = {rel: _baidu_netdisk_node_id_from_rel_path(rel, "LEAF") for rel in file_rel}
+            dir_id_by_dir = {rel: _baidu_netdisk_node_id_from_rel_path(rel, "DIR") for rel in dir_rel}
+
+            children_by_dir: dict[PurePosixPath, list[tuple[str, LearningObjectNodeId]]] = {rel: [] for rel in dir_rel}
+            for rel in dir_rel:
+                if rel == PurePosixPath("."):
+                    continue
+                children_by_dir[rel.parent].append((rel.as_posix(), dir_id_by_dir[rel]))
+            for rel in file_rel:
+                children_by_dir[rel.parent].append((rel.as_posix(), leaf_id_by_file[rel]))
+            for rel in dir_rel:
+                children_by_dir[rel].sort(key=lambda entry: entry[0])
+
+            desired_binding = ProjectMaterialSourceBinding.create(
+                project_id,
+                source_kind=MaterialSourceKind.BAIDU_NETDISK,
+                source_root_label=root_title,
+                updated_at=now,
+            )
+            current_binding = self.sys.project_material_source_binding_repo.get(s)
+            binding_changed = current_binding != desired_binding
+
+            nodes_out: list[LearningObjectContainer | LearningObjectLeaf] = []
+            for rel in dir_rel:
+                if rel == PurePosixPath("."):
+                    parent_id = None
+                    title = root_title
+                else:
+                    parent_id = dir_id_by_dir[rel.parent]
+                    title = rel.name
+                nodes_out.append(
+                    LearningObjectContainer(
+                        source="BAIDU_NETDISK",
+                        project_id=project_id,
+                        node_id=dir_id_by_dir[rel],
+                        relative_path=rel,
+                        parent_id=parent_id,
+                        children=tuple(node_id for _, node_id in children_by_dir.get(rel, [])),
+                        title=title,
+                    )
+                )
+            for rel in file_rel:
+                nodes_out.append(
                     LearningObjectLeaf(
                         source="BAIDU_NETDISK",
                         project_id=project_id,
-                        node_id=leaf_id,
-                        relative_path=remote_path,
-                        parent_id=parent_id,
-                        instance_id=iid,
-                        title=item["name"],
+                        node_id=leaf_id_by_file[rel],
+                        relative_path=rel,
+                        parent_id=dir_id_by_dir[rel.parent],
+                        instance_id=instance_id_by_file[rel],
+                        title=str(item_by_file[rel]["name"]),
                     )
                 )
-                created_leaf_nodes += 1
 
-            if created_leaf_nodes > 0:
-                for rel_key, node_id in list(container_id_by_rel_dir.items()):
-                    if rel_key == ".":
-                        parent_id = None
-                        title = root_title
-                        relative_path = common_parent
-                    else:
-                        rel_dir = PurePosixPath(rel_key)
-                        parent_rel = rel_dir.parent if rel_dir.parent != rel_dir else PurePosixPath(".")
-                        parent_id = container_id_by_rel_dir[parent_rel.as_posix() or "."]
-                        title = rel_dir.name
-                        relative_path = common_parent / rel_dir
-                    children = tuple(child_ids_by_container.get(rel_key, []))
-                    new_nodes.insert(
-                        0,
-                        LearningObjectContainer(
-                            source="BAIDU_NETDISK",
-                            project_id=project_id,
-                            node_id=node_id,
-                            relative_path=relative_path,
-                            parent_id=parent_id,
-                            children=children,
-                            title=title,
-                        ),
-                    )
-            created_nodes = len(new_nodes)
-
-            for binding in binding_by_instance_id.values():
+            for inst in instances_to_add:
+                self.sys.instance_repo.add(s, inst)
+            for inst in instances_to_update:
+                self.sys.instance_repo.update(s, inst)
+            for binding in bindings_to_set:
                 self.sys.instance_media_binding_repo.set(s, binding)
-            for node in new_nodes:
-                self.sys.learning_object_repo.add(s, node)
+            if binding_changed:
+                self.sys.project_material_source_binding_repo.set(s, desired_binding)
+
+            replaced_nodes_count = 0
+            cur_nodes = self.sys.learning_object_repo.all(s)
+            cur_nodes_by_id = {id_canonical_text(n.node_id): n for n in cur_nodes}
+            next_nodes_by_id = {id_canonical_text(n.node_id): n for n in nodes_out}
+            if cur_nodes_by_id != next_nodes_by_id:
+                self.sys.learning_object_repo.replace_all_from_fs(s, nodes_out)
+                replaced_nodes_count = len(nodes_out)
+
+            unchanged = (
+                created_instances == 0
+                and updated_instances == 0
+                and marked_missing_instances == 0
+                and not bindings_to_set
+                and replaced_nodes_count == 0
+                and not binding_changed
+            )
+            result = {
+                "unchanged": bool(unchanged),
+                "created_instances_count": int(created_instances),
+                "reused_instances_count": int(reused_instances),
+                "marked_missing_count": int(marked_missing_instances),
+                "created_learning_object_nodes_count": int(replaced_nodes_count),
+                "replaced_learning_object_nodes_count": int(replaced_nodes_count),
+                "imported_count": int(len(normalized_items)),
+                "warnings": tuple(),
+            }
+
+            if unchanged:
+                self.sys.rollback(s)
+                return result
 
             self._append_audit_event(
                 s,
@@ -3250,16 +3449,12 @@ class SystemAPI:
                     "itemsCount": len(normalized_items),
                     "createdInstancesCount": int(created_instances),
                     "reusedInstancesCount": int(reused_instances),
-                    "createdLearningObjectNodesCount": int(created_nodes),
+                    "markedMissingCount": int(marked_missing_instances),
+                    "replacedLearningObjectNodesCount": int(replaced_nodes_count),
+                    "unchanged": bool(unchanged),
                 },
             )
             self.sys.commit(s)
-            result = {
-                "created_instances_count": int(created_instances),
-                "reused_instances_count": int(reused_instances),
-                "created_learning_object_nodes_count": int(created_nodes),
-                "imported_count": int(len(normalized_items)),
-            }
             self._best_effort_drive_idle_orchestration(project_id)
             return result
         except Exception:
@@ -3292,6 +3487,23 @@ class SystemAPI:
         except BaiduNetdiskApiError as exc:
             self._raise_baidu_netdisk_error(exc)
         return ""
+
+    def get_instance_baidu_direct_playback_descriptor(
+        self,
+        project_id: ProjectId,
+        instance_id: InstanceId,
+        *,
+        auth_store: AuthStore,
+    ) -> dict[str, Any]:
+        try:
+            return self._instance_media_service().build_baidu_direct_playback_descriptor(
+                str(project_id),
+                str(instance_id),
+                auth_store=auth_store,
+            ).to_dict()
+        except BaiduNetdiskApiError as exc:
+            self._raise_baidu_netdisk_error(exc)
+        return {}
 
     def stream_instance_hls_segment(
         self,
@@ -3586,32 +3798,83 @@ class SystemAPI:
         root_title: str | None,
         relative_file_paths: Sequence[str],
     ) -> dict[str, object]:
+        return self._import_learning_objects_from_relative_scan(
+            project_id,
+            api_name="import_learning_objects_from_browser_scan",
+            source_kind=MaterialSourceKind.BROWSER_LOCAL,
+            root_title=root_title,
+            relative_file_paths=relative_file_paths,
+            project_root=None,
+            learning_object_root=None,
+        )
+
+    def import_learning_objects_from_native_local_scan(
+        self,
+        project_id: ProjectId,
+        *,
+        project_root: str,
+        root_title: str | None,
+        relative_file_paths: Sequence[str],
+    ) -> dict[str, object]:
+        return self._import_learning_objects_from_relative_scan(
+            project_id,
+            api_name="import_learning_objects_from_native_local_scan",
+            source_kind=MaterialSourceKind.NATIVE_LOCAL,
+            root_title=root_title,
+            relative_file_paths=relative_file_paths,
+            project_root=project_root,
+            learning_object_root=".",
+        )
+
+    def _import_learning_objects_from_relative_scan(
+        self,
+        project_id: ProjectId,
+        *,
+        api_name: str,
+        source_kind: MaterialSourceKind,
+        root_title: str | None,
+        relative_file_paths: Sequence[str],
+        project_root: str | None,
+        learning_object_root: str | None,
+    ) -> dict[str, object]:
+        if source_kind not in {MaterialSourceKind.BROWSER_LOCAL, MaterialSourceKind.NATIVE_LOCAL}:
+            raise PreconditionFailure(f"{api_name}: source_kind must be BROWSER_LOCAL or NATIVE_LOCAL")
         allowed_exts = {".mp4", ".mov", ".mkv", ".webm", ".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus"}
 
         def _normalize_rel_path(raw: str) -> PurePosixPath:
             normalized_raw = str(raw or "").replace("\\", "/").strip()
             if not normalized_raw:
-                raise PreconditionFailure("import_learning_objects_from_browser_scan: relative path must be non-empty")
+                raise PreconditionFailure(f"{api_name}: relative path must be non-empty")
             if normalized_raw.startswith("/"):
-                raise PreconditionFailure("import_learning_objects_from_browser_scan: absolute path is not allowed")
+                raise PreconditionFailure(f"{api_name}: absolute path is not allowed")
             if len(normalized_raw) >= 2 and normalized_raw[1] == ":" and normalized_raw[0].isalpha():
-                raise PreconditionFailure("import_learning_objects_from_browser_scan: drive path is not allowed")
+                raise PreconditionFailure(f"{api_name}: drive path is not allowed")
             rel = normalize_material_id_to_purepath(normalized_raw)
             if rel.as_posix() in {"", "."}:
-                raise PreconditionFailure("import_learning_objects_from_browser_scan: relative path must not be empty")
+                raise PreconditionFailure(f"{api_name}: relative path must not be empty")
             if rel.is_absolute():
-                raise PreconditionFailure("import_learning_objects_from_browser_scan: absolute path is not allowed")
+                raise PreconditionFailure(f"{api_name}: absolute path is not allowed")
             if any(part in {"", ".", ".."} for part in rel.parts):
-                raise PreconditionFailure("import_learning_objects_from_browser_scan: invalid relative path")
+                raise PreconditionFailure(f"{api_name}: invalid relative path")
             if rel.suffix.lower() not in allowed_exts:
                 raise PreconditionFailure(
-                    f"import_learning_objects_from_browser_scan: unsupported media extension: {rel.suffix or '(none)'}"
+                    f"{api_name}: unsupported media extension: {rel.suffix or '(none)'}"
                 )
             return rel
 
         file_rel = sorted({_normalize_rel_path(item) for item in relative_file_paths}, key=lambda p: p.as_posix())
         if not file_rel:
             raise PreconditionFailure("当前已授权目录中没有找到可导入的媒体文件")
+
+        next_storage_config: ProjectStorageConfig | None = None
+        if source_kind == MaterialSourceKind.NATIVE_LOCAL:
+            next_storage_config = ProjectStorageConfig.create(
+                project_id,
+                str(project_root or "").strip(),
+                learning_object_root=learning_object_root or ".",
+                fs_sync_policy=FsSyncPolicy.MANUAL_SYNC,
+                updated_at=now_utc_ms(),
+            )
 
         dir_rel_set: set[PurePosixPath] = {PurePosixPath(".")}
         for rel in file_rel:
@@ -3626,7 +3889,7 @@ class SystemAPI:
         s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
         try:
             if self._project_type_in_session(s) != ProjectType.COURSE:
-                raise PreconditionFailure("import_learning_objects_from_browser_scan is only available for COURSE projects")
+                raise PreconditionFailure(f"{api_name} is only available for COURSE projects")
             cur_instances = self.sys.instance_repo.all(s)
             cur_instances_by_key = {id_canonical_text(i.instance_id): i for i in cur_instances}
 
@@ -3712,11 +3975,15 @@ class SystemAPI:
             current_binding = self.sys.project_material_source_binding_repo.get(s)
             desired_binding = ProjectMaterialSourceBinding.create(
                 project_id,
-                source_kind=MaterialSourceKind.BROWSER_LOCAL,
+                source_kind=source_kind,
                 source_root_label=display_root_title,
                 updated_at=now_utc_ms(),
             )
             binding_changed = current_binding != desired_binding
+            storage_config_changed = False
+            if next_storage_config is not None:
+                current_storage_config = self.sys.project_storage_config_repo.get(s)
+                storage_config_changed = current_storage_config != next_storage_config
             nodes_out: list[LearningObjectLeaf | LearningObjectContainer] = []
 
             for rel in dir_rel:
@@ -3759,6 +4026,8 @@ class SystemAPI:
                 self.sys.instance_repo.update(s, inst)
             if binding_changed:
                 self.sys.project_material_source_binding_repo.set(s, desired_binding)
+            if storage_config_changed and next_storage_config is not None:
+                self.sys.project_storage_config_repo.set(s, next_storage_config)
 
             replaced_nodes_count = 0
             cur_nodes = self.sys.learning_object_repo.all(s)
@@ -3768,7 +4037,13 @@ class SystemAPI:
                 self.sys.learning_object_repo.replace_all_from_fs(s, nodes_out)
                 replaced_nodes_count = len(nodes_out)
 
-            unchanged = created_instances == 0 and updated_instances == 0 and replaced_nodes_count == 0 and not binding_changed
+            unchanged = (
+                created_instances == 0
+                and updated_instances == 0
+                and replaced_nodes_count == 0
+                and not binding_changed
+                and not storage_config_changed
+            )
             report: dict[str, object] = {
                 "unchanged": bool(unchanged),
                 "created_instances_count": int(created_instances),
@@ -3785,10 +4060,15 @@ class SystemAPI:
             root_hash = hashlib.sha256(display_root_title.encode("utf-8")).hexdigest()[:16]
             self._append_audit_event(
                 s,
-                kind=AuditEventKind.SYNC_LEARNING_OBJECTS_FROM_FS,
-                api_name="import_learning_objects_from_browser_scan",
+                kind=(
+                    AuditEventKind.BIND_NATIVE_LOCAL_ROOT
+                    if source_kind == MaterialSourceKind.NATIVE_LOCAL
+                    else AuditEventKind.SYNC_LEARNING_OBJECTS_FROM_FS
+                ),
+                api_name=api_name,
                 payload={
-                    "browserRootHash": root_hash,
+                    "rootHash": root_hash,
+                    "sourceKind": source_kind.value,
                     "filesCount": len(file_rel),
                     "dirsCount": len(dir_rel),
                     "createdInstancesCount": int(created_instances),
@@ -8148,6 +8428,7 @@ API_WHITELIST: dict[str, SchedulingEffect] = {
     "add_learning_object_leaf": SchedulingEffect.NONE,
     "add_learning_object_container": SchedulingEffect.NONE,
     "sync_learning_objects_from_fs": SchedulingEffect.NONE,
+    "import_learning_objects_from_native_local_scan": SchedulingEffect.NONE,
     "list_user_cloud_accounts": SchedulingEffect.NONE,
     "begin_baidu_netdisk_connect": SchedulingEffect.NONE,
     "complete_baidu_netdisk_connect": SchedulingEffect.NONE,
@@ -8159,6 +8440,7 @@ API_WHITELIST: dict[str, SchedulingEffect] = {
     "list_recall_points_by_instance": SchedulingEffect.NONE,
     "get_instance_playback_descriptor": SchedulingEffect.NONE,
     "get_instance_hls_playlist": SchedulingEffect.NONE,
+    "get_instance_baidu_direct_playback_descriptor": SchedulingEffect.NONE,
     "stream_instance_hls_segment": SchedulingEffect.NONE,
     "get_instance_subtitle_file_for_user": SchedulingEffect.NONE,
     "bulk_remap_recall_points_instance": SchedulingEffect.NONE,

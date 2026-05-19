@@ -302,6 +302,7 @@ class SQLiteProjectLifecycleRepository(SqlLifecycleRepository):
         "project_config_index",
         "instance_index",
         "instance_media_binding_index",
+        "video_watch_progress_index",
         "learning_object_node_index",
         "recall_point_index",
         "learning_task_index",

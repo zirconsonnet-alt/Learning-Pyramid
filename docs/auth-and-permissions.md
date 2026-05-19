@@ -20,12 +20,13 @@
 
 - cookie 名称：`plm_session`
 - 默认 TTL：`LEARNINGPYRAMID_SESSION_TTL_DAYS`，默认 30 天。
-- `HttpOnly`、`SameSite=Lax`。
+- `HttpOnly`。
+- `SameSite` 由 `LEARNINGPYRAMID_AUTH_COOKIE_SAMESITE` 控制，默认 `lax`。
 - `Secure` 由 `LEARNINGPYRAMID_SECURE_COOKIES` 控制。
 
 服务端持久化 session token 哈希，不应把明文 token 当作长期数据记录。
 
-邮箱验证等待态使用 `plm_pending_email_verification` cookie。
+邮箱验证等待态使用 `plm_pending_email_verification` cookie，并复用相同的 `Secure` 与 `SameSite` 策略。
 
 ## 公开 API 路径
 
@@ -49,7 +50,7 @@
 - `/api/public/asr-bridge/...`
 - `/api/auth/...`
 
-其中 `/api/system/capabilities` 与 `/api/commissions/payout-identity/wechat/withdrawal-confirmation/complete` 支持可选认证：有合法 session 时会写入 `request.state.auth_user`，没有 session 时仍可继续处理。
+其中 `/api/system/capabilities`、`/api/auth/baidu-netdisk/callback` 与 `/api/commissions/payout-identity/wechat/withdrawal-confirmation/complete` 支持可选认证：有合法 session 时会写入 `request.state.auth_user`，没有 session 时仍可继续处理。
 
 ## 用户状态
 

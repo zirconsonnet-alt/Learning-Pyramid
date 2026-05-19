@@ -3,6 +3,8 @@ import type { MaterialSourceKind } from "@/ui/api/projects"
 import type { ScopedProjectRef } from "@/ui/api/projectScope"
 import { getInstanceSubtitleFile, type SubtitleSegment } from "@/ui/api/subtitles"
 import { resolveProjectSameStemSiblingFile } from "@/ui/localMedia/projectDirectory"
+import { isDesktopRuntime } from "@/ui/runtime/appRuntime"
+import { readDesktopNativeSubtitleFile } from "@/ui/runtime/desktopSubtitle"
 
 export const SUPPORTED_SUBTITLE_EXTENSIONS = [".srt", ".vtt", ".ass", ".ssa"] as const
 export const SUPPORTED_SUBTITLE_EXTENSIONS_LABEL = SUPPORTED_SUBTITLE_EXTENSIONS.join(" / ")
@@ -19,14 +21,38 @@ export async function loadSubtitleDocumentForInstance(params: {
   scope: ScopedProjectRef
   instance: Pick<Instance, "instanceId" | "materialId">
   sourceKind: MaterialSourceKind | null | undefined
+  desktopNativeStorage?: {
+    projectRoot: string
+    learningObjectRoot: string
+  } | null
 }): Promise<SubtitleDocument | null> {
-  const { scope, instance, sourceKind } = params
-  const cacheKey = `${scope.subjectId}:${scope.scopedProjectId}:${instance.instanceId}:${instance.materialId}:${sourceKind ?? "unknown"}`
+  const { scope, instance, sourceKind, desktopNativeStorage } = params
+  const cacheKey = buildSubtitleDocumentCacheKey({
+    scope,
+    instance,
+    sourceKind,
+    desktopNativeStorage,
+  })
   const cached = subtitleDocumentCache.get(cacheKey)
   if (cached) return await cached
 
   const promise = (async () => {
     if (!sourceKind) return null
+
+    if (sourceKind === "NATIVE_LOCAL" && isDesktopRuntime()) {
+      if (!desktopNativeStorage) return null
+      const nativeSubtitle = await readDesktopNativeSubtitleFile({
+        projectRoot: desktopNativeStorage.projectRoot,
+        learningObjectRoot: desktopNativeStorage.learningObjectRoot,
+        materialId: instance.materialId,
+      })
+      if (!nativeSubtitle?.found) return null
+      return parseSubtitleText({
+        fileName: nativeSubtitle.fileName,
+        format: nativeSubtitle.format,
+        text: nativeSubtitle.text,
+      })
+    }
 
     if (sourceKind === "BROWSER_LOCAL") {
       const file = await resolveProjectSameStemSiblingFile(scope.scopedProjectId, instance.materialId, SUPPORTED_SUBTITLE_EXTENSIONS)
@@ -54,6 +80,28 @@ export async function loadSubtitleDocumentForInstance(params: {
 
 export function clearSubtitleDocumentCache() {
   subtitleDocumentCache.clear()
+}
+
+function buildSubtitleDocumentCacheKey(params: {
+  scope: ScopedProjectRef
+  instance: Pick<Instance, "instanceId" | "materialId">
+  sourceKind: MaterialSourceKind | null | undefined
+  desktopNativeStorage?: {
+    projectRoot: string
+    learningObjectRoot: string
+  } | null
+}) {
+  const storageKey = params.desktopNativeStorage
+    ? `${params.desktopNativeStorage.projectRoot}:${params.desktopNativeStorage.learningObjectRoot}`
+    : "remote"
+  return [
+    params.scope.subjectId,
+    params.scope.scopedProjectId,
+    params.instance.instanceId,
+    params.instance.materialId,
+    params.sourceKind ?? "unknown",
+    storageKey,
+  ].join(":")
 }
 
 export function findSubtitleTextAtMs(segments: SubtitleSegment[], playbackMs: number, graceMs = 120): string | null {
@@ -166,19 +214,28 @@ export function buildSubtitleContextText(params: {
 async function parseLocalSubtitleFile(file: File): Promise<SubtitleDocument> {
   const rawText = await file.text()
   const normalizedExt = file.name.includes(".") ? file.name.slice(file.name.lastIndexOf(".")).toLowerCase() : ""
-  if (normalizedExt === ".srt") {
-    return { fileName: file.name, format: "srt", segments: parseSrt(rawText) }
-  }
-  if (normalizedExt === ".vtt") {
-    return { fileName: file.name, format: "vtt", segments: parseVtt(rawText) }
-  }
-  if (normalizedExt === ".ass") {
-    return { fileName: file.name, format: "ass", segments: parseAssLike(rawText) }
-  }
-  if (normalizedExt === ".ssa") {
-    return { fileName: file.name, format: "ssa", segments: parseAssLike(rawText) }
-  }
+  if (normalizedExt === ".srt") return parseSubtitleText({ fileName: file.name, format: "srt", text: rawText })
+  if (normalizedExt === ".vtt") return parseSubtitleText({ fileName: file.name, format: "vtt", text: rawText })
+  if (normalizedExt === ".ass") return parseSubtitleText({ fileName: file.name, format: "ass", text: rawText })
+  if (normalizedExt === ".ssa") return parseSubtitleText({ fileName: file.name, format: "ssa", text: rawText })
   throw new Error(`暂不支持的字幕格式：${file.name}`)
+}
+
+function parseSubtitleText(params: {
+  fileName: string
+  format: SubtitleDocument["format"]
+  text: string
+}): SubtitleDocument {
+  if (params.format === "srt") {
+    return { fileName: params.fileName, format: "srt", segments: parseSrt(params.text) }
+  }
+  if (params.format === "vtt") {
+    return { fileName: params.fileName, format: "vtt", segments: parseVtt(params.text) }
+  }
+  if (params.format === "ass") {
+    return { fileName: params.fileName, format: "ass", segments: parseAssLike(params.text) }
+  }
+  return { fileName: params.fileName, format: "ssa", segments: parseAssLike(params.text) }
 }
 
 function parseSrt(text: string): SubtitleSegment[] {

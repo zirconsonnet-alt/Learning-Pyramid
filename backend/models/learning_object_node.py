@@ -4,6 +4,8 @@ from typing import Optional, Sequence, Union
 from .errors import PreconditionFailure
 from .types import InstanceId, LearningObjectNodeId, ProjectId, PurePath
 
+LEARNING_OBJECT_SOURCES = {"FILESYSTEM", "MANUAL", "BAIDU_NETDISK"}
+
 
 @dataclass(frozen=True, slots=True)
 class LearningObjectLeaf:
@@ -18,8 +20,8 @@ class LearningObjectLeaf:
     def validate_write_time(self) -> None:
         if not str(self.node_id):
             raise PreconditionFailure("LearningObjectLeaf.node_id must be non-empty")
-        if self.source not in {"FILESYSTEM", "MANUAL"}:
-            raise PreconditionFailure("LearningObjectLeaf.source must be FILESYSTEM or MANUAL")
+        if self.source not in LEARNING_OBJECT_SOURCES:
+            raise PreconditionFailure("LearningObjectLeaf.source must be FILESYSTEM, MANUAL or BAIDU_NETDISK")
         if not self.relative_path.as_posix().strip():
             raise PreconditionFailure("LearningObjectLeaf.relative_path must be non-empty")
         if self.relative_path.is_absolute():
@@ -45,8 +47,8 @@ class LearningObjectContainer:
     def validate_write_time(self) -> None:
         if not str(self.node_id):
             raise PreconditionFailure("LearningObjectContainer.node_id must be non-empty")
-        if self.source not in {"FILESYSTEM", "MANUAL"}:
-            raise PreconditionFailure("LearningObjectContainer.source must be FILESYSTEM or MANUAL")
+        if self.source not in LEARNING_OBJECT_SOURCES:
+            raise PreconditionFailure("LearningObjectContainer.source must be FILESYSTEM, MANUAL or BAIDU_NETDISK")
         if not self.relative_path.as_posix().strip():
             raise PreconditionFailure("LearningObjectContainer.relative_path must be non-empty")
         if self.relative_path.is_absolute():
