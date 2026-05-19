@@ -10,11 +10,23 @@ import type { createLearningPyramidApi } from "../src/api/types"
 import { LearningMediaPlayer } from "../src/screens/LearningMediaPlayer"
 import { LearningObjectScreen } from "../src/screens/LearningObjectScreen"
 
+type TimeUpdateHandler = (payload: { currentTime: number }) => void
+
+const mockPlayer = {
+  id: "player",
+  timeUpdateEventInterval: 0,
+  addListener: jest.fn((_eventName: "timeUpdate", handler: TimeUpdateHandler) => {
+    mockPlayer.timeUpdateHandler = handler
+    return { remove: jest.fn() }
+  }),
+  timeUpdateHandler: null as TimeUpdateHandler | null,
+}
+
 jest.mock("expo-video", () => {
   const React = require("react")
   const { Text } = require("react-native")
   return {
-    useVideoPlayer: jest.fn(() => ({ id: "player" })),
+    useVideoPlayer: jest.fn(() => mockPlayer),
     VideoView: () => React.createElement(Text, null, "VideoView"),
   }
 })
@@ -47,7 +59,7 @@ const recallPoint: RecallPoint = {
   deletedAt: null,
   question: [{ kind: "TEXT", text: "学习金字塔强调什么？" }],
   answer: [{ kind: "TEXT", text: "主动回忆和应用。" }],
-  anchor: { instanceId: "inst_1", position: "00:00:10" },
+  anchor: { instanceId: "inst_1", position: "t=10000" },
   references: [],
   insights: [],
 }
@@ -55,6 +67,8 @@ const recallPoint: RecallPoint = {
 describe("LearningMediaPlayer", () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    mockPlayer.timeUpdateEventInterval = 0
+    mockPlayer.timeUpdateHandler = null
   })
 
   it("passes resolved URL and session cookie header to expo-video for supported playback", () => {
@@ -77,6 +91,26 @@ describe("LearningMediaPlayer", () => {
         uri: "https://plm.xuebao.chat/api/subjects/subj_1/projects/proj_1/media/instances/inst_1",
       }),
     )
+  })
+
+  it("reports playback time updates in milliseconds", () => {
+    const onPlaybackTimeChange = jest.fn()
+    render(
+      <LearningMediaPlayer
+        apiBaseUrl="https://plm.xuebao.chat/api"
+        descriptor={playableDescriptor}
+        loading={false}
+        onPlaybackTimeChange={onPlaybackTimeChange}
+        sessionCookie="plm_session=abc"
+        title="第一课"
+      />,
+    )
+
+    expect(mockPlayer.timeUpdateEventInterval).toBe(0.5)
+    expect(mockPlayer.addListener).toHaveBeenCalledWith("timeUpdate", expect.any(Function))
+
+    mockPlayer.timeUpdateHandler?.({ currentTime: 12.345 })
+    expect(onPlaybackTimeChange).toHaveBeenCalledWith(12345)
   })
 
   it("shows an explicit unsupported state for desktop native media", () => {

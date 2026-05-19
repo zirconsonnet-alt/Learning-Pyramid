@@ -1,47 +1,89 @@
-# 当前变更：Android 移动端预检与 smoke 清单
+# 当前变更：移动端原生工作台合入
 
 ## 当前用户要求
 
-- 在 Android Studio 下载完成前，先做移动端预检和 Android smoke 测试清单。
-
-## 根因
-
-- 移动端 MVP 已可运行，但真实 Android 模拟器/真机 smoke 尚未执行。
-- 当前机器还没有可用 `adb`，因此只能先完成本地工程预检、Metro 状态确认和测试清单准备。
+- 将 `mobile-native-workbench` 分支本地合并回 `015-scoped-project-identity`。
+- 合并前已将主工作区既有源码、文档、测试改动提交为 checkpoint。
+- 排除 `desktop/src-tauri/target-codex-build/` 构建产物，不把 1.65GB 生成物提交进 Git。
+- 不修改后端 API、数据库、部署、Web/Tauri 工作台语义，不新增移动端专用学习协议。
 
 ## 本次实际修改文件
 
-- `docs/mobile-android-smoke-checklist.md`
-  - 新增 Android 模拟器 smoke 清单、预检结果、启动方式、风险观察和结果记录项。
+- `.gitignore`
+  - 新增忽略 `desktop/src-tauri/target-codex-build/`，避免 Tauri/Rust 构建产物进入仓库历史。
+- `mobile/src/api/learningTasks.ts`
+  - 新增移动端 `POST /learning-tasks` client，复用 scoped project 路径和既有后端 API。
+- `mobile/src/api/types.ts`
+  - 将 `learningTasks` 纳入移动端聚合 API。
+- `mobile/__tests__/domain-api.test.ts`
+  - 覆盖移动端领域 API 路径、方法和 `learning task` 提交 body。
+- `mobile/src/workbench/recallDrafts.ts`
+  - 新增纯函数草稿模型、草稿完整性校验和提交 payload 构造；拒绝无效播放时间。
+- `mobile/__tests__/workbench-drafts.test.ts`
+  - 覆盖草稿创建、校验、无效播放时间、锚点和提交 payload。
+- `mobile/src/screens/LearningMediaPlayer.tsx`
+  - 将播放器 `timeUpdate` 当前时间按毫秒回传给工作台，并清理监听器。
+- `mobile/__tests__/learning-object-detail.test.tsx`
+  - 覆盖播放器时间回调连接。
+- `mobile/src/screens/MobileWorkbenchScreen.tsx`
+  - 新增原生移动工作台 presentational screen，展示当前学习对象、目录、媒体、已有复述点、草稿和复习门禁。
+- `mobile/__tests__/mobile-workbench-screen.test.tsx`
+  - 覆盖工作台渲染、目录选择、播放器回调、草稿新增/编辑/删除、提交门禁和复习入口。
+- `mobile/src/app/project/[subjectId]/[scopedProjectId].tsx`
+  - 将项目路由接到 query-driven 移动工作台，处理 active leaf、播放时间、草稿提交、query invalidation、queue gate 和 active leaf reconcile。
+  - 提交成功后只清理本次提交快照内的 `localId` 草稿；不再按 `instanceId` 清空后续新建草稿。
+  - route 层复用草稿完整性校验，直接调用 submit callback 时也不会提交不完整草稿。
+  - 本地草稿 ID 仅使用 `globalThis.crypto.randomUUID()`，不提供隐式 fallback。
+- `mobile/__tests__/project-route-workbench.test.tsx`
+  - 覆盖 route 层草稿提交、当前节点草稿清理、query invalidation、提交门禁、active leaf reconcile、pending 提交期间新草稿保留和 `randomUUID` 路径。
+- `docs/mobile-client.md`
+  - 同步移动端原生工作台能力、功能边界和工程边界。
 - `docs/current-change.md`
-  - 覆盖为当前预检任务工作单。
+  - 解析合并冲突，覆盖为本次合入后的当前状态和验证记录。
+- `docs/mobile-android-smoke-checklist.md`
+  - 本次合并未修改；保留主线 Android smoke 清单作为长期检查文档。
+- `mobile/__tests__/learning-navigation.test.tsx`
+  - 未修改；学科和材料导航相关覆盖保留，项目路由行为由工作台 screen/API/route 测试覆盖。
 
 ## 行为语义是否变化
 
-- 无。仅文档和预检记录。
+- 是。移动端项目入口从只浏览学习对象列表，变为默认进入学习优先的原生工作台。
+- 是。移动端支持目录切换当前学习对象、查看已有复述点、基于当前播放时间创建文本复述点草稿，并提交为一个 `learning task`。
+- 是。移动端工作台在 review queue 有队列头、加载、刷新、错误、无 active leaf、无草稿、草稿不完整或提交中时阻止草稿提交。
+- 是。提交成功后只删除本次提交的草稿集合，提交 pending 期间新建的草稿会保留。
+- 是。移动端播放器继续只播放后端 playback descriptor 支持的来源；`NATIVE_LOCAL`、`BROWSER_LOCAL` 和 `MANUAL` 明确不可播放。
+- 否。后端 API、数据库结构、部署方式、认证协议、Web/Tauri 工作台语义未变化。
 
 ## 重构说明
 
-- 无。
+- 做了移动端范围内的局部结构补齐：新增 `recallDrafts` 纯函数模块承载草稿与 payload 构造，避免将校验和提交体拼装散落在 screen 或 route 中。
+- 做了 route container 内部状态整理：统一提交门禁、review queue 阻断状态、active leaf reconcile 和提交快照清理。
+- 未做跨模块重构，未改变公共后端接口、共享协议或 Web/Tauri 边界。
 
 ## 未修改内容
 
-- 未修改代码、依赖、测试、后端 API、部署、数据库结构或移动端构建配置。
-- `pnpm --dir mobile lint` 曾触发 Expo 自动安装 ESLint，但该副作用已撤销；未保留 lint 依赖或配置。
+- 未修改后端 API、数据库、部署配置、认证协议。
+- 未修改 Web/Tauri 工作台实现或语义。
+- 未新增移动端专用学习协议。
+- 未从 `frontend/` 复用 React DOM 工作台组件。
+- 未实现手机本机文件导入、离线缓存、移动端本机路径播放、推送、支付或发布渠道能力。
+- 未修改 `MobileWorkbenchScreen` presentational API 以掩盖 route 状态问题。
+- 未提交 `desktop/src-tauri/target-codex-build/` 构建产物。
 
 ## 影响范围
 
-- API：无影响。
-- 架构：无影响。
+- API：移动端 client 新增对既有 `POST /learning-tasks` 的调用；不新增后端 API。
+- 架构：`mobile/` 仍是独立 Expo-managed React Native 应用；不引入共享包或 Web 组件依赖。
 - 部署：无影响。
 - 数据结构：无影响。
-- UI：无影响。
-- 测试：无测试代码变化。
+- UI：移动端项目入口升级为学习优先工作台，交互布局为原生移动端实现。
+- 测试：新增和更新移动端 API、草稿、媒体、工作台、项目路由相关测试；导航覆盖保留。
 
 ## 当前风险点和不确定项
 
-- `adb` 当前不可用，需 Android Studio 安装完成后复查。
-- 真实 Android 原生播放器是否能稳定携带 Cookie header 播放受保护媒体，仍需模拟器 smoke 验证。
+- Expo 原生播放器携带 Cookie header 播放受保护媒体仍需 Android/iOS 真机或 emulator smoke 验证。
+- 当前环境未识别 `adb` 命令，无法确认连接的 Android 设备或模拟器；Android smoke 仍未运行。
+- 移动端 route 依赖运行环境提供 `globalThis.crypto.randomUUID()`；缺失时应暴露为环境问题，而不是降级生成本地 ID。
 
 ## 仍需用户确认的问题
 
@@ -49,14 +91,22 @@
 
 ## 验证记录
 
-- 已运行：`pnpm --dir mobile test`，通过，9 个测试套件、27 个测试通过。
-- 已运行：`pnpm --dir mobile typecheck`，通过。
-- 已运行：`pnpm --dir mobile exec expo --version`，结果 `55.0.30`。
-- 已运行：`pnpm --dir mobile exec expo install --check`，通过，输出 `Dependencies are up to date`。
-- 已运行：`git diff --check -- docs/mobile-android-smoke-checklist.md docs/current-change.md mobile/package.json mobile/pnpm-lock.yaml`，通过；仅有 Git 换行转换 warning，无 whitespace error。
-- 已运行：`adb devices` 探测，结果 `adb: not found`。
-- 已运行：`http://localhost:8081/status` 探测，结果 `packager-status:running`。
-- 已运行：`pnpm --dir mobile lint`，未通过；Expo 尝试自动安装 ESLint 后仍报 `Cannot find module 'eslint'`。该命令不作为当前验收项，自动依赖改动已撤销。
+- mobile-native-workbench 分支合入前已运行：`pnpm --dir mobile test`
+  - 结果：通过，12 个测试套件、47 个测试通过。
+- mobile-native-workbench 分支合入前已运行：`pnpm --dir mobile typecheck`
+  - 结果：通过，`tsc --noEmit` 退出码为 0。
+- mobile-native-workbench 分支合入前已运行：`pnpm --dir mobile exec expo --version`
+  - 结果：通过，输出 `55.0.30`。
+- mobile-native-workbench 分支合入前已运行：`git diff --check -- docs/mobile-client.md docs/current-change.md mobile`
+  - 结果：通过。
+- 主工作区 checkpoint 前已运行：`git diff --cached --check`
+  - 结果：通过。
+- 已运行：`adb devices`
+  - 结果：失败，当前环境未识别 `adb` 命令；未运行 Android 启动 smoke。
+- 合并结果已运行：`pnpm --dir mobile test`
+  - 结果：通过，12 个测试套件、47 个测试通过。
+- 合并结果已运行：`pnpm --dir mobile typecheck`
+  - 结果：通过，`tsc --noEmit` 退出码为 0。
 
 ## 污染风险检查
 

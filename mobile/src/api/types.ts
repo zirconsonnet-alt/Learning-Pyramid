@@ -2,6 +2,7 @@ import { z } from "zod"
 
 import { createAuthApi } from "./auth"
 import { createLearningObjectsApi } from "./learningObjects"
+import { createLearningTasksApi } from "./learningTasks"
 import { createMediaApi } from "./media"
 import { createReviewApi } from "./review"
 import { createSubjectsApi } from "./subjects"
@@ -34,6 +35,7 @@ export function createLearningPyramidApi(requester: ApiRequester) {
     auth: createAuthApi(requester),
     subjects: createSubjectsApi(requester),
     learningObjects: createLearningObjectsApi(requester),
+    learningTasks: createLearningTasksApi(requester),
     media: createMediaApi(requester),
     review: createReviewApi(requester),
   }

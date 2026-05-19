@@ -1,3 +1,4 @@
+import { useEffect } from "react"
 import { StyleSheet, View } from "react-native"
 import { VideoView, useVideoPlayer, type ContentType, type VideoSource } from "expo-video"
 
@@ -12,6 +13,7 @@ export function LearningMediaPlayer({
   descriptor,
   errorMessage,
   loading,
+  onPlaybackTimeChange,
   sessionCookie,
   title,
 }: {
@@ -19,6 +21,7 @@ export function LearningMediaPlayer({
   descriptor: PlaybackDescriptor | null
   errorMessage?: string | null
   loading: boolean
+  onPlaybackTimeChange?: (currentMs: number) => void
   sessionCookie?: string | null
   title: string
 }) {
@@ -37,7 +40,7 @@ export function LearningMediaPlayer({
     metadata: { title },
   }
 
-  return <PlayableVideo source={source} />
+  return <PlayableVideo onPlaybackTimeChange={onPlaybackTimeChange} source={source} />
 }
 
 function getUnsupportedPlaybackMessage(descriptor: PlaybackDescriptor) {
@@ -48,8 +51,30 @@ function getUnsupportedPlaybackMessage(descriptor: PlaybackDescriptor) {
   return null
 }
 
-function PlayableVideo({ source }: { source: VideoSource }) {
+function PlayableVideo({
+  onPlaybackTimeChange,
+  source,
+}: {
+  onPlaybackTimeChange?: (currentMs: number) => void
+  source: VideoSource
+}) {
   const player = useVideoPlayer(source)
+
+  useEffect(() => {
+    if (!onPlaybackTimeChange) return
+
+    player.timeUpdateEventInterval = 0.5
+    const subscription = player.addListener("timeUpdate", ({ currentTime }) => {
+      if (!Number.isFinite(currentTime)) return
+      onPlaybackTimeChange(Math.max(0, Math.floor(currentTime * 1000)))
+    })
+
+    return () => {
+      subscription.remove()
+      player.timeUpdateEventInterval = 0
+    }
+  }, [onPlaybackTimeChange, player])
+
   return (
     <View style={styles.shell}>
       <VideoView contentFit="contain" nativeControls player={player} style={styles.video} />

@@ -27,6 +27,17 @@ describe("mobile domain api", () => {
     await api.review.listRecallPoints(scope)
     await api.review.listRecommendations(scope, { offset: 10, limit: 20 })
     await api.review.commitReviewTask(scope, "task_1", { canRecall: [0] })
+    await api.learningTasks.submitLearningTask(scope, {
+      title: "第一课",
+      items: [
+        {
+          question: [{ kind: "TEXT", text: "题面" }],
+          answer: [{ kind: "TEXT", text: "答案" }],
+          anchor: { instanceId: "inst_1", position: "t=12000" },
+          references: [],
+        },
+      ],
+    })
 
     expect(calls).toEqual([
       { path: "/auth/me", method: undefined, body: undefined },
@@ -44,6 +55,21 @@ describe("mobile domain api", () => {
       { path: "/subjects/subj_1/projects/proj_1/recall-points", method: undefined, body: undefined },
       { path: "/subjects/subj_1/projects/proj_1/review-recommendations?offset=10&limit=20", method: undefined, body: undefined },
       { path: "/subjects/subj_1/projects/proj_1/review-tasks/task_1/commit", method: "POST", body: { canRecall: [0] } },
+      {
+        path: "/subjects/subj_1/projects/proj_1/learning-tasks",
+        method: "POST",
+        body: {
+          title: "第一课",
+          items: [
+            {
+              question: [{ kind: "TEXT", text: "题面" }],
+              answer: [{ kind: "TEXT", text: "答案" }],
+              anchor: { instanceId: "inst_1", position: "t=12000" },
+              references: [],
+            },
+          ],
+        },
+      },
     ])
   })
 })
