@@ -201,6 +201,8 @@ def build_course_package(
     created_at: str,
 ) -> dict[str, Any]:
     _ensure_output_dir_outside_input(input_dir, output_dir)
+    if output_dir.exists() and not output_dir.is_dir():
+        raise CoursePackageError("课程包输出路径必须是目录。")
     if output_dir.exists() and any(output_dir.iterdir()):
         raise CoursePackageError("课程包输出目录必须为空。")
 

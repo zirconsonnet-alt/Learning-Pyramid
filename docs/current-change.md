@@ -28,7 +28,7 @@
 ## 本次实际修改文件
 
 - `tools/offline_course_package.py`：新增离线课程包 manifest 构建、真实课程包目录生成、视频枚举、sidecar 字幕/封面识别、文件 sha256 和 manifest 校验；补充 `source.tool` / `source.version` 必填校验、包内相对路径校验、重复文件路径校验、重复视频名路径去重、symlink 拒绝和输出目录边界检查。
-- `tests/test_offline_course_package.py`：新增 manifest 构建、真实课程包目录写入、输出目录非空拒绝、输出目录位于输入目录内拒绝、项目身份校验、source 元数据校验、包内相对路径校验、重复文件路径拒绝、重复视频名路径去重、symlink 拒绝和 sha256 测试。
+- `tests/test_offline_course_package.py`：新增 manifest 构建、真实课程包目录写入、输出目录非空拒绝、输出路径为普通文件拒绝、输出目录位于输入目录内拒绝、项目身份校验、source 元数据校验、包内相对路径校验、重复文件路径拒绝、重复视频名路径去重、symlink 拒绝和 sha256 测试。
 - `docs/superpowers/plans/2026-05-20-offline-course-package-import.md`：同步方案 1，后续 Task 2/3 必须使用真实课程包目录作为 server root。
 - `docs/current-change.md`：覆盖为当前离线课程包实现工作单。
 
@@ -40,7 +40,7 @@
 - manifest 校验会拒绝绝对路径、反斜杠路径、`.` / `..` 路径段、空路径段、目录形态路径、重复文件路径，以及文件类型和顶层目录不匹配的路径。
 - manifest 构建会用唯一 `itemId` 生成视频、字幕和封面的包内路径，避免不同子目录的同名文件冲突。
 - manifest 构建会拒绝 symlink 文件，避免读取课程目录外内容。
-- 课程包输出目录必须为空，且不能位于输入课程目录内。
+- 课程包输出路径必须是目录；输出目录必须为空，且不能位于输入课程目录内。
 - 未改变现有运行时用户流程。
 
 ## 重构说明

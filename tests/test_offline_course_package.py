@@ -223,6 +223,24 @@ def test_build_course_package_rejects_non_empty_output_dir(tmp_path: Path) -> No
         )
 
 
+def test_build_course_package_rejects_file_output_path(tmp_path: Path) -> None:
+    input_dir = tmp_path / "input"
+    output_path = tmp_path / "course-package"
+    write_file(input_dir / "01.mp4", b"video")
+    write_file(output_path, b"not a directory")
+
+    with pytest.raises(CoursePackageError, match="输出路径必须是目录"):
+        build_course_package(
+            input_dir=input_dir,
+            output_dir=output_path,
+            title="默认网课材料",
+            subject_id="subj_1",
+            scoped_project_id="proj_1",
+            package_id="pkg_test",
+            created_at="2026-05-20T12:00:00Z",
+        )
+
+
 def test_build_course_package_rejects_output_dir_inside_input_dir(tmp_path: Path) -> None:
     input_dir = tmp_path / "input"
     write_file(input_dir / "01.mp4", b"video")

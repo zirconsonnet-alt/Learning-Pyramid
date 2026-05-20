@@ -52,6 +52,8 @@ Modify:
 
 ### Task 1: Python Course Package Manifest Model
 
+> Confirmed update: Task 1 now includes `build_course_package()` and must materialize a real course-package directory. The historical code snippets below are superseded by the current implementation in `tools/offline_course_package.py` and `tests/test_offline_course_package.py`; do not copy the older manifest-only snippets when continuing implementation.
+
 **Files:**
 - Create: `tools/offline_course_package.py`
 - Create: `tests/test_offline_course_package.py`
