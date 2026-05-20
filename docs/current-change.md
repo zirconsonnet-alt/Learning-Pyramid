@@ -1,82 +1,80 @@
-# 当前变更：离线课程包导入实现
+# 当前变更：桌面端离线课程包临时服务
 
 ## 当前用户要求
 
-- 实现局域网离线课程包导入。
-- 电脑端字幕工具提供视频、字幕和 manifest。
-- 手机端下载到 App 私有课程库并绑定线上学科/项目。
-- 用户确认采用方案 1：桌面端生成真实 `course-package/` 目录，manifest path 必须指向包内真实文件。
-- 当前正在执行 Task 1：Python 离线课程包 manifest 和真实课程包目录生成。
+- 实现 Task 2：Desktop Temporary Package Server。
+- 新增 token-gated 临时 HTTP server，服务 Task 1 生成的真实 `course-package/` 目录。
+- `OfflineCoursePackageSession.root` 必须指向 materialized package root，不是原始视频输入目录。
+- 只修改 `tools/offline_course_package_server.py`、`tests/test_offline_course_package_server.py`、`docs/current-change.md`。
+- 按 TDD 执行、运行指定测试并提交。
 
 ## 根因判断
 
-- 手机端离线学习需要完整课程素材包，不是单独字幕文件。
-- 线上 `{subjectId, scopedProjectId}` 必须继续作为学习数据主干。
-- manifest 的 `source` 是后续信任电脑端包来源和工具版本的顶层元数据，缺失时不能通过校验。
-- manifest 的文件路径会被后续临时 HTTP 服务和移动端存储使用，必须在校验层限制为包内相对路径。
-- manifest path 必须和桌面端生成的真实课程包目录闭合；否则 Task 2 server 按 `root / path` 下载会 404。
-- 同名视频位于不同子目录时不能生成重复包内路径，否则后续下载会覆盖或取错文件。
+- 移动端需要从桌面端下载已物化课程包中的 manifest 声明文件。
+- 临时服务不能信任任意 URL path 或目录中文件，必须以 manifest 声明路径作为下载白名单。
+- manifest 本身仍需启动前调用 `validate_course_package_manifest()`，避免无效包绕过 Task 1 校验。
+- Range 请求需要确定性返回 206 或 416，不能把解析错误暴露为未处理异常。
 
 ## 修改前判断
 
-- 先实现 manifest 和真实课程包目录生成，再接临时服务和移动端下载。
-- 不扫描手机系统文件，不写手机公共目录，不做公网中继。
-- 不使用原始路径映射、fallback、shim 或隐式兼容逻辑。
-- 课程包输出目录不能位于输入课程目录内，避免再次扫描时把已生成包当源素材。
-- 本次只修改 Python manifest/包生成模块、测试、当前工作单和离线课程包实现计划。
+- 本任务新增 `tools/` 下独立桌面临时服务，不改变现有后端 FastAPI、包生成接口、移动端、UI、部署配置或数据库。
+- 最小干净路径：复用 `validate_course_package_manifest()`，从 manifest 生成允许下载路径集合，再用 `root.resolve()` 和 `relative_to()` 确认文件位于包根目录内。
+- 不应做：二维码、UI、字幕工具入口、移动端下载、兼容旧目录结构、直接服务目录中所有文件。
+- 不需要跨模块重构。
 
 ## 本次实际修改文件
 
-- `tools/offline_course_package.py`：新增离线课程包 manifest 构建、真实课程包目录生成、视频枚举、sidecar 字幕/封面识别、文件 sha256 和 manifest 校验；补充 `source.tool` / `source.version` 必填校验、包内相对路径校验、重复文件路径校验、重复视频名路径去重、symlink 拒绝和输出目录边界检查。
-- `tests/test_offline_course_package.py`：新增 manifest 构建、真实课程包目录写入、输出目录非空拒绝、输出路径为普通文件拒绝、输出目录位于输入目录内拒绝、项目身份校验、source 元数据校验、包内相对路径校验、重复文件路径拒绝、重复视频名路径去重、symlink 拒绝和 sha256 测试。
-- `docs/superpowers/plans/2026-05-20-offline-course-package-import.md`：同步方案 1，后续 Task 2/3 必须使用真实课程包目录作为 server root。
-- `docs/current-change.md`：覆盖为当前离线课程包实现工作单。
+- `tools/offline_course_package_server.py`：新增 `OfflineCoursePackageSession`、`OfflineCoursePackageServer`、`start_offline_course_package_server()`、metadata/manifest/files GET endpoint、token 校验、过期校验、manifest path 白名单、root 边界检查和 Range 下载处理。
+- `tests/test_offline_course_package_server.py`：新增临时服务行为测试，使用 `build_course_package()` 生成真实课程包目录后验证 metadata、manifest、Range 下载、缺 token、过期 session、未声明文件、路径穿越和无效 Range。
+- `docs/current-change.md`：覆盖为当前 Task 2 工作单。
 
 ## 行为语义是否变化
 
-- 新增 Python 能力：生成并校验离线课程包 manifest。
-- 新增 Python 能力：把输入目录中的视频、字幕、封面复制到真实 `course-package/videos|subtitles|covers` 目录，并写入 `manifest.json`。
-- manifest 校验会拒绝缺少 `source`、`source.tool` 或 `source.version` 的包。
-- manifest 校验会拒绝绝对路径、反斜杠路径、`.` / `..` 路径段、空路径段、目录形态路径、重复文件路径，以及文件类型和顶层目录不匹配的路径。
-- manifest 构建会用唯一 `itemId` 生成视频、字幕和封面的包内路径，避免不同子目录的同名文件冲突。
-- manifest 构建会拒绝 symlink 文件，避免读取课程目录外内容。
-- 课程包输出路径必须是目录；输出目录必须为空，且不能位于输入课程目录内。
-- 未改变现有运行时用户流程。
+- 新增 Python 桌面端临时 HTTP 服务能力。
+- 所有 endpoint 都要求 `Authorization: Bearer <token>`。
+- session 过期后返回 410。
+- manifest 未声明的文件路径返回 404。
+- Range 合法时返回 206 和 `Content-Range`；无效 Range 返回 416。
+- 未改变现有课程包生成、后端 API、移动端、UI、部署或数据库语义。
 
 ## 重构说明
 
 - 未做跨模块重构。
-- 新增模块职责仍限定在桌面端课程包 manifest 和文件物化，不负责 HTTP 服务、二维码、移动端下载或播放器。
+- 仅在新增模块内提取 manifest 文件路径、总字节数、安全路径和 Range 解析 helper，避免 handler 中重复安全逻辑。
 
 ## 未修改内容
 
-- 未修改 Web/Tauri 工作台学习语义。
-- 未修改移动端 UI、播放器、下载逻辑。
-- 未修改字幕工具入口。
-- 未修改 API、数据库、部署配置。
+- 未修改 `tools/offline_course_package.py`，因为 Task 1 已提供真实课程包目录和 manifest 校验能力。
+- 未实现二维码、UI、字幕工具入口或移动端。
+- 未修改现有后端、前端、移动端、构建或部署文件。
 - 未修改其它已有脏工作区文件。
 
 ## 影响范围
 
-- 当前影响 Python 离线课程包 manifest 生成、校验和课程包目录生成。
-- 后续 Task 2 server 将以真实课程包目录作为 `session.root`。
+- 影响范围限定为 Python 离线课程包临时服务及其测试。
+- 不影响公共 API、架构、部署、数据结构或 UI。
+- 新增测试文件覆盖本任务服务行为。
 
 ## 当前风险点和不确定项
 
-- 大文件复制耗时和磁盘空间占用需要在字幕工具入口任务中给出清晰提示。
-- 当前 Windows 环境无法创建 symlink 时，symlink 安全测试会跳过；非 Windows 或具备权限的环境会执行。
-- Expo-managed 大文件下载、空间检查和本地视频 URI 需要在后续移动端任务验证。
+- 当前实现只使用 stdlib HTTP server，适合桌面端临时局域网传输，不作为生产公网服务。
+- `base_url` 在默认 `0.0.0.0` 启动时使用 `127.0.0.1` 表示本机访问地址；局域网展示地址后续应由字幕工具入口按网卡地址生成，本任务未实现。
 
 ## 仍需用户确认的问题
 
-- 无。用户已确认采用真实课程包目录方案。
+- 无。
 
 ## 验证记录
 
-- 已运行：`python -m pytest tests/test_offline_course_package.py -q`
-  - 结果：19 passed, 1 skipped。skip 为当前 Windows 环境不允许创建 symlink。
-- 已运行：`git diff --check -- tools/offline_course_package.py tests/test_offline_course_package.py docs/current-change.md docs/superpowers/plans/2026-05-20-offline-course-package-import.md`
+- 已按 TDD 先运行 `python -m pytest tests/test_offline_course_package_server.py -q`，在生产模块不存在时失败，符合预期 RED。
+- 已运行：`python -m pytest tests/test_offline_course_package_server.py -q`
+  - 结果：6 passed。
+- 已运行：`python -m pytest tests/test_offline_course_package.py tests/test_offline_course_package_server.py -q`
+  - 结果：26 passed, 1 skipped。skip 为既有 Task 1 symlink 测试在当前 Windows 环境不允许创建 symlink。
+- 已运行：`git diff --check -- tools/offline_course_package_server.py tests/test_offline_course_package_server.py docs/current-change.md`
   - 结果：通过；仅有 Git LF/CRLF 转换提示。
+- 已运行：`rg "from __future__ import annotations" tools/offline_course_package_server.py tests/test_offline_course_package_server.py`
+  - 结果：无命中。
 
 ## 污染风险检查
 
