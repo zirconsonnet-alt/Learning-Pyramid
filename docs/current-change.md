@@ -13,6 +13,7 @@
 - 线上 `{subjectId, scopedProjectId}` 必须继续作为学习数据主干。
 - manifest 的 `source` 是后续信任电脑端包来源和工具版本的顶层元数据，缺失时不能通过校验。
 - manifest 的文件路径会被后续临时 HTTP 服务和移动端存储使用，必须在校验层限制为包内相对路径。
+- 同名视频位于不同子目录时不能生成重复包内路径，否则后续下载会覆盖或取错文件。
 
 ## 修改前判断
 
@@ -20,11 +21,12 @@
 - 不扫描手机系统文件，不写公共目录，不做公网中继。
 - 本次只补 Task 1 spec review 发现的 `source` 校验漏项，不碰移动端、服务或字幕工具入口。
 - 代码质量 review 指出路径穿越风险后，本次继续在 Task 1 范围内补路径安全校验。
+- 代码质量 re-review 指出目录形态路径和重复包内路径风险后，继续在 Task 1 范围内收紧 manifest 生成与校验。
 
 ## 本次实际修改文件
 
-- `tools/offline_course_package.py`：新增离线课程包 manifest 构建、视频枚举、sidecar 字幕/封面识别、文件 sha256 和 manifest 校验；补充 `source.tool` / `source.version` 必填校验与包内相对路径校验。
-- `tests/test_offline_course_package.py`：新增 manifest 构建、项目身份校验、source 元数据校验、包内相对路径校验和 sha256 测试。
+- `tools/offline_course_package.py`：新增离线课程包 manifest 构建、视频枚举、sidecar 字幕/封面识别、文件 sha256 和 manifest 校验；补充 `source.tool` / `source.version` 必填校验、包内相对路径校验和重复文件名路径去重。
+- `tests/test_offline_course_package.py`：新增 manifest 构建、项目身份校验、source 元数据校验、包内相对路径校验、重复视频名路径去重和 sha256 测试。
 - `docs/current-change.md`：覆盖为当前离线课程包实现工作单。
 
 ## 行为语义是否变化
@@ -32,6 +34,7 @@
 - 新增 Python 纯函数能力，用于生成和校验离线课程包 manifest。
 - manifest 校验现在会拒绝缺少 `source`、`source.tool` 或 `source.version` 的包。
 - manifest 校验现在会拒绝绝对路径、反斜杠路径、`.` / `..` 路径段、空路径段，以及文件类型和顶层目录不匹配的路径。
+- manifest 构建会用唯一 `itemId` 生成视频、字幕和封面的包内路径，避免不同子目录的同名文件冲突。
 - 未改变现有运行时用户流程。
 
 ## 重构说明

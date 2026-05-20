@@ -58,6 +58,8 @@ def _validate_package_file_path(path: str, expected_dir: str, label: str) -> Non
     parts = path.split("/")
     if any(part in ("", ".", "..") for part in parts):
         raise CoursePackageError(f"{label} path 必须使用包内相对路径。")
+    if len(parts) < 2:
+        raise CoursePackageError(f"{label} path 必须包含文件名。")
     if parts[0] != expected_dir:
         raise CoursePackageError(f"{label} path 必须位于 {expected_dir}/。")
 
@@ -99,17 +101,17 @@ def build_course_package_manifest(
             "title": video.stem,
             "order": index,
             "learningObjectKey": item_id,
-            "video": _file_entry(video, f"videos/{video.name}"),
+            "video": _file_entry(video, f"videos/{item_id}{video.suffix.lower()}"),
         }
         subtitle = _find_sidecar(video, SUBTITLE_EXTENSIONS)
         if subtitle is not None:
             item["subtitle"] = {
-                **_file_entry(subtitle, f"subtitles/{subtitle.name}"),
+                **_file_entry(subtitle, f"subtitles/{item_id}{subtitle.suffix.lower()}"),
                 "language": "zh-CN",
             }
         cover = _find_sidecar(video, COVER_EXTENSIONS)
         if cover is not None:
-            item["cover"] = _file_entry(cover, f"covers/{cover.name}")
+            item["cover"] = _file_entry(cover, f"covers/{item_id}{cover.suffix.lower()}")
         items.append(item)
 
     manifest = {

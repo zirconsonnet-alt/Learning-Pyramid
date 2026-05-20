@@ -119,6 +119,7 @@ def test_validate_manifest_rejects_incomplete_source_metadata(source: dict[str, 
         "../01.mp4",
         "/tmp/01.mp4",
         "C:/tmp/01.mp4",
+        "videos",
         "videos/../secret.mp4",
         "videos//01.mp4",
         "subtitles/01.mp4",
@@ -151,6 +152,28 @@ def test_validate_manifest_rejects_file_paths_outside_package(path: str) -> None
 
     with pytest.raises(CoursePackageError, match="path"):
         validate_course_package_manifest(manifest)
+
+
+def test_builds_unique_package_paths_for_duplicate_video_names(tmp_path: Path) -> None:
+    root = tmp_path / "course"
+    first = write_file(root / "chapter-a" / "01.mp4", b"video-a")
+    second = write_file(root / "chapter-b" / "01.mp4", b"video-b")
+
+    manifest = build_course_package_manifest(
+        input_dir=root,
+        title="默认网课材料",
+        subject_id="subj_1",
+        scoped_project_id="proj_1",
+        package_id="pkg_test",
+        created_at="2026-05-20T12:00:00Z",
+    )
+
+    paths = [item["video"]["path"] for item in manifest["items"]]
+    hashes = {item["video"]["path"]: item["video"]["sha256"] for item in manifest["items"]}
+
+    assert paths == ["videos/01.mp4", "videos/01_2.mp4"]
+    assert hashes["videos/01.mp4"] == hashlib.sha256(first.read_bytes()).hexdigest()
+    assert hashes["videos/01_2.mp4"] == hashlib.sha256(second.read_bytes()).hexdigest()
 
 
 def test_sha256_file_hashes_large_files_without_reading_manifest_state(tmp_path: Path) -> None:
