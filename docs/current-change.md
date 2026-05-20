@@ -21,13 +21,13 @@
 
 ## 本次实际修改文件
 
-- `docs/current-change.md`：覆盖为当前全量提交与自托管同步工作单，避免提交说明与真实工作区范围不一致。
-- 其余文件为提交前已有工作区改动，本次不改变其内容语义。
+- `docs/current-change.md`：覆盖为当前全量提交与自托管同步工作单，并记录提交、推送、部署和验证结果。
+- 其余进入提交的文件为提交前已有工作区改动，本次按用户要求统一纳入提交，不改变其内容语义。
 
 ## 行为语义是否变化
 
 - 本工作单修改本身不改变运行时行为。
-- 待提交的既有工作区改动包含移动端导航壳、离线课程包、后端字幕文件模型、Web/移动端 API 与 UI、字幕工具、测试和文档等行为变化；具体语义以对应代码与长期文档为准。
+- 已提交的既有工作区改动包含移动端导航壳、离线课程包、后端字幕文件模型、Web/移动端 API 与 UI、字幕工具、测试和文档等行为变化；具体语义以对应代码与长期文档为准。
 
 ## 重构说明
 
@@ -41,13 +41,15 @@
 ## 影响范围
 
 - 本次新增影响限定为文档工作单、Git 提交和自托管同步流程。
-- 全量提交会把当前工作区全部已跟踪和未跟踪改动纳入同一个提交。
-- 自托管同步将通过 `Sync-Selfhost-Server.bat` 面向 `plm.xuebao.chat` 执行构建、部署、readiness 和 public smoke check。
+- 全量提交已把当前工作区全部已跟踪和未跟踪改动纳入提交 `7f9b18b`。
+- 已推送分支 `017-mobile-navigation-shell` 到 `origin/017-mobile-navigation-shell`。
+- 自托管同步已通过 `Sync-Selfhost-Server.bat` 面向 `plm.xuebao.chat` 执行构建、部署、readiness 和 smoke check。
 
 ## 当前风险点和不确定项
 
 - 当前工作区改动量较大，包含多个功能域；本次按用户要求统一提交，不重新做产品或架构拆分决策。
-- 同步脚本可能因远端 `.env`、SSH key、构建、服务 readiness 或 public smoke check 失败而中止。
+- 同步脚本过程中提示 `LEARNINGPYRAMID_ALLOW_SIGNUP=true`，说明线上仍开放自注册；这是部署环境配置事实，本次未修改。
+- 同步脚本内置 public frontend 解析曾重试失败并给出警告；随后手动公网复查确认首页已返回新前端资源 `assets/index-DcRYAmWr.js`。
 
 ## 仍需用户确认的问题
 
@@ -59,6 +61,13 @@
 - 已运行 `git remote -v`：确认远端为 `origin https://github.com/zirconsonnet-alt/Learning-Pyramid.git`。
 - 已读取 `docs/deployment.md` 和 `Sync-Selfhost-Server.bat`：确认自托管同步入口和目标主机。
 - 已运行 `rg -n "from __future__ import annotations" -g "*.py"`：无命中。
+- 已运行 `git diff --check`：通过；仅有 Git LF/CRLF 转换提示。
+- 已运行 `git add -A` 和 `git commit -m "feat: add mobile navigation shell and offline package support"`：生成提交 `7f9b18b`，共 124 个文件变更。
+- 已运行 `git push -u origin 017-mobile-navigation-shell`：远端分支创建并跟踪成功。
+- 已运行 `cmd /c Sync-Selfhost-Server.bat`：返回成功；服务器目录和运行中容器均验证到前端资源 `index-DcRYAmWr.js`，`/api/system/capabilities` 和 `/api/system/public-downloads` smoke check 通过。
+- 已运行 `curl.exe --ssl-no-revoke -fsS https://plm.xuebao.chat/api/health/live`：返回 `{"status":"ok"}`。
+- 已运行 `curl.exe --ssl-no-revoke -fsS https://plm.xuebao.chat/api/system/capabilities`：返回 `ok`，`ready=true`，`sqlBackend=postgres`。
+- 已运行 `curl.exe --ssl-no-revoke -fsSL https://plm.xuebao.chat/` 并检查首页：命中 `assets/index-DcRYAmWr.js`。
 
 ## 污染风险检查
 
