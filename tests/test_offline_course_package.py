@@ -1,5 +1,4 @@
 import hashlib
-import json
 from pathlib import Path
 
 import pytest
@@ -36,6 +35,7 @@ def test_builds_manifest_from_local_videos_and_sidecar_subtitles(tmp_path: Path)
     assert manifest["manifestVersion"] == 1
     assert manifest["subjectId"] == "subj_1"
     assert manifest["scopedProjectId"] == "proj_1"
+    assert manifest["source"] == {"tool": "LearningPyramid-SubtitleTool", "version": "local"}
     assert manifest["items"][0]["video"]["path"] == "videos/01.mp4"
     assert manifest["items"][0]["subtitle"]["path"] == "subtitles/01.srt"
     assert manifest["items"][0]["cover"]["path"] == "covers/01.jpg"
@@ -110,6 +110,46 @@ def test_validate_manifest_rejects_incomplete_source_metadata(source: dict[str, 
     }
 
     with pytest.raises(CoursePackageError, match="manifest.source"):
+        validate_course_package_manifest(manifest)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "../01.mp4",
+        "/tmp/01.mp4",
+        "C:/tmp/01.mp4",
+        "videos/../secret.mp4",
+        "videos//01.mp4",
+        "subtitles/01.mp4",
+        r"videos\01.mp4",
+    ],
+)
+def test_validate_manifest_rejects_file_paths_outside_package(path: str) -> None:
+    manifest = {
+        "manifestVersion": 1,
+        "packageId": "pkg_1",
+        "title": "课程",
+        "createdAt": "2026-05-20T12:00:00Z",
+        "subjectId": "subj_1",
+        "scopedProjectId": "proj_1",
+        "source": {"tool": "tool", "version": "local"},
+        "items": [
+            {
+                "itemId": "01",
+                "title": "01",
+                "order": 1,
+                "learningObjectKey": "01",
+                "video": {
+                    "path": path,
+                    "sizeBytes": 8,
+                    "sha256": "0" * 64,
+                },
+            }
+        ],
+    }
+
+    with pytest.raises(CoursePackageError, match="path"):
         validate_course_package_manifest(manifest)
 
 

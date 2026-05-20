@@ -7,6 +7,11 @@ from typing import Any
 VIDEO_EXTENSIONS = (".mp4", ".mkv", ".mov", ".avi", ".m4v", ".webm", ".wmv", ".flv")
 SUBTITLE_EXTENSIONS = (".srt", ".vtt", ".ass", ".ssa")
 COVER_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
+PACKAGE_FILE_DIRS = {
+    "video": "videos",
+    "subtitle": "subtitles",
+    "cover": "covers",
+}
 
 
 class CoursePackageError(ValueError):
@@ -43,6 +48,18 @@ def _find_sidecar(path: Path, extensions: tuple[str, ...]) -> Path | None:
         if candidate.exists() and candidate.is_file():
             return candidate
     return None
+
+
+def _validate_package_file_path(path: str, expected_dir: str, label: str) -> None:
+    if "\\" in path:
+        raise CoursePackageError(f"{label} path 必须使用包内相对路径。")
+    if path.startswith("/") or re.match(r"^[A-Za-z]:", path):
+        raise CoursePackageError(f"{label} path 必须使用包内相对路径。")
+    parts = path.split("/")
+    if any(part in ("", ".", "..") for part in parts):
+        raise CoursePackageError(f"{label} path 必须使用包内相对路径。")
+    if parts[0] != expected_dir:
+        raise CoursePackageError(f"{label} path 必须位于 {expected_dir}/。")
 
 
 def iter_video_files(input_dir: Path) -> list[Path]:
@@ -135,8 +152,14 @@ def validate_course_package_manifest(manifest: dict[str, Any]) -> None:
                 continue
             if not isinstance(entry, dict):
                 raise CoursePackageError(f"items[{index}].{file_key} 必须是对象。")
-            if not str(entry.get("path") or "").strip():
+            path = str(entry.get("path") or "").strip()
+            if not path:
                 raise CoursePackageError(f"items[{index}].{file_key} 缺少 path。")
+            _validate_package_file_path(
+                path,
+                PACKAGE_FILE_DIRS[file_key],
+                f"items[{index}].{file_key}",
+            )
             if not isinstance(entry.get("sizeBytes"), int) or entry["sizeBytes"] < 0:
                 raise CoursePackageError(f"items[{index}].{file_key} 缺少 sizeBytes。")
             if not re.fullmatch(r"[0-9a-f]{64}", str(entry.get("sha256") or "")):
