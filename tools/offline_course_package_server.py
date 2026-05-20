@@ -11,6 +11,8 @@ from urllib.parse import unquote, urlsplit
 
 from tools.offline_course_package import validate_course_package_manifest
 
+FILE_CHUNK_SIZE = 1024 * 1024
+
 
 @dataclass(frozen=True)
 class OfflineCoursePackageSession:
@@ -67,6 +69,12 @@ def _safe_file_path(root: Path, relative: str) -> Path | None:
     return file_path
 
 
+def _validate_declared_files_exist(root: Path, declared_paths: set[str]) -> None:
+    missing = [path for path in sorted(declared_paths) if _safe_file_path(root, path) is None]
+    if missing:
+        raise FileNotFoundError(f"课程包缺少 manifest 声明文件：{missing[0]}")
+
+
 def _parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
     if not range_header.startswith("bytes="):
         raise ValueError("range unit must be bytes")
@@ -98,6 +106,7 @@ def start_offline_course_package_server(
     validate_course_package_manifest(session.manifest)
     root = session.root
     declared_paths = _paths_from_manifest(session.manifest)
+    _validate_declared_files_exist(root, declared_paths)
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -165,7 +174,11 @@ def start_offline_course_package_server(
             self.send_header("Content-Length", str(file_size))
             self.end_headers()
             with file_path.open("rb") as handle:
-                self.wfile.write(handle.read())
+                while True:
+                    chunk = handle.read(FILE_CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
 
         def _send_file_bytes(self, file_path: Path, file_size: int, start: int, end: int) -> None:
             content_length = end - start + 1
@@ -177,7 +190,13 @@ def start_offline_course_package_server(
             self.end_headers()
             with file_path.open("rb") as handle:
                 handle.seek(start)
-                self.wfile.write(handle.read(content_length))
+                remaining = content_length
+                while remaining > 0:
+                    chunk = handle.read(min(FILE_CHUNK_SIZE, remaining))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+                    self.wfile.write(chunk)
 
         def log_message(self, format: str, *args: Any) -> None:
             return

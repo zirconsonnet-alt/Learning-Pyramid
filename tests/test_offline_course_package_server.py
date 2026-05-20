@@ -4,6 +4,8 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+import pytest
+
 from tools.offline_course_package import build_course_package
 from tools.offline_course_package_server import (
     OfflineCoursePackageSession,
@@ -90,6 +92,20 @@ def test_serves_metadata_manifest_and_range_download(tmp_path: Path) -> None:
         server.stop()
 
 
+def test_serves_full_file_download_without_range(tmp_path: Path) -> None:
+    session = build_session(tmp_path)
+    server = start_offline_course_package_server(session, host="127.0.0.1", port=0)
+    try:
+        with request(server, "/files/videos/01.mp4") as response:
+            body = response.read()
+
+        assert response.status == 200
+        assert body == b"0123456789"
+        assert response.headers["Content-Length"] == "10"
+    finally:
+        server.stop()
+
+
 def test_rejects_missing_token(tmp_path: Path) -> None:
     session = build_session(tmp_path)
     server = start_offline_course_package_server(session, host="127.0.0.1", port=0)
@@ -127,13 +143,25 @@ def test_rejects_path_traversal(tmp_path: Path) -> None:
         server.stop()
 
 
-def test_rejects_invalid_range(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "range_header",
+    ["bytes=99-100", "bytes=abc-def", "items=0-1", "bytes=-0", "bytes=0-1,2-3"],
+)
+def test_rejects_invalid_range(tmp_path: Path, range_header: str) -> None:
     session = build_session(tmp_path)
     server = start_offline_course_package_server(session, host="127.0.0.1", port=0)
     try:
         assert_http_error(
             416,
-            lambda: request(server, "/files/videos/01.mp4", headers={"Range": "bytes=99-100"}),
+            lambda: request(server, "/files/videos/01.mp4", headers={"Range": range_header}),
         )
     finally:
         server.stop()
+
+
+def test_rejects_session_when_declared_file_is_missing(tmp_path: Path) -> None:
+    session = build_session(tmp_path)
+    (session.root / "videos" / "01.mp4").unlink()
+
+    with pytest.raises(FileNotFoundError, match="manifest 声明文件"):
+        start_offline_course_package_server(session, host="127.0.0.1", port=0)
