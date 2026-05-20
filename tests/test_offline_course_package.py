@@ -57,6 +57,62 @@ def test_validate_manifest_rejects_missing_project_identity() -> None:
         validate_course_package_manifest(manifest)
 
 
+def test_validate_manifest_rejects_missing_source_metadata() -> None:
+    manifest = {
+        "manifestVersion": 1,
+        "packageId": "pkg_1",
+        "title": "课程",
+        "createdAt": "2026-05-20T12:00:00Z",
+        "subjectId": "subj_1",
+        "scopedProjectId": "proj_1",
+        "items": [
+            {
+                "itemId": "01",
+                "title": "01",
+                "order": 1,
+                "learningObjectKey": "01",
+                "video": {
+                    "path": "videos/01.mp4",
+                    "sizeBytes": 8,
+                    "sha256": "0" * 64,
+                },
+            }
+        ],
+    }
+
+    with pytest.raises(CoursePackageError, match="source"):
+        validate_course_package_manifest(manifest)
+
+
+@pytest.mark.parametrize("source", [{"tool": "", "version": "local"}, {"tool": "tool", "version": ""}])
+def test_validate_manifest_rejects_incomplete_source_metadata(source: dict[str, str]) -> None:
+    manifest = {
+        "manifestVersion": 1,
+        "packageId": "pkg_1",
+        "title": "课程",
+        "createdAt": "2026-05-20T12:00:00Z",
+        "subjectId": "subj_1",
+        "scopedProjectId": "proj_1",
+        "source": source,
+        "items": [
+            {
+                "itemId": "01",
+                "title": "01",
+                "order": 1,
+                "learningObjectKey": "01",
+                "video": {
+                    "path": "videos/01.mp4",
+                    "sizeBytes": 8,
+                    "sha256": "0" * 64,
+                },
+            }
+        ],
+    }
+
+    with pytest.raises(CoursePackageError, match="manifest.source"):
+        validate_course_package_manifest(manifest)
+
+
 def test_sha256_file_hashes_large_files_without_reading_manifest_state(tmp_path: Path) -> None:
     file_path = write_file(tmp_path / "large.mp4", b"a" * 1024 * 1024 + b"b")
 

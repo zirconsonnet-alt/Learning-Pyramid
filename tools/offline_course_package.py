@@ -115,6 +115,12 @@ def validate_course_package_manifest(manifest: dict[str, Any]) -> None:
     for key in ("packageId", "title", "createdAt", "subjectId", "scopedProjectId"):
         if not str(manifest.get(key) or "").strip():
             raise CoursePackageError(f"manifest 缺少 {key}。")
+    source = manifest.get("source")
+    if not isinstance(source, dict):
+        raise CoursePackageError("manifest 缺少 source。")
+    for key in ("tool", "version"):
+        if not str(source.get(key) or "").strip():
+            raise CoursePackageError(f"manifest.source 缺少 {key}。")
     items = manifest.get("items")
     if not isinstance(items, list) or not items:
         raise CoursePackageError("manifest 必须包含至少一个视频条目。")
