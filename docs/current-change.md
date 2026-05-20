@@ -1,112 +1,62 @@
-# 当前变更：移动端原生工作台合入
+# 当前变更：离线课程包导入设计
 
 ## 当前用户要求
 
-- 将 `mobile-native-workbench` 分支本地合并回 `015-scoped-project-identity`。
-- 合并前已将主工作区既有源码、文档、测试改动提交为 checkpoint。
-- 排除 `desktop/src-tauri/target-codex-build/` 构建产物，不把 1.65GB 生成物提交进 Git。
-- 不修改后端 API、数据库、部署、Web/Tauri 工作台语义，不新增移动端专用学习协议。
+- 将“字幕工具导入到手机”定义为 App 内离线课程包能力，而不是字幕收件箱。
+- 电脑端生成字幕后，通过局域网配对让手机主动下载视频、字幕和 manifest。
+- 手机端保存到 App 私有课程库，后续本地播放，不依赖电脑或百度网盘。
+- 离线课程包必须绑定线上学科和 scoped project。
+
+## 根因判断
+
+- 仅导入字幕无法满足手机本地学习需求；真实需求是电脑端已有视频和字幕，手机端需要托管完整学习素材包。
+- 现有移动端文档边界写着不做本机文件导入和离线缓存；新需求需要改为“不扫描系统文件，但允许 App 私有课程包导入”。
+
+## 修改前判断
+
+- 本轮只写设计 spec，不实现代码。
+- 该设计会影响字幕工具、移动端本地存储、播放器来源和移动端长期边界。
+- 需要先确认产品和架构边界，不能直接在现有字幕导入或学习页里加临时入口。
 
 ## 本次实际修改文件
 
-- `.gitignore`
-  - 新增忽略 `desktop/src-tauri/target-codex-build/`，避免 Tauri/Rust 构建产物进入仓库历史。
-- `mobile/src/api/learningTasks.ts`
-  - 新增移动端 `POST /learning-tasks` client，复用 scoped project 路径和既有后端 API。
-- `mobile/src/api/types.ts`
-  - 将 `learningTasks` 纳入移动端聚合 API。
-- `mobile/__tests__/domain-api.test.ts`
-  - 覆盖移动端领域 API 路径、方法和 `learning task` 提交 body。
-- `mobile/src/workbench/recallDrafts.ts`
-  - 新增纯函数草稿模型、草稿完整性校验和提交 payload 构造；拒绝无效播放时间。
-- `mobile/__tests__/workbench-drafts.test.ts`
-  - 覆盖草稿创建、校验、无效播放时间、锚点和提交 payload。
-- `mobile/src/screens/LearningMediaPlayer.tsx`
-  - 将播放器 `timeUpdate` 当前时间按毫秒回传给工作台，并清理监听器。
-- `mobile/__tests__/learning-object-detail.test.tsx`
-  - 覆盖播放器时间回调连接。
-- `mobile/src/screens/MobileWorkbenchScreen.tsx`
-  - 新增原生移动工作台 presentational screen，展示当前学习对象、目录、媒体、已有复述点、草稿和复习门禁。
-- `mobile/__tests__/mobile-workbench-screen.test.tsx`
-  - 覆盖工作台渲染、目录选择、播放器回调、草稿新增/编辑/删除、提交门禁和复习入口。
-- `mobile/src/app/project/[subjectId]/[scopedProjectId].tsx`
-  - 将项目路由接到 query-driven 移动工作台，处理 active leaf、播放时间、草稿提交、query invalidation、queue gate 和 active leaf reconcile。
-  - 提交成功后只清理本次提交快照内的 `localId` 草稿；不再按 `instanceId` 清空后续新建草稿。
-  - route 层复用草稿完整性校验，直接调用 submit callback 时也不会提交不完整草稿。
-  - 本地草稿 ID 仅使用 `globalThis.crypto.randomUUID()`，不提供隐式 fallback。
-- `mobile/__tests__/project-route-workbench.test.tsx`
-  - 覆盖 route 层草稿提交、当前节点草稿清理、query invalidation、提交门禁、active leaf reconcile、pending 提交期间新草稿保留和 `randomUUID` 路径。
-- `docs/mobile-client.md`
-  - 同步移动端原生工作台能力、功能边界和工程边界。
-- `docs/current-change.md`
-  - 解析合并冲突，覆盖为本次合入后的当前状态和验证记录。
-- `docs/mobile-android-smoke-checklist.md`
-  - 本次合并未修改；保留主线 Android smoke 清单作为长期检查文档。
-- `mobile/__tests__/learning-navigation.test.tsx`
-  - 未修改；学科和材料导航相关覆盖保留，项目路由行为由工作台 screen/API/route 测试覆盖。
+- `docs/superpowers/specs/2026-05-20-offline-course-package-import-design.md`：新增离线课程包导入设计，覆盖用户流程、manifest、局域网服务、手机端存储、下载任务、空间检查、播放器接入和测试边界。
+- `docs/current-change.md`：覆盖为当前设计任务工作单。
 
 ## 行为语义是否变化
 
-- 是。移动端项目入口从只浏览学习对象列表，变为默认进入学习优先的原生工作台。
-- 是。移动端支持目录切换当前学习对象、查看已有复述点、基于当前播放时间创建文本复述点草稿，并提交为一个 `learning task`。
-- 是。移动端工作台在 review queue 有队列头、加载、刷新、错误、无 active leaf、无草稿、草稿不完整或提交中时阻止草稿提交。
-- 是。提交成功后只删除本次提交的草稿集合，提交 pending 期间新建的草稿会保留。
-- 是。移动端播放器继续只播放后端 playback descriptor 支持的来源；`NATIVE_LOCAL`、`BROWSER_LOCAL` 和 `MANUAL` 明确不可播放。
-- 否。后端 API、数据库结构、部署方式、认证协议、Web/Tauri 工作台语义未变化。
+- 代码行为未变化。
+- 设计边界变化：移动端未来允许通过电脑端配对导入 App 托管的离线课程包，但仍不扫描手机系统文件、不写公共目录。
 
 ## 重构说明
 
-- 做了移动端范围内的局部结构补齐：新增 `recallDrafts` 纯函数模块承载草稿与 payload 构造，避免将校验和提交体拼装散落在 screen 或 route 中。
-- 做了 route container 内部状态整理：统一提交门禁、review queue 阻断状态、active leaf reconcile 和提交快照清理。
-- 未做跨模块重构，未改变公共后端接口、共享协议或 Web/Tauri 边界。
+- 未做代码重构。
 
 ## 未修改内容
 
-- 未修改后端 API、数据库、部署配置、认证协议。
-- 未修改 Web/Tauri 工作台实现或语义。
-- 未新增移动端专用学习协议。
-- 未从 `frontend/` 复用 React DOM 工作台组件。
-- 未实现手机本机文件导入、离线缓存、移动端本机路径播放、推送、支付或发布渠道能力。
-- 未修改 `MobileWorkbenchScreen` presentational API 以掩盖 route 状态问题。
-- 未提交 `desktop/src-tauri/target-codex-build/` 构建产物。
+- 未修改后端、移动端、字幕工具代码。
+- 未修改数据库、API、部署配置或认证协议。
+- 未更新 `docs/mobile-client.md` 的长期边界；等待 spec 确认后再同步长期文档。
 
 ## 影响范围
 
-- API：移动端 client 新增对既有 `POST /learning-tasks` 的调用；不新增后端 API。
-- 架构：`mobile/` 仍是独立 Expo-managed React Native 应用；不引入共享包或 Web 组件依赖。
-- 部署：无影响。
-- 数据结构：无影响。
-- UI：移动端项目入口升级为学习优先工作台，交互布局为原生移动端实现。
-- 测试：新增和更新移动端 API、草稿、媒体、工作台、项目路由相关测试；导航覆盖保留。
+- 当前只影响设计文档。
+- 后续实现会影响字幕工具、移动端本地课程库、播放器和测试。
 
 ## 当前风险点和不确定项
 
-- Expo 原生播放器携带 Cookie header 播放受保护媒体仍需 Android/iOS 真机或 emulator smoke 验证。
-- 当前环境未识别 `adb` 命令，无法确认连接的 Android 设备或模拟器；Android smoke 仍未运行。
-- 移动端 route 依赖运行环境提供 `globalThis.crypto.randomUUID()`；缺失时应暴露为环境问题，而不是降级生成本地 ID。
+- Expo-managed 对剩余空间查询、后台下载、大文件断点续传和本地视频 URI 的支持可能不足；实现前需要技术验证。
+- 局域网服务会受防火墙和网络隔离影响；第一版不做公网中继。
+- 本地包和线上学习对象的对应关系必须由 manifest 明确表达，不能靠文件名猜测。
 
 ## 仍需用户确认的问题
 
-- 无。
+- 请确认 `docs/superpowers/specs/2026-05-20-offline-course-package-import-design.md` 是否可作为后续实现计划的依据。
 
 ## 验证记录
 
-- mobile-native-workbench 分支合入前已运行：`pnpm --dir mobile test`
-  - 结果：通过，12 个测试套件、47 个测试通过。
-- mobile-native-workbench 分支合入前已运行：`pnpm --dir mobile typecheck`
-  - 结果：通过，`tsc --noEmit` 退出码为 0。
-- mobile-native-workbench 分支合入前已运行：`pnpm --dir mobile exec expo --version`
-  - 结果：通过，输出 `55.0.30`。
-- mobile-native-workbench 分支合入前已运行：`git diff --check -- docs/mobile-client.md docs/current-change.md mobile`
-  - 结果：通过。
-- 主工作区 checkpoint 前已运行：`git diff --cached --check`
-  - 结果：通过。
-- 已运行：`adb devices`
-  - 结果：失败，当前环境未识别 `adb` 命令；未运行 Android 启动 smoke。
-- 合并结果已运行：`pnpm --dir mobile test`
-  - 结果：通过，12 个测试套件、47 个测试通过。
-- 合并结果已运行：`pnpm --dir mobile typecheck`
-  - 结果：通过，`tsc --noEmit` 退出码为 0。
+- 已运行：`git diff --check -- docs/superpowers/specs/2026-05-20-offline-course-package-import-design.md docs/current-change.md`
+  - 结果：通过；仅有 Git LF/CRLF 转换提示。
 
 ## 污染风险检查
 
