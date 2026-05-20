@@ -14,11 +14,15 @@
 
 The spec touches two subsystems, but they are one vertical feature: the mobile client cannot import a course package unless the desktop tool serves one. This plan keeps them in one implementation plan and makes each task independently testable.
 
+## Confirmed Adjustment
+
+The user confirmed the real course-package directory approach after Task 1 review. The desktop builder must materialize a package directory with `manifest.json`, `videos/`, `subtitles/`, and `covers/`; manifest file paths are package-internal paths that must exist under that directory. Task 2 and later must use the materialized package directory as `OfflineCoursePackageSession.root`, not the original input video directory.
+
 ## File Structure
 
 Create:
 
-- `tools/offline_course_package.py`: pure Python manifest model, validation, SHA-256, and local directory package builder.
+- `tools/offline_course_package.py`: manifest model, validation, SHA-256, and real local course-package directory builder. Manifest file paths must point to files materialized under `videos/`, `subtitles/`, and `covers/`.
 - `tools/offline_course_package_server.py`: token-gated temporary HTTP server with metadata, manifest, file list, and Range file download.
 - `tests/test_offline_course_package.py`: package builder and manifest validation tests.
 - `tests/test_offline_course_package_server.py`: token, expiry, manifest, and Range tests.
@@ -383,7 +387,7 @@ from pathlib import Path
 
 import pytest
 
-from tools.offline_course_package import build_course_package_manifest
+from tools.offline_course_package import build_course_package
 from tools.offline_course_package_server import OfflineCoursePackageSession, start_offline_course_package_server
 
 
@@ -401,18 +405,20 @@ def read_url(url: str, token: str, headers: dict[str, str] | None = None) -> tup
 
 @pytest.fixture()
 def package_root(tmp_path: Path):
-    root = tmp_path / "course"
-    write_file(root / "01.mp4", b"0123456789")
-    write_file(root / "01.srt", b"subtitle")
-    manifest = build_course_package_manifest(
-        input_dir=root,
+    input_dir = tmp_path / "course"
+    output_dir = tmp_path / "course-package"
+    write_file(input_dir / "01.mp4", b"0123456789")
+    write_file(input_dir / "01.srt", b"subtitle")
+    manifest = build_course_package(
+        input_dir=input_dir,
+        output_dir=output_dir,
         title="课程",
         subject_id="subj_1",
         scoped_project_id="proj_1",
         package_id="pkg_1",
         created_at="2026-05-20T12:00:00Z",
     )
-    return root, manifest
+    return output_dir, manifest
 
 
 def test_serves_metadata_manifest_and_range_download(package_root) -> None:
@@ -694,7 +700,7 @@ from datetime import datetime, timedelta, timezone
 Add imports near other project imports:
 
 ```python
-from tools.offline_course_package import build_course_package_manifest
+from tools.offline_course_package import build_course_package
 from tools.offline_course_package_server import OfflineCoursePackageSession, start_offline_course_package_server
 ```
 
@@ -716,6 +722,7 @@ def _mobile_package_cli_requested(args: argparse.Namespace) -> bool:
 
 def build_mobile_package_session_from_args(args: argparse.Namespace) -> OfflineCoursePackageSession:
     input_dir = Path(str(args.mobile_package_dir)).expanduser().resolve()
+    package_dir = input_dir.parent / f"{input_dir.name}.learningpyramid-mobile-package"
     title = str(args.mobile_package_title or input_dir.name).strip() or input_dir.name
     subject_id = str(args.mobile_subject_id or "").strip()
     scoped_project_id = str(args.mobile_project_id or "").strip()
@@ -724,8 +731,9 @@ def build_mobile_package_session_from_args(args: argparse.Namespace) -> OfflineC
     if not scoped_project_id:
         raise SystemExit("请提供 --mobile-project-id。")
     now = datetime.now(timezone.utc)
-    manifest = build_course_package_manifest(
+    manifest = build_course_package(
         input_dir=input_dir,
+        output_dir=package_dir,
         title=title,
         subject_id=subject_id,
         scoped_project_id=scoped_project_id,
@@ -733,7 +741,7 @@ def build_mobile_package_session_from_args(args: argparse.Namespace) -> OfflineC
         created_at=now.isoformat().replace("+00:00", "Z"),
     )
     return OfflineCoursePackageSession(
-        root=input_dir,
+        root=package_dir,
         manifest=manifest,
         token=secrets.token_urlsafe(24),
         expires_at_epoch=(now + timedelta(minutes=10)).timestamp(),
