@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-import type { ApiRequester } from "./types"
+import type { ApiRequester } from "./requester"
 
 export const SubjectSchema = z.object({
   subjectId: z.string(),
@@ -32,10 +32,43 @@ export function createSubjectsApi(requester: ApiRequester) {
         path: "/subjects",
         responseSchema: z.array(SubjectSchema),
       }),
+    createSubject: (body: { title: string }) =>
+      requester.request({
+        path: "/subjects",
+        method: "POST",
+        body,
+        responseSchema: z.object({ subjectId: z.string() }),
+      }),
+    editSubject: (subjectId: string, body: { title: string }) =>
+      requester.request({
+        path: `/subjects/${encodeURIComponent(subjectId)}`,
+        method: "PATCH",
+        body,
+        responseSchema: z.null(),
+      }),
+    deleteSubject: (subjectId: string) =>
+      requester.request({
+        path: `/subjects/${encodeURIComponent(subjectId)}`,
+        method: "DELETE",
+        responseSchema: z.null(),
+      }),
     listMaterials: (subjectId: string) =>
       requester.request({
         path: `/subjects/${encodeURIComponent(subjectId)}/materials`,
         responseSchema: z.array(StudyMaterialSchema),
+      }),
+    createMaterial: (subjectId: string, body: { materialType: StudyMaterialType; title?: string }) =>
+      requester.request({
+        path: `/subjects/${encodeURIComponent(subjectId)}/materials`,
+        method: "POST",
+        body,
+        responseSchema: StudyMaterialSchema,
+      }),
+    deleteMaterial: (subjectId: string, materialId: string) =>
+      requester.request({
+        path: `/subjects/${encodeURIComponent(subjectId)}/materials/${encodeURIComponent(materialId)}`,
+        method: "DELETE",
+        responseSchema: z.null(),
       }),
   }
 }

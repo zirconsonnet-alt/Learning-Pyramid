@@ -4,6 +4,7 @@ import { StyleSheet, Text, View } from "react-native"
 import { AppButton } from "../components/AppButton"
 import { AppTextInput } from "../components/AppTextInput"
 import { Screen } from "../components/Screen"
+import { ui } from "../constants/ui"
 
 export function LoginScreen({
   signIn,
@@ -34,7 +35,7 @@ export function LoginScreen({
 
 const styles = StyleSheet.create({
   header: { paddingTop: 28 },
-  title: { color: "#0f172a", fontSize: 28, fontWeight: "700" },
-  form: { gap: 12 },
-  error: { color: "#b91c1c", fontSize: 14 },
+  title: { color: ui.colors.text, fontSize: 28, fontWeight: "800" },
+  form: { gap: ui.spacing.lg },
+  error: { color: ui.colors.danger, fontSize: 14 },
 })

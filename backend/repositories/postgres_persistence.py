@@ -397,6 +397,7 @@ class PostgresLifecycleRepository(SqlLifecycleRepository):
         "project_config_index",
         "instance_index",
         "instance_media_binding_index",
+        "instance_subtitle_file_index",
         "video_watch_progress_index",
         "learning_object_node_index",
         "recall_point_index",

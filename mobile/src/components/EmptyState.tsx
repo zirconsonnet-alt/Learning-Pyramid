@@ -1,5 +1,7 @@
 import { StyleSheet, Text, View } from "react-native"
 
+import { ui } from "../constants/ui"
+
 export function EmptyState({ title }: { title: string }) {
   return (
     <View style={styles.root}>
@@ -10,5 +12,5 @@ export function EmptyState({ title }: { title: string }) {
 
 const styles = StyleSheet.create({
   root: { paddingVertical: 24 },
-  title: { color: "#475569", fontSize: 15, textAlign: "center" },
+  title: { color: ui.colors.textMuted, fontSize: ui.type.control, textAlign: "center" },
 })

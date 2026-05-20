@@ -1,10 +1,10 @@
 import { z } from "zod"
 
-import { projectApiPath, type ApiRequester, type ScopedProjectRef } from "./types"
+import { projectApiPath, type ApiRequester, type ScopedProjectRef } from "./requester"
 
 export const PlaybackDescriptorSchema = z.object({
   instanceId: z.string(),
-  sourceKind: z.enum(["SERVER_FS", "BROWSER_LOCAL", "NATIVE_LOCAL", "MANUAL", "BAIDU_NETDISK"]),
+  sourceKind: z.enum(["SERVER_FS", "BROWSER_LOCAL", "NATIVE_LOCAL", "MANUAL", "BAIDU_NETDISK", "LOCAL_COURSE_PACKAGE"]),
   playbackKind: z.enum(["FILE", "HLS"]),
   url: z.string(),
   mimeType: z.string(),

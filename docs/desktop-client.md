@@ -1,6 +1,6 @@
 # Windows 桌面客户端
 
-本文记录 Windows 64 桌面客户端的当前工程边界。桌面客户端用于把视频数据面移到用户设备侧：本地视频由客户端读取，百度网盘视频由客户端直连百度网盘分片，云端服务器只同步学习数据和返回播放小数据。
+本文记录 Windows 64 桌面客户端的当前工程边界。桌面客户端用于把视频数据面移到用户设备侧：当前产品 UI 只暴露本地视频读取；百度网盘直连相关底层能力保留，但导入和播放入口已隐藏。
 
 ## 当前阶段
 
@@ -18,15 +18,15 @@
 - AI 问答页在 desktop + `NATIVE_LOCAL` 下使用客户端本地媒体 URL 截取课程视频帧。
 - 工作台播放器在 desktop + `NATIVE_LOCAL` 下读取视频同目录同名字幕。
 - 工作台视频助手、桌宠助手和 AI 问答页课程视频上下文在 desktop + `NATIVE_LOCAL` 下使用客户端读取的本机字幕。
-- 百度网盘桌面端直连播放描述符。
-- Tauri `desktop_baidu_hls_url` 命令。
-- 工作台播放器在 desktop + `BAIDU_NETDISK` 下使用客户端本地 HLS 代理播放百度网盘视频。
+- 百度网盘桌面端直连播放描述符与 Tauri `desktop_baidu_hls_url` 命令仍保留在底层实现中。
+- 工作台播放器当前不播放 `BAIDU_NETDISK` 媒体源，而是提示该媒体源已隐藏。
 
 当前阶段不包含：
 
 - 离线缓存。
 - 云视频托管。
 - 多清晰度选择。
+- 百度网盘导入和播放的产品 UI 入口。
 - 百度网盘视频本机缓存。
 
 ## 目录
@@ -84,7 +84,7 @@ Windows 桌面端本地文件夹导入使用客户端扫描、云端建树的数
 - 后端不访问用户 Windows 文件系统，只校验路径语义并按相对路径权威重建学习对象树。
 - 后端把项目材料源绑定为 `NATIVE_LOCAL`，并保存 `ProjectStorageConfig(projectRoot, learningObjectRoot=".")`。
 - `NATIVE_LOCAL` 导入使用 `MANUAL_SYNC`，避免线上后端在启动或读取时扫描用户本机路径。
-- 未出现在本次扫描结果中的旧实例按既有导入语义标记为 `MISSING`。
+- 未出现在本次扫描结果中的旧实例如果仍被复述点引用，会标记为 `MISSING` 供后续迁移锚点；如果没有任何复述点引用，会在同步时直接删除。
 
 当前可导入媒体扩展为 `.mp4`、`.mov`、`.mkv`、`.webm`、`.mp3`、`.wav`、`.m4a`、`.aac`、`.flac`、`.ogg`、`.opus`。导入时不跟随符号链接和快捷方式，避免目录边界不清。
 
@@ -99,13 +99,13 @@ Windows 桌面端本地文件夹导入使用客户端扫描、云端建树的数
 - Rust 端只读取字幕原文和文件名/格式，字幕解析仍复用前端现有解析器。
 - 字幕文件路径必须位于素材文件同一个 canonical 父目录下。
 - 前端只在 Tauri desktop + `NATIVE_LOCAL` 且存在项目存储配置时走本地字幕 command。
-- Web、本地浏览器目录、服务端文件和百度网盘字幕链路不改变。
+- 用户导入并绑定到实例的字幕资产优先于同目录同名字幕；没有导入字幕时，Web、本地浏览器目录和服务端文件继续使用原有同目录同名字幕链路。`BAIDU_NETDISK` 媒体源当前不在播放器里读取字幕。
 
 这条路径让桌面端本地视频的播放器字幕、工作台视频助手字幕上下文、桌宠助手字幕上下文和 AI 问答页课程视频上下文都由客户端读取本机字幕；云服务器不读取用户本机路径。
 
 ## 百度网盘直连播放
 
-Windows 桌面端百度网盘视频播放使用两段式链路：
+Windows 桌面端百度网盘视频播放底层链路仍保留，但当前产品 UI 不调用该链路。历史实现使用两段式链路：
 
 - 云端后端校验登录态和项目访问权，读取用户已绑定的百度网盘账号 token。
 - 云端后端请求百度 HLS playlist，把 playlist 内分片补成绝对百度 URL，并通过 `baidu-direct-playback` API 返回给桌面客户端。
@@ -189,9 +189,9 @@ pnpm --dir desktop build
 
 正式分发 Windows 安装包前需要补齐代码签名和发布流程；当前阶段不处理签名、自动更新或安装包分发策略。
 
-## 线上自动验收
+## 线上底层链路验证
 
-Windows 桌面端 MVP 的百度网盘直连播放链路使用只读 live gate 验证：
+百度网盘直连播放当前已从产品 UI 隐藏；以下脚本只保留为底层链路的只读验证工具，不代表当前工作台会暴露或调用该播放路径：
 
 ```powershell
 python tools/verify_desktop_mvp_live.py --server-host plm.xuebao.chat --server-user root --ssh-port 22 --subject-id subj_000006 --scoped-project-id proj_000001
@@ -206,7 +206,7 @@ python tools/verify_desktop_mvp_live.py --server-host plm.xuebao.chat --server-u
 - 服务器最近日志没有 `/segments/` 分片流量。
 - 本地 release exe、NSIS 安装包和桌面进程本机监听存在。
 
-该脚本不写线上学习数据，不替代最终画面和播放体感验收。
+该脚本不写线上学习数据，不替代当前产品 UI 验收。当前 UI 验收应确认百度网盘导入和播放入口不可见，历史 `BAIDU_NETDISK` 实例显示为隐藏媒体源。
 
 学习数据同步闭环使用隔离 SQLite store 验证：
 

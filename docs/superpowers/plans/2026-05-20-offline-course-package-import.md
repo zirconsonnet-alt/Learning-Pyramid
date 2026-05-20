@@ -646,14 +646,16 @@ git commit -m "feat: serve offline course packages over lan"
 
 ### Task 3: Subtitle Tool Entry Point
 
+> Confirmed update: Task 3 is implemented in `tests/test_subtitle_tool_mobile_package.py`, not `tests/test_offline_course_package.py`. The mobile package CLI path must call `build_course_package()` and `start_offline_course_package_server()` before subtitle runtime discovery, so package sharing does not depend on whisper/ffmpeg runtime availability. The UI entry uses the materialized package root produced beside the selected input directory.
+
 **Files:**
 - Modify: `tools/subtitle_tool.py`
-- Test: `tests/test_offline_course_package.py`
+- Test: `tests/test_subtitle_tool_mobile_package.py`
 - Modify: `docs/current-change.md`
 
-- [ ] **Step 1: Add a headless package command test**
+- [x] **Step 1: Add a headless package command test**
 
-Append to `tests/test_offline_course_package.py`:
+Create `tests/test_subtitle_tool_mobile_package.py`:
 
 ```python
 from tools.subtitle_tool import build_parser
@@ -680,17 +682,17 @@ def test_subtitle_tool_parser_accepts_mobile_package_args() -> None:
     assert args.mobile_project_id == "proj_1"
 ```
 
-- [ ] **Step 2: Run failing test**
+- [x] **Step 2: Run failing test**
 
 Run:
 
 ```powershell
-python -m pytest tests/test_offline_course_package.py::test_subtitle_tool_parser_accepts_mobile_package_args -q
+python -m pytest tests/test_subtitle_tool_mobile_package.py::test_parser_accepts_mobile_package_options -q
 ```
 
 Expected: FAIL because parser does not know the mobile package arguments.
 
-- [ ] **Step 3: Add parser arguments and package helper**
+- [x] **Step 3: Add parser arguments and package helper**
 
 Modify `tools/subtitle_tool.py`:
 
@@ -766,17 +768,17 @@ At the top of `run_cli`, before project Baidu mode:
         return 0
 ```
 
-- [ ] **Step 4: Run parser test**
+- [x] **Step 4: Run parser test**
 
 Run:
 
 ```powershell
-python -m pytest tests/test_offline_course_package.py::test_subtitle_tool_parser_accepts_mobile_package_args -q
+python -m pytest tests/test_subtitle_tool_mobile_package.py::test_parser_accepts_mobile_package_options -q
 ```
 
 Expected: PASS.
 
-- [ ] **Step 5: Add UI buttons without changing generation flow**
+- [x] **Step 5: Add UI buttons without changing generation flow**
 
 In both `QtSubtitleToolApp._build_ui()` and `SubtitleToolApp._build_ui()`, add a secondary button labeled `导入到手机` next to the existing `开始生成` button. The handler must:
 
@@ -806,12 +808,12 @@ def _start_mobile_package_server_from_form(self) -> None:
 
 Store the returned server on `self.mobile_package_server` and stop an existing server before starting a new one.
 
-- [ ] **Step 6: Run Python tests**
+- [x] **Step 6: Run Python tests**
 
 Run:
 
 ```powershell
-python -m pytest tests/test_offline_course_package.py tests/test_offline_course_package_server.py -q
+python -m pytest tests/test_subtitle_tool_mobile_package.py tests/test_offline_course_package.py tests/test_offline_course_package_server.py -q
 ```
 
 Expected: PASS.
@@ -819,7 +821,7 @@ Expected: PASS.
 - [ ] **Step 7: Commit**
 
 ```powershell
-git add tools/subtitle_tool.py tests/test_offline_course_package.py docs/current-change.md
+git add tools/subtitle_tool.py tests/test_subtitle_tool_mobile_package.py docs/current-change.md docs/superpowers/plans/2026-05-20-offline-course-package-import.md
 git commit -m "feat: expose mobile package import from subtitle tool"
 ```
 
@@ -834,7 +836,7 @@ git commit -m "feat: expose mobile package import from subtitle tool"
 - Create: `mobile/__tests__/offline-course-package-schema.test.ts`
 - Modify: `docs/current-change.md`
 
-- [ ] **Step 1: Install dependencies**
+- [x] **Step 1: Install dependencies**
 
 Run:
 
@@ -845,7 +847,7 @@ pnpm --dir mobile add @noble/hashes
 
 Expected: `mobile/package.json` includes `expo-file-system` and `@noble/hashes`.
 
-- [ ] **Step 2: Write schema tests**
+- [x] **Step 2: Write schema tests**
 
 Create `mobile/__tests__/offline-course-package-schema.test.ts`:
 
@@ -894,7 +896,7 @@ describe("offline course package schema", () => {
 })
 ```
 
-- [ ] **Step 3: Run failing test**
+- [x] **Step 3: Run failing test**
 
 Run:
 
@@ -904,7 +906,7 @@ pnpm --dir mobile test -- --runTestsByPath __tests__/offline-course-package-sche
 
 Expected: FAIL because `src/offlineCoursePackages/schema.ts` does not exist.
 
-- [ ] **Step 4: Implement schema**
+- [x] **Step 4: Implement schema**
 
 Create `mobile/src/offlineCoursePackages/schema.ts`:
 
@@ -990,7 +992,7 @@ export type LocalCoursePackage = z.infer<typeof LocalCoursePackageSchema>
 export type DownloadTask = z.infer<typeof DownloadTaskSchema>
 ```
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 Run:
 
@@ -1017,7 +1019,7 @@ git commit -m "feat: add mobile offline package schema"
 - Create: `mobile/__tests__/offline-course-package-storage.test.ts`
 - Modify: `docs/current-change.md`
 
-- [ ] **Step 1: Write storage tests with mocked file-system**
+- [x] **Step 1: Write storage tests with mocked file-system**
 
 Create `mobile/__tests__/offline-course-package-storage.test.ts`:
 
@@ -1093,7 +1095,7 @@ describe("offline package storage", () => {
 })
 ```
 
-- [ ] **Step 2: Run failing test**
+- [x] **Step 2: Run failing test**
 
 Run:
 
@@ -1103,7 +1105,7 @@ pnpm --dir mobile test -- --runTestsByPath __tests__/offline-course-package-stor
 
 Expected: FAIL because storage module does not exist.
 
-- [ ] **Step 3: Implement storage module**
+- [x] **Step 3: Implement storage module**
 
 Create `mobile/src/offlineCoursePackages/storage.ts`:
 
@@ -1167,7 +1169,7 @@ export function deleteLocalPackage(manifest: CoursePackageManifest) {
 }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run:
 
@@ -1194,7 +1196,7 @@ git commit -m "feat: add mobile offline package storage"
 - Create: `mobile/__tests__/offline-course-package-downloader.test.ts`
 - Modify: `docs/current-change.md`
 
-- [ ] **Step 1: Write downloader tests**
+- [x] **Step 1: Write downloader tests**
 
 Create `mobile/__tests__/offline-course-package-downloader.test.ts`:
 
@@ -1270,7 +1272,7 @@ describe("offline package downloader", () => {
 })
 ```
 
-- [ ] **Step 2: Run failing test**
+- [x] **Step 2: Run failing test**
 
 Run:
 
@@ -1280,7 +1282,7 @@ pnpm --dir mobile test -- --runTestsByPath __tests__/offline-course-package-down
 
 Expected: FAIL because downloader module does not exist.
 
-- [ ] **Step 3: Implement downloader state helpers**
+- [x] **Step 3: Implement downloader state helpers**
 
 Create `mobile/src/offlineCoursePackages/downloader.ts`:
 
@@ -1352,7 +1354,7 @@ export function bytesToHex(bytes: Uint8Array) {
 
 This task intentionally stops at pure state helpers. Do not add network/file writes until Task 7.
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run:
 
@@ -1383,7 +1385,7 @@ git commit -m "feat: add offline package download tasks"
 - Modify: `mobile/__tests__/root-layout.test.tsx`
 - Modify: `docs/current-change.md`
 
-- [ ] **Step 1: Write route and screen tests**
+- [x] **Step 1: Write route and screen tests**
 
 Create `mobile/__tests__/offline-course-package-screen.test.tsx`:
 
@@ -1423,7 +1425,7 @@ Append to `mobile/__tests__/root-layout.test.tsx`:
   })
 ```
 
-- [ ] **Step 2: Run failing tests**
+- [x] **Step 2: Run failing tests**
 
 Run:
 
@@ -1433,7 +1435,7 @@ pnpm --dir mobile test -- --runTestsByPath __tests__/offline-course-package-scre
 
 Expected: FAIL because the screen and route do not exist.
 
-- [ ] **Step 3: Implement screen**
+- [x] **Step 3: Implement screen**
 
 Create `mobile/src/screens/OfflineCoursePackagesScreen.tsx`:
 
@@ -1485,7 +1487,7 @@ const styles = StyleSheet.create({
 })
 ```
 
-- [ ] **Step 4: Implement route and registration**
+- [x] **Step 4: Implement route and registration**
 
 Create `mobile/src/app/offline-packages/[subjectId]/[scopedProjectId].tsx`:
 
@@ -1538,7 +1540,7 @@ Add inside the screen before the `EmptyState`:
 
 Import `AppButton`.
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 Run:
 
@@ -1567,7 +1569,7 @@ git commit -m "feat: add offline package management route"
 - Modify: `mobile/__tests__/learning-object-detail.test.tsx`
 - Modify: `docs/current-change.md`
 
-- [ ] **Step 1: Write local playback source tests**
+- [x] **Step 1: Write local playback source tests**
 
 Append to `mobile/__tests__/learning-object-detail.test.tsx`:
 
@@ -1594,7 +1596,7 @@ describe("local package playback source", () => {
 })
 ```
 
-- [ ] **Step 2: Run failing test**
+- [x] **Step 2: Run failing test**
 
 Run:
 
@@ -1604,7 +1606,7 @@ pnpm --dir mobile test -- --runTestsByPath __tests__/learning-object-detail.test
 
 Expected: FAIL because source module does not exist.
 
-- [ ] **Step 3: Implement local source module and descriptor union**
+- [x] **Step 3: Implement local source module and descriptor union**
 
 Create `mobile/src/offlineCoursePackages/source.ts`:
 
@@ -1640,7 +1642,7 @@ Modify `mobile/src/api/media.ts`:
   sourceKind: z.enum(["SERVER_FS", "BROWSER_LOCAL", "NATIVE_LOCAL", "MANUAL", "BAIDU_NETDISK", "LOCAL_COURSE_PACKAGE"]),
 ```
 
-- [ ] **Step 4: Update player URL resolution**
+- [x] **Step 4: Update player URL resolution**
 
 Modify `mobile/src/screens/LearningMediaPlayer.tsx`:
 
@@ -1665,7 +1667,7 @@ Add to `getUnsupportedPlaybackMessage`:
   }
 ```
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 Run:
 
@@ -1692,7 +1694,7 @@ git commit -m "feat: support local course package playback"
 - Modify: `docs/mobile-client.md`
 - Modify: `docs/current-change.md`
 
-- [ ] **Step 1: Update `docs/mobile-client.md` boundaries**
+- [x] **Step 1: Update `docs/mobile-client.md` boundaries**
 
 Replace the old mobile boundary statements with:
 
@@ -1704,7 +1706,7 @@ Replace the old mobile boundary statements with:
 - 删除本地课程包只删除手机本地素材，不删除线上学习记录。
 ```
 
-- [ ] **Step 2: Update README Public Subtitle Tool section**
+- [x] **Step 2: Update README Public Subtitle Tool section**
 
 Add under `## Public Subtitle Tool`:
 
@@ -1712,7 +1714,7 @@ Add under `## Public Subtitle Tool`:
 字幕工具支持为本地课程目录生成手机离线课程包。手机端通过“离线课程包”入口扫码连接电脑端临时局域网服务，主动下载视频、字幕和 manifest 到 App 私有课程库。该能力不扫描手机系统文件，不写公共目录，不做公网中继，课程包必须绑定线上学科和 scoped project。
 ```
 
-- [ ] **Step 3: Update `docs/current-change.md` final state**
+- [x] **Step 3: Update `docs/current-change.md` final state**
 
 Set the validation section to:
 
@@ -1726,7 +1728,7 @@ Set the validation section to:
 - 未运行：Android/iOS 真机大文件导入 smoke。
 ```
 
-- [ ] **Step 4: Run full verification**
+- [x] **Step 4: Run full verification**
 
 Run:
 

@@ -10,6 +10,7 @@ from backend.models.enums import MaterialSourceKind, SessionMode
 from backend.models.errors import NotFound, PreconditionFailure
 from backend.models.instance import Instance
 from backend.models.instance_media_binding import InstanceMediaBinding
+from backend.models.instance_subtitle_file import InstanceSubtitleFile
 from backend.models.project_material_source_binding import ProjectMaterialSourceBinding
 from backend.system.auth_store import AuthStore, CloudAccountBinding, decrypt_secret_value, encrypt_secret_value
 from backend.system.baidu_netdisk_client import (
@@ -163,8 +164,12 @@ class InstanceMediaService:
         *,
         auth_store: AuthStore | None = None,
     ) -> dict[str, object]:
-        source_kind = self.get_effective_source_kind(project_id, instance_id)
         instance = self.get_instance(project_id, instance_id)
+        uploaded = self.get_uploaded_instance_subtitle_file(project_id, instance_id)
+        if uploaded is not None:
+            return self._subtitle_file_to_response(uploaded)
+
+        source_kind = self.get_effective_source_kind(project_id, instance_id)
         if source_kind == MaterialSourceKind.BAIDU_NETDISK:
             if auth_store is None:
                 raise PreconditionFailure("auth store is required for Baidu Netdisk subtitles")
@@ -186,6 +191,7 @@ class InstanceMediaService:
                 "instanceId": str(instance_id),
                 "fileName": subtitle["fileName"],
                 "format": subtitle["format"],
+                "source": "BAIDU_NETDISK_SIBLING",
                 "segments": subtitle["segments"],
             }
 
@@ -206,9 +212,31 @@ class InstanceMediaService:
             "instanceId": str(instance_id),
             "fileName": subtitle_path.name,
             "format": document.format,
+            "source": "LOCAL_SIBLING",
             "segments": [
                 {"startMs": int(segment.start_ms), "endMs": int(segment.end_ms), "text": segment.text}
                 for segment in document.segments
+            ],
+        }
+
+    def get_uploaded_instance_subtitle_file(self, project_id: str, instance_id: str) -> InstanceSubtitleFile | None:
+        session = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
+        try:
+            return self.sys.instance_subtitle_file_repo.maybe_get(session, instance_id)  # type: ignore[arg-type]
+        finally:
+            self.sys.rollback(session)
+
+    @staticmethod
+    def _subtitle_file_to_response(item: InstanceSubtitleFile) -> dict[str, object]:
+        return {
+            "found": True,
+            "instanceId": str(item.instance_id),
+            "fileName": item.file_name,
+            "format": item.format,
+            "source": item.source,
+            "segments": [
+                {"startMs": int(segment.start_ms), "endMs": int(segment.end_ms), "text": segment.text}
+                for segment in item.segments
             ],
         }
 

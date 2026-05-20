@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **2026-05-19 correction:** 已发现原计划后半段把移动端工作台拆成“学习对象详情 + 独立复习页”，与桌面端工作台事实不一致。当前移动端工作台应以桌面端 `WorkbenchPage` / `ComposePane` / `ReviewPane` / `RollupPane` 语义为准：工作台内完成复述点录入或复习任务，并提供层推进与学习任务模式。本文早期任务仍保留为执行记录，不再作为当前工作台语义来源；当前状态以 `docs/mobile-client.md` 和 `docs/current-change.md` 为准。
+
 **Goal:** 创建 `mobile/` Expo-managed React Native App，实现 Android/iPhone 第一版学习闭环基础。
 
 **Architecture:** `mobile/` 是独立客户端工程，拥有自己的导航、页面、API client、状态和测试。移动端只通过现有 FastAPI `/api` 访问后端，继续使用 `{subjectId, scopedProjectId}`，不引用 `frontend/` 的 React DOM、Vite 或 Tauri 专用模块。

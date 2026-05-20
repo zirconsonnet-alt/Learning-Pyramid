@@ -2,7 +2,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from backend.models.enums import FsSyncPolicy, InstancePresence, MaterialSourceKind
+from backend.models.enums import FsSyncPolicy, InstancePresence, MaterialSourceKind, SessionMode
+from backend.models.instance import Instance
 from backend.models.learning_object_node import LearningObjectContainer, LearningObjectLeaf
 from backend.models.recall_point import Anchor
 from backend.models.rich_content import rich_text
@@ -12,7 +13,7 @@ from backend.system.subject_material_recovery import (
     validate_subject_material_relationship_integrity,
 )
 from backend.system.api import SystemAPI
-from backend.system.inmemory_system import InMemorySystem
+from backend.system.inmemory_system import InMemorySystem, SessionState
 from backend.system.persistence_store import SQLiteSnapshotStore
 
 
@@ -144,7 +145,89 @@ class SubjectMaterialPersistenceTest(unittest.TestCase):
                 list(reopened.list_recall_points_by_instance(reopened_project_id, instance_id)),
             )
 
-    def test_native_local_directory_import_survives_sqlite_reload_and_marks_absent_instances(self) -> None:
+    def test_uploaded_instance_subtitle_survives_sqlite_reload(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="lp-instance-subtitle-") as temp_dir:
+            store_path = Path(temp_dir) / "store.sqlite3"
+            api = self._reload_sqlite_api(store_path)
+            subject_id = api.create_subject("Subject")
+            material = api.list_subject_materials(subject_id)[0]
+            project_id = material.internal_project_id
+            self.assertIsNotNone(project_id)
+
+            api.import_learning_objects_from_browser_scan(
+                project_id,
+                root_title="Course",
+                relative_file_paths=("lesson-a.mp4",),
+            )
+            instance_id = api.list_instances(project_id)[0].instance_id
+
+            uploaded = api.upload_instance_subtitle_file(
+                project_id,
+                instance_id,
+                file_name="lesson-a.srt",
+                content="1\n00:00:01,000 --> 00:00:03,000\n第一句字幕\n\n",
+            )
+
+            self.assertTrue(uploaded["found"])
+            self.assertEqual("UPLOADED", uploaded["source"])
+            self.assertEqual("lesson-a.srt", uploaded["fileName"])
+            self.assertEqual("srt", uploaded["format"])
+            self.assertEqual([{"startMs": 1000, "endMs": 3000, "text": "第一句字幕"}], uploaded["segments"])
+
+            reloaded = self._reload_sqlite_api(store_path)
+            reloaded_project_id = reloaded.resolve_scoped_project_internal_key(subject_id, material.scoped_project_id)
+            loaded = reloaded.get_instance_subtitle_file(reloaded_project_id, instance_id)
+
+            self.assertTrue(loaded["found"])
+            self.assertEqual("UPLOADED", loaded["source"])
+            self.assertEqual("lesson-a.srt", loaded["fileName"])
+            self.assertEqual([{"startMs": 1000, "endMs": 3000, "text": "第一句字幕"}], loaded["segments"])
+
+    def test_uploaded_instance_subtitle_overrides_and_deletes_to_sibling_subtitle(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="lp-instance-subtitle-priority-") as temp_dir:
+            store_path = Path(temp_dir) / "store.sqlite3"
+            project_root = Path(temp_dir) / "Course Files"
+            project_root.mkdir()
+            (project_root / "lesson-a.mp4").write_bytes(b"")
+            (project_root / "lesson-a.srt").write_text(
+                "1\n00:00:01,000 --> 00:00:03,000\n自动字幕\n\n",
+                encoding="utf-8",
+            )
+            api = self._reload_sqlite_api(store_path)
+            subject_id = api.create_subject("Subject")
+            material = api.list_subject_materials(subject_id)[0]
+            project_id = material.internal_project_id
+            self.assertIsNotNone(project_id)
+
+            api.import_learning_objects_from_native_local_scan(
+                project_id,
+                project_root=str(project_root),
+                root_title="Course",
+                relative_file_paths=("lesson-a.mp4",),
+            )
+            instance_id = api.list_instances(project_id)[0].instance_id
+
+            auto = api.get_instance_subtitle_file(project_id, instance_id)
+            self.assertEqual("LOCAL_SIBLING", auto["source"])
+            self.assertEqual([{"startMs": 1000, "endMs": 3000, "text": "自动字幕"}], auto["segments"])
+
+            api.upload_instance_subtitle_file(
+                project_id,
+                instance_id,
+                file_name="manual.srt",
+                content="1\n00:00:02,000 --> 00:00:04,000\n导入字幕\n\n",
+            )
+            uploaded = api.get_instance_subtitle_file(project_id, instance_id)
+            self.assertEqual("UPLOADED", uploaded["source"])
+            self.assertEqual([{"startMs": 2000, "endMs": 4000, "text": "导入字幕"}], uploaded["segments"])
+
+            deleted = api.delete_instance_subtitle_file(project_id, instance_id)
+            self.assertEqual({"deleted": True, "instanceId": str(instance_id)}, deleted)
+            fallback = api.get_instance_subtitle_file(project_id, instance_id)
+            self.assertEqual("LOCAL_SIBLING", fallback["source"])
+            self.assertEqual([{"startMs": 1000, "endMs": 3000, "text": "自动字幕"}], fallback["segments"])
+
+    def test_native_local_directory_import_survives_sqlite_reload_and_prunes_unreferenced_absent_instances(self) -> None:
         with tempfile.TemporaryDirectory(prefix="lp-native-local-import-") as temp_dir:
             store_path = Path(temp_dir) / "store.sqlite3"
             project_root = str(Path(temp_dir) / "Course Files")
@@ -196,7 +279,8 @@ class SubjectMaterialPersistenceTest(unittest.TestCase):
 
             self.assertFalse(second["unchanged"])
             self.assertEqual(0, second["created_instances_count"])
-            self.assertEqual(1, second["marked_missing_count"])
+            self.assertEqual(0, second["marked_missing_count"])
+            self.assertEqual(1, second.get("deleted_instances_count"))
             self.assertEqual(3, second["replaced_learning_object_nodes_count"])
 
             reloaded = self._reload_sqlite_api(store_path)
@@ -214,9 +298,44 @@ class SubjectMaterialPersistenceTest(unittest.TestCase):
             self.assertEqual(project_root.replace("\\", "/"), reloaded_storage.project_root.as_posix())
             self.assertEqual(".", reloaded_storage.learning_object_root.as_posix())
             self.assertEqual(FsSyncPolicy.MANUAL_SYNC, reloaded_storage.fs_sync_policy)
-            self.assertEqual(InstancePresence.MISSING, reloaded_instances["intro.mp4"].presence)
+            self.assertNotIn("intro.mp4", reloaded_instances)
             self.assertEqual(InstancePresence.PRESENT, reloaded_instances["chapter/lesson.webm"].presence)
             self.assertEqual({"chapter/lesson.webm"}, reloaded_leaves)
+
+    def test_list_missing_instances_only_returns_active_recall_point_repairs(self) -> None:
+        api = SystemAPI(InMemorySystem())
+        project_id = api.create_project(
+            "Course",
+            initial_source_kind=MaterialSourceKind.MANUAL,
+        )
+        first_id = api.add_instance(project_id, "first.mp4")
+        second_id = api.add_instance(project_id, "second.mp4")
+        api.submit_learning_task(
+            project_id,
+            items=[(rich_text("question"), rich_text("answer"), Anchor(instance_id=first_id, position="t=1000"))],
+            title="Task",
+        )
+
+        session = api.sys.begin_session(project_id, SessionMode.READ_WRITE)
+        try:
+            for inst in api.sys.instance_repo.all(session):
+                api.sys.instance_repo.update(
+                    session,
+                    Instance.create(
+                        project_id,
+                        inst.instance_id,
+                        inst.material_id,
+                        presence=InstancePresence.MISSING,
+                        last_seen_at=inst.last_seen_at,
+                    ),
+                )
+            api.sys.commit(session)
+        except Exception:
+            if session.state == SessionState.OPEN:
+                api.sys.rollback(session)
+            raise
+
+        self.assertEqual((first_id,), api.list_missing_instances(project_id))
 
     def test_deleted_subject_material_relationship_does_not_survive_sqlite_reload(self) -> None:
         with tempfile.TemporaryDirectory(prefix="lp-subject-material-delete-") as temp_dir:

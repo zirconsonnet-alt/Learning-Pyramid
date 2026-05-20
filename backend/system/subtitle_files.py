@@ -65,7 +65,7 @@ def parse_subtitle_text(text: str, *, suffix: str) -> SubtitleDocument:
         return SubtitleDocument(format="ass", segments=_parse_ass_like(text))
     if ext == ".ssa":
         return SubtitleDocument(format="ssa", segments=_parse_ass_like(text))
-    raise ValueError(f"unsupported subtitle extension: {file_path.suffix}")
+    raise ValueError(f"unsupported subtitle extension: {ext}")
 
 
 def _normalize_subtitle_text(text: str) -> str:

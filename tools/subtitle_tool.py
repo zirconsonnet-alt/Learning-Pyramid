@@ -1,5 +1,7 @@
 import argparse
+import getpass
 import hashlib
+import http.cookiejar
 import json
 import os
 import queue
@@ -10,11 +12,14 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.error
+import secrets
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from tkinter import filedialog, messagebox, ttk
 from typing import Callable
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import quote, urljoin, urlsplit
 import urllib.request
 from zipfile import ZipFile
 import tkinter as tk
@@ -77,6 +82,12 @@ try:
 except Exception:
     APP_VERSION = "0.0.0"
 
+from tools.offline_course_package import build_course_package
+from tools.offline_course_package_server import (
+    OfflineCoursePackageSession,
+    start_offline_course_package_server,
+)
+
 
 APP_TITLE = "LearningPyramid 字幕生成工具"
 TOOL_ID = "subtitle-generator-windows-x64"
@@ -87,6 +98,7 @@ BUILD_INFO_FILE = "build-info.json"
 UPDATE_CONFIG_FILE = "update-config.json"
 UPDATE_DOWNLOAD_CHUNK_SIZE = 1024 * 1024
 VIDEO_EXTENSIONS = (".mp4", ".mkv", ".mov", ".avi", ".m4v", ".webm", ".wmv", ".flv")
+BAIDU_NETDISK_VIDEO_EXTENSIONS = VIDEO_EXTENSIONS + (".ts", ".m2ts")
 CUDA_BACKEND_NAMES = ("ggml-cuda.dll", "libggml-cuda.so", "libggml-cuda.dylib")
 CUDA_DEVICE_COUNT_PATTERN = re.compile(r"found\s+(\d+)\s+CUDA devices", re.IGNORECASE)
 DEFAULT_RECOGNITION_LANGUAGE = "zh"
@@ -106,6 +118,8 @@ LAYOUT_BREAKPOINT_STACK = 1040
 LAYOUT_BREAKPOINT_COMPACT = 1120
 QT_UNBOUNDED_MAX_WIDTH = 16_777_215
 SOURCE_MODE_UPDATE_MESSAGE = "源码运行模式，版本跟随当前工作区；在线更新仅在打包后的 EXE 中可用。"
+SOURCE_MODE_LOCAL_LABEL = "本地目录"
+SOURCE_MODE_PROJECT_BAIDU_LABEL = "项目网盘视频"
 
 
 class CancelledError(RuntimeError):
@@ -129,6 +143,30 @@ class BatchOptions:
     threads: int
     enable_gpu: bool = False
     language: str = DEFAULT_RECOGNITION_LANGUAGE
+
+
+@dataclass(frozen=True)
+class ProjectBaiduBatchOptions:
+    api_base_url: str
+    email: str
+    password: str
+    subject_id: str
+    scoped_project_id: str
+    overwrite: bool
+    threads: int
+    enable_gpu: bool = False
+    language: str = DEFAULT_RECOGNITION_LANGUAGE
+    baidu_account_id: str | None = None
+    baidu_import_paths: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class MobilePackageOptions:
+    input_dir: Path
+    title: str
+    subject_id: str
+    scoped_project_id: str
+    output_dir: Path | None = None
 
 
 @dataclass
@@ -189,6 +227,182 @@ class ProcessController:
             return
 
 
+def normalize_learningpyramid_api_base_url(value: str) -> str:
+    raw = str(value or "").strip().rstrip("/")
+    if not raw:
+        raise ValueError("请填写 LearningPyramid API 地址。")
+    parsed = urlsplit(raw)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("LearningPyramid API 地址必须以 http:// 或 https:// 开头。")
+    if parsed.path.rstrip("/") == "/api" or parsed.path.rstrip("/").endswith("/api"):
+        return raw
+    return f"{raw}/api"
+
+
+def _extract_api_error_message(payload: object, fallback: str) -> str:
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, dict):
+            message = str(error.get("message") or "").strip()
+            if message:
+                return message
+        detail = payload.get("detail")
+        if detail:
+            return str(detail)
+    return str(fallback or "请求 LearningPyramid API 失败")
+
+
+def _api_join(api_base_url: str, path: str) -> str:
+    return f"{api_base_url.rstrip('/')}/{str(path).lstrip('/')}"
+
+
+def _project_api_suffix(subject_id: str, scoped_project_id: str, suffix: str) -> str:
+    return (
+        f"/subjects/{quote(str(subject_id), safe='')}"
+        f"/projects/{quote(str(scoped_project_id), safe='')}"
+        f"{suffix}"
+    )
+
+
+class LearningPyramidProjectClient:
+    def __init__(self, api_base_url: str) -> None:
+        self.api_base_url = normalize_learningpyramid_api_base_url(api_base_url)
+        self.timeout_seconds = 60
+        self._cookie_jar = http.cookiejar.CookieJar()
+        self._opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self._cookie_jar))
+
+    def login(self, *, email: str, password: str) -> None:
+        self._request_json(
+            "POST",
+            "/auth/login",
+            body={"email": str(email).strip(), "password": str(password)},
+        )
+
+    def list_subjects(self):
+        return self._request_json("GET", "/subjects")
+
+    def list_subject_materials(self, subject_id: str):
+        return self._request_json("GET", f"/subjects/{quote(str(subject_id), safe='')}/materials")
+
+    def list_baidu_netdisk_accounts(self):
+        return self._request_json("GET", "/profile/me/cloud-accounts/baidu-netdisk")
+
+    def list_project_baidu_netdisk_files(
+        self,
+        subject_id: str,
+        scoped_project_id: str,
+        account_id: str,
+        *,
+        dir_path: str = "/",
+        page: int = 1,
+    ):
+        query = (
+            f"accountId={quote(str(account_id), safe='')}"
+            f"&dirPath={quote(str(dir_path or '/'), safe='')}"
+            f"&page={max(1, int(page))}&limit=200"
+        )
+        return self._request_json(
+            "GET",
+            f"{_project_api_suffix(subject_id, scoped_project_id, '/baidu-netdisk/files')}?{query}",
+        )
+
+    def list_instances(self, subject_id: str, scoped_project_id: str):
+        return self._request_json("GET", _project_api_suffix(subject_id, scoped_project_id, "/instances"))
+
+    def get_instance_subtitle_file(self, subject_id: str, scoped_project_id: str, instance_id: str):
+        return self._request_json(
+            "GET",
+            _project_api_suffix(
+                subject_id,
+                scoped_project_id,
+                f"/instances/{quote(str(instance_id), safe='')}/subtitle-file",
+            ),
+        )
+
+    def get_instance_baidu_direct_playback_descriptor(self, subject_id: str, scoped_project_id: str, instance_id: str):
+        return self._request_json(
+            "GET",
+            _project_api_suffix(
+                subject_id,
+                scoped_project_id,
+                f"/media/instances/{quote(str(instance_id), safe='')}/baidu-direct-playback",
+            ),
+        )
+
+    def upload_instance_subtitle_file(
+        self,
+        subject_id: str,
+        scoped_project_id: str,
+        instance_id: str,
+        *,
+        file_name: str,
+        content: str,
+    ):
+        return self._request_json(
+            "POST",
+            _project_api_suffix(
+                subject_id,
+                scoped_project_id,
+                f"/instances/{quote(str(instance_id), safe='')}/subtitle-file",
+            ),
+            body={"fileName": file_name, "content": content},
+        )
+
+    def import_learning_objects_from_baidu_netdisk(
+        self,
+        subject_id: str,
+        scoped_project_id: str,
+        account_id: str,
+        *,
+        items: list[dict[str, object]],
+    ):
+        return self._request_json(
+            "POST",
+            _project_api_suffix(subject_id, scoped_project_id, "/import-learning-objects-from-baidu-netdisk"),
+            body={"accountId": account_id, "items": items},
+        )
+
+    def _request_json(self, method: str, path: str, *, body: object | None = None):
+        payload_bytes: bytes | None = None
+        headers = {
+            "Accept": "application/json",
+            "User-Agent": f"{TOOL_EXE_BASENAME}/{APP_VERSION}",
+        }
+        if body is not None:
+            payload_bytes = json.dumps(body, ensure_ascii=False).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+        request = urllib.request.Request(
+            _api_join(self.api_base_url, path),
+            data=payload_bytes,
+            headers=headers,
+            method=method.upper(),
+        )
+        try:
+            with self._opener.open(request, timeout=self.timeout_seconds) as response:
+                raw = response.read()
+        except urllib.error.HTTPError as exc:
+            raw_error = exc.read().decode("utf-8", errors="replace")
+            parsed_error: object = None
+            try:
+                parsed_error = json.loads(raw_error)
+            except Exception:
+                parsed_error = None
+            raise RuntimeError(_extract_api_error_message(parsed_error, raw_error or str(exc))) from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"无法连接 LearningPyramid API：{exc.reason}") from exc
+
+        text = raw.decode("utf-8", errors="replace") if raw else ""
+        try:
+            payload = json.loads(text) if text else None
+        except Exception as exc:
+            raise RuntimeError("LearningPyramid API 返回了不可解析的响应。") from exc
+        if not isinstance(payload, dict):
+            raise RuntimeError("LearningPyramid API 返回了无效响应。")
+        if payload.get("ok") is not True:
+            raise RuntimeError(_extract_api_error_message(payload, "LearningPyramid API 请求失败。"))
+        return payload.get("data")
+
+
 def is_frozen() -> bool:
     return bool(getattr(sys, "frozen", False))
 
@@ -202,6 +416,83 @@ def executable_dir() -> Path:
 def default_threads() -> int:
     cpu_count = os.cpu_count() or 4
     return max(1, min(cpu_count, 8))
+
+
+def default_mobile_package_output_dir(input_dir: Path) -> Path:
+    resolved_input = input_dir.expanduser().resolve()
+    return resolved_input.parent / f"{resolved_input.name}.learningpyramid-mobile-package"
+
+
+def _validate_mobile_package_options(options: MobilePackageOptions) -> None:
+    if not options.input_dir.exists() or not options.input_dir.is_dir():
+        raise FileNotFoundError(f"课程目录不存在：{options.input_dir}")
+    missing: list[str] = []
+    if not str(options.title or "").strip():
+        missing.append("--mobile-package-title")
+    if not str(options.subject_id or "").strip():
+        missing.append("--mobile-subject-id")
+    if not str(options.scoped_project_id or "").strip():
+        missing.append("--mobile-project-id")
+    if missing:
+        raise ValueError(f"手机导入模式缺少参数：{', '.join(missing)}")
+
+
+def build_mobile_package_session(options: MobilePackageOptions) -> OfflineCoursePackageSession:
+    _validate_mobile_package_options(options)
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(hours=2)
+    package_root = options.output_dir or default_mobile_package_output_dir(options.input_dir)
+    manifest = build_course_package(
+        input_dir=options.input_dir.expanduser().resolve(),
+        output_dir=package_root.expanduser().resolve(),
+        title=options.title.strip(),
+        subject_id=options.subject_id.strip(),
+        scoped_project_id=options.scoped_project_id.strip(),
+        package_id=f"mobile_{secrets.token_urlsafe(16)}",
+        created_at=now.isoformat(),
+    )
+    return OfflineCoursePackageSession(
+        root=package_root.expanduser().resolve(),
+        manifest=manifest,
+        token=secrets.token_urlsafe(32),
+        expires_at_epoch=expires_at.timestamp(),
+    )
+
+
+def build_mobile_package_session_from_args(args: argparse.Namespace) -> OfflineCoursePackageSession:
+    input_dir_text = str(getattr(args, "mobile_package_dir", "") or getattr(args, "input_dir", "") or "").strip()
+    if not input_dir_text:
+        raise SystemExit("请提供 --mobile-package-dir。")
+    input_dir = Path(input_dir_text).expanduser().resolve()
+    title = str(getattr(args, "mobile_package_title", "") or "").strip() or input_dir.name
+    return build_mobile_package_session(
+        MobilePackageOptions(
+            input_dir=input_dir,
+            title=title,
+            subject_id=str(getattr(args, "mobile_subject_id", "") or "").strip(),
+            scoped_project_id=str(getattr(args, "mobile_project_id", "") or "").strip(),
+        )
+    )
+
+
+def format_mobile_package_connection_message(session: OfflineCoursePackageSession, base_url: str) -> str:
+    expires_at = datetime.fromtimestamp(session.expires_at_epoch, timezone.utc).astimezone()
+    return (
+        "手机和电脑在局域网可互相访问时使用。\n\n"
+        f"课程包：{session.root}\n"
+        f"Metadata：{base_url}/metadata\n"
+        f"Manifest：{base_url}/manifest\n"
+        f"Token：{session.token}\n"
+        f"过期时间：{expires_at.strftime('%Y-%m-%d %H:%M:%S %Z')}"
+    )
+
+
+def _wait_for_mobile_package_server_interrupt() -> None:
+    try:
+        while True:
+            time.sleep(3600)
+    except KeyboardInterrupt:
+        return
 
 
 def discover_runtime_paths(runtime_dir: Path | None = None) -> RuntimePaths:
@@ -709,10 +1000,279 @@ def run_batch(
     return summary
 
 
-def generate_subtitle_for_video(
+def _display_name_from_instance(item: object) -> str:
+    if isinstance(item, dict):
+        for key in ("materialDisplayName", "materialId", "instanceId"):
+            value = str(item.get(key) or "").strip()
+            if value:
+                return value
+    return "未命名视频"
+
+
+def _instance_id_from_instance(item: object) -> str:
+    if isinstance(item, dict):
+        value = str(item.get("instanceId") or "").strip()
+        if value:
+            return value
+    raise RuntimeError("项目实例缺少 instanceId。")
+
+
+def _is_project_baidu_hls_instance(item: object) -> bool:
+    if not isinstance(item, dict):
+        return False
+    return str(item.get("mediaSourceKind") or "").strip() == "BAIDU_NETDISK" and str(item.get("playbackKind") or "").strip() == "HLS"
+
+
+def _is_baidu_netdisk_video_item(item: dict[str, object]) -> bool:
+    mime_type = str(item.get("mimeType") or "").strip().lower()
+    if mime_type.startswith("video/"):
+        return True
+    name = str(item.get("name") or item.get("path") or "").strip().lower()
+    return name.endswith(BAIDU_NETDISK_VIDEO_EXTENSIONS)
+
+
+def _is_baidu_netdisk_importable_item(item: dict[str, object]) -> bool:
+    return bool(item.get("isDir")) or _is_baidu_netdisk_video_item(item)
+
+
+def normalize_baidu_remote_path(value: str) -> str:
+    raw = str(value or "").replace("\\", "/").strip()
+    if not raw:
+        raise ValueError("百度网盘路径不能为空。")
+    if not raw.startswith("/"):
+        raw = f"/{raw}"
+    normalized = PurePosixPath(raw).as_posix()
+    return normalized if normalized.startswith("/") else f"/{normalized}"
+
+
+def parse_baidu_import_paths_text(value: str) -> tuple[str, ...]:
+    paths: list[str] = []
+    seen: set[str] = set()
+    for raw_line in str(value or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        path = normalize_baidu_remote_path(line)
+        if path in seen:
+            continue
+        seen.add(path)
+        paths.append(path)
+    return tuple(paths)
+
+
+def _baidu_remote_parent_dir(remote_path: str) -> str:
+    parent = PurePosixPath(normalize_baidu_remote_path(remote_path)).parent.as_posix()
+    return parent if parent.startswith("/") else f"/{parent}"
+
+
+def _resolve_single_baidu_account_id(client: object, configured_account_id: str | None) -> str:
+    explicit = str(configured_account_id or "").strip()
+    if explicit:
+        return explicit
+    accounts = client.list_baidu_netdisk_accounts()  # type: ignore[attr-defined]
+    if not isinstance(accounts, list):
+        raise RuntimeError("百度网盘账号响应无效。")
+    enabled_accounts = [
+        item for item in accounts
+        if isinstance(item, dict) and str(item.get("accountId") or "").strip() and not item.get("disabledAt")
+    ]
+    if not enabled_accounts:
+        raise RuntimeError("当前 LearningPyramid 账号还没有绑定百度网盘。")
+    if len(enabled_accounts) > 1:
+        raise RuntimeError("检测到多个百度网盘账号，请明确填写账号 ID。")
+    return str(enabled_accounts[0]["accountId"]).strip()
+
+
+def _resolve_baidu_import_item(
+    client: object,
     *,
-    video_path: Path,
-    subtitle_path: Path,
+    subject_id: str,
+    scoped_project_id: str,
+    account_id: str,
+    remote_path: str,
+) -> dict[str, object]:
+    normalized_path = normalize_baidu_remote_path(remote_path)
+    if normalized_path == "/":
+        raise ValueError("项目网盘模式不导入百度网盘根目录，请选择具体课程目录或视频文件。")
+    parent_dir = _baidu_remote_parent_dir(normalized_path)
+    page = 1
+    while True:
+        payload = client.list_project_baidu_netdisk_files(  # type: ignore[attr-defined]
+            subject_id,
+            scoped_project_id,
+            account_id,
+            dir_path=parent_dir,
+            page=page,
+        )
+        if not isinstance(payload, dict):
+            raise RuntimeError("百度网盘目录响应无效。")
+        items = payload.get("items")
+        rows = [item for item in items if isinstance(item, dict)] if isinstance(items, list) else []
+        for item in rows:
+            if normalize_baidu_remote_path(str(item.get("path") or "")) != normalized_path:
+                continue
+            if not _is_baidu_netdisk_importable_item(item):
+                raise RuntimeError(f"百度网盘路径不是目录或视频文件：{normalized_path}")
+            file_id = str(item.get("fileId") or "").strip()
+            if not file_id:
+                raise RuntimeError(f"百度网盘路径缺少 fileId：{normalized_path}")
+            resolved: dict[str, object] = {
+                "fileId": file_id,
+                "path": str(item.get("path") or "").strip(),
+                "isDir": bool(item.get("isDir")),
+            }
+            name = str(item.get("name") or "").strip()
+            if name:
+                resolved["name"] = name
+            for source_key, target_key in (
+                ("sizeBytes", "sizeBytes"),
+                ("mimeType", "mimeType"),
+                ("durationMs", "durationMs"),
+            ):
+                value = item.get(source_key)
+                if value is not None:
+                    resolved[target_key] = value
+            return resolved
+        if not bool(payload.get("hasMore")):
+            break
+        page += 1
+    raise RuntimeError(f"百度网盘路径不存在或当前项目无法访问：{normalized_path}")
+
+
+def import_baidu_paths_into_project(
+    *,
+    client: object,
+    options: ProjectBaiduBatchOptions,
+    log: Callable[[str], None],
+) -> None:
+    paths = tuple(normalize_baidu_remote_path(item) for item in options.baidu_import_paths if str(item or "").strip())
+    if not paths:
+        return
+    account_id = _resolve_single_baidu_account_id(client, options.baidu_account_id)
+    items = [
+        _resolve_baidu_import_item(
+            client,
+            subject_id=options.subject_id,
+            scoped_project_id=options.scoped_project_id,
+            account_id=account_id,
+            remote_path=path,
+        )
+        for path in paths
+    ]
+    log(f"准备导入百度网盘路径：{', '.join(paths)}")
+    client.import_learning_objects_from_baidu_netdisk(  # type: ignore[attr-defined]
+        options.subject_id,
+        options.scoped_project_id,
+        account_id,
+        items=items,
+    )
+    log("百度网盘视频已导入到当前项目。")
+
+
+def subtitle_file_name_for_display_name(display_name: str, *, instance_id: str) -> str:
+    normalized = str(display_name or "").replace("\\", "/").strip()
+    filename = normalized.rsplit("/", 1)[-1] if normalized else ""
+    stem = Path(filename).stem.strip()
+    if not stem:
+        stem = str(instance_id or "").strip() or "subtitle"
+    stem = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", stem).strip(". ") or "subtitle"
+    return f"{stem}.srt"
+
+
+def run_project_baidu_batch(
+    options: ProjectBaiduBatchOptions,
+    runtime: RuntimePaths,
+    *,
+    client: object | None = None,
+    log: Callable[[str], None],
+    progress: Callable[[float, int, str, str], None],
+    cancel_event: threading.Event,
+    process_controller: ProcessController,
+) -> BatchSummary:
+    normalized_language = normalize_recognition_language(options.language)
+    project_client = client
+    if project_client is None:
+        project_client = LearningPyramidProjectClient(options.api_base_url)
+        project_client.login(email=options.email, password=options.password)  # type: ignore[attr-defined]
+
+    import_baidu_paths_into_project(client=project_client, options=options, log=log)
+
+    instances = project_client.list_instances(options.subject_id, options.scoped_project_id)  # type: ignore[attr-defined]
+    if not isinstance(instances, list):
+        raise RuntimeError("LearningPyramid 项目实例响应无效。")
+    videos = [item for item in instances if _is_project_baidu_hls_instance(item)]
+    if not videos:
+        raise FileNotFoundError("当前项目中没有找到已导入的百度网盘视频实例。")
+
+    summary = BatchSummary(total=len(videos))
+    for index, item in enumerate(videos, start=1):
+        if cancel_event.is_set():
+            raise CancelledError("任务已取消。")
+
+        instance_id = _instance_id_from_instance(item)
+        display_name = _display_name_from_instance(item)
+        subtitle_name = subtitle_file_name_for_display_name(display_name, instance_id=instance_id)
+        progress(index - 1, summary.total, display_name, "准备处理当前网盘视频。")
+
+        try:
+            if not options.overwrite:
+                existing = project_client.get_instance_subtitle_file(options.subject_id, options.scoped_project_id, instance_id)  # type: ignore[attr-defined]
+                if isinstance(existing, dict) and existing.get("found") is True:
+                    summary.skipped += 1
+                    log(f"[{index}/{summary.total}] 跳过 {display_name}，实例字幕已存在。")
+                    progress(index, summary.total, display_name, "已跳过，实例字幕已存在。")
+                    continue
+
+            log(f"[{index}/{summary.total}] 正在处理 {display_name}")
+            descriptor = project_client.get_instance_baidu_direct_playback_descriptor(  # type: ignore[attr-defined]
+                options.subject_id,
+                options.scoped_project_id,
+                instance_id,
+            )
+            if not isinstance(descriptor, dict):
+                raise RuntimeError("百度网盘播放描述符响应无效。")
+            playlist_text = str(descriptor.get("playlistText") or "").strip()
+            if not playlist_text:
+                raise RuntimeError("百度网盘播放描述符缺少 HLS playlist。")
+
+            subtitle_content = generate_subtitle_for_baidu_hls(
+                display_name=display_name,
+                playlist_text=playlist_text,
+                runtime=runtime,
+                threads=options.threads,
+                enable_gpu=options.enable_gpu,
+                language=normalized_language,
+                cancel_event=cancel_event,
+                process_controller=process_controller,
+                log=log,
+                progress=lambda stage_progress, detail: progress((index - 1) + stage_progress, summary.total, display_name, detail),
+            )
+            project_client.upload_instance_subtitle_file(  # type: ignore[attr-defined]
+                options.subject_id,
+                options.scoped_project_id,
+                instance_id,
+                file_name=subtitle_name,
+                content=subtitle_content,
+            )
+            summary.generated += 1
+            log(f"[{index}/{summary.total}] 已生成 {subtitle_name}")
+        except CancelledError:
+            raise
+        except Exception as exc:
+            summary.failed += 1
+            error_text = f"{display_name}: {exc}"
+            summary.failures.append(error_text)
+            log(f"[{index}/{summary.total}] 失败 {error_text}")
+
+        progress(index, summary.total, display_name, "当前网盘视频已处理完成。")
+
+    return summary
+
+
+def _generate_subtitle_bytes_from_media_input(
+    *,
+    input_args: list[str],
+    display_name: str,
     runtime: RuntimePaths,
     threads: int,
     enable_gpu: bool,
@@ -721,13 +1281,14 @@ def generate_subtitle_for_video(
     process_controller: ProcessController,
     log: Callable[[str], None],
     progress: Callable[[str], None],
-) -> None:
+) -> bytes:
+    safe_stem = subtitle_file_name_for_display_name(display_name, instance_id="subtitle").removesuffix(".srt")
     with tempfile.TemporaryDirectory(prefix="lp-subtitle-tool-") as tmpdir:
         tmp_root = Path(tmpdir)
-        wav_path = tmp_root / f"{video_path.stem}.wav"
-        output_prefix = tmp_root / video_path.stem
+        wav_path = tmp_root / f"{safe_stem}.wav"
+        output_prefix = tmp_root / safe_stem
 
-        log(f"  - 提取音频：{video_path.name}")
+        log(f"  - 提取音频：{display_name}")
         progress(0.08, "正在提取音频...")
         _run_process(
             [
@@ -737,8 +1298,7 @@ def generate_subtitle_for_video(
                 "error",
                 "-nostdin",
                 "-y",
-                "-i",
-                str(video_path),
+                *input_args,
                 "-vn",
                 "-ac",
                 "1",
@@ -755,7 +1315,7 @@ def generate_subtitle_for_video(
 
         acceleration_text = format_selected_acceleration_text(enable_gpu)
         language_text = recognition_language_label(language)
-        log(f"  - 识别语音（{acceleration_text} / {language_text}）：{video_path.name}")
+        log(f"  - 识别语音（{acceleration_text} / {language_text}）：{display_name}")
         progress(0.34, f"音频提取完成，正在识别语音（{acceleration_text} / {language_text}）...")
         _run_process(
             build_whisper_command(
@@ -774,9 +1334,79 @@ def generate_subtitle_for_video(
         generated_srt = whisper_output_file(output_prefix, ".srt")
         if not generated_srt.exists():
             raise RuntimeError("whisper.cpp 没有产出 .srt 文件。")
-        progress(0.92, "识别完成，正在写入字幕文件。")
-        subtitle_path.write_bytes(generated_srt.read_bytes())
-        progress(0.98, "字幕文件已写入到视频同目录。")
+        progress(0.92, "识别完成，正在整理字幕文件。")
+        return generated_srt.read_bytes()
+
+
+def generate_subtitle_for_video(
+    *,
+    video_path: Path,
+    subtitle_path: Path,
+    runtime: RuntimePaths,
+    threads: int,
+    enable_gpu: bool,
+    language: str,
+    cancel_event: threading.Event,
+    process_controller: ProcessController,
+    log: Callable[[str], None],
+    progress: Callable[[str], None],
+) -> None:
+    srt_bytes = _generate_subtitle_bytes_from_media_input(
+        input_args=["-i", str(video_path)],
+        display_name=video_path.name,
+        runtime=runtime,
+        threads=threads,
+        enable_gpu=enable_gpu,
+        language=language,
+        cancel_event=cancel_event,
+        process_controller=process_controller,
+        log=log,
+        progress=progress,
+    )
+    subtitle_path.write_bytes(srt_bytes)
+    progress(0.98, "字幕文件已写入到视频同目录。")
+
+
+def generate_subtitle_for_baidu_hls(
+    *,
+    display_name: str,
+    playlist_text: str,
+    runtime: RuntimePaths,
+    threads: int,
+    enable_gpu: bool,
+    language: str,
+    cancel_event: threading.Event,
+    process_controller: ProcessController,
+    log: Callable[[str], None],
+    progress: Callable[[str], None],
+) -> str:
+    normalized_playlist = str(playlist_text or "")
+    if not normalized_playlist.lstrip().startswith("#EXTM3U"):
+        raise RuntimeError("百度网盘播放列表不是有效 HLS playlist。")
+    with tempfile.TemporaryDirectory(prefix="lp-subtitle-tool-baidu-") as tmpdir:
+        playlist_path = Path(tmpdir) / "playlist.m3u8"
+        playlist_path.write_text(normalized_playlist, encoding="utf-8", newline="\n")
+        srt_bytes = _generate_subtitle_bytes_from_media_input(
+            input_args=[
+                "-protocol_whitelist",
+                "file,http,https,tcp,tls,crypto",
+                "-allowed_extensions",
+                "ALL",
+                "-i",
+                str(playlist_path),
+            ],
+            display_name=display_name,
+            runtime=runtime,
+            threads=threads,
+            enable_gpu=enable_gpu,
+            language=language,
+            cancel_event=cancel_event,
+            process_controller=process_controller,
+            log=log,
+            progress=progress,
+        )
+    progress(0.98, "字幕已生成，正在上传到 LearningPyramid。")
+    return srt_bytes.decode("utf-8-sig", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
 
 
 def _stream_process_output(stream, output_queue: "queue.Queue[str]") -> None:
@@ -927,6 +1557,9 @@ class QtSubtitleToolApp:
         self.current_detail = "请选择一个视频目录。"
         self._hero_layout_stacked: bool | None = None
         self._body_layout_compact: bool | None = None
+        self.project_choices: list[dict[str, str]] = []
+        self.baidu_dir_items: list[dict[str, object]] = []
+        self.mobile_package_server = None
 
         self._build_ui()
         self._load_ui_state()
@@ -936,6 +1569,7 @@ class QtSubtitleToolApp:
         self._refresh_runtime_summary()
         self._refresh_update_controls()
         self.app.aboutToQuit.connect(self._save_ui_state)
+        self.app.aboutToQuit.connect(self._stop_mobile_package_server)
 
         self.poll_timer = QTimer()
         self.poll_timer.timeout.connect(self._poll_events)
@@ -1230,13 +1864,42 @@ class QtSubtitleToolApp:
         remaining = max(0.0, elapsed * (1.0 / ratio - 1.0))
         self.eta_value_label.setText(format_elapsed_short(remaining))
 
+    def _refresh_source_mode_controls(self) -> None:
+        project_mode = self.source_mode_combo.currentText() == SOURCE_MODE_PROJECT_BAIDU_LABEL
+        self.input_dir_edit.setEnabled(not project_mode)
+        self.choose_directory_button.setEnabled(not project_mode)
+        for widget in (
+            self.api_base_url_edit,
+            self.email_edit,
+            self.password_edit,
+            self.project_picker_combo,
+            self.load_project_choices_button,
+            self.subject_id_edit,
+            self.project_id_edit,
+            self.baidu_account_id_edit,
+            self.baidu_current_dir_edit,
+            self.baidu_items_combo,
+            self.baidu_import_paths_edit,
+            self.load_baidu_dir_button,
+            self.baidu_parent_button,
+            self.baidu_enter_button,
+            self.baidu_add_path_button,
+        ):
+            widget.setEnabled(project_mode)
+
     def _refresh_selection_summary(self) -> None:
+        self._refresh_source_mode_controls()
         language_text = recognition_language_label(recognition_language_code_from_label(self.language_combo.currentText()))
         acceleration_text = format_selected_acceleration_text(self.enable_gpu_checkbox.isChecked())
-        scope_text = "递归扫描子目录"
+        source_text = "扫描项目中的百度网盘视频" if self.source_mode_combo.currentText() == SOURCE_MODE_PROJECT_BAIDU_LABEL else "递归扫描本地目录"
         overwrite_text = "覆盖已有字幕" if self.overwrite_checkbox.isChecked() else "跳过已有字幕"
         threads_text = f"{int(self.threads_spin.value())} 线程"
-        summary_text = " · ".join([language_text, acceleration_text, scope_text, overwrite_text, threads_text])
+        parts = [language_text, acceleration_text, source_text, overwrite_text, threads_text]
+        if self.source_mode_combo.currentText() == SOURCE_MODE_PROJECT_BAIDU_LABEL:
+            import_count = len(parse_baidu_import_paths_text(self.baidu_import_paths_edit.toPlainText()))
+            if import_count > 0:
+                parts.append(f"先导入 {import_count} 个网盘路径")
+        summary_text = " · ".join(parts)
         self.selection_summary_label.setText(summary_text)
 
     def _reset_run_metrics(self) -> None:
@@ -1274,7 +1937,15 @@ class QtSubtitleToolApp:
         width = max(MIN_QT_WINDOW_WIDTH, int(self.settings.value("ui/width", DEFAULT_QT_WINDOW_WIDTH)))
         height = max(MIN_QT_WINDOW_HEIGHT, int(self.settings.value("ui/height", DEFAULT_QT_WINDOW_HEIGHT)))
         self.window.resize(width, height)
+        self.source_mode_combo.setCurrentText(str(self.settings.value("form/sourceMode", SOURCE_MODE_LOCAL_LABEL)) or SOURCE_MODE_LOCAL_LABEL)
         self.input_dir_edit.setText(str(self.settings.value("form/inputDir", "")))
+        self.api_base_url_edit.setText(str(self.settings.value("form/apiBaseUrl", "")))
+        self.email_edit.setText(str(self.settings.value("form/email", "")))
+        self.subject_id_edit.setText(str(self.settings.value("form/subjectId", "")))
+        self.project_id_edit.setText(str(self.settings.value("form/projectId", "")))
+        self.baidu_account_id_edit.setText(str(self.settings.value("form/baiduAccountId", "")))
+        self.baidu_current_dir_edit.setText(str(self.settings.value("form/baiduCurrentDir", "/")) or "/")
+        self.baidu_import_paths_edit.setPlainText(str(self.settings.value("form/baiduImportPaths", "")))
         self.overwrite_checkbox.setChecked(self._read_setting_bool("form/overwrite", False))
         self.threads_spin.setValue(max(1, min(16, int(self.settings.value("form/threads", default_threads())))))
         self.enable_gpu_checkbox.setChecked(self._read_setting_bool("form/gpu", False))
@@ -1320,7 +1991,15 @@ class QtSubtitleToolApp:
         self.settings.setValue("ui/width", self.window.width())
         self.settings.setValue("ui/height", self.window.height())
         self.settings.setValue("ui/logVisible", self.log_card.isVisible())
+        self.settings.setValue("form/sourceMode", self.source_mode_combo.currentText())
         self.settings.setValue("form/inputDir", self.input_dir_edit.text().strip())
+        self.settings.setValue("form/apiBaseUrl", self.api_base_url_edit.text().strip())
+        self.settings.setValue("form/email", self.email_edit.text().strip())
+        self.settings.setValue("form/subjectId", self.subject_id_edit.text().strip())
+        self.settings.setValue("form/projectId", self.project_id_edit.text().strip())
+        self.settings.setValue("form/baiduAccountId", self.baidu_account_id_edit.text().strip())
+        self.settings.setValue("form/baiduCurrentDir", self.baidu_current_dir_edit.text().strip())
+        self.settings.setValue("form/baiduImportPaths", self.baidu_import_paths_edit.toPlainText().strip())
         self.settings.setValue("form/overwrite", self.overwrite_checkbox.isChecked())
         self.settings.setValue("form/threads", self.threads_spin.value())
         self.settings.setValue("form/gpu", self.enable_gpu_checkbox.isChecked())
@@ -1406,17 +2085,75 @@ class QtSubtitleToolApp:
         self._add_card_header(
             workspace_layout,
             eyebrow="工作区",
-            title="选择视频目录",
+            title="选择来源",
         )
         directory_layout = QGridLayout()
         directory_layout.setHorizontalSpacing(12)
         directory_layout.setVerticalSpacing(10)
-        directory_layout.addWidget(self._make_label("视频目录", role="metricLabel"), 0, 0)
+        directory_layout.addWidget(self._make_label("来源", role="metricLabel"), 0, 0)
+        self.source_mode_combo = QComboBox()
+        self.source_mode_combo.addItems([SOURCE_MODE_LOCAL_LABEL, SOURCE_MODE_PROJECT_BAIDU_LABEL])
+        directory_layout.addWidget(self.source_mode_combo, 0, 1)
+        directory_layout.addWidget(self._make_label("视频目录", role="metricLabel"), 1, 0)
         self.input_dir_edit = QLineEdit()
         self.input_dir_edit.setPlaceholderText("选择要批量生成字幕的视频目录")
-        directory_layout.addWidget(self.input_dir_edit, 0, 1)
+        directory_layout.addWidget(self.input_dir_edit, 1, 1)
         self.choose_directory_button = self._make_button("选择目录", variant="secondary", handler=self._choose_directory)
-        directory_layout.addWidget(self.choose_directory_button, 0, 2)
+        directory_layout.addWidget(self.choose_directory_button, 1, 2)
+        directory_layout.addWidget(self._make_label("API 地址", role="metricLabel"), 2, 0)
+        self.api_base_url_edit = QLineEdit()
+        self.api_base_url_edit.setPlaceholderText("https://plm.xuebao.chat/api")
+        directory_layout.addWidget(self.api_base_url_edit, 2, 1, 1, 2)
+        directory_layout.addWidget(self._make_label("邮箱", role="metricLabel"), 3, 0)
+        self.email_edit = QLineEdit()
+        directory_layout.addWidget(self.email_edit, 3, 1, 1, 2)
+        directory_layout.addWidget(self._make_label("密码", role="metricLabel"), 4, 0)
+        self.password_edit = QLineEdit()
+        self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        directory_layout.addWidget(self.password_edit, 4, 1, 1, 2)
+        directory_layout.addWidget(self._make_label("项目选择", role="metricLabel"), 5, 0)
+        self.project_picker_combo = QComboBox()
+        directory_layout.addWidget(self.project_picker_combo, 5, 1)
+        self.load_project_choices_button = self._make_button("加载项目", variant="secondary", handler=self._load_project_choices)
+        directory_layout.addWidget(self.load_project_choices_button, 5, 2)
+        directory_layout.addWidget(self._make_label("学科 ID", role="metricLabel"), 6, 0)
+        self.subject_id_edit = QLineEdit()
+        self.subject_id_edit.setPlaceholderText("例如 subj_000001")
+        directory_layout.addWidget(self.subject_id_edit, 6, 1, 1, 2)
+        directory_layout.addWidget(self._make_label("项目 ID", role="metricLabel"), 7, 0)
+        self.project_id_edit = QLineEdit()
+        self.project_id_edit.setPlaceholderText("例如 proj_000001")
+        directory_layout.addWidget(self.project_id_edit, 7, 1, 1, 2)
+        directory_layout.addWidget(self._make_label("网盘账号", role="metricLabel"), 8, 0)
+        self.baidu_account_id_edit = QLineEdit()
+        self.baidu_account_id_edit.setPlaceholderText("可留空；只有一个已绑定账号时会自动使用")
+        directory_layout.addWidget(self.baidu_account_id_edit, 8, 1, 1, 2)
+        directory_layout.addWidget(self._make_label("当前目录", role="metricLabel"), 9, 0)
+        self.baidu_current_dir_edit = QLineEdit()
+        self.baidu_current_dir_edit.setPlaceholderText("/")
+        directory_layout.addWidget(self.baidu_current_dir_edit, 9, 1)
+        self.load_baidu_dir_button = self._make_button("读取目录", variant="secondary", handler=self._load_baidu_dir_items)
+        directory_layout.addWidget(self.load_baidu_dir_button, 9, 2)
+        directory_layout.addWidget(self._make_label("目录项目", role="metricLabel"), 10, 0)
+        self.baidu_items_combo = QComboBox()
+        directory_layout.addWidget(self.baidu_items_combo, 10, 1)
+        baidu_item_actions = QWidget()
+        baidu_item_actions_layout = QHBoxLayout(baidu_item_actions)
+        baidu_item_actions_layout.setContentsMargins(0, 0, 0, 0)
+        baidu_item_actions_layout.setSpacing(8)
+        self.baidu_parent_button = self._make_button("上级", variant="secondary", handler=self._load_baidu_parent_dir)
+        self.baidu_enter_button = self._make_button("进入", variant="secondary", handler=self._enter_selected_baidu_dir)
+        self.baidu_add_path_button = self._make_button("添加", variant="secondary", handler=self._add_selected_baidu_import_path)
+        baidu_item_actions_layout.addWidget(self.baidu_parent_button)
+        baidu_item_actions_layout.addWidget(self.baidu_enter_button)
+        baidu_item_actions_layout.addWidget(self.baidu_add_path_button)
+        directory_layout.addWidget(baidu_item_actions, 10, 2)
+        directory_layout.addWidget(self._make_label("导入路径", role="metricLabel"), 11, 0)
+        self.baidu_import_paths_edit = QPlainTextEdit()
+        self.baidu_import_paths_edit.setPlaceholderText("一行一个百度网盘目录或视频路径；会先导入当前项目再生成字幕")
+        self.baidu_import_paths_edit.setMinimumHeight(76)
+        self.baidu_import_paths_edit.setMaximumHeight(120)
+        directory_layout.addWidget(self.baidu_import_paths_edit, 11, 1, 1, 2)
         directory_layout.setColumnStretch(1, 1)
         workspace_layout.addLayout(directory_layout)
         left_layout.addWidget(workspace_card)
@@ -1544,18 +2281,23 @@ class QtSubtitleToolApp:
         self.log_toggle_button = self._make_button("查看日志", variant="secondary", handler=self._toggle_log_visibility)
         self.cancel_button = self._make_button("取消", variant="secondary", handler=self._cancel)
         self.cancel_button.setEnabled(False)
+        self.mobile_import_button = self._make_button("导入到手机", variant="secondary", handler=self._start_mobile_import)
         self.start_button = self._make_button("开始生成", variant="primary", handler=self._start)
         footer_row.addWidget(self.log_toggle_button)
         footer_row.addWidget(self.cancel_button)
+        footer_row.addWidget(self.mobile_import_button)
         footer_row.addWidget(self.start_button)
         footer_layout.addLayout(footer_row)
         shell.addWidget(footer_card)
 
+        self.source_mode_combo.currentTextChanged.connect(self._refresh_selection_summary)
         self.input_dir_edit.textChanged.connect(self._refresh_selection_summary)
         self.overwrite_checkbox.toggled.connect(self._refresh_selection_summary)
         self.enable_gpu_checkbox.toggled.connect(self._refresh_selection_summary)
         self.language_combo.currentTextChanged.connect(self._refresh_selection_summary)
         self.threads_spin.valueChanged.connect(self._refresh_selection_summary)
+        self.baidu_import_paths_edit.textChanged.connect(self._refresh_selection_summary)
+        self.project_picker_combo.currentIndexChanged.connect(self._apply_selected_project_choice)
 
     def _show_info(self, message: str) -> None:
         QMessageBox.information(self.window, APP_TITLE, message)
@@ -1731,6 +2473,149 @@ class QtSubtitleToolApp:
         if selected:
             self.input_dir_edit.setText(selected)
 
+    def _make_project_client_from_form(self) -> LearningPyramidProjectClient:
+        api_base_url = normalize_learningpyramid_api_base_url(self.api_base_url_edit.text().strip())
+        email = self.email_edit.text().strip()
+        password = self.password_edit.text()
+        if not email:
+            raise ValueError("请填写 LearningPyramid 登录邮箱。")
+        if not password:
+            raise ValueError("请填写 LearningPyramid 密码。")
+        client = LearningPyramidProjectClient(api_base_url)
+        client.login(email=email, password=password)
+        return client
+
+    def _current_project_ids_from_form(self) -> tuple[str, str]:
+        subject_id = self.subject_id_edit.text().strip()
+        scoped_project_id = self.project_id_edit.text().strip()
+        if not subject_id:
+            raise ValueError("请填写学科 ID。")
+        if not scoped_project_id:
+            raise ValueError("请填写项目 ID。")
+        return subject_id, scoped_project_id
+
+    def _current_baidu_account_id(self, client: object) -> str:
+        account_id = _resolve_single_baidu_account_id(client, self.baidu_account_id_edit.text().strip() or None)
+        if not self.baidu_account_id_edit.text().strip():
+            self.baidu_account_id_edit.setText(account_id)
+        return account_id
+
+    def _load_project_choices(self) -> None:
+        try:
+            client = self._make_project_client_from_form()
+            subjects = client.list_subjects()
+            if not isinstance(subjects, list):
+                raise RuntimeError("LearningPyramid 学科响应无效。")
+            choices: list[dict[str, str]] = []
+            for subject in subjects:
+                if not isinstance(subject, dict):
+                    continue
+                subject_id = str(subject.get("subjectId") or "").strip()
+                if not subject_id:
+                    continue
+                subject_title = str(subject.get("title") or subject_id).strip()
+                materials = client.list_subject_materials(subject_id)
+                if not isinstance(materials, list):
+                    raise RuntimeError(f"LearningPyramid 项目响应无效：{subject_title}")
+                for material in materials:
+                    if not isinstance(material, dict):
+                        continue
+                    scoped_project_id = str(material.get("scopedProjectId") or "").strip()
+                    if not scoped_project_id:
+                        continue
+                    material_title = str(material.get("title") or scoped_project_id).strip()
+                    choices.append(
+                        {
+                            "subjectId": subject_id,
+                            "scopedProjectId": scoped_project_id,
+                            "label": f"{subject_title} / {material_title}",
+                        }
+                    )
+            self.project_picker_combo.clear()
+            self.project_choices = choices
+            for choice in choices:
+                self.project_picker_combo.addItem(choice["label"], choice)
+            if choices:
+                self.project_picker_combo.setCurrentIndex(0)
+                self._apply_selected_project_choice()
+            self._append_log(f"已加载 {len(choices)} 个项目。")
+        except Exception as exc:
+            self._show_error(str(exc))
+
+    def _apply_selected_project_choice(self, *_args) -> None:
+        choice = self.project_picker_combo.currentData()
+        if not isinstance(choice, dict):
+            return
+        subject_id = str(choice.get("subjectId") or "").strip()
+        scoped_project_id = str(choice.get("scopedProjectId") or "").strip()
+        if subject_id:
+            self.subject_id_edit.setText(subject_id)
+        if scoped_project_id:
+            self.project_id_edit.setText(scoped_project_id)
+
+    def _load_baidu_dir_items(self) -> None:
+        try:
+            subject_id, scoped_project_id = self._current_project_ids_from_form()
+            client = self._make_project_client_from_form()
+            account_id = self._current_baidu_account_id(client)
+            dir_path = normalize_baidu_remote_path(self.baidu_current_dir_edit.text().strip() or "/")
+            payload = client.list_project_baidu_netdisk_files(
+                subject_id,
+                scoped_project_id,
+                account_id,
+                dir_path=dir_path,
+                page=1,
+            )
+            if not isinstance(payload, dict):
+                raise RuntimeError("百度网盘目录响应无效。")
+            rows = payload.get("items")
+            items = [item for item in rows if isinstance(item, dict)] if isinstance(rows, list) else []
+            items.sort(key=lambda item: (0 if bool(item.get("isDir")) else 1, str(item.get("name") or item.get("path") or "")))
+            self.baidu_items_combo.clear()
+            self.baidu_dir_items = items
+            for item in items:
+                name = str(item.get("name") or item.get("path") or "").strip() or "未命名"
+                kind = "目录" if bool(item.get("isDir")) else ("视频" if _is_baidu_netdisk_video_item(item) else "文件")
+                self.baidu_items_combo.addItem(f"[{kind}] {name}", item)
+            self.baidu_current_dir_edit.setText(dir_path)
+            self._append_log(f"已读取百度网盘目录：{dir_path}，{len(items)} 项。")
+        except Exception as exc:
+            self._show_error(str(exc))
+
+    def _selected_baidu_item(self) -> dict[str, object] | None:
+        item = self.baidu_items_combo.currentData()
+        return item if isinstance(item, dict) else None
+
+    def _load_baidu_parent_dir(self) -> None:
+        current_dir = self.baidu_current_dir_edit.text().strip() or "/"
+        parent = _baidu_remote_parent_dir(current_dir)
+        self.baidu_current_dir_edit.setText(parent)
+        self._load_baidu_dir_items()
+
+    def _enter_selected_baidu_dir(self) -> None:
+        item = self._selected_baidu_item()
+        if item is None:
+            return
+        if not bool(item.get("isDir")):
+            self._show_error("只能进入目录。")
+            return
+        self.baidu_current_dir_edit.setText(normalize_baidu_remote_path(str(item.get("path") or "")))
+        self._load_baidu_dir_items()
+
+    def _add_selected_baidu_import_path(self) -> None:
+        item = self._selected_baidu_item()
+        if item is None:
+            return
+        if not _is_baidu_netdisk_importable_item(item):
+            self._show_error("只能添加目录或视频文件。")
+            return
+        selected_path = normalize_baidu_remote_path(str(item.get("path") or ""))
+        current_paths = list(parse_baidu_import_paths_text(self.baidu_import_paths_edit.toPlainText()))
+        if selected_path not in current_paths:
+            current_paths.append(selected_path)
+        self.baidu_import_paths_edit.setPlainText("\n".join(current_paths))
+        self._refresh_selection_summary()
+
     def _sync_gpu_controls(self, runtime: RuntimePaths | None) -> None:
         if runtime is not None and runtime_supports_cuda(runtime):
             detected_devices = detect_cuda_device_count(runtime)
@@ -1758,36 +2643,103 @@ class QtSubtitleToolApp:
         self._sync_gpu_controls(runtime)
         self._refresh_selection_summary()
 
-    def _start(self) -> None:
-        if self.worker_thread is not None and self.worker_thread.is_alive():
+    def _stop_mobile_package_server(self) -> None:
+        server = self.mobile_package_server
+        if server is None:
             return
+        self.mobile_package_server = None
+        server.stop()
 
+    def _start_mobile_import(self) -> None:
+        if self.source_mode_combo.currentText() == SOURCE_MODE_PROJECT_BAIDU_LABEL:
+            self._show_error("请先切换到本地目录模式，并选择本地视频目录。")
+            return
         input_dir_text = self.input_dir_edit.text().strip()
         if not input_dir_text:
             self._show_error("请先选择一个视频目录。")
             return
+        try:
+            input_dir = Path(input_dir_text).expanduser().resolve()
+            session = build_mobile_package_session(
+                MobilePackageOptions(
+                    input_dir=input_dir,
+                    title=input_dir.name,
+                    subject_id=self.subject_id_edit.text().strip(),
+                    scoped_project_id=self.project_id_edit.text().strip(),
+                )
+            )
+            self._stop_mobile_package_server()
+            self.mobile_package_server = start_offline_course_package_server(session)
+        except Exception as exc:
+            self._show_error(str(exc))
+            return
+        assert self.mobile_package_server is not None
+        message = format_mobile_package_connection_message(session, self.mobile_package_server.base_url)
+        self._append_log("已启动手机导入临时服务。")
+        self._append_log(message)
+        self._show_info(message)
 
-        input_dir = Path(input_dir_text).expanduser()
+    def _start(self) -> None:
+        if self.worker_thread is not None and self.worker_thread.is_alive():
+            return
+
         try:
             runtime = discover_runtime_paths(self.runtime_dir)
         except Exception as exc:
             self._show_error(str(exc))
             return
 
-        options = BatchOptions(
-            input_dir=input_dir,
-            recursive=True,
-            overwrite=self.overwrite_checkbox.isChecked(),
-            threads=max(1, int(self.threads_spin.value() or 1)),
-            enable_gpu=self.enable_gpu_checkbox.isChecked(),
-            language=recognition_language_code_from_label(self.language_combo.currentText()),
-        )
+        project_mode = self.source_mode_combo.currentText() == SOURCE_MODE_PROJECT_BAIDU_LABEL
+        if project_mode:
+            try:
+                options: BatchOptions | ProjectBaiduBatchOptions = ProjectBaiduBatchOptions(
+                    api_base_url=normalize_learningpyramid_api_base_url(self.api_base_url_edit.text().strip()),
+                    email=self.email_edit.text().strip(),
+                    password=self.password_edit.text(),
+                    subject_id=self.subject_id_edit.text().strip(),
+                    scoped_project_id=self.project_id_edit.text().strip(),
+                    overwrite=self.overwrite_checkbox.isChecked(),
+                    threads=max(1, int(self.threads_spin.value() or 1)),
+                    enable_gpu=self.enable_gpu_checkbox.isChecked(),
+                    language=recognition_language_code_from_label(self.language_combo.currentText()),
+                    baidu_account_id=self.baidu_account_id_edit.text().strip() or None,
+                    baidu_import_paths=parse_baidu_import_paths_text(self.baidu_import_paths_edit.toPlainText()),
+                )
+                _validate_project_baidu_options(options)
+            except Exception as exc:
+                self._show_error(str(exc))
+                return
+            task_label = f"{options.subject_id}/{options.scoped_project_id}"
+            preparing_text = "准备扫描项目网盘视频..."
+            status_text = (
+                f"正在扫描项目中的百度网盘视频并准备逐个生成字幕"
+                f"（{format_selected_acceleration_text(options.enable_gpu)} / {recognition_language_label(options.language)}）。"
+            )
+        else:
+            input_dir_text = self.input_dir_edit.text().strip()
+            if not input_dir_text:
+                self._show_error("请先选择一个视频目录。")
+                return
+            input_dir = Path(input_dir_text).expanduser()
+            options = BatchOptions(
+                input_dir=input_dir,
+                recursive=True,
+                overwrite=self.overwrite_checkbox.isChecked(),
+                threads=max(1, int(self.threads_spin.value() or 1)),
+                enable_gpu=self.enable_gpu_checkbox.isChecked(),
+                language=recognition_language_code_from_label(self.language_combo.currentText()),
+            )
+            task_label = str(options.input_dir)
+            preparing_text = "准备扫描目录..."
+            status_text = (
+                f"正在扫描目录并准备逐个生成字幕（{format_selected_acceleration_text(options.enable_gpu)} / {recognition_language_label(options.language)}）。"
+            )
         if options.enable_gpu and not runtime_supports_cuda(runtime):
             self._show_error("当前工具包未包含 CUDA backend，暂时不能启用 GPU 模式。")
             return
 
         self._append_log("")
-        self._append_log(f"开始任务：{options.input_dir}")
+        self._append_log(f"开始任务：{task_label}")
         self._append_log(print_runtime_summary(runtime))
         self._append_log(f"识别模式：{format_selected_acceleration_text(options.enable_gpu)}")
         self._append_log(f"识别语言：{recognition_language_label(options.language)}")
@@ -1803,12 +2755,10 @@ class QtSubtitleToolApp:
         self.start_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
         self.progress_bar.setValue(0)
-        self.progress_label.setText("准备扫描目录...")
-        self.status_label.setText(
-            f"正在扫描目录并准备逐个生成字幕（{format_selected_acceleration_text(options.enable_gpu)} / {recognition_language_label(options.language)}）。"
-        )
+        self.progress_label.setText(preparing_text)
+        self.status_label.setText(status_text)
         self.status_label.show()
-        self.current_file_value_label.setText("正在扫描目录...")
+        self.current_file_value_label.setText(preparing_text)
         self.current_file_value_label.setToolTip("")
         self.current_step_value_label.setText("准备任务队列")
         self._set_run_overview_active(True)
@@ -1819,16 +2769,26 @@ class QtSubtitleToolApp:
         self.worker_thread = threading.Thread(target=self._run_worker, args=(options, runtime), daemon=True)
         self.worker_thread.start()
 
-    def _run_worker(self, options: BatchOptions, runtime: RuntimePaths) -> None:
+    def _run_worker(self, options: BatchOptions | ProjectBaiduBatchOptions, runtime: RuntimePaths) -> None:
         try:
-            summary = run_batch(
-                options,
-                runtime,
-                log=lambda text: self.event_queue.put(("log", text)),
-                progress=lambda done, total, video, detail: self.event_queue.put(("progress", (done, total, str(video), detail))),
-                cancel_event=self.cancel_event,
-                process_controller=self.process_controller,
-            )
+            if isinstance(options, ProjectBaiduBatchOptions):
+                summary = run_project_baidu_batch(
+                    options,
+                    runtime,
+                    log=lambda text: self.event_queue.put(("log", text)),
+                    progress=lambda done, total, video, detail: self.event_queue.put(("progress", (done, total, str(video), detail))),
+                    cancel_event=self.cancel_event,
+                    process_controller=self.process_controller,
+                )
+            else:
+                summary = run_batch(
+                    options,
+                    runtime,
+                    log=lambda text: self.event_queue.put(("log", text)),
+                    progress=lambda done, total, video, detail: self.event_queue.put(("progress", (done, total, str(video), detail))),
+                    cancel_event=self.cancel_event,
+                    process_controller=self.process_controller,
+                )
             self.event_queue.put(("done", summary))
         except CancelledError as exc:
             self.event_queue.put(("cancelled", str(exc)))
@@ -2001,13 +2961,22 @@ class SubtitleToolApp:
         self.runtime_dir = runtime_dir
         self.root = tk.Tk()
         self.root.title(APP_TITLE)
-        self.root.geometry("860x500")
-        self.root.minsize(760, 500)
+        self.root.geometry("900x680")
+        self.root.minsize(820, 640)
         self._configure_theme()
         self.can_self_update = is_frozen()
         self.installed_build = load_installed_build_info()
 
         self.input_dir_var = tk.StringVar()
+        self.source_mode_var = tk.StringVar(value=SOURCE_MODE_LOCAL_LABEL)
+        self.api_base_url_var = tk.StringVar()
+        self.email_var = tk.StringVar()
+        self.password_var = tk.StringVar()
+        self.project_picker_var = tk.StringVar()
+        self.subject_id_var = tk.StringVar()
+        self.project_id_var = tk.StringVar()
+        self.baidu_account_id_var = tk.StringVar()
+        self.baidu_current_dir_var = tk.StringVar(value="/")
         self.runtime_var = tk.StringVar(value="正在检查内置运行时...")
         self.status_var = tk.StringVar(value="请选择一个视频目录。")
         self.progress_label_var = tk.StringVar(value="尚未开始")
@@ -2032,12 +3001,16 @@ class SubtitleToolApp:
         self.available_release: UpdateRelease | None = None
         self.staged_release: UpdateRelease | None = None
         self.staged_release_dir: Path | None = None
+        self.project_choices: list[dict[str, str]] = []
+        self.baidu_dir_items: list[dict[str, object]] = []
+        self.mobile_package_server = None
 
         self._build_ui()
         self._set_advanced_visible(False)
         self._set_log_visible(False)
         self._refresh_runtime_summary()
         self._refresh_update_controls()
+        self.root.protocol("WM_DELETE_WINDOW", self._close)
         self.root.after(120, self._poll_events)
         if self.can_self_update:
             self.root.after(500, self._auto_check_updates)
@@ -2106,9 +3079,62 @@ class SubtitleToolApp:
         directory_row = ttk.Frame(task_card, style="Card.TFrame")
         directory_row.grid(row=2, column=0, sticky="ew")
         directory_row.columnconfigure(1, weight=1)
-        ttk.Label(directory_row, text="视频目录", style="CardMuted.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Entry(directory_row, textvariable=self.input_dir_var).grid(row=0, column=1, sticky="ew", padx=(10, 10))
-        ttk.Button(directory_row, text="选择目录", style="Secondary.TButton", command=self._choose_directory).grid(row=0, column=2, sticky="e")
+        ttk.Label(directory_row, text="来源", style="CardMuted.TLabel").grid(row=0, column=0, sticky="w")
+        self.source_mode_combobox = ttk.Combobox(
+            directory_row,
+            textvariable=self.source_mode_var,
+            values=[SOURCE_MODE_LOCAL_LABEL, SOURCE_MODE_PROJECT_BAIDU_LABEL],
+            state="readonly",
+            width=16,
+        )
+        self.source_mode_combobox.grid(row=0, column=1, sticky="w", padx=(10, 10))
+        ttk.Label(directory_row, text="视频目录", style="CardMuted.TLabel").grid(row=1, column=0, sticky="w", pady=(10, 0))
+        self.input_dir_entry = ttk.Entry(directory_row, textvariable=self.input_dir_var)
+        self.input_dir_entry.grid(row=1, column=1, sticky="ew", padx=(10, 10), pady=(10, 0))
+        self.choose_directory_button = ttk.Button(directory_row, text="选择目录", style="Secondary.TButton", command=self._choose_directory)
+        self.choose_directory_button.grid(row=1, column=2, sticky="e", pady=(10, 0))
+        ttk.Label(directory_row, text="API 地址", style="CardMuted.TLabel").grid(row=2, column=0, sticky="w", pady=(10, 0))
+        self.api_base_url_entry = ttk.Entry(directory_row, textvariable=self.api_base_url_var)
+        self.api_base_url_entry.grid(row=2, column=1, columnspan=2, sticky="ew", padx=(10, 0), pady=(10, 0))
+        ttk.Label(directory_row, text="邮箱", style="CardMuted.TLabel").grid(row=3, column=0, sticky="w", pady=(10, 0))
+        self.email_entry = ttk.Entry(directory_row, textvariable=self.email_var)
+        self.email_entry.grid(row=3, column=1, columnspan=2, sticky="ew", padx=(10, 0), pady=(10, 0))
+        ttk.Label(directory_row, text="密码", style="CardMuted.TLabel").grid(row=4, column=0, sticky="w", pady=(10, 0))
+        self.password_entry = ttk.Entry(directory_row, textvariable=self.password_var, show="*")
+        self.password_entry.grid(row=4, column=1, columnspan=2, sticky="ew", padx=(10, 0), pady=(10, 0))
+        ttk.Label(directory_row, text="项目选择", style="CardMuted.TLabel").grid(row=5, column=0, sticky="w", pady=(10, 0))
+        self.project_picker_combobox = ttk.Combobox(directory_row, textvariable=self.project_picker_var, state="readonly")
+        self.project_picker_combobox.grid(row=5, column=1, sticky="ew", padx=(10, 10), pady=(10, 0))
+        self.load_project_choices_button = ttk.Button(directory_row, text="加载项目", style="Secondary.TButton", command=self._load_project_choices)
+        self.load_project_choices_button.grid(row=5, column=2, sticky="e", pady=(10, 0))
+        ttk.Label(directory_row, text="学科 ID", style="CardMuted.TLabel").grid(row=6, column=0, sticky="w", pady=(10, 0))
+        self.subject_id_entry = ttk.Entry(directory_row, textvariable=self.subject_id_var)
+        self.subject_id_entry.grid(row=6, column=1, columnspan=2, sticky="ew", padx=(10, 0), pady=(10, 0))
+        ttk.Label(directory_row, text="项目 ID", style="CardMuted.TLabel").grid(row=7, column=0, sticky="w", pady=(10, 0))
+        self.project_id_entry = ttk.Entry(directory_row, textvariable=self.project_id_var)
+        self.project_id_entry.grid(row=7, column=1, columnspan=2, sticky="ew", padx=(10, 0), pady=(10, 0))
+        ttk.Label(directory_row, text="网盘账号", style="CardMuted.TLabel").grid(row=8, column=0, sticky="w", pady=(10, 0))
+        self.baidu_account_id_entry = ttk.Entry(directory_row, textvariable=self.baidu_account_id_var)
+        self.baidu_account_id_entry.grid(row=8, column=1, columnspan=2, sticky="ew", padx=(10, 0), pady=(10, 0))
+        ttk.Label(directory_row, text="当前目录", style="CardMuted.TLabel").grid(row=9, column=0, sticky="w", pady=(10, 0))
+        self.baidu_current_dir_entry = ttk.Entry(directory_row, textvariable=self.baidu_current_dir_var)
+        self.baidu_current_dir_entry.grid(row=9, column=1, sticky="ew", padx=(10, 10), pady=(10, 0))
+        self.load_baidu_dir_button = ttk.Button(directory_row, text="读取目录", style="Secondary.TButton", command=self._load_baidu_dir_items)
+        self.load_baidu_dir_button.grid(row=9, column=2, sticky="e", pady=(10, 0))
+        ttk.Label(directory_row, text="目录项目", style="CardMuted.TLabel").grid(row=10, column=0, sticky="w", pady=(10, 0))
+        self.baidu_items_combobox = ttk.Combobox(directory_row, state="readonly")
+        self.baidu_items_combobox.grid(row=10, column=1, sticky="ew", padx=(10, 10), pady=(10, 0))
+        baidu_item_buttons = ttk.Frame(directory_row, style="Card.TFrame")
+        baidu_item_buttons.grid(row=10, column=2, sticky="e", pady=(10, 0))
+        self.baidu_parent_button = ttk.Button(baidu_item_buttons, text="上级", style="Secondary.TButton", command=self._load_baidu_parent_dir)
+        self.baidu_parent_button.grid(row=0, column=0, sticky="e")
+        self.baidu_enter_button = ttk.Button(baidu_item_buttons, text="进入", style="Secondary.TButton", command=self._enter_selected_baidu_dir)
+        self.baidu_enter_button.grid(row=0, column=1, sticky="e", padx=(6, 0))
+        self.baidu_add_path_button = ttk.Button(baidu_item_buttons, text="添加", style="Secondary.TButton", command=self._add_selected_baidu_import_path)
+        self.baidu_add_path_button.grid(row=0, column=2, sticky="e", padx=(6, 0))
+        ttk.Label(directory_row, text="导入路径", style="CardMuted.TLabel").grid(row=11, column=0, sticky="nw", pady=(10, 0))
+        self.baidu_import_paths_text = tk.Text(directory_row, height=4, width=52)
+        self.baidu_import_paths_text.grid(row=11, column=1, columnspan=2, sticky="ew", padx=(10, 0), pady=(10, 0))
 
         ttk.Label(task_card, textvariable=self.runtime_var, style="CardMuted.TLabel", wraplength=760).grid(
             row=3, column=0, sticky="w", pady=(12, 0)
@@ -2140,8 +3166,10 @@ class SubtitleToolApp:
         buttons.grid(row=0, column=1, sticky="e")
         self.cancel_button = ttk.Button(buttons, text="取消", style="Secondary.TButton", command=self._cancel, state="disabled")
         self.cancel_button.grid(row=0, column=0)
+        self.mobile_import_button = ttk.Button(buttons, text="导入到手机", style="Secondary.TButton", command=self._start_mobile_import)
+        self.mobile_import_button.grid(row=0, column=1, padx=(10, 0))
         self.start_button = ttk.Button(buttons, text="开始生成", style="Primary.TButton", command=self._start)
-        self.start_button.grid(row=0, column=1, padx=(10, 0))
+        self.start_button.grid(row=0, column=2, padx=(10, 0))
 
         advanced_card = ttk.Frame(task_card, style="Card.TFrame")
         advanced_card.grid(row=8, column=0, sticky="ew", pady=(16, 0))
@@ -2172,6 +3200,9 @@ class SubtitleToolApp:
             wraplength=540,
         ).grid(row=2, column=2, columnspan=3, sticky="w", pady=(12, 0))
         self.advanced_card = advanced_card
+        self.project_picker_combobox.bind("<<ComboboxSelected>>", lambda _event: self._apply_selected_project_choice())
+        self.source_mode_combobox.bind("<<ComboboxSelected>>", lambda _event: self._sync_source_mode_controls())
+        self._sync_source_mode_controls()
 
         log_card = ttk.Frame(shell, style="Card.TFrame", padding=18)
         log_card.grid(row=2, column=0, sticky="nsew", pady=(16, 0))
@@ -2229,6 +3260,31 @@ class SubtitleToolApp:
 
     def _set_update_status(self, message: str) -> None:
         return
+
+    def _sync_source_mode_controls(self) -> None:
+        project_mode = self.source_mode_var.get() == SOURCE_MODE_PROJECT_BAIDU_LABEL
+        local_state = "disabled" if project_mode else "normal"
+        project_state = "normal" if project_mode else "disabled"
+        self.input_dir_entry.configure(state=local_state)
+        self.choose_directory_button.configure(state=local_state)
+        for widget in (
+            self.api_base_url_entry,
+            self.email_entry,
+            self.password_entry,
+            self.project_picker_combobox,
+            self.load_project_choices_button,
+            self.subject_id_entry,
+            self.project_id_entry,
+            self.baidu_account_id_entry,
+            self.baidu_current_dir_entry,
+            self.baidu_items_combobox,
+            self.load_baidu_dir_button,
+            self.baidu_parent_button,
+            self.baidu_enter_button,
+            self.baidu_add_path_button,
+        ):
+            widget.configure(state=project_state)
+        self.baidu_import_paths_text.configure(state=project_state)
 
     def _refresh_update_controls(self) -> None:
         if not self.can_self_update:
@@ -2363,13 +3419,202 @@ class SubtitleToolApp:
             ],
             creationflags=creationflags,
         )
-        self.root.after(120, self.root.destroy)
+        self.root.after(120, self._close)
+
+    def _close(self) -> None:
+        self._stop_mobile_package_server()
+        self.root.destroy()
 
     def _choose_directory(self) -> None:
         initial_dir = self.input_dir_var.get().strip() or str(executable_dir())
         selected = filedialog.askdirectory(initialdir=initial_dir, title="选择要生成字幕的视频目录")
         if selected:
             self.input_dir_var.set(selected)
+
+    def _make_project_client_from_form(self) -> LearningPyramidProjectClient:
+        api_base_url = normalize_learningpyramid_api_base_url(self.api_base_url_var.get().strip())
+        email = self.email_var.get().strip()
+        password = self.password_var.get()
+        if not email:
+            raise ValueError("请填写 LearningPyramid 登录邮箱。")
+        if not password:
+            raise ValueError("请填写 LearningPyramid 密码。")
+        client = LearningPyramidProjectClient(api_base_url)
+        client.login(email=email, password=password)
+        return client
+
+    def _current_project_ids_from_form(self) -> tuple[str, str]:
+        subject_id = self.subject_id_var.get().strip()
+        scoped_project_id = self.project_id_var.get().strip()
+        if not subject_id:
+            raise ValueError("请填写学科 ID。")
+        if not scoped_project_id:
+            raise ValueError("请填写项目 ID。")
+        return subject_id, scoped_project_id
+
+    def _current_baidu_account_id(self, client: object) -> str:
+        account_id = _resolve_single_baidu_account_id(client, self.baidu_account_id_var.get().strip() or None)
+        if not self.baidu_account_id_var.get().strip():
+            self.baidu_account_id_var.set(account_id)
+        return account_id
+
+    def _load_project_choices(self) -> None:
+        try:
+            client = self._make_project_client_from_form()
+            subjects = client.list_subjects()
+            if not isinstance(subjects, list):
+                raise RuntimeError("LearningPyramid 学科响应无效。")
+            choices: list[dict[str, str]] = []
+            labels: list[str] = []
+            for subject in subjects:
+                if not isinstance(subject, dict):
+                    continue
+                subject_id = str(subject.get("subjectId") or "").strip()
+                if not subject_id:
+                    continue
+                subject_title = str(subject.get("title") or subject_id).strip()
+                materials = client.list_subject_materials(subject_id)
+                if not isinstance(materials, list):
+                    raise RuntimeError(f"LearningPyramid 项目响应无效：{subject_title}")
+                for material in materials:
+                    if not isinstance(material, dict):
+                        continue
+                    scoped_project_id = str(material.get("scopedProjectId") or "").strip()
+                    if not scoped_project_id:
+                        continue
+                    material_title = str(material.get("title") or scoped_project_id).strip()
+                    label = f"{subject_title} / {material_title}"
+                    choices.append({"subjectId": subject_id, "scopedProjectId": scoped_project_id, "label": label})
+                    labels.append(label)
+            self.project_choices = choices
+            self.project_picker_combobox.configure(values=labels)
+            if labels:
+                self.project_picker_combobox.current(0)
+                self._apply_selected_project_choice()
+            else:
+                self.project_picker_var.set("")
+            self._append_log(f"已加载 {len(choices)} 个项目。")
+        except Exception as exc:
+            messagebox.showerror(APP_TITLE, str(exc))
+
+    def _apply_selected_project_choice(self) -> None:
+        index = self.project_picker_combobox.current()
+        if index < 0 or index >= len(self.project_choices):
+            return
+        choice = self.project_choices[index]
+        self.subject_id_var.set(choice["subjectId"])
+        self.project_id_var.set(choice["scopedProjectId"])
+
+    def _load_baidu_dir_items(self) -> None:
+        try:
+            subject_id, scoped_project_id = self._current_project_ids_from_form()
+            client = self._make_project_client_from_form()
+            account_id = self._current_baidu_account_id(client)
+            dir_path = normalize_baidu_remote_path(self.baidu_current_dir_var.get().strip() or "/")
+            payload = client.list_project_baidu_netdisk_files(
+                subject_id,
+                scoped_project_id,
+                account_id,
+                dir_path=dir_path,
+                page=1,
+            )
+            if not isinstance(payload, dict):
+                raise RuntimeError("百度网盘目录响应无效。")
+            rows = payload.get("items")
+            items = [item for item in rows if isinstance(item, dict)] if isinstance(rows, list) else []
+            items.sort(key=lambda item: (0 if bool(item.get("isDir")) else 1, str(item.get("name") or item.get("path") or "")))
+            self.baidu_dir_items = items
+            labels: list[str] = []
+            for item in items:
+                name = str(item.get("name") or item.get("path") or "").strip() or "未命名"
+                kind = "目录" if bool(item.get("isDir")) else ("视频" if _is_baidu_netdisk_video_item(item) else "文件")
+                labels.append(f"[{kind}] {name}")
+            self.baidu_items_combobox.configure(values=labels)
+            if labels:
+                self.baidu_items_combobox.current(0)
+            else:
+                self.baidu_items_combobox.set("")
+            self.baidu_current_dir_var.set(dir_path)
+            self._append_log(f"已读取百度网盘目录：{dir_path}，{len(items)} 项。")
+        except Exception as exc:
+            messagebox.showerror(APP_TITLE, str(exc))
+
+    def _selected_baidu_item(self) -> dict[str, object] | None:
+        index = self.baidu_items_combobox.current()
+        if index < 0 or index >= len(self.baidu_dir_items):
+            return None
+        return self.baidu_dir_items[index]
+
+    def _load_baidu_parent_dir(self) -> None:
+        current_dir = self.baidu_current_dir_var.get().strip() or "/"
+        self.baidu_current_dir_var.set(_baidu_remote_parent_dir(current_dir))
+        self._load_baidu_dir_items()
+
+    def _enter_selected_baidu_dir(self) -> None:
+        item = self._selected_baidu_item()
+        if item is None:
+            return
+        if not bool(item.get("isDir")):
+            messagebox.showerror(APP_TITLE, "只能进入目录。")
+            return
+        self.baidu_current_dir_var.set(normalize_baidu_remote_path(str(item.get("path") or "")))
+        self._load_baidu_dir_items()
+
+    def _read_baidu_import_paths_text(self) -> str:
+        return self.baidu_import_paths_text.get("1.0", "end").strip()
+
+    def _set_baidu_import_paths_text(self, paths: list[str]) -> None:
+        self.baidu_import_paths_text.delete("1.0", "end")
+        self.baidu_import_paths_text.insert("1.0", "\n".join(paths))
+
+    def _add_selected_baidu_import_path(self) -> None:
+        item = self._selected_baidu_item()
+        if item is None:
+            return
+        if not _is_baidu_netdisk_importable_item(item):
+            messagebox.showerror(APP_TITLE, "只能添加目录或视频文件。")
+            return
+        selected_path = normalize_baidu_remote_path(str(item.get("path") or ""))
+        current_paths = list(parse_baidu_import_paths_text(self._read_baidu_import_paths_text()))
+        if selected_path not in current_paths:
+            current_paths.append(selected_path)
+        self._set_baidu_import_paths_text(current_paths)
+
+    def _stop_mobile_package_server(self) -> None:
+        server = self.mobile_package_server
+        if server is None:
+            return
+        self.mobile_package_server = None
+        server.stop()
+
+    def _start_mobile_import(self) -> None:
+        if self.source_mode_var.get() == SOURCE_MODE_PROJECT_BAIDU_LABEL:
+            messagebox.showerror(APP_TITLE, "请先切换到本地目录模式，并选择本地视频目录。")
+            return
+        input_dir_text = self.input_dir_var.get().strip()
+        if not input_dir_text:
+            messagebox.showerror(APP_TITLE, "请先选择一个视频目录。")
+            return
+        try:
+            input_dir = Path(input_dir_text).expanduser().resolve()
+            session = build_mobile_package_session(
+                MobilePackageOptions(
+                    input_dir=input_dir,
+                    title=input_dir.name,
+                    subject_id=self.subject_id_var.get().strip(),
+                    scoped_project_id=self.project_id_var.get().strip(),
+                )
+            )
+            self._stop_mobile_package_server()
+            self.mobile_package_server = start_offline_course_package_server(session)
+        except Exception as exc:
+            messagebox.showerror(APP_TITLE, str(exc))
+            return
+        assert self.mobile_package_server is not None
+        message = format_mobile_package_connection_message(session, self.mobile_package_server.base_url)
+        self._append_log("已启动手机导入临时服务。")
+        self._append_log(message)
+        messagebox.showinfo(APP_TITLE, message)
 
     def _sync_gpu_controls(self, runtime: RuntimePaths | None) -> None:
         if runtime is not None and runtime_supports_cuda(runtime):
@@ -2402,31 +3647,62 @@ class SubtitleToolApp:
         if self.worker_thread is not None and self.worker_thread.is_alive():
             return
 
-        input_dir_text = self.input_dir_var.get().strip()
-        if not input_dir_text:
-            messagebox.showerror(APP_TITLE, "请先选择一个视频目录。")
-            return
-
-        input_dir = Path(input_dir_text).expanduser()
         try:
             runtime = discover_runtime_paths(self.runtime_dir)
         except Exception as exc:
             messagebox.showerror(APP_TITLE, str(exc))
             return
 
-        options = BatchOptions(
-            input_dir=input_dir,
-            recursive=True,
-            overwrite=bool(self.overwrite_var.get()),
-            threads=max(1, int(self.threads_var.get() or 1)),
-            enable_gpu=bool(self.enable_gpu_var.get()),
-            language=recognition_language_code_from_label(self.language_var.get()),
-        )
+        project_mode = self.source_mode_var.get() == SOURCE_MODE_PROJECT_BAIDU_LABEL
+        if project_mode:
+            try:
+                options: BatchOptions | ProjectBaiduBatchOptions = ProjectBaiduBatchOptions(
+                    api_base_url=normalize_learningpyramid_api_base_url(self.api_base_url_var.get().strip()),
+                    email=self.email_var.get().strip(),
+                    password=self.password_var.get(),
+                    subject_id=self.subject_id_var.get().strip(),
+                    scoped_project_id=self.project_id_var.get().strip(),
+                    overwrite=bool(self.overwrite_var.get()),
+                    threads=max(1, int(self.threads_var.get() or 1)),
+                    enable_gpu=bool(self.enable_gpu_var.get()),
+                    language=recognition_language_code_from_label(self.language_var.get()),
+                    baidu_account_id=self.baidu_account_id_var.get().strip() or None,
+                    baidu_import_paths=parse_baidu_import_paths_text(self._read_baidu_import_paths_text()),
+                )
+                _validate_project_baidu_options(options)
+            except Exception as exc:
+                messagebox.showerror(APP_TITLE, str(exc))
+                return
+            task_label = f"{options.subject_id}/{options.scoped_project_id}"
+            preparing_text = "准备扫描项目网盘视频..."
+            status_text = (
+                f"正在扫描项目中的百度网盘视频并准备逐个生成字幕"
+                f"（{format_selected_acceleration_text(options.enable_gpu)} / {recognition_language_label(options.language)}）。"
+            )
+        else:
+            input_dir_text = self.input_dir_var.get().strip()
+            if not input_dir_text:
+                messagebox.showerror(APP_TITLE, "请先选择一个视频目录。")
+                return
+            input_dir = Path(input_dir_text).expanduser()
+            options = BatchOptions(
+                input_dir=input_dir,
+                recursive=True,
+                overwrite=bool(self.overwrite_var.get()),
+                threads=max(1, int(self.threads_var.get() or 1)),
+                enable_gpu=bool(self.enable_gpu_var.get()),
+                language=recognition_language_code_from_label(self.language_var.get()),
+            )
+            task_label = str(options.input_dir)
+            preparing_text = "准备扫描目录..."
+            status_text = (
+                f"正在扫描目录并准备逐个生成字幕（{format_selected_acceleration_text(options.enable_gpu)} / {recognition_language_label(options.language)}）。"
+            )
         if options.enable_gpu and not runtime_supports_cuda(runtime):
             messagebox.showerror(APP_TITLE, "当前工具包未包含 CUDA backend，暂时不能启用 GPU 模式。")
             return
         self._append_log("")
-        self._append_log(f"开始任务：{options.input_dir}")
+        self._append_log(f"开始任务：{task_label}")
         self._append_log(print_runtime_summary(runtime))
         self._append_log(f"识别模式：{format_selected_acceleration_text(options.enable_gpu)}")
         self._append_log(f"识别语言：{recognition_language_label(options.language)}")
@@ -2435,10 +3711,8 @@ class SubtitleToolApp:
         self.start_button.configure(state="disabled")
         self.cancel_button.configure(state="normal")
         self.progress_value_var.set(0.0)
-        self.progress_label_var.set("准备扫描目录...")
-        self.status_var.set(
-            f"正在扫描目录并准备逐个生成字幕（{format_selected_acceleration_text(options.enable_gpu)} / {recognition_language_label(options.language)}）。"
-        )
+        self.progress_label_var.set(preparing_text)
+        self.status_var.set(status_text)
 
         self.worker_thread = threading.Thread(
             target=self._run_worker,
@@ -2447,16 +3721,26 @@ class SubtitleToolApp:
         )
         self.worker_thread.start()
 
-    def _run_worker(self, options: BatchOptions, runtime: RuntimePaths) -> None:
+    def _run_worker(self, options: BatchOptions | ProjectBaiduBatchOptions, runtime: RuntimePaths) -> None:
         try:
-            summary = run_batch(
-                options,
-                runtime,
-                log=lambda text: self.event_queue.put(("log", text)),
-                progress=lambda done, total, video, detail: self.event_queue.put(("progress", (done, total, str(video), detail))),
-                cancel_event=self.cancel_event,
-                process_controller=self.process_controller,
-            )
+            if isinstance(options, ProjectBaiduBatchOptions):
+                summary = run_project_baidu_batch(
+                    options,
+                    runtime,
+                    log=lambda text: self.event_queue.put(("log", text)),
+                    progress=lambda done, total, video, detail: self.event_queue.put(("progress", (done, total, str(video), detail))),
+                    cancel_event=self.cancel_event,
+                    process_controller=self.process_controller,
+                )
+            else:
+                summary = run_batch(
+                    options,
+                    runtime,
+                    log=lambda text: self.event_queue.put(("log", text)),
+                    progress=lambda done, total, video, detail: self.event_queue.put(("progress", (done, total, str(video), detail))),
+                    cancel_event=self.cancel_event,
+                    process_controller=self.process_controller,
+                )
             self.event_queue.put(("done", summary))
         except CancelledError as exc:
             self.event_queue.put(("cancelled", str(exc)))
@@ -2596,7 +3880,53 @@ class SubtitleToolApp:
 
 
 def run_cli(args: argparse.Namespace) -> int:
+    if _mobile_package_cli_requested(args):
+        session = build_mobile_package_session_from_args(args)
+        server = start_offline_course_package_server(session)
+        try:
+            print(format_mobile_package_connection_message(session, server.base_url))
+            _wait_for_mobile_package_server_interrupt()
+        finally:
+            server.stop()
+        return 0
+
     runtime = discover_runtime_paths(Path(args.runtime_dir).expanduser().resolve() if args.runtime_dir else None)
+    if _project_baidu_cli_requested(args):
+        password = str(args.lp_password or os.getenv("LP_SUBTITLE_TOOL_PASSWORD") or "")
+        if not password:
+            password = getpass.getpass("LearningPyramid 密码: ")
+        options = ProjectBaiduBatchOptions(
+            api_base_url=normalize_learningpyramid_api_base_url(args.lp_api_base_url),
+            email=str(args.lp_email or "").strip(),
+            password=password,
+            subject_id=str(args.lp_subject_id or "").strip(),
+            scoped_project_id=str(args.lp_project_id or "").strip(),
+            overwrite=bool(args.overwrite),
+            threads=max(1, int(args.threads or 1)),
+            enable_gpu=bool(args.gpu),
+            language=normalize_recognition_language(args.language),
+            baidu_account_id=str(args.lp_baidu_account_id or "").strip() or None,
+            baidu_import_paths=parse_baidu_import_paths_text("\n".join(args.lp_baidu_import_path or [])),
+        )
+        try:
+            _validate_project_baidu_options(options)
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
+        cancel_event = threading.Event()
+        process_controller = ProcessController()
+        summary = run_project_baidu_batch(
+            options,
+            runtime,
+            log=lambda text: print(text),
+            progress=lambda done, total, video, detail: print(f"进度 {done:.2f}/{total}: {video} | {detail}"),
+            cancel_event=cancel_event,
+            process_controller=process_controller,
+        )
+        print(f"完成：生成 {summary.generated} 个，跳过 {summary.skipped} 个，失败 {summary.failed} 个。")
+        return 0 if summary.failed == 0 else 2
+
+    if not args.input_dir:
+        raise SystemExit("请提供 --input-dir，或使用 --lp-api-base-url/--lp-subject-id/--lp-project-id 运行项目网盘模式。")
     options = BatchOptions(
         input_dir=Path(args.input_dir).expanduser().resolve(),
         recursive=not bool(args.non_recursive),
@@ -2619,6 +3949,41 @@ def run_cli(args: argparse.Namespace) -> int:
     return 0 if summary.failed == 0 else 2
 
 
+def _project_baidu_cli_requested(args: argparse.Namespace) -> bool:
+    return any(
+        bool(str(getattr(args, name, "") or "").strip())
+        for name in ("lp_api_base_url", "lp_email", "lp_subject_id", "lp_project_id", "lp_baidu_account_id")
+    ) or bool(
+        [
+            item for item in getattr(args, "lp_baidu_import_path", [])
+            if str(item or "").strip()
+        ]
+    )
+
+
+def _mobile_package_cli_requested(args: argparse.Namespace) -> bool:
+    return any(
+        bool(str(getattr(args, name, "") or "").strip())
+        for name in ("mobile_package_dir", "mobile_package_title", "mobile_subject_id", "mobile_project_id")
+    )
+
+
+def _validate_project_baidu_options(options: ProjectBaiduBatchOptions) -> None:
+    missing: list[str] = []
+    if not str(options.api_base_url or "").strip():
+        missing.append("--lp-api-base-url")
+    if not str(options.email or "").strip():
+        missing.append("--lp-email")
+    if not str(options.password or "").strip():
+        missing.append("--lp-password")
+    if not str(options.subject_id or "").strip():
+        missing.append("--lp-subject-id")
+    if not str(options.scoped_project_id or "").strip():
+        missing.append("--lp-project-id")
+    if missing:
+        raise ValueError(f"项目网盘模式缺少参数：{', '.join(missing)}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Generate same-directory SRT subtitles for a video folder.")
     parser.add_argument("--input-dir", help="Run in headless mode for the given video directory.")
@@ -2633,13 +3998,29 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_RECOGNITION_LANGUAGE,
         help="Recognition language: zh, auto, or en.",
     )
+    parser.add_argument("--lp-api-base-url", help="LearningPyramid API base URL, for example https://plm.xuebao.chat/api.")
+    parser.add_argument("--lp-email", help="LearningPyramid login email for project Baidu Netdisk subtitle generation.")
+    parser.add_argument("--lp-password", help="LearningPyramid password. If omitted, LP_SUBTITLE_TOOL_PASSWORD or an interactive prompt is used.")
+    parser.add_argument("--lp-subject-id", help="Subject id from the LearningPyramid project URL.")
+    parser.add_argument("--lp-project-id", help="Scoped project id from the LearningPyramid project URL.")
+    parser.add_argument("--lp-baidu-account-id", help="Optional Baidu Netdisk cloud account id. Omit it when the user has exactly one bound account.")
+    parser.add_argument(
+        "--lp-baidu-import-path",
+        action="append",
+        default=[],
+        help="Baidu Netdisk file or directory path to import into the selected project before subtitle generation. Repeat for multiple paths.",
+    )
+    parser.add_argument("--mobile-package-dir", help="Build and serve a mobile offline course package from a local video directory.")
+    parser.add_argument("--mobile-package-title", help="Display title for the mobile offline course package.")
+    parser.add_argument("--mobile-subject-id", help="Subject id to bind the mobile offline package to.")
+    parser.add_argument("--mobile-project-id", help="Scoped project id to bind the mobile offline package to.")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    if args.input_dir:
+    if args.input_dir or _project_baidu_cli_requested(args) or _mobile_package_cli_requested(args):
         return run_cli(args)
     runtime_dir = Path(args.runtime_dir).expanduser().resolve() if args.runtime_dir else None
     app = QtSubtitleToolApp(runtime_dir=runtime_dir) if PYSIDE6_AVAILABLE else SubtitleToolApp(runtime_dir=runtime_dir)

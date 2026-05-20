@@ -35,6 +35,7 @@ from backend.models.enums import (
 )
 from backend.models.instance_media_binding import InstanceMediaBinding
 from backend.models.instance import Instance
+from backend.models.instance_subtitle_file import InstanceSubtitleFile, InstanceSubtitleSegment
 from backend.models.layer import Layer
 from backend.models.learning_object_node import LearningObjectContainer, LearningObjectLeaf, LearningObjectNode
 from backend.models.learning_task import LearningTask
@@ -412,6 +413,40 @@ def _decode_instance_media_binding(d: dict[str, Any]) -> InstanceMediaBinding:
         size_bytes=None if d.get("sizeBytes") is None else int(d.get("sizeBytes")),
         duration_ms=None if d.get("durationMs") is None else int(d.get("durationMs")),
         source_payload=dict(d.get("sourcePayload", {})),
+        updated_at=_ms_to_ts(int(d["updatedAtMs"])),
+    )
+
+
+def _encode_instance_subtitle_file(item: InstanceSubtitleFile) -> dict[str, Any]:
+    return {
+        "projectId": str(item.project_id),
+        "instanceId": str(item.instance_id),
+        "fileName": item.file_name,
+        "format": item.format,
+        "source": item.source,
+        "segments": [
+            {"startMs": int(segment.start_ms), "endMs": int(segment.end_ms), "text": segment.text}
+            for segment in item.segments
+        ],
+        "updatedAtMs": _ts_to_ms(item.updated_at),
+    }
+
+
+def _decode_instance_subtitle_file(d: dict[str, Any]) -> InstanceSubtitleFile:
+    return InstanceSubtitleFile.create(
+        ProjectId(str(d["projectId"])),
+        InstanceId(str(d["instanceId"])),
+        file_name=str(d.get("fileName", "")),
+        format=str(d.get("format", "")),
+        source=str(d.get("source", "UPLOADED")),
+        segments=tuple(
+            InstanceSubtitleSegment(
+                start_ms=int(dict(segment).get("startMs", 0)),
+                end_ms=int(dict(segment).get("endMs", 0)),
+                text=str(dict(segment).get("text", "")),
+            )
+            for segment in list(d.get("segments", []))
+        ),
         updated_at=_ms_to_ts(int(d["updatedAtMs"])),
     )
 
@@ -1054,6 +1089,9 @@ def encode_project_payload(project_store: Any) -> dict[str, Any]:
         "instanceMediaBindings": {
             k: _encode_instance_media_binding(v) for k, v in getattr(project_store, "instance_media_bindings", {}).items()
         },
+        "instanceSubtitleFiles": {
+            k: _encode_instance_subtitle_file(v) for k, v in getattr(project_store, "instance_subtitle_files", {}).items()
+        },
         "videoWatchProgress": {
             k: _encode_video_watch_progress(v) for k, v in getattr(project_store, "video_watch_progress", {}).items()
         },
@@ -1126,6 +1164,9 @@ def decode_project_payload(project_id: str, raw: dict[str, Any]) -> dict[str, An
         "instances": {k: _decode_instance(v) for k, v in dict(d.get("instances", {})).items()},
         "instance_media_bindings": {
             k: _decode_instance_media_binding(v) for k, v in dict(d.get("instanceMediaBindings", {})).items()
+        },
+        "instance_subtitle_files": {
+            k: _decode_instance_subtitle_file(v) for k, v in dict(d.get("instanceSubtitleFiles", {})).items()
         },
         "video_watch_progress": {
             k: _decode_video_watch_progress(v) for k, v in dict(d.get("videoWatchProgress", {})).items()

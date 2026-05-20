@@ -43,6 +43,7 @@ from backend.models.global_settings import GlobalLlmSettings
 from backend.models.idgen import InMemoryIdGenerator
 from backend.models.instance import Instance
 from backend.models.instance_media_binding import InstanceMediaBinding
+from backend.models.instance_subtitle_file import InstanceSubtitleFile
 from backend.models.layer import Layer
 from backend.models.learning_object_node import LearningObjectContainer, LearningObjectLeaf, LearningObjectNode
 from backend.models.learning_task import LearningTask
@@ -112,6 +113,7 @@ class ProjectStore:
 
     instances: Dict[str, Instance] = field(default_factory=dict)
     instance_media_bindings: Dict[str, InstanceMediaBinding] = field(default_factory=dict)
+    instance_subtitle_files: Dict[str, InstanceSubtitleFile] = field(default_factory=dict)
     video_watch_progress: Dict[str, VideoWatchProgress] = field(default_factory=dict)
     learning_object_nodes: Dict[str, LearningObjectNode] = field(default_factory=dict)
     recall_points: Dict[str, RecallPoint] = field(default_factory=dict)
@@ -153,7 +155,10 @@ class ProjectStaged:
     instances_deleted: Set[str] = field(default_factory=set)
     instance_media_bindings: Dict[str, InstanceMediaBinding] = field(default_factory=dict)
     instance_media_bindings_deleted: Set[str] = field(default_factory=set)
+    instance_subtitle_files: Dict[str, InstanceSubtitleFile] = field(default_factory=dict)
+    instance_subtitle_files_deleted: Set[str] = field(default_factory=set)
     video_watch_progress: Dict[str, VideoWatchProgress] = field(default_factory=dict)
+    video_watch_progress_deleted: Set[str] = field(default_factory=set)
     learning_object_nodes: Dict[str, LearningObjectNode] = field(default_factory=dict)
     learning_object_nodes_replaced: bool = False
     recall_points: Dict[str, RecallPoint] = field(default_factory=dict)
@@ -259,8 +264,19 @@ def _overlay_instance_media_bindings(ps: ProjectStore, st: ProjectStaged) -> Dic
     merged.update(getattr(st, "instance_media_bindings", {}))
     return merged
 
+def _overlay_instance_subtitle_files(ps: ProjectStore, st: ProjectStaged) -> Dict[str, InstanceSubtitleFile]:
+    merged = dict(getattr(ps, "instance_subtitle_files", {}))
+    for k in getattr(st, "instance_subtitle_files_deleted", set()):
+        merged.pop(k, None)
+    merged.update(getattr(st, "instance_subtitle_files", {}))
+    return merged
+
 def _overlay_video_watch_progress(ps: ProjectStore, st: ProjectStaged) -> Dict[str, VideoWatchProgress]:
-    return _merge_dict(getattr(ps, "video_watch_progress", {}), getattr(st, "video_watch_progress", {}))
+    merged = dict(getattr(ps, "video_watch_progress", {}))
+    for k in getattr(st, "video_watch_progress_deleted", set()):
+        merged.pop(k, None)
+    merged.update(getattr(st, "video_watch_progress", {}))
+    return merged
 
 def _overlay_audit_log_events(ps: ProjectStore, st: ProjectStaged) -> Dict[str, AuditLogEvent]:
     return _merge_dict(getattr(ps, "audit_log_events", {}), getattr(st, "audit_log_events", {}))
@@ -641,6 +657,10 @@ class InstanceRepository:
         st.instances.pop(k, None)
         st.instance_media_bindings.pop(k, None)
         st.instance_media_bindings_deleted.add(k)
+        st.instance_subtitle_files.pop(k, None)
+        st.instance_subtitle_files_deleted.add(k)
+        st.video_watch_progress.pop(k, None)
+        st.video_watch_progress_deleted.add(k)
 
 
 class InstanceMediaBindingRepository:
@@ -689,6 +709,50 @@ class InstanceMediaBindingRepository:
         session._staged.instance_media_bindings_deleted.add(k)
 
 
+class InstanceSubtitleFileRepository:
+    def __init__(self, g: GlobalStore, instance_repo: InstanceRepository) -> None:
+        self.g = g
+        self.instance_repo = instance_repo
+
+    def get(self, session: MutationSession, instance_id: InstanceId) -> InstanceSubtitleFile:
+        session.assert_open()
+        ps = session._baseline
+        k = id_canonical_text(instance_id)
+        if k in session._staged.instance_subtitle_files_deleted:
+            raise NotFound(instance_id)
+        return _overlay_get(getattr(ps, "instance_subtitle_files", {}), session._staged.instance_subtitle_files, k)
+
+    def maybe_get(self, session: MutationSession, instance_id: InstanceId) -> Optional[InstanceSubtitleFile]:
+        session.assert_open()
+        ps = session._baseline
+        k = id_canonical_text(instance_id)
+        if k in session._staged.instance_subtitle_files_deleted:
+            return None
+        return _overlay_maybe_get(getattr(ps, "instance_subtitle_files", {}), session._staged.instance_subtitle_files, k)
+
+    def set(self, session: MutationSession, subtitle_file: InstanceSubtitleFile) -> None:
+        session.assert_open()
+        if session.mode != SessionMode.READ_WRITE:
+            raise PreconditionFailure("READ_ONLY session cannot write")
+        if subtitle_file.project_id != session.project_id:
+            raise PreconditionFailure("InstanceSubtitleFileRepository.set must use matching session.project_id")
+        self.instance_repo.get(session, subtitle_file.instance_id)
+        subtitle_file.validate_write_time()
+        k = id_canonical_text(subtitle_file.instance_id)
+        session._staged.instance_subtitle_files_deleted.discard(k)
+        session._staged.instance_subtitle_files[k] = subtitle_file
+
+    def delete(self, session: MutationSession, instance_id: InstanceId) -> None:
+        session.assert_open()
+        if session.mode != SessionMode.READ_WRITE:
+            raise PreconditionFailure("READ_ONLY session cannot write")
+        k = id_canonical_text(instance_id)
+        if self.maybe_get(session, instance_id) is None:
+            raise NotFound(instance_id)
+        session._staged.instance_subtitle_files.pop(k, None)
+        session._staged.instance_subtitle_files_deleted.add(k)
+
+
 class VideoWatchProgressRepository:
     def __init__(self, g: GlobalStore) -> None:
         self.g = g
@@ -700,15 +764,14 @@ class VideoWatchProgressRepository:
         if str(progress.project_id) != str(session.project_id):
             raise PreconditionFailure("VideoWatchProgressRepository.set must use matching session.project_id")
         progress.validate_write_time()
-        session._staged.video_watch_progress[id_canonical_text(progress.instance_id)] = progress
+        key = id_canonical_text(progress.instance_id)
+        session._staged.video_watch_progress_deleted.discard(key)
+        session._staged.video_watch_progress[key] = progress
 
     def maybe_get(self, session: MutationSession, instance_id: InstanceId) -> Optional[VideoWatchProgress]:
         session.assert_open()
-        return _overlay_maybe_get(
-            getattr(session._baseline, "video_watch_progress", {}),
-            session._staged.video_watch_progress,
-            id_canonical_text(instance_id),
-        )
+        merged = _overlay_video_watch_progress(session._baseline, session._staged)
+        return merged.get(id_canonical_text(instance_id))
 
     def all(self, session: MutationSession) -> Tuple[VideoWatchProgress, ...]:
         session.assert_open()
@@ -2318,6 +2381,7 @@ class InMemorySystem:
         self.media_asset_repo = MediaAssetRepository(self.g)
         self.instance_repo = InstanceRepository(self.g)
         self.instance_media_binding_repo = InstanceMediaBindingRepository(self.g)
+        self.instance_subtitle_file_repo = InstanceSubtitleFileRepository(self.g, self.instance_repo)
         self.video_watch_progress_repo = VideoWatchProgressRepository(self.g)
         self.learning_object_repo = LearningObjectNodeRepository(self.g)
         self.recall_point_repo = RecallPointRepository(self.g, self.instance_repo, self.media_asset_repo)
@@ -2415,6 +2479,7 @@ class InMemorySystem:
                 ps.audit_log_events = d.get("audit_log_events", {})
                 ps.instances = d["instances"]
                 ps.instance_media_bindings = d.get("instance_media_bindings", {})
+                ps.instance_subtitle_files = d.get("instance_subtitle_files", {})
                 ps.video_watch_progress = d.get("video_watch_progress", {})
                 ps.learning_object_nodes = d["learning_object_nodes"]
                 ps.recall_points = d["recall_points"]
@@ -2445,6 +2510,7 @@ class InMemorySystem:
             ps.audit_log_events = d.get("audit_log_events", {})
             ps.instances = d["instances"]
             ps.instance_media_bindings = d.get("instance_media_bindings", {})
+            ps.instance_subtitle_files = d.get("instance_subtitle_files", {})
             ps.video_watch_progress = d.get("video_watch_progress", {})
             ps.learning_object_nodes = d["learning_object_nodes"]
             ps.recall_points = d["recall_points"]
@@ -2674,6 +2740,7 @@ class InMemorySystem:
 
             next_ps.instances = dict(_overlay_instances(ps, st))
             next_ps.instance_media_bindings = dict(_overlay_instance_media_bindings(ps, st))
+            next_ps.instance_subtitle_files = dict(_overlay_instance_subtitle_files(ps, st))
             next_ps.video_watch_progress = dict(_overlay_video_watch_progress(ps, st))
             next_ps.learning_object_nodes = dict(_overlay_learning_object_nodes(ps, st))
             next_ps.recall_points = dict(ps.recall_points)

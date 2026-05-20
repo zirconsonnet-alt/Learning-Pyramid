@@ -35,6 +35,7 @@ import {
   useInitializeBookLearningObjectsFromSubjectMaterial,
   useInstances,
   useLayers,
+  useMissingInstances,
   useProjectConfig,
   useSetProjectRollUpStrategy,
   useSetLayerConfig,
@@ -44,7 +45,6 @@ import { chooseDesktopLocalDirectory } from "@/ui/runtime/desktopLocalDirectory"
 import { showErrorFeedback, showInfoFeedback, showSuccessFeedback } from "@/ui/store/feedbackStore"
 import { formatStudyMaterialTypeLabel } from "@/ui/subjects/studyMaterials"
 import { cn } from "@/ui/utils"
-import { BaiduNetdiskImportDialog } from "@/views/settings/components/BaiduNetdiskImportDialog"
 
 let nextTemplateItemId = 1
 
@@ -204,11 +204,11 @@ export function ProjectSettingsPage() {
   const directoryBinding = useProjectDirectoryBinding(pid)
   const directoryPermission = directoryBinding.permission
   const browserLocalMediaEnabled = capabilitiesQ.data?.browserLocalMediaEnabled ?? false
-  const baiduNetdiskEnabled = capabilitiesQ.data?.baiduNetdiskEnabled ?? false
 
   const layersQ = useLayers(projectScope)
   const projectConfigQ = useProjectConfig(projectScope)
   const instancesQ = useInstances(projectScope)
+  const missingInstancesQ = useMissingInstances(projectScope)
   const importLearningObjectsM = useImportLearningObjectsFromBrowser(projectScope)
   const importNativeLocalM = useImportLearningObjectsFromNativeLocal(projectScope)
   const initializeBookLearningObjectsM = useInitializeBookLearningObjects(projectScope)
@@ -268,42 +268,43 @@ export function ProjectSettingsPage() {
   const [remapTargets, setRemapTargets] = useState<Record<string, string>>({})
   const [directoryAction, setDirectoryAction] = useState<"authorize" | "request" | "clear" | "import" | "native" | null>(null)
   const [bookOutlineDraft, setBookOutlineDraft] = useState("")
-  const [isBaiduImportDialogOpen, setIsBaiduImportDialogOpen] = useState(false)
+  const [activePanel, setActivePanel] = useState<SettingsPanelKey>("basic")
 
-  const missingInstances = useMemo(
-    () => (instancesQ.data ?? []).filter((item) => item.presence === "MISSING"),
-    [instancesQ.data],
-  )
+  const missingInstancesById = useMemo(() => {
+    const out: Record<string, Instance> = {}
+    for (const item of instancesQ.data ?? []) {
+      if (item.presence === "MISSING") out[item.instanceId] = item
+    }
+    return out
+  }, [instancesQ.data])
   const presentInstances = useMemo(
     () => (instancesQ.data ?? []).filter((item) => item.presence !== "MISSING"),
     [instancesQ.data],
   )
+  const actionableMissingInstances = useMemo(
+    () =>
+      (missingInstancesQ.data?.instanceIds ?? [])
+        .map((instanceId) => missingInstancesById[instanceId])
+        .filter((item): item is Instance => Boolean(item)),
+    [missingInstancesById, missingInstancesQ.data?.instanceIds],
+  )
 
   const missingRecallPointQs = useQueries({
-    queries: missingInstances.map((instance) => ({
+    queries: actionableMissingInstances.map((instance) => ({
       queryKey: ["recallPointsByInstance", subjectId ?? "", pid, instance.instanceId],
       queryFn: () => listRecallPointsByInstance(projectScope as ScopedProjectRef, instance.instanceId),
-      enabled: !!projectScope,
+      enabled: !!projectScope && activePanel === "missing",
     })),
   })
 
   const recallPointIdsByInstanceId = useMemo(() => {
     const out: Record<string, string[]> = {}
-    missingInstances.forEach((instance, index) => {
+    actionableMissingInstances.forEach((instance, index) => {
       out[instance.instanceId] = missingRecallPointQs[index]?.data?.recallPointIds ?? []
     })
     return out
-  }, [missingInstances, missingRecallPointQs])
-  const actionableMissingInstances = useMemo(
-    () =>
-      missingInstances.filter((_, index) => {
-        const query = missingRecallPointQs[index]
-        if (!query || query.isLoading || query.error) return true
-        return (query.data?.recallPointIds ?? []).length > 0
-      }),
-    [missingInstances, missingRecallPointQs],
-  )
-  const missingRepairCountsLoading = missingInstances.length > 0 && missingRecallPointQs.some((query) => query.isLoading)
+  }, [actionableMissingInstances, missingRecallPointQs])
+  const missingRepairCountsLoading = missingInstancesQ.isLoading
 
   const canChooseDirectory = !!pid && !directoryBinding.loading && directoryBinding.supported
   const canRequestDirectoryPermission =
@@ -311,7 +312,6 @@ export function ProjectSettingsPage() {
   const canClearDirectory = !!pid && !directoryBinding.loading && directoryPermission !== "missing"
   const directoryBusy = directoryAction !== null
   const desktopRuntime = isDesktopRuntime()
-  const [activePanel, setActivePanel] = useState<SettingsPanelKey>("basic")
   const supportsMissingInstanceRepair = projectType !== "LOOSE_POINTS"
 
   const directoryStatusText =
@@ -361,7 +361,7 @@ export function ProjectSettingsPage() {
   }, [activePanel, isSubjectSettingsScope, supportsMissingInstanceRepair])
 
   async function onRemapMissingInstance(fromInstanceId: string) {
-    const sourceInstance = actionableMissingInstances.find((item) => item.instanceId === fromInstanceId) ?? missingInstances.find((item) => item.instanceId === fromInstanceId)
+    const sourceInstance = actionableMissingInstances.find((item) => item.instanceId === fromInstanceId) ?? missingInstancesById[fromInstanceId]
     const toInstanceId = remapTargets[fromInstanceId] ?? (sourceInstance ? suggestTargetInstance(sourceInstance, presentInstances) : "")
     if (!toInstanceId) return
     const targetInstance = presentInstances.find((item) => item.instanceId === toInstanceId)
@@ -586,7 +586,6 @@ export function ProjectSettingsPage() {
           ) : (
             <BasicInfoCard
               actionableMissingInstanceCount={actionableMissingInstances.length}
-              baiduNetdiskEnabled={baiduNetdiskEnabled}
               browserLocalMediaEnabled={browserLocalMediaEnabled}
               canChooseDirectory={canChooseDirectory}
               canClearDirectory={canClearDirectory}
@@ -630,7 +629,6 @@ export function ProjectSettingsPage() {
               }}
               onClearDirectoryBinding={onClearDirectoryBinding}
               onImportNativeLocalDirectory={onImportNativeLocalDirectory}
-              onOpenBaiduImport={() => setIsBaiduImportDialogOpen(true)}
               onImportAuthorizedDirectory={onImportAuthorizedDirectory}
               onRequestDirectoryPermission={onRequestDirectoryPermission}
               onSave={async (title) => {
@@ -706,14 +704,6 @@ export function ProjectSettingsPage() {
             </div>
           ) : null}
 
-          {!isSubjectSettingsScope ? (
-            <BaiduNetdiskImportDialog
-              subjectId={subjectId ?? ""}
-              projectId={pid}
-              open={isBaiduImportDialogOpen}
-              onOpenChange={setIsBaiduImportDialogOpen}
-            />
-          ) : null}
         </>
       ) : null}
 
@@ -738,8 +728,7 @@ export function ProjectSettingsPage() {
           ) : null}
 
           <div className="space-y-3">
-            {actionableMissingInstances.map((instance) => {
-              const index = missingInstances.findIndex((item) => item.instanceId === instance.instanceId)
+            {actionableMissingInstances.map((instance, index) => {
               const recallPointIds = recallPointIdsByInstanceId[instance.instanceId] ?? []
               const countQuery = missingRecallPointQs[index]
               const targetInstanceId = remapTargets[instance.instanceId] ?? suggestTargetInstance(instance, presentInstances)
@@ -1017,7 +1006,6 @@ function SubjectSettingsInfoCard(props: {
 
 function BasicInfoCard({
   actionableMissingInstanceCount,
-  baiduNetdiskEnabled,
   browserLocalMediaEnabled,
   canChooseDirectory,
   canClearDirectory,
@@ -1048,13 +1036,11 @@ function BasicInfoCard({
   onChangeRollUpStrategy,
   onClearDirectoryBinding,
   onImportNativeLocalDirectory,
-  onOpenBaiduImport,
   onImportAuthorizedDirectory,
   onRequestDirectoryPermission,
   onSave,
 }: {
   actionableMissingInstanceCount: number
-  baiduNetdiskEnabled: boolean
   browserLocalMediaEnabled: boolean
   canChooseDirectory: boolean
   canClearDirectory: boolean
@@ -1085,7 +1071,6 @@ function BasicInfoCard({
   onChangeRollUpStrategy: (nextStrategy: RollUpStrategy) => Promise<void>
   onClearDirectoryBinding: () => Promise<void>
   onImportNativeLocalDirectory: () => Promise<void>
-  onOpenBaiduImport: () => void
   onImportAuthorizedDirectory: (silentSuccess?: boolean) => Promise<void>
   onRequestDirectoryPermission: () => Promise<void>
   onSave: (title: string) => Promise<void>
@@ -1280,29 +1265,6 @@ function BasicInfoCard({
                 </div>
               )}
 
-              {baiduNetdiskEnabled ? (
-                <div className="theme-status-surface rounded-[1.35rem] border border-border/70 p-4">
-                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                    <div className="space-y-2">
-                      <div className="flex flex-wrap items-center gap-3">
-                        <span className="theme-meta-strong">百度网盘视频</span>
-                        <span className="theme-pill-accent inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold">
-                          已启用
-                        </span>
-                      </div>
-                      <div className="text-sm text-muted-foreground">
-                        支持在当前项目里浏览百度网盘目录、导入视频并按实例播放；字幕会按同目录同名规则自动识别。
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap gap-2 lg:justify-end">
-                      <Button type="button" onClick={onOpenBaiduImport}>
-                        从百度网盘导入
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
             </div>
           ) : (
             <div className="rounded-[1.2rem] border border-border/70 bg-muted/15 px-4 py-4 text-sm text-muted-foreground">

@@ -132,6 +132,8 @@ class SqlStore(SnapshotStore, Protocol):
 
     def list_missing_instance_ids(self, project_id: str) -> tuple[InstanceId, ...]: ...
 
+    def list_actionable_missing_instance_ids(self, project_id: str) -> tuple[InstanceId, ...]: ...
+
     def list_recall_point_ids_by_instance(self, project_id: str, instance_id: str) -> tuple[RecallPointId, ...]: ...
 
     def get_learning_object_node(self, project_id: str, node_id: str) -> LearningObjectNode | None: ...
@@ -470,6 +472,28 @@ class SQLiteSnapshotStore:
                     """
                     CREATE INDEX IF NOT EXISTS idx_instance_media_binding_index_project
                     ON instance_media_binding_index (project_id, source_kind, updated_at_ms DESC)
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS instance_subtitle_file_index (
+                        project_id TEXT NOT NULL,
+                        instance_id TEXT NOT NULL,
+                        file_name TEXT NOT NULL,
+                        subtitle_format TEXT NOT NULL,
+                        source TEXT NOT NULL,
+                        segments_json TEXT NOT NULL,
+                        updated_at_ms INTEGER NOT NULL,
+                        PRIMARY KEY (project_id, instance_id),
+                        FOREIGN KEY(project_id) REFERENCES project_snapshots(project_id) ON DELETE CASCADE,
+                        FOREIGN KEY(project_id, instance_id) REFERENCES instance_index(project_id, instance_id) ON DELETE CASCADE
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_instance_subtitle_file_index_project
+                    ON instance_subtitle_file_index (project_id, updated_at_ms DESC)
                     """
                 )
                 conn.execute(
@@ -1077,6 +1101,7 @@ class SQLiteSnapshotStore:
         conn.execute("DELETE FROM project_config_index WHERE project_id = ?", (project_id,))
         conn.execute("DELETE FROM instance_index WHERE project_id = ?", (project_id,))
         conn.execute("DELETE FROM instance_media_binding_index WHERE project_id = ?", (project_id,))
+        conn.execute("DELETE FROM instance_subtitle_file_index WHERE project_id = ?", (project_id,))
         conn.execute("DELETE FROM video_watch_progress_index WHERE project_id = ?", (project_id,))
         conn.execute("DELETE FROM learning_object_node_index WHERE project_id = ?", (project_id,))
         conn.execute("DELETE FROM recall_point_index WHERE project_id = ?", (project_id,))
@@ -1251,6 +1276,33 @@ class SQLiteSnapshotStore:
                     None if binding_payload.get("durationMs") is None else int(binding_payload.get("durationMs")),
                     json.dumps(source_payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
                     int(binding_payload.get("updatedAtMs", 0)),
+                ),
+            )
+
+        for instance_id, raw_subtitle in dict(project_payload.get("instanceSubtitleFiles", {})).items():
+            subtitle_payload = dict(raw_subtitle)
+            segments = list(subtitle_payload.get("segments", []))
+            conn.execute(
+                """
+                INSERT INTO instance_subtitle_file_index (
+                    project_id,
+                    instance_id,
+                    file_name,
+                    subtitle_format,
+                    source,
+                    segments_json,
+                    updated_at_ms
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    project_id,
+                    str(instance_id),
+                    str(subtitle_payload.get("fileName", "")),
+                    str(subtitle_payload.get("format", "")),
+                    str(subtitle_payload.get("source", "UPLOADED")),
+                    json.dumps(segments, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
+                    int(subtitle_payload.get("updatedAtMs", 0)),
                 ),
             )
 
@@ -2307,6 +2359,28 @@ class SQLiteSnapshotStore:
             for row in instance_media_binding_rows
         }
 
+        subtitle_rows = conn.execute(
+            """
+            SELECT instance_id, file_name, subtitle_format, source, segments_json, updated_at_ms
+            FROM instance_subtitle_file_index
+            WHERE project_id = ?
+            ORDER BY instance_id ASC
+            """,
+            (str(project_id),),
+        ).fetchall()
+        hydrated["instanceSubtitleFiles"] = {
+            str(row["instance_id"]): {
+                "projectId": str(project_id),
+                "instanceId": str(row["instance_id"]),
+                "fileName": str(row["file_name"]),
+                "format": str(row["subtitle_format"]),
+                "source": str(row["source"]),
+                "segments": json.loads(str(row["segments_json"])),
+                "updatedAtMs": int(row["updated_at_ms"]),
+            }
+            for row in subtitle_rows
+        }
+
         progress_rows = conn.execute(
             """
             SELECT instance_id, duration_ms, ranges_json, completed_at_ms, updated_at_ms
@@ -3090,6 +3164,29 @@ class SQLiteSnapshotStore:
         finally:
             conn.close()
         return tuple(InstanceId(str(row["instance_id"])) for row in rows)
+
+    def list_actionable_missing_instance_ids(self, project_id: str) -> tuple[InstanceId, ...]:
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT DISTINCT i.instance_id
+                FROM instance_index i
+                JOIN recall_point_index rp
+                  ON rp.project_id = i.project_id
+                 AND rp.anchor_instance_id = i.instance_id
+                WHERE i.project_id = ? AND i.presence = ?
+                ORDER BY i.instance_id ASC
+                """,
+                (str(project_id), InstancePresence.MISSING.value),
+            ).fetchall()
+        finally:
+            conn.close()
+        out: list[InstanceId] = []
+        for row in rows:
+            if self.list_recall_point_ids_by_instance(str(project_id), str(row["instance_id"])):
+                out.append(InstanceId(str(row["instance_id"])))
+        return tuple(out)
 
     def list_recall_point_ids_by_instance(self, project_id: str, instance_id: str) -> tuple[RecallPointId, ...]:
         conn = self._connect()

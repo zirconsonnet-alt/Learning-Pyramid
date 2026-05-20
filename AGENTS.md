@@ -1,7 +1,7 @@
 # Code & UI Collaboration Rules
 
 <!-- SPECKIT START -->
-Current Spec Kit plan: specs/016-backend-verification-gates/plan.md
+Current Spec Kit plan: specs/017-mobile-navigation-shell/plan.md
 <!-- SPECKIT END -->
 
 你是我的代码与 UI 协作助手。

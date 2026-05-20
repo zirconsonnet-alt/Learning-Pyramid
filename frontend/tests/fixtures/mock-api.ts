@@ -182,6 +182,9 @@ export async function installMockApi(
     boundInviteCode?: string | null
     queueHeadId?: string | null
     recallPointReferences?: string[]
+    instances?: unknown[]
+    missingInstanceIds?: string[]
+    recallPointIdsByInstanceId?: Record<string, string[]>
     learningObjectNodes?: unknown[]
     projectLlmStreamContent?: string
     friendLeaderboard?: unknown[]
@@ -193,6 +196,11 @@ export async function installMockApi(
   const membershipProvider = options.membershipProvider ?? "manual_test"
   const withdrawalScenario = options.withdrawalScenario ?? "none"
   const queueHeadId = options.queueHeadId ?? null
+  const mockInstances = options.instances ?? [instance]
+  const missingInstanceIds = options.missingInstanceIds ?? []
+  const recallPointIdsByInstanceId = options.recallPointIdsByInstanceId ?? {
+    [instance.instanceId]: [recallPoint.recallPointId],
+  }
   const learningObjectNodes = options.learningObjectNodes ?? [learningObjectNode]
   let globalSettings = options.globalSettings ?? createMockGlobalSettings()
   let membershipOrders: MockMembershipOrder[] = []
@@ -397,17 +405,24 @@ export async function installMockApi(
     }
 
     if (path === `${scopedProjectPath}/instances`) {
-      await fulfill(route, contentReady ? [instance] : [])
+      await fulfill(route, contentReady ? mockInstances : [])
       return
     }
 
     if (path === `${scopedProjectPath}/missing-instances`) {
-      await fulfill(route, { instanceIds: [] })
+      await fulfill(route, { instanceIds: missingInstanceIds })
       return
     }
 
     if (path === `${scopedProjectPath}/instances/${instance.instanceId}/recall-points`) {
-      await fulfill(route, { recallPointIds: [recallPoint.recallPointId] })
+      await fulfill(route, { recallPointIds: recallPointIdsByInstanceId[instance.instanceId] ?? [] })
+      return
+    }
+
+    const recallByInstanceMatch = path.match(new RegExp(`^${scopedProjectPath}/instances/([^/]+)/recall-points$`))
+    if (recallByInstanceMatch) {
+      const instanceId = decodeURIComponent(recallByInstanceMatch[1] ?? "")
+      await fulfill(route, { recallPointIds: recallPointIdsByInstanceId[instanceId] ?? [] })
       return
     }
 

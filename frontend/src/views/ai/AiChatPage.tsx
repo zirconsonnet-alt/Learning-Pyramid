@@ -1259,6 +1259,7 @@ export function AiChatPage() {
     if (!instance) return null
     const sourceKind = instance.mediaSourceKind ?? materialSourceBindingQ.data?.sourceKind
     if (!sourceKind) return null
+    if (sourceKind === "BAIDU_NETDISK") return null
     if (isDesktopRuntime() && sourceKind === "NATIVE_LOCAL" && !desktopNativeStorage) return null
 
     return {
@@ -1299,6 +1300,7 @@ export function AiChatPage() {
 
   async function resolveAiChatVideoFrameSrc(instance: Instance, sourceKind: MaterialSourceKind, signal: AbortSignal) {
     if (!projectScope) throw new Error("当前页面缺少项目上下文，无法读取视频帧。")
+    if (sourceKind === "BAIDU_NETDISK") throw new Error("当前媒体源已隐藏，请改用本地素材。")
 
     if (isDesktopRuntime() && sourceKind === "NATIVE_LOCAL") {
       if (!desktopNativeStorage) throw new Error("当前项目缺少本地存储配置，无法读取本机视频帧。")
@@ -1330,7 +1332,7 @@ export function AiChatPage() {
       }
     }
 
-    if (instance.playbackKind === "HLS" || sourceKind === "BAIDU_NETDISK") {
+    if (instance.playbackKind === "HLS") {
       const playback = await getInstancePlaybackDescriptor(projectScope, instance.instanceId, { signal, timeoutMs: 90_000 })
       return {
         src: resolvePlaybackDescriptorUrl(playback.url),

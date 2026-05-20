@@ -66,7 +66,7 @@ python tools/build_windows_standalone.py --bootstrap-packaging-venv --refresh-pa
 
 ## Windows desktop client preview
 
-The Windows desktop client uses Tauri and reuses the existing React frontend. The current preview lives in `desktop/` and includes desktop runtime detection, native local folder import, a local media service for `NATIVE_LOCAL` file playback, same-directory same-stem subtitle reading for local desktop videos, and Baidu Netdisk HLS playback through a localhost Tauri proxy so video segments are fetched by the user's Windows client instead of the cloud server. Offline cache and cloud-hosted video are not implemented in this stage.
+The Windows desktop client uses Tauri and reuses the existing React frontend. The current preview lives in `desktop/` and includes desktop runtime detection, native local folder import, a local media service for `NATIVE_LOCAL` file playback, and same-directory same-stem subtitle reading for local desktop videos. Baidu Netdisk import and playback are currently hidden in the product UI; the existing lower-level API and Tauri bridge code are retained. Offline cache and cloud-hosted video are not implemented in this stage.
 
 ```powershell
 pnpm --dir frontend install
@@ -80,7 +80,7 @@ See [docs/desktop-client.md](docs/desktop-client.md) for the current desktop bou
 
 ## Mobile app preview
 
-The Android and iPhone client uses Expo-managed React Native and lives in `mobile/`. The current MVP connects to the existing API, uses the scoped project routes, and covers login, subject/material browsing, learning object detail, existing media playback descriptors, recall point viewing, and queue-head review submission.
+The Android and iPhone client uses Expo-managed React Native and lives in `mobile/`. The current MVP connects to the existing API, uses the scoped project routes, and covers login, subject/project center management, global settings, a native workbench aligned with the desktop workbench flow, existing local/server media playback descriptors, imported instance subtitles, learning task submission, inline queue-head review, and roll-up controls. Baidu Netdisk material import and playback are not exposed inside the mobile client.
 
 ```powershell
 pnpm --dir mobile install
@@ -362,4 +362,6 @@ python tools/build_subtitle_tool_windows.py --bootstrap-packaging-venv
 
 自托管同步脚本默认不会重复上传 `public-downloads/`，但会保留服务器上已经存在的这份目录；当你想首次发布或刷新字幕工具下载包时，再使用 `Sync-Selfhost-Server.bat -IncludePublicDownloads`。
 
-这个小工具本身会内置 `ffmpeg`、`whisper.cpp` 和默认 `ggml-base.bin` 模型，离线扫描视频目录并在视频旁边生成同名 `.srt` 字幕文件。
+这个小工具本身会内置 `ffmpeg`、`whisper.cpp` 和默认 `ggml-base.bin` 模型。当前公开入口只引导本地目录字幕生成：工具离线扫描本机视频目录，并在视频旁边生成同名 `.srt` 字幕文件。百度网盘项目模式相关底层参数仍保留在工具代码里，但当前产品 UI 和公开使用说明不暴露该路径。
+
+字幕工具支持为本地课程目录生成手机离线课程包。手机端通过“离线课程包”入口连接电脑端临时局域网服务，主动下载视频、字幕和 manifest 到 App 私有课程库。该能力不扫描手机系统文件，不写公共目录，不做公网中继，课程包必须绑定线上学科和 scoped project。

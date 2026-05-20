@@ -476,6 +476,7 @@ def _write_bundle_readme(bundle_dir: Path, *, supports_cuda: bool) -> None:
 
 功能：
 - 选择一个视频目录，批量生成同目录同名 `.srt`
+- 或连接 LearningPyramid 项目，先导入选中的百度网盘目录/视频，再生成并上传实例字幕
 - 默认递归处理子目录
 - 默认跳过已存在字幕，必要时可勾选覆盖
 
@@ -488,7 +489,8 @@ def _write_bundle_readme(bundle_dir: Path, *, supports_cuda: bool) -> None:
 说明：
 - 工具完全在本机离线运行，不会把视频上传到公网
 - 工具会直接把字幕生成到视频同目录，无需手动移动文件
-- 回到 LearningPyramid 重新打开视频后，会按同目录同名规则直接读取这些字幕
+- 项目网盘模式会在本机临时拉取百度网盘 HLS 分片抽音频，完成后只上传 `.srt` 字幕文本，并绑定到项目实例
+- 回到 LearningPyramid 重新打开视频后，本地目录视频会读取同目录同名字幕，项目网盘视频会读取已绑定的实例字幕
 """
     (bundle_dir / "README.txt").write_text(text, encoding="utf-8", newline="\n")
 
@@ -557,9 +559,9 @@ def _upsert_catalog_item(output_root: Path, *, zip_path: Path, sha256: str, publ
         "version": APP_VERSION,
         "platform": "windows-x64",
         "summary": (
-            "离线扫描视频目录，用内置 ffmpeg + whisper.cpp 生成同目录同名 .srt 字幕，支持可选 NVIDIA CUDA GPU 加速。"
+            "本机扫描视频目录或 LearningPyramid 项目网盘视频，用内置 ffmpeg + whisper.cpp 生成 .srt 字幕，支持可选 NVIDIA CUDA GPU 加速。"
             if supports_cuda
-            else "离线扫描视频目录，用内置 ffmpeg + whisper.cpp 生成同目录同名 .srt 字幕。"
+            else "本机扫描视频目录或 LearningPyramid 项目网盘视频，用内置 ffmpeg + whisper.cpp 生成 .srt 字幕。"
         ),
         "assetPath": zip_path.name,
         "publishedAt": published_at,

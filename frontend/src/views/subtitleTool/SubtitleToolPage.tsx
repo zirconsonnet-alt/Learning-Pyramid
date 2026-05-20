@@ -5,9 +5,9 @@ import { usePageMeta } from "@/ui/seo/usePageMeta"
 import { ShowcaseFooter, ShowcaseSiteHeader } from "@/views/home/ShowcaseChrome"
 
 const subtitleToolQuickGuide = [
-  "下载后解压到任意本地目录，离线运行即可。",
+  "下载后解压到任意本地目录，可离线运行。",
   "选择视频根目录后，工具会直接在视频同目录生成同名 `.srt`。",
-  "生成完成后无需移动文件，回到 LearningPyramid 重新打开视频即可读取字幕。",
+  "生成完成后，桌面端或网页本地目录模式会自动读取同名字幕。",
 ] as const
 
 const defaultIncludedComponents = ["ffmpeg", "whisper.cpp", "默认多语言模型"] as const
@@ -59,8 +59,8 @@ export function SubtitleToolPage() {
   const requirements = recommendedDownload?.requirements.length ? recommendedDownload.requirements : [...defaultRequirements]
 
   usePageMeta({
-    title: "LearningPyramid 字幕工具 | 离线批量生成字幕",
-    description: "下载离线字幕工具，在本机批量生成同目录同名的 .srt 文件，再回到 LearningPyramid 直接使用。",
+    title: "LearningPyramid 字幕工具 | 本机批量生成字幕",
+    description: "下载字幕工具，在本机给本地视频目录生成 .srt 字幕。",
     path: "/subtitle-tool",
   })
 
@@ -74,7 +74,7 @@ export function SubtitleToolPage() {
             <article className="lp-subtitle-tool-card">
               <div className="lp-subtitle-tool-head">
                 <h1>字幕工具</h1>
-                <p>本机离线批量生成同目录同名 `.srt` 字幕。</p>
+                <p>本机批量生成本地视频字幕。</p>
               </div>
 
               <div className="lp-subtitle-tool-actions">
@@ -101,7 +101,7 @@ export function SubtitleToolPage() {
                 </div>
               ) : null}
 
-              <p className="lp-subtitle-tool-flow">准备资源 → 选择目录 → 生成 → 回到 LearningPyramid</p>
+              <p className="lp-subtitle-tool-flow">选择本地目录 → 本机生成 → 自动读取字幕</p>
 
               {downloadNote ? <div className="lp-subtitle-tool-note">{downloadNote}</div> : null}
 
@@ -120,8 +120,7 @@ export function SubtitleToolPage() {
                 <details className="lp-subtitle-tool-disclosure">
                   <summary>使用方式</summary>
                   <div className="lp-subtitle-tool-disclosure-body">
-                    <p>字幕工具本身就会直接把 `.srt` 生成在视频同目录同名位置，不需要你手动移动任何文件。</p>
-                    <p>生成完成后，回到 LearningPyramid 重新打开视频，播放器就会按同目录同名规则自动读取这些字幕。</p>
+                    <p>工具会把 `.srt` 生成在视频同目录同名位置，不需要你手动移动任何文件。</p>
                     <a className="lp-subtitle-tool-inline-link" href="/#onboarding">
                       查看首页使用方式
                     </a>

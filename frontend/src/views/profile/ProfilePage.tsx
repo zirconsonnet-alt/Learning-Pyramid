@@ -1,6 +1,6 @@
 import { type ChangeEvent, type KeyboardEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useQueries } from "@tanstack/react-query"
-import { Activity, Camera, ChevronDown, Cloud, KeyRound, Mail, Save } from "lucide-react"
+import { Activity, Camera, ChevronDown, KeyRound, Mail, Save } from "lucide-react"
 
 import { type AuditLogEvent, listAuditLogEvents } from "@/ui/api/auditLog"
 import { ApiError } from "@/ui/api/http"
@@ -8,7 +8,6 @@ import { ErrorNotice, LoadingNotice } from "@/ui/components/contentEmptyState"
 import { Button } from "@/ui/components/ui/button"
 import { Input } from "@/ui/components/ui/input"
 import { Label } from "@/ui/components/ui/label"
-import { useBaiduNetdiskCloudAccounts, useBeginBaiduNetdiskConnect, useDisconnectBaiduNetdiskAccount } from "@/ui/queries/cloudAccounts"
 import { useChangeMyPassword, useMyProfile, useUpdateMyProfile, useUploadMyAvatar } from "@/ui/queries/profile"
 import { useSubjectProjectCatalog } from "@/ui/queries/subjects"
 import { useSystemCapabilities } from "@/ui/queries/system"
@@ -39,12 +38,6 @@ type ProfileDraft = {
 
 type LearningMetric = "effective" | "watch" | "compose" | "review" | "qa"
 type LearningRange = "week" | "month" | "history"
-
-type BaiduNetdiskConnectMessage = {
-  type?: unknown
-  ok?: unknown
-  message?: unknown
-}
 
 type LearningMetricOption = {
   value: LearningMetric
@@ -392,10 +385,6 @@ export function ProfilePage() {
   const profileQ = useMyProfile()
   const projectCatalog = useSubjectProjectCatalog()
   const capabilitiesQ = useSystemCapabilities()
-  const baiduNetdiskEnabled = capabilitiesQ.data?.baiduNetdiskEnabled ?? false
-  const baiduNetdiskAccountsQ = useBaiduNetdiskCloudAccounts(baiduNetdiskEnabled)
-  const beginBaiduNetdiskConnect = useBeginBaiduNetdiskConnect()
-  const disconnectBaiduNetdiskAccount = useDisconnectBaiduNetdiskAccount()
   const updateProfile = useUpdateMyProfile()
   const changePassword = useChangeMyPassword()
   const uploadAvatar = useUploadMyAvatar()
@@ -556,29 +545,6 @@ export function ProfilePage() {
 
   const learningViewLoading = projectCatalog.isLoading || auditLogQs.some((query) => query.isLoading)
   const learningViewError = projectCatalog.error ?? auditLogQs.find((query) => query.error)?.error ?? null
-  const baiduNetdiskAccounts = baiduNetdiskAccountsQ.data ?? []
-  const refetchBaiduNetdiskAccounts = baiduNetdiskAccountsQ.refetch
-
-  useEffect(() => {
-    if (!baiduNetdiskEnabled) return
-
-    function onMessage(event: MessageEvent<BaiduNetdiskConnectMessage>) {
-      if (event.origin !== window.location.origin) return
-      const payload = event.data
-      if (!payload || typeof payload !== "object" || payload.type !== "learningpyramid:baidu-netdisk-connect") return
-
-      void refetchBaiduNetdiskAccounts()
-      if (payload.ok) {
-        showSuccessFeedback("百度网盘已连接", "现在可以在项目设置里导入网盘视频。")
-        return
-      }
-
-      showErrorFeedback("百度网盘授权失败", typeof payload.message === "string" ? payload.message : "授权没有完成，请稍后重试。")
-    }
-
-    window.addEventListener("message", onMessage)
-    return () => window.removeEventListener("message", onMessage)
-  }, [baiduNetdiskEnabled, refetchBaiduNetdiskAccounts])
 
   function openProfileEditor() {
     if (!profile) return
@@ -690,27 +656,6 @@ export function ProfilePage() {
     }
   }
 
-  async function onConnectBaiduNetdisk() {
-    try {
-      const result = await beginBaiduNetdiskConnect.mutateAsync()
-      const authWindow = window.open(result.authorizeUrl, "learningpyramid-baidu-netdisk-connect", "width=720,height=760")
-      if (!authWindow) {
-        showErrorFeedback("无法打开授权窗口", "请允许浏览器弹出窗口后重试。")
-      }
-    } catch (err) {
-      showErrorFeedback("连接百度网盘失败", formatApiError(err))
-    }
-  }
-
-  async function onDisconnectBaiduNetdisk(accountId: string) {
-    try {
-      await disconnectBaiduNetdiskAccount.mutateAsync(accountId)
-      showSuccessFeedback("百度网盘已解绑", "这个账号不会再用于导入网盘视频。")
-    } catch (err) {
-      showErrorFeedback("解绑百度网盘失败", formatApiError(err))
-    }
-  }
-
   if (profileQ.isLoading) {
     return <LoadingNotice title="正在加载个人资料" message="稍等一下，我们正在准备你的账号信息。" />
   }
@@ -805,7 +750,7 @@ export function ProfilePage() {
         </section>
 
         <aside className="order-1 min-w-0 xl:order-1 xl:sticky xl:top-28 xl:self-start">
-          <div className="theme-card-main min-w-0 overflow-hidden">
+          <div className="theme-card-main min-w-0 overflow-hidden rounded-lg shadow-none">
             <div className="theme-card-header px-4 py-5 sm:px-6">
               <div className="flex items-start gap-4">
                 <div>
@@ -815,14 +760,14 @@ export function ProfilePage() {
             </div>
 
             <div className="space-y-6 px-4 py-5 sm:px-6 sm:py-6">
-              <div className="theme-soft-surface rounded-[1.8rem] p-4 sm:p-5">
+              <div className="theme-soft-surface rounded-lg p-4 shadow-none sm:p-5">
                 <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start">
                   <input ref={avatarInputRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={onSelectAvatar} />
                   <button
                     type="button"
                     onClick={() => avatarInputRef.current?.click()}
                     disabled={uploadAvatar.isPending}
-                    className="group relative flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-[1.45rem] border border-[color:var(--theme-subtle-border)] bg-[color:var(--theme-subtle-bg)] text-2xl font-semibold text-[color:var(--theme-subtle-text)] transition hover:border-primary/20 hover:shadow-[var(--theme-soft-shadow)] disabled:cursor-wait sm:h-24 sm:w-24 sm:rounded-[1.7rem] sm:text-3xl"
+                    className="group relative flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-[color:var(--theme-subtle-border)] bg-[color:var(--theme-subtle-bg)] text-2xl font-semibold text-[color:var(--theme-subtle-text)] transition hover:border-primary/20 hover:shadow-[var(--theme-soft-shadow)] disabled:cursor-wait sm:h-24 sm:w-24 sm:rounded-lg sm:text-3xl"
                     aria-label={uploadAvatar.isPending ? "头像上传中" : "点击修改头像"}
                     title={uploadAvatar.isPending ? "头像上传中..." : "点击修改头像"}
                   >
@@ -856,7 +801,7 @@ export function ProfilePage() {
                         </div>
                       </div>
                       {!isProfileEditing ? (
-                        <Button type="button" size="sm" variant="outline" className="shrink-0 rounded-full" onClick={openProfileEditor}>
+                        <Button type="button" size="sm" variant="outline" className="shrink-0 rounded-lg" onClick={openProfileEditor}>
                           修改昵称
                         </Button>
                       ) : (
@@ -868,9 +813,9 @@ export function ProfilePage() {
               </div>
 
               <div className="space-y-4">
-                <div className="theme-soft-surface rounded-[1.4rem] p-4">
+                <div className="theme-soft-surface rounded-lg p-4 shadow-none">
                   <div className="flex items-center gap-3">
-                    <div className="theme-icon-surface h-10 w-10">
+                    <div className="theme-icon-surface h-10 w-10 rounded-lg">
                       <Mail className="h-4 w-4" />
                     </div>
                     <div className="min-w-0">
@@ -880,10 +825,10 @@ export function ProfilePage() {
                   </div>
                 </div>
 
-                <div className="theme-soft-surface rounded-[1.4rem] p-4">
+                <div className="theme-soft-surface rounded-lg p-4 shadow-none">
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex items-start gap-3">
-                      <div className="theme-icon-surface mt-0.5 h-10 w-10">
+                      <div className="theme-icon-surface mt-0.5 h-10 w-10 rounded-lg">
                         <KeyRound className="h-4 w-4" />
                       </div>
                       <div className="min-w-0">
@@ -924,52 +869,6 @@ export function ProfilePage() {
                   </div>
                 </div>
 
-                {baiduNetdiskEnabled ? (
-                  <div className="theme-soft-surface rounded-[1.4rem] p-4">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex min-w-0 items-start gap-3">
-                        <div className="theme-icon-surface mt-0.5 h-10 w-10">
-                          <Cloud className="h-4 w-4" />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="text-xs uppercase tracking-[0.14em] text-[color:var(--theme-subtle-text)]">百度网盘</div>
-                          {baiduNetdiskAccountsQ.isLoading ? (
-                            <div className="mt-1 text-sm text-muted-foreground">正在读取账号...</div>
-                          ) : baiduNetdiskAccountsQ.error ? (
-                            <div className="mt-1 text-sm text-destructive">{formatApiError(baiduNetdiskAccountsQ.error)}</div>
-                          ) : baiduNetdiskAccounts.length > 0 ? (
-                            <div className="mt-2 space-y-2">
-                              {baiduNetdiskAccounts.map((account) => (
-                                <div key={account.accountId} className="flex min-w-0 items-center justify-between gap-3">
-                                  <div className="min-w-0 truncate text-sm font-medium text-foreground">{account.displayName}</div>
-                                  <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="ghost"
-                                    className="shrink-0"
-                                    onClick={() => void onDisconnectBaiduNetdisk(account.accountId)}
-                                    disabled={disconnectBaiduNetdiskAccount.isPending}
-                                  >
-                                    解绑
-                                  </Button>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="mt-1 text-sm text-muted-foreground">未连接</div>
-                          )}
-                        </div>
-                      </div>
-                      {!baiduNetdiskAccountsQ.isLoading && !baiduNetdiskAccountsQ.error && baiduNetdiskAccounts.length <= 0 ? (
-                        <div className="shrink-0">
-                          <Button type="button" size="sm" variant="outline" onClick={() => void onConnectBaiduNetdisk()} disabled={beginBaiduNetdiskConnect.isPending}>
-                            连接
-                          </Button>
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                ) : null}
               </div>
 
               <div className="space-y-4 pt-1">
@@ -988,7 +887,7 @@ export function ProfilePage() {
                       value={bio}
                       onChange={(event) => updateDraft("bio", event.target.value.slice(0, 120))}
                       maxLength={120}
-                      className="min-h-32 w-full rounded-[1.2rem] border border-[color:var(--theme-subtle-border)] bg-[color:var(--theme-subtle-bg)] px-4 py-3 text-sm leading-6 text-foreground outline-none transition focus-visible:ring-2 focus-visible:ring-ring"
+                      className="min-h-32 w-full rounded-lg border border-[color:var(--theme-subtle-border)] bg-[color:var(--theme-subtle-bg)] px-4 py-3 text-sm leading-6 text-foreground outline-none transition focus-visible:ring-2 focus-visible:ring-ring"
                       placeholder="写一点你的学习方向、偏好的项目类型，或者现在最想攻克的内容。"
                     />
                     <div className={cn("text-right text-xs", bioRemaining < 0 ? "text-destructive" : "text-[color:var(--theme-subtle-text)]")}>
@@ -996,7 +895,7 @@ export function ProfilePage() {
                     </div>
                   </div>
                 ) : (
-                  <div className="theme-subtle-surface mt-4 rounded-[1.2rem] border-dashed px-4 py-4 text-sm leading-7 text-[color:var(--theme-subtle-text)]">
+                  <div className="theme-subtle-surface mt-4 rounded-lg border-dashed px-4 py-4 text-sm leading-7 text-[color:var(--theme-subtle-text)]">
                     {profile.bio.trim() || "还没有留下自我描述。"}
                   </div>
                 )}

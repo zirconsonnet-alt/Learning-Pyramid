@@ -333,7 +333,7 @@ def test_import_baidu_netdisk_folder_recursively_imports_videos(monkeypatch) -> 
     assert source_binding.source_root_label == "课程"
 
 
-def test_import_baidu_netdisk_replaces_learning_object_tree_and_marks_absent_instances() -> None:
+def test_import_baidu_netdisk_replaces_learning_object_tree_and_prunes_unreferenced_absent_instances() -> None:
     api = SystemAPI(InMemorySystem())
     project_id = api.create_project(
         "Course",
@@ -366,7 +366,6 @@ def test_import_baidu_netdisk_replaces_learning_object_tree_and_marks_absent_ins
     )
 
     assert first_result["imported_count"] == 2
-    old_instances = {item.material_id.as_posix(): item for item in api.list_instances(project_id)}
     old_leaf_ids = {
         node.relative_path.as_posix(): node.node_id
         for node in api.list_learning_object_nodes(project_id)
@@ -391,12 +390,13 @@ def test_import_baidu_netdisk_replaces_learning_object_tree_and_marks_absent_ins
 
     assert second_result["imported_count"] == 1
     assert second_result["created_instances_count"] == 1
-    assert second_result["marked_missing_count"] == 2
+    assert second_result["marked_missing_count"] == 0
+    assert second_result.get("deleted_instances_count") == 2
     assert second_result["replaced_learning_object_nodes_count"] == 2
 
     instances = {item.material_id.as_posix(): item for item in api.list_instances(project_id)}
-    assert instances["/课程/第一章/导论.mp4"].presence == InstancePresence.MISSING
-    assert instances["/课程/第一章/案例.mkv"].presence == InstancePresence.MISSING
+    assert "/课程/第一章/导论.mp4" not in instances
+    assert "/课程/第一章/案例.mkv" not in instances
     assert instances["/新课程/第二章/复盘.mp4"].presence == InstancePresence.PRESENT
 
     nodes = api.list_learning_object_nodes(project_id)
@@ -430,8 +430,9 @@ def test_import_baidu_netdisk_replaces_learning_object_tree_and_marks_absent_ins
         for node in api.list_learning_object_nodes(project_id)
         if isinstance(node, LearningObjectLeaf)
     }
-    assert third_result["reused_instances_count"] == 1
-    assert new_instances["/课程/第一章/导论.mp4"].instance_id == old_instances["/课程/第一章/导论.mp4"].instance_id
+    assert third_result["created_instances_count"] == 1
+    assert third_result["reused_instances_count"] == 0
+    assert new_instances["/课程/第一章/导论.mp4"].presence == InstancePresence.PRESENT
     assert new_leaf_ids["导论.mp4"] == old_leaf_ids["导论.mp4"]
 
     source_binding = api.get_project_material_source_binding(project_id)

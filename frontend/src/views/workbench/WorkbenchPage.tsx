@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { useQueries } from "@tanstack/react-query"
 import { FolderTree, RadioTower } from "lucide-react"
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 
@@ -26,6 +25,7 @@ import {
   useInstances,
   useLayers,
   useManualRollUp,
+  useMissingInstances,
   useProjectConfig,
   useQueue,
   useSetLayerConfig,
@@ -141,7 +141,8 @@ async function resolveInstanceDurationMs(params: {
   if (typeof instance.durationMs === "number" && instance.durationMs > 0) {
     return instance.durationMs
   }
-  if (instance.playbackKind === "HLS" || instance.mediaSourceKind === "BAIDU_NETDISK") {
+  if (instance.mediaSourceKind === "BAIDU_NETDISK") return null
+  if (instance.playbackKind === "HLS") {
     const playback = await getInstancePlaybackDescriptor(scope, instance.instanceId, { timeoutMs: 90_000 })
     if (typeof playback.durationMs === "number" && playback.durationMs > 0) {
       return playback.durationMs
@@ -309,6 +310,7 @@ export function WorkbenchPage() {
   }, [ensure, pid])
 
   const instancesQ = useInstances(projectScope)
+  const missingInstancesQ = useMissingInstances(projectScope)
   const learningTaskNodesQ = useLearningTaskNodes(projectScope)
   const queueQ = useQueue(projectScope)
   const layersQ = useLayers(projectScope)
@@ -333,26 +335,7 @@ export function WorkbenchPage() {
     const items = instancesQ.data ?? []
     return selectedInstanceId ? items.find((i) => i.instanceId === selectedInstanceId) ?? null : null
   }, [instancesQ.data, selectedInstanceId])
-  const missingInstances = useMemo(
-    () => (instancesQ.data ?? []).filter((item) => item.presence === "MISSING"),
-    [instancesQ.data],
-  )
-  const missingRecallPointQs = useQueries({
-    queries: missingInstances.map((item) => ({
-      queryKey: ["recallPointsByInstance", pid, item.instanceId],
-      queryFn: () => listRecallPointsByInstance(projectScope as ScopedProjectRef, item.instanceId),
-      enabled: !!projectScope && !isVirtualStudyReviewProject,
-    })),
-  })
-  const actionableMissingInstanceCount = useMemo(
-    () =>
-      missingInstances.filter((_, index) => {
-        const query = missingRecallPointQs[index]
-        if (!query || query.isLoading || query.error) return true
-        return (query.data?.recallPointIds ?? []).length > 0
-      }).length,
-    [missingInstances, missingRecallPointQs],
-  )
+  const actionableMissingInstanceCount = isVirtualStudyReviewProject ? 0 : (missingInstancesQ.data?.instanceIds.length ?? 0)
   const actionableMissingGate = actionableMissingInstanceCount > 0
 
   const learningTaskNodesById = useMemo(() => {
@@ -1063,31 +1046,29 @@ export function WorkbenchPage() {
             requiresLearningObjectTree ? "xl:col-start-2 xl:row-start-1" : "xl:col-start-1 xl:row-start-1",
           )}
         >
-          <div id="workbench-mobile-tool-buttons" className="grid grid-cols-2 gap-2 xl:hidden">
-            <Button
-              type="button"
-              variant="outline"
-              className="h-10 justify-start px-3"
-              onClick={() => setMobileStudyStatsOpen(true)}
-              aria-haspopup="dialog"
-            >
-              <RadioTower className="h-4 w-4" />
-              学习统计
-            </Button>
+          <div id="workbench-mobile-tool-buttons" className={cn("grid gap-2 xl:hidden", requiresLearningObjectTree ? "grid-cols-2" : "grid-cols-1")}>
             {requiresLearningObjectTree ? (
               <Button
                 type="button"
                 variant="outline"
-                className="h-10 justify-start px-3"
+                className="h-10 justify-center px-3"
                 onClick={() => setMobileDirectoryOpen(true)}
                 aria-haspopup="dialog"
               >
                 <FolderTree className="h-4 w-4" />
                 内容目录
               </Button>
-            ) : (
-              <span aria-hidden="true" />
-            )}
+            ) : null}
+            <Button
+              type="button"
+              variant="outline"
+              className="h-10 justify-center px-3"
+              onClick={() => setMobileStudyStatsOpen(true)}
+              aria-haspopup="dialog"
+            >
+              <RadioTower className="h-4 w-4" />
+              学习统计
+            </Button>
           </div>
           <div ref={videoPaneRef} id="workbench-video-pane" className="min-w-0 shrink-0 scroll-mt-28">
             {usesResolvableCourseAnchor ? (

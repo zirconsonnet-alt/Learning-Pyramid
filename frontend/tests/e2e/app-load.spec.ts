@@ -329,6 +329,29 @@ test("workbench mobile opens study stats and directory dialogs above the player"
   await expect(page.locator("#workbench-status-card")).toBeHidden()
   await expect(page.locator("#workbench-content-tree")).toBeHidden()
 
+  const toolButtonLayout = await page.evaluate(() => {
+    const buttons = Array.from(document.querySelectorAll("#workbench-mobile-tool-buttons button")).map((element) => {
+      const rect = element.getBoundingClientRect()
+      return {
+        label: (element.textContent ?? "").replace(/\s+/g, ""),
+        left: Math.round(rect.left),
+        width: Math.round(rect.width),
+      }
+    })
+    return { buttons }
+  })
+  expect(toolButtonLayout.buttons.slice(0, 2).map((button) => button.label), JSON.stringify(toolButtonLayout, null, 2)).toEqual([
+    "内容目录",
+    "学习统计",
+  ])
+  expect(
+    Math.abs((toolButtonLayout.buttons[0]?.width ?? 0) - (toolButtonLayout.buttons[1]?.width ?? 0)),
+    JSON.stringify(toolButtonLayout, null, 2),
+  ).toBeLessThanOrEqual(1)
+  expect(toolButtonLayout.buttons[0]?.left ?? 0, JSON.stringify(toolButtonLayout, null, 2)).toBeLessThan(
+    toolButtonLayout.buttons[1]?.left ?? 0,
+  )
+
   await expect(page.locator("#workbench-mobile-study-stats-dialog")).toBeHidden()
   await expect(page.locator("#workbench-mobile-directory-dialog")).toBeHidden()
   await expect(page.locator("#workbench-mobile-content-tree [data-guide-tour='learning-object-tree']")).toBeHidden()
@@ -440,21 +463,38 @@ test("profile learning view uses scoped audit log endpoint", async ({ page }) =>
   const consoleIssues = collectConsoleIssues(page)
   let oldAuditLogRequested = false
   let scopedAuditLogRequested = false
+  let baiduCloudAccountRequested = false
 
   page.on("request", (request) => {
     const pathname = new URL(request.url()).pathname
     if (pathname === `/api/projects/${project.projectId}/audit-log-events`) oldAuditLogRequested = true
     if (pathname === `/api/subjects/${subject.subjectId}/projects/${project.projectId}/audit-log-events`) scopedAuditLogRequested = true
+    if (pathname === "/api/profile/me/cloud-accounts/baidu-netdisk") baiduCloudAccountRequested = true
   })
 
-  await installMockApi(page)
+  await installMockApi(page, { systemCapabilities: { baiduNetdiskEnabled: true } })
 
   await page.goto("/profile")
   await expect(page.getByText("账户信息", { exact: true })).toBeVisible()
   await expect(page.getByText("进入会员中心")).toHaveCount(0)
   await expect(page.getByText("学习视图", { exact: true })).toBeVisible()
+  await expect(page.getByText("百度网盘", { exact: true })).toHaveCount(0)
   await expect.poll(() => scopedAuditLogRequested).toBe(true)
   expect(oldAuditLogRequested).toBe(false)
+  expect(baiduCloudAccountRequested).toBe(false)
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
+test("subtitle tool public page only describes local subtitle generation", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page)
+
+  await page.goto("/subtitle-tool")
+  await expect(page.getByRole("heading", { name: "字幕工具" })).toBeVisible()
+  await expect(page.getByText("本机批量生成本地视频字幕。")).toBeVisible()
+  await expect(page.getByText("百度网盘")).toHaveCount(0)
+  await expect(page.getByText("网盘")).toHaveCount(0)
 
   expectNoConsoleIssues(consoleIssues)
 })

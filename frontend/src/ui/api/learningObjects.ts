@@ -51,6 +51,7 @@ const ImportLearningObjectsFromBrowserResultSchema = z.object({
   unchanged: z.boolean(),
   created_instances_count: z.number().int(),
   marked_missing_count: z.number().int(),
+  deleted_instances_count: z.number().int().optional().default(0),
   replaced_learning_object_nodes_count: z.number().int(),
   warnings: z.array(z.unknown()),
 })
@@ -69,6 +70,7 @@ const ImportLearningObjectsFromBaiduNetdiskResultSchema = z.object({
   created_instances_count: z.number().int(),
   reused_instances_count: z.number().int(),
   marked_missing_count: z.number().int(),
+  deleted_instances_count: z.number().int().optional().default(0),
   created_learning_object_nodes_count: z.number().int(),
   replaced_learning_object_nodes_count: z.number().int(),
   imported_count: z.number().int(),

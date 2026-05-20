@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-import type { ApiRequester } from "./types"
+import type { ApiRequester } from "./requester"
 
 export const AuthUserSchema = z.object({
   userId: z.string(),

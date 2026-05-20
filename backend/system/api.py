@@ -61,6 +61,7 @@ from backend.models.constants import GLOBAL_QUEUE
 from backend.models.errors import DirectoryStructureCorruptedError, ExternalServiceError, NotFound, PreconditionFailure
 from backend.models.instance import Instance
 from backend.models.instance_media_binding import InstanceMediaBinding
+from backend.models.instance_subtitle_file import InstanceSubtitleFile, InstanceSubtitleSegment
 from backend.models.layer import Layer
 from backend.models.learning_object_node import LearningObjectContainer, LearningObjectLeaf
 from backend.models.learning_task import LearningTask
@@ -140,7 +141,7 @@ from backend.system.persistence_json import (
 )
 from backend.system.persistence_store import SqlStore
 from backend.system.project_paths import allocate_project_root
-from backend.system.subtitle_files import find_sibling_subtitle_file, parse_subtitle_file
+from backend.system.subtitle_files import SUPPORTED_SUBTITLE_EXTENSIONS, find_sibling_subtitle_file, parse_subtitle_file, parse_subtitle_text
 from backend.system.runtime_features import (
     current_env_asr_service_config,
     current_env_llm_qa_service_config,
@@ -165,6 +166,7 @@ class TickAttemptResult(str, Enum):
     GATE_BLOCKED = "GATE_BLOCKED"
 
 MAX_ASR_WINDOW_MS: int = 5 * 60 * 1000
+MAX_SUBTITLE_UPLOAD_BYTES: int = 50 * 1024 * 1024
 BAIDU_NETDISK_IMPORTABLE_VIDEO_EXTENSIONS: frozenset[str] = frozenset(
     {".mp4", ".m4v", ".mkv", ".webm", ".mov", ".avi", ".flv", ".ts", ".m2ts"}
 )
@@ -3326,23 +3328,14 @@ class SystemAPI:
                 if existing_binding != desired_binding:
                     bindings_to_set.append(desired_binding)
 
-            marked_missing_instances = 0
-            for inst in existing_instances:
-                if id_canonical_text(inst.instance_id) in scanned_instance_keys:
-                    continue
-                if inst.presence == InstancePresence.MISSING:
-                    continue
-                desired = Instance.create(
-                    project_id,
-                    inst.instance_id,
-                    inst.material_id,
-                    presence=InstancePresence.MISSING,
-                    last_seen_at=inst.last_seen_at,
-                )
-                if inst != desired:
-                    instances_to_update.append(desired)
-                    updated_instances += 1
-                marked_missing_instances += 1
+            marked_missing_instances, deleted_instances, missing_cleanup_updates = self._stage_absent_instance_cleanup(
+                s,
+                project_id=project_id,
+                existing_instances=existing_instances,
+                scanned_instance_keys=scanned_instance_keys,
+                instances_to_update=instances_to_update,
+            )
+            updated_instances += missing_cleanup_updates
 
             dir_rel = sorted(dir_rel_set, key=lambda p: p.as_posix())
             leaf_id_by_file = {rel: _baidu_netdisk_node_id_from_rel_path(rel, "LEAF") for rel in file_rel}
@@ -3420,6 +3413,7 @@ class SystemAPI:
                 created_instances == 0
                 and updated_instances == 0
                 and marked_missing_instances == 0
+                and deleted_instances == 0
                 and not bindings_to_set
                 and replaced_nodes_count == 0
                 and not binding_changed
@@ -3429,6 +3423,7 @@ class SystemAPI:
                 "created_instances_count": int(created_instances),
                 "reused_instances_count": int(reused_instances),
                 "marked_missing_count": int(marked_missing_instances),
+                "deleted_instances_count": int(deleted_instances),
                 "created_learning_object_nodes_count": int(replaced_nodes_count),
                 "replaced_learning_object_nodes_count": int(replaced_nodes_count),
                 "imported_count": int(len(normalized_items)),
@@ -3450,6 +3445,7 @@ class SystemAPI:
                     "createdInstancesCount": int(created_instances),
                     "reusedInstancesCount": int(reused_instances),
                     "markedMissingCount": int(marked_missing_instances),
+                    "deletedInstancesCount": int(deleted_instances),
                     "replacedLearningObjectNodesCount": int(replaced_nodes_count),
                     "unchanged": bool(unchanged),
                 },
@@ -3665,23 +3661,14 @@ class SystemAPI:
                     instances_to_update.append(desired)
                     updated_instances += 1
 
-            marked_missing_instances = 0
-            for inst in cur_instances:
-                if id_canonical_text(inst.instance_id) in scanned_instance_keys:
-                    continue
-                if inst.presence == InstancePresence.MISSING:
-                    continue
-                marked_missing_instances += 1
-                desired = Instance.create(
-                    project_id,
-                    inst.instance_id,
-                    inst.material_id,
-                    presence=InstancePresence.MISSING,
-                    last_seen_at=inst.last_seen_at,
-                )
-                if inst != desired:
-                    instances_to_update.append(desired)
-                    updated_instances += 1
+            marked_missing_instances, deleted_instances, missing_cleanup_updates = self._stage_absent_instance_cleanup(
+                s,
+                project_id=project_id,
+                existing_instances=cur_instances,
+                scanned_instance_keys=scanned_instance_keys,
+                instances_to_update=instances_to_update,
+            )
+            updated_instances += missing_cleanup_updates
 
             # LearningObjectNode full replacement (filesystem authoritative).
             nodes_out: list[LearningObjectLeaf | LearningObjectContainer] = []
@@ -3755,11 +3742,12 @@ class SystemAPI:
                 self.sys.learning_object_repo.replace_all_from_fs(s, nodes_out)
                 replaced_nodes_count = len(nodes_out)
 
-            unchanged = created_instances == 0 and updated_instances == 0 and replaced_nodes_count == 0
+            unchanged = created_instances == 0 and updated_instances == 0 and deleted_instances == 0 and replaced_nodes_count == 0
             report: dict[str, object] = {
                 "unchanged": bool(unchanged),
                 "created_instances_count": int(created_instances),
                 "marked_missing_count": int(marked_missing_instances),
+                "deleted_instances_count": int(deleted_instances),
                 "replaced_learning_object_nodes_count": int(replaced_nodes_count),
                 "warnings": tuple(),
             }
@@ -3779,6 +3767,7 @@ class SystemAPI:
                     "dirsCount": len(dir_rel),
                     "createdInstancesCount": int(created_instances),
                     "markedMissingCount": int(marked_missing_instances),
+                    "deletedInstancesCount": int(deleted_instances),
                     "replacedLearningObjectNodesCount": int(replaced_nodes_count),
                     "unchanged": bool(unchanged),
                 },
@@ -3943,23 +3932,14 @@ class SystemAPI:
                     instances_to_update.append(desired)
                     updated_instances += 1
 
-            marked_missing_instances = 0
-            for inst in cur_instances:
-                if id_canonical_text(inst.instance_id) in scanned_instance_keys:
-                    continue
-                if inst.presence == InstancePresence.MISSING:
-                    continue
-                marked_missing_instances += 1
-                desired = Instance.create(
-                    project_id,
-                    inst.instance_id,
-                    inst.material_id,
-                    presence=InstancePresence.MISSING,
-                    last_seen_at=inst.last_seen_at,
-                )
-                if inst != desired:
-                    instances_to_update.append(desired)
-                    updated_instances += 1
+            marked_missing_instances, deleted_instances, missing_cleanup_updates = self._stage_absent_instance_cleanup(
+                s,
+                project_id=project_id,
+                existing_instances=cur_instances,
+                scanned_instance_keys=scanned_instance_keys,
+                instances_to_update=instances_to_update,
+            )
+            updated_instances += missing_cleanup_updates
 
             children_by_dir: dict[PurePosixPath, list[tuple[str, LearningObjectNodeId]]] = {rel: [] for rel in dir_rel}
             for rel in dir_rel:
@@ -4040,6 +4020,7 @@ class SystemAPI:
             unchanged = (
                 created_instances == 0
                 and updated_instances == 0
+                and deleted_instances == 0
                 and replaced_nodes_count == 0
                 and not binding_changed
                 and not storage_config_changed
@@ -4048,6 +4029,7 @@ class SystemAPI:
                 "unchanged": bool(unchanged),
                 "created_instances_count": int(created_instances),
                 "marked_missing_count": int(marked_missing_instances),
+                "deleted_instances_count": int(deleted_instances),
                 "replaced_learning_object_nodes_count": int(replaced_nodes_count),
                 "warnings": tuple(),
             }
@@ -4073,6 +4055,7 @@ class SystemAPI:
                     "dirsCount": len(dir_rel),
                     "createdInstancesCount": int(created_instances),
                     "markedMissingCount": int(marked_missing_instances),
+                    "deletedInstancesCount": int(deleted_instances),
                     "replacedLearningObjectNodesCount": int(replaced_nodes_count),
                     "unchanged": bool(unchanged),
                 },
@@ -4196,6 +4179,46 @@ class SystemAPI:
         }
         ordered = sorted(actionable_keys, key=id_canonical_text)
         return tuple(InstanceId(item) for item in ordered)
+
+    def _stage_absent_instance_cleanup(
+        self,
+        s: MutationSession,
+        *,
+        project_id: ProjectId,
+        existing_instances: Sequence[Instance],
+        scanned_instance_keys: set[str],
+        instances_to_update: list[Instance],
+    ) -> tuple[int, int, int]:
+        referenced_instance_keys = {
+            id_canonical_text(rp.anchor.instance_id)
+            for rp in self.sys.recall_point_repo.all(s)
+            if rp.anchor is not None
+        }
+        marked_missing_instances = 0
+        deleted_instances = 0
+        updated_instances = 0
+        for inst in existing_instances:
+            inst_key = id_canonical_text(inst.instance_id)
+            if inst_key in scanned_instance_keys:
+                continue
+            if inst_key not in referenced_instance_keys:
+                self.sys.instance_repo.delete(s, inst.instance_id)
+                deleted_instances += 1
+                continue
+            if inst.presence == InstancePresence.MISSING:
+                continue
+            desired = Instance.create(
+                project_id,
+                inst.instance_id,
+                inst.material_id,
+                presence=InstancePresence.MISSING,
+                last_seen_at=inst.last_seen_at,
+            )
+            if inst != desired:
+                instances_to_update.append(desired)
+                updated_instances += 1
+            marked_missing_instances += 1
+        return marked_missing_instances, deleted_instances, updated_instances
 
     def _raise_if_actionable_missing_instances(self, s: MutationSession) -> None:
         if self._actionable_missing_instance_ids(s):
@@ -5075,6 +5098,90 @@ class SystemAPI:
             auth_store=auth_store,
         )
 
+    @staticmethod
+    def _uploaded_subtitle_file_name(file_name: str) -> str:
+        normalized = str(file_name or "").replace("\\", "/").strip()
+        clean_name = PurePosixPath(normalized).name.strip()
+        if not clean_name:
+            raise PreconditionFailure("字幕文件名不能为空")
+        return clean_name
+
+    @staticmethod
+    def _instance_subtitle_file_to_response(item: InstanceSubtitleFile) -> dict[str, object]:
+        return {
+            "found": True,
+            "instanceId": str(item.instance_id),
+            "fileName": item.file_name,
+            "format": item.format,
+            "source": item.source,
+            "segments": [
+                {"startMs": int(segment.start_ms), "endMs": int(segment.end_ms), "text": segment.text}
+                for segment in item.segments
+            ],
+        }
+
+    def upload_instance_subtitle_file(
+        self,
+        project_id: ProjectId,
+        instance_id: InstanceId,
+        *,
+        file_name: str,
+        content: str,
+    ) -> dict[str, object]:
+        self._ensure_startup_fs_sync_done(project_id)
+        clean_name = self._uploaded_subtitle_file_name(file_name)
+        suffix = PurePosixPath(clean_name).suffix.lower()
+        if suffix not in SUPPORTED_SUBTITLE_EXTENSIONS:
+            raise PreconditionFailure(f"暂不支持的字幕格式：{suffix or clean_name}")
+        encoded_size = len(str(content or "").encode("utf-8"))
+        if encoded_size > MAX_SUBTITLE_UPLOAD_BYTES:
+            raise PreconditionFailure(f"subtitle upload is too large (max {MAX_SUBTITLE_UPLOAD_BYTES} bytes)")
+        try:
+            document = parse_subtitle_text(str(content or ""), suffix=suffix)
+        except Exception as exc:
+            raise PreconditionFailure(f"failed to parse subtitle file: {clean_name}") from exc
+        if not document.segments:
+            raise PreconditionFailure("字幕文件没有可用字幕片段")
+
+        s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
+        try:
+            self.sys.instance_repo.get(s, instance_id)
+            item = InstanceSubtitleFile.create(
+                project_id,
+                instance_id,
+                file_name=clean_name,
+                format=document.format,
+                segments=tuple(
+                    InstanceSubtitleSegment(
+                        start_ms=int(segment.start_ms),
+                        end_ms=int(segment.end_ms),
+                        text=segment.text,
+                    )
+                    for segment in document.segments
+                ),
+                updated_at=now_utc_ms(),
+            )
+            self.sys.instance_subtitle_file_repo.set(s, item)
+            self.sys.commit(s)
+            return self._instance_subtitle_file_to_response(item)
+        except Exception:
+            if s.state == SessionState.OPEN:
+                self.sys.rollback(s)
+            raise
+
+    def delete_instance_subtitle_file(self, project_id: ProjectId, instance_id: InstanceId) -> dict[str, object]:
+        self._ensure_startup_fs_sync_done(project_id)
+        s = self.sys.begin_session(project_id, SessionMode.READ_WRITE)
+        try:
+            self.sys.instance_repo.get(s, instance_id)
+            self.sys.instance_subtitle_file_repo.delete(s, instance_id)
+            self.sys.commit(s)
+            return {"deleted": True, "instanceId": str(instance_id)}
+        except Exception:
+            if s.state == SessionState.OPEN:
+                self.sys.rollback(s)
+            raise
+
     # 4.5.3
     def add_instance(self, project_id: ProjectId, material_id: str) -> InstanceId:
         self._ensure_startup_fs_sync_done(project_id)
@@ -5617,12 +5724,10 @@ class SystemAPI:
     def list_missing_instances(self, project_id: ProjectId) -> Tuple[InstanceId, ...]:
         sql_store = self._sql_store()
         if sql_store is not None:
-            return sql_store.list_missing_instance_ids(str(project_id))
+            return sql_store.list_actionable_missing_instance_ids(str(project_id))
         s = self.sys.begin_session(project_id, SessionMode.READ_ONLY)
         try:
-            items = [i.instance_id for i in self.sys.instance_repo.all(s) if i.presence == InstancePresence.MISSING]
-            items.sort(key=lambda x: id_canonical_text(x))
-            return tuple(items)
+            return self._actionable_missing_instance_ids(s)
         finally:
             self.sys.rollback(s)
 
@@ -8443,6 +8548,8 @@ API_WHITELIST: dict[str, SchedulingEffect] = {
     "get_instance_baidu_direct_playback_descriptor": SchedulingEffect.NONE,
     "stream_instance_hls_segment": SchedulingEffect.NONE,
     "get_instance_subtitle_file_for_user": SchedulingEffect.NONE,
+    "upload_instance_subtitle_file": SchedulingEffect.NONE,
+    "delete_instance_subtitle_file": SchedulingEffect.NONE,
     "bulk_remap_recall_points_instance": SchedulingEffect.NONE,
     "submit_learning_task": SchedulingEffect.ORCHESTRATION_MUTATING,
     "get_learning_task": SchedulingEffect.NONE,

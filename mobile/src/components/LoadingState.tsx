@@ -1,5 +1,7 @@
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native"
 
+import { ui } from "../constants/ui"
+
 export function LoadingState({ label = "加载中" }: { label?: string }) {
   return (
     <View style={styles.root}>
@@ -10,6 +12,6 @@ export function LoadingState({ label = "加载中" }: { label?: string }) {
 }
 
 const styles = StyleSheet.create({
-  root: { alignItems: "center", gap: 10, padding: 24 },
-  text: { color: "#475569", fontSize: 14 },
+  root: { alignItems: "center", gap: ui.spacing.md, padding: 24 },
+  text: { color: ui.colors.textMuted, fontSize: 14 },
 })

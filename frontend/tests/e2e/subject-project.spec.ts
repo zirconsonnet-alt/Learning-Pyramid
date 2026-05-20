@@ -5,7 +5,7 @@ import { installMockApi } from "../fixtures/mock-api"
 import { journeyIds } from "../fixtures/journeys"
 import { recordJourney } from "../fixtures/journey-result"
 import { gotoProjects, openSubject, projectPath } from "../fixtures/page-objects"
-import { material, project, subject } from "../fixtures/test-data"
+import { instance, material, project, subject } from "../fixtures/test-data"
 
 async function seedGrantedProjectDirectory(page: Page) {
   await page.addInitScript(
@@ -83,6 +83,37 @@ test(journeyIds.subjectProjectEntry, async ({ page }) => {
     await expect(page).toHaveURL(new RegExp(projectPath("/workbench")))
     await expect(page.getByRole("heading", { name: "学习统计" })).toBeVisible()
   })
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
+test("workbench hides Baidu Netdisk playback instead of requesting a playback stream", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  let hiddenMediaPlaybackRequested = false
+  const baiduInstance = {
+    ...instance,
+    mediaSourceKind: "BAIDU_NETDISK",
+    playbackKind: "HLS",
+  }
+  await installMockApi(page, {
+    instances: [baiduInstance],
+    systemCapabilities: { baiduNetdiskEnabled: true, serverMediaStreamEnabled: true },
+  })
+  page.on("request", (request) => {
+    const pathname = new URL(request.url()).pathname
+    if (
+      pathname.endsWith(`/media/instances/${instance.instanceId}/playback`) ||
+      pathname.endsWith(`/media/instances/${instance.instanceId}/baidu-direct-playback`)
+    ) {
+      hiddenMediaPlaybackRequested = true
+    }
+  })
+
+  await page.goto(projectPath("/workbench"))
+  await page.getByRole("button", { name: "第一讲 自动化导论" }).click()
+  await expect(page.getByText("当前媒体源已隐藏，请改用本地素材。")).toBeVisible()
+  await expect(page.getByText("正在连接百度网盘视频流")).toHaveCount(0)
+  expect(hiddenMediaPlaybackRequested).toBe(false)
 
   expectNoConsoleIssues(consoleIssues)
 })
@@ -216,6 +247,67 @@ test("project settings shows concise convergence template copy", async ({ page }
   await expect(page.getByText("推送上次复习时不记得的重点")).toBeVisible()
   await expect(page.getByText("完成一轮后决定是否继续生成复习任务。")).toHaveCount(0)
   await expect(page.getByText("这个步骤没有额外参数")).toHaveCount(0)
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
+test("project settings hides Baidu Netdisk import even when the backend capability is enabled", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  await installMockApi(page, { systemCapabilities: { baiduNetdiskEnabled: true } })
+
+  await page.goto(projectPath("/settings"))
+  await expect(page.getByText("当前网课项目")).toBeVisible()
+  await expect(page.getByText("百度网盘视频")).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "从百度网盘导入" })).toHaveCount(0)
+
+  expectNoConsoleIssues(consoleIssues)
+})
+
+test("project settings does not probe every missing instance before showing repair count", async ({ page }) => {
+  const consoleIssues = collectConsoleIssues(page)
+  let recallPointProbeCount = 0
+  page.on("request", (request) => {
+    const pathname = new URL(request.url()).pathname
+    if (pathname.includes("/instances/") && pathname.endsWith("/recall-points")) {
+      recallPointProbeCount += 1
+    }
+  })
+
+  const actionableMissingId = "inst_missing_actionable"
+  const staleMissingInstances = Array.from({ length: 40 }, (_, index) => ({
+    instanceId: `inst_missing_stale_${index}`,
+    materialId: `stale-${index}.mp4`,
+    materialDisplayName: `stale-${index}.mp4`,
+    presence: "MISSING",
+    lastSeenAt: null,
+    mediaSourceKind: "BROWSER_LOCAL",
+    playbackKind: "FILE",
+    durationMs: null,
+  }))
+  await installMockApi(page, {
+    instances: [
+      instance,
+      {
+        instanceId: actionableMissingId,
+        materialId: "missing-actionable.mp4",
+        materialDisplayName: "missing-actionable.mp4",
+        presence: "MISSING",
+        lastSeenAt: null,
+        mediaSourceKind: "BROWSER_LOCAL",
+        playbackKind: "FILE",
+        durationMs: null,
+      },
+      ...staleMissingInstances,
+    ],
+    missingInstanceIds: [actionableMissingId],
+    recallPointIdsByInstanceId: {
+      [actionableMissingId]: ["rp_missing_actionable"],
+    },
+  })
+
+  await page.goto(projectPath("/settings"))
+  await expect(page.getByText("1 个待修复")).toBeVisible()
+  expect(recallPointProbeCount).toBeLessThanOrEqual(1)
 
   expectNoConsoleIssues(consoleIssues)
 })

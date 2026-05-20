@@ -399,6 +399,28 @@ class PostgresStore(SQLiteSnapshotStore):
             for row in instance_media_binding_rows
         }
 
+        subtitle_rows = conn.execute(
+            """
+            SELECT instance_id, file_name, subtitle_format, source, segments_json, updated_at_ms
+            FROM instance_subtitle_file_index
+            WHERE project_id = %s
+            ORDER BY instance_id ASC
+            """,
+            (str(project_id),),
+        ).fetchall()
+        hydrated["instanceSubtitleFiles"] = {
+            str(row["instance_id"]): {
+                "projectId": str(project_id),
+                "instanceId": str(row["instance_id"]),
+                "fileName": str(row["file_name"]),
+                "format": str(row["subtitle_format"]),
+                "source": str(row["source"]),
+                "segments": json.loads(str(row["segments_json"])),
+                "updatedAtMs": int(row["updated_at_ms"]),
+            }
+            for row in subtitle_rows
+        }
+
         progress_rows = conn.execute(
             """
             SELECT instance_id, duration_ms, ranges_json, completed_at_ms, updated_at_ms
@@ -866,6 +888,25 @@ class PostgresStore(SQLiteSnapshotStore):
             (str(project_id), InstancePresence.MISSING.value),
         )
         return tuple(InstanceId(str(row["instance_id"])) for row in rows)
+
+    def list_actionable_missing_instance_ids(self, project_id: str) -> tuple[InstanceId, ...]:
+        rows = self._fetchall(
+            """
+            SELECT DISTINCT i.instance_id
+            FROM instance_index i
+            JOIN recall_point_index rp
+              ON rp.project_id = i.project_id
+             AND rp.anchor_instance_id = i.instance_id
+            WHERE i.project_id = %s AND i.presence = %s
+            ORDER BY i.instance_id ASC
+            """,
+            (str(project_id), InstancePresence.MISSING.value),
+        )
+        out: list[InstanceId] = []
+        for row in rows:
+            if self.list_recall_point_ids_by_instance(str(project_id), str(row["instance_id"])):
+                out.append(InstanceId(str(row["instance_id"])))
+        return tuple(out)
 
     def list_recall_point_ids_by_instance(self, project_id: str, instance_id: str) -> tuple[RecallPointId, ...]:
         rows = self._fetchall(

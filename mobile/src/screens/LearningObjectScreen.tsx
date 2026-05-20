@@ -7,6 +7,7 @@ import type { RecallPoint } from "../api/review"
 import { EmptyState } from "../components/EmptyState"
 import { LoadingState } from "../components/LoadingState"
 import { Screen } from "../components/Screen"
+import { ui } from "../constants/ui"
 import { LearningMediaPlayer } from "./LearningMediaPlayer"
 
 export function LearningObjectScreen({
@@ -99,13 +100,13 @@ export function LearningObjectScreen({
 }
 
 const styles = StyleSheet.create({
-  header: { gap: 4 },
-  title: { color: "#0f172a", fontSize: 24, fontWeight: "700" },
-  meta: { color: "#64748b", fontSize: 12 },
-  section: { gap: 10 },
-  sectionTitle: { color: "#0f172a", fontSize: 18, fontWeight: "700" },
+  header: { gap: ui.spacing.xs },
+  title: { color: ui.colors.text, fontSize: ui.type.title, fontWeight: "800" },
+  meta: { color: ui.colors.textMuted, fontSize: ui.type.caption },
+  section: { gap: ui.spacing.md },
+  sectionTitle: { color: ui.colors.text, fontSize: ui.type.sectionTitle, fontWeight: "800" },
   list: { gap: 0 },
-  row: { borderBottomColor: "#e2e8f0", borderBottomWidth: 1, gap: 6, paddingVertical: 14 },
-  question: { color: "#0f172a", fontSize: 15 },
-  answer: { color: "#475569", fontSize: 13, lineHeight: 19 },
+  row: { borderBottomColor: ui.colors.borderSoft, borderBottomWidth: 1, gap: 6, paddingVertical: ui.spacing.xl },
+  question: { color: ui.colors.text, fontSize: ui.type.control },
+  answer: { color: ui.colors.textMuted, fontSize: 13, lineHeight: 19 },
 })

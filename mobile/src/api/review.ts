@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 import { RichContentSchema } from "./richContent"
-import { projectApiPath, type ApiRequester, type ScopedProjectRef } from "./types"
+import { projectApiPath, type ApiRequester, type ScopedProjectRef } from "./requester"
 
 const AnchorSchema = z.object({
   instanceId: z.string(),
@@ -76,8 +76,21 @@ export type CommitReviewTaskInput = {
   canRecall: number[]
   appendedInsights?: Array<{
     recallPointId: string
-    insight: unknown
+    insight: z.infer<typeof RichContentSchema>
   }>
+}
+
+export type RecallPointSearchQuery = {
+  q?: string
+  limit?: number
+}
+
+function recallPointSearchPath(scope: ScopedProjectRef, query?: RecallPointSearchQuery) {
+  const params = new URLSearchParams()
+  if (query?.q !== undefined && query.q.trim()) params.set("q", query.q.trim())
+  if (query?.limit !== undefined) params.set("limit", String(query.limit))
+  const suffix = params.toString()
+  return `${projectApiPath(scope, "/recall-points/search")}${suffix ? `?${suffix}` : ""}`
 }
 
 function reviewRecommendationsPath(scope: ScopedProjectRef, query?: ReviewRecommendationQuery) {
@@ -110,6 +123,11 @@ export function createReviewApi(requester: ApiRequester) {
         path: projectApiPath(scope, "/recall-points"),
         responseSchema: z.array(RecallPointSchema),
       }),
+    searchRecallPoints: (scope: ScopedProjectRef, query?: RecallPointSearchQuery) =>
+      requester.request({
+        path: recallPointSearchPath(scope, query),
+        responseSchema: z.array(RecallPointSchema),
+      }),
     listRecommendations: (scope: ScopedProjectRef, query?: ReviewRecommendationQuery) =>
       requester.request({
         path: reviewRecommendationsPath(scope, query),
@@ -119,7 +137,13 @@ export function createReviewApi(requester: ApiRequester) {
       requester.request({
         path: projectApiPath(scope, `/review-tasks/${encodeURIComponent(reviewTaskId)}/commit`),
         method: "POST",
-        body,
+        body: {
+          canRecall: body.canRecall,
+          appendedInsights: body.appendedInsights?.map((item) => ({
+            recallPointId: item.recallPointId,
+            insight: RichContentSchema.parse(item.insight),
+          })),
+        },
         responseSchema: z.null(),
       }),
   }

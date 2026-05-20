@@ -3,6 +3,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
+from pydantic import BaseModel
 
 from adapter.deps import get_api, get_auth_store
 from adapter.scoped_projects import ScopedProject, resolve_scoped_project
@@ -16,6 +17,11 @@ from backend.system.runtime_env import resource_root
 
 router = APIRouter()
 MAX_IMAGE_UPLOAD_BYTES = 10 * 1024 * 1024
+
+
+class UploadInstanceSubtitleFileRequest(BaseModel):
+    fileName: str
+    content: str
 
 
 def _content_length_or_none(request: Request) -> int | None:
@@ -190,4 +196,34 @@ def get_instance_subtitle_file(
     return {
         "ok": True,
         "data": api.get_instance_subtitle_file_for_user(project.internal_project_id, instanceId, auth_store=auth_store),  # type: ignore[arg-type]
+    }
+
+
+@router.post("/subjects/{subjectId}/projects/{scopedProjectId}/instances/{instanceId}/subtitle-file")
+def upload_instance_subtitle_file(
+    instanceId: str,
+    payload: UploadInstanceSubtitleFileRequest,
+    project: ScopedProject = Depends(resolve_scoped_project),
+    api: SystemAPI = Depends(get_api),
+) -> dict:
+    return {
+        "ok": True,
+        "data": api.upload_instance_subtitle_file(  # type: ignore[arg-type]
+            project.internal_project_id,
+            instanceId,
+            file_name=payload.fileName,
+            content=payload.content,
+        ),
+    }
+
+
+@router.delete("/subjects/{subjectId}/projects/{scopedProjectId}/instances/{instanceId}/subtitle-file")
+def delete_instance_subtitle_file(
+    instanceId: str,
+    project: ScopedProject = Depends(resolve_scoped_project),
+    api: SystemAPI = Depends(get_api),
+) -> dict:
+    return {
+        "ok": True,
+        "data": api.delete_instance_subtitle_file(project.internal_project_id, instanceId),  # type: ignore[arg-type]
     }

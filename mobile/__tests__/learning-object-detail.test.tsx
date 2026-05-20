@@ -6,7 +6,9 @@ import { ApiProvider, useApiRuntime } from "../src/api/ApiProvider"
 import type { LearningObjectNode } from "../src/api/learningObjects"
 import type { PlaybackDescriptor } from "../src/api/media"
 import type { RecallPoint } from "../src/api/review"
+import type { InstanceSubtitleFile } from "../src/api/subtitles"
 import type { createLearningPyramidApi } from "../src/api/types"
+import { getLocalPackagePlaybackDescriptor } from "../src/offlineCoursePackages/source"
 import { LearningMediaPlayer } from "../src/screens/LearningMediaPlayer"
 import { LearningObjectScreen } from "../src/screens/LearningObjectScreen"
 
@@ -40,6 +42,18 @@ const playableDescriptor: PlaybackDescriptor = {
   durationMs: 120000,
   supportsFrameGrab: true,
   supportsServerAsr: true,
+}
+
+const subtitleFile: InstanceSubtitleFile = {
+  found: true,
+  instanceId: "inst_1",
+  fileName: "lesson.srt",
+  format: "srt",
+  source: "UPLOADED",
+  segments: [
+    { startMs: 1000, endMs: 3000, text: "当前字幕" },
+    { startMs: 4000, endMs: 5000, text: "后一句" },
+  ],
 }
 
 const leafNode: LearningObjectNode = {
@@ -113,6 +127,23 @@ describe("LearningMediaPlayer", () => {
     expect(onPlaybackTimeChange).toHaveBeenCalledWith(12345)
   })
 
+  it("overlays the current subtitle segment from the shared subtitle file", () => {
+    const screen = render(
+      <LearningMediaPlayer
+        apiBaseUrl="https://plm.xuebao.chat/api"
+        currentMs={1500}
+        descriptor={playableDescriptor}
+        loading={false}
+        sessionCookie="plm_session=abc"
+        subtitleFile={subtitleFile}
+        title="第一课"
+      />,
+    )
+
+    expect(screen.getByText("当前字幕")).toBeTruthy()
+    expect(screen.queryByText("后一句")).toBeNull()
+  })
+
   it("shows an explicit unsupported state for desktop native media", () => {
     const screen = render(
       <LearningMediaPlayer
@@ -126,6 +157,59 @@ describe("LearningMediaPlayer", () => {
 
     expect(screen.getByText("移动端不支持桌面本地媒体")).toBeTruthy()
     expect(useVideoPlayer).not.toHaveBeenCalled()
+  })
+
+  it("hides Baidu Netdisk playback on mobile", () => {
+    const screen = render(
+      <LearningMediaPlayer
+        apiBaseUrl="https://plm.xuebao.chat/api"
+        descriptor={{ ...playableDescriptor, sourceKind: "BAIDU_NETDISK", playbackKind: "HLS", url: "/baidu.m3u8" }}
+        loading={false}
+        sessionCookie="plm_session=abc"
+        title="第一课"
+      />,
+    )
+
+    expect(screen.getByText("当前媒体源已隐藏，请改用本地素材。")).toBeTruthy()
+    expect(useVideoPlayer).not.toHaveBeenCalled()
+  })
+
+  it("uses file URLs directly for verified local package playback", () => {
+    render(
+      <LearningMediaPlayer
+        apiBaseUrl="https://plm.xuebao.chat/api"
+        descriptor={{ ...playableDescriptor, sourceKind: "LOCAL_COURSE_PACKAGE", url: "file://document/courses/pkg_1/videos/01.mp4" }}
+        loading={false}
+        sessionCookie="plm_session=abc"
+        title="第一课"
+      />,
+    )
+
+    expect(useVideoPlayer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headers: undefined,
+        uri: "file://document/courses/pkg_1/videos/01.mp4",
+      }),
+    )
+  })
+})
+
+describe("local package playback source", () => {
+  it("resolves a verified local package item into a local playback descriptor", () => {
+    const descriptor = getLocalPackagePlaybackDescriptor({
+      instanceId: "inst_1",
+      item: {
+        itemId: "lesson_1",
+        title: "第一讲",
+        order: 1,
+        learningObjectKey: "inst_1",
+        video: { path: "videos/01.mp4", sizeBytes: 10, sha256: "0".repeat(64) },
+      },
+      packageRootUri: "file://document/courses/pkg_1",
+    })
+
+    expect(descriptor.sourceKind).toBe("LOCAL_COURSE_PACKAGE")
+    expect(descriptor.url).toBe("file://document/courses/pkg_1/videos/01.mp4")
   })
 })
 

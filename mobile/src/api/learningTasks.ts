@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 import { RichContentSchema, type RichContent } from "./richContent"
-import { projectApiPath, type ApiRequester, type ScopedProjectRef } from "./types"
+import { projectApiPath, type ApiRequester, type ScopedProjectRef } from "./requester"
 
 const SubmitLearningTaskResultSchema = z.object({ entryNodeId: z.string() })
 
